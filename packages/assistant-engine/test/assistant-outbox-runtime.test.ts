@@ -35,7 +35,11 @@ import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import * as assistantStore from '../src/assistant/store.ts'
 import { getAssistantSession, saveAssistantSession } from '../src/assistant/store.ts'
-import { createAssistantTurnReceipt } from '../src/assistant/turns.ts'
+import {
+  createAssistantTurnReceipt,
+  readAssistantTurnReceipt,
+  updateAssistantTurnReceipt,
+} from '../src/assistant/turns.ts'
 import { deliverAssistantMessageOverBinding } from '../src/outbound-channel.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -120,6 +124,60 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-blank',
       }),
     ).rejects.toThrow('Assistant outbox messages must be non-empty strings.')
+  })
+
+  it('repairs missing receipt linkage when an outbox create retry hits an existing intent', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-dedupe-repair-')
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'queue this message',
+      provider: 'openai-compatible',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-dedupe-repair',
+      turnId: 'turn-dedupe-repair',
+      vault: vaultRoot,
+    })
+
+    const first = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-repair-token',
+      message: 'hello from outbox',
+      sessionId: 'session-dedupe-repair',
+      turnId: 'turn-dedupe-repair',
+    })
+    await updateAssistantTurnReceipt({
+      vault: vaultRoot,
+      turnId: 'turn-dedupe-repair',
+      mutate(receipt) {
+        return {
+          ...receipt,
+          completedAt: '2026-04-08T00:05:00.000Z',
+          deliveryDisposition: 'not-requested',
+          deliveryIntentId: null,
+          status: 'completed',
+          timeline: receipt.timeline.filter((event) => event.kind !== 'delivery.queued'),
+          updatedAt: '2026-04-08T00:05:00.000Z',
+        }
+      },
+    })
+
+    const deduped = await createIntent(vaultRoot, {
+      createdAt: '2026-04-08T00:01:00.000Z',
+      dedupeToken: 'stable-repair-token',
+      message: 'hello from outbox',
+      sessionId: 'session-dedupe-repair',
+      turnId: 'turn-dedupe-repair',
+    })
+
+    expect(deduped.intentId).toBe(first.intentId)
+    const receipt = await readAssistantTurnReceipt(vaultRoot, 'turn-dedupe-repair')
+    expect(receipt?.deliveryDisposition).toBe('queued')
+    expect(receipt?.deliveryIntentId).toBe(first.intentId)
+    expect(receipt?.updatedAt).toBe('2026-04-08T00:05:00.000Z')
+    expect(receipt?.completedAt).toBe('2026-04-08T00:05:00.000Z')
+    expect(
+      receipt?.timeline.filter((event) => event.kind === 'delivery.queued'),
+    ).toHaveLength(1)
   })
 
   it('lists intents oldest-first and quarantines malformed inventory files', async () => {

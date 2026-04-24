@@ -14,6 +14,13 @@ export function isScopedLocalInternalProxyBaseUrl(value: URL): boolean {
   return /^\/__murph\/local-internal-proxy\/users\/[^/]+\/$/u.test(value.pathname);
 }
 
+export function readScopedLocalInternalProxyRouteUserId(value: URL): string | null {
+  const match = /^\/__murph\/local-internal-proxy\/users\/(?<userId>[^/]+)\/$/u.exec(
+    value.pathname,
+  );
+  return match?.groups?.userId ? decodeURIComponent(match.groups.userId) : null;
+}
+
 function ensureTrailingSlash(url: URL): URL {
   return new URL(url.toString().replace(/\/?$/u, "/"));
 }

@@ -102,6 +102,7 @@ export async function startHostedContainerEntrypoint(input: {
   runtime?: HostedContainerRuntimeOptions;
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
+  let controlToken = normalizeOptionalString(input.controlToken);
   let activeHostedRunnerJobCount = 0;
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
@@ -131,22 +132,22 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      if (!input.controlToken) {
+      const bearerToken = readBearerAuthorizationToken(request.headers.authorization);
+
+      if (!controlToken && !bearerToken) {
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "error",
-          message: "Hosted container entrypoint is missing its control token.",
+          message: "Hosted container entrypoint is missing its initial control token.",
           phase: "failed",
         });
-        writeJsonResponse(response, 503, {
-          error: "Hosted runner control token is not configured.",
+        writeJsonResponse(response, 401, {
+          error: "Unauthorized",
         });
         return;
       }
 
-      const bearerToken = readBearerAuthorizationToken(request.headers.authorization);
-
-      if (!bearerToken || !timingSafeEquals(bearerToken, input.controlToken)) {
+      if (controlToken && (!bearerToken || !timingSafeEquals(bearerToken, controlToken))) {
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "warn",
@@ -158,6 +159,7 @@ export async function startHostedContainerEntrypoint(input: {
         });
         return;
       }
+      controlToken ??= bearerToken;
 
       if (activeHostedRunnerJobCount > 0) {
         emitHostedExecutionStructuredLog({
@@ -214,14 +216,11 @@ export async function startHostedContainerEntrypoint(input: {
         run: job.request.run ?? null,
       });
 
-      const result = await runHostedExecutionJob(job, runtime, {
+      const result = await runHostedExecutionJobWithProcessIsolation(job, runtime, {
         internalWorkerProxyToken,
         localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
         signal: requestAbort.signal,
       });
-      if (runtime.processIsolation) {
-        await enforceHostedContainerProcessIsolation(runtime.processApi);
-      }
 
       if (requestAbort.signal.aborted || response.destroyed) {
         return;
@@ -299,17 +298,15 @@ export async function startHostedContainerEntrypoint(input: {
     throw error;
   }
 
-  if (input.controlToken) {
-    void runtime.loadNodeRunner().catch((error) => {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        error,
-        level: "error",
-        message: "Hosted runner runtime preload failed.",
-        phase: "failed",
-      });
+  void runtime.loadNodeRunner().catch((error) => {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "error",
+      message: "Hosted runner runtime preload failed.",
+      phase: "failed",
     });
-  }
+  });
 
   return server;
 }
@@ -367,24 +364,19 @@ if (isHostedContainerCliEntrypoint()) {
 
 function isHostedContainerCliEntrypoint(): boolean {
   return Boolean(process.argv[1])
-    && import.meta.url === pathToFileURL(process.argv[1]).href
-    && Boolean(process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?.trim());
+    && import.meta.url === pathToFileURL(process.argv[1]).href;
 }
 
 async function startHostedContainerEntrypointCli(): Promise<void> {
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
 
   await startHostedContainerEntrypoint({
-    controlToken: readControlTokenFromEnv(process.env),
+    controlToken: null,
     port,
     runtime: {
       processIsolation: true,
     },
   });
-}
-
-function readControlTokenFromEnv(source: NodeJS.ProcessEnv): string | null {
-  return normalizeOptionalString(source.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN);
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
@@ -730,6 +722,24 @@ async function runHostedExecutionJob(
 ): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedExecutionJob"]>>> {
   const nodeRunner = await runtime.loadNodeRunner();
   return await nodeRunner.runHostedExecutionJob(input, options);
+}
+
+async function runHostedExecutionJobWithProcessIsolation(
+  input: HostedAssistantRuntimeJobInput,
+  runtime: HostedContainerRuntimeDependencies,
+  options?: {
+    internalWorkerProxyToken?: string | null;
+    localInternalProxyBaseUrl?: string | null;
+    signal?: AbortSignal;
+  },
+): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedExecutionJob"]>>> {
+  try {
+    return await runHostedExecutionJob(input, runtime, options);
+  } finally {
+    if (runtime.processIsolation) {
+      await enforceHostedContainerProcessIsolation(runtime.processApi);
+    }
+  }
 }
 
 function isHostedAssistantConfigurationError(

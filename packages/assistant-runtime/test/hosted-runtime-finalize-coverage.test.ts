@@ -442,6 +442,29 @@ describe("assistant-runtime execution coverage", () => {
         run: HOSTED_RUN_CONTEXT,
         runDrain: {
           acquiredAt: "2026-04-08T00:00:00.000Z",
+          committedResult: {
+            bundle: "committed-bundle",
+            result: {
+              eventsHandled: 7,
+              nextWakeAt: "2026-04-08T00:05:00.000Z",
+              redactedDetails: {
+                maintenance: "device-sync",
+              },
+              redactedLogEntries: [
+                {
+                  component: "runtime",
+                  eventId: "evt_runtime_timer",
+                  level: "info",
+                  message: "prepared summary log",
+                  phase: "commit.recorded",
+                  redacted: {
+                    lane: "maintenance",
+                  },
+                },
+              ],
+              summary: "Prepared runtime drain preserved metadata.",
+            },
+          },
           events: [
             {
               seq: "24",
@@ -514,6 +537,29 @@ describe("assistant-runtime execution coverage", () => {
         run: HOSTED_RUN_CONTEXT,
         runDrain: {
           acquiredAt: "2026-04-08T00:00:00.000Z",
+          committedResult: {
+            bundle: "committed-bundle",
+            result: {
+              eventsHandled: 7,
+              nextWakeAt: "2026-04-08T00:05:00.000Z",
+              redactedDetails: {
+                maintenance: "device-sync",
+              },
+              redactedLogEntries: [
+                {
+                  component: "runtime",
+                  eventId: "evt_runtime_timer",
+                  level: "info",
+                  message: "prepared summary log",
+                  phase: "commit.recorded",
+                  redacted: {
+                    lane: "maintenance",
+                  },
+                },
+              ],
+              summary: "Prepared runtime drain preserved metadata.",
+            },
+          },
           events: [
             {
               seq: "24",
@@ -595,8 +641,26 @@ describe("assistant-runtime execution coverage", () => {
       vaultRoot: "/tmp/vault-root",
     });
     assert.equal(result.phase, "completed");
-    assert.equal(result.result.result.summary, "Finalized committed hosted run side effects.");
-    assert.equal(result.result.result.eventsHandled, 1);
+    assert.deepEqual(result.result.result, {
+      eventsHandled: 7,
+      nextWakeAt: "2026-04-08T00:05:00.000Z",
+      redactedDetails: {
+        maintenance: "device-sync",
+      },
+      redactedLogEntries: [
+        {
+          component: "runtime",
+          eventId: "evt_runtime_timer",
+          level: "info",
+          message: "prepared summary log",
+          phase: "commit.recorded",
+          redacted: {
+            lane: "maintenance",
+          },
+        },
+      ],
+      summary: "Prepared runtime drain preserved metadata.",
+    });
     assert.deepEqual(result.assistantDeliveryOutcomes, [
       {
         deliveryChannel: "telegram",

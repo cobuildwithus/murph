@@ -128,7 +128,7 @@ test("hosted usage export leaves unacknowledged records pending and warns", asyn
         async recordUsage() {
           return {
             recorded: 1,
-            usageIds: [firstUsageId, "unknown_usage_id"],
+            usageIds: [firstUsageId, firstUsageId, "unknown_usage_id"],
           };
         },
       },

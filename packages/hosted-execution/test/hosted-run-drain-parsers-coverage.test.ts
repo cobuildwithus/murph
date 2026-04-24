@@ -31,6 +31,52 @@ describe("hosted run drain parser coverage", () => {
       },
       runDrain: {
         acquiredAt: "2026-04-08T00:00:00.000Z",
+        committedResult: {
+          bundle: "committed-bundle-ref-123",
+          result: {
+            adoptedCleanupTargets: [
+              {
+                channel: "email",
+                eventId: "evt_late_email",
+                rawMessageKey: "raw/message/key",
+                userId: "user_123",
+              },
+              {
+                channel: "linq",
+                messageId: "linq_message_123",
+              },
+              {
+                channel: "telegram",
+                messageId: "telegram_message_123",
+                target: "telegram_thread_123",
+              },
+            ],
+            adoptedEventResults: [
+              {
+                ingressEventId: "wake_late",
+                state: "completed",
+              },
+            ],
+            eventsHandled: 3,
+            nextWakeAt: "2026-04-08T00:05:00.000Z",
+            redactedDetails: {
+              lane: "maintenance",
+            },
+            redactedLogEntries: [
+              {
+                component: "runtime",
+                eventId: "evt_123",
+                level: "info",
+                message: "prepared",
+                phase: "commit.recorded",
+                redacted: {
+                  provider: "device-sync",
+                },
+              },
+            ],
+            summary: "Prepared run drain.",
+          },
+        },
         events: [
           {
             seq: "24",
@@ -60,6 +106,52 @@ describe("hosted run drain parser coverage", () => {
       },
       runDrain: {
         acquiredAt: "2026-04-08T00:00:00.000Z",
+        committedResult: {
+          bundle: "committed-bundle-ref-123",
+          result: {
+            adoptedCleanupTargets: [
+              {
+                channel: "email",
+                eventId: "evt_late_email",
+                rawMessageKey: "raw/message/key",
+                userId: "user_123",
+              },
+              {
+                channel: "linq",
+                messageId: "linq_message_123",
+              },
+              {
+                channel: "telegram",
+                messageId: "telegram_message_123",
+                target: "telegram_thread_123",
+              },
+            ],
+            adoptedEventResults: [
+              {
+                ingressEventId: "wake_late",
+                state: "completed",
+              },
+            ],
+            eventsHandled: 3,
+            nextWakeAt: "2026-04-08T00:05:00.000Z",
+            redactedDetails: {
+              lane: "maintenance",
+            },
+            redactedLogEntries: [
+              {
+                component: "runtime",
+                eventId: "evt_123",
+                level: "info",
+                message: "prepared",
+                phase: "commit.recorded",
+                redacted: {
+                  provider: "device-sync",
+                },
+              },
+            ],
+            summary: "Prepared run drain.",
+          },
+        },
         events: [
           {
             seq: "24",

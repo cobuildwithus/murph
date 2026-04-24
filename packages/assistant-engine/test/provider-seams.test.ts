@@ -325,13 +325,6 @@ describe('assistant provider seam helpers', () => {
     expect(
       resolveAssistantProviderResumeKey({
         resumeState,
-        provider: 'openai-compatible',
-      }),
-    ).toBe('provider_session_alpha')
-    expect(
-      resolveAssistantProviderResumeKey({
-        resumeState,
-        provider: 'codex-cli',
       }),
     ).toBe('provider_session_alpha')
 
@@ -370,7 +363,6 @@ describe('assistant provider seam helpers', () => {
     expect(
       resolveAssistantProviderResumeKey({
         resumeState: null,
-        provider: 'openai-compatible',
       }),
     ).toBeNull()
 

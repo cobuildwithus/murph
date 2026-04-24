@@ -6,6 +6,9 @@ import {
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
 } from "../src/client.ts";
+import {
+  CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+} from "../src/routes.ts";
 
 type ObservedRequest = { init?: RequestInit; url: string };
 
@@ -61,6 +64,35 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     await expect(client.getStatus("user_123")).resolves.toEqual(createUserStatus());
+  });
+
+  it("rejects blank user identifiers before issuing requests", () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse(createUserStatus())) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    expect(() => client.getStatus("  \t")).toThrow(
+      "Cloudflare hosted control userId must not be blank.",
+    );
+    expect(() => client.nudgeUserRun("")).toThrow(
+      "Cloudflare hosted control userId must not be blank.",
+    );
+    expect(() =>
+      client.createBrowserVaultSession({
+        browserPublicKeyJwk: {
+          crv: "P-256",
+          kty: "EC",
+          x: "x-value",
+          y: "y-value",
+        },
+        replicaRef: createReplicaRef(),
+        userId: "\n",
+      })
+    ).toThrow("Cloudflare hosted control userId must not be blank.");
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("does not echo HTTP response bodies in thrown errors", async () => {
@@ -152,7 +184,11 @@ describe("createCloudflareHostedControlClient", () => {
   it("maps missing browser vault replica objects to a dedicated not-found error", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
-      fetchImpl: vi.fn(async () => new Response("missing", { status: 404 })) as typeof fetch,
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+          error: "Browser vault replica was not found.",
+        }, { status: 404 })) as typeof fetch,
       getBearerToken: async () => "token-123",
       timeoutMs: 2_500,
     });
@@ -168,6 +204,174 @@ describe("createCloudflareHostedControlClient", () => {
       userId: "user_123",
     })).rejects.toThrow("Hosted execution browser vault replica was not found.");
   });
+
+  it("leaves generic browser vault 404s as HTTP failures", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          error: "Not found",
+        }, { status: 404 })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+      timeoutMs: 2_500,
+    });
+    const promise = client.createBrowserVaultSession({
+      browserPublicKeyJwk: {
+        crv: "P-256",
+        kty: "EC",
+        x: "x-value",
+        y: "y-value",
+      },
+      replicaRef: createReplicaRef(),
+      userId: "user_123",
+    });
+
+    await expect(promise).rejects.toThrow(
+      "Hosted execution browser vault session failed with HTTP 404.",
+    );
+    await expect(promise).rejects.not.toThrow(
+      "Hosted execution browser vault replica was not found.",
+    );
+  });
+
+  for (const scenario of [
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: createReplicaAad(),
+          replicaKeyEnvelope: createReplicaKeyEnvelope(),
+          replicaRef: {
+            ...createReplicaRef(),
+            objectKey: "users/browser-vault-replicas/other/replica.json",
+          },
+          state: "ready",
+        }),
+      message:
+        "Cloudflare browser vault session replicaRef.objectKey must match the requested replicaRef.objectKey.",
+      name: "returned replicaRef objectKey differs from the request",
+    },
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: {
+            ...createReplicaAad(),
+            userId: "user_other",
+          },
+          replicaKeyEnvelope: createReplicaKeyEnvelope(),
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        }),
+      message: "Cloudflare browser vault session replicaAad.userId must match the requested userId.",
+      name: "replica AAD user differs from the request",
+    },
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: {
+            ...createReplicaAad(),
+            sourceBundleHash: "b".repeat(64),
+          },
+          replicaKeyEnvelope: createReplicaKeyEnvelope(),
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        }),
+      message:
+        "Cloudflare browser vault session replicaAad.sourceBundleHash must match the requested replicaRef.sourceBundleHash.",
+      name: "replica AAD source bundle differs from the request",
+    },
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
+          encryptedReplica: {
+            ...createReplicaEnvelope(),
+            keyId: "browser-vault-replica:other",
+          },
+          replicaAad: createReplicaAad(),
+          replicaKeyEnvelope: createReplicaKeyEnvelope(),
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        }),
+      message:
+        "Cloudflare browser vault session encryptedReplica.keyId must match the requested replicaRef.keyId.",
+      name: "encrypted replica key differs from the request",
+    },
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
+          encryptedReplica: {
+            ...createReplicaEnvelope(),
+            scope: "bundle",
+          },
+          replicaAad: createReplicaAad(),
+          replicaKeyEnvelope: createReplicaKeyEnvelope(),
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        }),
+      message:
+        "Cloudflare browser vault session encryptedReplica.scope must match the browser-vault-replica storage scope.",
+      name: "encrypted replica scope is not browser-vault-replica",
+    },
+    {
+      buildResponse: () =>
+        createBrowserVaultSession({
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: createReplicaAad(),
+          replicaKeyEnvelope: {
+            ...createReplicaKeyEnvelope(),
+            userId: "user_other",
+          },
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        }),
+      message:
+        "Cloudflare browser vault session replicaKeyEnvelope.userId must match the requested userId.",
+      name: "key envelope user differs from the request",
+    },
+    {
+      buildResponse: () => {
+        const keyEnvelope = createReplicaKeyEnvelope();
+        return createBrowserVaultSession({
+          encryptedReplica: createReplicaEnvelope(),
+          replicaAad: createReplicaAad(),
+          replicaKeyEnvelope: {
+            ...keyEnvelope,
+            recipients: keyEnvelope.recipients.map((recipient) => ({
+              ...recipient,
+              keyId: "browser-vault-replica:other",
+            })),
+          },
+          replicaRef: createReplicaRef(),
+          state: "ready",
+        });
+      },
+      message:
+        "Cloudflare browser vault session replicaKeyEnvelope.recipients[0].keyId must match the requested replicaRef.keyId.",
+      name: "recipient key differs from the request",
+    },
+  ]) {
+    it(`rejects ready browser vault sessions when ${scenario.name}`, async () => {
+      const client = createCloudflareHostedControlClient({
+        baseUrl: "https://runner.example.test/root/",
+        fetchImpl: vi.fn(async () => createJsonResponse(scenario.buildResponse())) as typeof fetch,
+        getBearerToken: async () => "token-123",
+        timeoutMs: 2_500,
+      });
+
+      await expect(client.createBrowserVaultSession({
+        browserPublicKeyJwk: {
+          crv: "P-256",
+          kty: "EC",
+          x: "x-value",
+          y: "y-value",
+        },
+        replicaRef: createReplicaRef(),
+        userId: "user_123",
+      })).rejects.toThrow(scenario.message);
+    });
+  }
 
   it("rejects ready browser vault sessions without a replica ref", async () => {
     const client = createCloudflareHostedControlClient({
@@ -246,6 +450,20 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("rejects user status responses for another user", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse(createUserStatus({ userId: "user_other" }))) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.getStatus("user_123")).rejects.toThrow(
+      "Hosted execution status userId must match the requested userId.",
+    );
+  });
+
   it("posts run requests without a synchronous drain contract", async () => {
     let observedRequest: ObservedRequest | null = null;
     const client = createCloudflareHostedControlClient({
@@ -278,10 +496,14 @@ describe("createCloudflareHostedControlClient", () => {
 
 });
 
-function createJsonResponse(value: unknown): Response {
+function createJsonResponse(value: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+
   return new Response(JSON.stringify(value), {
-    headers: { "content-type": "application/json; charset=utf-8" },
-    status: 200,
+    ...init,
+    headers,
+    status: init.status ?? 200,
   });
 }
 

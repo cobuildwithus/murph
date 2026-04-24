@@ -16,6 +16,7 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionVaultShareAcceptedWake,
   buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
 import {
@@ -29,6 +30,7 @@ import {
 import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
+import { HostedRunSideInputNotFoundError } from "../src/user-runner/runner-run-processor.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import type {
@@ -2326,6 +2328,222 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     ).rejects.toThrow("status refresh failed");
   });
 
+  it("does not infer adopted wake completion from refreshed run projection membership", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const runner = new HostedUserRunner(
+      createDurableObjectStateHarness(),
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    const mergeCommitInputs = Reflect.get(
+      runner,
+      "mergeAdoptedHostedRunCommitInputs",
+    );
+    if (typeof mergeCommitInputs !== "function") {
+      throw new Error("Expected hosted runner commit merge helper to be callable.");
+    }
+    const run = createRunRecord();
+    run.status = "running";
+    run.eventSeqs = ["11", "12"];
+    run.ingressEventIds = ["wake-explicit", "wake-adopted"];
+    webControlMocks.readHostedRunStatusFromWeb.mockResolvedValueOnce({
+      cursor: createCursorState({
+        committedSeq: "10",
+        nextSeq: "13",
+        snapshotKey: "snapshot/adopted-status",
+        version: "cursor-adopted",
+      }),
+      pendingIngressEventCount: 1,
+      run,
+    });
+
+    await expect(
+      mergeCommitInputs.call(runner, {
+        eventResults: [
+          {
+            ingressEventId: "wake-explicit",
+            state: "completed",
+          },
+        ],
+        outputCommittedSeq: "11",
+        run,
+        userId: "user-resume-finalize",
+      }),
+    ).resolves.toEqual({
+      eventResults: [
+        {
+          ingressEventId: "wake-explicit",
+          state: "completed",
+        },
+      ],
+      outputCommittedSeq: "11",
+    });
+  });
+
+  it("commits adopted turn-input wakes only when the runtime reports them processed", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const runner = new HostedUserRunner(
+      createDurableObjectStateHarness(),
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    const mergeCommitInputs = Reflect.get(
+      runner,
+      "mergeAdoptedHostedRunCommitInputs",
+    );
+    if (typeof mergeCommitInputs !== "function") {
+      throw new Error("Expected hosted runner commit merge helper to be callable.");
+    }
+    const run = createRunRecord();
+    run.status = "running";
+    run.eventSeqs = ["11", "12", "13"];
+    run.ingressEventIds = ["wake-explicit", "wake-adopted", "wake-unreported"];
+    webControlMocks.readHostedRunStatusFromWeb.mockResolvedValueOnce({
+      cursor: createCursorState({
+        committedSeq: "10",
+        nextSeq: "14",
+        snapshotKey: "snapshot/adopted-runtime-reported",
+        version: "cursor-adopted-runtime-reported",
+      }),
+      pendingIngressEventCount: 1,
+      run,
+    });
+
+    await expect(
+      mergeCommitInputs.call(runner, {
+        adoptedEventResults: [
+          {
+            ingressEventId: "wake-adopted",
+            state: "completed",
+          },
+          {
+            ingressEventId: "wake-not-in-run",
+            state: "completed",
+          },
+        ],
+        eventResults: [
+          {
+            ingressEventId: "wake-explicit",
+            state: "completed",
+          },
+        ],
+        outputCommittedSeq: "11",
+        run,
+        userId: "user-resume-finalize",
+      }),
+    ).resolves.toEqual({
+      eventResults: [
+        {
+          ingressEventId: "wake-explicit",
+          state: "completed",
+        },
+        {
+          ingressEventId: "wake-adopted",
+          state: "completed",
+        },
+      ],
+      outputCommittedSeq: "12",
+    });
+  });
+
+  it("treats hosted wake drain cap exhaustion as backpressure and schedules a retry", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+    const run = createRunRecord();
+    run.status = "acquired";
+    run.triggerKind = "external_ingress";
+
+    for (let index = 0; index < 32; index += 1) {
+      const seq = (11 + index).toString();
+      const nextSeq = (12 + index).toString();
+      const wake = buildHostedExecutionMemberActivatedWake({
+        eventId: `evt_cap_${seq}`,
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: false,
+        },
+        memberId: "user-resume-finalize",
+        occurredAt: "2026-04-20T00:00:00.000Z",
+      });
+      const acquiredCursor = createCursorState({
+        committedSeq: (10 + index).toString(),
+        nextSeq: seq,
+        snapshotKey: `snapshot/cap-acquired-${seq}`,
+        version: `cursor-cap-${seq}`,
+      });
+      const committedCursor = createCursorState({
+        committedSeq: seq,
+        nextSeq,
+        snapshotKey: `snapshot/cap-committed-${seq}`,
+        version: `cursor-cap-committed-${seq}`,
+      });
+      webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+        acquired: true,
+        cursor: acquiredCursor,
+        events: [
+          createAcquireEvent({
+            id: `wake-cap-${seq}`,
+            seq,
+            userId: "user-resume-finalize",
+            wake,
+          }),
+        ],
+        pendingIngressEventCount: 1,
+        resumeFinalize: false,
+        run,
+        runToken: `run-token-${seq}`,
+      });
+      webControlMocks.commitHostedRunToWeb.mockResolvedValueOnce({
+        committed: true,
+        cursor: committedCursor,
+        needsFinalize: false,
+        run,
+      });
+    }
+
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    wakeProcessorMocks.executeRunDrain.mockImplementation(async (input) => ({
+      cursorSnapshotRef: createSnapshotRef(
+        `snapshot/cap-committed-${input.events[0]?.seq ?? "unknown"}`,
+      ),
+      finalizeRequired: false,
+      nextRuntimeWakeAt: null,
+      redactedSummary: null,
+      state: "completed",
+    }));
+
+    const result = await runner.drainHostedRuns({
+      targetCommittedSeqHint: "999",
+    });
+
+    expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(32);
+    expect(webControlMocks.acquireHostedRunFromWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        limit: 64,
+      },
+    });
+    expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(32);
+    expect(result).toEqual({
+      committedSeq: "42",
+      requestedTargetSeq: "999",
+      targetReached: false,
+    });
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      nextWakeAt: expect.any(String),
+    });
+  });
+
   it("keeps runtime fallback ownership enabled when runner typing only returns a cleanup handle", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
@@ -3686,7 +3904,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
   });
 
-  it("quarantines wakes when the share pack cannot be hydrated", async () => {
+  it("quarantines wakes when a deterministic share pack side input is missing", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
     const stateStore = new RunnerStateStore(state);
@@ -3697,15 +3915,14 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       new MemoryEncryptedR2Bucket(),
     );
 
-    const activationWake = buildHostedExecutionMemberActivatedWake({
+    const shareWake = buildHostedExecutionVaultShareAcceptedWake({
       eventId: "evt_share_pack_missing",
-      memberChannels: {
-        email: true,
-        linq: false,
-        telegram: false,
-      },
       memberId: "user-resume-finalize",
       occurredAt: "2026-04-20T00:00:00.000Z",
+      share: {
+        ownerUserId: "share-owner",
+        shareId: "share-missing",
+      },
     });
     const acquiredCursor = createCursorState({
       committedSeq: "10",
@@ -3723,7 +3940,10 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     run.status = "acquired";
 
     wakeProcessorMocks.readRunDrainSharePack.mockRejectedValueOnce(
-      new Error("share pack unavailable"),
+      new HostedRunSideInputNotFoundError({
+        message: "share pack unavailable",
+        sideInputKind: "share-pack",
+      }),
     );
     webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
       acquired: true,
@@ -3733,7 +3953,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
           id: "wake-share-pack-missing",
           seq: "11",
           userId: "user-resume-finalize",
-          wake: activationWake,
+          wake: shareWake,
         }),
       ],
       pendingIngressEventCount: 1,
@@ -3777,6 +3997,166 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
     await expect(stateStore.readState()).resolves.toMatchObject({
       userId: "user-resume-finalize",
+    });
+  });
+
+  it("quarantines wakes when a deterministic vault sync import side input is missing", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const vaultSyncWake = buildHostedExecutionVaultSyncImportWake({
+      eventId: "evt_vault_sync_missing",
+      memberId: "user-resume-finalize",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+      vaultSync: {
+        localManifestHash: "sha256:manifest",
+        sessionId: "vsi-missing",
+        sourceVaultId: "vault-source",
+        sourceVaultTitle: "Source Vault",
+      },
+    });
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/vault-sync-missing",
+      version: "cursor-v1",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+
+    wakeProcessorMocks.readRunDrainVaultSyncImport.mockRejectedValueOnce(
+      new HostedRunSideInputNotFoundError({
+        message: "vault sync import unavailable",
+        sideInputKind: "vault-sync-import",
+      }),
+    );
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [
+        createAcquireEvent({
+          id: "wake-vault-sync-missing",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: vaultSyncWake,
+        }),
+      ],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.commitHostedRunToWeb.mockResolvedValueOnce({
+      committed: true,
+      cursor: createCursorState({
+        committedSeq: "11",
+        nextSeq: "12",
+        snapshotKey: "snapshot/vault-sync-missing-committed",
+        version: "cursor-v2",
+      }),
+      needsFinalize: false,
+      run,
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    const result = await runner.drainHostedRuns({
+      targetCommittedSeqHint: "11",
+    });
+
+    expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.commitHostedRunToWeb.mock.calls[0]?.[0]).toMatchObject({
+      body: {
+        eventResults: [
+          {
+            quarantineCode: "hosted-side-input-unavailable",
+            state: "quarantined",
+            ingressEventId: "wake-vault-sync-missing",
+          },
+        ],
+        outputCommittedSeq: "11",
+      },
+    });
+    expect(wakeProcessorMocks.executeRunDrain).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      committedSeq: "11",
+      requestedTargetSeq: "11",
+      targetReached: true,
+    });
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      userId: "user-resume-finalize",
+    });
+  });
+
+  it("backpressures without committing when share pack hydration fails transiently", async () => {
+    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
+    const state = createDurableObjectStateHarness();
+    const stateStore = new RunnerStateStore(state);
+    await stateStore.bootstrapUser("user-resume-finalize");
+    const runner = new HostedUserRunner(
+      state,
+      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      new MemoryEncryptedR2Bucket(),
+    );
+
+    const shareWake = buildHostedExecutionVaultShareAcceptedWake({
+      eventId: "evt_share_pack_transient",
+      memberId: "user-resume-finalize",
+      occurredAt: "2026-04-20T00:00:00.000Z",
+      share: {
+        ownerUserId: "share-owner",
+        shareId: "share-transient",
+      },
+    });
+    const acquiredCursor = createCursorState({
+      committedSeq: "10",
+      nextSeq: "11",
+      snapshotKey: "snapshot/share-pack-transient",
+      version: "cursor-v1",
+    });
+    const run = createRunRecord();
+    run.status = "acquired";
+
+    wakeProcessorMocks.readRunDrainSharePack.mockRejectedValueOnce(
+      new Error("Hosted share payload read failed with HTTP 503."),
+    );
+    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce({
+      acquired: true,
+      cursor: acquiredCursor,
+      events: [
+        createAcquireEvent({
+          id: "wake-share-pack-transient",
+          seq: "11",
+          userId: "user-resume-finalize",
+          wake: shareWake,
+        }),
+      ],
+      pendingIngressEventCount: 1,
+      resumeFinalize: false,
+      run,
+      runToken: "run-token",
+    });
+    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+
+    await expect(runner.drainHostedRuns({
+      targetCommittedSeqHint: "11",
+    })).rejects.toThrow("Hosted share payload read failed with HTTP 503.");
+    expect(webControlMocks.commitHostedRunToWeb).not.toHaveBeenCalled();
+    expect(wakeProcessorMocks.executeRunDrain).not.toHaveBeenCalled();
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      nextWakeAt: expect.any(String),
     });
   });
 

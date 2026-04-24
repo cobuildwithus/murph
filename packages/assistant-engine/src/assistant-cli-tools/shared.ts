@@ -4,6 +4,7 @@ export interface AssistantToolContext {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: import('../assistant/execution-context.js').AssistantExecutionContext | null
   inboxServices?: import('@murphai/inbox-services').InboxServices
+  operatorAuthority?: import('../assistant/operator-authority.js').AssistantOperatorAuthority | null
   requestId?: string | null
   sessionId?: string | null
   vault: string

@@ -144,8 +144,10 @@ async function deliverHostedCommittedAssistantDelivery(input: {
           }
 
           return await input.effectsPort.sendEmail({
+            idempotencyKey: request.idempotencyKey ?? null,
             identityId: request.identityId ?? null,
             message: request.message,
+            replyToMessageId: request.replyToMessageId ?? null,
             subject: request.subject ?? null,
             target: request.target,
             targetKind: request.targetKind,

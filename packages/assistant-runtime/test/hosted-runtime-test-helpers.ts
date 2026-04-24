@@ -30,6 +30,23 @@ export const HOSTED_RUNTIME_RESOLVED_CONFIG: HostedAssistantRuntimeResolvedConfi
     telegramBotConfigured: true,
   },
   deviceSync: null,
+  managedAutoReplyChannels: [
+    {
+      capabilityReady: true,
+      channel: "email",
+      memberChannel: "email",
+    },
+    {
+      capabilityReady: true,
+      channel: "linq",
+      memberChannel: "linq",
+    },
+    {
+      capabilityReady: true,
+      channel: "telegram",
+      memberChannel: "telegram",
+    },
+  ],
 };
 
 export function createHostedRuntimeResolvedConfig(
@@ -44,6 +61,11 @@ export function createHostedRuntimeResolvedConfig(
       overrides.deviceSync === undefined
         ? HOSTED_RUNTIME_RESOLVED_CONFIG.deviceSync
         : overrides.deviceSync,
+    managedAutoReplyChannels: overrides.managedAutoReplyChannels
+      ? overrides.managedAutoReplyChannels.map((channel) => ({ ...channel }))
+      : (HOSTED_RUNTIME_RESOLVED_CONFIG.managedAutoReplyChannels ?? []).map((channel) => ({
+          ...channel,
+        })),
   };
 }
 

@@ -14,6 +14,7 @@ import {
 } from '@murphai/runtime-state'
 import { hasMatchingLoopbackControlBearerToken } from '@murphai/runtime-state/node'
 import {
+  type AssistantGatewayRequest,
   AssistantHttpRequestError,
   assertAssistantBoundVault,
   buildAssistantHttpErrorPayload,
@@ -167,66 +168,93 @@ async function handleAssistantRequest(
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/conversations/list') {
-      const body = parseGatewayListConversationsRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.listConversations(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayListConversationsRequestBody,
+        (gatewayInput) => input.service.gateway.listConversations(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/conversations/get') {
-      const body = parseGatewayGetConversationRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.getConversation(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayGetConversationRequestBody,
+        (gatewayInput) => input.service.gateway.getConversation(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/messages/read') {
-      const body = parseGatewayReadMessagesRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.readMessages(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayReadMessagesRequestBody,
+        (gatewayInput) => input.service.gateway.readMessages(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/attachments/fetch') {
-      const body = parseGatewayFetchAttachmentsRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.fetchAttachments(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayFetchAttachmentsRequestBody,
+        (gatewayInput) => input.service.gateway.fetchAttachments(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/messages/send') {
-      const body = parseGatewaySendMessageRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.sendMessage(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewaySendMessageRequestBody,
+        (gatewayInput) => input.service.gateway.sendMessage(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/events/poll') {
-      const body = parseGatewayPollEventsRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.pollEvents(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayPollEventsRequestBody,
+        (gatewayInput) => input.service.gateway.pollEvents(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/events/wait') {
-      const body = parseGatewayWaitForEventsRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.waitForEvents(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayWaitForEventsRequestBody,
+        (gatewayInput) => input.service.gateway.waitForEvents(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/permissions/list-open') {
-      const body = parseGatewayListOpenPermissionsRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.listOpenPermissions(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayListOpenPermissionsRequestBody,
+        (gatewayInput) => input.service.gateway.listOpenPermissions(gatewayInput),
+      )
       return
     }
     if (method === 'POST' && url.pathname === '/gateway/permissions/respond') {
-      const body = parseGatewayRespondToPermissionRequestBody(await readJsonBody(request))
-      const { vault, ...gatewayInput } = body
-      assertAssistantBoundVault(vault, input.service.vault)
-      sendJson(response, 200, await input.service.gateway.respondToPermission(gatewayInput))
+      await forwardBoundGatewayRequest(
+        request,
+        response,
+        input,
+        parseGatewayRespondToPermissionRequestBody,
+        (gatewayInput) => input.service.gateway.respondToPermission(gatewayInput),
+      )
       return
     }
     if (method === 'GET' && url.pathname === '/cron/status') {
@@ -273,6 +301,18 @@ async function handleAssistantRequest(
     const statusCode = resolveAssistantHttpErrorStatus(error)
     sendJson(response, statusCode, buildAssistantHttpErrorPayload(error, statusCode))
   }
+}
+
+async function forwardBoundGatewayRequest<TInput extends object>(
+  request: IncomingMessage,
+  response: ServerResponse,
+  input: CreateAssistantHttpServerInput,
+  parseBody: (payload: unknown) => AssistantGatewayRequest<TInput>,
+  callGateway: (gatewayInput: TInput) => Promise<unknown> | unknown,
+): Promise<void> {
+  const body = parseBody(await readJsonBody(request))
+  assertAssistantBoundVault(body.vault, input.service.vault)
+  sendJson(response, 200, await callGateway(body.gatewayInput))
 }
 
 export function assertAssistantControlRequest(input: {

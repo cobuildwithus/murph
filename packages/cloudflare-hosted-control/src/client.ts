@@ -20,10 +20,12 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
+  CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserStatusPath,
   buildCloudflareHostedControlUserRunPath,
 } from "./routes.ts";
+import { requireCloudflareHostedControlUserId } from "./user-id.ts";
 
 export interface CloudflareHostedControlBrowserVaultSession {
   encryptedReplica: HostedCipherEnvelope;
@@ -74,11 +76,21 @@ export function createCloudflareHostedControlClient(
 
   return {
     createBrowserVaultSession(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(input.browserPublicKeyJwk);
+      const replicaRef = parseHostedBrowserVaultReplicaRef(
+        input.replicaRef,
+        "Cloudflare browser vault session request replicaRef",
+      );
+
+      if (!replicaRef) {
+        throw new TypeError("Cloudflare browser vault session request replicaRef must not be null.");
+      }
+
       const body = JSON.stringify({
-        browserPublicKeyJwk: parseHostedUserRecipientPublicKeyJwk(input.browserPublicKeyJwk),
-        replicaRef: input.replicaRef,
+        browserPublicKeyJwk,
+        replicaRef,
       });
-      const userId = input.userId;
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -86,7 +98,11 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "browser vault session",
-        parse: parseCloudflareHostedControlBrowserVaultSession,
+        parse: (value) =>
+          parseCloudflareHostedControlBrowserVaultSession(value, {
+            replicaRef,
+            userId,
+          }),
         path: buildCloudflareHostedControlBrowserVaultSessionPath(userId),
         request: {
           body,
@@ -97,7 +113,13 @@ export function createCloudflareHostedControlClient(
         },
         timeoutMs: options.timeoutMs,
       }).catch((error) => {
-        if (isHostedExecutionHttpError(error, 404)) {
+        if (
+          isHostedExecutionHttpError(
+            error,
+            404,
+            CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+          )
+        ) {
           throw new Error(BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE);
         }
 
@@ -105,27 +127,31 @@ export function createCloudflareHostedControlClient(
       });
     },
     getStatus(userId) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
-        boundUserId: userId,
+        boundUserId: expectedUserId,
         fetchImpl,
         getAuthorizationHeader,
         label: "status",
-        parse: parseHostedExecutionUserStatus,
-        path: buildCloudflareHostedControlUserStatusPath(userId),
+        parse: (value) => parseHostedExecutionUserStatusForExpectedUser(value, expectedUserId),
+        path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
         timeoutMs: options.timeoutMs,
       });
     },
     nudgeUserRun(userId) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
-        boundUserId: userId,
+        boundUserId: expectedUserId,
         fetchImpl,
         getAuthorizationHeader,
         label: "run",
         parse: parseHostedRunNudgeResult,
-        path: buildCloudflareHostedControlUserRunPath(userId),
+        path: buildCloudflareHostedControlUserRunPath(expectedUserId),
         request: {
           body: "{}",
           headers: {
@@ -139,13 +165,38 @@ export function createCloudflareHostedControlClient(
   };
 }
 
-function isHostedExecutionHttpError(error: unknown, status: number): error is Error {
-  return error instanceof Error &&
-    error.message === `Hosted execution browser vault session failed with HTTP ${status}.`;
+class HostedExecutionHttpResponseError extends Error {
+  readonly code: string | undefined;
+  readonly status: number;
+
+  constructor(input: {
+    code: string | undefined;
+    label: string;
+    status: number;
+  }) {
+    super(`Hosted execution ${input.label} failed with HTTP ${input.status}.`);
+    this.name = "HostedExecutionHttpResponseError";
+    this.code = input.code;
+    this.status = input.status;
+  }
+}
+
+function isHostedExecutionHttpError(
+  error: unknown,
+  status: number,
+  code?: string,
+): error is HostedExecutionHttpResponseError {
+  return error instanceof HostedExecutionHttpResponseError &&
+    error.status === status &&
+    (code === undefined || error.code === code);
 }
 
 function parseCloudflareHostedControlBrowserVaultSession(
   value: unknown,
+  expected: {
+    replicaRef: HostedBrowserVaultReplicaRef;
+    userId: string;
+  },
 ): CloudflareHostedControlBrowserVaultSession {
   const record = requireRecord(value, "Cloudflare browser vault session");
   const state = requireString(record.state, "Cloudflare browser vault session state");
@@ -163,19 +214,91 @@ function parseCloudflareHostedControlBrowserVaultSession(
     throw new TypeError("Cloudflare browser vault session replicaRef must not be null.");
   }
 
+  assertHostedBrowserVaultReplicaRefMatches(
+    replicaRef,
+    expected.replicaRef,
+    "Cloudflare browser vault session replicaRef",
+  );
+
+  const encryptedReplica = parseHostedCipherEnvelope(
+    record.encryptedReplica,
+    "Cloudflare browser vault session encryptedReplica",
+  );
+  const replicaAad = parseCloudflareHostedControlBrowserVaultReplicaAad(
+    record.replicaAad,
+    "Cloudflare browser vault session replicaAad",
+  );
+  const replicaKeyEnvelope = parseHostedBrowserSessionKeyEnvelope(
+    record.replicaKeyEnvelope,
+    "Cloudflare browser vault session replicaKeyEnvelope",
+  );
+
+  assertMatchingString(
+    encryptedReplica.keyId,
+    expected.replicaRef.keyId,
+    "Cloudflare browser vault session encryptedReplica.keyId",
+    "the requested replicaRef.keyId",
+  );
+  assertMatchingString(
+    encryptedReplica.scope,
+    "browser-vault-replica",
+    "Cloudflare browser vault session encryptedReplica.scope",
+    "the browser-vault-replica storage scope",
+  );
+  assertMatchingString(
+    replicaAad.userId,
+    expected.userId,
+    "Cloudflare browser vault session replicaAad.userId",
+    "the requested userId",
+  );
+  assertMatchingString(
+    replicaAad.objectKey,
+    expected.replicaRef.objectKey,
+    "Cloudflare browser vault session replicaAad.objectKey",
+    "the requested replicaRef.objectKey",
+  );
+  assertMatchingString(
+    replicaAad.dataVersion,
+    expected.replicaRef.dataVersion,
+    "Cloudflare browser vault session replicaAad.dataVersion",
+    "the requested replicaRef.dataVersion",
+  );
+  assertMatchingString(
+    replicaAad.sourceBundleHash,
+    expected.replicaRef.sourceBundleHash,
+    "Cloudflare browser vault session replicaAad.sourceBundleHash",
+    "the requested replicaRef.sourceBundleHash",
+  );
+  assertMatchingString(
+    replicaKeyEnvelope.userId,
+    expected.userId,
+    "Cloudflare browser vault session replicaKeyEnvelope.userId",
+    "the requested userId",
+  );
+  assertMatchingString(
+    replicaKeyEnvelope.keyId,
+    expected.replicaRef.keyId,
+    "Cloudflare browser vault session replicaKeyEnvelope.keyId",
+    "the requested replicaRef.keyId",
+  );
+
+  if (replicaKeyEnvelope.recipients.length === 0) {
+    throw new TypeError("Cloudflare browser vault session replicaKeyEnvelope.recipients must not be empty.");
+  }
+
+  for (const [index, recipient] of replicaKeyEnvelope.recipients.entries()) {
+    assertMatchingString(
+      recipient.keyId,
+      expected.replicaRef.keyId,
+      `Cloudflare browser vault session replicaKeyEnvelope.recipients[${index}].keyId`,
+      "the requested replicaRef.keyId",
+    );
+  }
+
   return {
-    encryptedReplica: parseHostedCipherEnvelope(
-      record.encryptedReplica,
-      "Cloudflare browser vault session encryptedReplica",
-    ),
-    replicaAad: parseCloudflareHostedControlBrowserVaultReplicaAad(
-      record.replicaAad,
-      "Cloudflare browser vault session replicaAad",
-    ),
-    replicaKeyEnvelope: parseHostedBrowserSessionKeyEnvelope(
-      record.replicaKeyEnvelope,
-      "Cloudflare browser vault session replicaKeyEnvelope",
-    ),
+    encryptedReplica,
+    replicaAad,
+    replicaKeyEnvelope,
     replicaRef,
     state,
   };
@@ -204,6 +327,84 @@ function parseCloudflareHostedControlBrowserVaultReplicaAad(
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireString(record.userId, `${label}.userId`),
   };
+}
+
+function parseHostedExecutionUserStatusForExpectedUser(
+  value: unknown,
+  expectedUserId: string,
+): HostedExecutionUserStatus {
+  const status = parseHostedExecutionUserStatus(value);
+
+  if (status.userId !== expectedUserId) {
+    throw new TypeError("Hosted execution status userId must match the requested userId.");
+  }
+
+  return status;
+}
+
+function assertHostedBrowserVaultReplicaRefMatches(
+  actual: HostedBrowserVaultReplicaRef,
+  expected: HostedBrowserVaultReplicaRef,
+  label: string,
+): void {
+  assertMatchingNumber(
+    actual.byteLength,
+    expected.byteLength,
+    `${label}.byteLength`,
+    "the requested replicaRef.byteLength",
+  );
+  assertMatchingString(
+    actual.dataVersion,
+    expected.dataVersion,
+    `${label}.dataVersion`,
+    "the requested replicaRef.dataVersion",
+  );
+  assertMatchingString(
+    actual.generatedAt,
+    expected.generatedAt,
+    `${label}.generatedAt`,
+    "the requested replicaRef.generatedAt",
+  );
+  assertMatchingString(
+    actual.keyId,
+    expected.keyId,
+    `${label}.keyId`,
+    "the requested replicaRef.keyId",
+  );
+  assertMatchingString(
+    actual.objectKey,
+    expected.objectKey,
+    `${label}.objectKey`,
+    "the requested replicaRef.objectKey",
+  );
+  assertMatchingString(
+    actual.sourceBundleHash,
+    expected.sourceBundleHash,
+    `${label}.sourceBundleHash`,
+    "the requested replicaRef.sourceBundleHash",
+  );
+}
+
+function assertMatchingNumber(
+  actual: number,
+  expected: number,
+  label: string,
+  expectedLabel: string,
+): void {
+  if (actual !== expected) {
+    throw new TypeError(`${label} must match ${expectedLabel}.`);
+  }
+}
+
+function assertMatchingString(
+  actual: string,
+  expected: string,
+  label: string,
+  expectedLabel: string,
+): void {
+  if (actual !== expected) {
+    throw new TypeError(`${label} must match ${expectedLabel}.`);
+  }
 }
 
 function requireHostedExecutionBaseUrl(
@@ -265,8 +466,11 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   const headers = new Headers(input.request.headers);
   headers.set("authorization", await input.getAuthorizationHeader());
 
-  if (input.boundUserId) {
-    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+  if (input.boundUserId !== undefined) {
+    headers.set(
+      HOSTED_EXECUTION_USER_ID_HEADER,
+      requireCloudflareHostedControlUserId(input.boundUserId),
+    );
   }
 
   const response = await input.fetchImpl(url.toString(), {
@@ -278,10 +482,36 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   });
 
   if (!response.ok) {
-    throw new Error(`Hosted execution ${input.label} failed with HTTP ${response.status}.`);
+    throw new HostedExecutionHttpResponseError({
+      code: await readHostedExecutionStructuredErrorCode(response),
+      label: input.label,
+      status: response.status,
+    });
   }
 
   return input.parse(await response.json());
+}
+
+async function readHostedExecutionStructuredErrorCode(response: Response): Promise<string | undefined> {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+
+  if (!contentType.includes("application/json")) {
+    return undefined;
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return undefined;
+  }
+
+  const code = (body as Record<string, unknown>).code;
+  return typeof code === "string" && code.length > 0 ? code : undefined;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

@@ -25,6 +25,9 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import {
+  CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+} from "@murphai/cloudflare-hosted-control/routes";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
@@ -416,6 +419,34 @@ describe("cloudflare worker routes", () => {
     expect(eventStatusResponse.status).toBe(404);
     await expect(eventStatusResponse.json()).resolves.toEqual({
       error: "Not found",
+    });
+  });
+
+  it("returns a stable browser-vault missing-replica code from the browser-vault route", async () => {
+    const env = createWorkerEnv();
+    await resolveHostedUserCryptoContextForTest(env, "member_123");
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: createBrowserSessionPublicKeyJwk(),
+            replicaRef: createMissingBrowserVaultReplicaRefForTest(),
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+      error: "Browser vault replica was not found.",
     });
   });
 
@@ -928,6 +959,28 @@ function createWake(eventId: string): HostedIngressEnvelope {
     },
     occurredAt: "2026-04-16T10:00:00.000Z",
     userId: "member_123",
+  };
+}
+
+function createBrowserSessionPublicKeyJwk() {
+  return {
+    crv: "P-256",
+    kty: "EC",
+    x: "browser-session-x",
+    y: "browser-session-y",
+  };
+}
+
+function createMissingBrowserVaultReplicaRefForTest() {
+  return {
+    byteLength: 128,
+    dataVersion: "d".repeat(64),
+    generatedAt: "2026-04-20T08:00:00.000Z",
+    keyId: "browser-vault-replica:d",
+    objectKey: "users/browser-vault-replicas/missing/replica.json",
+    replicaSchema: "murph.browser-vault-replica.v1",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash: "a".repeat(64),
   };
 }
 

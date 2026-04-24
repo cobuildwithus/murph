@@ -362,6 +362,50 @@ describe("HostedBundleGarbageCollector", () => {
     await expect(secondUserStore.readBundle(secondUserRef)).resolves.toEqual(secondUserBytes);
   });
 
+  it("keeps another user's identical bundle bytes alive after one user cleans up a superseded ref", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const firstUserStore = createHostedBundleStore({
+      bucket,
+      key: bundleKey,
+      keyId: "v1",
+      userId: "member_a",
+    });
+    const secondUserStore = createHostedBundleStore({
+      bucket,
+      key: bundleKey,
+      keyId: "v1",
+      userId: "member_b",
+    });
+    const sharedBytes = createTextOnlyBundle("notes/shared.txt", "same bytes");
+    const firstUserPreviousRef = await firstUserStore.writeBundle("vault", sharedBytes);
+    const secondUserRef = await secondUserStore.writeBundle("vault", sharedBytes);
+    const firstUserNextRef = await firstUserStore.writeBundle(
+      "vault",
+      createTextOnlyBundle("notes/next.txt", "next bytes"),
+    );
+
+    expect(firstUserPreviousRef.hash).toBe(secondUserRef.hash);
+    expect(firstUserPreviousRef.key).not.toBe(secondUserRef.key);
+
+    await new HostedBundleGarbageCollector(
+      bucket,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+    ).cleanupBundleTransition({
+      nextBundleRef: firstUserNextRef,
+      previousBundleRef: firstUserPreviousRef,
+      userId: "member_a",
+    });
+
+    expect(bucket.objects.has(firstUserPreviousRef.key)).toBe(false);
+    expect(bucket.objects.has(firstUserNextRef.key)).toBe(true);
+    expect(bucket.objects.has(secondUserRef.key)).toBe(true);
+    await expect(secondUserStore.readBundle(secondUserRef)).resolves.toEqual(sharedBytes);
+  });
+
   it("refuses bundle cleanup when the ref belongs to another user's namespace", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const firstUserStore = createHostedBundleStore({

@@ -12,6 +12,7 @@ import {
 import {
   buildAssistantOutboxIntentMirrorState,
   rescheduleAssistantOutboxConfirmationRetry,
+  markAssistantOutboxIntentSent,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorTerminal,
   updateAssistantOutboxAfterDispatchFailure,
@@ -20,6 +21,7 @@ import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intent
 import {
   createAssistantTurnReceipt,
   readAssistantTurnReceipt,
+  updateAssistantTurnReceipt,
 } from '../src/assistant/turns.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -220,6 +222,61 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
+  it('records retry timeline entries for each distinct retryable transition', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        sending.intentId,
+      )
+      const firstRetry = await markAssistantOutboxIntentMirrorRetryable({
+        error: Object.assign(new Error('first hosted mirror retry'), {
+          code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:12:00.000Z'),
+        intent: sending,
+        intentPath,
+        vault,
+      })
+      const secondSending = await beginAssistantOutboxIntentMirrorDispatch({
+        deliveryIdempotencyKey: 'assistant-outbox:retry-timeline',
+        deliveryTransportIdempotent: false,
+        intentId: firstRetry.intentId,
+        startedAt: '2030-04-13T00:13:00.000Z',
+        vault,
+      })
+      if (!secondSending) {
+        throw new Error('Expected second sending intent.')
+      }
+
+      await markAssistantOutboxIntentMirrorRetryable({
+        error: Object.assign(new Error('second hosted mirror retry'), {
+          code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:14:00.000Z'),
+        intent: secondSending,
+        intentPath,
+        vault,
+      })
+
+      const receipt = await readAssistantTurnReceipt(vault, sending.turnId)
+      const retryEvents =
+        receipt?.timeline.filter((event) => event.kind === 'delivery.retry-scheduled') ??
+        []
+      expect(retryEvents).toHaveLength(2)
+      expect(retryEvents.map((event) => event.at)).toEqual([
+        '2030-04-13T00:12:00.000Z',
+        '2030-04-13T00:14:00.000Z',
+      ])
+    })
+  })
+
   it('records hosted mirror terminal failures without scheduling another retry', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({
@@ -259,6 +316,104 @@ describe('assistant outbox dispatch-state', () => {
       expect(diagnostics.counters.deliveriesFailed).toBe(1)
       expect(diagnostics.counters.deliveriesRetryable).toBe(0)
       expect(diagnostics.counters.outboxRetries).toBe(0)
+    })
+  })
+
+  it('sanitizes persisted outbox and receipt delivery errors', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const failed = await markAssistantOutboxIntentMirrorTerminal({
+        error: Object.assign(
+          new Error(
+            'Authorization: Bearer secret-token-value failed at https://example.com/send?api_key=secret-token-value under /tmp/murph-secret',
+          ),
+          {
+            code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+          },
+        ),
+        failedAt: new Date('2030-04-13T00:24:00.000Z'),
+        intent: sending,
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        status: 'failed',
+        vault,
+      })
+
+      const receipt = await readAssistantTurnReceipt(vault, sending.turnId)
+      const serialized = JSON.stringify({
+        intent: failed,
+        receipt,
+      })
+      expect(failed.lastError?.message).toContain('[REDACTED]')
+      expect(receipt?.lastError?.message).toContain('[url]')
+      expect(receipt?.timeline.at(-1)?.detail).toContain('[path]')
+      expect(serialized).not.toContain('secret-token-value')
+      expect(serialized).not.toContain('api_key=')
+      expect(serialized).not.toContain('/tmp/murph-secret')
+    })
+  })
+
+  it('repairs sent receipt state when a repeated sent transition hits an existing sent intent', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        sending.intentId,
+      )
+      const delivery = {
+        channel: 'telegram',
+        idempotencyKey: 'assistant-outbox:sent-repair',
+        messageLength: sending.message.length,
+        providerMessageId: 'provider-sent-repair',
+        providerThreadId: null,
+        sentAt: '2030-04-13T00:30:00.000Z',
+        target: 'chat-sent-repair',
+        targetKind: 'thread',
+      } as const
+
+      const sent = await markAssistantOutboxIntentSent({
+        delivery,
+        intent: sending,
+        intentPath,
+        vault,
+      })
+      await updateAssistantTurnReceipt({
+        vault,
+        turnId: sent.turnId,
+        mutate(receipt) {
+          return {
+            ...receipt,
+            completedAt: '2030-04-13T00:31:00.000Z',
+            deliveryDisposition: 'queued',
+            deliveryIntentId: null,
+            timeline: receipt.timeline.filter((event) => event.kind !== 'delivery.sent'),
+            updatedAt: '2030-04-13T00:31:00.000Z',
+          }
+        },
+      })
+
+      const repeated = await markAssistantOutboxIntentSent({
+        delivery,
+        intent: sent,
+        intentPath,
+        vault,
+      })
+
+      expect(repeated.intentId).toBe(sent.intentId)
+      const receipt = await readAssistantTurnReceipt(vault, sent.turnId)
+      expect(receipt?.deliveryDisposition).toBe('sent')
+      expect(receipt?.deliveryIntentId).toBe(sent.intentId)
+      expect(receipt?.updatedAt).toBe('2030-04-13T00:31:00.000Z')
+      expect(receipt?.completedAt).toBe('2030-04-13T00:31:00.000Z')
+      expect(receipt?.timeline.filter((event) => event.kind === 'delivery.sent')).toHaveLength(1)
     })
   })
 

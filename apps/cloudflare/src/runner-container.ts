@@ -20,7 +20,7 @@ import { methodNotAllowed } from "./json.ts";
 import {
   buildLocalInternalProxyRouteBaseUrl,
 } from "./local-internal-proxy-route.ts";
-import { buildHostedRunnerOperatorEnv } from "./runner-env.ts";
+import { buildHostedRunnerSupervisorEnv } from "./runner-env.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
@@ -74,7 +74,12 @@ interface HostedExecutionContainerRunnerInput {
 export interface HostedExecutionContainerStubLike {
   destroyInstance(): Promise<void>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedAssistantRuntimeJobResult>;
-  ownsInternalWorkerProxyToken(input: { token: string }): Promise<boolean>;
+  ownsInternalWorkerProxyToken(input: {
+    attempt?: number;
+    runId?: string;
+    token: string;
+    userId?: string;
+  }): Promise<boolean>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -83,6 +88,8 @@ export interface HostedExecutionContainerNamespaceLike {
 
 type RunnerOutboundHandlerContext = OutboundHandlerContext<{
   internalWorkerProxyToken?: unknown;
+  runAttempt?: unknown;
+  runId?: unknown;
   userId?: unknown;
 } | undefined>;
 
@@ -105,8 +112,8 @@ export class RunnerContainer extends Container {
   private readonly environment: RunnerContainerEnvironmentSource;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private runnerControlToken: string | null = null;
-  private runnerOutboundProxyToken: string | null = null;
-  private installedRunnerOutboundProxyToken: string | null = null;
+  private runnerOutboundProxyState: RunnerOutboundProxyState | null = null;
+  private installedRunnerOutboundProxyState: RunnerOutboundProxyState | null = null;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
@@ -128,8 +135,13 @@ export class RunnerContainer extends Container {
     });
   }
 
-  async ownsInternalWorkerProxyToken(input: { token: string }): Promise<boolean> {
-    return this.runnerOutboundProxyToken !== null && this.runnerOutboundProxyToken === input.token;
+  async ownsInternalWorkerProxyToken(input: {
+    attempt?: number;
+    runId?: string;
+    token: string;
+    userId?: string;
+  }): Promise<boolean> {
+    return isRunnerOutboundProxyStateMatch(this.runnerOutboundProxyState, input);
   }
 
   override async onActivityExpired(): Promise<void> {
@@ -157,15 +169,21 @@ export class RunnerContainer extends Container {
       this.environment,
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL_ENV,
     );
-    const internalWorkerProxyToken = this.runnerOutboundProxyToken
-      ?? createRunnerOutboundProxyToken();
+    const routeUserId = input.job.request.runDrain.userId;
+    const runIdentity = resolveRunnerOutboundRunIdentity(input.job);
+    const outboundProxyState: RunnerOutboundProxyState = {
+      attempt: runIdentity.attempt,
+      runId: runIdentity.runId,
+      token: createRunnerOutboundProxyToken(),
+      userId: routeUserId,
+    };
     let keepWarm = false;
 
     try {
       const startTime = Date.now();
       const runnerControlToken = await this.ensureContainerReady(input);
-      this.runnerOutboundProxyToken = internalWorkerProxyToken;
-      await this.installOutboundHandlers(input.userId, internalWorkerProxyToken, {
+      this.runnerOutboundProxyState = outboundProxyState;
+      await this.installOutboundHandlers(outboundProxyState, {
         wake,
         run,
       });
@@ -186,10 +204,10 @@ export class RunnerContainer extends Container {
         RUNNER_EXECUTE_URL,
         {
           body: JSON.stringify({
-            internalWorkerProxyToken,
+            internalWorkerProxyToken: outboundProxyState.token,
             localInternalProxyBaseUrl: createChildLocalInternalProxyBaseUrl({
               localInternalProxyBaseUrl,
-              userId: input.userId,
+              userId: routeUserId,
             }),
             job: input.job,
           }),
@@ -232,6 +250,14 @@ export class RunnerContainer extends Container {
       });
       throw error;
     } finally {
+      const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState, {
+        run,
+        wake,
+      });
+      if (!outboundProxyExpired) {
+        keepWarm = false;
+      }
+
       const shouldDestroy = !keepWarm;
 
       if (shouldDestroy) {
@@ -311,11 +337,9 @@ export class RunnerContainer extends Container {
         ports: RUNNER_PORT,
         startOptions: {
           enableInternet: true,
-          envVars: {
-            ...buildHostedRunnerOperatorEnv(this.environment),
-            HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: runnerControlToken,
-            PORT: String(RUNNER_PORT),
-          },
+          envVars: buildHostedRunnerSupervisorEnv({
+            port: RUNNER_PORT,
+          }),
         },
       });
     } catch (error) {
@@ -354,14 +378,13 @@ export class RunnerContainer extends Container {
   }
 
   private async installOutboundHandlers(
-    userId: string,
-    internalWorkerProxyToken: string,
+    state: RunnerOutboundProxyState,
     input: {
       wake: HostedRuntimeEvent;
       run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
     },
   ): Promise<void> {
-    if (this.installedRunnerOutboundProxyToken === internalWorkerProxyToken) {
+    if (isSameRunnerOutboundProxyState(this.installedRunnerOutboundProxyState, state)) {
       return;
     }
 
@@ -371,8 +394,10 @@ export class RunnerContainer extends Container {
         {
           method: RUNNER_OUTBOUND_HANDLER_METHOD,
           params: {
-            internalWorkerProxyToken,
-            userId,
+            internalWorkerProxyToken: state.token,
+            runAttempt: state.attempt,
+            runId: state.runId,
+            userId: state.userId,
           },
         },
       ]),
@@ -395,7 +420,7 @@ export class RunnerContainer extends Container {
             run: input.run,
           });
         }
-        this.installedRunnerOutboundProxyToken = internalWorkerProxyToken;
+        this.installedRunnerOutboundProxyState = state;
         return;
       } catch (error) {
         if (
@@ -422,6 +447,42 @@ export class RunnerContainer extends Container {
         });
         await sleep(OUTBOUND_HANDLER_INSTALL_RETRY_DELAY_MS);
       }
+    }
+  }
+
+  private async expireOutboundProxyState(
+    state: RunnerOutboundProxyState,
+    input: {
+      wake: HostedRuntimeEvent;
+      run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+    },
+  ): Promise<boolean> {
+    if (isSameRunnerOutboundProxyState(this.runnerOutboundProxyState, state)) {
+      this.runnerOutboundProxyState = null;
+    }
+
+    if (!isSameRunnerOutboundProxyState(this.installedRunnerOutboundProxyState, state)) {
+      return true;
+    }
+
+    try {
+      await this.setOutboundByHosts({});
+      this.installedRunnerOutboundProxyState = null;
+      return true;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        wake: input.wake,
+        details: {
+          runElapsedMs: computeHostedRunElapsedMs(input.run),
+        },
+        error,
+        level: "error",
+        message: "Hosted execution container failed to expire outbound handlers.",
+        phase: "failed",
+        run: input.run,
+      });
+      return false;
     }
   }
 
@@ -518,8 +579,8 @@ export class RunnerContainer extends Container {
     failClosed: true,
   }): Promise<void> {
     this.runnerControlToken = null;
-    this.runnerOutboundProxyToken = null;
-    this.installedRunnerOutboundProxyToken = null;
+    this.runnerOutboundProxyState = null;
+    this.installedRunnerOutboundProxyState = null;
     await this.destroyIfRunning(input);
   }
 
@@ -540,10 +601,15 @@ RunnerContainer.outboundHandlers = {
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,
 ): Promise<HostedAssistantRuntimeJobResult> {
-  return input.runnerContainerNamespace.getByName(input.userId).invoke({
+  const jobUserId = input.job.request.runDrain.userId;
+  if (input.userId !== jobUserId) {
+    throw new TypeError("Hosted runner container route userId must match job runDrain.userId.");
+  }
+
+  return input.runnerContainerNamespace.getByName(jobUserId).invoke({
     job: input.job,
     timeoutMs: input.timeoutMs,
-    userId: input.userId,
+    userId: jobUserId,
   });
 }
 
@@ -718,10 +784,17 @@ function parseHostedExecutionContainerInvokeInput(
     userId?: unknown;
   },
 ): HostedExecutionContainerInvokeInput {
+  const job = parseHostedAssistantRuntimeJobInput(payload.job);
+  const userId = requireString(payload.userId, "payload.userId");
+
+  if (userId !== job.request.runDrain.userId) {
+    throw new TypeError("Hosted runner container invoke userId must match job runDrain.userId.");
+  }
+
   return {
-    job: parseHostedAssistantRuntimeJobInput(payload.job),
+    job,
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
-    userId: requireString(payload.userId, "payload.userId"),
+    userId,
   };
 }
 
@@ -816,8 +889,8 @@ function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
     throw new TypeError("HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be a string when configured.");
   }
 
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isInteger(parsed) || parsed < MIN_RUNNER_IDLE_TTL_MS) {
+  const parsed = readStrictPositiveIntegerEnv(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < MIN_RUNNER_IDLE_TTL_MS) {
     throw new TypeError(
       `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be an integer greater than or equal to ${MIN_RUNNER_IDLE_TTL_MS}.`,
     );
@@ -837,12 +910,21 @@ function readRunnerReadyTimeoutMs(source: RunnerContainerEnvironmentSource): num
     throw new TypeError("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a string when configured.");
   }
 
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  const parsed = readStrictPositiveIntegerEnv(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new TypeError("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
   }
 
   return parsed;
+}
+
+function readStrictPositiveIntegerEnv(raw: string): number {
+  if (!/^[0-9]+$/u.test(raw)) {
+    return Number.NaN;
+  }
+
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
 }
 
 function isTransientOutboundHandlerInstallError(error: unknown): boolean {
@@ -889,6 +971,56 @@ function resolveHostedRunnerRequestWake(
 ): HostedRuntimeEvent {
   const [firstEvent] = request.runDrain.events;
   return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(request.runDrain);
+}
+
+interface RunnerOutboundProxyState {
+  attempt: number;
+  runId: string;
+  token: string;
+  userId: string;
+}
+
+function resolveRunnerOutboundRunIdentity(
+  job: HostedAssistantRuntimeJobInput,
+): Pick<RunnerOutboundProxyState, "attempt" | "runId"> {
+  const runId = job.request.run.runId;
+
+  if (runId !== job.request.runDrain.runId) {
+    throw new TypeError("Hosted runner job run.runId must match runDrain.runId.");
+  }
+
+  return {
+    attempt: job.request.run.attempt,
+    runId,
+  };
+}
+
+function isSameRunnerOutboundProxyState(
+  left: RunnerOutboundProxyState | null,
+  right: RunnerOutboundProxyState | null,
+): boolean {
+  return left !== null
+    && right !== null
+    && left.attempt === right.attempt
+    && left.runId === right.runId
+    && left.token === right.token
+    && left.userId === right.userId;
+}
+
+function isRunnerOutboundProxyStateMatch(
+  state: RunnerOutboundProxyState | null,
+  input: {
+    attempt?: number;
+    runId?: string;
+    token: string;
+    userId?: string;
+  },
+): boolean {
+  return state !== null
+    && state.token === input.token
+    && (input.userId === undefined || state.userId === input.userId)
+    && (input.runId === undefined || state.runId === input.runId)
+    && (input.attempt === undefined || state.attempt === input.attempt);
 }
 
 function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {

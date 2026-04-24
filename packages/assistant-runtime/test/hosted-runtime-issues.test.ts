@@ -255,7 +255,11 @@ describe('exportHostedPendingAssistantRuntimeIssues', () => {
 
       const issueExportPort = {
         recordIssues: vi.fn(async () => ({
-          issueIds: [firstRecord.issueId, 'ari_deadbeefdeadbeef_deadbeefdeadbeefdeadbeef'],
+          issueIds: [
+            firstRecord.issueId,
+            firstRecord.issueId,
+            'ari_deadbeefdeadbeef_deadbeefdeadbeefdeadbeef',
+          ],
           recorded: 2,
         })),
       }

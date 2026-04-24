@@ -3,8 +3,10 @@ export const hostedEmailSendTargetKindValues = ["explicit", "thread"] as const;
 export type HostedEmailSendTargetKind = (typeof hostedEmailSendTargetKindValues)[number];
 
 export interface HostedEmailSendRequest {
+  idempotencyKey?: string | null;
   identityId: string | null;
   message: string;
+  replyToMessageId?: string | null;
   subject?: string | null;
   target: string;
   targetKind: HostedEmailSendTargetKind;
@@ -15,6 +17,10 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
   const record = requireHostedEmailSendRequestObject(value, "Hosted email send request");
 
   return {
+    idempotencyKey: readOptionalHostedEmailSendRequestString(
+      record.idempotencyKey ?? null,
+      "Hosted email send request idempotencyKey",
+    ),
     identityId: readOptionalHostedEmailSendRequestString(
       record.identityId ?? null,
       "Hosted email send request identityId",
@@ -22,6 +28,10 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
     message: requireHostedEmailSendRequestString(
       record.message,
       "Hosted email send request message",
+    ),
+    replyToMessageId: readOptionalHostedEmailSendRequestString(
+      record.replyToMessageId ?? null,
+      "Hosted email send request replyToMessageId",
     ),
     subject: readOptionalHostedEmailSendRequestString(
       record.subject ?? null,

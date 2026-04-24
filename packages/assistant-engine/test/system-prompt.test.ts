@@ -12,6 +12,7 @@ function buildPrompt(
     activeExperimentContext?: string | null
     assistantHostedDeviceConnectAvailable?: boolean
     assistantHostedDeviceConnectProviders?: Array<{ label: string; provider: string }>
+    assistantToolNameAliases?: Record<string, string>
     onboardingGuidance?: boolean
   },
 ) {
@@ -25,6 +26,7 @@ function buildPrompt(
     assistantHostedDeviceConnectProviders:
       options?.assistantHostedDeviceConnectProviders ?? [],
     assistantKnowledgeToolsAvailable: false,
+    assistantToolNameAliases: options?.assistantToolNameAliases ?? null,
     channel: null,
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -72,6 +74,19 @@ describe('buildAssistantSystemPrompt', () => {
     expect(prompt).toContain('even if the user did not explicitly ask for them')
     expect(prompt).toContain('prefer more specific place text or coordinates')
     expect(prompt).toContain('provider may still return a broader display label')
+  })
+
+  it('renders provider-visible aliases for bound tool names when supplied', () => {
+    const prompt = buildPrompt('bound-tools', null, {
+      assistantToolNameAliases: {
+        'murph.device.connect': 'murph_device_connect',
+        'vault.cli.run': 'vault_cli_run',
+      },
+    })
+
+    expect(prompt).toContain('call `vault_cli_run` with `route estimate ...`')
+    expect(prompt).toContain('Use `vault_cli_run` as the canonical Murph runtime surface')
+    expect(prompt).not.toContain('`vault.cli.run`')
   })
 
   it('tells direct-cli sessions to use vault-cli route estimate directly', () => {

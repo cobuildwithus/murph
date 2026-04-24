@@ -223,6 +223,19 @@ describe("runHostedAssistantAutomation", () => {
         },
       ),
     ).resolves.toEqual({
+      adoptedCleanupTargets: [
+        {
+          channel: "telegram",
+          messageId: "789",
+          target: "telegram:123",
+        },
+      ],
+      adoptedEventResults: [
+        {
+          ingressEventId: "wake_late",
+          state: "completed",
+        },
+      ],
       nextWakeAt: null,
       progressed: true,
     });
@@ -485,6 +498,8 @@ describe("runHostedAssistantAutomation", () => {
         },
       ),
     ).resolves.toEqual({
+      adoptedCleanupTargets: [],
+      adoptedEventResults: [],
       nextWakeAt: "2026-04-08T01:15:00.000Z",
       progressed: true,
     });
@@ -536,6 +551,8 @@ describe("runHostedAssistantAutomation", () => {
         },
       ),
     ).resolves.toEqual({
+      adoptedCleanupTargets: [],
+      adoptedEventResults: [],
       nextWakeAt: null,
       progressed: false,
     });

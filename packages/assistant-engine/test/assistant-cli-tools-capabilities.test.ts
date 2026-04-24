@@ -1243,6 +1243,21 @@ describe('assistant CLI execution adapters', () => {
     const { vaultRoot } = await createOwnedVaultContext('murph-assistant-cli-failures-')
     const pathRoot = await createOwnedPathRoot('murph-assistant-cli-failure-path-')
 
+    await expect(
+      executeAssistantCliCommand({
+        args: ['--config', '/tmp/other-config.json', 'audit', 'list'],
+        input: {
+          cliEnv: {
+            HOME: pathRoot,
+            PATH: '/usr/bin:/bin',
+          },
+          vault: vaultRoot,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CLI_COMMAND_BLOCKED',
+    })
+
     await writeExecutable(
       path.join(pathRoot, '.local', 'bin', 'vault-cli'),
       [

@@ -8,6 +8,7 @@ export type {
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobRequest,
   HostedAssistantRuntimeJobResult,
+  HostedAssistantRuntimeManagedAutoReplyChannel,
   HostedAssistantRuntimeResolvedConfig,
 } from "./hosted-runtime/models.ts";
 export type {

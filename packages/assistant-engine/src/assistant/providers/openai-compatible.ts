@@ -462,11 +462,13 @@ function resolveOpenAiCompatibleAiSdkTools(input: {
     shouldAssistantProviderUseMurphWebSearch(input.providerConfig) ||
     ((requestedProviderWebSearch || requestedGatewayWebSearch) &&
       !useNativeWebSearch)
+  const useMurphWebReadTools = input.providerConfig.policy.webSearch === 'murph'
   const murphTools = filterOpenAiCompatibleMurphAiSdkTools({
     tools:
       input.input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
         onToolEvent: input.onToolEvent,
       }) ?? null,
+    useMurphWebReadTools,
     useMurphWebSearch,
   })
   const tools = {
@@ -552,15 +554,24 @@ function recordOpenAiCompatibleProviderActionToolCall(
 
 function filterOpenAiCompatibleMurphAiSdkTools(input: {
   tools: ToolSet | null
+  useMurphWebReadTools: boolean
   useMurphWebSearch: boolean
 }): ToolSet | null {
   if (!input.tools) {
     return null
   }
 
-  const filteredEntries = Object.entries(input.tools).filter(([name]) =>
-    input.useMurphWebSearch ? true : name !== 'web.search',
-  )
+  const filteredEntries = Object.entries(input.tools).filter(([name]) => {
+    if (name === 'web.search') {
+      return input.useMurphWebSearch
+    }
+
+    if (name === 'web.fetch' || name === 'web.pdf.read') {
+      return input.useMurphWebReadTools
+    }
+
+    return true
+  })
 
   return filteredEntries.length > 0 ? Object.fromEntries(filteredEntries) : null
 }
@@ -571,10 +582,26 @@ function remapOpenAiCompatibleToolNames(tools: ToolSet | null): ToolSet {
   }
 
   const remapped: ToolSet = {}
-  const seenNames = new Set<string>()
+  const aliases = resolveOpenAiCompatibleProviderVisibleToolAliases(
+    Object.keys(tools),
+  )
 
   for (const [name, definition] of Object.entries(tools)) {
-    const baseName = sanitizeOpenAiCompatibleToolName(name)
+    remapped[aliases[name] ?? resolveOpenAiCompatibleProviderVisibleToolName(name)] =
+      definition
+  }
+
+  return remapped
+}
+
+export function resolveOpenAiCompatibleProviderVisibleToolAliases(
+  toolNames: readonly string[],
+): Record<string, string> {
+  const aliases: Record<string, string> = {}
+  const seenNames = new Set<string>()
+
+  for (const name of toolNames) {
+    const baseName = resolveOpenAiCompatibleProviderVisibleToolName(name)
     let nextName = baseName
     let suffix = 2
 
@@ -584,10 +611,14 @@ function remapOpenAiCompatibleToolNames(tools: ToolSet | null): ToolSet {
     }
 
     seenNames.add(nextName)
-    remapped[nextName] = definition
+    aliases[name] = nextName
   }
 
-  return remapped
+  return aliases
+}
+
+export function resolveOpenAiCompatibleProviderVisibleToolName(name: string): string {
+  return sanitizeOpenAiCompatibleToolName(name)
 }
 
 function sanitizeOpenAiCompatibleToolName(name: string): string {

@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
+  matchCloudflareHostedControlUserRoutePath,
 } from "../src/routes.ts";
 
 describe("cloudflare hosted control routes", () => {
@@ -21,6 +23,54 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlUserRunPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/run",
     );
+  });
+
+  it("rejects blank user identifiers before building routes", () => {
+    for (const buildPath of [
+      buildCloudflareHostedControlBrowserVaultSessionPath,
+      buildCloudflareHostedControlUserRunPath,
+      buildCloudflareHostedControlUserStatusPath,
+    ]) {
+      expect(() => buildPath("  \t")).toThrow("Cloudflare hosted control userId must not be blank.");
+    }
+  });
+
+  it("feeds every exported builder output into the shared worker matcher shape", () => {
+    const userId = "user/a b";
+    const encodedUserId = "user%2Fa%20b";
+
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "browserVaultSession",
+        buildCloudflareHostedControlBrowserVaultSessionPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "run",
+        buildCloudflareHostedControlUserRunPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "status",
+        buildCloudflareHostedControlUserStatusPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
+        "status",
+        buildCloudflareHostedControlUserRunPath(userId),
+      ),
+    ).toBeNull();
+    expect(
+      matchCloudflareHostedControlUserRoutePath("status", "/internal/users//status"),
+    ).toBeNull();
+    expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toMatchObject({
+      browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
+      run: { method: "POST", suffix: "run" },
+      status: { method: "GET", suffix: "status" },
+    });
   });
 
   it("publishes only the surviving focused subpath exports", async () => {
@@ -60,6 +110,7 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
       buildCloudflareHostedControlUserRunPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
+      matchCloudflareHostedControlUserRoutePath: expect.any(Function),
     });
     await expect(importBySpecifier("@murphai/cloudflare-hosted-control/contracts")).rejects.toThrow();
     await expect(importBySpecifier("@murphai/cloudflare-hosted-control/parsers")).rejects.toThrow();

@@ -46,6 +46,7 @@ interface AssistantAutomationCandidate {
 const ASSISTANT_DOCUMENT_PRESERVATION_RETRY_DELAY_MS = 30 * 1000
 
 export async function scanAssistantAutomationOnce(input: {
+  applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
@@ -69,11 +70,14 @@ export async function scanAssistantAutomationOnce(input: {
 }): Promise<AssistantAutomationScanResult> {
   const routing = createEmptyInboxScanResult()
   const replies = createEmptyAutoReplyScanResult()
+  const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
   const routingModelSpec = input.modelSpec?.model ? input.modelSpec : null
   const routingEnabled = routingModelSpec !== null
-  const replyChannels = scanState.autoReply.map((entry) => entry.channel)
+  const replyChannels = applyCanonicalWrites
+    ? scanState.autoReply.map((entry) => entry.channel)
+    : []
   const persistScanState = async () => {
     await persistAssistantAutomationScanState({
       onStateProgress: input.onStateProgress,
@@ -93,7 +97,7 @@ export async function scanAssistantAutomationOnce(input: {
   }
 
   const candidateBatches = await listAssistantAutomationCandidates({
-    autoReply: scanState.autoReply,
+    autoReply: applyCanonicalWrites ? scanState.autoReply : [],
     inboxServices: input.inboxServices,
     maxPerScan: input.maxPerScan,
     requestId: input.requestId ?? null,
@@ -132,6 +136,10 @@ export async function scanAssistantAutomationOnce(input: {
   const preserveCandidateDocuments = async (
     candidate: AssistantAutomationCandidate,
   ): Promise<boolean> => {
+    if (!applyCanonicalWrites) {
+      return true
+    }
+
     if (candidate.summary.attachmentCount === 0) {
       return true
     }
@@ -183,6 +191,7 @@ export async function scanAssistantAutomationOnce(input: {
 
     routing.considered += 1
     const outcome = await routeAssistantInboxCapture({
+      applyCanonicalWrites,
       capture: candidate.summary,
       inboxServices: input.inboxServices,
       modelSpec: routingModelSpec,
@@ -201,7 +210,7 @@ export async function scanAssistantAutomationOnce(input: {
       return
     }
 
-    if (!routingCursorBlocked) {
+    if (applyCanonicalWrites && !routingCursorBlocked) {
       scanState.inboxScanCursor = cursorFromCapture(candidate.summary)
     }
   }

@@ -1,5 +1,7 @@
 import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -84,60 +86,58 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(destroy).not.toHaveBeenCalled();
 
-    const coldStartToken =
-      startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
-    expect(typeof coldStartToken).toBe("string");
-    expect(coldStartToken).toBeTruthy();
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toEqual({
+      PORT: "8080",
+    });
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/run")
     );
     expect(executeCalls).toHaveLength(2);
     expect(String(executeCalls[0]?.[0])).toBe("http://container/internal/run");
-    expect(executeCalls[0]?.[1]).toMatchObject({
-      headers: {
-        authorization: `Bearer ${coldStartToken}`,
-      },
-    });
-    expect(executeCalls[1]?.[1]).toMatchObject({
-      headers: {
-        authorization: `Bearer ${coldStartToken}`,
-      },
-    });
+    const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
+    const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
+    expect(firstAuthorization).toMatch(/^Bearer .+/u);
+    expect(secondAuthorization).toBe(firstAuthorization);
 
-    const outboundTokens = setOutboundByHosts.mock.calls.map(([mapping]) =>
-      readRunnerProxyToken(mapping as Record<string, unknown>)
-    );
-    expect(outboundTokens).toHaveLength(1);
+    const outboundTokens = setOutboundByHosts.mock.calls
+      .map(([mapping]) => readRunnerProxyToken(mapping as Record<string, unknown>))
+      .filter((token): token is string => token !== null);
+    expect(outboundTokens).toHaveLength(2);
     expect(outboundTokens[0]).toBeTruthy();
+    expect(outboundTokens[1]).toBeTruthy();
+    expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
 
-    const outboundMethods = setOutboundByHosts.mock.calls.map(([mapping]) =>
-      readRunnerMethodsByHost(mapping as Record<string, unknown>)
-    );
+    const outboundMethods = setOutboundByHosts.mock.calls
+      .map(([mapping]) => readRunnerMethodsByHost(mapping as Record<string, unknown>))
+      .filter((methods) => Object.keys(methods).length > 0);
     const expectedOutboundMethods = Object.fromEntries(
       Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS).map((host) => [host, "internalWorkerProxy"]),
     );
-    expect(outboundMethods).toHaveLength(1);
-    expect(outboundMethods).toEqual([expectedOutboundMethods]);
+    expect(outboundMethods).toHaveLength(2);
+    expect(outboundMethods).toEqual([expectedOutboundMethods, expectedOutboundMethods]);
 
-    const outboundAssignments = setOutboundByHosts.mock.calls.map(([mapping]) =>
-      readRunnerOutboundAssignments(mapping as Record<string, unknown>),
-    );
-    const expectedOutboundAssignments = Object.fromEntries(
-      Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS).map((host) => [
-        host,
-        {
+    const outboundAssignments = setOutboundByHosts.mock.calls
+      .map(([mapping]) => readRunnerOutboundAssignments(mapping as Record<string, unknown>))
+      .filter((assignment) => Object.keys(assignment).length > 0);
+    expect(outboundAssignments).toHaveLength(2);
+    for (const assignment of outboundAssignments) {
+      expect(Object.keys(assignment).sort()).toEqual(
+        Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS).sort(),
+      );
+      for (const value of Object.values(assignment)) {
+        expect(value).toMatchObject({
           internalWorkerProxyToken: expect.any(String),
           method: "internalWorkerProxy",
+          runAttempt: 1,
+          runId: "run_123",
           userId: "member_123",
-        },
-      ]),
-    );
-    expect(outboundAssignments).toHaveLength(1);
-    expect(outboundAssignments).toEqual([expectedOutboundAssignments]);
+        });
+      }
+    }
   });
 
-  it("starts the container with the hosted execution operator env needed by the runtime", async () => {
+  it("starts the container without operator-only control-plane secrets in supervisor env", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
@@ -167,22 +167,51 @@ describe("RunnerContainer", () => {
     });
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toMatchObject({
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: '{"kty":"EC"}',
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"pub","y":"pub"}',
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
-      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
-      HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://host.docker.internal:4010/.well-known/jwks",
-      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
-      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-ingress-key",
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-      HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "web:v3",
-      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
+    const envVars = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars ?? {};
+    expect(envVars).toEqual({
       PORT: "8080",
     });
+    expect(envVars).not.toHaveProperty("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK");
+    expect(envVars).not.toHaveProperty("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY");
+    expect(envVars).not.toHaveProperty("HOSTED_WAKE_ENCRYPTION_KEY");
+    expect(envVars).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
+  });
+
+  it("keeps operator secrets and control token out of supervisor procfs env", async () => {
+    if (!existsSync("/proc/self/environ")) {
+      return;
+    }
+
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-envelope-key",
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-encryption-key",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        OPENAI_API_KEY: "model-api-key",
+      },
+    });
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_procfs_supervisor_env"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    const envVars = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
+    if (!envVars) {
+      throw new Error("Expected runner supervisor env vars.");
+    }
+    const procEnv = await readParentProcEnvironmentFromChild(envVars);
+
+    expect(procEnv).not.toContain("HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN");
+    expect(procEnv).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK");
+    expect(procEnv).not.toContain("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY");
+    expect(procEnv).not.toContain("HOSTED_WAKE_ENCRYPTION_KEY");
+    expect(procEnv).not.toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
+    expect(procEnv).not.toContain("OPENAI_API_KEY");
   });
 
   it("passes the local internal bridge config through each runner request when configured", async () => {
@@ -214,6 +243,67 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("accepts only the active run-bound proxy token and expires it after completion", async () => {
+    let activeToken: string | null = null;
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (!init?.body || typeof init.body !== "string") {
+          throw new Error("Expected JSON runner request body.");
+        }
+        const body = JSON.parse(init.body) as { internalWorkerProxyToken?: unknown };
+        activeToken =
+          typeof body.internalWorkerProxyToken === "string"
+            ? body.internalWorkerProxyToken
+            : null;
+        expect(activeToken).toBeTruthy();
+        expect(await container.ownsInternalWorkerProxyToken({
+          attempt: 1,
+          runId: "run_123",
+          token: activeToken ?? "",
+          userId: "member_123",
+        })).toBe(true);
+        expect(await container.ownsInternalWorkerProxyToken({
+          attempt: 1,
+          runId: "run_123",
+          token: activeToken ?? "",
+          userId: "member_other",
+        })).toBe(false);
+
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    await expect(container.invoke({
+      job: {
+        request: createRunnerRequest("evt_active_proxy_token"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(activeToken).toBeTruthy();
+    expect(await container.ownsInternalWorkerProxyToken({
+      attempt: 1,
+      runId: "run_123",
+      token: activeToken ?? "",
+      userId: "member_123",
+    })).toBe(false);
+  });
+
   it("retries transient outbound handler installation failures before giving up", async () => {
     const setOutboundByHosts = vi
       .fn()
@@ -233,7 +323,8 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual(createRunnerResult());
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(setOutboundByHosts).toHaveBeenCalledTimes(3);
+    expect(setOutboundByHosts).toHaveBeenCalledTimes(4);
+    expect(setOutboundByHosts.mock.calls[3]?.[0]).toEqual({});
   });
 
   it("registers exactly one stable outbound handler method for the runner boundary", () => {
@@ -261,7 +352,8 @@ describe("RunnerContainer", () => {
   });
 
   it("destroys the warm shell on container activity expiry and cold-starts the next run", async () => {
-    const { container, destroy, setOutboundByHosts, startAndWaitForPorts } = createContainerDouble();
+    const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
+      createContainerDouble();
 
     await container.invoke({
       job: {
@@ -270,8 +362,10 @@ describe("RunnerContainer", () => {
       timeoutMs: 60_000,
       userId: "member_123",
     });
-    const firstToken =
-      startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
+    const firstExecuteCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/run")
+    );
+    const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
 
     await container.onActivityExpired();
     expect(destroy).toHaveBeenCalledTimes(1);
@@ -283,11 +377,13 @@ describe("RunnerContainer", () => {
       timeoutMs: 60_000,
       userId: "member_123",
     });
-    const secondToken =
-      startAndWaitForPorts.mock.calls[1]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
-    const outboundTokens = setOutboundByHosts.mock.calls.map(([mapping]) =>
-      readRunnerProxyToken(mapping as Record<string, unknown>)
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/run")
     );
+    const secondToken = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
+    const outboundTokens = setOutboundByHosts.mock.calls
+      .map(([mapping]) => readRunnerProxyToken(mapping as Record<string, unknown>))
+      .filter((token): token is string => token !== null);
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
     expect(firstToken).not.toBe(secondToken);
@@ -883,6 +979,30 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("3s");
   });
 
+  it("rejects runner lifecycle env values with trailing junk", async () => {
+    expect(() =>
+      createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2500abc",
+        },
+      })
+    ).toThrow("HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be an integer");
+
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "45000abc",
+      },
+    });
+
+    await expect(container.invoke({
+      job: {
+        request: createRunnerRequest("evt_bad_ready_timeout"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).rejects.toThrow("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
+  });
+
   it("defaults the warm container idle TTL to five minutes", () => {
     const { container } = createContainerDouble();
 
@@ -960,6 +1080,64 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("rejects mismatched route and job identities before selecting a container", async () => {
+    const invoke = vi.fn(async () => createRunnerResult());
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      async destroyInstance() {},
+      invoke,
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+    }));
+
+    await expect(invokeHostedExecutionContainerRunner({
+      job: {
+        request: createRunnerRequest("evt_namespace_mismatch"),
+      },
+      runnerContainerNamespace: { getByName },
+      timeoutMs: 45_000,
+      userId: "member_other",
+    })).rejects.toThrow("route userId must match job runDrain.userId");
+
+    expect(getByName).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("rejects durable-object invoke payloads with mismatched route and job identities", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.invoke({
+      job: {
+        request: createRunnerRequest("evt_invoke_mismatch"),
+      },
+      timeoutMs: 45_000,
+      userId: "member_other",
+    })).rejects.toThrow("invoke userId must match job runDrain.userId");
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("rejects runner jobs whose run id does not match the drain run id", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.invoke({
+      job: {
+        request: {
+          ...createRunnerRequest("evt_run_id_mismatch"),
+          run: {
+            attempt: 1,
+            runId: "run_other",
+            startedAt: "2026-03-27T00:00:00.000Z",
+          },
+        },
+      },
+      timeoutMs: 45_000,
+      userId: "member_123",
+    })).rejects.toThrow("run.runId must match runDrain.runId");
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
   it("preserves extended runner request fields when the container is invoked over durable-object RPC", async () => {
     const { container, containerFetch } = createContainerDouble();
     const extendedRequest = {
@@ -974,6 +1152,7 @@ describe("RunnerContainer", () => {
         inputCursorVersion: "1",
         committedResult: {
           assistantDeliveryEffects: [],
+          bundle: null,
           result: {
             eventsHandled: 1,
             summary: "already committed",
@@ -1157,6 +1336,8 @@ function readRunnerOutboundAssignments(
   {
     internalWorkerProxyToken: string | null;
     method: string | null;
+    runAttempt: number | null;
+    runId: string | null;
     userId: string | null;
   }
 > {
@@ -1167,6 +1348,8 @@ function readRunnerOutboundAssignments(
           method?: unknown;
           params?: {
             internalWorkerProxyToken?: unknown;
+            runAttempt?: unknown;
+            runId?: unknown;
             userId?: unknown;
           };
         }) : undefined;
@@ -1179,6 +1362,14 @@ function readRunnerOutboundAssignments(
               ? assignment.params.internalWorkerProxyToken
               : null,
           method: typeof assignment?.method === "string" ? assignment.method : null,
+          runAttempt:
+            typeof assignment?.params?.runAttempt === "number"
+              ? assignment.params.runAttempt
+              : null,
+          runId:
+            typeof assignment?.params?.runId === "string"
+              ? assignment.params.runId
+              : null,
           userId: typeof assignment?.params?.userId === "string" ? assignment.params.userId : null,
         },
       ];
@@ -1229,6 +1420,59 @@ function createRunnerRequest(
       userId: "member_123",
     },
   };
+}
+
+function readAuthorizationHeader(headers: HeadersInit | undefined): string | null {
+  if (headers instanceof Headers) {
+    return headers.get("authorization");
+  }
+
+  if (Array.isArray(headers)) {
+    const match = headers.find(([key]) => key.toLowerCase() === "authorization");
+    return match?.[1] ?? null;
+  }
+
+  const record = headers as Record<string, string | undefined> | undefined;
+  const value = record?.authorization ?? record?.Authorization;
+  return typeof value === "string" ? value : null;
+}
+
+async function readParentProcEnvironmentFromChild(
+  parentEnv: Record<string, string>,
+): Promise<string> {
+  const parentScript = [
+    "const { spawn } = require('node:child_process');",
+    "const child = spawn(process.execPath, ['-e', \"const fs = require('node:fs'); process.stdout.write(fs.readFileSync('/proc/' + process.ppid + '/environ', 'utf8'));\"], { stdio: ['ignore', 'pipe', 'inherit'] });",
+    "child.stdout.pipe(process.stdout);",
+    "child.on('exit', (code) => process.exit(code ?? 1));",
+  ].join("\n");
+
+  const child = spawn(process.execPath, ["-e", parentScript], {
+    env: parentEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  child.stdout.on("data", (chunk) => {
+    stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  child.stderr.on("data", (chunk) => {
+    stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+
+  if (exitCode !== 0) {
+    throw new Error(
+      Buffer.concat(stderrChunks).toString("utf8")
+        || `Proc env probe exited with ${exitCode ?? "unknown"}.`,
+    );
+  }
+
+  return Buffer.concat(stdoutChunks).toString("utf8");
 }
 
 function createRunnerResult(): HostedAssistantRuntimeJobResult {

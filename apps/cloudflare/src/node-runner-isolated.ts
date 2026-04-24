@@ -6,11 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  createHostedRuntimeChildLauncherDirectories,
-  createHostedRuntimeChildProcessEnv,
   formatHostedRuntimeChildResult,
   parseHostedRuntimeChildResult,
-  resolveHostedRuntimeTsxImportSpecifier,
   type HostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
@@ -18,6 +15,11 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 import { buildHostedRunnerChildRuntimeEnv } from "./runner-env.ts";
+import {
+  createHostedRunnerChildLauncherDirectories,
+  createHostedRunnerChildProcessEnv,
+  resolveHostedRunnerTsxImportSpecifier,
+} from "./runner-child-launcher.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
@@ -40,18 +42,18 @@ export async function runHostedExecutionJobIsolatedDetailed(
       throw options.signal.reason ?? new Error("Hosted runner job aborted before child launch.");
     }
 
-    const launcherDirectories = await createHostedRuntimeChildLauncherDirectories(launcherRoot);
+    const launcherDirectories = await createHostedRunnerChildLauncherDirectories(launcherRoot);
     const childEntry = resolveNodeRunnerChildEntry();
     const isTypeScriptChild = childEntry.endsWith(".ts");
     const child = spawn(
       process.execPath,
       isTypeScriptChild
-        ? ["--import", resolveHostedRuntimeTsxImportSpecifier(), childEntry]
+        ? ["--import", resolveHostedRunnerTsxImportSpecifier(), childEntry]
         : [childEntry],
       {
         cwd: launcherRoot,
         detached: process.platform !== "win32",
-        env: createHostedRuntimeChildProcessEnv({
+        env: createHostedRunnerChildProcessEnv({
           forwardedEnv: buildHostedRunnerChildRuntimeEnv({
             forwardedEnv: input.job.runtime?.forwardedEnv,
           }),

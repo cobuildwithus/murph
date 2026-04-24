@@ -181,6 +181,26 @@ describe('assistant session secret sidecars', () => {
     })
   })
 
+  it('rejects sidecars whose embedded session identity does not match the session', () => {
+    const extracted = extractAssistantSessionSecretsForPersistence(createOpenAiSession())
+    const hydratedSession = parseAssistantSessionRecord(extracted.persisted)
+    if (!extracted.secrets) {
+      throw new Error('Expected openai-compatible session secrets.')
+    }
+    const mismatchedSecrets = assistantSessionSecretsSchema.parse({
+      ...extracted.secrets,
+      sessionId: 'session-beta',
+    })
+
+    expect(() =>
+      mergeAssistantSessionSecrets(hydratedSession, mismatchedSecrets),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'ASSISTANT_SESSION_SECRETS_MISMATCH',
+      }),
+    )
+  })
+
   it('rebuilds provider binding headers from the target owner when resuming an openai session', () => {
     const session = parseAssistantSessionRecord({
       schema: 'murph.assistant-session.v1',
@@ -250,6 +270,9 @@ describe('assistant session secret sidecars', () => {
     const paths = await createAssistantPaths('assistant-state-secrets-')
     const session = createOpenAiSession()
     const extracted = extractAssistantSessionSecretsForPersistence(session)
+    if (!extracted.secrets) {
+      throw new Error('Expected openai-compatible session secrets.')
+    }
     const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
 
     await persistAssistantSessionSecrets({
@@ -281,6 +304,95 @@ describe('assistant session secret sidecars', () => {
         sessionId: session.sessionId,
       }),
     ).resolves.toBeNull()
+  })
+
+  it('quarantines valid sidecars stored under the wrong session filename', async () => {
+    const paths = await createAssistantPaths('assistant-state-secrets-mismatched-')
+    const session = createOpenAiSession()
+    const extracted = extractAssistantSessionSecretsForPersistence(session)
+    const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
+
+    await mkdir(path.dirname(secretsPath), {
+      recursive: true,
+    })
+    await writeFile(
+      secretsPath,
+      JSON.stringify({
+        ...extracted.secrets,
+        sessionId: 'session-beta',
+      }),
+      'utf8',
+    )
+
+    await expect(
+      readAssistantSessionSecrets({
+        paths,
+        sessionId: session.sessionId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_SECRETS_MISMATCH',
+      context: expect.objectContaining({
+        expectedSessionId: session.sessionId,
+        sidecarSessionId: 'session-beta',
+      }),
+    })
+
+    await expect(readFile(secretsPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    const quarantines = await quarantineModule.listAssistantQuarantineEntriesAtPaths(paths, {
+      artifactKind: 'session',
+    })
+    expect(quarantines).toHaveLength(1)
+    await expect(readFile(quarantines[0]!.quarantinedPath, 'utf8')).resolves.toContain(
+      '"sessionId":"session-beta"',
+    )
+  })
+
+  it('quarantines stale sidecars whose updatedAt no longer matches the session', async () => {
+    const paths = await createAssistantPaths('assistant-state-secrets-stale-')
+    const session = createOpenAiSession()
+    const extracted = extractAssistantSessionSecretsForPersistence(session)
+    const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
+    const staleUpdatedAt = '2026-04-07T23:59:59.000Z'
+
+    await mkdir(path.dirname(secretsPath), {
+      recursive: true,
+    })
+    await writeFile(
+      secretsPath,
+      JSON.stringify({
+        ...extracted.secrets,
+        updatedAt: staleUpdatedAt,
+      }),
+      'utf8',
+    )
+
+    await expect(
+      readAssistantSessionSecrets({
+        paths,
+        sessionId: session.sessionId,
+        updatedAt: session.updatedAt,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_SECRETS_MISMATCH',
+      context: expect.objectContaining({
+        expectedSessionId: session.sessionId,
+        expectedUpdatedAt: session.updatedAt,
+        sidecarUpdatedAt: staleUpdatedAt,
+      }),
+    })
+
+    await expect(readFile(secretsPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    const quarantines = await quarantineModule.listAssistantQuarantineEntriesAtPaths(paths, {
+      artifactKind: 'session',
+    })
+    expect(quarantines).toHaveLength(1)
+    await expect(readFile(quarantines[0]!.quarantinedPath, 'utf8')).resolves.toContain(
+      `"updatedAt":"${staleUpdatedAt}"`,
+    )
   })
 
   it('quarantines corrupted secret sidecars and raises a targeted runtime error', async () => {

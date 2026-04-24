@@ -112,12 +112,14 @@ async function exportHostedUsageBatch(input: {
   const response = await input.usageExportPort.recordUsage(input.batch);
 
   const batchUsageIds = new Set(input.batch.map((record) => record.usageId));
-  const acknowledgedUsageIds = response.usageIds.filter((usageId) => batchUsageIds.has(usageId));
-  const failed = input.batch.length - acknowledgedUsageIds.length;
+  const acknowledgedUsageIds = new Set(
+    response.usageIds.filter((usageId) => batchUsageIds.has(usageId)),
+  );
+  const failed = input.batch.length - acknowledgedUsageIds.size;
 
   if (failed > 0) {
     console.warn(
-      `Hosted AI usage export acknowledged ${acknowledgedUsageIds.length} of ${input.batch.length} records; leaving the remainder pending.`,
+      `Hosted AI usage export acknowledged ${acknowledgedUsageIds.size} of ${input.batch.length} records; leaving the remainder pending.`,
     );
   }
 
@@ -129,7 +131,7 @@ async function exportHostedUsageBatch(input: {
   }
 
   return {
-    exported: acknowledgedUsageIds.length,
+    exported: acknowledgedUsageIds.size,
     failed,
   };
 }

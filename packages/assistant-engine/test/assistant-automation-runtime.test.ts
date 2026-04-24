@@ -1081,6 +1081,48 @@ describe('assistant inbox routing', () => {
     })
   })
 
+  it('previews model routing when canonical writes are disabled', async () => {
+    routingMocks.routeInboxCaptureWithModel.mockResolvedValue({
+      plan: {
+        actions: [
+          {
+            tool: 'promoteMeal',
+          },
+        ],
+      },
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(
+        createShowResult(createCaptureDetail()),
+      ),
+    })
+    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
+      '../src/assistant/automation/routing.ts',
+    )
+
+    const outcome = await routing.routeAssistantInboxCapture({
+      applyCanonicalWrites: false,
+      capture: createCaptureSummary(),
+      inboxServices,
+      modelSpec: {
+        model: 'gpt-5.4',
+      },
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(outcome).toEqual({
+      advanceCursor: true,
+      status: 'routed',
+      tools: ['promoteMeal'],
+    })
+    expect(routingMocks.routeInboxCaptureWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apply: false,
+        vaultServices: undefined,
+      }),
+    )
+  })
+
   it('maps routing errors to failed outcomes', async () => {
     routingMocks.routeInboxCaptureWithModel.mockRejectedValue(new Error('routing failed'))
     const inboxServices = createInboxServices({
@@ -1213,6 +1255,55 @@ describe('assistant inbox routing', () => {
         occurredAt: '2026-04-08T00:01:00.000Z',
       },
     ])
+  })
+
+  it('keeps preview routing scans from advancing the canonical cursor', async () => {
+    routingMocks.routeInboxCaptureWithModel.mockResolvedValue({
+      plan: {
+        actions: [
+          {
+            tool: 'promoteMeal',
+          },
+        ],
+      },
+    })
+    const capture = createCaptureSummary({
+      captureId: 'capture-preview',
+      occurredAt: '2026-04-08T00:01:00.000Z',
+    })
+    const inboxServices = createInboxServices({
+      list: vi.fn().mockResolvedValue(createListResult([capture])),
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
+      '../src/assistant/automation/routing.ts',
+    )
+    const cursorUpdates: Array<AssistantAutomationCursor | null> = []
+
+    const result = await routing.scanAssistantInboxOnce({
+      applyCanonicalWrites: false,
+      afterCursor: null,
+      inboxServices,
+      modelSpec: {
+        model: 'gpt-5.4',
+      },
+      onCursorProgress: async (cursor) => {
+        cursorUpdates.push(cursor)
+      },
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      considered: 1,
+      failed: 0,
+      routed: 1,
+    })
+    expect(cursorUpdates).toEqual([])
+    expect(routingMocks.routeInboxCaptureWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apply: false,
+      }),
+    )
   })
 
   it('does not advance the scan cursor past retryable model configuration failures', async () => {
@@ -1507,6 +1598,59 @@ describe('assistant automation scanner', () => {
       details: 'automatic document preservation failed: preserve failed',
     })
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+  })
+
+  it('skips automatic document preservation and forwards preview mode when canonical writes are disabled', async () => {
+    const preserveDocumentAttachments = vi
+      .fn()
+      .mockRejectedValue(new Error('should not preserve'))
+    const capture = createCaptureSummary({
+      attachmentCount: 1,
+    })
+    const inboxServices = createInboxServices({
+      list: vi.fn().mockResolvedValue(createListResult([capture])),
+      preserveDocumentAttachments,
+    })
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+    const stateUpdates: AssistantAutomationState[] = []
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      applyCanonicalWrites: false,
+      inboxServices,
+      modelSpec: {
+        model: 'gpt-5.4',
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+        autoReplyPrimed: true,
+      }),
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+          inboxScanCursor: next.inboxScanCursor,
+        })
+      },
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.routing).toMatchObject({
+      considered: 1,
+      failed: 0,
+    })
+    expect(preserveDocumentAttachments).not.toHaveBeenCalled()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(scannerRoutingMocks.routeAssistantInboxCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        applyCanonicalWrites: false,
+        capture: expect.objectContaining({
+          captureId: capture.captureId,
+        }),
+      }),
+    )
+    expect(stateUpdates).toEqual([])
   })
 
   it('keeps the routing cursor blocked after a non-advancing routing decision', async () => {
@@ -3189,6 +3333,29 @@ describe('assistant auto-reply runtime', () => {
       expect.objectContaining({
         executionContext,
         turnInputPort: undefined,
+      }),
+    )
+  })
+
+  it('skips canonical automation branches for no-canonical-write automation passes', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    await runLoop.runAssistantAutomationPass({
+      applyCanonicalWrites: false,
+      requestId: 'request-preview',
+      vault: '/tmp/assistant-automation-vault',
+      vaultServices: null,
+    })
+
+    expect(runLoopMocks.createIntegratedVaultServices).not.toHaveBeenCalled()
+    expect(runLoopMocks.recoverAssistantAutoReplies).not.toHaveBeenCalled()
+    expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        applyCanonicalWrites: false,
+        vaultServices: undefined,
       }),
     )
   })

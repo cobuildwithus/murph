@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -6,6 +7,7 @@ import {
   type AssistantCliLlmsManifestCommand,
   type AssistantCliLlmsManifestSchemaNode,
 } from '../assistant-cli-tools.js'
+import { buildAssistantCliProcessEnv } from '../assistant-cli-tools/execution-adapters.js'
 import { ensureAssistantStateDirectory, isMissingFileError, writeJsonFileAtomic } from './shared.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
@@ -20,7 +22,10 @@ const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'vault',
 ])
 
-let cachedAssistantCliSurfaceContractPromise: Promise<string | null> | null = null
+const cachedAssistantCliSurfaceContractPromises = new Map<
+  string,
+  Promise<string | null>
+>()
 
 export function buildAssistantCliSurfaceBootstrapDocId(sessionId: string): string {
   return `sessions/${sessionId}/cli-surface-bootstrap`
@@ -126,21 +131,58 @@ async function loadAssistantCliSurfaceContract(input: {
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
+  const cacheKey = createAssistantCliSurfaceContractCacheKey(input)
+  let cachedAssistantCliSurfaceContractPromise =
+    cachedAssistantCliSurfaceContractPromises.get(cacheKey) ?? null
   if (cachedAssistantCliSurfaceContractPromise === null) {
-    cachedAssistantCliSurfaceContractPromise = generateAssistantCliSurfaceContract(input)
+    cachedAssistantCliSurfaceContractPromise =
+      generateAssistantCliSurfaceContract(input)
+    cachedAssistantCliSurfaceContractPromises.set(
+      cacheKey,
+      cachedAssistantCliSurfaceContractPromise,
+    )
   }
 
   try {
     const contract = await cachedAssistantCliSurfaceContractPromise
     if (contract === null) {
-      cachedAssistantCliSurfaceContractPromise = null
+      cachedAssistantCliSurfaceContractPromises.delete(cacheKey)
     }
 
     return contract
   } catch {
-    cachedAssistantCliSurfaceContractPromise = null
+    cachedAssistantCliSurfaceContractPromises.delete(cacheKey)
     return null
   }
+}
+
+function createAssistantCliSurfaceContractCacheKey(input: {
+  cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
+  vault: string
+  workingDirectory?: string | null
+}): string {
+  return JSON.stringify({
+    cliEnvHash: hashAssistantCliSurfaceEnv(input.cliEnv),
+    executionContext: input.executionContext ?? null,
+    vault: input.vault,
+    workingDirectory: input.workingDirectory ?? null,
+  })
+}
+
+function hashAssistantCliSurfaceEnv(env: NodeJS.ProcessEnv | undefined): string {
+  const effectiveEnv = buildAssistantCliProcessEnv({
+    cliEnv: env,
+  })
+  const hash = createHash('sha256')
+  for (const key of Object.keys(effectiveEnv).sort()) {
+    hash.update(key)
+    hash.update('\0')
+    hash.update(effectiveEnv[key] ?? '')
+    hash.update('\0')
+  }
+
+  return hash.digest('hex')
 }
 
 async function generateAssistantCliSurfaceContract(input: {

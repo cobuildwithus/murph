@@ -77,6 +77,12 @@ export async function prepareAssistantCliExecutionRequest(input: {
       'The provider-turn CLI executor does not allow an explicit `--vault` override.',
     )
   }
+  if (hasExplicitConfigOption(input.args)) {
+    throw new VaultCliError(
+      'ASSISTANT_CLI_COMMAND_BLOCKED',
+      'The provider-turn CLI executor does not allow an explicit `--config` override.',
+    )
+  }
 
   const commandPath = readAssistantCliCommandPath(input.args)
   if (commandPath && assistantCliBlockedCommandPaths.has(commandPath)) {
@@ -208,6 +214,10 @@ function redactAssistantCliArg(token: string): string {
 
 function hasExplicitFormatOption(args: readonly string[]): boolean {
   return args.some((token) => token === '--format' || token.startsWith('--format='))
+}
+
+function hasExplicitConfigOption(args: readonly string[]): boolean {
+  return args.some((token) => token === '--config' || token.startsWith('--config='))
 }
 
 function hasAssistantCliBuiltinTextSurface(args: readonly string[]): boolean {

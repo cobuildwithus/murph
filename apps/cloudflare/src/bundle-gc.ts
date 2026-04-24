@@ -9,6 +9,7 @@ import {
   createHostedBundleStore,
   isMissingHostedBundleError,
   isStoredHostedBundleObjectKey,
+  MissingHostedBundleError,
   type R2BucketLike,
 } from "./bundle-store.js";
 
@@ -121,6 +122,10 @@ export class HostedBundleGarbageCollector {
         return new Set();
       }
       throw error;
+    }
+
+    if (!bytes && options.failIfMissing) {
+      throw new MissingHostedBundleError(ref);
     }
 
     if (!bytes) {

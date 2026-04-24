@@ -9,6 +9,8 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
+  buildHostedExecutionVaultShareAcceptedWake,
+  buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
@@ -22,6 +24,7 @@ import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store
 import * as hostedEmailModule from "../src/hosted-email.ts";
 import * as runnerContainerModule from "../src/runner-container.ts";
 import {
+  isHostedRunSideInputNotFoundError,
   RunnerRunProcessor,
   summarizeHostedAssistantDeliveryOutcomes,
 } from "../src/user-runner/runner-run-processor.ts";
@@ -34,6 +37,7 @@ import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function createHostedRunRecord(input: {
@@ -117,7 +121,9 @@ function createReplicaPersistenceProcessor(input: {
 function createInvokeRunnerProcessor(input: {
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnvSource?: Readonly<Record<string, unknown>>;
+  hostedWebBaseUrl?: string | null;
   runnerSecrets?: Readonly<Record<string, string>>;
+  webCallbackSigning?: null;
 } = {}) {
   const readBundlesForRunner = vi.fn().mockResolvedValue(null);
   const readRunnerSecrets = vi.fn().mockResolvedValue(input.runnerSecrets ?? {});
@@ -146,12 +152,12 @@ function createInvokeRunnerProcessor(input: {
     ensureRunnerStores,
     env: {
       runnerTimeoutMs: 60_000,
-      webCallbackSigning: {
+      webCallbackSigning: input.webCallbackSigning === null ? null : {
         keyId: "v1",
         privateKeyJwkJson: "{\"kty\":\"EC\"}",
       },
     },
-    hostedWebBaseUrl: null,
+    hostedWebBaseUrl: input.hostedWebBaseUrl ?? null,
     readRunnerRuntimeConfigSource: () => input.configSource ?? {},
     runnerContainerNamespace: {
       getByName: vi.fn(),
@@ -181,6 +187,18 @@ function createInvokeRunnerProcessor(input: {
     readBundlesForRunner,
     readRunnerSecrets,
   };
+}
+
+function createShareAcceptedWake() {
+  return buildHostedExecutionVaultShareAcceptedWake({
+    eventId: "evt_share_accepted",
+    memberId: "user_123",
+    occurredAt: "2026-04-20T09:00:00.000Z",
+    share: {
+      ownerUserId: "owner_123",
+      shareId: "share_123",
+    },
+  });
 }
 
 function createRunContext(runId: string): {
@@ -235,6 +253,80 @@ describe("runner wake processor delivery summaries", () => {
       assistantDeliveryFirstNonSentCode: "LINQ_API_REQUEST_FAILED",
       assistantDeliveryFirstNonSentStatus: "failed",
     });
+  });
+});
+
+describe("runner wake processor side input hydration", () => {
+  it("marks confirmed missing share side inputs as deterministic poison", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      hostedWebBaseUrl: "https://web.example.test",
+      webCallbackSigning: null,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", {
+      status: 404,
+    })));
+
+    let thrown: unknown = null;
+    try {
+      await processor.readRunDrainSharePack(createShareAcceptedWake());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(isHostedRunSideInputNotFoundError(thrown)).toBe(true);
+  });
+
+  it("marks confirmed missing vault sync imports as deterministic poison", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      hostedWebBaseUrl: "https://web.example.test",
+      webCallbackSigning: null,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", {
+      status: 404,
+    })));
+
+    let thrown: unknown = null;
+    try {
+      await processor.readRunDrainVaultSyncImport(
+        buildHostedExecutionVaultSyncImportWake({
+          eventId: "evt_vault_sync_missing",
+          memberId: "user_123",
+          occurredAt: "2026-04-20T09:00:00.000Z",
+          vaultSync: {
+            localManifestHash: "sha256:manifest",
+            sessionId: "vsi_123",
+            sourceVaultId: "vault_123",
+            sourceVaultTitle: "Source Vault",
+          },
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(isHostedRunSideInputNotFoundError(thrown)).toBe(true);
+  });
+
+  it("rethrows non-OK share side input fetches as transient failures", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      hostedWebBaseUrl: "https://web.example.test",
+      webCallbackSigning: null,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("temporarily unavailable", {
+      status: 503,
+    })));
+
+    await expect(processor.readRunDrainSharePack(createShareAcceptedWake()))
+      .rejects.toThrow("Hosted share payload read failed with HTTP 503.");
+  });
+
+  it("rethrows missing hosted-web config instead of marking side input poison", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      hostedWebBaseUrl: null,
+    });
+
+    await expect(processor.readRunDrainSharePack(createShareAcceptedWake()))
+      .rejects.toThrow("HOSTED_WEB_BASE_URL must be configured");
   });
 });
 
@@ -756,6 +848,95 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
         },
       ],
     });
+  });
+
+  it("persists adopted turn-input cleanup targets for later finalize cleanup", async () => {
+    const { processor } = createInvokeRunnerProcessor({
+      forwardedEnvSource: {
+        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+        LINQ_API_TOKEN: "linq-token",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    });
+    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
+      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
+      readPendingRunCleanup: ReturnType<typeof vi.fn>;
+    };
+    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
+      runId: string,
+    ) => Promise<unknown>;
+    const deleteHostedEmailRawMessage = vi.spyOn(
+      hostedEmailModule,
+      "deleteHostedEmailRawMessage",
+    ).mockResolvedValue(undefined);
+    const deleteHostedLinqMessages = vi.spyOn(
+      hostedRuntimeContractsModule,
+      "deleteHostedLinqMessages",
+    ).mockResolvedValue(undefined);
+    const deleteHostedTelegramMessages = vi.spyOn(
+      hostedRuntimeContractsModule,
+      "deleteHostedTelegramMessages",
+    ).mockResolvedValue(undefined);
+
+    await processor.persistPendingRunCleanupData({
+      cleanupTargets: [
+        {
+          channel: "email",
+          eventId: "adopted-email-wake",
+          rawMessageKey: "adopted_raw_message_key",
+          userId: "user_123",
+        },
+        {
+          channel: "linq",
+          messageId: "linq_adopted_inbound_message",
+        },
+        {
+          channel: "telegram",
+          messageId: "7007654321",
+          target: "6007654321",
+        },
+      ],
+      runId: "run-adopted-cleanup",
+      wakes: [],
+    });
+
+    await expect(readPendingRunCleanup("run-adopted-cleanup")).resolves.toEqual({
+      emailMessages: [
+        {
+          eventId: "adopted-email-wake",
+          rawMessageKey: "adopted_raw_message_key",
+          userId: "user_123",
+        },
+      ],
+      linqMessageIds: ["linq_adopted_inbound_message"],
+      required: true,
+      telegramMessages: [
+        {
+          messageId: "7007654321",
+          target: "6007654321",
+        },
+      ],
+    });
+
+    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
+      assistantDeliveryOutcomes: [],
+      runId: "run-adopted-cleanup",
+      userId: "user_123",
+      wakes: [],
+    })).resolves.toBeUndefined();
+
+    expect(deleteHostedEmailRawMessage).toHaveBeenCalledWith(expect.objectContaining({
+      rawMessageKey: "adopted_raw_message_key",
+      userId: "user_123",
+    }));
+    expect(deleteHostedLinqMessages).toHaveBeenCalledWith(expect.objectContaining({
+      messageIds: ["linq_adopted_inbound_message"],
+    }));
+    expect(deleteHostedTelegramMessages).toHaveBeenCalledWith(expect.objectContaining({
+      messageIds: ["7007654321"],
+      target: "6007654321",
+    }));
+    expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-adopted-cleanup");
   });
 
   it("retains outcome-derived Telegram cleanup inputs on env failure and clears them after a later retry", async () => {
@@ -1971,8 +2152,17 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       result: {
         bundle: "bundle-encoded",
         result: {
+          adoptedEventResults: [
+            {
+              ingressEventId: "wake_late",
+              state: "completed",
+            },
+          ],
           eventsHandled: 0,
-          nextWakeAt: null,
+          nextWakeAt: "2026-04-20T09:05:00.000Z",
+          redactedDetails: {
+            lane: "maintenance",
+          },
           summary: "Prepared hosted run snapshot.",
         },
       },
@@ -1994,17 +2184,43 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     });
 
     expect(result).toMatchObject({
+      adoptedEventResults: [
+        {
+          ingressEventId: "wake_late",
+          state: "completed",
+        },
+      ],
       assistantDeliveryOutcomes: [
         expect.objectContaining({
           deliveryChannel: "linq",
           providerMessageId: "linq_outbound_message",
         }),
       ],
+      committedResult: {
+        bundle: "bundle-encoded",
+        result: {
+          adoptedEventResults: [
+            {
+              ingressEventId: "wake_late",
+              state: "completed",
+            },
+          ],
+          eventsHandled: 0,
+          nextWakeAt: "2026-04-20T09:05:00.000Z",
+          redactedDetails: {
+            lane: "maintenance",
+          },
+          summary: "Prepared hosted run snapshot.",
+        },
+      },
       cursorSnapshotRef: null,
       finalizeRequired: true,
-      nextRuntimeWakeAt: null,
+      nextRuntimeWakeAt: "2026-04-20T09:05:00.000Z",
       redactedSummary: {
         assistantDeliveryEffectCount: 0,
+        details: {
+          lane: "maintenance",
+        },
         eventsHandled: 0,
         phase: "prepared",
         summary: "Prepared hosted run snapshot.",
@@ -2042,7 +2258,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     });
 
     (processor as any).advanceRunPhase = vi.fn().mockResolvedValue({});
-    (processor as any).invokeRunner = vi.fn().mockResolvedValue({
+    const invokeRunner = vi.fn().mockResolvedValue({
       assistantDeliveryOutcomes: [],
       browserVaultReplica: null,
       finalGatewayProjectionSnapshot: null,
@@ -2056,6 +2272,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
         },
       },
     });
+    (processor as any).invokeRunner = invokeRunner;
     (processor as any).persistCompletedRunnerResult = vi.fn().mockResolvedValue(null);
     (processor as any).readRecentActiveRunLease = vi.fn().mockResolvedValue(null);
 
@@ -2253,7 +2470,7 @@ describe("RunnerRunProcessor.finalizeRunDrain", () => {
     });
 
     (processor as any).advanceRunPhase = vi.fn().mockResolvedValue({});
-    (processor as any).invokeRunner = vi.fn().mockResolvedValue({
+    const invokeRunner = vi.fn().mockResolvedValue({
       assistantDeliveryOutcomes: [],
       browserVaultReplica: null,
       finalGatewayProjectionSnapshot: null,
@@ -2267,9 +2484,22 @@ describe("RunnerRunProcessor.finalizeRunDrain", () => {
         },
       },
     });
+    (processor as any).invokeRunner = invokeRunner;
     (processor as any).persistCompletedRunnerResult = vi.fn().mockResolvedValue(null);
+    const committedResult = {
+      bundle: "prepared-bundle-encoded",
+      result: {
+        eventsHandled: 4,
+        nextWakeAt: "2026-04-20T09:10:00.000Z",
+        redactedDetails: {
+          lane: "device-sync",
+        },
+        summary: "Prepared hosted run snapshot.",
+      },
+    };
 
     const result = await processor.finalizeRunDrain({
+      committedResult,
       currentBundleRef: null,
       primaryWake: createRuntimeTimerWake(),
       run: createHostedRunRecord({
@@ -2285,6 +2515,11 @@ describe("RunnerRunProcessor.finalizeRunDrain", () => {
       finalizeRequired: false,
       state: "completed",
     });
+    expect(invokeRunner.mock.calls[0]?.[4]).toEqual(expect.objectContaining({
+      committedResult,
+      events: [],
+      resumeFinalize: true,
+    }));
     await expect(replicaStore.readBrowserVaultReplicaEnvelope(existingReplicaRef)).resolves.not.toBeNull();
     expect(bucket.deleted).toEqual([]);
   });

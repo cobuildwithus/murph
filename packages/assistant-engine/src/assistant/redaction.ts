@@ -1,6 +1,10 @@
 import type {
+  AssistantDeliveryError,
+  AssistantOutboxIntent,
   AssistantProviderSessionOptions,
   AssistantSession,
+  AssistantTurnReceipt,
+  AssistantTurnTimelineEvent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   isSensitiveAssistantHeaderName,
@@ -11,10 +15,17 @@ import {
 import type { AssistantHeaderPersistenceSplit } from '@murphai/operator-config/assistant/redaction'
 
 const REDACTED_SECRET_TEXT = '[REDACTED]' as const
+const PORTABLE_STATE_STRING_MAX_LENGTH = 240
+const PORTABLE_STATE_METADATA_VALUE_MAX_LENGTH = 160
 
 const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/gu
 const SENSITIVE_INLINE_ASSIGNMENT_PATTERN =
   /((?:authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|token)\s*[:=]\s*["']?)([^"'\s,;\]}]{4,})/giu
+const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu
+const URL_PATTERN = /(?:https?:\/\/|file:\/\/)[^\s),;]+/giu
+const POSIX_LOCAL_PATH_PATTERN =
+  /(?:file:\/\/)?\/(?:Users|home|mnt|tmp|var)\/[^\s),;]+/giu
+const WINDOWS_LOCAL_PATH_PATTERN = /[A-Za-z]:\\[^\s),;]+/gu
 
 export {
   isSensitiveAssistantHeaderName,
@@ -56,6 +67,148 @@ export function redactAssistantStateStructuredValue(value: unknown): unknown {
       return [key, redactAssistantStateStructuredValue(entryValue)]
     }),
   )
+}
+
+export function isSensitiveAssistantFieldName(name: string): boolean {
+  if (isSensitiveAssistantHeaderName(name)) {
+    return true
+  }
+
+  const tokens = name
+    .replaceAll(/([a-z0-9])([A-Z])/gu, '$1 $2')
+    .split(/[^A-Za-z0-9]+/u)
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean)
+  const joined = tokens.join('')
+
+  if (
+    new Set([
+      'accesstoken',
+      'apikey',
+      'authorization',
+      'clientsecret',
+      'cookie',
+      'passphrase',
+      'password',
+      'privatekey',
+      'refreshtoken',
+      'sessionkey',
+      'setcookie',
+    ]).has(joined)
+  ) {
+    return true
+  }
+
+  if (
+    tokens.some((token) =>
+      new Set(['authorization', 'cookie', 'passphrase', 'password', 'secret', 'token']).has(
+        token,
+      ),
+    )
+  ) {
+    return true
+  }
+
+  return (
+    hasTokenPair(tokens, 'access', 'token') ||
+    hasTokenPair(tokens, 'api', 'key') ||
+    hasTokenPair(tokens, 'client', 'secret') ||
+    hasTokenPair(tokens, 'private', 'key') ||
+    hasTokenPair(tokens, 'refresh', 'token') ||
+    hasTokenPair(tokens, 'session', 'key')
+  )
+}
+
+export function sanitizeAssistantPortableStateString(
+  value: string,
+  maxLength = PORTABLE_STATE_STRING_MAX_LENGTH,
+): string {
+  const redacted = redactAssistantStateString(value)
+    .replaceAll(EMAIL_PATTERN, '[email]')
+    .replaceAll(URL_PATTERN, '[url]')
+    .replaceAll(POSIX_LOCAL_PATH_PATTERN, '[path]')
+    .replaceAll(WINDOWS_LOCAL_PATH_PATTERN, '[path]')
+    .replaceAll(/\s+/gu, ' ')
+    .trim()
+
+  if (redacted.length <= maxLength) {
+    return redacted
+  }
+
+  return `${redacted.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`
+}
+
+export function sanitizeAssistantPortableMetadata(
+  metadata: Record<string, string> | null | undefined,
+): Record<string, string> {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(metadata).map(([key, value]) => [
+      sanitizeAssistantPortableMetadataKey(key),
+      isSensitiveAssistantFieldName(key)
+        ? REDACTED_SECRET_TEXT
+        : sanitizeAssistantPortableStateString(
+            value,
+            PORTABLE_STATE_METADATA_VALUE_MAX_LENGTH,
+          ),
+    ]),
+  )
+}
+
+export function sanitizeAssistantDeliveryErrorForPersistence(
+  error: AssistantDeliveryError | null | undefined,
+): AssistantDeliveryError | null {
+  if (!error) {
+    return null
+  }
+
+  const message =
+    sanitizeAssistantPortableStateString(error.message) ||
+    'assistant delivery failed'
+
+  return {
+    code: error.code
+      ? sanitizeAssistantPortableStateString(error.code, 80).replaceAll(/\s+/gu, '_')
+      : null,
+    message,
+  }
+}
+
+export function sanitizeAssistantTurnTimelineEventForPersistence(
+  event: AssistantTurnTimelineEvent,
+): AssistantTurnTimelineEvent {
+  return {
+    ...event,
+    detail:
+      typeof event.detail === 'string'
+        ? sanitizeAssistantPortableStateString(event.detail)
+        : null,
+    metadata: sanitizeAssistantPortableMetadata(event.metadata),
+  }
+}
+
+export function sanitizeAssistantTurnReceiptForPersistence(
+  receipt: AssistantTurnReceipt,
+): AssistantTurnReceipt {
+  return {
+    ...receipt,
+    lastError: sanitizeAssistantDeliveryErrorForPersistence(receipt.lastError),
+    timeline: receipt.timeline.map((event) =>
+      sanitizeAssistantTurnTimelineEventForPersistence(event),
+    ),
+  }
+}
+
+export function sanitizeAssistantOutboxIntentForPersistence(
+  intent: AssistantOutboxIntent,
+): AssistantOutboxIntent {
+  return {
+    ...intent,
+    lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
+  }
 }
 
 export function containsInlineAssistantSecretMaterial(value: string): boolean {
@@ -111,6 +264,16 @@ export function redactAssistantSessionsForDisplay(
   return sessions.map((session) => redactAssistantSessionForDisplay(session))
 }
 
-function isSensitiveAssistantFieldName(name: string): boolean {
-  return isSensitiveAssistantHeaderName(name)
+function hasTokenPair(tokens: readonly string[], first: string, second: string): boolean {
+  return tokens.includes(first) && tokens.includes(second)
+}
+
+function sanitizeAssistantPortableMetadataKey(key: string): string {
+  const sanitized = sanitizeAssistantPortableStateString(key, 120)
+    .replaceAll(/\s+/gu, '-')
+    .replaceAll(/[^A-Za-z0-9_.:-]+/gu, '-')
+    .replaceAll(/^-+|-+$/gu, '')
+    .slice(0, 80)
+
+  return sanitized || 'metadata'
 }

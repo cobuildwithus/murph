@@ -99,19 +99,24 @@ export async function openAssistantConversation(
 export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ) {
+  const messageInput = {
+    ...input,
+    operatorAuthority: input.operatorAuthority ?? 'direct-operator',
+  } satisfies AssistantMessageInput
+
   await assertLocalAssistantLinqRouteAllowed({
-    channel: input.channel,
-    conversation: input.conversation,
-    sessionId: input.sessionId,
-    vault: input.vault,
+    channel: messageInput.channel,
+    conversation: messageInput.conversation,
+    sessionId: messageInput.sessionId,
+    vault: messageInput.vault,
   })
 
-  const remote = await maybeSendAssistantMessageViaDaemon(input)
+  const remote = await maybeSendAssistantMessageViaDaemon(messageInput)
   if (remote) {
     return remote
   }
 
-  return sendAssistantMessageLocal(input)
+  return sendAssistantMessageLocal(messageInput)
 }
 
 export async function updateAssistantSessionOptions(input: {

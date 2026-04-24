@@ -1,8 +1,3 @@
-import { mkdir } from "node:fs/promises";
-import { createRequire } from "node:module";
-import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
 import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/runtime-config";
 
 import {
@@ -11,43 +6,94 @@ import {
 } from "../hosted-env-categories.ts";
 
 import type {
+  HostedAssistantRuntimeManagedAutoReplyChannel,
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import {
+  createDefaultHostedManagedAutoReplyChannels,
+} from "./managed-auto-reply.ts";
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
 
-const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "NODE_EXTRA_CA_CERTS",
-  "PATH",
-  "SSL_CERT_DIR",
-  "SSL_CERT_FILE",
-  "TZ",
+const HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES = [
+  "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS",
+  "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+  "HOSTED_EXECUTION_CONTROL_TOKEN",
+  "HOSTED_EXECUTION_CONTROL_TOKENS",
+  "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL",
+  "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY",
+  "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON",
+  "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID",
+  "HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID",
+  "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK",
+  "HOSTED_EXECUTION_RETRY_DELAY_MS",
+  "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
+  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKENS",
+  "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
+  "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
+  "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+  "HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID",
+  "HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+  "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
+  "HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL",
+  "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
+  "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
+  "HOSTED_WAKE_ENCRYPTION_KEY",
+  "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
+  "HOSTED_WAKE_ENCRYPTION_KEY_VERSION",
+  "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
+  "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
 ] as const;
 const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
   [
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+    ...HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES,
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "HOME",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "PATH",
+    "PORT",
+    "PWD",
+    "VAULT",
   ],
 );
 const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
   [
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+    ...HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES,
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "HOME",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "PATH",
+    "PORT",
+    "PWD",
+    "VAULT",
   ],
 );
-
-export interface HostedRuntimeChildLauncherDirectories {
-  cacheRoot: string;
-  homeRoot: string;
-  huggingFaceRoot: string;
-  tempRoot: string;
-}
+const HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES = [
+  "HOSTED_EXECUTION_",
+  "HOSTED_WAKE_",
+  "HOSTED_WEB_CALLBACK_SIGNING_",
+] as const;
+let hostedProcessEnvironmentQueue: Promise<void> = Promise.resolve();
 
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
@@ -56,7 +102,7 @@ export function normalizeHostedAssistantRuntimeConfig(
   const forwardedEnv = sanitizeHostedAssistantRuntimeForwardedEnv(
     input?.forwardedEnv ?? {},
   );
-  const platformEnv = { ...(input?.platformEnv ?? {}) };
+  const platformEnv = sanitizeHostedAssistantRuntimePlatformEnv(input?.platformEnv ?? {});
   const userEnv = sanitizeHostedAssistantRuntimeUserEnv({
     forwardedEnv,
     userEnv: input?.userEnv ?? {},
@@ -83,15 +129,24 @@ export function buildHostedPlatformBackedRuntimeEnv(input: {
 }): Record<string, string> {
   return {
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
-    ...(input.platformEnv ?? {}),
+    ...sanitizeHostedAssistantRuntimePlatformEnv(input.platformEnv ?? {}),
   };
 }
 
-function sanitizeHostedAssistantRuntimeForwardedEnv(
+export function sanitizeHostedAssistantRuntimeForwardedEnv(
   forwardedEnv: Readonly<Record<string, string>>,
 ): Record<string, string> {
   return Object.fromEntries(
     Object.entries(forwardedEnv).filter(([key]) => !HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST.has(key)),
+  );
+}
+
+function sanitizeHostedAssistantRuntimePlatformEnv(
+  platformEnv: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const allowedKeys = new Set<string>(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES);
+  return Object.fromEntries(
+    Object.entries(platformEnv).filter(([key]) => allowedKeys.has(key)),
   );
 }
 
@@ -100,7 +155,10 @@ function sanitizeHostedAssistantRuntimeUserEnv(input: {
   userEnv: Readonly<Record<string, string>>;
 }): Record<string, string> {
   const normalizedUserEnv = Object.fromEntries(
-    Object.entries(input.userEnv).filter(([key]) => !HOSTED_RUNTIME_USER_ENV_DENYLIST.has(key)),
+    Object.entries(input.userEnv).filter(([key]) =>
+      !HOSTED_RUNTIME_USER_ENV_DENYLIST.has(key)
+      && !HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ),
   );
   const configuredApiKeyEnv = normalizeHostedRuntimeString(
     input.forwardedEnv.HOSTED_ASSISTANT_API_KEY_ENV,
@@ -128,84 +186,50 @@ function normalizeHostedRuntimeString(value: string | null | undefined): string 
 function cloneHostedAssistantRuntimeResolvedConfig(
   input: HostedAssistantRuntimeResolvedConfig | undefined,
 ): HostedAssistantRuntimeResolvedConfig {
+  const channelCapabilities = {
+    emailSendReady: input?.channelCapabilities.emailSendReady ?? false,
+    telegramBotConfigured: input?.channelCapabilities.telegramBotConfigured ?? false,
+  };
+
   return {
-    channelCapabilities: {
-      emailSendReady: input?.channelCapabilities.emailSendReady ?? false,
-      telegramBotConfigured: input?.channelCapabilities.telegramBotConfigured ?? false,
-    },
+    channelCapabilities,
     deviceSync: input?.deviceSync ? cloneConfiguredDeviceSyncRuntimeConfig(input.deviceSync) : null,
+    managedAutoReplyChannels: (input?.managedAutoReplyChannels
+      ?? createDefaultHostedManagedAutoReplyChannels(channelCapabilities))
+      .map(cloneHostedManagedAutoReplyChannel),
   };
 }
 
-export function resolveHostedRuntimeTsconfigPath(): string {
-  return fileURLToPath(new URL("../../../../tsconfig.base.json", import.meta.url));
-}
-
-export function resolveHostedRuntimeTsxImportSpecifier(
-  moduleRequire: NodeJS.Require = resolveHostedRuntimeModuleRequire(),
-): string {
-  try {
-    return pathToFileURL(moduleRequire.resolve("tsx")).href;
-  } catch {
-    return "tsx";
-  }
-}
-
-function resolveHostedRuntimeModuleRequire(): NodeJS.Require {
-  return createRequire(import.meta.url);
-}
-
-export async function createHostedRuntimeChildLauncherDirectories(
-  launcherRoot: string,
-): Promise<HostedRuntimeChildLauncherDirectories> {
-  const directories = {
-    cacheRoot: path.join(launcherRoot, "cache"),
-    homeRoot: path.join(launcherRoot, "home"),
-    huggingFaceRoot: path.join(launcherRoot, "hf-home"),
-    tempRoot: path.join(launcherRoot, "tmp"),
-  } satisfies HostedRuntimeChildLauncherDirectories;
-
-  await Promise.all(
-    Object.values(directories).map((directory) => mkdir(directory, { recursive: true })),
-  );
-
-  return directories;
-}
-
-export function createHostedRuntimeChildProcessEnv(input: {
-  ambientEnv?: Readonly<Record<string, string | undefined>>;
-  forwardedEnv: Record<string, string>;
-  isTypeScriptChild: boolean;
-  launcherDirectories: HostedRuntimeChildLauncherDirectories;
-}): Record<string, string> {
-  const env: Record<string, string> = {};
-  const ambientEnv = input.ambientEnv ?? process.env;
-
-  for (const key of HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS) {
-    const value = ambientEnv[key];
-
-    if (typeof value === "string" && value.length > 0) {
-      env[key] = value;
-    }
-  }
-
-  Object.assign(env, sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv), {
-    HF_HOME: input.launcherDirectories.huggingFaceRoot,
-    HOME: input.launcherDirectories.homeRoot,
-    TEMP: input.launcherDirectories.tempRoot,
-    TMP: input.launcherDirectories.tempRoot,
-    TMPDIR: input.launcherDirectories.tempRoot,
-    XDG_CACHE_HOME: input.launcherDirectories.cacheRoot,
-  });
-
-  if (input.isTypeScriptChild) {
-    env.TSX_TSCONFIG_PATH = resolveHostedRuntimeTsconfigPath();
-  }
-
-  return env;
+function cloneHostedManagedAutoReplyChannel(
+  channel: HostedAssistantRuntimeManagedAutoReplyChannel,
+): HostedAssistantRuntimeManagedAutoReplyChannel {
+  return {
+    capabilityReady: channel.capabilityReady,
+    channel: channel.channel,
+    memberChannel: channel.memberChannel ?? null,
+  };
 }
 
 export async function withHostedProcessEnvironment<T>(input: {
+  envOverrides: Record<string, string>;
+  operatorHomeRoot: string;
+  vaultRoot: string;
+}, run: () => Promise<T>): Promise<T> {
+  let releaseEnvironmentLock = () => {};
+  const previousEnvironmentLock = hostedProcessEnvironmentQueue;
+  hostedProcessEnvironmentQueue = new Promise<void>((resolve) => {
+    releaseEnvironmentLock = resolve;
+  });
+  await previousEnvironmentLock;
+
+  try {
+    return await runWithHostedProcessEnvironment(input, run);
+  } finally {
+    releaseEnvironmentLock();
+  }
+}
+
+async function runWithHostedProcessEnvironment<T>(input: {
   envOverrides: Record<string, string>;
   operatorHomeRoot: string;
   vaultRoot: string;

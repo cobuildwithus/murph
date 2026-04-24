@@ -272,6 +272,20 @@ describe("hosted execution parsers coverage", () => {
       expect(parseHostedExecutionRunnerResult({
         bundle: null,
         result: {
+          adoptedCleanupTargets: [
+            {
+              channel: "email",
+              eventId: "evt_late_email",
+              rawMessageKey: "raw/message/key",
+              userId: "user_123",
+            },
+          ],
+          adoptedEventResults: [
+            {
+              ingressEventId: "wake_late",
+              state: "completed",
+            },
+          ],
           eventsHandled: 3,
           nextWakeAt: "2026-04-08T01:00:00.000Z",
           redactedLogEntries: [
@@ -292,6 +306,20 @@ describe("hosted execution parsers coverage", () => {
       })).toEqual({
         bundle: null,
         result: {
+          adoptedCleanupTargets: [
+            {
+              channel: "email",
+              eventId: "evt_late_email",
+              rawMessageKey: "raw/message/key",
+              userId: "user_123",
+            },
+          ],
+          adoptedEventResults: [
+            {
+              ingressEventId: "wake_late",
+              state: "completed",
+            },
+          ],
           eventsHandled: 3,
           nextWakeAt: "2026-04-08T01:00:00.000Z",
           redactedLogEntries: [

@@ -89,6 +89,92 @@ describe('assistant failover helpers', () => {
     expect(routes[1]?.providerOptions.providerName).toBeUndefined()
   })
 
+  it('keeps failover route ids independent of secret header values', () => {
+    const [first] = buildAssistantFailoverRoutes({
+      provider: 'openai-compatible',
+      providerOptions: {
+        provider: 'openai-compatible',
+        approvalPolicy: null,
+        continuityFingerprint: 'fingerprint-one',
+        executionDriver: 'openai-compatible',
+        headers: {
+          Authorization: 'Bearer first-secret-token',
+          'X-Trace': 'trace-shared',
+        },
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        resumeKind: null,
+        sandbox: null,
+      },
+    })
+    const [second] = buildAssistantFailoverRoutes({
+      provider: 'openai-compatible',
+      providerOptions: {
+        provider: 'openai-compatible',
+        approvalPolicy: null,
+        continuityFingerprint: 'fingerprint-two',
+        executionDriver: 'openai-compatible',
+        headers: {
+          Authorization: 'Bearer rotated-secret-token',
+          'X-Trace': 'trace-shared',
+        },
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        resumeKind: null,
+        sandbox: null,
+      },
+    })
+
+    expect(first?.routeId).toBe(second?.routeId)
+  })
+
+  it('keeps non-sensitive failover header values route-defining', () => {
+    const [first] = buildAssistantFailoverRoutes({
+      provider: 'openai-compatible',
+      providerOptions: {
+        provider: 'openai-compatible',
+        approvalPolicy: null,
+        continuityFingerprint: 'fingerprint',
+        executionDriver: 'openai-compatible',
+        headers: {
+          Authorization: 'Bearer shared-secret-token',
+          'X-Trace': 'trace-a',
+        },
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        resumeKind: null,
+        sandbox: null,
+      },
+    })
+    const [second] = buildAssistantFailoverRoutes({
+      provider: 'openai-compatible',
+      providerOptions: {
+        provider: 'openai-compatible',
+        approvalPolicy: null,
+        continuityFingerprint: 'fingerprint',
+        executionDriver: 'openai-compatible',
+        headers: {
+          Authorization: 'Bearer shared-secret-token',
+          'X-Trace': 'trace-b',
+        },
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        resumeKind: null,
+        sandbox: null,
+      },
+    })
+
+    expect(first?.routeId).not.toBe(second?.routeId)
+  })
+
   it('records string failures and falls back to the route default cooldown when overrides are non-positive', async () => {
     const vaultRoot = await createVaultRoot()
     const [route] = buildAssistantFailoverRoutes({
@@ -201,6 +287,52 @@ describe('assistant failover helpers', () => {
       lastErrorMessage: null,
       cooldownUntil: null,
     })
+  })
+
+  it('persists sanitized failover error messages in portable state', async () => {
+    const vaultRoot = await createVaultRoot()
+    const [route] = buildAssistantFailoverRoutes({
+      provider: 'codex-cli',
+      providerOptions: {
+        provider: 'codex-cli',
+        continuityFingerprint: 'codex-fingerprint',
+        executionDriver: 'codex-app-server',
+        model: 'gpt-oss:20b',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+        approvalPolicy: 'never',
+        profile: 'default',
+        oss: false,
+        resumeKind: 'codex-thread',
+      },
+    })
+
+    const failedState = await recordAssistantFailoverRouteFailure({
+      vault: vaultRoot,
+      at: '2026-04-08T12:00:00.000Z',
+      route: route!,
+      error: Object.assign(
+        new Error(
+          'Authorization: Bearer secret-token-value failed at https://example.com/send?api_key=secret-token-value under /tmp/murph-secret',
+        ),
+        {
+          code:
+            'Authorization: Bearer secret-token-value failed at https://example.com/send?api_key=secret-token-value under /tmp/murph-secret',
+        },
+      ),
+    })
+
+    const failedRoute = failedState.routes.find((entry) => entry.routeId === route?.routeId)
+    expect(failedRoute?.lastErrorMessage).toContain('[REDACTED]')
+    expect(failedRoute?.lastErrorMessage).toContain('[url]')
+    expect(failedRoute?.lastErrorMessage).toContain('[path]')
+    expect(failedRoute?.lastErrorCode).toContain('[REDACTED]')
+    expect(failedRoute?.lastErrorCode).toContain('[url]')
+    expect(failedRoute?.lastErrorCode).toContain('[path]')
+    expect(failedRoute?.lastErrorCode?.length).toBeLessThanOrEqual(80)
+    expect(JSON.stringify(failedState)).not.toContain('secret-token-value')
+    expect(JSON.stringify(failedState)).not.toContain('api_key=')
+    expect(JSON.stringify(failedState)).not.toContain('/tmp/murph-secret')
   })
 
   it('allows explicit cooldown overrides and returns null for unknown route cooldown lookups', async () => {

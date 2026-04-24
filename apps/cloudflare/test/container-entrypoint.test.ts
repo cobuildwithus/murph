@@ -202,7 +202,7 @@ describe("startHostedContainerEntrypoint", () => {
     await expect(response.text()).resolves.toBe("Not found");
   });
 
-  it("fails closed when the runner control token is missing", async () => {
+  it("fails closed when the initial runner control token header is missing", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: null,
       port: 0,
@@ -228,10 +228,64 @@ describe("startHostedContainerEntrypoint", () => {
       method: "POST",
     });
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "Hosted runner control token is not configured.",
+      error: "Unauthorized",
     });
+  });
+
+  it("initializes the in-memory runner control token from the first authorized request", async () => {
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
+      finalGatewayProjectionSnapshot: null,
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
+      },
+    });
+    const server = await startHostedContainerEntrypoint({
+      controlToken: null,
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const accepted = await sendHostedContainerJsonRequest({
+      authorization: "Bearer first-runner-token",
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_first_control_token",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      path: "/internal/run",
+      port: address.port,
+    });
+    const rejected = await sendHostedContainerJsonRequest({
+      authorization: "Bearer second-runner-token",
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_wrong_control_token",
+          occurredAt: "2026-03-26T12:01:00.000Z",
+        },
+      })),
+      path: "/internal/run",
+      port: address.port,
+    });
+
+    expect(accepted.status).toBe(200);
+    expect(rejected.status).toBe(401);
+    expect(rejected.json).toEqual({ error: "Unauthorized" });
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
   });
 
   it("logs a structured listen failure when the container cannot start", async () => {
@@ -966,6 +1020,71 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(readdir).toHaveBeenCalled();
     expect(readFile).toHaveBeenCalled();
+  });
+
+  it("runs warm-container cleanup after a failed runner job", async () => {
+    const childPid = process.pid + 1500;
+    let killed = false;
+    const kill = vi.fn(() => {
+      killed = true;
+    });
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      { isDirectory: () => true, name: String(childPid) },
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        const state = killed ? "Z" : "S";
+        return `${childPid} (child) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+      new TypeError("missing hosted runtime config"),
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_failed_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(500);
+    const payload = await response.json() as ClassifiedRunnerPayload;
+    expect(payload).toMatchObject({
+      code: "type_error",
+      error: "Hosted execution runtime failed.",
+    });
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(readdir).toHaveBeenCalledTimes(2);
+    expect(exit).not.toHaveBeenCalled();
   });
 
   it("still rejects lingering descendant processes after the cleanup pass", async () => {

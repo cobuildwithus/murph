@@ -12,6 +12,8 @@ import type {
   HostedExecutionRunnerResult,
   HostedRuntimeDrainRequest,
   HostedIngressEnvelope,
+  HostedRunCleanupTarget,
+  HostedRunEventResult,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -263,6 +265,12 @@ export async function executeHostedRunDrainForCommit(input: {
     committedResult: {
       bundle: encodeHostedBundleBase64(committedSnapshot.bundle),
       result: {
+        ...(metrics.adoptedCleanupTargets.length === 0
+          ? {}
+          : { adoptedCleanupTargets: metrics.adoptedCleanupTargets }),
+        ...(metrics.adoptedEventResults.length === 0
+          ? {}
+          : { adoptedEventResults: metrics.adoptedEventResults }),
         eventsHandled: metrics.eventsHandled,
         nextWakeAt: metrics.nextWakeAt,
         redactedDetails: buildHostedRunDrainRedactedDetails(metrics),
@@ -292,6 +300,13 @@ export async function completeHostedRunDrainAfterCommit(input: {
   const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
     input.restored.vaultRoot,
   );
+  const committedResult = runDrain.committedResult ?? {
+    bundle: input.request.bundle,
+    result: {
+      eventsHandled: runDrain.events.length,
+      summary: "Finalized committed hosted run side effects.",
+    },
+  };
 
   return finalizeHostedCommittedRunAfterCommit({
     materializedArtifactPaths: input.materializedArtifactPaths,
@@ -301,13 +316,7 @@ export async function completeHostedRunDrainAfterCommit(input: {
     committedExecution: {
       committedAssistantDeliveryEffects,
       committedGatewayProjectionSnapshot: null,
-        committedResult: {
-          bundle: input.request.bundle,
-          result: {
-            eventsHandled: runDrain.events.length,
-            summary: "Finalized committed hosted run side effects.",
-          },
-        },
+      committedResult,
     },
     wake: input.wake,
   });
@@ -321,6 +330,8 @@ async function resolveHostedRunExecutionContext(
 
 function createHostedRunDrainMetrics(): HostedRunDrainMetrics {
   return {
+    adoptedCleanupTargets: [],
+    adoptedEventResults: [],
     bootstrapResult: null,
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
@@ -359,6 +370,11 @@ function mergeHostedRunDrainWakeMetrics(
     target.nextWakeAt,
     metrics.conversationMetrics?.nextWakeAt ?? null,
   );
+  appendHostedRunEventResults(target.adoptedEventResults, metrics.adoptedEventResults ?? []);
+  appendHostedRunCleanupTargets(
+    target.adoptedCleanupTargets,
+    metrics.adoptedCleanupTargets ?? [],
+  );
   const redactedLogEntries = metrics.redactedLogEntries ?? [];
   if (redactedLogEntries.length > 0) {
     target.redactedLogEntries.push(...redactedLogEntries);
@@ -378,9 +394,62 @@ function mergeHostedRunDrainMaintenanceMetrics(
   target: HostedRunDrainMetrics,
   metrics: HostedMaintenanceMetrics,
 ): void {
+  appendHostedRunEventResults(target.adoptedEventResults, metrics.adoptedEventResults ?? []);
+  appendHostedRunCleanupTargets(
+    target.adoptedCleanupTargets,
+    metrics.adoptedCleanupTargets ?? [],
+  );
   target.deviceSyncProcessed += metrics.deviceSyncProcessed;
   target.deviceSyncSkipped = target.deviceSyncSkipped && metrics.deviceSyncSkipped;
   target.parserProcessed += metrics.parserProcessed;
+}
+
+function appendHostedRunCleanupTargets(
+  target: HostedRunCleanupTarget[],
+  source: readonly HostedRunCleanupTarget[],
+): void {
+  if (source.length === 0) {
+    return;
+  }
+
+  const knownKeys = new Set(target.map(hostedRunCleanupTargetKey));
+  for (const cleanupTarget of source) {
+    const key = hostedRunCleanupTargetKey(cleanupTarget);
+    if (knownKeys.has(key)) {
+      continue;
+    }
+    target.push(cleanupTarget);
+    knownKeys.add(key);
+  }
+}
+
+function hostedRunCleanupTargetKey(target: HostedRunCleanupTarget): string {
+  switch (target.channel) {
+    case "email":
+      return `email:${target.userId}:${target.rawMessageKey}`;
+    case "linq":
+      return `linq:${target.messageId}`;
+    case "telegram":
+      return `telegram:${target.target}:${target.messageId}`;
+  }
+}
+
+function appendHostedRunEventResults(
+  target: HostedRunEventResult[],
+  source: readonly HostedRunEventResult[],
+): void {
+  if (source.length === 0) {
+    return;
+  }
+
+  const knownIds = new Set(target.map((result) => result.ingressEventId));
+  for (const result of source) {
+    if (knownIds.has(result.ingressEventId)) {
+      continue;
+    }
+    target.push(result);
+    knownIds.add(result.ingressEventId);
+  }
 }
 
 async function drainHostedImmediateMaintenanceUntilIdleOrBudget(input: {

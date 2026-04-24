@@ -40,6 +40,8 @@ import type {
   HostedIngressPayloadSchema,
   HostedRuntimeDrainEvent,
   HostedRuntimeDrainRequest,
+  HostedRunCleanupTarget,
+  HostedRunEventResult,
 } from "./contracts.ts";
 import type {
   HostedExecutionRunContext,
@@ -413,6 +415,13 @@ export function parseHostedRuntimeDrainRequest(
 
   return {
     acquiredAt: requireString(record.acquiredAt, "Hosted runtime drain request acquiredAt"),
+    ...(record.committedResult === undefined
+      ? {}
+      : {
+          committedResult: record.committedResult === null
+            ? null
+            : parseHostedExecutionRunnerResult(record.committedResult),
+        }),
     events: requireArray(record.events, "Hosted runtime drain request events")
       .map((entry, index) => parseHostedRuntimeDrainEvent(
         entry,
@@ -482,6 +491,32 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
       "Hosted execution runner result bundle",
     ),
     result: {
+      ...(result.adoptedCleanupTargets === undefined
+        ? {}
+        : {
+            adoptedCleanupTargets: requireArray(
+              result.adoptedCleanupTargets,
+              "Hosted execution runner result adoptedCleanupTargets",
+            ).map((entry, index) =>
+              parseHostedExecutionRunnerCleanupTarget(
+                entry,
+                `Hosted execution runner result adoptedCleanupTargets[${index}]`,
+              ),
+            ),
+          }),
+      ...(result.adoptedEventResults === undefined
+        ? {}
+        : {
+            adoptedEventResults: requireArray(
+              result.adoptedEventResults,
+              "Hosted execution runner result adoptedEventResults",
+            ).map((entry, index) =>
+              parseHostedExecutionRunnerEventResult(
+                entry,
+                `Hosted execution runner result adoptedEventResults[${index}]`,
+              ),
+            ),
+          }),
       eventsHandled: requireNumber(result.eventsHandled, "Hosted execution runner result eventsHandled"),
       nextWakeAt: readOptionalNullableString(
         result.nextWakeAt,
@@ -514,6 +549,65 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
           }),
       summary: requireString(result.summary, "Hosted execution runner result summary"),
     },
+  };
+}
+
+function parseHostedExecutionRunnerCleanupTarget(
+  value: unknown,
+  label: string,
+): HostedRunCleanupTarget {
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label}.channel`);
+
+  if (channel === "email") {
+    return {
+      channel,
+      eventId: requireString(record.eventId, `${label}.eventId`),
+      rawMessageKey: requireString(record.rawMessageKey, `${label}.rawMessageKey`),
+      userId: requireString(record.userId, `${label}.userId`),
+    };
+  }
+
+  if (channel === "linq") {
+    return {
+      channel,
+      messageId: requireString(record.messageId, `${label}.messageId`),
+    };
+  }
+
+  if (channel === "telegram") {
+    return {
+      channel,
+      messageId: requireString(record.messageId, `${label}.messageId`),
+      target: requireString(record.target, `${label}.target`),
+    };
+  }
+
+  throw new TypeError(`${label}.channel must be email, linq, or telegram.`);
+}
+
+function parseHostedExecutionRunnerEventResult(
+  value: unknown,
+  label: string,
+): HostedRunEventResult {
+  const record = requireObject(value, label);
+  rejectLegacyAliases(record, label, {
+    wakeId: "ingressEventId",
+  });
+  const state = requireString(record.state, `${label}.state`);
+
+  if (state !== "completed" && state !== "quarantined") {
+    throw new TypeError(`${label}.state must be completed or quarantined.`);
+  }
+
+  return {
+    ingressEventId: requireString(record.ingressEventId, `${label}.ingressEventId`),
+    ...(record.quarantineCode === undefined
+      ? {}
+      : {
+          quarantineCode: readNullableString(record.quarantineCode, `${label}.quarantineCode`),
+        }),
+    state,
   };
 }
 

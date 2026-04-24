@@ -22,6 +22,11 @@ import type {
   GatewayService,
   GatewayWaitForEventsInput,
 } from '@murphai/gateway-core'
+import {
+  createGatewaySessionNotFoundError,
+  createGatewayUnsupportedOperationError,
+} from '@murphai/gateway-core'
+import { createAssistantdVaultMismatchError } from '../src/errors.js'
 import { AssistantHttpRequestError } from '../src/http-protocol.js'
 import {
   assertAssistantControlRequest,
@@ -497,6 +502,10 @@ function createGatewayServiceMock(
   }
 }
 
+function createBearerAuthorization(token: string): string {
+  return ['Bearer', token].join(' ')
+}
+
 function createAssistantdTestFetch(
   handler: AssistantHttpRequestHandler,
   baseUrl: string,
@@ -890,9 +899,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   }
 
   const baseUrl = 'http://127.0.0.1:50241'
+  const controlToken = 'secret-token'
   const fetch = createAssistantdTestFetch(
     createAssistantHttpRequestHandler({
-      controlToken: 'secret-token',
+      controlToken,
       host: '127.0.0.1',
       port: 0,
       service,
@@ -1429,7 +1439,19 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       },
     )
     assert.equal(mismatchedGatewayVault.status, 400)
-    assert.match(await mismatchedGatewayVault.text(), /bound to \/tmp\/vault/u)
+    const mismatchedGatewayVaultPayload = await mismatchedGatewayVault.json() as {
+      code?: string
+      error?: string
+    }
+    assert.equal(
+      mismatchedGatewayVaultPayload.code,
+      'ASSISTANTD_VAULT_MISMATCH',
+    )
+    assert.equal(
+      mismatchedGatewayVaultPayload.error,
+      'Request vault does not match the daemon-bound vault.',
+    )
+    assert.doesNotMatch(mismatchedGatewayVaultPayload.error ?? '', /\/tmp/u)
 
     const cronStatus = await fetch(
       `${handle.address.baseUrl}/cron/status?vault=${encodeURIComponent('/tmp/vault')}`,
@@ -1785,6 +1807,268 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   } finally {
     await handle.close()
   }
+})
+
+test('assistantd http server maps bound-vault mismatches on non-gateway routes to typed 400 responses', async () => {
+  const configuredVault = '/tmp/vault'
+  const otherVault = '/tmp/other-vault'
+  const rejectMismatchedVault = (vault: string | null | undefined): void => {
+    if (vault !== otherVault) {
+      throw new Error(`Expected the test request to target ${otherVault}.`)
+    }
+    throw createAssistantdVaultMismatchError({
+      configuredVault,
+      requestedVault: otherVault,
+    })
+  }
+  const service: AssistantLocalService = {
+    ...createUnusedAssistantService(),
+    drainOutbox: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return { attempted: 0, sent: 0, failed: 0, queued: 0 }
+    },
+    getCronJob: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return TEST_CRON_JOB
+    },
+    getCronTarget: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return createAssistantCronTarget(input.job, TEST_THREAD_BINDING_DELIVERY)
+    },
+    getCronStatus: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return TEST_CRON_STATUS
+    },
+    getOutboxIntent: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return TEST_OUTBOX_INTENT
+    },
+    getSession: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return TEST_SESSION
+    },
+    getStatus: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return TEST_ASSISTANT_STATUS
+    },
+    listCronJobs: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return [TEST_CRON_JOB]
+    },
+    listCronRuns: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return { jobId: input.job, runs: [TEST_CRON_RUN] }
+    },
+    listOutbox: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return [TEST_OUTBOX_INTENT]
+    },
+    listSessions: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return [TEST_SESSION]
+    },
+    processDueCron: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return EMPTY_PROCESS_DUE_CRON_RESULT
+    },
+    runAutomationOnce: async (input) => {
+      rejectMismatchedVault(input?.vault)
+      return createAssistantRunAutomationResult(0)
+    },
+    sendMessage: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return createAssistantSendMessageResult(input.prompt, 'daemon response')
+    },
+    setCronTarget: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return createSetCronTargetResult({ jobId: input.job })
+    },
+    updateSessionOptions: async (input) => {
+      rejectMismatchedVault(input.vault)
+      return TEST_SESSION
+    },
+    vault: configuredVault,
+  }
+  const baseUrl = 'http://127.0.0.1:50241'
+  const controlToken = 'secret-token'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken,
+      host: '127.0.0.1',
+      port: 0,
+      service,
+    }),
+    baseUrl,
+  )
+  const encodedVault = encodeURIComponent(otherVault)
+  const authenticatedJsonHeaders = {
+    Authorization: createBearerAuthorization(controlToken),
+    'Content-Type': 'application/json',
+  }
+  const authenticatedHeaders = {
+    Authorization: createBearerAuthorization(controlToken),
+  }
+  const cases: Array<{
+    init?: RequestInit
+    path: string
+  }> = [
+    { path: `/status?vault=${encodedVault}` },
+    { path: `/sessions?vault=${encodedVault}` },
+    { path: `/sessions/${encodeURIComponent(TEST_SESSION.sessionId)}?vault=${encodedVault}` },
+    { path: `/outbox?vault=${encodedVault}` },
+    { path: `/outbox/${encodeURIComponent(TEST_OUTBOX_INTENT.intentId)}?vault=${encodedVault}` },
+    { path: `/cron/status?vault=${encodedVault}` },
+    { path: `/cron/jobs?vault=${encodedVault}` },
+    { path: `/cron/jobs/${encodeURIComponent(TEST_CRON_JOB.jobId)}?vault=${encodedVault}` },
+    { path: `/cron/jobs/${encodeURIComponent(TEST_CRON_JOB.jobId)}/target?vault=${encodedVault}` },
+    { path: `/cron/runs?job=${encodeURIComponent(TEST_CRON_JOB.jobId)}&vault=${encodedVault}` },
+    {
+      path: '/message',
+      init: {
+        method: 'POST',
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          vault: otherVault,
+          prompt: 'hello',
+        }),
+      },
+    },
+    {
+      path: '/session-options',
+      init: {
+        method: 'POST',
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          vault: otherVault,
+          sessionId: TEST_SESSION.sessionId,
+          providerOptions: {
+            provider: 'codex-cli',
+          },
+        }),
+      },
+    },
+    {
+      path: '/outbox/drain',
+      init: {
+        method: 'POST',
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          vault: otherVault,
+        }),
+      },
+    },
+    {
+      path: '/automation/run-once',
+      init: {
+        method: 'POST',
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          vault: otherVault,
+        }),
+      },
+    },
+    {
+      path: '/cron/process-due',
+      init: {
+        method: 'POST',
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          vault: otherVault,
+        }),
+      },
+    },
+    {
+      path: `/cron/jobs/${encodeURIComponent(TEST_CRON_JOB.jobId)}/target`,
+      init: {
+        method: 'POST',
+        headers: authenticatedJsonHeaders,
+        body: JSON.stringify({
+          vault: otherVault,
+          channel: 'email',
+          deliveryTarget: 'person@example.com',
+        }),
+      },
+    },
+  ]
+
+  for (const entry of cases) {
+    const response = await fetch(`${baseUrl}${entry.path}`, {
+      headers: authenticatedHeaders,
+      ...entry.init,
+    })
+    assert.equal(response.status, 400, entry.path)
+    const payload = await response.json() as { code?: string; error?: string }
+    assert.equal(payload.code, 'ASSISTANTD_VAULT_MISMATCH', entry.path)
+    assert.equal(
+      payload.error,
+      'Request vault does not match the daemon-bound vault.',
+      entry.path,
+    )
+    assert.doesNotMatch(payload.error ?? '', /\/tmp/u, entry.path)
+  }
+})
+
+test('assistantd http server maps gateway send domain errors to typed non-500 responses', async () => {
+  const gatewaySendMessage = vi.fn(async (input: GatewaySendMessageInput) => {
+    if (input.sessionKey === 'gwcs_missing_http_test') {
+      throw createGatewaySessionNotFoundError(
+        `Gateway session ${input.sessionKey} was not found.`,
+      )
+    }
+
+    throw createGatewayUnsupportedOperationError(
+      `Gateway session ${input.sessionKey} does not have a routable reply target.`,
+    )
+  })
+  const service: AssistantLocalService = {
+    ...createUnusedAssistantService(),
+    gateway: createGatewayServiceMock({
+      sendMessage: gatewaySendMessage,
+    }),
+    vault: '/tmp/vault',
+  }
+  const baseUrl = 'http://127.0.0.1:50241'
+  const controlToken = 'secret-token'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken,
+      host: '127.0.0.1',
+      port: 0,
+      service,
+    }),
+    baseUrl,
+  )
+
+  const sendGatewayMessage = async (sessionKey: string) =>
+    fetch(`${baseUrl}/gateway/messages/send`, {
+      method: 'POST',
+      headers: {
+        Authorization: createBearerAuthorization(controlToken),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        sessionKey,
+        text: 'please follow up',
+      }),
+    })
+
+  const missing = await sendGatewayMessage('gwcs_missing_http_test')
+  assert.equal(missing.status, 404)
+  const missingPayload = await missing.json() as { code?: string; error?: string }
+  assert.equal(missingPayload.code, 'ASSISTANT_GATEWAY_SESSION_NOT_FOUND')
+  assert.match(missingPayload.error ?? '', /was not found/u)
+
+  const unsupported = await sendGatewayMessage('gwcs_unroutable_http_test')
+  assert.equal(unsupported.status, 400)
+  const unsupportedPayload = await unsupported.json() as { code?: string; error?: string }
+  assert.equal(
+    unsupportedPayload.code,
+    'ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION',
+  )
+  assert.match(unsupportedPayload.error ?? '', /routable reply target/u)
+
+  assert.equal(gatewaySendMessage.mock.calls.length, 2)
 })
 
 test('assistant http handler rejects continuous automation without the inbox daemon', async () => {

@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
-import { createRequire } from "node:module";
-import path from "node:path";
 
 import { test } from "vitest";
 import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/side-effects";
@@ -9,17 +6,11 @@ import type { HostedAssistantDeliveryRecord } from "@murphai/hosted-execution/si
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import {
   buildHostedPlatformBackedRuntimeEnv,
-  createHostedRuntimeChildLauncherDirectories,
-  createHostedRuntimeChildProcessEnv,
   normalizeHostedAssistantRuntimeConfig,
-  resolveHostedRuntimeTsconfigPath,
-  resolveHostedRuntimeTsxImportSpecifier,
   withHostedProcessEnvironment,
 } from "../src/hosted-runtime/environment.ts";
 import {
-  createHostedRuntimeLauncherDirectories,
   createHostedRuntimeResolvedConfig,
-  createHostedRuntimeWorkspace,
 } from "./hosted-runtime-test-helpers.ts";
 
 function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
@@ -185,6 +176,68 @@ test("hosted runtime config strips platform-only Telegram vars from forwarded an
   });
 });
 
+test("hosted runtime config strips hosted control-plane secrets from forwarded and user env", () => {
+  const platform = createHostedRuntimePlatformStub();
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      forwardedEnv: {
+        LD_PRELOAD: "/tmp/injected.so",
+        NODE_OPTIONS: "--require /tmp/injected.js",
+        PATH: "/tmp/custom-bin",
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: '{"kty":"EC","x":"recovery","y":"recovery"}',
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+        HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        OPENAI_API_KEY: "openai-secret",
+      },
+      userEnv: {
+        LD_PRELOAD: "/tmp/user-injected.so",
+        NODE_OPTIONS: "--require /tmp/user-injected.js",
+        PATH: "/tmp/user-bin",
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{}",
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
+        HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        OPENAI_API_KEY: "user-openai-secret",
+      },
+    },
+    platform,
+  );
+
+  assert.deepEqual(normalized.forwardedEnv, {
+    HOSTED_WEB_BASE_URL: "https://web.example.test",
+    OPENAI_API_KEY: "openai-secret",
+  });
+  assert.deepEqual(normalized.userEnv, {
+    OPENAI_API_KEY: "user-openai-secret",
+  });
+});
+
+test("hosted platform-backed env strips non-platform entries from platform env", () => {
+  assert.deepEqual(
+    buildHostedPlatformBackedRuntimeEnv({
+      forwardedEnv: {
+        OPENAI_API_KEY: "openai-secret",
+      },
+      platformEnv: {
+        HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        OPENAI_API_KEY: "platform-openai-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    }),
+    {
+      OPENAI_API_KEY: "openai-secret",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+    },
+  );
+});
+
 test("hosted runtime config deep-clones resolved device-sync provider config", () => {
   const platform = createHostedRuntimePlatformStub();
   const ouraScopes = ["daily", "sleep"];
@@ -281,87 +334,6 @@ test("hosted runtime config deep-clones resolved device-sync provider config", (
   );
 });
 
-test("hosted child launcher directories create the expected cache, home, hf, and temp roots", async () => {
-  const { cleanup, workspaceRoot } = await createHostedRuntimeWorkspace("hosted-runtime-env-");
-
-  try {
-    const launcherRoot = path.join(workspaceRoot, "launcher");
-    const directories = await createHostedRuntimeChildLauncherDirectories(launcherRoot);
-
-    assert.deepEqual(
-      directories,
-      createHostedRuntimeLauncherDirectories(launcherRoot),
-    );
-
-    await Promise.all(Object.values(directories).map(async (directory) => access(directory)));
-  } finally {
-    await cleanup();
-  }
-});
-
-test("hosted child process env forwards only allowlisted ambient keys and normalizes runtime roots", () => {
-  const launcherDirectories = createHostedRuntimeLauncherDirectories("/tmp/hosted-runner");
-
-  const env = createHostedRuntimeChildProcessEnv({
-    ambientEnv: {
-      HTTPS_PROXY: "https://proxy.example.test",
-      LANG: "en_US.UTF-8",
-      PATH: "/usr/bin:/bin",
-      SSL_CERT_FILE: "/etc/ssl/cert.pem",
-      TZ: "UTC",
-    },
-    forwardedEnv: {
-      LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
-      OPENAI_API_KEY: "secret",
-      PATH: "/custom/bin",
-    },
-    isTypeScriptChild: true,
-    launcherDirectories,
-  });
-
-  assert.deepEqual(env, {
-    HF_HOME: launcherDirectories.huggingFaceRoot,
-    HOME: launcherDirectories.homeRoot,
-    LANG: "en_US.UTF-8",
-    OPENAI_API_KEY: "secret",
-    PATH: "/custom/bin",
-    SSL_CERT_FILE: "/etc/ssl/cert.pem",
-    TEMP: launcherDirectories.tempRoot,
-    TMP: launcherDirectories.tempRoot,
-    TMPDIR: launcherDirectories.tempRoot,
-    TSX_TSCONFIG_PATH: resolveHostedRuntimeTsconfigPath(),
-    TZ: "UTC",
-    XDG_CACHE_HOME: launcherDirectories.cacheRoot,
-  });
-  assert.equal("HTTPS_PROXY" in env, false);
-});
-
-test("hosted child process env omits tsx config wiring for non-typescript children", () => {
-  const env = createHostedRuntimeChildProcessEnv({
-    forwardedEnv: {},
-    isTypeScriptChild: false,
-    launcherDirectories: createHostedRuntimeLauncherDirectories("/tmp/hosted-runner"),
-  });
-
-  assert.equal("TSX_TSCONFIG_PATH" in env, false);
-});
-
-test("hosted runtime environment resolves stable tsx loader and tsconfig paths", () => {
-  assert.match(resolveHostedRuntimeTsconfigPath(), /tsconfig\.base\.json$/u);
-  assert.equal(typeof resolveHostedRuntimeTsxImportSpecifier(), "string");
-  assert.notEqual(resolveHostedRuntimeTsxImportSpecifier().length, 0);
-});
-
-test("hosted runtime environment falls back to the bare tsx specifier when resolution fails", () => {
-  const unresolvedRequire = Object.assign(createRequire(import.meta.url), {
-    resolve() {
-      throw new Error("tsx not installed");
-    },
-  });
-
-  assert.equal(resolveHostedRuntimeTsxImportSpecifier(unresolvedRequire), "tsx");
-});
-
 test("withHostedProcessEnvironment restores overwritten and newly introduced env values", async () => {
   const originalHome = process.env.HOME;
   const originalVault = process.env.VAULT;
@@ -387,6 +359,92 @@ test("withHostedProcessEnvironment restores overwritten and newly introduced env
       },
     );
 
+    assert.equal(process.env.HOME, "/tmp/original-home");
+    assert.equal(process.env.VAULT, "/tmp/original-vault");
+    assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (originalVault === undefined) {
+      delete process.env.VAULT;
+    } else {
+      process.env.VAULT = originalVault;
+    }
+
+    if (originalCustom === undefined) {
+      delete process.env.CUSTOM_HOSTED_ENV;
+    } else {
+      process.env.CUSTOM_HOSTED_ENV = originalCustom;
+    }
+  }
+});
+
+test("withHostedProcessEnvironment serializes overlapping process env overrides", async () => {
+  const originalHome = process.env.HOME;
+  const originalVault = process.env.VAULT;
+  const originalCustom = process.env.CUSTOM_HOSTED_ENV;
+  let releaseFirstRun = () => {};
+  const firstRunGate = new Promise<void>((resolve) => {
+    releaseFirstRun = resolve;
+  });
+  const observed: string[] = [];
+
+  process.env.HOME = "/tmp/original-home";
+  process.env.VAULT = "/tmp/original-vault";
+  delete process.env.CUSTOM_HOSTED_ENV;
+
+  try {
+    const firstRun = withHostedProcessEnvironment(
+      {
+        envOverrides: {
+          CUSTOM_HOSTED_ENV: "first",
+        },
+        operatorHomeRoot: "/tmp/first-home",
+        vaultRoot: "/tmp/first-vault",
+      },
+      async () => {
+        observed.push(`first-start:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
+        await firstRunGate;
+        observed.push(`first-end:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
+      },
+    );
+    await Promise.resolve();
+
+    const secondRun = withHostedProcessEnvironment(
+      {
+        envOverrides: {
+          CUSTOM_HOSTED_ENV: "second",
+        },
+        operatorHomeRoot: "/tmp/second-home",
+        vaultRoot: "/tmp/second-vault",
+      },
+      async () => {
+        observed.push(`second-start:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
+        observed.push(`second-end:${process.env.HOME}:${process.env.CUSTOM_HOSTED_ENV}`);
+      },
+    );
+    await Promise.resolve();
+
+    assert.deepEqual(observed, [
+      "first-start:/tmp/first-home:first",
+    ]);
+    assert.equal(process.env.HOME, "/tmp/first-home");
+    assert.equal(process.env.VAULT, "/tmp/first-vault");
+    assert.equal(process.env.CUSTOM_HOSTED_ENV, "first");
+
+    releaseFirstRun();
+    await Promise.all([firstRun, secondRun]);
+
+    assert.deepEqual(observed, [
+      "first-start:/tmp/first-home:first",
+      "first-end:/tmp/first-home:first",
+      "second-start:/tmp/second-home:second",
+      "second-end:/tmp/second-home:second",
+    ]);
     assert.equal(process.env.HOME, "/tmp/original-home");
     assert.equal(process.env.VAULT, "/tmp/original-vault");
     assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);

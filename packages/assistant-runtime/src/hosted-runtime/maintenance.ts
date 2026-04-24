@@ -21,6 +21,8 @@ import {
 } from "../hosted-device-sync-runtime.ts";
 import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
+  HostedRunCleanupTarget,
+  HostedRunEventResult,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -122,6 +124,8 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.runtime,
       )
     : {
+        adoptedCleanupTargets: [],
+        adoptedEventResults: [],
         nextWakeAt: null,
         progressed: false,
       };
@@ -129,6 +133,12 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
     ?? (assistantResult.progressed ? new Date().toISOString() : null);
 
   return {
+    ...(assistantResult.adoptedCleanupTargets.length === 0
+      ? {}
+      : { adoptedCleanupTargets: assistantResult.adoptedCleanupTargets }),
+    ...(assistantResult.adoptedEventResults.length === 0
+      ? {}
+      : { adoptedEventResults: assistantResult.adoptedEventResults }),
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
     nextWakeAt,
@@ -142,14 +152,27 @@ export async function runHostedAssistantAutomation(
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
   runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
-): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
+): Promise<{
+  adoptedCleanupTargets: HostedRunCleanupTarget[];
+  adoptedEventResults: HostedRunEventResult[];
+  nextWakeAt: string | null;
+  progressed: boolean;
+}> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
+  const adoptedEventResults: HostedRunEventResult[] = [];
+  const adoptedCleanupTargets: HostedRunCleanupTarget[] = [];
   const turnInputPort = runtime
     ? createHostedAssistantTurnInputPort({
         inboxServices,
+        onImportedEvent(result, cleanupTarget) {
+          adoptedEventResults.push(result);
+          if (cleanupTarget) {
+            adoptedCleanupTargets.push(cleanupTarget);
+          }
+        },
         requestId,
         runtime,
         vaultRoot,
@@ -214,7 +237,12 @@ export async function runHostedAssistantAutomation(
       message: "Hosted assistant automation pass finished.",
       phase: "wake.running",
     });
-    return result;
+    return {
+      adoptedCleanupTargets,
+      adoptedEventResults,
+      nextWakeAt: result.nextWakeAt,
+      progressed: result.progressed,
+    };
   } catch (error) {
     if (
       error
@@ -232,6 +260,8 @@ export async function runHostedAssistantAutomation(
         phase: "wake.running",
       });
       return {
+        adoptedCleanupTargets,
+        adoptedEventResults,
         nextWakeAt: null,
         progressed: false,
       };
