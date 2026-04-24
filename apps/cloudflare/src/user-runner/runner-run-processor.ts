@@ -46,6 +46,7 @@ import type { HostedExecutionEnvironment } from "../env.js";
 import { type HostedUserCryptoContext } from "../user-key-store.js";
 import { HostedGatewayProjectionCache } from "../gateway-projection-cache.js";
 import {
+  destroyHostedExecutionContainer,
   HostedExecutionConfigurationError,
   type HostedExecutionContainerNamespaceLike,
   invokeHostedExecutionContainerRunner,
@@ -491,6 +492,30 @@ export class RunnerRunProcessor {
           },
           state: "quarantined",
         };
+      }
+
+      if (isInvalidRunnerOutputBundleArchiveValidation(error)) {
+        await destroyHostedExecutionContainer({
+          runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
+          userId,
+        });
+        emitHostedExecutionStructuredLog({
+          component: "runner",
+          details: {
+            action: "destroy_runner_container",
+            bundleArchiveOperation: "runner-output",
+            containerRecycleRequested: this.dependencies.runnerContainerNamespace !== null,
+            runElapsedMs: computeHostedRunElapsedMs(run),
+          },
+          error,
+          eventId: wake.eventId,
+          level: "warn",
+          message:
+            "Hosted runner output bundle archive was invalid; recycling the runner container before retry.",
+          phase: "retry.scheduled",
+          run,
+          userId,
+        });
       }
 
       await this.dependencies.stateStore.failRun({
@@ -1122,6 +1147,10 @@ function resolveInvalidAuthoritativeBundleArchiveValidation(input: {
   }
 
   return null;
+}
+
+function isInvalidRunnerOutputBundleArchiveValidation(error: unknown): boolean {
+  return isHostedBundleArchiveValidationError(error) && error.operation === "runner-output";
 }
 
 function hostedRunEventId(runId: string): string {
