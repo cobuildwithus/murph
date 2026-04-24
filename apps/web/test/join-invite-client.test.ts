@@ -544,9 +544,9 @@ test("activating invite state explains when vault and assistant setup is still r
   );
 
   assert.match(markup, /Finishing your setup/);
-  assert.match(markup, /Setup finishes in about a minute\./);
+  assert.match(markup, /Setup finishes in about ten seconds\./);
   assert.match(markup, /Setting up your vault and assistant/);
-  assert.match(markup, /This takes about a minute\. We’ll update here when it’s done\./);
+  assert.match(markup, /This takes about ten seconds\. We’ll update here when it’s done\./);
   assert.match(markup, /We’ll add your shared bundle once setup finishes\./);
 });
 

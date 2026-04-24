@@ -92,7 +92,7 @@ test("activating success page explains when vault and assistant setup is still r
 
   assert.match(markup, /Finishing your setup/);
   assert.match(markup, /Payment confirmed\./);
-  assert.match(markup, /Setup finishes in about a minute/);
+  assert.match(markup, /Setup finishes in about ten seconds/);
   assert.match(markup, /We&#x27;ll keep checking automatically/);
 });
 
