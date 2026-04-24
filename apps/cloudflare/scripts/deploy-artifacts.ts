@@ -205,10 +205,7 @@ async function assertRunnerBundleShape(
       continue;
     }
 
-    await assertReadableFile(
-      path.join(bundleDir, "node_modules", ...packageName.split("/"), "package.json"),
-      `runner dependency ${packageName}`,
-    );
+    await assertInstalledRunnerDependency(bundleDir, packageName);
   }
 
   if (manifest.includeBundleOnlyDependencies) {
@@ -338,6 +335,76 @@ async function assertReadableFile(filePath: string, label: string): Promise<void
 
     throw error;
   }
+}
+
+async function isReadableFile(filePath: string): Promise<boolean> {
+  try {
+    const fileStat = await stat(filePath);
+
+    return fileStat.isFile();
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function assertInstalledRunnerDependency(
+  bundleDir: string,
+  packageName: string,
+): Promise<void> {
+  const nodeModulesDir = path.join(bundleDir, "node_modules");
+  const packageParts = packageName.split("/");
+
+  if (await isReadableFile(path.join(nodeModulesDir, ...packageParts, "package.json"))) {
+    return;
+  }
+
+  if (
+    await hasPnpmVirtualPackageManifest(
+      path.join(nodeModulesDir, ".pnpm"),
+      packageParts,
+    )
+  ) {
+    return;
+  }
+
+  throw new Error(`Missing runner dependency ${packageName}.`);
+}
+
+async function hasPnpmVirtualPackageManifest(
+  virtualStoreDir: string,
+  packageParts: readonly string[],
+): Promise<boolean> {
+  let entries;
+
+  try {
+    entries = await readdir(virtualStoreDir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    if (
+      await isReadableFile(
+        path.join(virtualStoreDir, entry.name, "node_modules", ...packageParts, "package.json"),
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function assertReadableDirectory(directoryPath: string, label: string): Promise<void> {
