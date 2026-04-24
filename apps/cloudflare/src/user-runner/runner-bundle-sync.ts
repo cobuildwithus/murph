@@ -13,6 +13,11 @@ import {
   type HostedBundleStore,
   type R2BucketLike,
 } from "../bundle-store.js";
+import {
+  assertHostedBundleArchiveValid,
+  HostedBundleArchiveValidationError,
+  isHostedBundleArchiveValidationFailure,
+} from "../hosted-bundle-validation.js";
 
 interface RunnerBundleRefCacheReader {
   readCachedBundleRef(): Promise<HostedExecutionBundleRef | null>;
@@ -36,9 +41,10 @@ export class RunnerBundleSync {
     userId?: string | null,
   ): Promise<HostedExecutionRunnerResult["bundle"]> {
     const store = this.createBundleStore(userId ?? undefined);
+    const ref = await this.resolveCurrentBundleRef(currentBundleRef);
     return encodeHostedBundleBase64(await readRequiredBundleForRunner({
       bundleStore: store,
-      ref: await this.resolveCurrentBundleRef(currentBundleRef),
+      ref,
     }));
   }
 
@@ -51,6 +57,11 @@ export class RunnerBundleSync {
     const currentBundleRef = await this.resolveCurrentBundleRef(currentBundleRefOrVersion);
     const nextBundle = bundle ?? null;
     const nextBundleBytes = decodeHostedBundleBase64(nextBundle);
+    assertHostedBundleArchiveValid({
+      bytes: nextBundleBytes,
+      expectedKind: "vault",
+      operation: "runner-output",
+    });
     const nextBundleRef = nextBundle === null
       ? null
       : await writeHostedBundleBytesIfChanged({
@@ -94,12 +105,30 @@ async function readRequiredBundleForRunner(input: {
     return null;
   }
 
-  const bytes = await input.bundleStore.readBundle(input.ref);
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await input.bundleStore.readBundle(input.ref);
+  } catch (error) {
+    if (isHostedBundleArchiveValidationFailure(error)) {
+      throw new HostedBundleArchiveValidationError({
+        cause: error,
+        operation: "runner-input",
+        ref: input.ref,
+      });
+    }
+    throw error;
+  }
   if (!bytes) {
     throw new Error(
       `Hosted vault bundle ${input.ref.key} is missing from R2.`,
     );
   }
+  assertHostedBundleArchiveValid({
+    bytes,
+    expectedKind: "vault",
+    operation: "runner-input",
+    ref: input.ref,
+  });
 
   return bytes;
 }

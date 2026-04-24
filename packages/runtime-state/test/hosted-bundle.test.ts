@@ -220,6 +220,20 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
     /Hosted bundle root is invalid/u,
   );
   assert.throws(
+    () => hostedBundle.parseHostedBundleArchive(gzipSync(Buffer.from(JSON.stringify({
+      files: [
+        {
+          contentsBase64: "not@@base64",
+          path: "a.txt",
+          root: "vault",
+        },
+      ],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    })))),
+    /Hosted bundle archive contains invalid inline file contents/u,
+  );
+  assert.throws(
     () => hostedBundle.serializeHostedBundleArchive({
       files: [
         { contentsBase64: "YQ==", path: "dup.txt", root: "vault" },

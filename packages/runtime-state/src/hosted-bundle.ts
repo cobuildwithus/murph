@@ -294,6 +294,10 @@ function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {
   };
 
   if (typeof record.contentsBase64 === "string") {
+    assertCanonicalBase64(
+      record.contentsBase64,
+      "Hosted bundle archive contains invalid inline file contents.",
+    );
     return {
       contentsBase64: record.contentsBase64,
       ...normalized,
@@ -318,6 +322,24 @@ function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {
   }
 
   throw new Error("Hosted bundle archive contains an invalid file entry.");
+}
+
+function assertCanonicalBase64(value: string, errorMessage: string): void {
+  if (value.length === 0) {
+    return;
+  }
+
+  if (
+    value.length % 4 !== 0
+    || !BASE64_CANONICAL_PATTERN.test(value)
+  ) {
+    throw new Error(errorMessage);
+  }
+
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.toString("base64") !== value) {
+    throw new Error(errorMessage);
+  }
 }
 
 export function normalizeBundlePath(value: string): string {
