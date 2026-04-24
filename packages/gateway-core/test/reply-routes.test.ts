@@ -131,6 +131,31 @@ describe('gateway route integration', () => {
         participantId: 'linq-user',
       }),
     ).toBe(false)
+
+    expect(
+      gatewayBindingDeliveryFromRoute({
+        channel: 'linq',
+        participantId: 'linq-user',
+        reply: {
+          kind: 'participant',
+          target: 'linq-user',
+        },
+      }),
+    ).toEqual({
+      kind: 'participant',
+      target: 'linq-user',
+    })
+
+    expect(
+      gatewayConversationRouteCanSend({
+        channel: 'linq',
+        participantId: 'linq-user',
+        reply: {
+          kind: 'participant',
+          target: 'linq-user',
+        },
+      }),
+    ).toBe(false)
   })
 
   it('keeps linq thread routes sendable', () => {
