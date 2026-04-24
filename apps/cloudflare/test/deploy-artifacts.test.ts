@@ -22,6 +22,30 @@ describe("deploy artifact validation", () => {
     await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
   });
 
+  it("accepts runner dependencies installed through pnpm's virtual store", async () => {
+    const workspacePackageNames = [
+      ...resolveHostedRunnerWorkspacePackageNames({ includeBundleOnlyDependencies: true }),
+    ];
+    const virtualStorePackageName = selectRunnerDependencyPackageName(workspacePackageNames);
+    const fixture = await createDeployArtifactFixture({ virtualStorePackageName });
+
+    await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
+  });
+
+  it("rejects a missing runner workspace dependency", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const missingPackageName = selectRunnerDependencyPackageName(fixture.workspacePackageNames);
+
+    await rm(
+      path.join(fixture.runnerBundleDir, "node_modules", ...missingPackageName.split("/")),
+      { force: true, recursive: true },
+    );
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      `Missing runner dependency ${missingPackageName}.`,
+    );
+  });
+
   it("rejects a runner bundle without the assembly manifest", async () => {
     const fixture = await createDeployArtifactFixture();
 
@@ -115,12 +139,14 @@ describe("deploy artifact validation", () => {
 async function createDeployArtifactFixture(input: {
   config?: Record<string, unknown>;
   includeBundleOnlyDependencies?: boolean;
+  virtualStorePackageName?: string;
 } = {}): Promise<{
   configPath: string;
   includeSecrets: boolean;
   manifest: RunnerBundleManifest;
   runnerBundleDir: string;
   secretsFilePath: string;
+  workspacePackageNames: readonly string[];
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-deploy-artifacts-"));
   const deployDir = path.join(root, ".deploy");
@@ -172,16 +198,19 @@ async function createDeployArtifactFixture(input: {
       continue;
     }
 
-    const packageDir = path.join(runnerBundleDir, "node_modules", ...packageName.split("/"));
-    await mkdir(packageDir, { recursive: true });
-    await writeFile(
-      path.join(packageDir, "package.json"),
-      `${JSON.stringify({
-        name: packageName,
-        version: "1.0.0",
-      }, null, 2)}\n`,
-      "utf8",
-    );
+    const packageParts = packageName.split("/");
+    const packageDir = packageName === input.virtualStorePackageName
+      ? path.join(
+        runnerBundleDir,
+        "node_modules",
+        ".pnpm",
+        "virtual-store-entry",
+        "node_modules",
+        ...packageParts,
+      )
+      : path.join(runnerBundleDir, "node_modules", ...packageParts);
+
+    await writeWorkspacePackageManifest(packageDir, packageName);
   }
 
   for (const binName of ["murph", "vault-cli"]) {
@@ -200,5 +229,28 @@ async function createDeployArtifactFixture(input: {
     manifest,
     runnerBundleDir,
     secretsFilePath,
+    workspacePackageNames,
   };
+}
+
+async function writeWorkspacePackageManifest(packageDir: string, packageName: string): Promise<void> {
+  await mkdir(packageDir, { recursive: true });
+  await writeFile(
+    path.join(packageDir, "package.json"),
+    `${JSON.stringify({
+      name: packageName,
+      version: "1.0.0",
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+function selectRunnerDependencyPackageName(packageNames: readonly string[]): string {
+  const packageName = packageNames.find((entry) => entry !== hostedRunnerRuntimePackageName);
+
+  if (!packageName) {
+    throw new Error("Fixture must include at least one runner dependency package.");
+  }
+
+  return packageName;
 }
