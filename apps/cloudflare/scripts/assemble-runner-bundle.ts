@@ -92,6 +92,7 @@ async function assembleRunnerBundle(): Promise<void> {
     );
     await writeRunnerBundleManifest(runnerBundleDeployRoot, {
       appDir,
+      buildSkipped: shouldSkipBuild,
       includeBundleOnlyDependencies,
       repoRoot,
     });

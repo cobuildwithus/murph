@@ -66,6 +66,9 @@ describe("runHostedWorkerDeployment", () => {
       includeSecrets: true,
       runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
+      source: expect.objectContaining({
+        CF_WORKER_NAME: "hosted-worker",
+      }),
     });
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
       configPath: "/tmp/wrangler.generated.jsonc",
@@ -144,6 +147,42 @@ describe("runHostedWorkerDeployment", () => {
     expect(result.mode).toBe("direct");
   });
 
+  it("fails direct deploys that do not report a 100% Worker version for smoke", async () => {
+    const finalDeployment: DeploymentStatusPayload = {
+      created_on: "2026-03-27T00:10:00.000Z",
+      versions: [
+        {
+          percentage: 50,
+          version_id: "version-split",
+        },
+      ],
+    };
+    const dependencies = createDependencies({
+      readCurrentDeployment: vi
+        .fn<HostedWorkerDeploymentDependencies["readCurrentDeployment"]>()
+        .mockResolvedValue(finalDeployment),
+    });
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    })).rejects.toThrow("Direct deploy did not report a 100% Worker version for smoke.");
+
+    expect(dependencies.deployDirect).toHaveBeenCalledTimes(1);
+    expect(dependencies.writeFile).not.toHaveBeenCalledWith(
+      "/tmp/deployment-result.json",
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
   it("accepts yes and no for deploy boolean env values", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",
@@ -180,6 +219,9 @@ describe("runHostedWorkerDeployment", () => {
       includeSecrets: false,
       runnerBundleDir: "/tmp/runner-bundle",
       secretsFilePath: "/tmp/worker-secrets.json",
+      source: expect.objectContaining({
+        HOSTED_EXECUTION_INCLUDE_SECRETS: "no",
+      }),
     });
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
       configPath: "/tmp/wrangler.generated.jsonc",

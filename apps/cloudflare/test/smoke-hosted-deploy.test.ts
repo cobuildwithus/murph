@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import {
@@ -9,6 +13,7 @@ import {
   resolveSmokeWorkerBaseUrl,
   runSmokeHostedDeploy,
 } from "../scripts/smoke-hosted-deploy.shared.js";
+import { TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON } from "./hosted-execution-fixtures.js";
 
 describe("resolveSmokeWorkerBaseUrl", () => {
   it("prefers the explicit smoke worker base URL over the other envs", () => {
@@ -86,13 +91,20 @@ describe("runSmokeHostedDeploy", () => {
       });
 
       if (String(url).endsWith("/")) {
-        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+        return new Response(JSON.stringify({
+          ok: true,
+          service: "cloudflare-hosted-runner",
+          workerVersionId: "version-123",
+        }), {
           status: 200,
         });
       }
 
       if (String(url).endsWith("/health")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        return new Response(JSON.stringify({
+          ok: true,
+          workerVersionId: "version-123",
+        }), { status: 200 });
       }
 
       if (String(url).endsWith("/status")) {
@@ -186,6 +198,104 @@ describe("runSmokeHostedDeploy", () => {
         url: "https://worker.example.test/health",
       },
     ]);
+  });
+
+  it("fails when a version override is configured but the Worker reports a different version", async () => {
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async (url: RequestInfo | URL) => {
+        if (String(url).endsWith("/")) {
+          return new Response(JSON.stringify({
+            ok: true,
+            service: "cloudflare-hosted-runner",
+            workerVersionId: "version-other",
+          }), {
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({ ok: true, workerVersionId: "version-other" }), { status: 200 });
+      },
+      log() {},
+      source: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow("worker banner check did not run the requested Worker version.");
+  });
+
+  it("executes the deploy-signed runner container smoke when enabled", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-manifest-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        sourceFingerprint: "source-fingerprint",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    const fetchCalls: Array<{
+      headers: HeadersInit | undefined;
+      method: string | undefined;
+      url: string;
+    }> = [];
+    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({
+        headers: init?.headers,
+        method: init?.method,
+        url: String(url),
+      });
+
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              sourceFingerprint: "source-fingerprint",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    const containerCall = fetchCalls.find((entry) =>
+      entry.url === "https://worker.example.test/internal/deploy/container-smoke"
+    );
+    expect(containerCall).toBeDefined();
+    expect(containerCall?.method).toBe("POST");
+    const headers = new Headers(containerCall?.headers);
+    expect(headers.get("x-hosted-execution-signature")).toEqual(expect.any(String));
+    expect(headers.get("x-hosted-execution-timestamp")).toEqual(expect.any(String));
   });
 
   it("fails when the authenticated hosted status check returns a non-ok response", async () => {

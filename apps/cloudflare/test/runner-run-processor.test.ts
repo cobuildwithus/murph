@@ -45,13 +45,14 @@ afterEach(() => {
 });
 
 function createHostedRunRecord(input: {
+  attempt?: number;
   runId: string;
   status?: HostedRunRecord["status"];
   userId?: string;
 }): HostedRunRecord {
   return {
     acquiredAt: "2026-04-20T09:00:00.000Z",
-    attempt: 1,
+    attempt: input.attempt ?? 1,
     createdAt: "2026-04-20T09:00:00.000Z",
     eventCount: 0,
     eventKinds: [],
@@ -93,6 +94,7 @@ function createReplicaPersistenceProcessor(input: {
       },
     }),
     env: {
+      maxEventAttempts: 3,
       runnerTimeoutMs: 60_000,
       webCallbackSigning: {
         keyId: "v1",
@@ -173,6 +175,12 @@ function createInvokeRunnerProcessor(input: {
         throw new Error("unexpected runner container invocation");
       }),
       ownsInternalWorkerProxyToken: vi.fn(async () => false),
+      smokeHealth: vi.fn(async () => ({
+        ok: true,
+        runnerBundle: null,
+        service: "cloudflare-hosted-runner-node",
+        status: 200,
+      })),
     })),
   };
 
@@ -181,6 +189,7 @@ function createInvokeRunnerProcessor(input: {
     bucket: {} as never,
     ensureRunnerStores,
     env: {
+      maxEventAttempts: 3,
       runnerTimeoutMs: 60_000,
       webCallbackSigning: input.webCallbackSigning === null ? null : {
         keyId: "v1",
@@ -2428,6 +2437,64 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     expect(destroyCallOrder).toBeLessThan(retryPhaseCallOrder);
     expect(stateStore.recordRunPhase).not.toHaveBeenCalledWith(expect.objectContaining({
       phase: "quarantined",
+    }));
+  });
+
+  it("quarantines invalid runner-output bundles at the configured attempt limit", async () => {
+    const {
+      destroyRunnerContainerInstance,
+      processor,
+      readBundlesForRunner,
+      stateStore,
+    } = createInvokeRunnerProcessor();
+    const invalidRef: HostedExecutionBundleRef = {
+      hash: "3".repeat(64),
+      key: "bundles/user_123/vault/output-invalid-final",
+      size: 180,
+      updatedAt: "2026-04-20T09:00:00.000Z",
+    };
+    const validationError = new HostedBundleArchiveValidationError({
+      cause: new Error("Hosted bundle archive is invalid."),
+      operation: "runner-output",
+      ref: invalidRef,
+    });
+    readBundlesForRunner.mockResolvedValueOnce("bundle-encoded");
+    vi.spyOn(
+      runnerContainerModule,
+      "invokeHostedExecutionContainerRunner",
+    ).mockRejectedValueOnce(validationError);
+
+    const result = await processor.executeRunDrain({
+      currentBundleRef: invalidRef,
+      events: [],
+      primaryWake: createRuntimeTimerWake(),
+      run: createHostedRunRecord({
+        attempt: 3,
+        runId: "run-output-invalid-final",
+      }),
+      runToken: "run-token",
+    });
+
+    expect(result).toEqual({
+      cursorSnapshotRef: invalidRef,
+      finalizeRequired: false,
+      quarantineCode: "runner-output-invalid-max-attempts",
+      redactedSummary: {
+        attempt: 3,
+        maxEventAttempts: 3,
+        phase: "quarantined",
+        reason: "runner_output_invalid_max_attempts",
+      },
+      state: "quarantined",
+    });
+    expect(destroyRunnerContainerInstance).toHaveBeenCalledTimes(1);
+    expect(stateStore.completeRun).toHaveBeenCalledTimes(1);
+    expect(stateStore.failRun).not.toHaveBeenCalled();
+    expect(stateStore.recordRunPhase).toHaveBeenCalledWith(expect.objectContaining({
+      phase: "quarantined",
+    }));
+    expect(stateStore.recordRunPhase).not.toHaveBeenCalledWith(expect.objectContaining({
+      phase: "retry.scheduled",
     }));
   });
 

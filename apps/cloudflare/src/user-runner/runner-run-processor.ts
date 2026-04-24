@@ -99,6 +99,7 @@ export interface RunnerRunDrainExecutionResult {
   cursorSnapshotRef: HostedExecutionBundleRef | null;
   finalizeRequired: boolean;
   nextRuntimeWakeAt?: string | null;
+  quarantineCode?: string | null;
   redactedSummary?: Record<string, unknown>;
   state: HostedIngressLifecycleState;
 }
@@ -516,6 +517,55 @@ export class RunnerRunProcessor {
           run,
           userId,
         });
+
+        if (run.attempt >= this.dependencies.env.maxEventAttempts) {
+          await this.dependencies.stateStore.completeRun({
+            eventId: wake.eventId,
+            finishedAt: new Date().toISOString(),
+            leaseOwner: context.leaseOwner,
+          });
+          void recordHostedRunBreadcrumbInWebBestEffort({
+            baseUrl: this.dependencies.hostedWebBaseUrl,
+            callbackSigning: this.dependencies.env.webCallbackSigning,
+            error,
+            level: "error",
+            message:
+              "Cloudflare quarantined hosted run execution because the runner output bundle stayed invalid through the configured attempt limit.",
+            phase: "quarantined",
+            redacted: {
+              attempt: run.attempt,
+              maxEventAttempts: this.dependencies.env.maxEventAttempts,
+              reason: "runner_output_invalid_max_attempts",
+              resumeFinalize: input.lifecycle.resumeFinalize,
+            },
+            run,
+            runToken: input.runToken,
+            userId,
+            wakeEventId: wake.eventId,
+          });
+          await this.advanceRunPhase({
+            wake,
+            error,
+            level: "error",
+            message:
+              "Hosted run execution quarantined invalid runner output after the configured attempt limit.",
+            phase: "quarantined",
+            run,
+            runToken: input.runToken,
+          });
+          return {
+            cursorSnapshotRef: input.currentBundleRef,
+            finalizeRequired: false,
+            quarantineCode: "runner-output-invalid-max-attempts",
+            redactedSummary: {
+              attempt: run.attempt,
+              maxEventAttempts: this.dependencies.env.maxEventAttempts,
+              phase: "quarantined",
+              reason: "runner_output_invalid_max_attempts",
+            },
+            state: "quarantined",
+          };
+        }
       }
 
       await this.dependencies.stateStore.failRun({

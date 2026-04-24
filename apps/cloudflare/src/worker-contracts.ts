@@ -23,6 +23,11 @@ export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
   BUNDLES: R2BucketLike;
+  CF_VERSION_METADATA?: {
+    id?: string;
+    tag?: string;
+    timestamp?: string;
+  };
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_ASSISTANT_API_KEY_ENV?: string;
   HOSTED_ASSISTANT_APPROVAL_POLICY?: string;

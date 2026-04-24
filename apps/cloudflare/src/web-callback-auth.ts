@@ -6,6 +6,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   encodeHostedExecutionSignedRequestPayload,
+  readHostedExecutionSignatureHeaders,
 } from "@murphai/hosted-execution/auth";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
@@ -17,6 +18,7 @@ const HOSTED_WEB_CALLBACK_SIGNING_ALGORITHM: EcdsaParams = {
   name: "ECDSA",
   hash: "SHA-256",
 };
+const DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS = 5 * 60 * 1000;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -26,6 +28,7 @@ export interface HostedWebCallbackSigningEnvironment {
 }
 
 const privateKeyCache = new Map<string, Promise<CryptoKey>>();
+const publicKeyCache = new Map<string, Promise<CryptoKey>>();
 
 export function readHostedWebCallbackSigningEnvironment(
   source: EnvSource = process.env,
@@ -70,6 +73,60 @@ export async function createHostedWebCallbackSignatureHeaders(input: {
     [HOSTED_EXECUTION_SIGNATURE_HEADER]: signature,
     [HOSTED_EXECUTION_TIMESTAMP_HEADER]: timestamp,
   };
+}
+
+export async function verifyHostedWebCallbackSignatureHeaders(input: {
+  environment: HostedWebCallbackSigningEnvironment;
+  method?: string;
+  now?: () => Date;
+  path?: string;
+  payload: string;
+  request: Request;
+  search?: string;
+  timestampToleranceMs?: number;
+  userId?: string | null;
+}): Promise<boolean> {
+  const headers = readHostedExecutionSignatureHeaders(input.request.headers);
+
+  if (headers.keyId !== input.environment.keyId) {
+    return false;
+  }
+
+  if (!isFreshCanonicalTimestamp({
+    now: input.now ?? (() => new Date()),
+    timestamp: headers.timestamp,
+    toleranceMs: input.timestampToleranceMs ?? DEFAULT_SIGNATURE_TIMESTAMP_TOLERANCE_MS,
+  })) {
+    return false;
+  }
+
+  const signatureBytes = decodeBase64Url(headers.signature);
+
+  if (!signatureBytes) {
+    return false;
+  }
+
+  const signatureBuffer = new ArrayBuffer(signatureBytes.byteLength);
+  new Uint8Array(signatureBuffer).set(signatureBytes);
+  const publicKey = await importHostedWebCallbackPublicKey(
+    input.environment.privateKeyJwkJson,
+    input.environment.keyId,
+  );
+
+  return crypto.subtle.verify(
+    HOSTED_WEB_CALLBACK_SIGNING_ALGORITHM,
+    publicKey,
+    signatureBuffer,
+    encodeHostedExecutionSignedRequestPayload({
+      method: input.method,
+      nonce: headers.nonce,
+      path: input.path,
+      payload: input.payload,
+      search: input.search,
+      timestamp: headers.timestamp ?? "",
+      userId: input.userId,
+    }),
+  );
 }
 
 async function signHostedWebCallbackRequest(input: {
@@ -128,6 +185,39 @@ async function importHostedWebCallbackPrivateKey(
   return existing;
 }
 
+async function importHostedWebCallbackPublicKey(
+  privateKeyJwkJson: string,
+  keyId: string,
+): Promise<CryptoKey> {
+  const privateJwk = parseEcP256PrivateJwk(
+    parseJsonObject(privateKeyJwkJson, "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK"),
+    "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+  );
+  const publicJwk: JsonWebKey = {
+    crv: "P-256",
+    ext: true,
+    key_ops: ["verify"],
+    kty: "EC",
+    x: privateJwk.x,
+    y: privateJwk.y,
+  };
+  const cacheKey = `${keyId}:${JSON.stringify(publicJwk)}`;
+  let existing = publicKeyCache.get(cacheKey);
+
+  if (!existing) {
+    existing = crypto.subtle.importKey(
+      "jwk",
+      publicJwk,
+      HOSTED_WEB_CALLBACK_SIGNING_IMPORT_ALGORITHM,
+      false,
+      ["verify"],
+    );
+    publicKeyCache.set(cacheKey, existing);
+  }
+
+  return existing;
+}
+
 function parseJsonObject(value: string, label: string): Record<string, unknown> {
   let parsed: unknown;
 
@@ -178,6 +268,42 @@ function encodeBase64Url(bytes: Uint8Array): string {
     .replace(/\+/gu, "-")
     .replace(/\//gu, "_")
     .replace(/=+$/u, "");
+}
+
+function decodeBase64Url(value: string | null): Uint8Array | null {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized || /[^A-Za-z0-9\-_]/u.test(normalized)) {
+    return null;
+  }
+
+  const padded = normalized.replace(/-/gu, "+").replace(/_/gu, "/");
+  const remainder = padded.length % 4;
+  const withPadding = remainder === 0 ? padded : `${padded}${"=".repeat(4 - remainder)}`;
+
+  try {
+    return Uint8Array.from([...Buffer.from(withPadding, "base64")]);
+  } catch {
+    return null;
+  }
+}
+
+function isFreshCanonicalTimestamp(input: {
+  now: () => Date;
+  timestamp: string | null;
+  toleranceMs: number;
+}): boolean {
+  if (typeof input.timestamp !== "string" || input.timestamp.trim() !== input.timestamp) {
+    return false;
+  }
+
+  const timestampMs = Date.parse(input.timestamp);
+
+  if (!Number.isFinite(timestampMs) || new Date(timestampMs).toISOString() !== input.timestamp) {
+    return false;
+  }
+
+  return Math.abs(input.now().getTime() - timestampMs) <= input.toleranceMs;
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

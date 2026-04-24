@@ -4,6 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  buildHostedWorkerSecretsPayload,
+  buildHostedWranglerDeployConfig,
+  readHostedDeployAutomationEnvironment,
+} from "./deploy-automation.js";
+import {
   hostedRunnerRuntimePackageName,
   resolveHostedRunnerBuildPackageNames,
   resolveHostedRunnerWorkspacePackageNames,
@@ -11,7 +16,7 @@ import {
 
 export const runnerBundleManifestFileName = ".murph-runner-bundle-manifest.json";
 
-const runnerBundleManifestSchemaVersion = 1;
+const runnerBundleManifestSchemaVersion = 2;
 const deployArtifactTimestampGraceMs = 2_000;
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultAppDir = path.resolve(scriptDir, "..");
@@ -19,7 +24,10 @@ const defaultRepoRoot = path.resolve(defaultAppDir, "../..");
 const expectedDeployContainerImage = "../../../Dockerfile.cloudflare-hosted-runner";
 const expectedDeployContainerBuildContext = "..";
 
+type EnvSource = Readonly<Record<string, string | undefined>>;
+
 export interface RunnerBundleManifest {
+  buildSkipped: boolean;
   buildPackageNames: readonly string[];
   bundleFingerprint: string;
   generatedAt: string;
@@ -33,6 +41,7 @@ export async function writeRunnerBundleManifest(
   bundleDir: string,
   input: {
     appDir?: string;
+    buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
     repoRoot?: string;
@@ -53,6 +62,7 @@ async function buildRunnerBundleManifest(
   bundleDir: string,
   input: {
     appDir?: string;
+    buildSkipped?: boolean;
     includeBundleOnlyDependencies?: boolean;
     now?: () => Date;
     repoRoot?: string;
@@ -63,6 +73,7 @@ async function buildRunnerBundleManifest(
   const repoRoot = input.repoRoot ?? defaultRepoRoot;
 
   return {
+    buildSkipped: input.buildSkipped === true,
     buildPackageNames: [
       ...resolveHostedRunnerBuildPackageNames({ includeBundleOnlyDependencies }),
     ],
@@ -88,15 +99,17 @@ export async function assertPreparedDeployArtifacts(input: {
   repoRoot?: string;
   runnerBundleDir: string;
   secretsFilePath: string;
+  source?: EnvSource;
 }): Promise<void> {
   const appDir = input.appDir ?? defaultAppDir;
   const repoRoot = input.repoRoot ?? defaultRepoRoot;
+  const source = input.source ?? process.env;
   const manifest = await readRunnerBundleManifest(input.runnerBundleDir);
   const manifestGeneratedAtMs = parseManifestGeneratedAt(manifest.generatedAt);
 
-  assertGeneratedWranglerConfig(
-    await readJsonObjectFile(input.configPath, "generated Wrangler config"),
-  );
+  const generatedConfig = await readJsonObjectFile(input.configPath, "generated Wrangler config");
+  assertGeneratedWranglerConfig(generatedConfig);
+  assertGeneratedWranglerConfigMatchesCurrentEnvironment(generatedConfig, source);
   await assertArtifactNotNewerThanManifest({
     artifactPath: input.configPath,
     label: "generated Wrangler config",
@@ -104,7 +117,8 @@ export async function assertPreparedDeployArtifacts(input: {
   });
 
   if (input.includeSecrets) {
-    await readJsonObjectFile(input.secretsFilePath, "worker secrets payload");
+    const workerSecretsPayload = await readJsonObjectFile(input.secretsFilePath, "worker secrets payload");
+    assertWorkerSecretsPayloadMatchesCurrentEnvironment(workerSecretsPayload, source);
     await assertArtifactNotNewerThanManifest({
       artifactPath: input.secretsFilePath,
       label: "worker secrets payload",
@@ -113,6 +127,10 @@ export async function assertPreparedDeployArtifacts(input: {
   }
 
   await assertRunnerBundleShape(input.runnerBundleDir, manifest);
+
+  if (manifest.buildSkipped) {
+    throw new Error("Prepared runner bundle was assembled without rebuilding workspace artifacts; rebuild deploy artifacts before deploying.");
+  }
 
   if (!manifest.includeBundleOnlyDependencies) {
     throw new Error(
@@ -160,6 +178,7 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
 
   if (
     manifest.schemaVersion !== runnerBundleManifestSchemaVersion ||
+    typeof manifest.buildSkipped !== "boolean" ||
     typeof manifest.generatedAt !== "string" ||
     typeof manifest.includeBundleOnlyDependencies !== "boolean" ||
     typeof manifest.sourceFingerprint !== "string" ||
@@ -171,6 +190,7 @@ async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundle
   }
 
   return {
+    buildSkipped: manifest.buildSkipped,
     buildPackageNames: manifest.buildPackageNames,
     bundleFingerprint: manifest.bundleFingerprint,
     generatedAt: manifest.generatedAt,
@@ -244,6 +264,34 @@ function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
     imageBuildContext !== expectedDeployContainerBuildContext
   ) {
     throw new Error("Generated Wrangler config must use the prepared runner-bundle image context.");
+  }
+}
+
+function assertGeneratedWranglerConfigMatchesCurrentEnvironment(
+  config: Record<string, unknown>,
+  source: EnvSource,
+): void {
+  const expectedConfig = buildHostedWranglerDeployConfig(
+    readHostedDeployAutomationEnvironment(source),
+  );
+
+  if (!stableJsonEqual(config, expectedConfig)) {
+    throw new Error(
+      "Generated Wrangler config does not match the current deploy environment; rerender deploy artifacts before deploying.",
+    );
+  }
+}
+
+function assertWorkerSecretsPayloadMatchesCurrentEnvironment(
+  payload: Record<string, unknown>,
+  source: EnvSource,
+): void {
+  const expectedPayload = buildHostedWorkerSecretsPayload(source);
+
+  if (!stableJsonEqual(payload, expectedPayload)) {
+    throw new Error(
+      "Worker secrets payload does not match the current deploy environment; rerender deploy artifacts before deploying.",
+    );
   }
 }
 
@@ -423,6 +471,78 @@ async function assertReadableDirectory(directoryPath: string, label: string): Pr
   }
 }
 
+interface WorkspacePackageSourceManifest {
+  bin?: unknown;
+  files?: unknown;
+}
+
+async function readWorkspacePackageSourceManifest(
+  packageDir: string,
+): Promise<WorkspacePackageSourceManifest> {
+  return await readJsonObjectFile(
+    path.join(packageDir, "package.json"),
+    "workspace package manifest",
+  );
+}
+
+function listWorkspacePackageSourceAssetRoots(
+  packageDir: string,
+  packageJson: WorkspacePackageSourceManifest,
+): string[] {
+  const roots = [
+    path.join(packageDir, "package.json"),
+    path.join(packageDir, "src"),
+    path.join(packageDir, "tsconfig.json"),
+    path.join(packageDir, "tsconfig.build.json"),
+    path.join(packageDir, "tsconfig.typecheck.json"),
+    path.join(packageDir, "README.md"),
+    path.join(packageDir, "DEPLOY.md"),
+    path.join(packageDir, "assets"),
+    path.join(packageDir, "bin"),
+    path.join(packageDir, "scripts"),
+  ];
+
+  for (const entry of listPackageFilesEntries(packageJson.files)) {
+    if (entry === "dist") {
+      continue;
+    }
+
+    roots.push(path.join(packageDir, entry));
+  }
+
+  for (const entry of listPackageBinEntries(packageJson.bin)) {
+    roots.push(path.join(packageDir, entry));
+  }
+
+  return roots;
+}
+
+function listPackageFilesEntries(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) =>
+    typeof entry === "string" && isSafeRelativePackagePath(entry) ? [entry] : []
+  );
+}
+
+function listPackageBinEntries(value: unknown): string[] {
+  if (typeof value === "string") {
+    return isSafeRelativePackagePath(value) ? [value] : [];
+  }
+
+  if (!isStringRecord(value)) {
+    return [];
+  }
+
+  return Object.values(value).filter(isSafeRelativePackagePath);
+}
+
+function isSafeRelativePackagePath(value: string): boolean {
+  return value.length > 0 && !path.isAbsolute(value) && !value.split(/[\\/]/u).includes("..");
+}
+
 async function fingerprintHostedRunnerSources(input: {
   appDir: string;
   includeBundleOnlyDependencies: boolean;
@@ -473,13 +593,10 @@ async function resolveHostedRunnerSourceRoots(input: {
   ];
 
   for (const packageDir of packageDirectories) {
-    roots.push(
-      path.join(packageDir, "package.json"),
-      path.join(packageDir, "src"),
-      path.join(packageDir, "tsconfig.json"),
-      path.join(packageDir, "tsconfig.build.json"),
-      path.join(packageDir, "tsconfig.typecheck.json"),
-    );
+    roots.push(...listWorkspacePackageSourceAssetRoots(
+      packageDir,
+      await readWorkspacePackageSourceManifest(packageDir),
+    ));
   }
 
   return roots;
@@ -624,6 +741,25 @@ const sourceDirectorySkipNames = new Set([
 
 function stringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function stableJsonEqual(left: unknown, right: unknown): boolean {
+  return stableJsonStringify(left) === stableJsonStringify(right);
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJsonStringify).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
 }
 
 function isStringArray(value: unknown): value is string[] {

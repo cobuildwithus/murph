@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -77,6 +78,14 @@ interface HostedExecutionLocalBridgeConfig {
   localInternalProxyBaseUrl: string | null;
 }
 
+interface HostedRunnerBundleManifestSummary {
+  buildSkipped?: boolean;
+  bundleFingerprint?: string;
+  generatedAt?: string;
+  schemaVersion?: number;
+  sourceFingerprint?: string;
+}
+
 type HostedAbortEventListener = (...args: unknown[]) => void;
 
 interface HostedAbortEmitterLike {
@@ -117,9 +126,14 @@ export async function startHostedContainerEntrypoint(input: {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
 
       if (request.method === "GET" && requestUrl.pathname === "/health") {
+        const runnerBundle = await readHostedRunnerBundleManifestSummary(runtime.processApi);
         response.statusCode = 200;
         response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner-node" }));
+        response.end(JSON.stringify({
+          ok: true,
+          service: "cloudflare-hosted-runner-node",
+          ...(runnerBundle ? { runnerBundle } : {}),
+        }));
         return;
       }
 
@@ -711,6 +725,47 @@ function classifyRequestDecodeError(error: unknown): {
   };
 }
 
+async function readHostedRunnerBundleManifestSummary(
+  processApi: HostedContainerProcessApi,
+): Promise<HostedRunnerBundleManifestSummary | null> {
+  let raw: string;
+
+  try {
+    raw = await processApi.readFile(
+      path.join(process.cwd(), ".murph-runner-bundle-manifest.json"),
+      "utf8",
+    );
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const manifest = parsed as Record<string, unknown>;
+
+  return {
+    ...(typeof manifest.buildSkipped === "boolean" ? { buildSkipped: manifest.buildSkipped } : {}),
+    ...(typeof manifest.bundleFingerprint === "string" ? { bundleFingerprint: manifest.bundleFingerprint } : {}),
+    ...(typeof manifest.generatedAt === "string" ? { generatedAt: manifest.generatedAt } : {}),
+    ...(typeof manifest.schemaVersion === "number" ? { schemaVersion: manifest.schemaVersion } : {}),
+    ...(typeof manifest.sourceFingerprint === "string" ? { sourceFingerprint: manifest.sourceFingerprint } : {}),
+  };
+}
+
 async function runHostedExecutionJob(
   input: HostedAssistantRuntimeJobInput,
   runtime: HostedContainerRuntimeDependencies,
@@ -746,6 +801,15 @@ function isHostedAssistantConfigurationError(
   error: unknown,
 ): error is Error & { code?: string | null } {
   return error instanceof Error && error.name === "HostedAssistantConfigurationError";
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT",
+  );
 }
 
 function createCachedHostedContainerLoader<T>(load: () => Promise<T>): () => Promise<T> {

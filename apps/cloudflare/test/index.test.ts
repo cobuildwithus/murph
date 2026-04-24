@@ -9,6 +9,9 @@ import {
   deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import {
+  createHostedWebCallbackSignatureHeaders,
+} from "../src/web-callback-auth.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
@@ -135,6 +138,91 @@ describe("cloudflare worker routes", () => {
     expect(unknownResponse.status).toBe(404);
     await expect(unknownResponse.json()).resolves.toEqual({
       error: "Not found",
+    });
+  });
+
+  it("exposes the invoked Worker version when the version metadata binding is present", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/"),
+      {
+        ...createWorkerEnv(),
+        CF_VERSION_METADATA: {
+          id: "version-123",
+          tag: "test",
+          timestamp: "2026-04-24T00:00:00.000Z",
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      service: "cloudflare-hosted-runner",
+      workerVersionId: "version-123",
+    });
+  });
+
+  it("runs the deploy-signed managed container smoke route", async () => {
+    const env = createWorkerEnv();
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      runnerContainer: {
+        ok: true,
+        runnerBundle: {
+          buildSkipped: false,
+          bundleFingerprint: "bundle-fingerprint",
+          generatedAt: "2026-04-24T00:00:00.000Z",
+          schemaVersion: 2,
+          sourceFingerprint: "source-fingerprint",
+        },
+        service: "cloudflare-hosted-runner-node",
+        status: 200,
+      },
+      service: "cloudflare-hosted-runner",
+    });
+  });
+
+  it("rejects unsigned deploy container smoke requests", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/deploy/container-smoke", {
+        method: "POST",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
+  it("returns method-not-allowed before smoke signature verification on wrong methods", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/deploy/container-smoke", {
+        method: "GET",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(response.status).toBe(405);
+    await expect(response.json()).resolves.toEqual({
+      error: "Method not allowed.",
     });
   });
 
@@ -845,6 +933,20 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
         },
         async ownsInternalWorkerProxyToken(input: { token: string }): Promise<boolean> {
           return name === "member_123" && input.token === RUNNER_PROXY_TOKEN;
+        },
+        async smokeHealth() {
+          return {
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "bundle-fingerprint",
+              generatedAt: "2026-04-24T00:00:00.000Z",
+              schemaVersion: 2,
+              sourceFingerprint: "source-fingerprint",
+            },
+            service: "cloudflare-hosted-runner-node",
+            status: 200,
+          };
         },
       };
     },

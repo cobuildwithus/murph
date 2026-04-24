@@ -140,6 +140,48 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("starts a managed shell for deploy smoke health and stops it afterward", async () => {
+    const { container, containerFetch, destroy, startAndWaitForPorts } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        expect(url).toBe("http://container/health");
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerBundle: {
+            buildSkipped: false,
+            bundleFingerprint: "bundle-fingerprint",
+            generatedAt: "2026-04-24T00:00:00.000Z",
+            schemaVersion: 2,
+            sourceFingerprint: "source-fingerprint",
+          },
+          service: "cloudflare-hosted-runner-node",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    const result = await container.smokeHealth();
+
+    expect(result).toEqual({
+      ok: true,
+      runnerBundle: {
+        buildSkipped: false,
+        bundleFingerprint: "bundle-fingerprint",
+        generatedAt: "2026-04-24T00:00:00.000Z",
+        schemaVersion: 2,
+        sourceFingerprint: "source-fingerprint",
+      },
+      service: "cloudflare-hosted-runner-node",
+      status: 200,
+    });
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(containerFetch).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
   it("starts the container without operator-only control-plane secrets in supervisor env", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble({
       env: {
@@ -1290,6 +1332,14 @@ describe("RunnerContainer", () => {
       async ownsInternalWorkerProxyToken() {
         return false;
       },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
     }));
 
     await invokeHostedExecutionContainerRunner({
@@ -1323,6 +1373,14 @@ describe("RunnerContainer", () => {
       invoke,
       async ownsInternalWorkerProxyToken() {
         return false;
+      },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
       },
     }));
 
@@ -1467,6 +1525,12 @@ describe("RunnerContainer", () => {
             destroyInstance,
             invoke: vi.fn(async () => createRunnerResult()),
             ownsInternalWorkerProxyToken: vi.fn(async () => false),
+            smokeHealth: vi.fn(async () => ({
+              ok: true,
+              runnerBundle: null,
+              service: "cloudflare-hosted-runner-node",
+              status: 200,
+            })),
           } satisfies HostedExecutionContainerStubLike;
         },
       },

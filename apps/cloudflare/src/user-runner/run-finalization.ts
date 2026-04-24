@@ -231,7 +231,7 @@ export async function prepareAndCommitAcquiredHostedRun(
         acquired: input.acquired,
         eventResults: input.acquired.events.map((event) => ({
           ingressEventId: event.id,
-          quarantineCode: "invalid-authoritative-snapshot",
+          quarantineCode: execution.quarantineCode ?? "invalid-authoritative-snapshot",
           state: "quarantined",
         })),
         outputCommittedSeq: resolved.outputCommittedSeq,
@@ -1302,13 +1302,16 @@ async function quarantineAcquiredHostedRunAfterInvalidBundle(
     userId: string;
   },
 ): Promise<HostedRunFinalizationOutcome> {
+  const reason = typeof input.summary?.reason === "string"
+    ? input.summary.reason
+    : "invalid_authoritative_snapshot";
   context.recordHostedRunBreadcrumb({
     level: "warn",
     message:
-      "Cloudflare quarantined a hosted run because the authoritative bundle archive is invalid.",
+      "Cloudflare quarantined a hosted run because a bundle archive failed validation.",
     phase: "commit_quarantine_attempted",
     redacted: {
-      commitKind: "invalid_authoritative_snapshot",
+      commitKind: reason,
       eventCount: input.eventResults.length,
     },
     run: input.run,
@@ -1328,7 +1331,7 @@ async function quarantineAcquiredHostedRunAfterInvalidBundle(
       redactedSummary: input.summary ?? {
         eventCount: input.eventResults.length,
         phase: "quarantined",
-        reason: "invalid_authoritative_snapshot",
+        reason,
       },
       runId: input.run.id,
       runToken: input.runToken,
@@ -1341,13 +1344,13 @@ async function quarantineAcquiredHostedRunAfterInvalidBundle(
   context.recordHostedRunBreadcrumb({
     level: commit.committed ? "warn" : "error",
     message: commit.committed
-      ? "Cloudflare committed invalid-bundle quarantine for the hosted run."
-      : "Cloudflare could not commit invalid-bundle quarantine for the hosted run.",
+      ? "Cloudflare committed bundle-validation quarantine for the hosted run."
+      : "Cloudflare could not commit bundle-validation quarantine for the hosted run.",
     phase: commit.committed ? "commit_quarantined" : "commit_quarantine_failed",
     redacted: {
       committed: commit.committed,
       eventCount: input.eventResults.length,
-      reason: "invalid_authoritative_snapshot",
+      reason,
     },
     run: input.run,
     runToken: input.runToken,

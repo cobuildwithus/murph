@@ -21,6 +21,7 @@ That rendered surface is then used by:
 
 The rendered deploy helper path is the canonical rollout contract. The lower-level version helper still exists for recovery work, and the checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints, so applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config/secrets render newer than the bundle fails before upload.
+The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace plus the web-owned hosted-run recovery record.
 
 ## One-Time Cloudflare Setup
@@ -46,6 +47,7 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 
 `CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy.
+The workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`; deploy smoke signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, and compares its reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest.
 
 ## Required GitHub Environment Secrets
 
