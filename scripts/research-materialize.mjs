@@ -510,7 +510,8 @@ function buildLaterTemplateSpecs(commonPromptTokens, sharedHeader, sectionSeams)
         SHARED_HEADER: sharedHeader,
         PROTOCOL_PACKAGE_DRAFT_SOURCE: "TODO_PROTOCOL_PACKAGE_DRAFT_SOURCE",
         CLAIMS_SOURCE: "TODO_SECTION_CLAIMS_V1_SOURCE",
-        ATOMIC_FINDINGS_SOURCE: "TODO_ATOMIC_FINDINGS_V1_SOURCE",
+        SOURCE_FINDINGS_SOURCE: "TODO_SOURCE_FINDINGS_V1_SOURCE",
+        EVIDENCE_APPRAISALS_SOURCE: "TODO_EVIDENCE_APPRAISALS_V1_SOURCE",
       },
     },
     {
@@ -546,7 +547,8 @@ function buildLaterTemplateSpecs(commonPromptTokens, sharedHeader, sectionSeams)
         SECTION_ID: section.id,
         SECTION_FOCUS: section.focus,
         CANONICAL_LEDGER_SOURCE: "TODO_CANONICAL_SOURCE_LEDGER_V1_SOURCE",
-        ATOMIC_FINDINGS_SOURCE: "TODO_ATOMIC_FINDINGS_V1_SOURCE",
+        SOURCE_FINDINGS_SOURCE: "TODO_SOURCE_FINDINGS_V1_SOURCE",
+        EVIDENCE_APPRAISALS_SOURCE: "TODO_EVIDENCE_APPRAISALS_V1_SOURCE",
         SOURCE_PAGE_DRAFTS_SOURCE: "TODO_SOURCE_PAGE_DRAFTS_SOURCE",
       },
     });
@@ -597,11 +599,19 @@ function buildExtractionBatchSourceList(outDirRelative) {
   ]);
 }
 
-function buildAtomicFindingsSourceList(outDirRelative) {
+function buildSourceFindingsSourceList(outDirRelative) {
   return formatBulletList([
-    `${outDirRelative}/downloads/*/normalized/ATOMIC_FINDINGS_V1*.json`,
-    `${outDirRelative}/downloads/*/downloads/ATOMIC_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/normalized/SOURCE_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/downloads/SOURCE_FINDINGS_V1*.json`,
     `${outDirRelative}/downloads/*/thread.json (fallback only when a batch returned findings inline instead of as downloadable JSON)`,
+  ]);
+}
+
+function buildEvidenceAppraisalsSourceList(outDirRelative) {
+  return formatBulletList([
+    `${outDirRelative}/downloads/*/normalized/EVIDENCE_APPRAISALS_V1*.json`,
+    `${outDirRelative}/downloads/*/downloads/EVIDENCE_APPRAISALS_V1*.json`,
+    `${outDirRelative}/downloads/*/thread.json (fallback only when a batch returned appraisals inline instead of as downloadable JSON)`,
   ]);
 }
 
@@ -640,8 +650,10 @@ function buildSectionClaimsSourceList(outDirRelative) {
 
 function buildSafetyFindingsSourceList(outDirRelative) {
   return formatBulletList([
-    `${outDirRelative}/downloads/*/normalized/ATOMIC_FINDINGS_V1*.json`,
-    `${outDirRelative}/downloads/*/downloads/ATOMIC_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/normalized/SOURCE_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/downloads/SOURCE_FINDINGS_V1*.json`,
+    `${outDirRelative}/downloads/*/normalized/EVIDENCE_APPRAISALS_V1*.json`,
+    `${outDirRelative}/downloads/*/downloads/EVIDENCE_APPRAISALS_V1*.json`,
     `${outDirRelative}/downloads/*/normalized/*source-page-drafts*.md`,
     `${outDirRelative}/downloads/*/downloads/*source-page-drafts*.md`,
     `${outDirRelative}/responses/2*.md (use any safety-oriented synthesis sections already present)`,
@@ -821,8 +833,10 @@ function main(argv) {
     BATCH_SOURCE: buildExtractionBatchSourceList(outDirRelative),
     SOURCE_EXTRACTION_BATCHES_V1_SOURCE: buildExtractionBatchSourceList(outDirRelative),
     SOURCE_PAGE_DRAFTS_SOURCE: buildSourcePageDraftsSourceList(outDirRelative),
-    ATOMIC_FINDINGS_SOURCE: buildAtomicFindingsSourceList(outDirRelative),
-    ATOMIC_FINDINGS_V1_SOURCE: buildAtomicFindingsSourceList(outDirRelative),
+    SOURCE_FINDINGS_SOURCE: buildSourceFindingsSourceList(outDirRelative),
+    SOURCE_FINDINGS_V1_SOURCE: buildSourceFindingsSourceList(outDirRelative),
+    EVIDENCE_APPRAISALS_SOURCE: buildEvidenceAppraisalsSourceList(outDirRelative),
+    EVIDENCE_APPRAISALS_V1_SOURCE: buildEvidenceAppraisalsSourceList(outDirRelative),
     ARTIFACT_CANDIDATES_SOURCE: buildArtifactCandidatesSourceList(outDirRelative),
     SECTION_SYNTHESIS_SOURCE: buildSectionSynthesisSourceList(outDirRelative),
     CLAIMS_SOURCE: buildSectionClaimsSourceList(outDirRelative),
