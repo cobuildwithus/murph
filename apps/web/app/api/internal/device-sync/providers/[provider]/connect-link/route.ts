@@ -18,6 +18,21 @@ const HOSTED_ASSISTANT_DEVICE_CONNECT_UNAVAILABLE_ERROR = {
   retryable: true,
 } as const;
 
+type HostedDeviceConnectLinkSetupPhase =
+  | "callback_verification_setup"
+  | "control_plane_setup";
+
+class HostedDeviceConnectLinkBackendSetupError extends Error {
+  readonly errorObservabilityClass = "hosted_device_connect_link_backend_setup";
+  readonly errorPhase: HostedDeviceConnectLinkSetupPhase;
+
+  constructor(phase: HostedDeviceConnectLinkSetupPhase, cause: unknown) {
+    super("Hosted device connect-link backend setup failed.", { cause });
+    this.name = "HostedDeviceConnectLinkBackendSetupError";
+    this.errorPhase = phase;
+  }
+}
+
 export async function GET(): Promise<Response> {
   return Response.json({
     error: {
@@ -54,7 +69,7 @@ async function requireHostedDeviceConnectCallbackRequest(request: Request): Prom
   try {
     return await requireHostedCloudflareCallbackRequest(request);
   } catch (error) {
-    remapHostedDeviceConnectBackendSetupError(error);
+    remapHostedDeviceConnectBackendSetupError(error, "callback_verification_setup");
   }
 }
 
@@ -71,15 +86,18 @@ async function startHostedDeviceConnection(
       HOSTED_ASSISTANT_DEVICE_CONNECT_RETURN_TO,
     );
   } catch (error) {
-    remapHostedDeviceConnectBackendSetupError(error);
+    remapHostedDeviceConnectBackendSetupError(error, "control_plane_setup");
   }
 }
 
-function remapHostedDeviceConnectBackendSetupError(error: unknown): never {
+function remapHostedDeviceConnectBackendSetupError(
+  error: unknown,
+  phase: HostedDeviceConnectLinkSetupPhase,
+): never {
   if (error instanceof TypeError || error instanceof RangeError) {
     throw deviceSyncError({
       ...HOSTED_ASSISTANT_DEVICE_CONNECT_UNAVAILABLE_ERROR,
-      cause: error,
+      cause: new HostedDeviceConnectLinkBackendSetupError(phase, error),
     });
   }
 

@@ -41,7 +41,15 @@ export interface JsonErrorMapping {
     retryable?: boolean;
     details?: unknown;
   };
+  log?: JsonErrorLogMapping | null;
   status: number;
+}
+
+export type JsonLogLevel = "warn" | "error";
+
+export interface JsonErrorLogMapping {
+  level?: JsonLogLevel;
+  details?: Record<string, unknown>;
 }
 
 export type JsonErrorMatcher = (error: unknown) => JsonErrorMapping | null;
@@ -206,6 +214,7 @@ export function createJsonErrorResponse(
   const matchedError = matchJsonError(error, options.matchers);
 
   if (matchedError) {
+    logMappedJsonError(error, matchedError, options);
     return NextResponse.json(
       { error: matchedError.error },
       buildJsonResponseInit(options, matchedError.status),
@@ -353,10 +362,34 @@ function matchJsonError(
   return null;
 }
 
+function logMappedJsonError(
+  error: unknown,
+  mapping: JsonErrorMapping,
+  options: JsonErrorResponseOptions,
+): void {
+  if (!mapping.log) {
+    return;
+  }
+
+  logJsonError(mapping.log.level ?? inferJsonErrorLogLevel(mapping.status), error, options, {
+    errorResponseCode: mapping.error.code,
+    ...(mapping.error.retryable === undefined
+      ? {}
+      : { errorResponseRetryable: mapping.error.retryable }),
+    errorResponseStatus: mapping.status,
+    ...(mapping.log.details ?? {}),
+  });
+}
+
+function inferJsonErrorLogLevel(status: number): JsonLogLevel {
+  return status >= 500 ? "error" : "warn";
+}
+
 function logJsonError(
-  level: "warn" | "error",
+  level: JsonLogLevel,
   error: unknown,
   options: JsonErrorResponseOptions,
+  extraDetails: Record<string, unknown> = {},
 ): void {
   const log = level === "warn" ? console.warn : console.error;
   const defaultDetails = describeErrorForLog(error, options.sanitizeLogString);
@@ -368,6 +401,7 @@ function logJsonError(
     internalMessage: options.internalMessage,
     ...(defaultDetails ?? {}),
     ...customDetails,
+    ...extraDetails,
   });
 }
 
