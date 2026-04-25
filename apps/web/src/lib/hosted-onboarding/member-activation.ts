@@ -21,9 +21,11 @@ import {
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
 import {
+  clearHostedMemberPendingActivationTimeZone,
   composeHostedMemberSnapshot,
+  type HostedMemberActivationCoreState,
   type HostedMemberSnapshot,
-  readHostedMemberCoreState,
+  readHostedMemberActivationCoreState,
   readHostedMemberEmailAuthorization,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
@@ -49,6 +51,10 @@ export type HostedMemberActivationResult = {
   activated: boolean;
   hostedExecutionEventId: string | null;
   memberId: string;
+};
+
+type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
+  core: HostedMemberActivationCoreState;
 };
 
 export async function activateHostedMemberForPositiveSourceTx(input: {
@@ -114,6 +120,13 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     && currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
     if (existingWakeEventId) {
+      if (currentMember.core.pendingActivationTimeZone) {
+        await clearHostedMemberPendingActivationTimeZone({
+          memberId: currentMember.core.id,
+          prisma: input.prisma,
+        });
+      }
+
       return {
         activated: false,
         hostedExecutionEventId: existingWakeEventId,
@@ -125,6 +138,13 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   if (currentMember.core.billingStatus !== HostedBillingStatus.active) {
     await updateHostedMemberCoreState({
       billingStatus: HostedBillingStatus.active,
+      memberId: currentMember.core.id,
+      prisma: input.prisma,
+    });
+  }
+
+  if (currentMember.core.pendingActivationTimeZone) {
+    await clearHostedMemberPendingActivationTimeZone({
       memberId: currentMember.core.id,
       prisma: input.prisma,
     });
@@ -184,7 +204,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
 }
 
 async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
-  member: HostedMemberSnapshot;
+  member: HostedMemberActivationSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<{ welcomeRoute: HostedExecutionAssistantNotificationRoute | null }> {
   if (!input.member.identity?.phoneNumber) {
@@ -206,7 +226,7 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
 async function readActivationReadyHostedMemberTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMemberSnapshot | null> {
+}): Promise<HostedMemberActivationSnapshot | null> {
   await lockHostedMemberRow(input.prisma, input.memberId);
 
   const currentMember = await readHostedMemberActivationSnapshotTx({
@@ -229,8 +249,8 @@ async function readActivationReadyHostedMemberTx(input: {
 async function readHostedMemberActivationSnapshotTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMemberSnapshot | null> {
-  const core = await readHostedMemberCoreState({
+}): Promise<HostedMemberActivationSnapshot | null> {
+  const core = await readHostedMemberActivationCoreState({
     memberId: input.memberId,
     prisma: input.prisma,
   });
@@ -252,12 +272,17 @@ async function readHostedMemberActivationSnapshotTx(input: {
     prisma: input.prisma,
   });
 
-  return composeHostedMemberSnapshot(core, {
+  const snapshot = composeHostedMemberSnapshot(core, {
     billingRef: null,
     emailAuthorization,
     identity,
     routing,
   });
+
+  return {
+    ...snapshot,
+    core,
+  };
 }
 
 function resolveHostedMemberActivationEmailLinked(
@@ -298,7 +323,7 @@ async function materializeHostedMemberActivationWakesTx(input: {
 
 function buildHostedMemberActivationWakeForMember(input: {
   emailLinked: boolean;
-  member: HostedMemberSnapshot;
+  member: HostedMemberActivationSnapshot;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
@@ -313,6 +338,7 @@ function buildHostedMemberActivationWakeForMember(input: {
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,
+    timeZone: input.member.core.pendingActivationTimeZone,
   });
 }
 
@@ -326,6 +352,7 @@ function buildHostedMemberActivationWake(input: {
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
+  timeZone?: string | null;
 }): HostedIngressEnvelope {
   return buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedMemberActivationEventId(input),
@@ -341,6 +368,7 @@ function buildHostedMemberActivationWake(input: {
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
+    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
 

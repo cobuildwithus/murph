@@ -1,18 +1,18 @@
 import "server-only";
 
-import { type HostedMember } from "@prisma/client";
 import { cache } from "react";
 
 import { getPrisma } from "../prisma";
 import { isHostedOnboardingError } from "./errors";
 import { getHostedPrivySession, type HostedPrivySession } from "./hosted-session";
+import { type HostedMemberCoreState } from "./hosted-member-store";
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import { type HostedMemberPrivyIdentityLookup } from "./member-identity-service";
 import { resolvePrivyMemberAuthFromSession } from "./request-auth";
 
 export interface HostedPageAuthSnapshot {
   authenticated: boolean;
-  authenticatedMember: HostedMember | null;
+  authenticatedMember: HostedMemberCoreState | null;
   linkedAccounts: PrivyLinkedAccountLike[];
   memberLookup: HostedMemberPrivyIdentityLookup | null;
   session: HostedPrivySession | null;

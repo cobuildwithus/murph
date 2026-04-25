@@ -1,7 +1,10 @@
-import { type HostedMember, type PrismaClient } from "@prisma/client";
+import { type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { readHostedMemberCoreState } from "./hosted-member-store";
+import {
+  readHostedMemberCoreState,
+  type HostedMemberCoreState,
+} from "./hosted-member-store";
 import {
   assertHostedMemberActiveAccessAllowed,
 } from "./entitlement";
@@ -25,14 +28,14 @@ export interface PrivyMemberAuthContext {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
   memberLookup: HostedMemberPrivyIdentityLookup | null;
-  member: HostedMember | null;
+  member: HostedMemberCoreState | null;
   verifiedPrivyUser: HostedPrivyUser;
 }
 
 export type PrivySessionContext = HostedPrivySession;
 
 export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAuthContext, "member"> {
-  member: HostedMember;
+  member: HostedMemberCoreState;
 }
 
 export async function getPrivySession(
@@ -46,7 +49,7 @@ export async function resolvePrivyMemberAuthFromSession(input: {
   memberId: string | null;
   prisma: PrismaClient;
 }): Promise<{
-  member: HostedMember | null;
+  member: HostedMemberCoreState | null;
   memberLookup: HostedMemberPrivyIdentityLookup | null;
 }> {
   const memberLookup = await lookupHostedMemberForPrivyIdentity({

@@ -66,7 +66,14 @@ export type HostedMemberRoutingLookupMatch =
   | "telegramUserId";
 
 export interface HostedMemberRoutingLookup {
-  core: Pick<HostedMember, "billingStatus" | "createdAt" | "id" | "suspendedAt" | "updatedAt">;
+  core: Pick<
+    HostedMember,
+    | "billingStatus"
+    | "createdAt"
+    | "id"
+    | "suspendedAt"
+    | "updatedAt"
+  >;
   matchedBy: HostedMemberRoutingLookupMatch;
   routing: HostedMemberRoutingLookupSnapshot;
 }

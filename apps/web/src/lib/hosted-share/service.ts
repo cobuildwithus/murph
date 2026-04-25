@@ -1,10 +1,10 @@
 import type {
-  HostedMember,
   HostedShareLink,
   PrismaClient,
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { type HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 
 import { acceptHostedShareLink } from "./acceptance-service";
 import {
@@ -33,7 +33,7 @@ export async function createHostedShareLink(
 }
 
 export async function buildHostedSharePageData(input: {
-  authenticatedMember?: HostedMember | null;
+  authenticatedMember?: HostedMemberCoreState | null;
   inviteCode?: string | null;
   prisma?: PrismaClient;
   shareCode: string;

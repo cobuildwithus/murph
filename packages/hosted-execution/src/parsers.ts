@@ -1,5 +1,6 @@
 import {
   assertContract,
+  normalizeIanaTimeZone,
   sharePackSchema,
   type SharePack,
 } from "@murphai/contracts";
@@ -153,6 +154,10 @@ export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelop
         ),
         memberId: wireUserId,
         occurredAt,
+        timeZone: parseHostedExecutionOptionalTimeZone(
+          record.timeZone,
+          "Hosted execution wake member.activated timeZone",
+        ),
       });
     case "member.channels.updated":
       return buildHostedExecutionMemberChannelsUpdatedWake({
@@ -267,6 +272,25 @@ export function parseHostedExecutionConversationMessagePayload(
             }),
       };
   }
+}
+
+function parseHostedExecutionOptionalTimeZone(
+  value: unknown,
+  label: string,
+): string | null | undefined {
+  const timeZone = readOptionalNullableString(value, label);
+
+  if (timeZone === undefined || timeZone === null) {
+    return timeZone;
+  }
+
+  const normalized = normalizeIanaTimeZone(timeZone);
+
+  if (!normalized) {
+    throw new TypeError(`${label} must be a valid IANA timezone.`);
+  }
+
+  return normalized;
 }
 
 function parseHostedExecutionLinqConversationMessage(
@@ -798,15 +822,22 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
   const userId = requireString(record.userId, "Hosted execution event userId");
 
   switch (kind) {
-    case "member.activated":
+    case "member.activated": {
+      const timeZone = parseHostedExecutionOptionalTimeZone(
+        record.timeZone,
+        "Hosted execution member.activated timeZone",
+      );
+
       return {
         kind,
         memberChannels: parseHostedExecutionMemberChannels(
           record.memberChannels,
           "Hosted execution member.activated memberChannels",
         ),
+        ...(timeZone === undefined ? {} : { timeZone }),
         userId,
       };
+    }
     case "member.channels.updated":
       return {
         kind,

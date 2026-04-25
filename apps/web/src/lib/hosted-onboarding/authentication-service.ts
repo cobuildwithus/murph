@@ -1,4 +1,5 @@
 import {
+  HostedBillingStatus,
   type PrismaClient,
 } from "@prisma/client";
 
@@ -16,6 +17,7 @@ import { isHostedMemberActivationPending } from "./activation-progress";
 import {
   readHostedMemberMessagingSetupState,
   syncHostedMemberVerifiedEmailAuthorization,
+  updateHostedMemberPendingActivationTimeZoneIfActivationPending,
 } from "./hosted-member-store";
 import {
   syncHostedMemberTelegramRoutingBinding,
@@ -28,6 +30,7 @@ import {
   type HostedPrivyIdentity,
   type HostedPrivyUser,
 } from "./privy";
+import { normalizeHostedSignupTimeZone } from "./time-zone-hint";
 import {
   buildHostedInviteUrl,
   issueHostedInvite,
@@ -47,6 +50,7 @@ export async function completeHostedPrivyVerification(input: {
   intent?: HostedAuthenticationIntent;
   now?: Date;
   prisma?: PrismaClient;
+  timeZone?: string | null;
   verifiedPrivyUser?: HostedPrivyUser | null;
 }): Promise<{
   inviteCode: string;
@@ -104,6 +108,12 @@ export async function completeHostedPrivyVerification(input: {
       prisma,
       verifiedPrivyUser: input.verifiedPrivyUser ?? null,
     });
+    await syncHostedMemberPendingActivationTimeZone({
+      billingStatus: member.billingStatus,
+      memberId: member.id,
+      prisma,
+      timeZone: input.timeZone ?? null,
+    });
 
     const messagingSetupState = await readHostedMemberMessagingSetupState({
       memberId: member.id,
@@ -152,6 +162,25 @@ export async function completeHostedPrivyVerification(input: {
     });
     throw error;
   }
+}
+
+async function syncHostedMemberPendingActivationTimeZone(input: {
+  billingStatus: HostedBillingStatus;
+  memberId: string;
+  prisma: PrismaClient;
+  timeZone: string | null;
+}): Promise<void> {
+  const timeZone = normalizeHostedSignupTimeZone(input.timeZone);
+
+  if (!timeZone || input.billingStatus === HostedBillingStatus.active) {
+    return;
+  }
+
+  await updateHostedMemberPendingActivationTimeZoneIfActivationPending({
+    memberId: input.memberId,
+    pendingActivationTimeZone: timeZone,
+    prisma: input.prisma,
+  });
 }
 
 async function syncHostedPrivyBindings(input: {

@@ -52,9 +52,12 @@ export function buildHostedPrivyCompletionRequestPayload(input: {
   intent: HostedAuthenticationIntent;
   inviteCode?: string | null;
 }): Record<string, string> {
+  const timeZone = resolveHostedBrowserTimeZone();
+
   return {
     intent: input.intent,
     ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
+    ...(timeZone ? { timeZone } : {}),
   };
 }
 
@@ -103,4 +106,17 @@ function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
       error.code === "PRIVY_PHONE_NOT_READY" ||
       error.code === "PRIVY_WALLET_NOT_READY")
   );
+}
+
+function resolveHostedBrowserTimeZone(): string | null {
+  if (typeof window === "undefined" || !("Intl" in window)) {
+    return null;
+  }
+
+  try {
+    const timeZone = window.Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof timeZone === "string" && timeZone.length > 0 ? timeZone : null;
+  } catch {
+    return null;
+  }
 }

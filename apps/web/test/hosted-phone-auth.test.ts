@@ -1214,6 +1214,34 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
+  it("includes the browser timezone when hosted Privy completion runs in a browser", async () => {
+    const { buildHostedPrivyCompletionRequestPayload } = await import("@/src/components/hosted-onboarding/hosted-privy-auth-support");
+
+    vi.stubGlobal("window", {
+      Intl: {
+        DateTimeFormat: () => ({
+          resolvedOptions: () => ({
+            timeZone: "America/Los_Angeles",
+          }),
+        }),
+      },
+    });
+
+    try {
+      assert.deepEqual(
+        buildHostedPrivyCompletionRequestPayload({
+          intent: "signup",
+        }),
+        {
+          intent: "signup",
+          timeZone: "America/Los_Angeles",
+        },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("sends checkout-stage homepage verification back to the invite join flow", async () => {
     vi.resetModules();
 

@@ -735,6 +735,7 @@ function createAuthenticatedMember() {
     billingStatus: HostedBillingStatus.active,
     createdAt: NOW,
     id: "member_123",
+    pendingActivationTimeZone: null,
     suspendedAt: null,
     updatedAt: NOW,
   };

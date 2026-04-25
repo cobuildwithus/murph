@@ -185,6 +185,7 @@ export function buildHostedExecutionMemberActivatedWake(input: {
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
   occurredAt: string;
+  timeZone?: string | null;
 }): HostedExecutionMemberActivatedWake {
   return {
     ...buildHostedExecutionMemberOwnedWakeBase({
@@ -194,6 +195,7 @@ export function buildHostedExecutionMemberActivatedWake(input: {
       occurredAt: input.occurredAt,
     }),
     memberChannels: { ...input.memberChannels },
+    ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   };
 }
 

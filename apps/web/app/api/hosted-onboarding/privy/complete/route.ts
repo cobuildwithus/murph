@@ -10,6 +10,7 @@ import {
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
+import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.privy-complete");
@@ -18,10 +19,15 @@ export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const auth = await requirePrivyCompletionSession(request);
     const body = await readOptionalJsonObject(request);
+    const timeZone = resolveHostedSignupTimeZone({
+      clientTimeZone: body.timeZone,
+      headers: request.headers,
+    });
     const result = await completeHostedPrivyVerification({
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
       intent: isHostedAuthenticationIntent(body.intent) ? body.intent : "signup",
+      ...(timeZone ? { timeZone } : {}),
       verifiedPrivyUser: auth.verifiedPrivyUser,
     });
 

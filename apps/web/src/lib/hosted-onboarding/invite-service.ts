@@ -29,6 +29,7 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
+import { type HostedMemberCoreState } from "./hosted-member-store";
 import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import { deriveHostedOnboardingStage } from "./lifecycle";
 import {
@@ -68,7 +69,7 @@ type HostedInvitePhoneAuthTargetWithNumber =
     };
 
 export async function getHostedInviteStatus(input: {
-  authenticatedMember?: HostedMember | null;
+  authenticatedMember?: HostedMemberCoreState | null;
   authenticatedSessionIdentity?: HostedPrivyIdentity | null;
   inviteCode: string;
   now?: Date;
@@ -185,7 +186,7 @@ export async function getHostedInviteStatus(input: {
 }
 
 export async function buildHostedInvitePageData(input: {
-  authenticatedMember?: HostedMember | null;
+  authenticatedMember?: HostedMemberCoreState | null;
   inviteCode: string;
   prisma?: PrismaClient;
 }) {
@@ -196,7 +197,7 @@ export async function issueHostedInviteForPhone(input: {
   channel?: "share" | "web";
   phoneNumber: string;
   prisma?: PrismaClient;
-}): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMember }> {
+}): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMemberCoreState }> {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction(async (tx) => {
