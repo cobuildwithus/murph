@@ -22,10 +22,47 @@ import type {
   HostedPhoneCountryOption,
 } from "./hosted-phone-auth-types";
 
+export function HostedInviteMaskedPhoneStep({
+  disabled,
+  phoneHint,
+  onEnterNumber,
+}: {
+  disabled: boolean;
+  phoneHint: string;
+  onEnterNumber: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="space-y-2">
+        <p className="text-sm font-medium leading-none text-[#2d3436]">
+          Phone number
+        </p>
+        <div className="rounded-xl border border-[#d9cdbb] bg-[#f7f4ee] px-4 py-3">
+          <p className="text-lg font-semibold text-[#2d3436]">{phoneHint}</p>
+        </div>
+        <p className="text-sm text-stone-500">
+          Enter the full number to receive your code.
+        </p>
+      </div>
+      <Button
+        type="button"
+        disabled={disabled}
+        size="lg"
+        className="w-full"
+        onClick={onEnterNumber}
+      >
+        Enter full number
+      </Button>
+      <HostedAuthLegalNotice />
+    </div>
+  );
+}
+
 export function HostedPhoneEntryStep({
   intent,
   phoneFieldLabel,
   phoneFieldDescription,
+  phoneInputAutoFocus = false,
   pendingAction,
   phoneCountryOptions,
   phoneNumber,
@@ -39,6 +76,7 @@ export function HostedPhoneEntryStep({
   intent: HostedPhoneAuthIntent;
   phoneFieldLabel?: string | null;
   phoneFieldDescription?: string | null;
+  phoneInputAutoFocus?: boolean;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
@@ -100,6 +138,7 @@ export function HostedPhoneEntryStep({
           </Combobox>
           <Input
             id={phoneInputId}
+            autoFocus={phoneInputAutoFocus}
             autoComplete="tel-national"
             inputMode="tel"
             name="phone-number"
