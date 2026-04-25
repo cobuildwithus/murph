@@ -24,12 +24,16 @@ import type {
 
 export function HostedInviteMaskedPhoneStep({
   disabled,
+  pendingAction,
   phoneHint,
-  onEnterNumber,
+  onSendCode,
+  onUseDifferentNumber,
 }: {
   disabled: boolean;
+  pendingAction: HostedPhoneAuthPendingAction;
   phoneHint: string;
-  onEnterNumber: () => void;
+  onSendCode: () => void;
+  onUseDifferentNumber: () => void;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -41,7 +45,7 @@ export function HostedInviteMaskedPhoneStep({
           <p className="text-lg font-semibold text-[#2d3436]">{phoneHint}</p>
         </div>
         <p className="text-sm text-stone-500">
-          Enter the full number to receive your code.
+          We will text a verification code to this number.
         </p>
       </div>
       <Button
@@ -49,10 +53,16 @@ export function HostedInviteMaskedPhoneStep({
         disabled={disabled}
         size="lg"
         className="w-full"
-        onClick={onEnterNumber}
+        onClick={onSendCode}
       >
-        Enter full number
+        {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
       </Button>
+      <HostedUseDifferentNumberButton
+        disabled={disabled}
+        pendingAction={pendingAction}
+        size="sm"
+        onClick={onUseDifferentNumber}
+      />
       <HostedAuthLegalNotice />
     </div>
   );
