@@ -11,7 +11,14 @@ import type {
   WorkerEnvironmentContract,
 } from "../worker-contracts.ts";
 
-type RunnerOutboundUserRunnerStubLike = WorkerBootstrapUserRunnerStubLike;
+interface RunnerOutboundUserRunnerStubLike extends WorkerBootstrapUserRunnerStubLike {
+  stopActiveRunMessagingActivity?(input: {
+    reason?: string | null;
+    runId: string;
+  }): Promise<{
+    stopped: boolean;
+  }>;
+}
 
 export interface RunnerOutboundEnvironmentSource
   extends WorkerEnvironmentContract<RunnerOutboundUserRunnerStubLike> {}

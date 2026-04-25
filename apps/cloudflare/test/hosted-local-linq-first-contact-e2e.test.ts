@@ -207,7 +207,11 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(sendIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndices[0]).toBeGreaterThanOrEqual(0);
     expect(sendIndex).toBeGreaterThan(typingIndices[0]);
-    expect(typingStopIndex).toBeGreaterThan(sendIndex);
+    expect(typingStopIndex).toBeGreaterThan(typingIndices[0]);
+    expect(typingStopIndex).toBeLessThan(sendIndex);
+    expect(typingRequestsAfterInbound.every((request) =>
+      requestsAfterInbound.indexOf(request) < sendIndex
+    )).toBe(true);
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
     );

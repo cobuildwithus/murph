@@ -498,10 +498,24 @@ async function stopHostedMessagingActivityIndicator(input: {
 }): Promise<void> {
   try {
     await input.indicator.stop();
+    emitHostedExecutionStructuredLog({
+      component: input.component,
+      details: {
+        ...input.target.logDetails,
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+      },
+      message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator stopped.`,
+      phase: "side-effects.draining",
+      run: input.run,
+      wake: input.target.wake,
+    });
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: input.component,
-      details: input.target.logDetails,
+      details: {
+        ...input.target.logDetails,
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+      },
       error,
       level: "warn",
       message: `Hosted ${formatHostedMessagingActivityChannelLabel(input.target.channel)} typing indicator could not be stopped.`,

@@ -17,6 +17,7 @@ export type {
   HostedRuntimeEffectsPort,
   HostedRuntimeIssueExportPort,
   HostedRuntimeIssueRecordResponse,
+  HostedRuntimeMessagingActivityPort,
   HostedRuntimePlatform,
   HostedRuntimeTurnInputPort,
   HostedRuntimeUsageExportPort,

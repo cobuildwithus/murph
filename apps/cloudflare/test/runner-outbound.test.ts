@@ -181,6 +181,50 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("routes active messaging activity stop requests to the bound user runner", async () => {
+    const stopActiveRunMessagingActivity = vi.fn(async () => ({
+      stopped: true,
+    }));
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName() {
+          return {
+            async bootstrapUser(userId: string) {
+              return { userId };
+            },
+            stopActiveRunMessagingActivity,
+          };
+        },
+      },
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/messaging-activity/stop-active", {
+        body: JSON.stringify({
+          reason: "before_committed_assistant_delivery",
+          runId: "run_123",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      env,
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stopped: true,
+    });
+    expect(stopActiveRunMessagingActivity).toHaveBeenCalledWith({
+      reason: "before_committed_assistant_delivery",
+      runId: "run_123",
+    });
+  });
+
   it.each(ALLOWLISTED_WEB_CONTROL_CASES)(
     "proxies allowlisted hosted web-control path: $name",
     async ({ body, path }) => {

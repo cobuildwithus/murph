@@ -345,6 +345,19 @@ describe("hosted runtime messaging activity helpers", () => {
 
     const stopHandle = await mocks.startLinqTypingIndicator.mock.results[0]?.value;
     expect(stopHandle.stop).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          chatIdPresent: true,
+          provider: "linq",
+          runElapsedMs: expect.any(Number),
+          sourceSeq: "007",
+        }),
+        message: "Hosted Linq typing indicator stopped.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 
   it("logs a null elapsed time when the hosted run startedAt is invalid", async () => {

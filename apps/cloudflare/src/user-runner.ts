@@ -743,6 +743,17 @@ export class HostedUserRunner {
     };
   }
 
+  async stopActiveRunMessagingActivity(input: {
+    reason?: string | null;
+    runId: string;
+  }): Promise<{
+    stopped: boolean;
+  }> {
+    return this.stopActiveMessagingActivity({
+      runId: input.runId,
+    });
+  }
+
   private async stopActiveMessagingActivity(input: {
     runId?: string;
   }): Promise<{
