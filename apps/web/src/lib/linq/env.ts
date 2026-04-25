@@ -34,10 +34,6 @@ export function readLinqEnvironment(source: NodeJS.ProcessEnv = process.env): Ho
   };
 }
 
-export function readHostedLinqEnvironment(source: NodeJS.ProcessEnv = process.env): HostedLinqEnvironment {
-  return readLinqEnvironment(source);
-}
-
 function readWebhookTimestampToleranceMs(source: NodeJS.ProcessEnv): number {
   const parsed = parseOptionalInteger(readEnv(source, LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS));
 
