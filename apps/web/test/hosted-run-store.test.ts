@@ -141,6 +141,73 @@ function asHostedRunLogPrisma<T extends Record<string, unknown>>(client: T) {
   return Object.assign(Object.create(null), client) as Parameters<typeof recordHostedRunLog>[0]["prisma"];
 }
 
+const hostedRunSensitiveLogFixture = {
+  accessToken: "TEST_ACCESS_TOKEN_SHOULD_NOT_PERSIST",
+  apiKey: "TEST_API_KEY_SHOULD_NOT_PERSIST",
+  bearerToken: "TEST_BEARER_TOKEN_SHOULD_NOT_PERSIST",
+  email: "runner.operator@example.invalid",
+  openaiApiKey: "TEST_OPENAI_API_KEY_SHOULD_NOT_PERSIST",
+  phone: "+15550101234",
+  privateContactName: "PRIVATE_CONTACT_NAME_SHOULD_NOT_PERSIST",
+  rawEmailAfterSemicolon: "Subject: RAW_EMAIL_AFTER_SEMICOLON_SHOULD_NOT_PERSIST",
+  rawEmailBody: "RAW_EMAIL_BODY_SHOULD_NOT_PERSIST",
+  rawEmailSubject: "RAW_EMAIL_SUBJECT_SHOULD_NOT_PERSIST",
+  vaultAfterSemicolon: "Note: VAULT_AFTER_SEMICOLON_SHOULD_NOT_PERSIST",
+  vaultText: "VAULT_TEXT_SHOULD_NOT_PERSIST",
+} as const;
+
+const hostedRunSensitiveLogFragments = [
+  hostedRunSensitiveLogFixture.accessToken,
+  hostedRunSensitiveLogFixture.apiKey,
+  hostedRunSensitiveLogFixture.bearerToken,
+  hostedRunSensitiveLogFixture.email,
+  hostedRunSensitiveLogFixture.openaiApiKey,
+  hostedRunSensitiveLogFixture.phone,
+  hostedRunSensitiveLogFixture.privateContactName,
+  hostedRunSensitiveLogFixture.rawEmailAfterSemicolon,
+  hostedRunSensitiveLogFixture.rawEmailBody,
+  hostedRunSensitiveLogFixture.rawEmailSubject,
+  hostedRunSensitiveLogFixture.vaultAfterSemicolon,
+  hostedRunSensitiveLogFixture.vaultText,
+] as const;
+
+function buildHostedRunSensitiveRunnerPayload() {
+  const rawEmailSnippet = [
+    `From: ${hostedRunSensitiveLogFixture.email}`,
+    `Subject: ${hostedRunSensitiveLogFixture.rawEmailSubject}`,
+    "",
+    `${hostedRunSensitiveLogFixture.rawEmailBody}; ${hostedRunSensitiveLogFixture.rawEmailAfterSemicolon}`,
+  ].join("\n");
+
+  return {
+    accessToken: hostedRunSensitiveLogFixture.accessToken,
+    apiKey: hostedRunSensitiveLogFixture.apiKey,
+    bearerToken: `Bearer ${hostedRunSensitiveLogFixture.bearerToken}`,
+    openaiApiKey: hostedRunSensitiveLogFixture.openaiApiKey,
+    operatorEmail: hostedRunSensitiveLogFixture.email,
+    operatorPhone: hostedRunSensitiveLogFixture.phone,
+    privateContactFields: {
+      displayName: hostedRunSensitiveLogFixture.privateContactName,
+      email: hostedRunSensitiveLogFixture.email,
+      phone: hostedRunSensitiveLogFixture.phone,
+    },
+    rawEmailSnippet,
+    vaultText: `${hostedRunSensitiveLogFixture.vaultText}; ${hostedRunSensitiveLogFixture.vaultAfterSemicolon}`,
+  };
+}
+
+function expectNoSensitiveHostedRunFragments(value: unknown): void {
+  const serialized = JSON.stringify(value);
+
+  if (serialized === undefined) {
+    throw new Error("Expected hosted run log value to be JSON serializable.");
+  }
+
+  for (const fragment of hostedRunSensitiveLogFragments) {
+    expect(serialized).not.toContain(fragment);
+  }
+}
+
 describe("hosted run log handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -365,6 +432,70 @@ describe("hosted run log handling", () => {
         recipient: "<redacted-email>",
       },
     });
+  });
+
+  it("redacts high-risk runner log payloads before persistence", async () => {
+    const runToken = "run-token.sensitive-log-regression";
+    const run = buildRunRow({
+      eventSeqs: ["10"],
+      runToken,
+      ingressEventIds: ["wake_10"],
+    });
+    const sensitivePayload = buildHostedRunSensitiveRunnerPayload();
+    const hostedRunLogCreate = vi.fn(async ({ data }: {
+      data: Record<string, unknown>;
+    }) => ({
+      ...data,
+      createdAt: new Date("2026-04-20T00:01:00.000Z"),
+    }));
+    const tx = asHostedRunMutationTx({
+      hostedRun: {
+        findFirst: vi.fn(async () => run),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      hostedRunLog: {
+        create: hostedRunLogCreate,
+      },
+    });
+    const prisma = asHostedRunLogPrisma({
+      $transaction: async <T>(callback: (inner: typeof tx) => Promise<T>) => callback(tx),
+    });
+
+    const result = await recordHostedRunLog({
+      component: "runner",
+      level: "warn",
+      message: [
+        `authorization: ${sensitivePayload.bearerToken}`,
+        `email=${sensitivePayload.operatorEmail}`,
+        `phone=${sensitivePayload.operatorPhone}`,
+        `api_key=${sensitivePayload.apiKey}`,
+        `rawEmailSnippet=${sensitivePayload.rawEmailSnippet}`,
+        `vaultText=${sensitivePayload.vaultText}`,
+        `privateContactFields=${sensitivePayload.privateContactFields.displayName}`,
+      ].join("; "),
+      prisma,
+      redacted: sensitivePayload,
+      phase: "running",
+      runId: run.id,
+      runToken,
+      userId: run.userId,
+    });
+
+    expect(result.logged).toBe(true);
+    const persisted = hostedRunLogCreate.mock.calls[0]?.[0].data;
+    expect(persisted).toEqual(expect.objectContaining({
+      message: expect.any(String),
+      redactedJson: expect.objectContaining({
+        accessToken: "<redacted-sensitive-field>",
+        openaiApiKey: "<redacted-sensitive-field>",
+      }),
+    }));
+    expectNoSensitiveHostedRunFragments(persisted);
+    expect(result.log?.redacted).toEqual(expect.objectContaining({
+      accessToken: "<redacted-sensitive-field>",
+      openaiApiKey: "<redacted-sensitive-field>",
+    }));
+    expectNoSensitiveHostedRunFragments(result.log);
   });
 });
 
@@ -888,6 +1019,7 @@ describe("commitHostedRunTx", () => {
       redactedSummaryJson: data.redactedSummaryJson ?? null,
       status: data.status,
     }));
+    const sensitivePayload = buildHostedRunSensitiveRunnerPayload();
     const tx = asHostedRunMutationTx({
       hostedExecutionCursor: {
         updateMany: hostedExecutionCursorUpdateMany,
@@ -912,11 +1044,17 @@ describe("commitHostedRunTx", () => {
       finalizeRequired: false,
       outputCommittedSeq: 9n,
       redactedSummary: {
+        accessToken: sensitivePayload.accessToken,
+        apiKey: sensitivePayload.apiKey,
+        openaiApiKey: sensitivePayload.openaiApiKey,
         error: "Bearer top-secret-token person@example.com",
         nested: {
           phone: "+15555551234",
         },
+        privateContactFields: sensitivePayload.privateContactFields,
+        rawEmailSnippet: sensitivePayload.rawEmailSnippet,
         url: "https://secret.example.test/path",
+        vaultText: sensitivePayload.vaultText,
       },
       runId: run.id,
       runToken,
@@ -926,23 +1064,28 @@ describe("commitHostedRunTx", () => {
 
     expect(hostedRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        redactedSummaryJson: {
+        redactedSummaryJson: expect.objectContaining({
+          accessToken: "<redacted-sensitive-field>",
+          openaiApiKey: "<redacted-sensitive-field>",
           error: "Bearer <redacted-secret> <redacted-email>",
           nested: {
             phone: "<redacted-phone>",
           },
           url: "<redacted-url>",
-        },
+        }),
       }),
       where: { id: run.id },
     }));
-    expect(result.run?.redactedSummary).toEqual({
+    const persistedSummary = hostedRunUpdate.mock.calls[0]?.[0].data.redactedSummaryJson;
+    expectNoSensitiveHostedRunFragments(persistedSummary);
+    expect(result.run?.redactedSummary).toEqual(expect.objectContaining({
       error: "Bearer <redacted-secret> <redacted-email>",
       nested: {
         phone: "<redacted-phone>",
       },
       url: "<redacted-url>",
-    });
+    }));
+    expectNoSensitiveHostedRunFragments(result.run?.redactedSummary);
   });
 
   it("scrubs terminal ingress payload ciphertext and spilled payload rows after commit", async () => {
@@ -1787,6 +1930,7 @@ describe("finalizeHostedRunTx", () => {
       redactedSummaryJson: data.redactedSummaryJson ?? null,
       status: data.status,
     }));
+    const sensitivePayload = buildHostedRunSensitiveRunnerPayload();
     const tx = asHostedRunMutationTx({
       hostedExecutionCursor: {
         updateMany: hostedExecutionCursorUpdateMany,
@@ -1815,10 +1959,16 @@ describe("finalizeHostedRunTx", () => {
         updatedAt: "2026-04-20T00:21:00.000Z",
       },
       redactedSummary: {
+        accessToken: sensitivePayload.accessToken,
+        apiKey: sensitivePayload.apiKey,
+        openaiApiKey: sensitivePayload.openaiApiKey,
         email: "person@example.com",
         nested: {
           path: "/tmp/private/output.json",
         },
+        privateContactFields: sensitivePayload.privateContactFields,
+        rawEmailSnippet: sensitivePayload.rawEmailSnippet,
+        vaultText: sensitivePayload.vaultText,
       },
       runId: run.id,
       runToken,
@@ -1847,21 +1997,26 @@ describe("finalizeHostedRunTx", () => {
     });
     expect(hostedRunUpdate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        redactedSummaryJson: {
+        redactedSummaryJson: expect.objectContaining({
+          accessToken: "<redacted-sensitive-field>",
+          openaiApiKey: "<redacted-sensitive-field>",
           email: "<redacted-email>",
           nested: {
             path: "<redacted-path>",
           },
-        },
+        }),
       }),
       where: { id: run.id },
     }));
-    expect(result.run?.redactedSummary).toEqual({
+    const persistedSummary = hostedRunUpdate.mock.calls[0]?.[0].data.redactedSummaryJson;
+    expectNoSensitiveHostedRunFragments(persistedSummary);
+    expect(result.run?.redactedSummary).toEqual(expect.objectContaining({
       email: "<redacted-email>",
       nested: {
         path: "<redacted-path>",
       },
-    });
+    }));
+    expectNoSensitiveHostedRunFragments(result.run?.redactedSummary);
   });
 });
 
