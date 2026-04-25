@@ -8,6 +8,7 @@ import {
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 export type DeploymentMode = "direct";
+export type ContainerRolloutMode = "gradual" | "immediate";
 
 export interface DeploymentStatusPayload {
   created_on: string;
@@ -36,6 +37,7 @@ export interface HostedWorkerDeploymentResult {
 
 export interface HostedWorkerDeploymentDependencies {
   deployDirect(input: {
+    containerRolloutMode: ContainerRolloutMode;
     configPath: string;
     deploymentMessage: string;
     includeSecrets: boolean;
@@ -65,6 +67,7 @@ export interface HostedWorkerDeploymentDependencies {
 }
 
 interface HostedWorkerDeploymentSettingsBase {
+  containerRolloutMode: ContainerRolloutMode;
   deploymentMessage: string;
   includeSecrets: boolean;
   versionTag: string;
@@ -101,6 +104,7 @@ export async function runHostedWorkerDeployment(input: {
     configPath: input.configPath,
     dependencies: input.dependencies,
     deploymentMessage: deploymentSettings.deploymentMessage,
+    containerRolloutMode: deploymentSettings.containerRolloutMode,
     includeSecrets: deploymentSettings.includeSecrets,
     secretsFilePath: input.secretsFilePath,
     versionTag: deploymentSettings.versionTag,
@@ -120,12 +124,14 @@ async function runDirectDeployment(input: {
   configPath: string;
   dependencies: HostedWorkerDeploymentDependencies;
   deploymentMessage: string;
+  containerRolloutMode: ContainerRolloutMode;
   includeSecrets: boolean;
   secretsFilePath: string;
   versionTag: string;
   workerName: string;
 }): Promise<HostedWorkerDeploymentResult> {
   await input.dependencies.deployDirect({
+    containerRolloutMode: input.containerRolloutMode,
     configPath: input.configPath,
     deploymentMessage: input.deploymentMessage,
     includeSecrets: input.includeSecrets,
@@ -188,11 +194,26 @@ function resolveHostedWorkerDeploymentSettings(
   const deploymentMessageOverride = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE);
 
   return {
+    containerRolloutMode: readContainerRolloutMode(env.HOSTED_EXECUTION_CONTAINER_ROLLOUT),
     deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
     includeSecrets,
     mode,
     versionTag,
   };
+}
+
+function readContainerRolloutMode(value: string | undefined): ContainerRolloutMode {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized) {
+    return "gradual";
+  }
+
+  if (normalized === "gradual" || normalized === "immediate") {
+    return normalized;
+  }
+
+  throw new Error("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual' or 'immediate'.");
 }
 
 async function requireCurrentDeployment(

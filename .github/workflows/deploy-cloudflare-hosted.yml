@@ -20,6 +20,14 @@ on:
         required: true
         default: true
         type: boolean
+      container_rollout:
+        description: Container rollout behavior for Worker deploys
+        required: true
+        default: gradual
+        type: choice
+        options:
+          - gradual
+          - immediate
       smoke_user_id:
         description: Optional hosted user id for a manual /run smoke test
         required: false
@@ -243,6 +251,7 @@ jobs:
         if: ${{ inputs.deploy_worker }}
         env:
           HOSTED_EXECUTION_DEPLOYMENT_MODE: direct
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}
         run: pnpm --dir apps/cloudflare deploy:worker:apply -- --config ./.deploy/wrangler.generated.jsonc
@@ -261,6 +270,7 @@ jobs:
             echo
             echo "- Environment: \`${{ inputs.environment }}\`"
             echo "- Deploy strategy: \`direct\`"
+            echo "- Container rollout: \`${{ inputs.container_rollout }}\`"
             echo "- Worker name: \`${CF_WORKER_NAME}\`"
             echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
             echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"

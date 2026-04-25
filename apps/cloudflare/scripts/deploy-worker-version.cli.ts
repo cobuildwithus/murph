@@ -33,11 +33,15 @@ export async function runDeployWorkerVersionCli(
     configPath,
     dependencies: {
       async deployDirect(input) {
+        const containerRolloutArgs = input.containerRolloutMode === "immediate"
+          ? ["--containers-rollout=immediate"]
+          : [];
+
         await runWranglerLogged([
           "deploy",
           "--config",
           input.configPath,
-          "--containers-rollout=immediate",
+          ...containerRolloutArgs,
           "--message",
           input.deploymentMessage,
           "--name",

@@ -7,8 +7,8 @@ import {
   readHostedDeployAutomationEnvironment,
 } from "../scripts/deploy-automation.js";
 
-const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 0;
-const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [100];
+const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 300;
+const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
 
 function parseJsoncObject(rawConfig: string): Record<string, unknown> {
   return JSON.parse(
@@ -21,7 +21,7 @@ function parseJsoncObject(rawConfig: string): Record<string, unknown> {
 }
 
 describe("Cloudflare container rollout config", () => {
-  it("renders all-at-once rollout defaults for hosted runner containers", () => {
+  it("renders conservative rollout defaults for hosted runner containers", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",

@@ -119,7 +119,7 @@ describe("runDeployWorkerVersionCli", () => {
     ]);
   });
 
-  it("forces immediate container rollout on direct deploys", async () => {
+  it("uses configured gradual container rollout on direct deploys by default", async () => {
     await runDeployWorkerVersionCli(
       ["--config", "./.deploy/wrangler.generated.jsonc"],
       {
@@ -131,9 +131,60 @@ describe("runDeployWorkerVersionCli", () => {
         log: false,
         runHostedWorkerDeployment: async ({ dependencies }) => {
           await dependencies.deployDirect({
+            containerRolloutMode: "gradual",
             configPath: "/tmp/wrangler.generated.jsonc",
             deploymentMessage: "manual direct deploy",
             includeSecrets: true,
+            secretsFilePath: "/tmp/worker-secrets.json",
+            versionTag: "manual-version",
+            workerName: "hosted-worker",
+          });
+
+          return {
+            candidateVersionId: null,
+            currentDeploymentVersions: null,
+            finalDeploymentVersions: [],
+            mode: "direct",
+            rolloutPercentage: null,
+            smokeVersionId: null,
+            uploadedVersionId: null,
+            workerName: "hosted-worker",
+          };
+        },
+      },
+    );
+
+    expect(wranglerMocks.runWranglerLogged).toHaveBeenCalledWith([
+      "deploy",
+      "--config",
+      "/tmp/wrangler.generated.jsonc",
+      "--message",
+      "manual direct deploy",
+      "--name",
+      "hosted-worker",
+      "--tag",
+      "manual-version",
+      "--secrets-file",
+      "/tmp/worker-secrets.json",
+    ]);
+  });
+
+  it("passes the immediate container rollout flag only for explicit hotfix deploys", async () => {
+    await runDeployWorkerVersionCli(
+      ["--config", "./.deploy/wrangler.generated.jsonc"],
+      {
+        deployRoot: path.join("/tmp", "repo", "apps", "cloudflare"),
+        env: {
+          CF_WORKER_NAME: "hosted-worker",
+          HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
+        },
+        log: false,
+        runHostedWorkerDeployment: async ({ dependencies }) => {
+          await dependencies.deployDirect({
+            containerRolloutMode: "immediate",
+            configPath: "/tmp/wrangler.generated.jsonc",
+            deploymentMessage: "manual direct deploy",
+            includeSecrets: false,
             secretsFilePath: "/tmp/worker-secrets.json",
             versionTag: "manual-version",
             workerName: "hosted-worker",
@@ -164,8 +215,6 @@ describe("runDeployWorkerVersionCli", () => {
       "hosted-worker",
       "--tag",
       "manual-version",
-      "--secrets-file",
-      "/tmp/worker-secrets.json",
     ]);
   });
 
