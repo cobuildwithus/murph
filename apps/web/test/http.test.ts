@@ -113,6 +113,56 @@ describe("json route helper factory", () => {
     });
   });
 
+  it("can opt matched domain errors into safe classified logs", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const domainError = new Error(
+      "Domain failed from /tmp/demo-app with apiKey=fake-token",
+    );
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      matchers: [
+        (error) => error === domainError
+          ? {
+              error: {
+                code: "DOMAIN_BACKEND_DOWN",
+                message: "Domain backend is unavailable.",
+                retryable: true,
+              },
+              log: {
+                details: {
+                  errorClass: "backend_setup",
+                  errorDomain: "demo",
+                },
+              },
+              status: 503,
+            }
+          : null,
+      ],
+    });
+
+    const response = helpers.jsonError(domainError);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "DOMAIN_BACKEND_DOWN",
+        message: "Domain backend is unavailable.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("route failed", {
+      errorClass: "backend_setup",
+      errorDomain: "demo",
+      errorMessage: "Domain failed from <redacted-path> with apiKey=<redacted-secret>",
+      errorResponseCode: "DOMAIN_BACKEND_DOWN",
+      errorResponseRetryable: true,
+      errorResponseStatus: 503,
+      errorType: "Error",
+      internalMessage: "route failed unexpectedly",
+    });
+  });
+
   it("includes optional sanitized log details for unexpected errors", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({

@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -43,6 +43,10 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("creates a hosted device connect link for the verified Cloudflare callback principal", async () => {
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
@@ -71,6 +75,8 @@ describe("device sync internal connect-link route", () => {
   });
 
   it("maps rejected Cloudflare callbacks to a 401 without starting a connection", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     mocks.requireHostedCloudflareCallbackRequest.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
       httpStatus: 401,
@@ -98,9 +104,23 @@ describe("device sync internal connect-link route", () => {
         retryable: false,
       },
     });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted device-sync settings route failed.",
+      expect.objectContaining({
+        errorClass: "authorization",
+        errorDomain: "hosted-onboarding",
+        errorHttpStatus: 401,
+        errorResponseCode: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+        errorResponseRetryable: false,
+        errorResponseStatus: 401,
+        errorRetryable: false,
+      }),
+    );
   });
 
   it("keeps malformed provider parameters classified as invalid requests", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/providers/%E0%A4%A/connect-link", {
         method: "POST",
@@ -122,9 +142,17 @@ describe("device sync internal connect-link route", () => {
         message: "Invalid request.",
       },
     });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted device-sync settings route failed.",
+      expect.objectContaining({
+        errorType: "InvalidRouteParamEncodingError",
+      }),
+    );
   });
 
   it("maps callback verification setup failures to a retryable unavailable response", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
     mocks.requireHostedCloudflareCallbackRequest.mockRejectedValue(
       new TypeError("Callback verification is not configured."),
     );
@@ -151,9 +179,29 @@ describe("device sync internal connect-link route", () => {
         retryable: true,
       },
     });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted device-sync settings route failed.",
+      expect.objectContaining({
+        errorCauseMessage: "Hosted device connect-link backend setup failed.",
+        errorCauseType: "HostedDeviceConnectLinkBackendSetupError",
+        errorClass: "hosted_device_connect_link_backend_setup",
+        errorDomain: "device-sync",
+        errorHttpStatus: 503,
+        errorPhase: "callback_verification_setup",
+        errorResponseCode: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
+        errorResponseRetryable: true,
+        errorResponseStatus: 503,
+        errorRetryable: true,
+      }),
+    );
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
+      "Callback verification is not configured",
+    );
   });
 
   it("maps control-plane setup failures to a retryable unavailable response", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
     mocks.createHostedDeviceSyncControlPlane.mockImplementation(() => {
       throw new TypeError("Provider configuration is incomplete.");
     });
@@ -180,6 +228,24 @@ describe("device sync internal connect-link route", () => {
         retryable: true,
       },
     });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted device-sync settings route failed.",
+      expect.objectContaining({
+        errorCauseMessage: "Hosted device connect-link backend setup failed.",
+        errorCauseType: "HostedDeviceConnectLinkBackendSetupError",
+        errorClass: "hosted_device_connect_link_backend_setup",
+        errorDomain: "device-sync",
+        errorHttpStatus: 503,
+        errorPhase: "control_plane_setup",
+        errorResponseCode: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
+        errorResponseRetryable: true,
+        errorResponseStatus: 503,
+        errorRetryable: true,
+      }),
+    );
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(
+      "Provider configuration is incomplete",
+    );
   });
 
   it("rejects GET requests on the internal connect-link route", async () => {
