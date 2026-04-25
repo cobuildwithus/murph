@@ -11,7 +11,6 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   deleteHostedLinqMessages,
-  deleteHostedTelegramMessages,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import type { R2BucketLike } from "../bundle-store.js";
@@ -102,15 +101,8 @@ export class RunnerCleanupService {
     if (remainingPendingCleanup && hostedLinqCleanupConfirmed) {
       remainingPendingCleanup.linqMessageIds = [];
     }
-    const unresolvedTelegramMessages = await this.deleteHostedTelegramMessagesBestEffort({
-      assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
-      cleanupTargets: input.cleanupTargets ?? [],
-      pendingCleanup,
-      userId: input.userId ?? null,
-      wakes: input.wakes,
-    });
     if (remainingPendingCleanup) {
-      remainingPendingCleanup.telegramMessages = unresolvedTelegramMessages;
+      remainingPendingCleanup.telegramMessages = [];
     }
 
     if (input.runId && canClearPendingCleanup) {
@@ -342,136 +334,6 @@ export class RunnerCleanupService {
     return true;
   }
 
-  private async deleteHostedTelegramMessagesBestEffort(input: {
-    assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
-    cleanupTargets: readonly HostedRunCleanupTarget[];
-    pendingCleanup: RunnerPendingCleanupState | null;
-    userId: string | null;
-    wakes: readonly HostedIngressEnvelope[];
-  }): Promise<Array<{ messageId: string; target: string }>> {
-    const groupedMessageIds = new Map<string, Set<string>>();
-    const cleanupTargetAliases = buildHostedTelegramCleanupTargetAliasMap(
-      input.assistantDeliveryOutcomes,
-    );
-    const cleanupWakeMessages: Array<{ messageId: string; target: string }> = [];
-    const persistedCleanupMessages = [...(input.pendingCleanup?.telegramMessages ?? [])];
-
-    for (const wake of input.wakes) {
-      if (wake.kind !== "conversation.message" || wake.message.channel !== "telegram") {
-        continue;
-      }
-
-      cleanupWakeMessages.push({
-        messageId: wake.message.telegramMessage.messageId,
-        target: wake.message.telegramMessage.threadId,
-      });
-    }
-
-    for (const message of cleanupWakeMessages) {
-      addHostedProviderMessageId(
-        groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(message.target, cleanupTargetAliases),
-        message.messageId,
-      );
-    }
-    for (const message of persistedCleanupMessages) {
-      addHostedProviderMessageId(
-        groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(message.target, cleanupTargetAliases),
-        message.messageId,
-      );
-    }
-    for (const cleanupTarget of input.cleanupTargets) {
-      if (cleanupTarget.channel !== "telegram") {
-        continue;
-      }
-      addHostedProviderMessageId(
-        groupedMessageIds,
-        resolveHostedTelegramCleanupTarget(cleanupTarget.target, cleanupTargetAliases),
-        cleanupTarget.messageId,
-      );
-    }
-
-    for (const outcome of input.assistantDeliveryOutcomes) {
-      if (!isHostedTelegramCleanupTargetOutcome(outcome)) {
-        continue;
-      }
-
-      for (const cleanupMessage of readHostedCleanupMessages(outcome)) {
-        addHostedProviderMessageId(
-          groupedMessageIds,
-          cleanupMessage.target,
-          cleanupMessage.messageId,
-        );
-      }
-    }
-
-    if (groupedMessageIds.size === 0) {
-      return [];
-    }
-
-    const firstWake = input.wakes[0];
-    const cleanupUserId = firstWake?.userId ?? input.userId ?? null;
-    const unresolvedMessages: Array<{ messageId: string; target: string }> = [];
-    try {
-      const runtimeEnv = await this.dependencies.resolveRunnerRuntimeEnv(cleanupUserId);
-      for (const [target, messageIds] of groupedMessageIds) {
-        try {
-          await deleteHostedTelegramMessages({
-            env: runtimeEnv,
-            messageIds: [...messageIds],
-            target,
-          });
-        } catch (error) {
-          emitHostedExecutionStructuredLog({
-            component: "runner",
-            details: {
-              messageIdCount: messageIds.size,
-              provider: "telegram",
-              target,
-            },
-            error,
-            eventId: firstWake?.eventId ?? "hosted-run:cleanup",
-            level: "warn",
-            message: "Hosted Telegram message cleanup failed; the provider copy may need manual deletion.",
-            phase: "completed",
-            run: null,
-            userId: cleanupUserId ?? "unknown",
-          });
-          unresolvedMessages.push(
-            ...[...messageIds].map((messageId) => ({
-              messageId,
-              target,
-            })),
-          );
-        }
-      }
-      return unresolvedMessages;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          provider: "telegram",
-          targetCount: groupedMessageIds.size,
-        },
-        error,
-        eventId: firstWake?.eventId ?? "hosted-run:cleanup",
-        level: "warn",
-        message: "Hosted Telegram cleanup environment resolution failed; the provider copies may need manual deletion.",
-        phase: "completed",
-        run: null,
-        userId: cleanupUserId ?? "unknown",
-      });
-      return Array.from(
-        groupedMessageIds.entries(),
-      ).flatMap(([target, messageIds]) =>
-        [...messageIds].map((messageId) => ({
-          messageId,
-          target,
-        }))
-      );
-    }
-  }
 }
 
 function readHostedProviderMessageIds(
@@ -482,62 +344,6 @@ function readHostedProviderMessageIds(
   }
 
   return outcome.providerMessageId ? [outcome.providerMessageId] : [];
-}
-
-function readHostedCleanupTargetAliases(
-  outcome: HostedAssistantDeliveryOutcome,
-): string[] {
-  if (!Array.isArray(outcome.cleanupTargetAliases) || outcome.cleanupTargetAliases.length === 0) {
-    return [];
-  }
-
-  return Array.from(
-    new Set(
-      outcome.cleanupTargetAliases
-        .map((value) => typeof value === "string" ? value.trim() : "")
-        .filter((value) => value.length > 0),
-    ),
-  );
-}
-
-function readHostedCleanupMessages(
-  outcome: HostedAssistantDeliveryOutcome,
-): Array<{ messageId: string; target: string }> {
-  if (Array.isArray(outcome.cleanupMessages) && outcome.cleanupMessages.length > 0) {
-    return Array.from(
-      new Map(
-        outcome.cleanupMessages.flatMap((entry) => {
-          if (!entry || typeof entry !== "object") {
-            return [];
-          }
-
-          const messageId =
-            "messageId" in entry && typeof entry.messageId === "string"
-              ? entry.messageId.trim()
-              : "";
-          const target =
-            "target" in entry && typeof entry.target === "string"
-              ? entry.target.trim()
-              : "";
-          if (messageId.length === 0 || target.length === 0) {
-            return [];
-          }
-
-          return [[`${target}\u0000${messageId}`, { messageId, target }] as const];
-        }),
-      ).values(),
-    );
-  }
-
-  if (typeof outcome.target !== "string" || outcome.target.length === 0) {
-    return [];
-  }
-
-  const target = outcome.target;
-  return readHostedProviderMessageIds(outcome).map((messageId) => ({
-    messageId,
-    target,
-  }));
 }
 
 function readHostedEmailCleanupTargets(
@@ -563,16 +369,6 @@ function readHostedEmailCleanupTargets(
   );
 }
 
-function addHostedProviderMessageId(
-  groupedMessageIds: Map<string, Set<string>>,
-  target: string,
-  messageId: string,
-): void {
-  const bucket = groupedMessageIds.get(target) ?? new Set<string>();
-  bucket.add(messageId);
-  groupedMessageIds.set(target, bucket);
-}
-
 function shouldUseHostedDeliveryOutcomeForCleanup(
   outcome: HostedAssistantDeliveryOutcome,
   channel: string,
@@ -582,15 +378,6 @@ function shouldUseHostedDeliveryOutcomeForCleanup(
     && readHostedProviderMessageIds(outcome).length > 0;
 }
 
-function isHostedTelegramCleanupTargetOutcome(
-  outcome: HostedAssistantDeliveryOutcome,
-): outcome is HostedAssistantDeliveryOutcome & { target: string } {
-  return outcome.deliveryChannel === "telegram"
-    && (outcome.deliveryStatus === "sent" || outcome.deliveryStatus === "failed_ambiguous")
-    && typeof outcome.target === "string"
-    && outcome.target.length > 0;
-}
-
 function buildRunnerPendingCleanupState(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   cleanupTargets: readonly HostedRunCleanupTarget[];
@@ -598,7 +385,6 @@ function buildRunnerPendingCleanupState(input: {
   wakes: readonly HostedIngressEnvelope[];
 }): RunnerPendingCleanupState {
   const linqMessageIds = new Set<string>();
-  const telegramMessages = new Map<string, { messageId: string; target: string }>();
   const cleanup: RunnerPendingCleanupState = {
     emailMessages: [],
     linqMessageIds: [],
@@ -625,15 +411,6 @@ function buildRunnerPendingCleanupState(input: {
       case "linq":
         linqMessageIds.add(wake.message.linqMessage.messageId);
         break;
-      case "telegram":
-        telegramMessages.set(
-          `${wake.message.telegramMessage.threadId}\u0000${wake.message.telegramMessage.messageId}`,
-          {
-            messageId: wake.message.telegramMessage.messageId,
-            target: wake.message.telegramMessage.threadId,
-          },
-        );
-        break;
       default:
         break;
     }
@@ -651,15 +428,6 @@ function buildRunnerPendingCleanupState(input: {
       case "linq":
         linqMessageIds.add(cleanupTarget.messageId);
         break;
-      case "telegram":
-        telegramMessages.set(
-          `${cleanupTarget.target}\u0000${cleanupTarget.messageId}`,
-          {
-            messageId: cleanupTarget.messageId,
-            target: cleanupTarget.target,
-          },
-        );
-        break;
     }
   }
 
@@ -672,19 +440,6 @@ function buildRunnerPendingCleanupState(input: {
       linqMessageIds.add(messageId);
     }
   }
-  for (const outcome of input.assistantDeliveryOutcomes) {
-    if (!isHostedTelegramCleanupTargetOutcome(outcome)) {
-      continue;
-    }
-
-    for (const cleanupMessage of readHostedCleanupMessages(outcome)) {
-      telegramMessages.set(
-        `${cleanupMessage.target}\u0000${cleanupMessage.messageId}`,
-        cleanupMessage,
-      );
-    }
-  }
-
   cleanup.emailMessages = Array.from(
     new Map(
       cleanup.emailMessages.map((message) => [
@@ -694,7 +449,6 @@ function buildRunnerPendingCleanupState(input: {
     ).values(),
   );
   cleanup.linqMessageIds = [...linqMessageIds];
-  cleanup.telegramMessages = [...telegramMessages.values()];
 
   return cleanup;
 }
@@ -741,46 +495,4 @@ function sameRunnerPendingCleanupState(
   right: RunnerPendingCleanupState | null,
 ): boolean {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-}
-
-function resolveHostedTelegramCleanupTarget(
-  target: string,
-  cleanupTargetAliases: ReadonlyMap<string, string | null>,
-): string {
-  const replacement = cleanupTargetAliases.get(target);
-  return replacement ?? target;
-}
-
-function buildHostedTelegramCleanupTargetAliasMap(
-  outcomes: readonly HostedAssistantDeliveryOutcome[],
-): Map<string, string | null> {
-  const aliases = new Map<string, string | null>();
-
-  for (const outcome of outcomes) {
-    if (!shouldUseHostedDeliveryOutcomeForCleanup(outcome, "telegram")) {
-      continue;
-    }
-
-    if (typeof outcome.target !== "string" || outcome.target.length === 0) {
-      continue;
-    }
-
-    for (const alias of readHostedCleanupTargetAliases(outcome)) {
-      if (alias === outcome.target) {
-        continue;
-      }
-
-      const existing = aliases.get(alias);
-      if (existing === undefined) {
-        aliases.set(alias, outcome.target);
-        continue;
-      }
-
-      if (existing !== outcome.target) {
-        aliases.set(alias, null);
-      }
-    }
-  }
-
-  return aliases;
 }
