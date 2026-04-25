@@ -6,5 +6,5 @@ export const JOIN_INVITE_ACTIVATION_PENDING_COPY = {
   shareImportDescription:
     "We’ll add your shared bundle once setup finishes.",
   successDescription:
-    "Payment confirmed. Setup finishes in about ten seconds — continue below.",
+    "Payment confirmed. Setup finishes in about ten seconds.",
 } as const;
