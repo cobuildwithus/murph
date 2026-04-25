@@ -34,6 +34,9 @@ import {
   markAssistantFirstContactSeen,
   resolveAssistantFirstContactStateDocIds,
 } from './first-contact.js'
+import {
+  emitHostedAssistantContextSessionResolvedTrace,
+} from './hosted-context-diagnostics.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { normalizeNullableString, normalizeRequiredText } from './shared.js'
 
@@ -132,6 +135,11 @@ export async function sendAssistantNotificationLocal(
         boundaryDefaultTarget,
         defaults,
         message: messageInput,
+      })
+      await emitHostedAssistantContextSessionResolvedTrace({
+        message: messageInput,
+        resolved,
+        source: 'assistant-notification',
       })
       const sharedPlan = await resolveAssistantTurnSharedPlan(messageInput, resolved)
       const firstContactDocIds = resolveAssistantNotificationFirstContactDocIds({

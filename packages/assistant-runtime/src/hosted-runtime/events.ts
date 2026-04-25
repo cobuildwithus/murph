@@ -10,12 +10,16 @@ import type {
   HostedExecutionRunPhase,
   HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
-import { sendAssistantNotification } from "@murphai/assistant-engine";
+import {
+  buildHostedAssistantContextFingerprintDetails,
+  sendAssistantNotification,
+} from "@murphai/assistant-engine";
 import {
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
   isHostedConversationMessageWake,
+  isHostedLinqConversationMessageWake,
   sanitizeHostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
@@ -23,6 +27,7 @@ import {
   prepareHostedWakeContext,
 } from "./context.ts";
 import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
+import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { handleHostedShareAcceptedWake } from "./events/share.ts";
 import { handleHostedVaultSyncImportWake } from "./events/vault-sync.ts";
 import type {
@@ -121,10 +126,14 @@ async function executeHostedConversationWake(input: {
   vaultRoot: string;
 }): Promise<HostedIngressOutcome> {
   const conversationMetrics = await ingestHostedConversationMessageWake(input);
+  const redactedLogEntries = isHostedLinqConversationMessageWake(input.wake)
+    ? [emitHostedLinqConversationContextLog(input.wake)]
+    : [];
 
   return createNoopIngressEffect({
     conversationMetrics,
     ingressLane: "conversation-message",
+    redactedLogEntries,
   });
 }
 
@@ -277,6 +286,7 @@ function buildHostedAssistantNotificationLogDetails(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): HostedExecutionStructuredLogDetails {
   const route = wake.notification.route;
+  const delivery = route.delivery;
 
   return {
     deliveryDedupeTokenPresent: wake.notification.deliveryDedupeToken != null,
@@ -288,6 +298,13 @@ function buildHostedAssistantNotificationLogDetails(
     notificationRouteThreadIdPresent: route.threadId != null,
     notificationRouteThreadIsDirect: route.threadIsDirect,
     responsePolicyKind: wake.notification.responsePolicy?.kind ?? "none",
+    ...buildHostedAssistantContextFingerprintDetails({
+      actorId: route.actorId,
+      channel: route.channel,
+      identityId: route.identityId,
+      threadId: delivery.kind === "thread" ? delivery.target : route.threadId,
+      threadIsDirect: route.threadIsDirect,
+    }),
   };
 }
 
@@ -313,9 +330,11 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
   phase: HostedExecutionRunPhase;
   wake: HostedExecutionAssistantNotificationRequestedWake;
 }): HostedExecutionRedactedLogEntry {
+  const details = buildHostedAssistantNotificationLogDetails(input.wake);
+
   emitHostedExecutionStructuredLog({
     component: "runtime",
-    details: buildHostedAssistantNotificationLogDetails(input.wake),
+    details,
     ...(input.error === undefined ? {} : { error: input.error }),
     ...(input.level === undefined ? {} : { level: input.level }),
     message: input.message,
@@ -330,10 +349,47 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
     message: input.message,
     phase: input.phase,
     redacted: {
-      ...buildHostedAssistantNotificationLogDetails(input.wake),
+      ...details,
       ...(extractHostedAssistantNotificationRedactedDetails(input.error) ?? {}),
       ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
     },
+  };
+}
+
+function emitHostedLinqConversationContextLog(
+  wake: HostedExecutionConversationMessageWake & {
+    message: Extract<
+      HostedExecutionConversationMessageWake["message"],
+      { channel: "linq" }
+    >;
+  },
+): HostedExecutionRedactedLogEntry {
+  const details = sanitizeHostedExecutionStructuredLogDetails({
+    contextSource: "linq-conversation-message",
+    ...buildHostedAssistantContextFingerprintDetails({
+      actorId: wake.message.linqMessage.from,
+      channel: "linq",
+      identityId: wake.message.phoneLookupKey,
+      threadId: wake.message.linqMessage.chatId,
+      threadIsDirect: true,
+    }),
+  });
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime.context",
+    details,
+    message: "Hosted Linq conversation context fingerprints captured.",
+    phase: "wake.running",
+    wake,
+  });
+
+  return {
+    component: "runtime.context",
+    eventId: wake.eventId,
+    level: "info",
+    message: "Hosted Linq conversation context fingerprints captured.",
+    phase: "wake.running",
+    redacted: details,
   };
 }
 
@@ -593,6 +649,13 @@ function buildAssistantNotificationInput(
     identityId: route.identityId,
     instructions: wake.notification.instructions,
     onTraceEvent(event) {
+      const contextEntry = emitHostedAssistantContextTraceLog({
+        event,
+        wake,
+      });
+      if (contextEntry) {
+        recordLogEntry(contextEntry);
+      }
       const entry = emitHostedAssistantNotificationProviderTraceLog({
         event,
         wake,

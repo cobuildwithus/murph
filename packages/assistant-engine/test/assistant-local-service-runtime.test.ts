@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { afterEach, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
@@ -17,6 +17,7 @@ type Deferred<T> = {
 
 afterEach(() => {
   vi.resetModules()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
   vi.clearAllMocks()
   vi.useRealTimers()
@@ -157,6 +158,72 @@ test('sendAssistantMessageLocal prefers the hosted execution default target when
       timezone: 'Australia/Sydney',
     },
   )
+})
+
+test('sendAssistantMessageLocal emits a hosted context trace after session resolution', async () => {
+  vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', 'message-trace-secret')
+  const traceEvents: unknown[] = []
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'actor-message-trace',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-message-trace',
+      },
+      identityId: 'identity-message-trace',
+      threadId: 'thread-message-trace',
+      threadIsDirect: true,
+    },
+    sessionId: 'session-message-trace',
+  })
+  const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    actorId: 'actor-message-trace',
+    channel: 'linq',
+    deliverResponse: false,
+    executionContext: {
+      hosted: {
+        memberId: 'member-123',
+        userEnvKeys: [],
+      },
+    },
+    identityId: 'identity-message-trace',
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
+    prompt: 'Use the hosted trace diagnostics.',
+    threadId: 'thread-message-trace',
+    threadIsDirect: true,
+    vault: '/vaults/test',
+  })
+
+  const contextTrace = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.context.diagnostics'),
+  )
+  expect(contextTrace).toBeDefined()
+  const rawEvent = (contextTrace as { rawEvent: Record<string, unknown> }).rawEvent
+  expect(rawEvent).toEqual(expect.objectContaining({
+    schema: 'murph.assistant-context-diagnostics.v1',
+    type: 'assistant.context.diagnostics',
+    source: 'assistant-message',
+    stage: 'assistant-session-resolved',
+    fingerprintReady: true,
+    sessionResolutionCreated: false,
+    sessionTurnCount: 0,
+  }))
+  expect(rawEvent.actorFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(rawEvent.identityFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(rawEvent.threadFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(rawEvent.sessionFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(JSON.stringify(rawEvent)).not.toContain('actor-message-trace')
+  expect(JSON.stringify(rawEvent)).not.toContain('identity-message-trace')
+  expect(JSON.stringify(rawEvent)).not.toContain('thread-message-trace')
+  expect(JSON.stringify(rawEvent)).not.toContain('session-message-trace')
 })
 
 test('sendAssistantMessageLocal forwards onboarding fallback completion metadata to finalization', async () => {
@@ -988,6 +1055,7 @@ async function loadLocalServiceModule(input?: {
       ) => undefined,
     ),
     getAssistantChannelAdapter: vi.fn((_channel: string | null) => input?.adapter ?? null),
+    listAssistantTranscriptEntries: vi.fn(async () => []),
     normalizeAssistantAskResultForReturn: vi.fn((value) => value),
     normalizeAssistantDeliveryError: vi.fn((error: Error) => ({
       code: 'ASSISTANT_DELIVERY_FAILED',
@@ -1025,6 +1093,7 @@ async function loadLocalServiceModule(input?: {
     saveAssistantSession: vi.fn(),
     resolveAssistantSession: vi.fn(),
     resolveAssistantMessageSession: vi.fn(async () => ({
+      created: false,
       session,
     })),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
@@ -1167,6 +1236,7 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/store.js', () => ({
     appendAssistantTranscriptEntries: mocks.appendAssistantTranscriptEntries,
+    listAssistantTranscriptEntries: mocks.listAssistantTranscriptEntries,
     redactAssistantDisplayPath: mocks.redactAssistantDisplayPath,
     resolveAssistantSession: mocks.resolveAssistantSession,
     saveAssistantSession: mocks.saveAssistantSession,
@@ -1246,7 +1316,25 @@ async function loadLocalServiceModule(input?: {
   }
 }
 
+function isTraceEventWithRawType(
+  event: unknown,
+  type: string,
+): event is { rawEvent: Record<string, unknown> } {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) {
+    return false
+  }
+
+  const rawEvent = (event as { rawEvent?: unknown }).rawEvent
+  return (
+    rawEvent !== null &&
+    typeof rawEvent === 'object' &&
+    !Array.isArray(rawEvent) &&
+    (rawEvent as { type?: unknown }).type === type
+  )
+}
+
 function createAssistantSession(input?: {
+  binding?: AssistantSession['binding']
   provider?: AssistantSession['provider']
   providerOptions?: Partial<AssistantSession['providerOptions']>
   resumeState?: AssistantSession['resumeState']
@@ -1255,18 +1343,20 @@ function createAssistantSession(input?: {
 }): AssistantSession {
   return {
     alias: null,
-    binding: {
-      actorId: null,
-      channel: 'telegram',
-      conversationKey: null,
-      delivery: {
-        kind: 'thread',
-        target: 'thread-1',
+    binding:
+      input?.binding ??
+      {
+        actorId: null,
+        channel: 'telegram',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-1',
+        },
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+        threadIsDirect: false,
       },
-      identityId: 'identity-1',
-      threadId: 'thread-1',
-      threadIsDirect: false,
-    },
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     provider: input?.provider ?? 'openai-compatible',

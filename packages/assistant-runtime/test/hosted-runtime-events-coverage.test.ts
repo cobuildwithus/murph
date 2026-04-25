@@ -21,9 +21,16 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
   prepareHostedWakeContext: mocks.prepareHostedWakeContext,
 }));
 
-vi.mock("@murphai/assistant-engine", () => ({
-  sendAssistantNotification: mocks.sendAssistantNotification,
-}));
+vi.mock("@murphai/assistant-engine", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
+    "@murphai/assistant-engine",
+  );
+
+  return {
+    ...actual,
+    sendAssistantNotification: mocks.sendAssistantNotification,
+  };
+});
 
 vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
   assistantGatewayLocalMessageSender: Symbol("assistantGatewayLocalMessageSender"),

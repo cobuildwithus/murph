@@ -19,6 +19,7 @@ import {
   drainAssistantOutboxLocal as drainAssistantOutbox,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
+import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
@@ -68,6 +69,7 @@ export interface RunAssistantAutomationInput {
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
   requestId?: string | null
@@ -322,6 +324,7 @@ export async function runAssistantAutomationPass(
         inboxServices,
         maxPerScan: input.maxPerScan,
         onEvent: input.onEvent,
+        onTraceEvent: input.onTraceEvent,
         requestId: input.requestId,
         signal: input.signal,
         sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
@@ -342,6 +345,7 @@ export async function runAssistantAutomationPass(
     maxPerScan: input.maxPerScan,
     modelSpec: input.modelSpec,
     onEvent: input.onEvent,
+    onTraceEvent: input.onTraceEvent,
     requestId: input.requestId,
     signal: input.signal,
     sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,

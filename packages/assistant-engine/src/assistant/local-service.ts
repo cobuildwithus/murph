@@ -29,6 +29,9 @@ import {
   resolveAssistantSessionForMessage as resolveAssistantMessageSession,
 } from './session-resolution.js'
 import {
+  emitHostedAssistantContextSessionResolvedTrace,
+} from './hosted-context-diagnostics.js'
+import {
   deliverAssistantReply as dispatchAssistantReply,
   finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
 } from './delivery-service.js'
@@ -154,6 +157,11 @@ export async function sendAssistantMessageLocal(
         boundaryDefaultTarget,
         defaults,
         message: input,
+      })
+      await emitHostedAssistantContextSessionResolvedTrace({
+        message: input,
+        resolved,
+        source: 'assistant-message',
       })
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
       const routes = prioritizeAssistantRoutesForRichUserMessageContent({

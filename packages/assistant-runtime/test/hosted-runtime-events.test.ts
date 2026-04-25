@@ -30,9 +30,16 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
   prepareHostedWakeContext: mocks.prepareHostedWakeContext,
 }));
 
-vi.mock("@murphai/assistant-engine", () => ({
-  sendAssistantNotification: mocks.sendAssistantNotification,
-}));
+vi.mock("@murphai/assistant-engine", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
+    "@murphai/assistant-engine",
+  );
+
+  return {
+    ...actual,
+    sendAssistantNotification: mocks.sendAssistantNotification,
+  };
+});
 
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
@@ -54,6 +61,7 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
 }));
 
 import { executeHostedIngressEvent } from "../src/hosted-runtime/events.ts";
+import { emitHostedAssistantContextTraceLog } from "../src/hosted-runtime/context-diagnostics.ts";
 
 const executionContext = {
   hosted: {
@@ -99,6 +107,64 @@ afterEach(() => {
 });
 
 describe("executeHostedIngressEvent", () => {
+  it("drops spoofed raw-looking values from hosted context diagnostic traces", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_context_spoof",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send exactly the signup welcome.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantContextTraceLog({
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-context-diagnostics.v1",
+          type: "assistant.context.diagnostics",
+          stage: "assistant-session-resolved",
+          source: "assistant-notification",
+          channel: "linq",
+          actorFingerprint: "h1_abcdef0123456789abcdef01",
+          threadFingerprint: "raw-thread-id",
+          sessionFingerprint: "raw-session-id",
+          primaryConversationScope: "thread",
+          actorFallbackConversationScope: "raw-scope",
+          sessionTurnCount: -1,
+        },
+      },
+      wake,
+    });
+
+    expect(entry?.redacted).toEqual(
+      expect.objectContaining({
+        actorFingerprint: "h1_abcdef0123456789abcdef01",
+        channel: "linq",
+        primaryConversationScope: "thread",
+        schema: "murph.assistant-context-diagnostics.v1",
+        source: "assistant-notification",
+        stage: "assistant-session-resolved",
+      }),
+    );
+    expect(entry?.redacted).not.toHaveProperty("threadFingerprint");
+    expect(entry?.redacted).not.toHaveProperty("sessionFingerprint");
+    expect(entry?.redacted).not.toHaveProperty("actorFallbackConversationScope");
+    expect(entry?.redacted).not.toHaveProperty("sessionTurnCount");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-session-id");
+  });
+
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
@@ -142,6 +208,35 @@ describe("executeHostedIngressEvent", () => {
       ],
     });
     mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
+      input.onTraceEvent?.({
+        providerSessionId: null,
+        rawEvent: {
+          schema: "murph.assistant-context-diagnostics.v1",
+          type: "assistant.context.diagnostics",
+          stage: "assistant-session-resolved",
+          source: "assistant-notification",
+          fingerprintReady: true,
+          channel: "linq",
+          threadIsDirect: true,
+          actorPresent: true,
+          identityPresent: true,
+          threadPresent: true,
+          sessionPresent: true,
+          actorFingerprint: "h1_111111111111111111111111",
+          identityFingerprint: "h1_222222222222222222222222",
+          threadFingerprint: "h1_333333333333333333333333",
+          sessionFingerprint: "h1_444444444444444444444444",
+          primaryConversationFingerprint: "h1_555555555555555555555555",
+          primaryConversationScope: "thread",
+          actorFallbackConversationFingerprint: "h1_666666666666666666666666",
+          actorFallbackConversationScope: "actor",
+          sessionResolutionCreated: true,
+          sessionTurnCount: 0,
+          existingTranscriptEntryCount: 0,
+          existingTranscriptWelcomeVisible: false,
+        },
+        updates: [],
+      });
       input.onTraceEvent?.({
         providerSessionId: null,
         rawEvent: {
@@ -304,6 +399,26 @@ describe("executeHostedIngressEvent", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        component: "runtime.context",
+        details: expect.objectContaining({
+          actorFingerprint: "h1_111111111111111111111111",
+          actorFallbackConversationFingerprint: "h1_666666666666666666666666",
+          existingTranscriptEntryCount: 0,
+          existingTranscriptWelcomeVisible: false,
+          fingerprintReady: true,
+          primaryConversationFingerprint: "h1_555555555555555555555555",
+          sessionFingerprint: "h1_444444444444444444444444",
+          sessionResolutionCreated: true,
+          stage: "assistant-session-resolved",
+        }),
+        message: "Hosted assistant context fingerprints captured.",
+        phase: "wake.running",
+        wake,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
         component: "runtime.provider",
         details: expect.objectContaining({
           assistantProviderRequest: expect.objectContaining({
@@ -325,7 +440,7 @@ describe("executeHostedIngressEvent", () => {
       }),
     );
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
-      3,
+      4,
       expect.objectContaining({
         component: "runtime.provider.http",
         details: expect.objectContaining({
@@ -344,7 +459,7 @@ describe("executeHostedIngressEvent", () => {
       }),
     );
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
-      4,
+      5,
       expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
@@ -356,7 +471,7 @@ describe("executeHostedIngressEvent", () => {
         wake,
       }),
     );
-    expect(result.redactedLogEntries?.[1]?.redacted).toEqual(
+    expect(result.redactedLogEntries?.[2]?.redacted).toEqual(
       expect.objectContaining({
         assistantProviderRequest: expect.not.objectContaining({
           rawEvent: expect.anything(),
@@ -367,7 +482,7 @@ describe("executeHostedIngressEvent", () => {
         }),
       }),
     );
-    expect(result.redactedLogEntries?.[2]?.redacted).toEqual(
+    expect(result.redactedLogEntries?.[3]?.redacted).toEqual(
       expect.objectContaining({
         assistantResponsesRequest: expect.not.objectContaining({
           requestBody: expect.anything(),
@@ -386,17 +501,38 @@ describe("executeHostedIngressEvent", () => {
           level: "info",
           message: "Hosted assistant notification started.",
           phase: "wake.running",
-          redacted: {
+          redacted: expect.objectContaining({
             deliveryDedupeTokenPresent: true,
             deliveryDispatchMode: "queue-only",
             firstContact: true,
+            actorPresent: true,
+            identityPresent: true,
             notificationRouteChannel: "linq",
             notificationRouteDeliveryKind: "thread",
             notificationRouteIdentityPresent: true,
             notificationRouteThreadIdPresent: true,
             notificationRouteThreadIsDirect: true,
+            primaryConversationScope: "thread",
             responsePolicyKind: "require_send_exact_text",
-          },
+            threadPresent: true,
+          }),
+        },
+        {
+          component: "runtime.context",
+          eventId: "evt_notification",
+          level: "info",
+          message: "Hosted assistant context fingerprints captured.",
+          phase: "wake.running",
+          redacted: expect.objectContaining({
+            actorFallbackConversationFingerprint: "h1_666666666666666666666666",
+            existingTranscriptEntryCount: 0,
+            existingTranscriptWelcomeVisible: false,
+            fingerprintReady: true,
+            primaryConversationFingerprint: "h1_555555555555555555555555",
+            sessionFingerprint: "h1_444444444444444444444444",
+            sessionResolutionCreated: true,
+            stage: "assistant-session-resolved",
+          }),
         },
         {
           component: "runtime.provider",
@@ -435,17 +571,21 @@ describe("executeHostedIngressEvent", () => {
           level: "info",
           message: "Hosted assistant notification finished.",
           phase: "wake.running",
-          redacted: {
+          redacted: expect.objectContaining({
             deliveryDedupeTokenPresent: true,
             deliveryDispatchMode: "queue-only",
             firstContact: true,
+            actorPresent: true,
+            identityPresent: true,
             notificationRouteChannel: "linq",
             notificationRouteDeliveryKind: "thread",
             notificationRouteIdentityPresent: true,
             notificationRouteThreadIdPresent: true,
             notificationRouteThreadIsDirect: true,
+            primaryConversationScope: "thread",
             responsePolicyKind: "require_send_exact_text",
-          },
+            threadPresent: true,
+          }),
         },
       ],
       shareImportResult: null,
@@ -835,14 +975,31 @@ describe("executeHostedIngressEvent", () => {
       vaultRoot,
       wake: emailWake,
     });
-    assert.deepEqual(linqResult, {
+    expect(linqResult).toEqual({
       bootstrapResult: null,
       conversationMetrics: {
         nextWakeAt: null,
         parserProcessed: 0,
       },
       ingressLane: "conversation-message",
-      redactedLogEntries: [],
+      redactedLogEntries: [
+        {
+          component: "runtime.context",
+          eventId: "evt_linq",
+          level: "info",
+          message: "Hosted Linq conversation context fingerprints captured.",
+          phase: "wake.running",
+          redacted: expect.objectContaining({
+            actorPresent: true,
+            channel: "linq",
+            contextSource: "linq-conversation-message",
+            identityPresent: true,
+            primaryConversationScope: "thread",
+            threadIsDirect: true,
+            threadPresent: true,
+          }),
+        },
+      ],
       shareImportResult: null,
       shareImportTitle: null,
       vaultSyncImportResult: null,

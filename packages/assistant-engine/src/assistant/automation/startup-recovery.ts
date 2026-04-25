@@ -6,6 +6,7 @@ import type {
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantTurnInputPort } from '../turn-input.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { assistantChatReplyArtifactExists } from './artifacts.js'
@@ -42,6 +43,7 @@ export interface RecoverAssistantAutoRepliesInput {
   inboxServices: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   requestId?: string | null
   scanCursor?: AssistantAutomationCursor | null
   signal?: AbortSignal
@@ -146,6 +148,7 @@ export async function recoverAssistantAutoReplies(
       executionContext: input.executionContext,
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
+      onTraceEvent: input.onTraceEvent,
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
