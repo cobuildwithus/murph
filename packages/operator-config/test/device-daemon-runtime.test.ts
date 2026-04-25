@@ -116,16 +116,16 @@ async function importDeviceDaemonPathsWithMockedRequire(
 
 function createMockRequire(
   actualModule: typeof import('node:module'),
-  resolveImpl: () => string,
+  resolveImpl: (request: string) => string,
 ): NodeJS.Require {
   const mockRequire = actualModule.createRequire(import.meta.url)
   mockRequire.resolve = createMockResolve(resolveImpl)
   return mockRequire
 }
 
-function createMockResolve(resolveImpl: () => string): NodeJS.RequireResolve {
-  function resolve(_request: string): string {
-    return resolveImpl()
+function createMockResolve(resolveImpl: (request: string) => string): NodeJS.RequireResolve {
+  function resolve(request: string): string {
+    return resolveImpl(request)
   }
 
   resolve.paths = (_request: string) => []
@@ -253,7 +253,6 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
     }),
     '/opt/device-syncd/dist/bin.js',
   )
-  assert.match(resolveInstalledDeviceSyncPackageEntry(), /device-syncd/u)
 
   assert.equal(defaultIsProcessAlive(process.pid), true)
   vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
@@ -606,6 +605,18 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
 })
 
 test('resolveInstalledDeviceSyncPackageEntry falls back only when the bare package request is missing', async () => {
+  const primaryModule = await importDeviceDaemonPathsWithMockedRequire((_callCount, actual) =>
+    createMockRequire(actual, (request) => {
+      assert.equal(request, '@murphai/device-syncd')
+      return '/workspace/node_modules/@murphai/device-syncd/dist/index.js'
+    }),
+  )
+
+  assert.equal(
+    primaryModule.resolveInstalledDeviceSyncPackageEntry(),
+    '/workspace/node_modules/@murphai/device-syncd/dist/index.js',
+  )
+
   const fallbackModule = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
     if (callCount === 1) {
       return createMockRequire(actual, () => {
