@@ -103,13 +103,8 @@ export async function startHostedLocalFullStackScenario(input: {
 }): Promise<HostedLocalFullStackScenario> {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const assistantProviderStubState: HostedLocalAssistantProviderStubState = {
-    currentResponseText: null,
     queuedResponseTexts: [...(input.assistantProviderResponses ?? [])],
   };
-  if (assistantProviderStubState.queuedResponseTexts.length > 0) {
-    assistantProviderStubState.currentResponseText =
-      assistantProviderStubState.queuedResponseTexts.at(-1) ?? null;
-  }
   const localDatabaseUrl = input.localDatabaseUrl?.trim() || DEFAULT_DATABASE_URL;
   const baseEnvironment = await loadHostedLocalBaseEnvironment();
   const seedEnvironment = input.seedEnvironment ?? baseEnvironment;
@@ -212,7 +207,6 @@ export async function startHostedLocalFullStackScenario(input: {
         ].join("\n");
       },
       queueAssistantResponses: (responseTexts) => {
-        let latestResponseText: string | null = null;
         for (const responseText of responseTexts) {
           const trimmed = responseText.trim();
           if (!trimmed) {
@@ -220,11 +214,6 @@ export async function startHostedLocalFullStackScenario(input: {
           }
 
           assistantProviderStubState.queuedResponseTexts.push(trimmed);
-          latestResponseText = trimmed;
-        }
-
-        if (latestResponseText) {
-          assistantProviderStubState.currentResponseText = latestResponseText;
         }
       },
       runWake: async (wake, userId) =>

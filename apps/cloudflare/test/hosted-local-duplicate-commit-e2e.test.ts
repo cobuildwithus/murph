@@ -303,7 +303,8 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
         log.message === "Cloudflare runner invocation failed while preparing the hosted run snapshot."
         && isRecord(log.redacted)
         && log.redacted.errorCode === "bundle_archive_validation_error"
-        && log.redacted.errorName === "HostedBundleArchiveValidationError"
+        && typeof log.redacted.assistantNotificationErrorDetail === "string"
+        && log.redacted.assistantNotificationErrorDetail.includes("HostedBundleArchiveValidationError")
       ),
     );
     expect(invalidBundleLog.message).not.toMatch(/^\d{4}-\d{2}-\d{2}T/u);
@@ -311,8 +312,11 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
     expect(invalidBundleLog.redacted).toMatchObject({
       errorCode: "bundle_archive_validation_error",
       errorMessage: "Hosted bundle archive validation failed.",
-      errorName: "HostedBundleArchiveValidationError",
       reason: "runner_invocation_failed",
+    });
+    expect(invalidBundleLog.redacted).toMatchObject({
+      assistantNotificationErrorCode: "bundle_archive_validation_error",
+      assistantNotificationErrorDetail: expect.stringContaining("HostedBundleArchiveValidationError"),
     });
 
     for (let attempt = 0; attempt < 8; attempt += 1) {

@@ -399,7 +399,7 @@ describe("hosted runner container image contract", () => {
     );
     expect(packageJson.scripts?.["deploy:artifacts"]).toContain("pnpm deploy:artifacts:validate");
     expect(packageJson.scripts?.["runner:docker:base"]).toBe(
-      `docker build -f ../../Dockerfile.cloudflare-hosted-runner-base -t ${hostedRunnerBaseImageTag} ../..`,
+      `docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-base -t ${hostedRunnerBaseImageTag} ../..`,
     );
     expect(packageJson.scripts?.["runner:docker:build"]).toBe(
       "pnpm runner:bundle && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
