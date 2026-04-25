@@ -74,7 +74,6 @@ const wakeProcessorMocks = vi.hoisted(() => ({
   readRunDrainSharePack: vi.fn(),
   readRunDrainVaultSyncImport: vi.fn(),
   recordHostedRunBreadcrumbInWebBestEffort: vi.fn(),
-  startRunMessagingActivity: vi.fn(),
 }));
 
 vi.mock("../src/env.ts", async () => {
@@ -122,8 +121,6 @@ vi.mock("../src/user-runner/runner-run-processor.js", async () => {
     readRunDrainSharePack = wakeProcessorMocks.readRunDrainSharePack;
 
     readRunDrainVaultSyncImport = wakeProcessorMocks.readRunDrainVaultSyncImport;
-
-    startRunMessagingActivity = wakeProcessorMocks.startRunMessagingActivity;
 
     constructor(..._args: unknown[]) {}
   }
@@ -749,7 +746,6 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       log: null,
       logged: true,
     });
-    wakeProcessorMocks.startRunMessagingActivity.mockResolvedValue(null);
     wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
       cursorSnapshotRef: finalizedCursor.snapshotRef,
       nextRuntimeWakeAt: null,
@@ -2855,229 +2851,6 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     });
   });
 
-  it("keeps runtime fallback ownership enabled when runner typing only returns a cleanup handle", async () => {
-    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
-    const state = createDurableObjectStateHarness();
-    const stateStore = new RunnerStateStore(state);
-    await stateStore.bootstrapUser("user-resume-finalize");
-    const runner = new HostedUserRunner(
-      state,
-      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
-      new MemoryEncryptedR2Bucket(),
-    );
-
-    const acquiredCursor = createCursorState({
-      committedSeq: "10",
-      nextSeq: "11",
-      snapshotKey: "snapshot/acquired",
-      version: "cursor-v1",
-    });
-    const committedCursor = createCursorState({
-      committedSeq: "11",
-      nextSeq: "12",
-      snapshotKey: "snapshot/committed",
-      version: "cursor-v2",
-    });
-    const run = {
-      ...createRunRecord(),
-      status: "acquired" as const,
-      triggerKind: "external_ingress" as const,
-    };
-    const prepareAcquire: HostedRunAcquireResponse = {
-      acquired: true,
-      cursor: acquiredCursor,
-      events: [],
-      pendingIngressEventCount: 1,
-      resumeFinalize: false,
-      run,
-      runToken: "prepare-token",
-    };
-    const commitResponse: HostedRunCommitResponse = {
-      committed: true,
-      cursor: committedCursor,
-      needsFinalize: false,
-      run,
-    };
-    const stopHandle = vi.fn(async () => {});
-
-    webControlMocks.acquireHostedRunFromWeb.mockResolvedValueOnce(prepareAcquire);
-    webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
-    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
-      log: null,
-      logged: true,
-    });
-    wakeProcessorMocks.startRunMessagingActivity.mockResolvedValue({
-      ownsRuntimeActivity: false,
-      stop: stopHandle,
-    });
-    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
-      cursorSnapshotRef: committedCursor.snapshotRef,
-      finalizeRequired: false,
-      nextRuntimeWakeAt: null,
-      redactedSummary: null,
-      state: "completed",
-    });
-
-    const result = await runner.drainHostedRuns();
-
-    expect(result).toEqual({
-      committedSeq: committedCursor.committedSeq,
-      requestedTargetSeq: null,
-      targetReached: true,
-    });
-    expect(wakeProcessorMocks.executeRunDrain.mock.calls[0]?.[0]).toMatchObject({
-      messagingActivityOwnedByExecutor: false,
-    });
-    expect(stopHandle).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps runtime fallback ownership enabled through finalize when runner typing only returns a cleanup handle", async () => {
-    envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
-    const state = createDurableObjectStateHarness();
-    const stateStore = new RunnerStateStore(state);
-    await stateStore.bootstrapUser("user-resume-finalize");
-    const runner = new HostedUserRunner(
-      state,
-      envMocks.readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
-      new MemoryEncryptedR2Bucket(),
-    );
-
-    const acquiredCursor = createCursorState({
-      committedSeq: "10",
-      nextSeq: "11",
-      snapshotKey: "snapshot/acquired",
-      version: "cursor-v1",
-    });
-    const committedCursor = createCursorState({
-      committedSeq: "10",
-      nextSeq: "11",
-      snapshotKey: "snapshot/committed",
-      version: "cursor-v2",
-    });
-    const finalizeCursor = createCursorState({
-      committedSeq: "10",
-      nextSeq: "11",
-      snapshotKey: "snapshot/finalize",
-      version: "cursor-v3",
-    });
-    const finalizedCursor = createCursorState({
-      committedSeq: "11",
-      nextSeq: "12",
-      snapshotKey: "snapshot/finalized",
-      version: "cursor-v4",
-    });
-    const acquiredRun = {
-      ...createRunRecord(),
-      status: "acquired" as const,
-      triggerKind: "external_ingress" as const,
-    };
-    const committedRun = {
-      ...acquiredRun,
-      status: "committed_needs_finalize" as const,
-    };
-    const finalizingRun = {
-      ...acquiredRun,
-      status: "finalizing" as const,
-      triggerKind: "retry_finalize" as const,
-    };
-    const prepareAcquire: HostedRunAcquireResponse = {
-      acquired: true,
-      cursor: acquiredCursor,
-      events: [
-        createAcquireEvent({
-          id: "evt-linq",
-          seq: "11",
-          userId: "user-resume-finalize",
-          wake: buildHostedExecutionLinqConversationMessageWake({
-            eventId: "linq-wake",
-            linqMessage: {
-              chatId: "chat_123",
-              from: "+15550001",
-              isFromMe: false,
-              messageId: "linq_inbound_message",
-              parts: [
-                {
-                  type: "text",
-                  value: "hello",
-                },
-              ],
-            },
-            occurredAt: "2026-04-20T09:00:00.000Z",
-            phoneLookupKey: "lookup_123",
-            userId: "user-resume-finalize",
-          }),
-        }),
-      ],
-      pendingIngressEventCount: 1,
-      resumeFinalize: false,
-      run: acquiredRun,
-      runToken: "prepare-token",
-    };
-    const resumeFinalizeAcquire: HostedRunAcquireResponse = {
-      acquired: true,
-      cursor: finalizeCursor,
-      events: [],
-      pendingIngressEventCount: 1,
-      resumeFinalize: true,
-      run: finalizingRun,
-      runToken: "finalize-token",
-    };
-    const commitResponse: HostedRunCommitResponse = {
-      committed: true,
-      cursor: committedCursor,
-      needsFinalize: true,
-      run: committedRun,
-    };
-    const finalizedResponse: HostedRunFinalizeResponse = {
-      cursor: finalizedCursor,
-      finalized: true,
-      run: finalizingRun,
-    };
-    const stopHandle = vi.fn(async () => {});
-
-    webControlMocks.acquireHostedRunFromWeb
-      .mockResolvedValueOnce(prepareAcquire)
-      .mockResolvedValueOnce(resumeFinalizeAcquire);
-    webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
-    webControlMocks.finalizeHostedRunInWeb.mockResolvedValue(finalizedResponse);
-    webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
-      log: null,
-      logged: true,
-    });
-    wakeProcessorMocks.startRunMessagingActivity.mockResolvedValue({
-      ownsRuntimeActivity: false,
-      stop: stopHandle,
-    });
-    wakeProcessorMocks.executeRunDrain.mockResolvedValue({
-      cursorSnapshotRef: committedCursor.snapshotRef,
-      finalizeRequired: true,
-      nextRuntimeWakeAt: null,
-      redactedSummary: null,
-      state: "completed",
-    });
-    wakeProcessorMocks.finalizeRunDrain.mockResolvedValue({
-      cursorSnapshotRef: finalizedCursor.snapshotRef,
-      nextRuntimeWakeAt: null,
-      redactedSummary: null,
-      state: "completed",
-    });
-
-    const result = await runner.drainHostedRuns();
-
-    expect(result).toEqual({
-      committedSeq: finalizedCursor.committedSeq,
-      requestedTargetSeq: null,
-      targetReached: true,
-    });
-    expect(wakeProcessorMocks.executeRunDrain.mock.calls[0]?.[0]).toMatchObject({
-      messagingActivityOwnedByExecutor: false,
-    });
-    expect(wakeProcessorMocks.finalizeRunDrain.mock.calls[0]?.[0]).toMatchObject({
-      messagingActivityOwnedByExecutor: false,
-    });
-    expect(stopHandle).toHaveBeenCalledTimes(1);
-  });
-
   it("reacquires finalize-required commits before running finalize side effects", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
@@ -3738,7 +3511,7 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     }
   });
 
-  it("keeps messaging activity alive through finalize and stops it before finalize delivery completes", async () => {
+  it("runs prepare and finalize side effects in order for finalize-required commits", async () => {
     envMocks.readHostedExecutionEnvironment.mockReturnValue(createTestRuntimeEnvironment());
     const state = createDurableObjectStateHarness();
     const stateStore = new RunnerStateStore(state);
@@ -3788,9 +3561,6 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       triggerKind: "retry_finalize" as const,
     };
     const steps: string[] = [];
-    const stopHandle = vi.fn(async () => {
-      steps.push("activity.stop");
-    });
 
     const prepareAcquire: HostedRunAcquireResponse = {
       acquired: true,
@@ -3828,26 +3598,15 @@ describe("HostedUserRunner resumeFinalize drain", () => {
     webControlMocks.commitHostedRunToWeb.mockResolvedValue(commitResponse);
     webControlMocks.finalizeHostedRunInWeb.mockImplementation(async () => {
       expect(steps).toEqual(expect.arrayContaining([
-        "activity.start",
         "prepare.runtime",
         "finalize.runtime",
-        "activity.stop",
       ]));
-      expect(steps.indexOf("activity.start")).toBeLessThan(steps.indexOf("prepare.runtime"));
       expect(steps.indexOf("prepare.runtime")).toBeLessThan(steps.indexOf("finalize.runtime"));
-      expect(steps.indexOf("finalize.runtime")).toBeLessThan(steps.indexOf("activity.stop"));
       return finalizedResponse;
     });
     webControlMocks.recordHostedRunLogInWeb.mockResolvedValue({
       log: null,
       logged: true,
-    });
-    wakeProcessorMocks.startRunMessagingActivity.mockImplementation(async () => {
-      steps.push("activity.start");
-      return {
-        ownsRuntimeActivity: true,
-        stop: stopHandle,
-      };
     });
     wakeProcessorMocks.executeRunDrain.mockImplementation(async () => {
       steps.push("prepare.runtime");
@@ -3876,13 +3635,9 @@ describe("HostedUserRunner resumeFinalize drain", () => {
       requestedTargetSeq: null,
       targetReached: true,
     });
-    expect(wakeProcessorMocks.startRunMessagingActivity).toHaveBeenCalledTimes(1);
-    expect(stopHandle).toHaveBeenCalledTimes(1);
     expect(steps).toEqual([
-      "activity.start",
       "prepare.runtime",
       "finalize.runtime",
-      "activity.stop",
     ]);
   });
 

@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
+import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
 import {
   createAssistantTurnBeforeDeliveryHook,
@@ -466,12 +467,16 @@ test('sendAssistantMessageLocal stops a typing indicator that resolves after the
   assert.equal(stopTyping.mock.calls.length, 1)
 })
 
-test('sendAssistantMessageLocal returns deferred delivery results without starting typing in queue-only mode', async () => {
+test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {
   const queuedSession = createAssistantSession({
     sessionId: 'session-queued',
   })
-  const startTypingIndicator = vi.fn(async () => ({
-    stop: vi.fn(async () => undefined),
+  const stopTyping = vi.fn(async () => undefined)
+  const startTelegramTyping = vi.fn(async () => undefined)
+  const startTypingIndicator = vi.fn<
+    NonNullable<AssistantChannelAdapter['startTypingIndicator']>
+  >(async () => ({
+    stop: stopTyping,
   }))
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
@@ -492,6 +497,15 @@ test('sendAssistantMessageLocal returns deferred delivery results without starti
   const result = await sendAssistantMessageLocal({
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
+    executionContext: {
+      hosted: {
+        channelTypingDependencies: {
+          startTelegramTyping,
+        },
+        memberId: 'member-test',
+        userEnvKeys: [],
+      },
+    },
     prompt: 'Queue this reply',
     vault: '/vaults/test',
   })
@@ -511,8 +525,10 @@ test('sendAssistantMessageLocal returns deferred delivery results without starti
     status: 'completed',
     vault: '<redacted-vault>',
   })
-  assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 0)
-  assert.equal(startTypingIndicator.mock.calls.length, 0)
+  assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 1)
+  assert.equal(startTypingIndicator.mock.calls.length, 1)
+  assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
+  assert.equal(stopTyping.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal reports failed delivery outcomes after provider success', async () => {
@@ -556,9 +572,10 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
   })
 })
 
-test('sendAssistantMessageLocal skips typing indicators for queue-only delivery', async () => {
+test('sendAssistantMessageLocal starts typing indicators for queue-only delivery', async () => {
+  const stopTyping = vi.fn(async () => undefined)
   const startTypingIndicator = vi.fn(async () => ({
-    stop: vi.fn(async () => undefined),
+    stop: stopTyping,
   }))
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
@@ -574,8 +591,9 @@ test('sendAssistantMessageLocal skips typing indicators for queue-only delivery'
   })
 
   assert.equal(result.status, 'completed')
-  assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 0)
-  assert.equal(startTypingIndicator.mock.calls.length, 0)
+  assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 1)
+  assert.equal(startTypingIndicator.mock.calls.length, 1)
+  assert.equal(stopTyping.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal swallows typing-indicator startup failures', async () => {
@@ -598,9 +616,10 @@ test('sendAssistantMessageLocal swallows typing-indicator startup failures', asy
   assert.equal(startTypingIndicator.mock.calls.length, 1)
 })
 
-test('sendAssistantMessageLocal surfaces queued delivery state without starting typing in queue-only mode', async () => {
+test('sendAssistantMessageLocal surfaces queued delivery state after queue-only typing', async () => {
+  const stopTyping = vi.fn(async () => undefined)
   const startTypingIndicator = vi.fn(async () => ({
-    stop: vi.fn(async () => undefined),
+    stop: stopTyping,
   }))
   const queuedSession = createAssistantSession({
     sessionId: 'session-queued',
@@ -634,7 +653,8 @@ test('sendAssistantMessageLocal surfaces queued delivery state without starting 
   assert.equal(result.deliveryDeferred, true)
   assert.equal(result.deliveryIntentId, 'intent-queued')
   assert.deepEqual(result.deliveryError, queuedError)
-  assert.equal(startTypingIndicator.mock.calls.length, 0)
+  assert.equal(startTypingIndicator.mock.calls.length, 1)
+  assert.equal(stopTyping.mock.calls.length, 1)
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
 })
 
@@ -940,10 +960,7 @@ test('openAssistantConversationLocal forwards defaults into session resolution',
 
 async function loadLocalServiceModule(input?: {
   adapter?: {
-    startTypingIndicator?: (
-      binding: Record<string, unknown>,
-      options: Record<string, unknown>,
-    ) => Promise<{ stop(): Promise<void> } | null>
+    startTypingIndicator?: NonNullable<AssistantChannelAdapter['startTypingIndicator']>
   } | null
   plan?: ReturnType<typeof createSharedPlan>
   providerOutcome?:

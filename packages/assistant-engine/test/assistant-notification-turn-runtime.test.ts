@@ -9,6 +9,7 @@ import type {
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.ts'
 import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
 import type {
@@ -33,12 +34,20 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/rich-content-routing.js')
   vi.doUnmock('../src/assistant/turns.js')
+  vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
 })
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
   const persistedBeforeDelivery: string[] = []
   const traceEvents: unknown[] = []
+  const stopTyping = vi.fn(async () => undefined)
+  const startTelegramTyping = vi.fn(async () => undefined)
+  const startTypingIndicator = vi.fn<
+    NonNullable<AssistantChannelAdapter['startTypingIndicator']>
+  >(async () => ({
+    stop: stopTyping,
+  }))
   vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', 'notification-trace-secret')
   const initialSession = createAssistantSession({
     binding: {
@@ -202,6 +211,18 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification',
   }))
+  vi.doMock('../src/assistant/channel-adapters.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.js')
+
+    return {
+      ...actual,
+      getAssistantChannelAdapter: vi.fn(() => ({
+        startTypingIndicator,
+      })),
+    }
+  })
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
@@ -224,6 +245,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
           providerName: 'Hosted Gateway',
           reasoningEffort: null,
           webSearch: null,
+        },
+        channelTypingDependencies: {
+          startTelegramTyping,
         },
         memberId: 'member-hosted',
         userEnvKeys: [],
@@ -256,6 +280,12 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   )
   assert.equal(result.response, 'Raw notification text')
   assert.deepEqual(result.session, deliveredSession)
+  assert.equal(startTypingIndicator.mock.calls.length, 1)
+  assert.equal(
+    startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping,
+    startTelegramTyping,
+  )
+  assert.equal(stopTyping.mock.calls.length, 1)
   const firstResolvedNotificationSessionCall = (
     mocks.resolveAssistantSessionForMessage.mock.calls as Array<
       Array<{ boundaryDefaultTarget?: unknown; defaults?: unknown }>

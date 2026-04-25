@@ -14,8 +14,6 @@ import {
   buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
   type HostedAssistantDeliveryOutcome,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import * as hostedRuntimeContractsModule from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -2001,26 +1999,6 @@ describe("recordHostedRunnerResultLogsInWebBestEffort", () => {
 });
 
 describe("RunnerRunProcessor.executeRunDrain", () => {
-  it("skips runner env resolution for batches without supported messaging activity targets", async () => {
-    const { ensureRunnerStores, processor } = createInvokeRunnerProcessor();
-
-    const activity = await processor.startRunMessagingActivity({
-      events: [
-        {
-          ingressEventId: "ingress-runtime-timer",
-          seq: "11",
-          wake: createRuntimeTimerWake(),
-        },
-      ],
-      run: createHostedRunRecord({
-        runId: "run-no-messaging-target",
-      }),
-    });
-
-    expect(activity).toBeNull();
-    expect(ensureRunnerStores).not.toHaveBeenCalled();
-  });
-
   it("keeps an active run fresh for the full runner timeout instead of the web-control timeout", async () => {
     const {
       processor,
@@ -2056,28 +2034,6 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     });
     expect(stateStore.beginRun).not.toHaveBeenCalled();
     expect(runnerContainerNamespace.getByName).not.toHaveBeenCalled();
-  });
-
-  it("keeps loopback Linq typing endpoints in the runner-owned messaging activity env", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
-        LINQ_API_BASE_URL: "http://127.0.0.1:4011",
-      },
-    });
-
-    const runtimeEnv = await Reflect.get(
-      processor,
-      "resolveRunnerMessagingActivityRuntimeEnv",
-    ).call(processor, "user_123");
-
-    expect(runtimeEnv).toEqual(expect.objectContaining({
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      LINQ_API_BASE_URL: "http://127.0.0.1:4011",
-      NODE_ENV: "production",
-    }));
   });
 
   it("always requires finalize for prepared snapshots, even without delivery effects", async () => {
@@ -2601,84 +2557,6 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     expect(bucket.deleted).toEqual([]);
   });
 
-  it("marks outbound runtime jobs with executor-owned messaging activity only when requested", async () => {
-    const { processor } = createInvokeRunnerProcessor();
-    const invokeRunner = Reflect.get(processor, "invokeRunner").bind(processor) as (
-      userId: string,
-      currentBundleRef: null,
-      wake: HostedExecutionRuntimeTimerWake,
-      run: ReturnType<typeof createRunContext>,
-      runDrain: HostedRuntimeDrainRequest,
-      runToken?: string | null,
-      options?: {
-        messagingActivityOwnedByExecutor?: boolean;
-      },
-    ) => Promise<unknown>;
-    const invokeHostedExecutionContainerRunner = vi.spyOn(
-      runnerContainerModule,
-      "invokeHostedExecutionContainerRunner",
-    ).mockResolvedValue({
-      assistantDeliveryOutcomes: [],
-      browserVaultReplica: null,
-      finalGatewayProjectionSnapshot: null,
-      phase: "completed",
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 0,
-          nextWakeAt: null,
-          summary: "Completed hosted run.",
-        },
-      },
-    });
-
-    await invokeRunner(
-      "user_123",
-      null,
-      createRuntimeTimerWake(),
-      createRunContext("run-owned"),
-      createRunDrainRequest("run-owned"),
-      "run-token",
-      {
-        messagingActivityOwnedByExecutor: true,
-      },
-    );
-    await invokeRunner(
-      "user_123",
-      null,
-      createRuntimeTimerWake(),
-      createRunContext("run-runtime"),
-      createRunDrainRequest("run-runtime"),
-      "run-token",
-      {
-        messagingActivityOwnedByExecutor: false,
-      },
-    );
-
-    expect(invokeHostedExecutionContainerRunner).toHaveBeenCalledTimes(2);
-    expect(invokeHostedExecutionContainerRunner.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
-      timeoutMs: 60_000,
-      job: expect.objectContaining({
-        runtime: expect.objectContaining({
-          forwardedEnv: expect.objectContaining({
-            [HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]:
-              HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
-          }),
-        }),
-      }),
-    }));
-    expect(invokeHostedExecutionContainerRunner.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
-      job: expect.objectContaining({
-        runtime: expect.objectContaining({
-          forwardedEnv: expect.not.objectContaining({
-            [HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]:
-              HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
-          }),
-        }),
-      }),
-    }));
-  });
-
   it("rewrites Telegram platform URLs for container runner jobs", async () => {
     const { processor } = createInvokeRunnerProcessor({
       configSource: {
@@ -2695,9 +2573,6 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       run: ReturnType<typeof createRunContext>,
       runDrain: HostedRuntimeDrainRequest,
       runToken?: string | null,
-      options?: {
-        messagingActivityOwnedByExecutor?: boolean;
-      },
     ) => Promise<unknown>;
     const invokeHostedExecutionContainerRunner = vi.spyOn(
       runnerContainerModule,

@@ -60,10 +60,6 @@ import type {
 import { exportHostedPendingAssistantRuntimeIssues } from "./issues.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultReplica } from "./browser-vault.ts";
-import {
-  shouldStartRuntimeHostedRunMessagingActivity,
-  stopExecutorOwnedHostedRunMessagingActivityAfterDelivery,
-} from "./typing.ts";
 import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
 
 const HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET = 8;
@@ -810,14 +806,6 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     run: input.run ?? null,
   });
   const sideEffectsStartedAtMs = Date.now();
-  const runnerMessagingActivityStopRequested =
-    await stopRunnerOwnedHostedRunMessagingActivityBeforeDelivery({
-      committedAssistantDeliveryEffectCount:
-        input.committedExecution.committedAssistantDeliveryEffects.length,
-      run: input.run ?? null,
-      runtime: input.runtime,
-      wake: input.wake,
-    });
   const assistantDeliveryOutcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
     effectsPort: input.runtime.platform.effectsPort,
     assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
@@ -826,17 +814,6 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     vaultRoot: input.restored.vaultRoot,
     wake: input.wake,
   });
-  if (!runnerMessagingActivityStopRequested) {
-    await stopExecutorOwnedHostedRunMessagingActivityAfterDelivery({
-      component: "runtime",
-      runtimeEnv: {
-        ...input.runtime.forwardedEnv,
-        ...input.runtime.userEnv,
-      },
-      run: input.run ?? null,
-      wake: input.wake,
-    });
-  }
   await exportHostedPendingAssistantUsage({
     usageExportPort: input.runtime.platform.usageExportPort,
     vaultRoot: input.restored.vaultRoot,
@@ -982,66 +959,6 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     phase: "completed",
     result: finalResult,
   };
-}
-
-async function stopRunnerOwnedHostedRunMessagingActivityBeforeDelivery(input: {
-  committedAssistantDeliveryEffectCount: number;
-  run: HostedExecutionRunContext | null;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "userEnv">;
-  wake: HostedRuntimeEvent;
-}): Promise<boolean> {
-  if (input.committedAssistantDeliveryEffectCount <= 0) {
-    return false;
-  }
-
-  const runtimeEnv = {
-    ...input.runtime.forwardedEnv,
-    ...input.runtime.userEnv,
-  };
-  if (shouldStartRuntimeHostedRunMessagingActivity(runtimeEnv)) {
-    return false;
-  }
-
-  const runId = input.run?.runId;
-  const messagingActivityPort = input.runtime.platform.messagingActivityPort ?? null;
-  if (!runId || !messagingActivityPort) {
-    return false;
-  }
-
-  try {
-    const result = await messagingActivityPort.stopActiveRunMessagingActivity({
-      reason: "before_committed_assistant_delivery",
-      runId,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: {
-        runElapsedMs: computeHostedRunElapsedMs(input.run),
-        stopped: result.stopped,
-      },
-      message:
-        "Hosted run messaging activity stop requested before committed assistant delivery.",
-      phase: "side-effects.draining",
-      run: input.run,
-      wake: input.wake,
-    });
-    return result.stopped;
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: {
-        runElapsedMs: computeHostedRunElapsedMs(input.run),
-      },
-      error,
-      level: "warn",
-      message:
-        "Hosted run messaging activity could not be stopped before committed assistant delivery.",
-      phase: "side-effects.draining",
-      run: input.run,
-      wake: input.wake,
-    });
-    return false;
-  }
 }
 
 function collectHostedBundleArtifactHashes(bytes: Uint8Array | null): Set<string> {

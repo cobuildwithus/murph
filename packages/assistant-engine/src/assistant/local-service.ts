@@ -72,9 +72,9 @@ import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import { isAssistantTurnRevisionRequiredError } from './turn-input.js'
 import {
-  getAssistantChannelAdapter,
-  type AssistantChannelActivityHandle,
-} from './channel-adapters.js'
+  startAssistantChannelTypingIndicator,
+  stopAssistantChannelTypingIndicator,
+} from './channel-typing.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
@@ -194,6 +194,8 @@ export async function sendAssistantMessageLocal(
       let responseText: string | null = null
       let userTurn: PersistedUserTurn | null = null
       const typingIndicator = startAssistantChannelTypingIndicator({
+        channelDependencies:
+          executionContext?.hosted?.channelTypingDependencies ?? null,
         input,
         session: resolved.session,
         sharedPlan,
@@ -423,87 +425,4 @@ async function runAssistantTurnBestEffort(
   try {
     await task()
   } catch {}
-}
-
-function startAssistantChannelTypingIndicator(input: {
-  input: AssistantMessageInput
-  session: AssistantSession
-  sharedPlan: AssistantTurnSharedPlan
-}): AssistantChannelActivityHandle | null {
-  if (input.input.deliverResponse !== true) {
-    return null
-  }
-
-  if ((input.input.deliveryDispatchMode ?? 'immediate') === 'queue-only') {
-    return null
-  }
-
-  const audience = input.sharedPlan.conversationPolicy.audience
-  const channel = audience.channel ?? input.session.binding.channel ?? null
-  const adapter = getAssistantChannelAdapter(channel)
-  if (!adapter?.startTypingIndicator) {
-    return null
-  }
-  const startTypingIndicator = adapter.startTypingIndicator
-
-  let activeIndicator: AssistantChannelActivityHandle | null = null
-  let stopRequested = false
-  const indicatorReady = Promise.resolve()
-    .then(() =>
-      startTypingIndicator(
-        {
-          bindingDelivery:
-            audience.bindingDelivery ?? input.session.binding.delivery ?? null,
-          explicitTarget: audience.explicitTarget,
-          identityId:
-            audience.identityId ?? input.session.binding.identityId ?? null,
-        },
-        {},
-      ),
-    )
-    .then(async (indicator) => {
-      if (!indicator) {
-        return null
-      }
-
-      if (stopRequested) {
-        await runAssistantTurnBestEffort(() => indicator.stop())
-        return null
-      }
-
-      activeIndicator = indicator
-      return indicator
-    })
-    .catch(() => null)
-
-  return {
-    async stop() {
-      stopRequested = true
-      if (activeIndicator) {
-        const indicator = activeIndicator
-        activeIndicator = null
-        void runAssistantTurnBestEffort(() => indicator.stop())
-        return
-      }
-
-      void indicatorReady.then((indicator) => {
-        if (indicator) {
-          activeIndicator = null
-          return runAssistantTurnBestEffort(() => indicator.stop())
-        }
-
-        return undefined
-      })
-    },
-  }
-}
-
-async function stopAssistantChannelTypingIndicator(
-  indicator: AssistantChannelActivityHandle | null,
-): Promise<void> {
-  if (!indicator) {
-    return
-  }
-
-  await indicator.stop()
 }

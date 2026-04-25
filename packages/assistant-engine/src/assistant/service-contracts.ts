@@ -228,4 +228,8 @@ export interface AssistantTurnDeliveryFinalizationPlan {
 }
 
 export type { ResolvedAssistantSession }
-export type { AssistantExecutionContext, AssistantHostedExecutionContext } from './execution-context.js'
+export type {
+  AssistantChannelTypingDependencies,
+  AssistantExecutionContext,
+  AssistantHostedExecutionContext,
+} from './execution-context.js'

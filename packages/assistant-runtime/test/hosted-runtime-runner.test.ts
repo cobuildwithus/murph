@@ -1286,78 +1286,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(mocks.materializeHostedExecutionArtifacts).toHaveBeenCalledTimes(1);
   });
 
-  it("waits for Linq typing startup confirmation before executing the hosted run and stops after commit", async () => {
-    const steps: string[] = [];
-    const stopHandle = vi.fn(async () => {
-      steps.push("stop");
-    });
-    let resolveTypingStart!: (value: { stop(): Promise<void> }) => void;
-    mocks.startLinqTypingIndicator.mockImplementation(() => {
-      steps.push("start");
-      return new Promise<{ stop(): Promise<void> }>((resolve) => {
-        resolveTypingStart = resolve;
-      });
-    });
-    mocks.executeHostedRunDrainForCommit.mockImplementation(async () => {
-      steps.push("execute");
-      return committedExecution;
-    });
-
-    const runPromise = runHostedAssistantRuntimeJobInProcessDetailed(
-      {
-        request: {
-          bundle: "incoming-bundle",
-          run: HOSTED_RUN_CONTEXT,
-          runDrain: createSingleWakeRunDrain(buildLinqWake("evt_linq_typing")),
-        },
-        runtime: {
-          forwardedEnv: {
-            LINQ_API_TOKEN: "linq-token",
-          },
-        },
-      },
-      {
-        platform: {
-          artifactStore: {
-            async get() {
-              return null;
-            },
-            async put() {},
-          },
-          effectsPort: createHostedRuntimeEffectsPortStub(),
-        },
-      },
-    );
-
-    await vi.waitFor(() => {
-      expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(1);
-    });
-    expect(mocks.executeHostedRunDrainForCommit).not.toHaveBeenCalled();
-
-    resolveTypingStart({
-      stop: stopHandle,
-    });
-    await vi.waitFor(() => {
-      expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
-    });
-    await runPromise;
-
-    expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
-      {
-        target: "chat_123",
-      },
-      {
-        env: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-        refreshMs: undefined,
-        signal: expect.any(AbortSignal),
-      },
-    );
-    expect(stopHandle).toHaveBeenCalledTimes(1);
-    expect(steps).toEqual(["start", "execute", "stop"]);
-  });
-
   it("passes a null artifact materializer when the decoded bundle is absent", async () => {
     mocks.decodeHostedBundleBase64.mockReturnValueOnce(null);
 
@@ -1395,6 +1323,151 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(mocks.materializeHostedExecutionArtifacts).not.toHaveBeenCalled();
   });
 
+  it("passes hosted channel typing dependencies through the local assistant execution context", async () => {
+    mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+      const dependencies =
+        input.executionContext.hosted?.channelTypingDependencies;
+      assert.ok(dependencies?.startLinqTyping);
+      assert.ok(dependencies.startTelegramTyping);
+
+      await dependencies.startLinqTyping({ target: "chat_123" });
+      await dependencies.startTelegramTyping({ target: "123456" });
+
+      return committedExecution;
+    });
+
+    await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: createSingleWakeRunDrain(buildTelegramWake("evt_channel_typing_context")),
+        },
+        runtime: {
+          forwardedEnv: {
+            LINQ_API_TOKEN: "linq-token",
+          },
+          platformEnv: {
+            TELEGRAM_BOT_TOKEN: "telegram-token",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
+      { target: "chat_123" },
+      expect.objectContaining({
+        env: expect.objectContaining({
+          LINQ_API_TOKEN: "linq-token",
+        }),
+      }),
+    );
+    expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledWith(
+      { target: "123456" },
+      expect.objectContaining({
+        env: expect.objectContaining({
+          TELEGRAM_BOT_TOKEN: "telegram-token",
+        }),
+      }),
+    );
+    const linqOptions = mocks.startLinqTypingIndicator.mock.calls[0]?.[1] as
+      | { signal?: AbortSignal }
+      | undefined;
+    const telegramOptions = mocks.startTelegramTypingIndicator.mock.calls[0]?.[1] as
+      | { signal?: AbortSignal }
+      | undefined;
+    assert.ok(linqOptions?.signal);
+    assert.ok(telegramOptions?.signal);
+    expect(linqOptions.signal.aborted).toBe(true);
+    expect(telegramOptions.signal.aborted).toBe(true);
+  });
+
+  it("aborts hosted channel typing starts that are still pending when run execution exits", async () => {
+    let observedSignal: AbortSignal | undefined;
+    let resolveAbortObserved: () => void = () => {};
+    const abortObserved = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("Timed out waiting for hosted typing abort.")),
+        1_000,
+      );
+      resolveAbortObserved = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+    });
+
+    mocks.startTelegramTypingIndicator.mockImplementationOnce(
+      (_request, options?: { signal?: AbortSignal }) => {
+        observedSignal = options?.signal;
+        return new Promise((resolve) => {
+          if (!options?.signal) {
+            return;
+          }
+
+          if (options.signal.aborted) {
+            resolveAbortObserved();
+            resolve(undefined);
+            return;
+          }
+
+          options.signal.addEventListener("abort", () => {
+            resolveAbortObserved();
+            resolve(undefined);
+          }, { once: true });
+        });
+      },
+    );
+    mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+      const dependencies =
+        input.executionContext.hosted?.channelTypingDependencies;
+      assert.ok(dependencies?.startTelegramTyping);
+      void dependencies.startTelegramTyping({ target: "123456" });
+
+      return committedExecution;
+    });
+
+    await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          run: HOSTED_RUN_CONTEXT,
+          runDrain: createSingleWakeRunDrain(buildTelegramWake("evt_channel_typing_abort")),
+        },
+        runtime: {
+          platformEnv: {
+            TELEGRAM_BOT_TOKEN: "telegram-token",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    await abortObserved;
+    assert.ok(observedSignal);
+    expect(observedSignal.aborted).toBe(true);
+  });
+
   it("uses the committed run-drain finalize payload without re-running dispatch or commit callbacks", async () => {
     const result = await runHostedAssistantRuntimeJobInProcessDetailed(
       {
@@ -1429,181 +1502,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     assert.deepEqual(result, finalResult);
     expect(mocks.executeHostedRunDrainForCommit).not.toHaveBeenCalled();
     expect(mocks.completeHostedRunDrainAfterCommit).toHaveBeenCalledTimes(1);
-  });
-
-  it("swallows Linq typing startup failures and still completes the hosted run", async () => {
-    mocks.startLinqTypingIndicator.mockRejectedValueOnce(
-      new Error("typing start failed"),
-    );
-
-    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
-      {
-        request: {
-          bundle: "incoming-bundle",
-          run: HOSTED_RUN_CONTEXT,
-          runDrain: createSingleWakeRunDrain(buildLinqWake("evt_linq_typing_start_failure")),
-        },
-        runtime: {
-          forwardedEnv: {
-            LINQ_API_TOKEN: "linq-token",
-          },
-        },
-      },
-      {
-        platform: {
-          artifactStore: {
-            async get() {
-              return null;
-            },
-            async put() {},
-          },
-          effectsPort: createHostedRuntimeEffectsPortStub(),
-        },
-      },
-    );
-
-    assert.deepEqual(result, committedFirstPassResult);
-    expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        level: "warn",
-        message: "Hosted Linq typing indicator could not be started.",
-        phase: "wake.running",
-      }),
-    );
-  });
-
-  it("waits for Telegram typing startup confirmation before executing the hosted run and stops after commit", async () => {
-    const steps: string[] = [];
-    const stopHandle = vi.fn(async () => {
-      steps.push("stop");
-    });
-    let resolveTypingStart!: (value: { stop(): Promise<void> }) => void;
-    mocks.startTelegramTypingIndicator.mockImplementation(() => {
-      steps.push("start");
-      return new Promise<{ stop(): Promise<void> }>((resolve) => {
-        resolveTypingStart = resolve;
-      });
-    });
-    mocks.executeHostedRunDrainForCommit.mockImplementation(async () => {
-      steps.push("execute");
-      return committedExecution;
-    });
-
-    const runPromise = runHostedAssistantRuntimeJobInProcessDetailed(
-      {
-        request: {
-          bundle: "incoming-bundle",
-          run: HOSTED_RUN_CONTEXT,
-          runDrain: createSingleWakeRunDrain(buildHostedExecutionTelegramConversationMessageWake({
-            eventId: "evt_telegram_typing",
-            occurredAt: "2026-04-08T00:00:00.000Z",
-            telegramMessage: {
-              messageId: "tg_message_77",
-              schema: "murph.hosted-telegram-message.v1",
-              threadId: "123456",
-            },
-            userId: "member_123",
-          })),
-        },
-        runtime: {
-          platformEnv: {
-            TELEGRAM_BOT_TOKEN: "telegram-token",
-          },
-        },
-      },
-      {
-        platform: {
-          artifactStore: {
-            async get() {
-              return null;
-            },
-            async put() {},
-          },
-          effectsPort: createHostedRuntimeEffectsPortStub(),
-        },
-      },
-    );
-
-    await vi.waitFor(() => {
-      expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledTimes(1);
-    });
-    expect(mocks.executeHostedRunDrainForCommit).not.toHaveBeenCalled();
-
-    resolveTypingStart({
-      stop: stopHandle,
-    });
-    await vi.waitFor(() => {
-      expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
-    });
-    await runPromise;
-
-    expect(mocks.startTelegramTypingIndicator).toHaveBeenCalledWith(
-      {
-        target: "123456",
-      },
-      {
-        env: {
-          TELEGRAM_BOT_TOKEN: "telegram-token",
-        },
-        signal: expect.any(AbortSignal),
-      },
-    );
-    expect(stopHandle).toHaveBeenCalledTimes(1);
-    expect(steps).toEqual(["start", "execute", "stop"]);
-  });
-
-  it("swallows Telegram typing startup failures and still completes the hosted run", async () => {
-    mocks.startTelegramTypingIndicator.mockRejectedValueOnce(
-      new Error("telegram typing start failed"),
-    );
-
-    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
-      {
-        request: {
-          bundle: "incoming-bundle",
-          run: HOSTED_RUN_CONTEXT,
-          runDrain: createSingleWakeRunDrain(
-            buildHostedExecutionTelegramConversationMessageWake({
-              eventId: "evt_telegram_typing_start_failure",
-              occurredAt: "2026-04-08T00:00:00.000Z",
-              telegramMessage: {
-                messageId: "tg_message_77",
-                schema: "murph.hosted-telegram-message.v1",
-                threadId: "123456",
-              },
-              userId: "member_123",
-            }),
-          ),
-        },
-        runtime: {
-          platformEnv: {
-            TELEGRAM_BOT_TOKEN: "telegram-token",
-          },
-        },
-      },
-      {
-        platform: {
-          artifactStore: {
-            async get() {
-              return null;
-            },
-            async put() {},
-          },
-          effectsPort: createHostedRuntimeEffectsPortStub(),
-        },
-      },
-    );
-
-    assert.deepEqual(result, committedFirstPassResult);
-    expect(mocks.executeHostedRunDrainForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        level: "warn",
-        message: "Hosted Telegram typing indicator could not be started.",
-        phase: "wake.running",
-      }),
-    );
   });
 
   it("fails closed when run-drain finalize post-commit completion fails", async () => {

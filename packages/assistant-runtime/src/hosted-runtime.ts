@@ -41,10 +41,8 @@ import {
   executeHostedRunDrainForCommit,
 } from "./hosted-runtime/execution.ts";
 import {
-  shouldStartRuntimeHostedRunMessagingActivity,
-  startHostedRunMessagingActivity,
-  stopHostedRunMessagingActivity,
-} from "./hosted-runtime/typing.ts";
+  createHostedAssistantChannelTypingDependencies,
+} from "./hosted-runtime/channel-typing.ts";
 import type {
   HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobInput,
@@ -104,18 +102,8 @@ export {
   computeHostedRunElapsedMs,
 } from "./hosted-runtime/utils.ts";
 export {
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
-  selectHostedRunMessagingActivityTarget,
-  shouldStartRuntimeHostedRunMessagingActivity,
-  startHostedRunMessagingActivity,
-  stopHostedRunMessagingActivity,
-} from "./hosted-runtime/typing.ts";
-export type {
-  HostedMessagingActivityComponent,
-  HostedRunMessagingActivityHandle,
-  HostedRunMessagingActivityTarget,
-} from "./hosted-runtime/typing.ts";
+  createHostedAssistantChannelTypingDependencies,
+} from "./hosted-runtime/channel-typing.ts";
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
@@ -197,62 +185,59 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         vaultRoot: restored.vaultRoot,
       },
       async () => {
-        const messagingActivity = shouldStartRuntimeHostedRunMessagingActivity(runtimeEnv)
-          ? await startHostedRunMessagingActivity({
-              component: "runtime",
-              events: runDrain.events,
-              platformEnv: runtime.platformEnv,
-              runtimeEnv,
-              run: input.request.run ?? null,
-            })
-          : null;
-
-        try {
-          if (runDrain.resumeFinalize) {
-            const finalResult = await completeHostedRunDrainAfterCommit({
-              materializedArtifactPaths,
-              run: input.request.run ?? null,
-              runtime,
-              restored,
-              request: input.request,
-              wake,
-            });
-
-            emitHostedExecutionStructuredLog({
-              component: "runtime",
-              wake,
-              details: {
-                runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
-              },
-              message: "Hosted runtime completed run-drain finalization.",
-              phase: "completed",
-              run: input.request.run ?? null,
-            });
-
-            return finalResult;
-          }
-
-          const stripeCustomerId = await resolveHostedVercelAiGatewayStripeCustomerId({
-            billingPort: runtime.platform.billingPort ?? null,
-            forwardedEnv: runtime.forwardedEnv,
+        if (runDrain.resumeFinalize) {
+          const finalResult = await completeHostedRunDrainAfterCommit({
+            materializedArtifactPaths,
             run: input.request.run ?? null,
-            userEnv: runtime.userEnv,
+            runtime,
+            restored,
+            request: input.request,
             wake,
           });
-          const deviceConnectProviders = resolveHostedDeviceConnectProviders(runtime);
-          const executionContext: AssistantExecutionContext = {
-            hosted: {
-              deviceConnectProviders,
-              issueDeviceConnectLink: createHostedDeviceConnectLinkIssuer({
-                messagingReturnTarget: resolveHostedDeviceConnectMessagingReturnTarget(wake),
-                platform: runtime.platform,
-                supportedProviders: deviceConnectProviders.map((entry) => entry.provider),
-              }),
-              memberId: wake.userId,
-              stripeCustomerId,
-              userEnvKeys: Object.keys(runtime.userEnv),
+
+          emitHostedExecutionStructuredLog({
+            component: "runtime",
+            wake,
+            details: {
+              runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
             },
-          };
+            message: "Hosted runtime completed run-drain finalization.",
+            phase: "completed",
+            run: input.request.run ?? null,
+          });
+
+          return finalResult;
+        }
+
+        const stripeCustomerId = await resolveHostedVercelAiGatewayStripeCustomerId({
+          billingPort: runtime.platform.billingPort ?? null,
+          forwardedEnv: runtime.forwardedEnv,
+          run: input.request.run ?? null,
+          userEnv: runtime.userEnv,
+          wake,
+        });
+        const deviceConnectProviders = resolveHostedDeviceConnectProviders(runtime);
+        const typingAbortController = new AbortController();
+        const executionContext: AssistantExecutionContext = {
+          hosted: {
+            channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+              forwardedEnv: runtime.forwardedEnv,
+              platformEnv: runtime.platformEnv,
+              runtimeEnv,
+              signal: typingAbortController.signal,
+            }),
+            deviceConnectProviders,
+            issueDeviceConnectLink: createHostedDeviceConnectLinkIssuer({
+              messagingReturnTarget: resolveHostedDeviceConnectMessagingReturnTarget(wake),
+              platform: runtime.platform,
+              supportedProviders: deviceConnectProviders.map((entry) => entry.provider),
+            }),
+            memberId: wake.userId,
+            stripeCustomerId,
+            userEnvKeys: Object.keys(runtime.userEnv),
+          },
+        };
+        try {
           const committedExecution = await executeHostedRunDrainForCommit({
             artifactMaterializer: incomingBundle
               ? createHostedArtifactMaterializer({
@@ -279,9 +264,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
             result: committedExecution.committedResult,
           };
         } finally {
-          await stopHostedRunMessagingActivity({
-            activity: messagingActivity,
-          });
+          typingAbortController.abort();
         }
       },
     );

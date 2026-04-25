@@ -223,7 +223,6 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
-      "HOSTED_EXECUTION_RUNNER_MESSAGING_ACTIVITY_STOP_PATH",
       "HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH",
     ]);
   });
