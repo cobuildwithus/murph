@@ -4,8 +4,8 @@ entityType: protocol_variant
 key: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
 slug: protocols/whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
 title: Whole Body Red And Near Infrared Light Exposure
-summary: "Research draft for a cautious, nonthermal whole-body red and near-infrared light-bed self-experiment with explicit dose logging and sleep or recovery readouts; direct evidence remains thin, adjacent, and device-specific."
-status: draft
+summary: "High-caution field-testing protocol for a nonthermal whole-body red and near-infrared light-bed self-experiment with explicit dose logging and sleep or recovery readouts; direct evidence remains thin, adjacent, and device-specific."
+status: field-testing
 quality: usable
 aliases:
   - whole-body photobiomodulation
@@ -206,8 +206,8 @@ protocol:
   interventionSessionsTarget: 12
   steps:
     - Confirm that the device is a documented non-UV, non-tanning, nonthermal red/NIR PBM device; do not substitute an infrared sauna, tanning bed, IPL, laser, or heat protocol.
-    - Before starting, check the avoid-or-get-clinician-guidance list; this ordinary wellness draft is for adults without the listed clinical boundaries.
-    - Use the device’s beginner or manufacturer-recommended setting and stay at the lower of the device instructions and this draft’s candidate range; do not increase time, intensity, distance compensation, or frequency to chase an effect.
+    - Before starting, check the avoid-or-get-clinician-guidance list; this ordinary wellness field test is for adults without the listed clinical boundaries.
+    - Use the device’s beginner or manufacturer-recommended setting and stay at the lower of the device instructions and this protocol’s candidate range; do not increase time, intensity, distance compensation, or frequency to chase an effect.
     - Record the device name, wavelengths, irradiance if available, stated fluence if available, intensity mode, pulsing if available, session duration, exposure geometry, body coverage, and whether the session is front-only or front-and-back.
     - Choose one stable session window and keep it as consistent as practical across the intervention rather than changing time of day from session to session.
     - Use the device in a clearly nonthermal way; stop if skin feels hot, burning, painful, or unusually warm.
@@ -339,7 +339,7 @@ experimentOnboarding:
         id: pregnancy_lactation_or_minor
         prompt: Are you under 18, pregnant, trying to become pregnant, breastfeeding, or lactating?
         ifPositive: clinician_guidance_before_unsupervised_start
-        why: This adult wellness draft does not establish whole-body PBM clearance for minors, pregnancy, or lactation.
+        why: This adult wellness protocol does not establish whole-body PBM clearance for minors, pregnancy, or lactation.
       -
         id: cancer_skin_cancer_or_suspicious_lesion
         prompt: Do you have active or recent cancer treatment, skin-cancer history, precancerous lesions, or any changing, bleeding, crusting, painful, unexplained, or suspicious skin lesion in an area that would be exposed?
@@ -710,9 +710,9 @@ claims:
       - source_artifact:pmid-36671752
       - source_artifact:pmid-40253006
 researchLandscape:
-  bottomLine: "Whole-body red and near-infrared photobiomodulation is plausible enough to document as a careful measurement-first research draft, but the direct evidence for this exact general variant is still limited, adjacent, device-specific, and parameter-sensitive."
+  bottomLine: "Whole-body red and near-infrared photobiomodulation is plausible enough for a careful measurement-first field test, but the direct evidence for this exact general variant is still limited, adjacent, device-specific, and parameter-sensitive."
   confidenceLabel: limited
-  primaryClaim: "A cautious, explicitly logged whole-body red/NIR routine can be described as a measurement-first draft, not as a validated or onboarding-ready sleep or recovery intervention."
+  primaryClaim: "A cautious, explicitly logged whole-body red/NIR routine can support a gated measurement-first field test, not a validated sleep or recovery intervention."
   mainCaveat: "Much of the stronger or more positive literature belongs to sibling variants, adjacent modalities, or narrow populations rather than to a general healthy-adult whole-body protocol."
   groups:
     -
@@ -828,7 +828,7 @@ safety:
     - chest pain chest tightness palpitations wheezing dyspnea at rest or unusual shortness of breath
     - repeated worsening sleep insomnia agitation irritability hypomania or mania-like symptoms lowered mood or unstable mood
   notes:
-    - This page is for a bounded research draft, not for disease treatment or Murph experiment onboarding.
+    - This page is for a bounded field-testing protocol with gated onboarding, not for disease treatment or automatic experiment creation.
     - Use only documented non-UV non-tanning nonthermal red/NIR PBM devices; do not substitute sauna tanning IPL laser or heat protocols.
     - Avoid direct gaze into emitters and use device-appropriate eye protection unless the manufacturer explicitly states it is not required.
     - Do not stop hold or change prescribed medication for this protocol.
@@ -836,7 +836,7 @@ safety:
     - Keep safety language stronger than efficacy language because the direct evidence base is still sparse.
 ---
 
-Whole-body red and near-infrared photobiomodulation is plausible enough to document as a cautious research draft, but the direct evidence for this exact Murph variant is much thinner than the broader PBM internet narrative suggests.
+Whole-body red and near-infrared photobiomodulation is plausible enough for cautious field testing, but the direct evidence for this exact Murph variant is much thinner than the broader PBM internet narrative suggests.
 
 ## What this page is trying to answer
 
@@ -848,7 +848,7 @@ The direct literature is not strong enough to promise a result. The strongest ge
 
 ## Who should not use this as an ordinary self-experiment
 
-Do not use this ordinary wellness draft without clinician guidance if you are pregnant or breastfeeding; are under 18; have seizure risk, photophobia, photosensitivity, eye disease, recent eye surgery, active or recent cancer treatment, skin-cancer history, suspicious or changing skin lesions, thyroid disease, an implanted medical device, unstable cardiovascular, metabolic, neurologic, pulmonary, or psychiatric disease, diabetes medication constraints, open wounds, active rash, sunburn, skin infection, herpes outbreak, or recent photodynamic therapy drug exposure. Also do not use this protocol if you cannot reliably detect or report heat, pain, skin symptoms, or visual symptoms. These boundaries come from safety reviews, medication guidance, and supervised or registered protocol exclusions rather than from proven risk rates. (source_artifact:clinicaltrials-gov-nct05116605-2026-04-23; source_artifact:clinicaltrials-gov-nct06678698-2026-04-23; source_artifact:clinicaltrials-gov-nct07047248-2026-04-23; source_artifact:clinicaltrials-gov-nct07271927-2026-04-23; source_artifact:ensaiosclinicos-rbr-8v7rsdp-2026-04-23; source_artifact:ensaiosclinicos-rbr-9vcph8x-2026-04-23; source_artifact:clinicaltrials-gov-nct06866522-2026-04-23; source_artifact:bmla-drugs-and-lasers-ipls-2018-11-30; source_artifact:pmid-34451820; source_artifact:pmid-29466089)
+Do not use this ordinary wellness protocol without clinician guidance if you are pregnant or breastfeeding; are under 18; have seizure risk, photophobia, photosensitivity, eye disease, recent eye surgery, active or recent cancer treatment, skin-cancer history, suspicious or changing skin lesions, thyroid disease, an implanted medical device, unstable cardiovascular, metabolic, neurologic, pulmonary, or psychiatric disease, diabetes medication constraints, open wounds, active rash, sunburn, skin infection, herpes outbreak, or recent photodynamic therapy drug exposure. Also do not use this protocol if you cannot reliably detect or report heat, pain, skin symptoms, or visual symptoms. These boundaries come from safety reviews, medication guidance, and supervised or registered protocol exclusions rather than from proven risk rates. (source_artifact:clinicaltrials-gov-nct05116605-2026-04-23; source_artifact:clinicaltrials-gov-nct06678698-2026-04-23; source_artifact:clinicaltrials-gov-nct07047248-2026-04-23; source_artifact:clinicaltrials-gov-nct07271927-2026-04-23; source_artifact:ensaiosclinicos-rbr-8v7rsdp-2026-04-23; source_artifact:ensaiosclinicos-rbr-9vcph8x-2026-04-23; source_artifact:clinicaltrials-gov-nct06866522-2026-04-23; source_artifact:bmla-drugs-and-lasers-ipls-2018-11-30; source_artifact:pmid-34451820; source_artifact:pmid-29466089)
 
 
 ## What stays separate
