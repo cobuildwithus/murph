@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: web_page
   canonicalIdBasis: url
-  url: https://blog.alomoves.com/movement/amrap-emom-tabata-explained-why-you-should-switch-up-your-training
-  sourceKind: web_page
+  identifiers:
+    url: https://blog.alomoves.com/movement/amrap-emom-tabata-explained-why-you-should-switch-up-your-training
+  canonicalUrl: https://blog.alomoves.com/movement/amrap-emom-tabata-explained-why-you-should-switch-up-your-training
 sourceKind: web_page
 source:
   kind: web_page

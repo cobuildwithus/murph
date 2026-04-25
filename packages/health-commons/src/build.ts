@@ -2,7 +2,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { buildHealthCommonsCatalog } from "./catalog.ts";
+import {
+  buildHealthCommonsCatalog,
+  buildHealthCommonsSourceArtifactIndex,
+  buildHealthCommonsSourceIndex,
+} from "./catalog.ts";
 import { stablePrettyJson } from "./normalize.ts";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,6 +36,9 @@ export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions):
 function buildGeneratedFiles(
   catalog: Awaited<ReturnType<typeof buildHealthCommonsCatalog>>,
 ): Map<string, string> {
+  const sourceIndex = buildHealthCommonsSourceIndex(catalog);
+  const sourceArtifactIndex = buildHealthCommonsSourceArtifactIndex(catalog);
+
   return new Map<string, string>([
     ["catalog.json", stablePrettyJson(catalog)],
     ["catalog.hash", `${catalog.catalogHash}\n`],
@@ -39,6 +46,10 @@ function buildGeneratedFiles(
     ["redirects.json", stablePrettyJson({ redirects: catalog.redirects })],
     ["recent-changes.json", stablePrettyJson({ changes: catalog.changes })],
     ["artifact-manifests.json", stablePrettyJson({ artifactManifests: catalog.artifactManifests })],
+    ["evidence-appraisals.json", stablePrettyJson({ evidenceAppraisals: catalog.evidenceAppraisals })],
+    ["source-index.json", stablePrettyJson(sourceIndex)],
+    ["source-identities.ndjson", sourceIndex.identityLookup.map((entry) => JSON.stringify(entry)).join("\n") + "\n"],
+    ["source-artifact-index.json", stablePrettyJson(sourceArtifactIndex)],
   ]);
 }
 

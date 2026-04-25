@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: trial_registry
   canonicalIdBasis: url
-  url: https://clinicaltrials.gov/study/NCT04796532
-  sourceKind: trial_registry
+  identifiers:
+    url: https://clinicaltrials.gov/study/NCT04796532
+  canonicalUrl: https://clinicaltrials.gov/study/NCT04796532
 sourceKind: trial_registry
 source:
   kind: other

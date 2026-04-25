@@ -20,10 +20,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: trial_registry
   canonicalIdBasis: url
-  url: https://center6.umin.ac.jp/cgi-open-bin/ctr_e/ctr_view.cgi?recptno=R000063711
-  sourceKind: trial_registry
+  identifiers:
+    url: https://center6.umin.ac.jp/cgi-open-bin/ctr_e/ctr_view.cgi?recptno=R000063711
+  canonicalUrl: https://center6.umin.ac.jp/cgi-open-bin/ctr_e/ctr_view.cgi?recptno=R000063711
 sourceKind: trial_registry
 source:
   kind: other

@@ -6,11 +6,13 @@ import {
   HEALTH_COMMONS_ARTIFACT_MANIFEST_SCHEMA_VERSION,
   healthCommonsArtifactManifestSchema,
   healthCommonsChangeRecordSchema,
+  healthCommonsEvidenceAppraisalSchema,
   healthCommonsPageFrontmatterSchema,
   healthCommonsRedirectsFileSchema,
   type HealthCommonsArtifactManifest,
   type HealthCommonsArtifactPointer,
   type HealthCommonsChangeRecord,
+  type HealthCommonsEvidenceAppraisal,
   type HealthCommonsPageFrontmatter,
   type HealthCommonsRedirect,
 } from "@murphai/contracts";
@@ -29,6 +31,7 @@ export interface HealthCommonsSourcePage {
 export interface HealthCommonsContentSet {
   artifactManifests: HealthCommonsArtifactManifest[];
   changes: HealthCommonsChangeRecord[];
+  evidenceAppraisals: HealthCommonsEvidenceAppraisal[];
   pages: HealthCommonsSourcePage[];
   redirects: HealthCommonsRedirect[];
 }
@@ -37,15 +40,17 @@ const PAGE_ARTIFACTS_MANIFEST_KEY = "artifact_manifest:page-frontmatter-artifact
 
 export async function readHealthCommonsContent(contentRoot: string): Promise<HealthCommonsContentSet> {
   const pages = await readHealthCommonsPages(contentRoot);
-  const [redirects, changes, fileArtifactManifests] = await Promise.all([
+  const [redirects, changes, fileArtifactManifests, evidenceAppraisals] = await Promise.all([
     readHealthCommonsRedirects(contentRoot),
     readHealthCommonsChanges(contentRoot),
     readHealthCommonsArtifactManifests(contentRoot),
+    readHealthCommonsEvidenceAppraisals(contentRoot),
   ]);
 
   return {
     artifactManifests: withPageArtifactManifest(fileArtifactManifests, pages),
     changes,
+    evidenceAppraisals,
     pages,
     redirects,
   };
@@ -128,6 +133,35 @@ export async function readHealthCommonsChanges(contentRoot: string): Promise<Hea
 
   changes.sort((left, right) => left.changeId.localeCompare(right.changeId));
   return changes;
+}
+
+export async function readHealthCommonsEvidenceAppraisals(contentRoot: string): Promise<HealthCommonsEvidenceAppraisal[]> {
+  const appraisalRoot = path.join(contentRoot, "evidence-appraisals");
+  const jsonlPaths = (await walkRelativeFiles(appraisalRoot, ".jsonl"))
+    .map((relativePath) => normalizePath(path.join("evidence-appraisals", relativePath)));
+  const appraisals: HealthCommonsEvidenceAppraisal[] = [];
+
+  for (const relativePath of jsonlPaths) {
+    const absolutePath = path.join(contentRoot, relativePath);
+    const raw = await readFile(absolutePath, "utf8");
+    const lines = raw.split(/\r?\n/u);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]?.trim();
+      if (!line) {
+        continue;
+      }
+      try {
+        appraisals.push(healthCommonsEvidenceAppraisalSchema.parse(JSON.parse(line)));
+      } catch (error) {
+        throw new Error(
+          `Failed to parse health commons evidence appraisal at ${relativePath}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
+  appraisals.sort((left, right) => left.key.localeCompare(right.key));
+  return appraisals;
 }
 
 export async function readHealthCommonsArtifactManifests(contentRoot: string): Promise<HealthCommonsArtifactManifest[]> {

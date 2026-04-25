@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: web_page
   canonicalIdBasis: url
-  url: https://wodwell.com/wod/tabata-this/
-  sourceKind: web_page
+  identifiers:
+    url: https://wodwell.com/wod/tabata-this/
+  canonicalUrl: https://wodwell.com/wod/tabata-this/
 sourceKind: web_page
 source:
   kind: web_page

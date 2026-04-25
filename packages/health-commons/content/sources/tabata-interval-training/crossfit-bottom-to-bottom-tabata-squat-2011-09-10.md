@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: web_page
   canonicalIdBasis: url
-  url: https://www.crossfit.com/workout/2011/09/10
-  sourceKind: web_page
+  identifiers:
+    url: https://www.crossfit.com/workout/2011/09/10
+  canonicalUrl: https://www.crossfit.com/workout/2011/09/10
 sourceKind: web_page
 source:
   kind: web_page
