@@ -100,7 +100,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     }
 
     await maybeStartHostedLinqIngressTypingDiagnostic({
-      defer: input.defer,
       plan,
       signal: input.signal,
     });
@@ -134,7 +133,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 }
 
 async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
-  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
   signal?: AbortSignal;
 }): Promise<void> {
@@ -150,172 +148,36 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
     return;
   }
 
-  const burstDelaysMs = environment.linqIngressTypingDiagnosticBurstDelaysMs;
-  const burstMode = environment.linqIngressTypingDiagnosticBurstMode;
-  const immediateDelaysMs = burstDelaysMs.filter((delayMs) => delayMs === 0);
-  const deferredDelaysMs = burstDelaysMs.filter((delayMs) => delayMs > 0);
   const responseReason = input.plan.response.reason ?? null;
   const timeoutMs = environment.linqIngressTypingDiagnosticTimeoutMs;
-
-  if (burstMode === "inline") {
-    const burstTiming = startHostedOnboardingTiming(
-      "hosted-onboarding.webhook.linq.ingress-typing-burst",
-      {
-        burstMode,
-        inlineAttempts: burstDelaysMs.length,
-        responseReason,
-        totalAttempts: burstDelaysMs.length,
-      },
-    );
-
-    await runHostedLinqIngressTypingDiagnosticBurst({
-      attemptOffset: 0,
-      burstMode,
-      chatId,
-      delaysMs: burstDelaysMs,
-      responseReason,
-      signal: input.signal,
-      timeoutMs,
-      totalAttempts: burstDelaysMs.length,
-    });
-
-    finishHostedOnboardingTiming(burstTiming, "completed", {
-      burstMode,
-      deferred: false,
-      responseReason,
-    });
-    return;
-  }
-
-  await runHostedLinqIngressTypingDiagnosticBurst({
-    attemptOffset: 0,
-    burstMode,
-    chatId,
-    delaysMs: immediateDelaysMs.length > 0 ? immediateDelaysMs : [0],
-    responseReason,
-    signal: input.signal,
-    timeoutMs,
-    totalAttempts: burstDelaysMs.length,
-  });
-
-  if (deferredDelaysMs.length === 0) {
-    return;
-  }
-
-  const burstTiming = startHostedOnboardingTiming(
-    "hosted-onboarding.webhook.linq.ingress-typing-burst",
+  const typingTiming = startHostedOnboardingTiming(
+    "hosted-onboarding.webhook.linq.ingress-typing",
     {
-      burstMode,
-      deferredAttempts: deferredDelaysMs.length,
+      chatIdPresent: true,
       responseReason,
-      totalAttempts: burstDelaysMs.length,
+      timeoutMs,
     },
   );
 
-  if (!input.defer) {
-    finishHostedOnboardingTiming(burstTiming, "skipped", {
-      burstMode,
-      deferred: false,
-      responseReason,
-    });
-    return;
-  }
-
   try {
-    await input.defer(async () => {
-      await runHostedLinqIngressTypingDiagnosticBurst({
-        attemptOffset: immediateDelaysMs.length,
-        burstMode,
-        chatId,
-        delaysMs: deferredDelaysMs,
-        responseReason,
-        timeoutMs,
-        totalAttempts: burstDelaysMs.length,
-      });
+    const result = await sendHostedLinqTypingPing({
+      chatId,
+      signal: input.signal,
+      timeoutMs,
     });
 
-    finishHostedOnboardingTiming(burstTiming, "scheduled", {
-      burstMode,
-      deferred: true,
+    finishHostedOnboardingTiming(typingTiming, result.ok ? "started" : "failed", {
+      httpStatus: result.status,
       responseReason,
+      signalAbortedAfterTyping: input.signal?.aborted ?? false,
     });
   } catch (error) {
-    finishHostedOnboardingTiming(burstTiming, "failed", {
-      burstMode,
+    finishHostedOnboardingTiming(typingTiming, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       responseReason,
+      signalAbortedAfterTyping: input.signal?.aborted ?? false,
     });
   }
-}
-
-async function runHostedLinqIngressTypingDiagnosticBurst(input: {
-  attemptOffset: number;
-  burstMode: string;
-  chatId: string;
-  delaysMs: readonly number[];
-  responseReason: string | null;
-  signal?: AbortSignal;
-  timeoutMs: number;
-  totalAttempts: number;
-}): Promise<void> {
-  let previousDelayMs = 0;
-
-  for (const [index, delayMs] of input.delaysMs.entries()) {
-    const waitMs = Math.max(0, delayMs - previousDelayMs);
-    previousDelayMs = delayMs;
-
-    if (waitMs > 0) {
-      await waitForHostedLinqIngressTypingDiagnosticDelay(waitMs);
-    }
-
-    const attempt = input.attemptOffset + index + 1;
-    const typingTiming = startHostedOnboardingTiming(
-      "hosted-onboarding.webhook.linq.ingress-typing",
-      {
-        burstAttempt: attempt,
-        burstDelayMs: delayMs,
-        burstMode: input.burstMode,
-        burstTotal: input.totalAttempts,
-        chatIdPresent: true,
-        responseReason: input.responseReason,
-        timeoutMs: input.timeoutMs,
-      },
-    );
-
-    try {
-      const result = await sendHostedLinqTypingPing({
-        chatId: input.chatId,
-        signal: input.signal,
-        timeoutMs: input.timeoutMs,
-      });
-
-      finishHostedOnboardingTiming(typingTiming, result.ok ? "started" : "failed", {
-        burstAttempt: attempt,
-        burstDelayMs: delayMs,
-        burstMode: input.burstMode,
-        burstTotal: input.totalAttempts,
-        httpStatus: result.status,
-        responseReason: input.responseReason,
-        signalAbortedAfterTyping: input.signal?.aborted ?? false,
-      });
-    } catch (error) {
-      finishHostedOnboardingTiming(typingTiming, "failed", {
-        burstAttempt: attempt,
-        burstDelayMs: delayMs,
-        burstMode: input.burstMode,
-        burstTotal: input.totalAttempts,
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-        responseReason: input.responseReason,
-        signalAbortedAfterTyping: input.signal?.aborted ?? false,
-      });
-    }
-  }
-}
-
-function waitForHostedLinqIngressTypingDiagnosticDelay(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
-  });
 }
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
