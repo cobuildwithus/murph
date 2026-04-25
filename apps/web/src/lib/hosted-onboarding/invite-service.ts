@@ -30,9 +30,7 @@ import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import { deriveHostedOnboardingStage } from "./lifecycle";
 import {
   readHostedMemberIdentity,
-  projectHostedMemberIdentityState,
   writeHostedMemberSignupPhoneState,
-  type HostedMemberIdentityState,
 } from "./hosted-member-identity-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import { type HostedPrivyIdentity, hasHostedPrivyPhoneAuthConfig } from "./privy";
@@ -115,7 +113,6 @@ export async function getHostedInviteStatus(input: {
       )
     : input.authenticatedMember?.id === invite.memberId;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
-  const inviteIdentityState = projectHostedMemberIdentityState(inviteIdentity);
   const activationPending = sessionMatchesInvite
     ? await isHostedMemberActivationPending({
         billingStatus: invite.member.billingStatus,
@@ -152,10 +149,6 @@ export async function getHostedInviteStatus(input: {
       code: invite.inviteCode,
       expiresAt: invite.expiresAt.toISOString(),
       phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-      phonePrefill: resolveHostedInvitePhonePrefill({
-        identity: inviteIdentityState,
-        stage,
-      }),
     },
     messagingSetupRequired,
     murphPhoneNumber: resolveHostedInviteMurphPhoneNumber({
@@ -625,17 +618,6 @@ function readPhoneCodeRetryAfterMs(input: {
     0,
     input.lastAttemptAt.getTime() + HOSTED_INVITE_SEND_CODE_COOLDOWN_MS - input.now.getTime(),
   );
-}
-
-function resolveHostedInvitePhonePrefill(input: {
-  identity: Pick<HostedMemberIdentityState, "phoneNumberVerifiedAt" | "signupPhoneNumber">;
-  stage: HostedInviteStatusPayload["stage"];
-}): string | null {
-  if (input.stage !== "verify" || input.identity.phoneNumberVerifiedAt) {
-    return null;
-  }
-
-  return normalizePhoneNumber(input.identity.signupPhoneNumber);
 }
 
 function maxDate(first: Date | null, second: Date | null): Date | null {

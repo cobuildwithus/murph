@@ -155,7 +155,7 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("returns the stored signup phone as a verify-stage invite prefill", async () => {
+  it("returns only the masked phone hint for a verify-stage invite", async () => {
     const prisma = {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
@@ -178,21 +178,26 @@ describe("getHostedInviteStatus", () => {
       },
     } as never;
 
-    await expect(
-      getHostedInviteStatus({
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      invite: {
-        phonePrefill: "+12025550123",
-      },
+    const status = await getHostedInviteStatus({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(status).toMatchObject({
       stage: "verify",
     });
+    expect(status.invite).toEqual({
+      code: "invite-code",
+      expiresAt: "2026-04-07T12:00:00.000Z",
+      phoneHint: "*** 4567",
+    });
+    expect(status.invite).not.toHaveProperty("phonePrefill");
+    expect(JSON.stringify(status)).not.toContain("+12025550123");
+    expect(JSON.stringify(status)).not.toContain("+1 (202) 555-0123");
   });
 
-  it("does not expose the stored phone prefill after the invite is already active", async () => {
+  it("does not expose the stored phone after the invite is already active", async () => {
     const prisma = {
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
@@ -215,19 +220,18 @@ describe("getHostedInviteStatus", () => {
       },
     } as never;
 
-    await expect(
-      getHostedInviteStatus({
-        authenticatedMember: createAuthenticatedMember(),
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      invite: {
-        phonePrefill: null,
-      },
+    const status = await getHostedInviteStatus({
+      authenticatedMember: createAuthenticatedMember(),
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(status).toMatchObject({
       stage: "active",
     });
+    expect(status.invite).not.toHaveProperty("phonePrefill");
+    expect(JSON.stringify(status)).not.toContain("+12025550123");
   });
 
   it("does not expose a verified phone as a prefill to an unauthenticated invite holder", async () => {
@@ -254,22 +258,21 @@ describe("getHostedInviteStatus", () => {
       },
     } as never;
 
-    await expect(
-      getHostedInviteStatus({
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      invite: {
-        phonePrefill: null,
-      },
+    const status = await getHostedInviteStatus({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(status).toMatchObject({
       session: {
         authenticated: false,
         matchesInvite: false,
       },
       stage: "verify",
     });
+    expect(status.invite).not.toHaveProperty("phonePrefill");
+    expect(JSON.stringify(status)).not.toContain("+12025550123");
   });
 
   it("does not expose a refreshed signup phone once the member phone is verified", async () => {
@@ -296,22 +299,21 @@ describe("getHostedInviteStatus", () => {
       },
     } as never;
 
-    await expect(
-      getHostedInviteStatus({
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      invite: {
-        phonePrefill: null,
-      },
+    const status = await getHostedInviteStatus({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(status).toMatchObject({
       session: {
         authenticated: false,
         matchesInvite: false,
       },
       stage: "verify",
     });
+    expect(status.invite).not.toHaveProperty("phonePrefill");
+    expect(JSON.stringify(status)).not.toContain("+12025550123");
   });
 
   it("matches invite access by a rotated Privy user lookup key", async () => {

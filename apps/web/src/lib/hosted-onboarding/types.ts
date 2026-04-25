@@ -20,7 +20,6 @@ export interface HostedInviteStatusPayload {
     code: string;
     expiresAt: string;
     phoneHint: string;
-    phonePrefill?: string | null;
   } | null;
   messagingSetupRequired: boolean;
   murphPhoneNumber?: string | null;

@@ -392,22 +392,68 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /disabled=""/);
   });
 
-  it("prefills invite phone entry from the stored signup phone", async () => {
+  it("shows an invite masked phone hint without rendering the raw phone input", async () => {
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
 
     const markup = renderToStaticMarkup(
       React.createElement(HostedInvitePhoneAuth, {
-        initialPhoneNumber: "+14155552671",
         inviteCode: "invite-code",
+        phoneHint: "*** 2671",
+      }),
+    );
+
+    assert.match(markup, /\*\*\* 2671/);
+    assert.match(markup, /Enter full number/);
+    assert.doesNotMatch(markup, /name="phone-number"/);
+    assert.doesNotMatch(markup, /\+14155552671/);
+    assert.doesNotMatch(markup, /disabled=""/);
+  });
+
+  it("defensively masks invite phone hints before rendering them", async () => {
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "+14155552671",
+      }),
+    );
+
+    assert.match(markup, /\*\*\* 2671/);
+    assert.doesNotMatch(markup, /\+14155552671/);
+    assert.doesNotMatch(markup, /name="phone-number"/);
+  });
+
+  it("does not render malformed masked invite phone hints verbatim", async () => {
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "*** 2671 +14155552671",
       }),
     );
 
     assert.match(markup, /name="phone-number"/);
-    assert.match(markup, /value="\+14155552671"/);
-    assert.doesNotMatch(markup, /disabled=""/);
+    assert.doesNotMatch(markup, /\*\*\* 2671 \+14155552671/);
+    assert.doesNotMatch(markup, /\+14155552671/);
   });
 
-  it("derives the invite phone country picker from an international prefill", async () => {
+  it("falls back to manual invite phone entry for the generic phone hint", async () => {
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "your number",
+      }),
+    );
+
+    assert.match(markup, /name="phone-number"/);
+    assert.doesNotMatch(markup, /Enter full number/);
+  });
+
+  it("falls back to manual invite phone entry when there is no masked hint", async () => {
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
     const { HostedPhoneCountryCodeProvider } = await import(
       "@/src/components/hosted-onboarding/hosted-phone-country-code-provider"
@@ -420,28 +466,31 @@ describe("HostedPhoneAuth", () => {
           countryCode: "US",
         },
         React.createElement(HostedInvitePhoneAuth, {
-          initialPhoneNumber: "+447400123456",
           inviteCode: "invite-code",
         }),
       ),
     );
 
-    assert.match(markup, />\+44</);
-    assert.match(markup, /placeholder="07400 123456"/);
-    assert.match(markup, /value="\+447400123456"/);
+    assert.match(markup, />\+1</);
+    assert.match(markup, /name="phone-number"/);
+    assert.match(markup, /value=""/);
   });
 
-  it("restores the invite phone prefill after signing out of an interrupted session", async () => {
+  it("returns to the masked invite phone hint after signing out of an interrupted session", async () => {
     vi.resetModules();
 
     vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
       HostedPhoneAuthFlow(props: {
         onPhoneNumberChange: (value: string) => void;
+        phoneInputAutoFocus?: boolean;
         phoneNumber: string;
       }) {
         return React.createElement(
           "div",
           {
+            "data-phone-input-autofocus": props.phoneInputAutoFocus
+              ? "true"
+              : "false",
             "data-phone-number": props.phoneNumber,
           },
           React.createElement(
@@ -485,15 +534,35 @@ describe("HostedPhoneAuth", () => {
 
     const { cleanup, container } = await renderClientComponent(
       React.createElement(HostedInvitePhoneAuth, {
-        initialPhoneNumber: "+14155552671",
         inviteCode: "invite-code",
+        phoneHint: "*** 2671",
       }),
     );
 
     try {
+      assert.match(container.textContent ?? "", /\*\*\* 2671/);
+      assert.equal(container.querySelector("[data-phone-number]"), null);
+
+      const enterFullNumberButton = [
+        ...container.querySelectorAll("button"),
+      ].find((button) => button.textContent === "Enter full number") as
+        | HTMLButtonElement
+        | undefined;
+      assert.ok(enterFullNumberButton);
+
+      await act(async () => {
+        enterFullNumberButton.dispatchEvent(
+          new Event("click", { bubbles: true }),
+        );
+      });
+
       assert.equal(
         container.querySelector("[data-phone-number]")?.getAttribute("data-phone-number"),
-        "+14155552671",
+        "",
+      );
+      assert.equal(
+        container.querySelector("[data-phone-number]")?.getAttribute("data-phone-input-autofocus"),
+        "true",
       );
 
       const changePhoneButton = container.querySelector(
@@ -519,10 +588,8 @@ describe("HostedPhoneAuth", () => {
         signOutButton?.dispatchEvent(new Event("click", { bubbles: true }));
       });
 
-      assert.equal(
-        container.querySelector("[data-phone-number]")?.getAttribute("data-phone-number"),
-        "+14155552671",
-      );
+      assert.equal(container.querySelector("[data-phone-number]"), null);
+      assert.match(container.textContent ?? "", /\*\*\* 2671/);
       expect(mocks.logout).toHaveBeenCalledTimes(1);
     } finally {
       await cleanup();

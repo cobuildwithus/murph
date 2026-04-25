@@ -23,10 +23,7 @@ import {
   type HostedPrivyClientPendingAction,
   type HostedPrivyFinalizationState,
 } from "@/src/lib/hosted-onboarding/privy-client";
-import {
-  normalizePhoneNumber,
-  normalizePhoneNumberForCountry,
-} from "@/src/lib/hosted-onboarding/phone";
+import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedPrivyClientSessionInput } from "./hosted-auth-completion";
 
@@ -57,7 +54,6 @@ import type {
 } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthControllerInput {
-  initialPhoneNumber?: string | null;
   inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
@@ -67,14 +63,8 @@ interface HostedPhoneAuthControllerInput {
 }
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
-const HOSTED_PHONE_COUNTRY_CODE_DIAL_CODE_TIEBREAKERS: ReadonlyMap<string, string> =
-  new Map([
-    ["+1", "US"],
-    ["+44", "GB"],
-  ]);
 
 export function useHostedPhoneAuthController({
-  initialPhoneNumber: initialPhoneNumberInput,
   inviteCode,
   intent = "signup",
   onCompleted,
@@ -93,15 +83,13 @@ export function useHostedPhoneAuthController({
   const [pendingAction, setPendingAction] =
     useState<HostedPrivyClientPendingAction>(null);
   const phoneCountryCodeHint = useHostedPhoneCountryCodeHint();
-  const initialPhoneNumber = normalizeInitialHostedPhoneNumber(initialPhoneNumberInput);
   const initialPhoneCountryCode = resolveInitialHostedPhoneCountryCode({
     countryCodeHint: phoneCountryCodeHint,
-    initialPhoneNumber,
   });
   const [phoneCountryCode, setPhoneCountryCode] = useState<string>(() =>
     initialPhoneCountryCode,
   );
-  const [phoneNumber, setPhoneNumber] = useState(() => initialPhoneNumber);
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneVerificationAttempt, setPhoneVerificationAttempt] =
     useState<HostedPhoneVerificationAttempt | null>(null);
   const lastAutoSubmittedCodeRef = useRef<string | null>(null);
@@ -377,7 +365,7 @@ export function useHostedPhoneAuthController({
         await onSignOut?.();
         resetPhoneAuthFlow();
         setPhoneCountryCode(initialPhoneCountryCode);
-        setPhoneNumber(initialPhoneNumber);
+        setPhoneNumber("");
       },
       setPendingAction,
     });
@@ -453,30 +441,12 @@ export function resolveHostedAuthenticatedPhoneAuthView(input: {
 
 function resolveInitialHostedPhoneCountryCode(input: {
   countryCodeHint: string | null | undefined;
-  initialPhoneNumber: string;
 }): string {
   const fallbackOption =
     resolveHostedPhoneCountryOption(input.countryCodeHint)
     ?? resolveHostedPhoneCountryOption(DEFAULT_HOSTED_PHONE_COUNTRY_CODE)
     ?? HOSTED_PHONE_COUNTRY_OPTIONS[0];
-  const normalizedPhoneNumber = normalizePhoneNumber(input.initialPhoneNumber);
-
-  if (!normalizedPhoneNumber) {
-    return fallbackOption.code;
-  }
-
-  if (normalizedPhoneNumber.startsWith(fallbackOption.dialCode)) {
-    return fallbackOption.code;
-  }
-
-  return (
-    resolveHostedPhoneCountryOptionFromPhoneNumber(normalizedPhoneNumber)?.code
-    ?? fallbackOption.code
-  );
-}
-
-function normalizeInitialHostedPhoneNumber(value: string | null | undefined): string {
-  return typeof value === "string" ? value.trim() : "";
+  return fallbackOption.code;
 }
 
 function resolveHostedPhoneCountryOption(value: string | null | undefined) {
@@ -488,29 +458,6 @@ function resolveHostedPhoneCountryOption(value: string | null | undefined) {
 
   return (
     HOSTED_PHONE_COUNTRY_OPTIONS.find((option) => option.code === normalized)
-    ?? null
-  );
-}
-
-function resolveHostedPhoneCountryOptionFromPhoneNumber(phoneNumber: string) {
-  const matchingOptions = HOSTED_PHONE_COUNTRY_OPTIONS
-    .filter((option) => phoneNumber.startsWith(option.dialCode))
-    .sort((left, right) => right.dialCode.length - left.dialCode.length);
-  const longestDialCode = matchingOptions[0]?.dialCode;
-
-  if (!longestDialCode) {
-    return null;
-  }
-
-  const preferredCountryCode =
-    HOSTED_PHONE_COUNTRY_CODE_DIAL_CODE_TIEBREAKERS.get(longestDialCode);
-  const longestMatches = matchingOptions.filter(
-    (option) => option.dialCode === longestDialCode,
-  );
-
-  return (
-    longestMatches.find((option) => option.code === preferredCountryCode)
-    ?? longestMatches[0]
     ?? null
   );
 }
