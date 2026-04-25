@@ -9,15 +9,84 @@ vi.mock("@/src/lib/hosted-web/encryption", () => ({
   encryptHostedWebNullableString: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    publicBaseUrl: "https://join.example.test",
+  }),
+}));
+
 import {
+  generateHostedVaultSyncPairingCode,
+  HOSTED_VAULT_SYNC_SESSION_TTL_MS,
+  normalizeHostedVaultSyncPairingCode,
   normalizeHostedVaultSyncSessionStatus,
   projectHostedVaultSyncPayload,
   projectHostedVaultSyncSessionView,
 } from "@/src/lib/vault-sync/shared";
 import {
+  createHostedVaultSyncSession,
   listHostedVaultSyncSessions,
   markHostedVaultSyncSessionCommittedFromRunSummary,
 } from "@/src/lib/vault-sync/session-service";
+
+describe("vault sync pairing setup", () => {
+  it("generates 10-character pairing codes in a readable display shape", () => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const pairingCode = generateHostedVaultSyncPairingCode();
+
+      expect(pairingCode).toMatch(/^[A-Z0-9]{5}-[A-Z0-9]{5}$/u);
+      expect(normalizeHostedVaultSyncPairingCode(pairingCode)).toHaveLength(10);
+    }
+  });
+
+  it("creates pending sessions with a 10-minute expiry", async () => {
+    const now = new Date("2026-04-21T00:00:00.000Z");
+    const create = vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...data,
+      agentTokenHash: null,
+      createdAt: now,
+      localManifestHash: null,
+      queuedAt: null,
+      queuedIngressEventId: null,
+      revokedAt: null,
+      sourceSchemaVersion: null,
+      sourceVaultId: null,
+      sourceVaultTitle: null,
+      updatedAt: now,
+      uploadedAt: null,
+    }));
+    const prisma = {
+      hostedVaultSyncSession: {
+        create,
+      },
+    } as never;
+
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      const result = await createHostedVaultSyncSession({
+        memberId: "member_123",
+        prisma,
+      });
+
+      expect(HOSTED_VAULT_SYNC_SESSION_TTL_MS).toBe(10 * 60 * 1000);
+      expect(create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          expiresAt: new Date("2026-04-21T00:10:00.000Z"),
+          memberId: "member_123",
+          status: "pending",
+        }),
+      });
+      expect(result.pairingCode).toMatch(/^[A-Z0-9]{5}-[A-Z0-9]{5}$/u);
+      expect(result.session.agentCommand).toBe(
+        `murph sync push --session ${result.pairingCode} --host https://join.example.test`,
+      );
+      expect(result.session.expiresAt).toBe("2026-04-21T00:10:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe("vault sync shared projections", () => {
   it("projects pending sessions with a runnable agent command and hides the command once they expire", () => {
@@ -41,11 +110,11 @@ describe("vault sync shared projections", () => {
 
     expect(projectHostedVaultSyncSessionView({
       appBaseUrl: "https://join.example.test",
-      pairingCode: "ABCD-EFGH",
+      pairingCode: "ABCDE-FGHIJ",
       session,
       now: new Date("2026-04-21T00:30:00.000Z"),
     })).toEqual({
-      agentCommand: "murph sync push --session ABCD-EFGH --host https://join.example.test",
+      agentCommand: "murph sync push --session ABCDE-FGHIJ --host https://join.example.test",
       createdAt: "2026-04-21T00:00:00.000Z",
       expiresAt: "2026-04-21T01:00:00.000Z",
       id: "vsi_123",
@@ -64,7 +133,7 @@ describe("vault sync shared projections", () => {
 
     expect(projectHostedVaultSyncSessionView({
       appBaseUrl: "https://join.example.test",
-      pairingCode: "ABCD-EFGH",
+      pairingCode: "ABCDE-FGHIJ",
       session: {
         ...session,
         expiresAt: new Date("2026-04-20T23:59:59.000Z"),

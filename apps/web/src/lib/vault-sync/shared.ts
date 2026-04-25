@@ -16,11 +16,12 @@ import {
 } from "../hosted-web/encryption";
 
 export const HOSTED_VAULT_SYNC_PAYLOAD_SCHEMA = "murph.hosted-vault-sync-payload.v1";
-export const HOSTED_VAULT_SYNC_SESSION_TTL_MS = 30 * 60 * 1000;
+export const HOSTED_VAULT_SYNC_SESSION_TTL_MS = 10 * 60 * 1000;
 export const HOSTED_VAULT_SYNC_MAX_BUNDLE_BASE64_LENGTH = 32 * 1024 * 1024;
 
 const HOSTED_VAULT_SYNC_PAYLOAD_FIELD = "hosted-vault-sync.payload";
-const HOSTED_VAULT_SYNC_PAIRING_CODE_BYTES = 8;
+const HOSTED_VAULT_SYNC_PAIRING_CODE_LENGTH = 10;
+const HOSTED_VAULT_SYNC_PAIRING_CODE_BYTES = 10;
 const HOSTED_VAULT_SYNC_AGENT_TOKEN_BYTES = 32;
 
 type VaultSyncClient = PrismaClient | Prisma.TransactionClient;
@@ -54,13 +55,13 @@ export function generateHostedVaultSyncSessionId(): string {
 
 export function generateHostedVaultSyncPairingCode(): string {
   let code = "";
-  while (code.length < 8) {
+  while (code.length < HOSTED_VAULT_SYNC_PAIRING_CODE_LENGTH) {
     code += crypto.randomBytes(HOSTED_VAULT_SYNC_PAIRING_CODE_BYTES)
       .toString("base64url")
       .replace(/[^a-z0-9]/giu, "");
   }
-  const normalized = code.slice(0, 8).toUpperCase();
-  return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
+  const normalized = code.slice(0, HOSTED_VAULT_SYNC_PAIRING_CODE_LENGTH).toUpperCase();
+  return `${normalized.slice(0, 5)}-${normalized.slice(5)}`;
 }
 
 export function normalizeHostedVaultSyncPairingCode(value: string): string {
