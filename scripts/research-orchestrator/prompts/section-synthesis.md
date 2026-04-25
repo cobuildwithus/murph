@@ -8,8 +8,8 @@ Section:
 
 Allowed source material:
 - CANONICAL_SOURCE_LEDGER_V1 from: {{CANONICAL_LEDGER_SOURCE}}
-- SOURCE_FINDINGS_V1 outputs from: {{ATOMIC_FINDINGS_SOURCE}}
-- EVIDENCE_APPRAISALS_V1 outputs from: {{ATOMIC_FINDINGS_SOURCE}}
+- SOURCE_FINDINGS_V1 outputs from: {{SOURCE_FINDINGS_SOURCE}}
+- EVIDENCE_APPRAISALS_V1 outputs from: {{EVIDENCE_APPRAISALS_SOURCE}}
 - Draft source pages from extraction batches at: {{SOURCE_PAGE_DRAFTS_SOURCE}}
 - Generated source index at packages/health-commons/generated/source-index.json
 - Existing Health Commons schema and page patterns

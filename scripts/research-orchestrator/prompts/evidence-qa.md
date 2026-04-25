@@ -11,8 +11,8 @@ Review:
 - claims from: {{CLAIMS_SOURCE}}
 - researchLandscape
 - source pages
-- source-owned findings from: {{ATOMIC_FINDINGS_SOURCE}}
-- standalone evidence appraisals from: {{ATOMIC_FINDINGS_SOURCE}}
+- source-owned findings from: {{SOURCE_FINDINGS_SOURCE}}
+- standalone evidence appraisals from: {{EVIDENCE_APPRAISALS_SOURCE}}
 - generated source index at packages/health-commons/generated/source-index.json
 
 Output:
