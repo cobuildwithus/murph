@@ -152,13 +152,76 @@ test("JoinInvitePage passes invite status and share data into the client tree", 
   assert.match(markup, /data-share-code="share-code"/);
 });
 
-test("JoinInvitePage keeps its route copy while inheriting the app-level Open Graph image", async () => {
+test("JoinInvitePage keeps route copy and inherits the shared Open Graph image", async () => {
   const { metadata } = await import("../app/join/[inviteCode]/page");
 
   expect(metadata.title).toBe("Murph hosted invite");
+  expect(metadata.description).toBe(
+    "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
+  );
   expect(metadata.openGraph?.title).toBe("Murph hosted invite");
+  expect(metadata.openGraph?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
   expect(metadata.twitter?.title).toBe("Murph hosted invite");
+  expect(metadata.twitter?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
   expect(
     existsSync(new URL("../app/join/[inviteCode]/opengraph-image.tsx", import.meta.url))
   ).toBe(false);
+});
+
+test("JoinInviteSuccessPage keeps the shared preview image and setup copy", async () => {
+  const { metadata } = await import("../app/join/[inviteCode]/success/page");
+
+  expect(metadata.title).toBe("Finishing setup — Murph");
+  expect(metadata.description).toBe(
+    "Finish activating your Murph hosted account after checkout.",
+  );
+  expect(metadata.openGraph?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
+  expect(metadata.twitter?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
+});
+
+test("JoinInviteCancelPage keeps the shared preview image and pause copy", async () => {
+  const { metadata } = await import("../app/join/[inviteCode]/cancel/page");
+
+  expect(metadata.title).toBe("Checkout paused — Murph");
+  expect(metadata.description).toBe(
+    "Return to your Murph invite when you are ready to finish checkout.",
+  );
+  expect(metadata.openGraph?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
+  expect(metadata.twitter?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
 });

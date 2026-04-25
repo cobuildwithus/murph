@@ -88,6 +88,31 @@ vi.mock("@/src/components/settings/hosted-vault-sync-settings", () => ({
   HostedVaultSyncSettings: mocks.HostedVaultSyncSettings,
 }));
 
+test("SettingsPage metadata uses the shared preview image", async () => {
+  const { metadata } = await import("../app/(dashboard)/settings/page");
+
+  assert.equal(metadata.title, "Settings — Murph");
+  assert.equal(metadata.description, "Manage your Murph account settings.");
+  assert.deepEqual(metadata.openGraph?.images, [
+    {
+      alt: "Murph — Wearable data, made useful.",
+      height: 630,
+      type: "image/png",
+      url: "/opengraph-image",
+      width: 1200,
+    },
+  ]);
+  assert.deepEqual(metadata.twitter?.images, [
+    {
+      alt: "Murph — Wearable data, made useful.",
+      height: 630,
+      type: "image/png",
+      url: "/opengraph-image",
+      width: 1200,
+    },
+  ]);
+});
+
 test("SettingsPage reads the server-side Privy session and threads it into the settings tree", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,

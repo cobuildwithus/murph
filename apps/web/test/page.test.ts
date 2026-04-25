@@ -143,7 +143,25 @@ test("HomePage renders the canonical landing page at the root route", async () =
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {
   const { metadata } = await import("../app/page");
 
+  expect(metadata.title).toBe("Murph — Discover what actually makes you healthier");
+  expect(metadata.description).toBe(
+    "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
+  );
   expect(metadata.alternates?.canonical).toBe("/");
+  expect(metadata.openGraph?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
+  expect(metadata.twitter?.images).toEqual([
+    expect.objectContaining({
+      url: "/opengraph-image",
+      width: 1200,
+      height: 630,
+    }),
+  ]);
 });
 
 test("HomePage keeps the mid-page CTA consistent for authenticated sessions", async () => {
