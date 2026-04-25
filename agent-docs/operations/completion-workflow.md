@@ -1,11 +1,11 @@
 # Completion Workflow
 
-Last verified: 2026-04-14
+Last verified: 2026-04-25
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
-When the routed task class requires audit passes such as `coverage-write`, `frontend-review`, or `task-finish-review`, treat them as mandatory completion steps before handoff, not optional close-out checks after code, tests, or commit.
+When the routed task class requires audit passes such as `security-privacy-review`, `coverage-write`, `frontend-review`, or `task-finish-review`, treat them as mandatory completion steps before handoff, not optional close-out checks after code, tests, or commit.
 Those required audit passes are local Codex subagent passes, not `review:gpt`, not external ChatGPT autosends, and not `thread wake` workflows.
 This completion workflow is standing user approval to spawn the required local Codex audit subagents for routed repo tasks. Do not skip or downgrade a required audit pass because generic agent instructions say subagents need an explicit user request; this document and `AGENTS.md` are that explicit repo-level request for the required completion passes.
 
@@ -17,24 +17,26 @@ This completion workflow is standing user approval to spawn the required local C
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips audit subagents unless the user explicitly asks for them
-   - really low-impact `apps/web` copy-only edits may skip audit subagents when they only change static text and do not alter layout, UI state, auth, pricing logic, schemas, or runtime behavior; use local readback and focused checks instead
+   - really low-impact `apps/web` copy-only edits may skip audit subagents when they only change static text and do not alter layout, UI state, auth, pricing logic, schemas, runtime behavior, or security/privacy claims; use local readback and focused checks instead
    - the tiny repo-internal fast path below replaces the final-review audit subagent with an explicit local final review
+   - changesets that reasonably touch user data, persisted state, auth/session behavior, secrets or credentials, payment/billing state, health data, contact identifiers, observability/logging, external ingress/egress, public APIs/routes, or trust boundaries add the dedicated `security-privacy-review` pass
    - user-facing `apps/web` UI changes add the dedicated `frontend-review` pass
    - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
    - ordinary repo code/test/config changes then run `task-finish-review`
    - add `simplify` only when the conditions below are met
 5. When `simplify` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below, and run it before coverage or final review. Land only behavior-preserving reductions from that pass.
-6. When `frontend-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/frontend-review.md` plus the audit handoff packet below, and run it after any simplify pass but before the final completion review. Keep it review-only and scope it to user-facing `apps/web` surfaces plus the frontend guidance in `agent-docs/FRONTEND.md`.
-7. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there.
-8. When step 7 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.4-mini` after any simplify pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
-9. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
-10. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any required coverage pass lands, after any frontend-review-driven fixes, and after any later review-driven fixes.
-11. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
-12. Treat that final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
-13. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
-14. Do not automatically spawn another workflow audit subagent after the first final review. One extra final-review rerun is allowed only when the first review forced a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
-15. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. Do not treat the commit as a substitute for any still-required audit pass.
-16. Final handoff must report required-check results plus any direct scenario evidence. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
+6. When `security-privacy-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/security-privacy-review.md` plus the audit handoff packet below, and run it before coverage or final review. If `simplify` also applies, run both passes in parallel after implementation is stable enough for review. Keep this pass review-only and scope it to security, privacy, data minimization, and leakage risks.
+7. When `frontend-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/frontend-review.md` plus the audit handoff packet below, and run it after any simplify/security-privacy pass but before the final completion review. Keep it review-only and scope it to user-facing `apps/web` surfaces plus the frontend guidance in `agent-docs/FRONTEND.md`.
+8. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there.
+9. When step 8 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.4-mini` after any simplify/security-privacy pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
+10. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
+11. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any security/privacy-review-driven fixes, after any required coverage pass lands, after any frontend-review-driven fixes, and after any later review-driven fixes.
+12. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
+13. Treat that final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
+14. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
+15. Do not automatically spawn another workflow audit subagent after the first final review. One extra final-review rerun is allowed only when the first review forced a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
+16. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. Do not treat the commit as a substitute for any still-required audit pass.
+17. Final handoff must report required-check results plus any direct scenario evidence. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
 
 ## When To Add Simplify
 
@@ -56,10 +58,10 @@ It does not skip `coverage-write` when the task's verification lane already incl
 
 ## Tiny Copy-Only Fast Path
 
-Skip `frontend-review`, `coverage-write`, and `task-finish-review` subagents for very small `apps/web` copy-only edits when all of the following are true:
+Skip `security-privacy-review`, `frontend-review`, `coverage-write`, and `task-finish-review` subagents for very small `apps/web` copy-only edits when all of the following are true:
 
 1. The diff only changes static user-facing text.
-2. The change does not alter layout, styling, UI state, component structure, auth, billing/pricing logic, schemas, routes, API behavior, or runtime code.
+2. The change does not alter layout, styling, UI state, component structure, auth, billing/pricing logic, schemas, routes, API behavior, runtime code, or security/privacy claims.
 3. Local readback plus focused checks cover the changed surface.
 
 Use focused component/page tests, typecheck, `git diff --check`, and stale-string searches as appropriate. If the copy change touches claims about security, privacy, billing, medical outcomes, or product guarantees, leave this fast path and use the normal review workflow.
@@ -67,6 +69,7 @@ Use focused component/page tests, typecheck, `git diff --check`, and stale-strin
 ## Audit Worker Rules
 
 - `coverage-write` is the default write-capable audit pass, must run on `gpt-5.4-mini`, and should stay narrowly scoped to tests or direct-proof scaffolding.
+- `security-privacy-review` is a review-only pass for changes that touch user data/state, auth/session behavior, secrets, payments, health data, contact identifiers, observability/logging, external surfaces, or trust boundaries. It should read `agent-docs/SECURITY.md` and focus on data minimization, leakage risks, authority expansion, and privacy/security regressions.
 - `frontend-review` is a review-only pass for user-facing `apps/web` pages, components, and design-system-facing UI. It should read `agent-docs/FRONTEND.md` and focus on design-system alignment, product context, UX quality, and unnecessary UI drift.
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
@@ -100,6 +103,14 @@ For the required `frontend-review` pass, also provide:
 - An explicit instruction to read `agent-docs/FRONTEND.md` before reviewing.
 - The product/user outcome the UI is meant to support so the review can judge polish against intent rather than taste alone.
 - Any screenshots, local dev notes, or direct scenario evidence already gathered, or the exact gap if visual verification still needs a human/browser pass.
+
+For the required `security-privacy-review` pass, also provide:
+
+- The exact sensitive data, state, auth/session, external surface, logging, or trust-boundary behavior under review.
+- An explicit instruction to read `agent-docs/SECURITY.md` before reviewing.
+- The intended authority boundary, including who or what should be able to see, mutate, or infer the affected data.
+- Any data-minimization decisions already made, plus known tradeoffs or accepted residual exposure.
+- Any direct security/privacy scenario proof already gathered, or the exact gap if manual verification still needs to happen.
 
 For the required `coverage-write` pass, also provide:
 

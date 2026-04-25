@@ -628,15 +628,14 @@ function readPhoneCodeRetryAfterMs(input: {
 }
 
 function resolveHostedInvitePhonePrefill(input: {
-  identity: Pick<HostedMemberIdentityState, "phoneNumber" | "signupPhoneNumber">;
+  identity: Pick<HostedMemberIdentityState, "phoneNumberVerifiedAt" | "signupPhoneNumber">;
   stage: HostedInviteStatusPayload["stage"];
 }): string | null {
-  if (input.stage !== "verify") {
+  if (input.stage !== "verify" || input.identity.phoneNumberVerifiedAt) {
     return null;
   }
 
-  return normalizePhoneNumber(input.identity.signupPhoneNumber)
-    ?? normalizePhoneNumber(input.identity.phoneNumber);
+  return normalizePhoneNumber(input.identity.signupPhoneNumber);
 }
 
 function maxDate(first: Date | null, second: Date | null): Date | null {
