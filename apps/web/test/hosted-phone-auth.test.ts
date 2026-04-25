@@ -392,6 +392,146 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /disabled=""/);
   });
 
+  it("prefills invite phone entry from the stored signup phone", async () => {
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuth, {
+        initialPhoneNumber: "+14155552671",
+        inviteCode: "invite-code",
+      }),
+    );
+
+    assert.match(markup, /name="phone-number"/);
+    assert.match(markup, /value="\+14155552671"/);
+    assert.doesNotMatch(markup, /disabled=""/);
+  });
+
+  it("derives the invite phone country picker from an international prefill", async () => {
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+    const { HostedPhoneCountryCodeProvider } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-country-code-provider"
+    );
+
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        HostedPhoneCountryCodeProvider,
+        {
+          countryCode: "US",
+        },
+        React.createElement(HostedInvitePhoneAuth, {
+          initialPhoneNumber: "+447400123456",
+          inviteCode: "invite-code",
+        }),
+      ),
+    );
+
+    assert.match(markup, />\+44</);
+    assert.match(markup, /placeholder="07400 123456"/);
+    assert.match(markup, /value="\+447400123456"/);
+  });
+
+  it("restores the invite phone prefill after signing out of an interrupted session", async () => {
+    vi.resetModules();
+
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: {
+        onPhoneNumberChange: (value: string) => void;
+        phoneNumber: string;
+      }) {
+        return React.createElement(
+          "div",
+          {
+            "data-phone-number": props.phoneNumber,
+          },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-change-phone": "true",
+              onClick: () => props.onPhoneNumberChange("9995552671"),
+            },
+            "Change phone",
+          ),
+        );
+      },
+      HostedPhoneAuthScaffold(props: {
+        children: React.ReactNode;
+        onUseDifferentNumber: () => void;
+      }) {
+        return React.createElement(
+          "div",
+          null,
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-sign-out": "true",
+              onClick: props.onUseDifferentNumber,
+            },
+            "Use a different number",
+          ),
+          props.children,
+        );
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return React.createElement("div", { "data-privy-captcha": "mounted" });
+      },
+    }));
+
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedInvitePhoneAuth, {
+        initialPhoneNumber: "+14155552671",
+        inviteCode: "invite-code",
+      }),
+    );
+
+    try {
+      assert.equal(
+        container.querySelector("[data-phone-number]")?.getAttribute("data-phone-number"),
+        "+14155552671",
+      );
+
+      const changePhoneButton = container.querySelector(
+        "[data-change-phone]",
+      ) as HTMLButtonElement | null;
+      const signOutButton = container.querySelector(
+        "[data-sign-out]",
+      ) as HTMLButtonElement | null;
+
+      assert.ok(changePhoneButton);
+      assert.ok(signOutButton);
+
+      await act(async () => {
+        changePhoneButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      assert.equal(
+        container.querySelector("[data-phone-number]")?.getAttribute("data-phone-number"),
+        "9995552671",
+      );
+
+      await act(async () => {
+        signOutButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      assert.equal(
+        container.querySelector("[data-phone-number]")?.getAttribute("data-phone-number"),
+        "+14155552671",
+      );
+      expect(mocks.logout).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
   it("keeps the public homepage in a manual resume state for authenticated sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,

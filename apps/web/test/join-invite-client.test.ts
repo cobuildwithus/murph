@@ -99,6 +99,35 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
   assert.match(markup, /data-hosted-invite-phone-auth="true"/);
 });
 
+test("verify-stage invite seeds the phone auth form from the stored invite phone", () => {
+  renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      authenticated: false,
+      initialLinkedAccounts: [],
+      initialStatus: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+        invite: {
+          code: "invite-code",
+          expiresAt: "2026-03-27T12:00:00.000Z",
+          phoneHint: "*** 2671",
+          phonePrefill: "+14155552671",
+        },
+      }),
+      inviteCode: "invite-code",
+      shareCode: null,
+      sharePreview: null,
+    }),
+  );
+
+  expect(mocks.hostedInvitePhoneAuthProps).toMatchObject({
+    initialPhoneNumber: "+14155552671",
+    inviteCode: "invite-code",
+  });
+});
+
 test("verify-stage invite shows the session check while the server session is still settling", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
@@ -765,6 +794,7 @@ function createStatus(
       code: "invite-code",
       expiresAt: "2026-03-27T12:00:00.000Z",
       phoneHint: "+1 415 555 2671",
+      phonePrefill: null,
     },
     session: {
       authenticated: false,

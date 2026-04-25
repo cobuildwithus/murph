@@ -8,7 +8,10 @@ import {
   createHostedWalletAddressLookupKey,
   createHostedWalletAddressLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import {
+  buildHostedMemberIdentityPrivateColumns,
+  buildHostedMemberRoutingPrivateColumns,
+} from "@/src/lib/hosted-onboarding/member-private-codecs";
 
 const mocks = vi.hoisted(() => ({
   isHostedMemberActivationPending: vi.fn(),
@@ -149,6 +152,80 @@ describe("getHostedInviteStatus", () => {
         authenticated: true,
         matchesInvite: true,
       },
+    });
+  });
+
+  it("returns the stored signup phone as a verify-stage invite prefill", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            identity: createIdentity({
+              ...buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: null,
+                privyUserId: null,
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: "+1 (415) 555-2671",
+                walletAddress: null,
+              }),
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      invite: {
+        phonePrefill: "+14155552671",
+      },
+      stage: "verify",
+    });
+  });
+
+  it("does not expose the stored phone prefill after the invite is already active", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity({
+              ...buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: "+14155552671",
+                privyUserId: null,
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: "+14155552671",
+                walletAddress: null,
+              }),
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      invite: {
+        phonePrefill: null,
+      },
+      stage: "active",
     });
   });
 
