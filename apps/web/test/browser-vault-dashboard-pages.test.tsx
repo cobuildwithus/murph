@@ -19,10 +19,13 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault: mocks.useBrowserVault,
 }));
 
-import ExperimentsPage from "../app/(dashboard)/experiments/page";
+import ExperimentsPage, { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
 import HistoryPage from "../app/(dashboard)/history/page";
+import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPage from "../app/(dashboard)/overview/page";
+import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 import SignalsPage from "../app/(dashboard)/signals/page";
+import { metadata as signalsMetadata } from "../app/(dashboard)/signals/layout";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
@@ -38,6 +41,55 @@ beforeEach(async () => {
     refresh: async () => {},
     status: "ready",
   });
+});
+
+test("dashboard routes define page-specific metadata with the shared preview image", () => {
+  assert.equal(overviewMetadata.title, "Overview — Murph");
+  assert.equal(
+    overviewMetadata.description,
+    "A quick read on your recent notes, experiments, and tracked trends.",
+  );
+  assert.equal(historyMetadata.title, "History — Murph");
+  assert.equal(
+    historyMetadata.description,
+    "Recent notes, events, assessments, and daily summaries from your vault.",
+  );
+  assert.equal(signalsMetadata.title, "Signals — Murph");
+  assert.equal(
+    signalsMetadata.description,
+    "Sleep, recovery, activity, and body metrics from connected health data.",
+  );
+  assert.equal(experimentsMetadata.title, "Experiments — Murph");
+  assert.equal(
+    experimentsMetadata.description,
+    "Browse evidence-backed health experiments and compare what changes against your own baseline.",
+  );
+
+  for (const routeMetadata of [
+    overviewMetadata,
+    historyMetadata,
+    signalsMetadata,
+    experimentsMetadata,
+  ]) {
+    assert.deepEqual(routeMetadata.openGraph?.images, [
+      {
+        alt: "Murph — Wearable data, made useful.",
+        height: 630,
+        type: "image/png",
+        url: "/opengraph-image",
+        width: 1200,
+      },
+    ]);
+    assert.deepEqual(routeMetadata.twitter?.images, [
+      {
+        alt: "Murph — Wearable data, made useful.",
+        height: 630,
+        type: "image/png",
+        url: "/opengraph-image",
+        width: 1200,
+      },
+    ]);
+  }
 });
 
 test("OverviewPage renders the dashboard overview", () => {
