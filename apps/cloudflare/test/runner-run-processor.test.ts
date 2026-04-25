@@ -37,6 +37,7 @@ import {
   recordHostedRunPhaseLogInWebBestEffort,
   recordHostedRunnerResultLogsInWebBestEffort,
 } from "../src/user-runner/runner-web-observability.ts";
+import * as runnerWebObservabilityModule from "../src/user-runner/runner-web-observability.ts";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 afterEach(() => {
@@ -1930,6 +1931,65 @@ describe("recordHostedRunPhaseLogInWebBestEffort", () => {
     expect(recordLog.mock.calls[0]?.[0]?.body.redacted).not.toHaveProperty("eventId");
   });
 
+  it("automatically forwards bundle-validation diagnostics to hosted run logs", async () => {
+    const recordLog = vi.fn().mockResolvedValue({
+      log: null,
+      logged: true,
+    });
+    const validationError = new HostedBundleArchiveValidationError({
+      cause: new Error("Hosted bundle archive is invalid."),
+      operation: "runner-input",
+      ref: {
+        hash: "b".repeat(64),
+        key: "users/bundles/segment/vault/hash",
+        size: 456,
+        updatedAt: "2026-04-20T09:00:00.000Z",
+      },
+    });
+
+    await recordHostedRunPhaseLogInWebBestEffort({
+      baseUrl: "https://hosted.example",
+      callbackSigning,
+      error: validationError,
+      level: "warn",
+      message: "Hosted run drain failed after invoking the runtime.",
+      phase: "retry.scheduled",
+      recordLog,
+      run: {
+        attempt: 1,
+        runId: "run-bundle-validation",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+      },
+      runToken: "run-token-bundle-validation",
+      userId: "user-bundle-validation",
+      wakeEventId: "wake-bundle-validation",
+    });
+
+    expect(recordLog).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        redacted: expect.objectContaining({
+          errorCode: "bundle_archive_validation_error",
+          errorDetails: expect.objectContaining({
+            bundleArchiveOperation: "runner-input",
+            bundleRefHash: "b".repeat(64),
+            bundleRefKey: "users/bundles/segment/vault/hash",
+            bundleRefPresent: true,
+            bundleRefSize: 456,
+            errorDetail: "Hosted bundle archive is invalid.",
+            errorProperties: expect.objectContaining({
+              operation: "runner-input",
+              refHash: "b".repeat(64),
+              refKey: "users/bundles/segment/vault/hash",
+              refSize: 456,
+            }),
+          }),
+          errorMessage: "Hosted bundle archive validation failed.",
+          errorName: "HostedBundleArchiveValidationError",
+        }),
+      }),
+    }));
+  });
+
   it("keeps correlation ids stable for the same wake id across callback-signing changes", async () => {
     const recordLog = vi.fn().mockResolvedValue({
       log: null,
@@ -2288,6 +2348,10 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       runnerContainerModule,
       "invokeHostedExecutionContainerRunner",
     );
+    const breadcrumbSpy = vi.spyOn(
+      runnerWebObservabilityModule,
+      "recordHostedRunBreadcrumbInWebBestEffort",
+    );
 
     const result = await processor.executeRunDrain({
       currentBundleRef: invalidRef,
@@ -2319,6 +2383,16 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       phase: "quarantined",
     }));
     expect(invokeHostedExecutionContainerRunner).not.toHaveBeenCalled();
+    expect(breadcrumbSpy).toHaveBeenCalledWith(expect.objectContaining({
+      error: validationError,
+      redacted: expect.objectContaining({
+        bundleArchiveOperation: "runner-input",
+        bundleRefHash: invalidRef.hash,
+        bundleRefKey: invalidRef.key,
+        bundleRefSize: invalidRef.size,
+        bundleValidationSource: "validation-error",
+      }),
+    }));
   });
 
   it("quarantines invalid authoritative bundles discovered by the runtime child", async () => {
@@ -2339,6 +2413,10 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       runnerContainerModule,
       "invokeHostedExecutionContainerRunner",
     ).mockRejectedValueOnce(runtimeError);
+    const breadcrumbSpy = vi.spyOn(
+      runnerWebObservabilityModule,
+      "recordHostedRunBreadcrumbInWebBestEffort",
+    );
 
     const result = await processor.executeRunDrain({
       currentBundleRef: invalidRef,
@@ -2368,6 +2446,76 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       message: expect.stringContaining(
         "Hosted run execution quarantined an invalid authoritative snapshot instead of scheduling another retry.",
       ),
+      phase: "quarantined",
+    }));
+    expect(breadcrumbSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      error: runtimeError,
+      redacted: expect.objectContaining({
+        bundleArchiveOperation: "runner-input",
+        bundleRefHash: invalidRef.hash,
+        bundleRefKey: invalidRef.key,
+        bundleRefSize: invalidRef.size,
+        bundleValidationSource: "current-bundle-ref",
+      }),
+    }));
+  });
+
+  it("quarantines code-backed authoritative bundle validation failures from the runner shell", async () => {
+    const {
+      processor,
+      readBundlesForRunner,
+      stateStore,
+    } = createInvokeRunnerProcessor();
+    const invalidRef: HostedExecutionBundleRef = {
+      hash: "4".repeat(64),
+      key: "bundles/user_123/vault/code-backed-invalid",
+      size: 160,
+      updatedAt: "2026-04-20T09:00:00.000Z",
+    };
+    const runtimeError = Object.assign(
+      new Error("Hosted bundle archive validation failed."),
+      {
+        code: "bundle_archive_validation_error",
+        details: {
+          bundleArchiveOperation: "runner-input",
+          bundleRefHash: invalidRef.hash,
+          bundleRefKey: invalidRef.key,
+          bundleRefPresent: true,
+          bundleRefSize: invalidRef.size,
+        },
+        name: "HostedBundleArchiveValidationError",
+      },
+    );
+    readBundlesForRunner.mockResolvedValueOnce("bundle-encoded");
+    vi.spyOn(
+      runnerContainerModule,
+      "invokeHostedExecutionContainerRunner",
+    ).mockRejectedValueOnce(runtimeError);
+
+    const result = await processor.executeRunDrain({
+      currentBundleRef: invalidRef,
+      events: [],
+      primaryWake: createRuntimeTimerWake(),
+      run: createHostedRunRecord({
+        runId: "run-code-backed-runtime-invalid-input",
+      }),
+      runToken: "run-token",
+    });
+
+    expect(result).toEqual({
+      cursorSnapshotRef: invalidRef,
+      finalizeRequired: false,
+      redactedSummary: {
+        phase: "quarantined",
+        reason: "invalid_authoritative_snapshot",
+      },
+      state: "quarantined",
+    });
+    expect(stateStore.completeRun).toHaveBeenCalledTimes(1);
+    expect(stateStore.failRun).not.toHaveBeenCalled();
+    expect(stateStore.recordRunPhase).toHaveBeenCalledWith(expect.objectContaining({
+      error: runtimeError,
+      level: "warn",
       phase: "quarantined",
     }));
   });

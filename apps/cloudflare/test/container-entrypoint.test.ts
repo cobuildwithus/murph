@@ -1246,4 +1246,35 @@ describe("classifyRunnerJobError", () => {
     });
     expect((classified.payload as ClassifiedRunnerPayload).details?.stackPreview).toEqual(expect.any(Array));
   });
+
+  it("surfaces bundle-validation failures with their dedicated code and safe properties", () => {
+    const classified = classifyRunnerJobError(
+      Object.assign(new Error("Hosted bundle archive is invalid."), {
+        code: "bundle_archive_validation_error",
+        details: {
+          bundleArchiveOperation: "runner-input",
+          bundleRefPresent: false,
+        },
+        name: "HostedBundleArchiveValidationError",
+        operation: "runner-input",
+      }),
+    );
+
+    expect(classified).toMatchObject({
+      payload: {
+        code: "bundle_archive_validation_error",
+        details: {
+          bundleArchiveOperation: "runner-input",
+          bundleRefPresent: false,
+          errorDetail: "Hosted bundle archive is invalid.",
+          errorProperties: {
+            operation: "runner-input",
+          },
+        },
+        error: "Hosted bundle archive validation failed.",
+        errorName: "HostedBundleArchiveValidationError",
+      },
+      statusCode: 500,
+    });
+  });
 });

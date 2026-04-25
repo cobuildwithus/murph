@@ -81,6 +81,18 @@ describe("hosted execution observability", () => {
         }),
         "invalid_request",
       ],
+      [
+        Object.assign(new Error("Hosted bundle archive is invalid."), {
+          name: "HostedBundleArchiveValidationError",
+        }),
+        "bundle_archive_validation_error",
+      ],
+      [
+        Object.assign(new Error("runner failed"), {
+          code: "bundle_archive_validation_error",
+        }),
+        "bundle_archive_validation_error",
+      ],
       [Object.assign(new Error("aborted"), { name: "AbortError" }), "timeout"],
       [new TypeError("wrong type"), "type_error"],
       ["plain failure", "runtime_error"],
@@ -242,6 +254,58 @@ describe("hosted execution observability", () => {
       phase: "failed",
     });
     expect(record.details?.stackPreview).toEqual(expect.any(Array));
+  });
+
+  it("automatically includes safe custom error properties in structured diagnostics", () => {
+    const error = Object.assign(
+      new Error("Hosted bundle archive is invalid."),
+      {
+        code: "bundle_archive_validation_error",
+        details: {
+          bundleArchiveOperation: "runner-input",
+          bundleRefKey: "users/bundles/user-segment/vault/hash",
+          bundleRefPresent: true,
+        },
+        name: "HostedBundleArchiveValidationError",
+        operation: "runner-input",
+        path: "/tmp/raw-bundle",
+        payload: "raw payload fragment",
+        refHash: "a".repeat(64),
+        refKey: "users/bundles/user-segment/vault/hash",
+        refSize: 123,
+        token: "secret-token",
+      },
+    );
+
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "runner",
+      error,
+      message: "Hosted run drain failed after invoking the runtime.",
+      phase: "retry.scheduled",
+    });
+
+    expect(record).toMatchObject({
+      errorCode: "bundle_archive_validation_error",
+      errorMessage: "Hosted bundle archive validation failed.",
+      errorName: "HostedBundleArchiveValidationError",
+      message:
+        "Hosted run drain failed after invoking the runtime. Hosted bundle archive validation failed. Detail: Hosted bundle archive is invalid. Code: bundle_archive_validation_error",
+    });
+    expect(record.details).toMatchObject({
+      bundleArchiveOperation: "runner-input",
+      bundleRefKey: "users/bundles/user-segment/vault/hash",
+      bundleRefPresent: true,
+      errorDetail: "Hosted bundle archive is invalid.",
+      errorProperties: {
+        operation: "runner-input",
+        refHash: "a".repeat(64),
+        refKey: "users/bundles/user-segment/vault/hash",
+        refSize: 123,
+      },
+    });
+    expect(record.details?.errorProperties).not.toHaveProperty("path");
+    expect(record.details?.errorProperties).not.toHaveProperty("payload");
+    expect(record.details?.errorProperties).not.toHaveProperty("token");
   });
 
   it("extracts a privacy-bounded assistant-notification detail subset from annotated errors", () => {

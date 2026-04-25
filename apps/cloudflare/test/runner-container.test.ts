@@ -795,6 +795,56 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("restores safe bundle-validation error names from runner shell error codes", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "bundle_archive_validation_error",
+          details: {
+            bundleArchiveOperation: "runner-input",
+            bundleRefPresent: true,
+          },
+          error: "Hosted bundle archive validation failed.",
+          errorName: "Error",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 500,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_bundle_validation_diagnostics"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      code: "bundle_archive_validation_error",
+      details: {
+        bundleArchiveOperation: "runner-input",
+        bundleRefPresent: true,
+      },
+      message: "Hosted bundle archive validation failed.",
+      name: "HostedBundleArchiveValidationError",
+      status: 500,
+      statusCode: 500,
+    });
+  });
+
   it("rejects HTTP 200 runner responses with invalid output bundle archives", async () => {
     const invalidBundle = encodeHostedBundleBase64(
       Uint8Array.from(Buffer.from("not-a-hosted-bundle")),
@@ -839,6 +889,14 @@ describe("RunnerContainer", () => {
 
     expect(thrown).toBeInstanceOf(HostedBundleArchiveValidationError);
     expect(thrown).toMatchObject({
+      code: "bundle_archive_validation_error",
+      details: {
+        bundleArchiveOperation: "runner-output",
+        bundleRefHash: null,
+        bundleRefKey: null,
+        bundleRefPresent: false,
+        bundleRefSize: null,
+      },
       message: "Hosted bundle archive is invalid.",
       operation: "runner-output",
       refKey: null,
@@ -884,6 +942,14 @@ describe("RunnerContainer", () => {
 
     expect(thrown).toBeInstanceOf(HostedBundleArchiveValidationError);
     expect(thrown).toMatchObject({
+      code: "bundle_archive_validation_error",
+      details: {
+        bundleArchiveOperation: "runner-output",
+        bundleRefHash: null,
+        bundleRefKey: null,
+        bundleRefPresent: false,
+        bundleRefSize: null,
+      },
       message: "Hosted bundle archive payload is invalid.",
       operation: "runner-output",
       refKey: null,
