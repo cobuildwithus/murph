@@ -1124,23 +1124,28 @@ describe('assistant CLI tool capability seam', () => {
         privateVaultRecords: false,
       },
       count: expect.any(Number),
-      protocols: expect.arrayContaining([
-        expect.objectContaining({
-          key: 'protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed',
-          entityType: 'protocol_variant',
-          hasExperimentOnboarding: true,
-        }),
-      ]),
     })
     if (
       typeof protocols !== 'object' ||
       protocols === null ||
       !('count' in protocols) ||
-      typeof protocols.count !== 'number'
+      typeof protocols.count !== 'number' ||
+      !('protocols' in protocols) ||
+      !Array.isArray(protocols.protocols)
     ) {
-      throw new Error('Expected healthCommons.listProtocols to return a numeric count.')
+      throw new Error('Expected healthCommons.listProtocols to return a protocol list.')
     }
     expect(protocols.count).toBeGreaterThanOrEqual(7)
+    expect(protocols.protocols).toHaveLength(protocols.count)
+    expect(protocols.protocols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entityType: 'protocol_variant',
+          hasExperimentOnboarding: true,
+          key: expect.stringMatching(/^protocol_variant:/u),
+        }),
+      ]),
+    )
 
     const search = await executeTool(tools, 'healthCommons.search', {
       query: 'sleep',
