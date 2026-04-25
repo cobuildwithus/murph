@@ -44,10 +44,16 @@ Set these in the selected GitHub environment as vars:
 - `CF_BUNDLES_PREVIEW_BUCKET`
 - `CF_PUBLIC_BASE_URL`
 - `HOSTED_WEB_BASE_URL`
+- `HOSTED_WEB_PRODUCTION_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
 
 `CF_PUBLIC_BASE_URL` is required for the standard deploy-and-smoke flow because smoke targets the public Worker URL after deploy.
+For production deploys, `HOSTED_WEB_BASE_URL` must exactly match the normalized
+origin in `HOSTED_WEB_PRODUCTION_BASE_URL`; production preflight also rejects
+HTTP, localhost, `host.docker.internal`, loopback, preview/development, and
+private-network Worker, hosted web, and callback origins, including DNS names
+that resolve to private-network addresses.
 The workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`; deploy smoke signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, and compares its reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest.
 Because Cloudflare updates Worker code before container instances finish rolling, the runner-container smoke retries through the container rollout window and does not pass until the managed container reports the freshly deployed runner bundle.
 
@@ -231,6 +237,7 @@ export CF_WORKER_NAME=hosted-runner-staging
 export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_PUBLIC_BASE_URL=https://hosted-runner-staging.example.workers.dev
+export HOSTED_EXECUTION_DEPLOY_CONTEXT=preview
 export HOSTED_WEB_BASE_URL=https://web.example.test
 export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=your-team
 export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=your-project
@@ -275,6 +282,7 @@ pnpm --dir apps/cloudflare deploy:worker
 
 That command:
 
+- runs deploy preflight inside the apply step before artifact validation and upload
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`)
 - prepares the stable native runner base image with Docker's local cache

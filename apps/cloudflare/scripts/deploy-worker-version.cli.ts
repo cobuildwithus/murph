@@ -11,6 +11,7 @@ import {
   parseJsonValue,
   requireConfiguredString,
 } from "./deploy-automation/shared.ts";
+import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
@@ -53,6 +54,11 @@ export async function runDeployWorkerVersionCli(
       },
       mkdir,
       readCurrentDeployment,
+      validateDeployEnvironment: async (input) => {
+        await assertHostedDeployEnvironmentAsync(input.source, {
+          deployWorker: input.deployWorker,
+        });
+      },
       validatePreparedArtifacts: assertPreparedDeployArtifacts,
       writeFile,
     },

@@ -71,6 +71,12 @@ Required worker vars:
 `HOSTED_WEB_BASE_URL` must be an origin-only hosted web URL. Do not configure a
 subpath such as `https://example.test/app`; the worker appends its own internal
 callback routes to that origin.
+Production deploy preflight also requires `HOSTED_WEB_PRODUCTION_BASE_URL` and
+rejects a production Worker when `HOSTED_WEB_BASE_URL` does not match that
+production origin or when callback origins use HTTP, localhost, Docker bridge,
+loopback, preview/development, or private-network hosts. The GitHub workflow
+runs that preflight before artifact preparation; the local `deploy:worker`
+path also runs it inside the apply step before artifact validation and upload.
 
 Defaulted worker vars:
 
@@ -108,7 +114,7 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 - `apps/cloudflare/.deploy/wrangler.generated.jsonc`
 - `apps/cloudflare/.deploy/worker-secrets.json`
 
-`pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, the hosted email send binding restrictions, and the cached native runner base image before upload. The lower-level version helper remains in-tree as a recovery-only path.
+`pnpm --dir apps/cloudflare deploy:worker` is the canonical cut because it renders environment-specific deploy config, worker secrets, the hosted email send binding restrictions, and the cached native runner base image before upload; its apply step also runs deploy preflight before Wrangler upload. The lower-level version helper remains in-tree as a recovery-only path.
 Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle fingerprint with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.

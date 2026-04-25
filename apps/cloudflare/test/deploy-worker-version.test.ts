@@ -25,6 +25,7 @@ describe("runHostedWorkerDeployment", () => {
 
     expect(dependencies.mkdir).not.toHaveBeenCalled();
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
+    expect(dependencies.validateDeployEnvironment).not.toHaveBeenCalled();
     expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
   });
 
@@ -61,6 +62,12 @@ describe("runHostedWorkerDeployment", () => {
       workerName: "hosted-worker",
     });
 
+    expect(dependencies.validateDeployEnvironment).toHaveBeenCalledWith({
+      deployWorker: true,
+      source: expect.objectContaining({
+        CF_WORKER_NAME: "hosted-worker",
+      }),
+    });
     expect(dependencies.validatePreparedArtifacts).toHaveBeenCalledWith({
       configPath: "/tmp/wrangler.generated.jsonc",
       includeSecrets: true,
@@ -323,7 +330,38 @@ describe("runHostedWorkerDeployment", () => {
     })).rejects.toThrow("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual' or 'immediate'.");
 
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
+    expect(dependencies.validateDeployEnvironment).not.toHaveBeenCalled();
     expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid deploy environment before validating prepared artifacts or running Wrangler", async () => {
+    const dependencies = createDependencies({
+      validateDeployEnvironment: async () => {
+        throw new Error("Invalid GitHub environment variables for deploy workflow.");
+      },
+    });
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    })).rejects.toThrow("Invalid GitHub environment variables for deploy workflow.");
+
+    expect(dependencies.validateDeployEnvironment).toHaveBeenCalledWith({
+      deployWorker: true,
+      source: expect.objectContaining({
+        HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
+      }),
+    });
+    expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
+    expect(dependencies.deployDirect).not.toHaveBeenCalled();
   });
 
   it("rejects invalid prepared artifacts before running Wrangler", async () => {
@@ -356,6 +394,7 @@ function createDependencies(
   deployDirect: ReturnType<typeof vi.fn>;
   mkdir: ReturnType<typeof vi.fn>;
   readCurrentDeployment: ReturnType<typeof vi.fn>;
+  validateDeployEnvironment: ReturnType<typeof vi.fn>;
   validatePreparedArtifacts: ReturnType<typeof vi.fn>;
   writeFile: ReturnType<typeof vi.fn>;
 } {
@@ -368,6 +407,9 @@ function createDependencies(
   const readCurrentDeployment = vi.fn(
     overrides.readCurrentDeployment ?? (async () => null),
   );
+  const validateDeployEnvironment = vi.fn(
+    overrides.validateDeployEnvironment ?? (async () => {}),
+  );
   const validatePreparedArtifacts = vi.fn(
     overrides.validatePreparedArtifacts ?? (async () => {}),
   );
@@ -379,6 +421,7 @@ function createDependencies(
     deployDirect,
     mkdir,
     readCurrentDeployment,
+    validateDeployEnvironment,
     validatePreparedArtifacts,
     writeFile,
   };
