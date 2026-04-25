@@ -84,20 +84,92 @@ function escapeRegex(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function extractNamedJsonBlock(raw, name) {
-  const patternText =
-    String.raw`(?:^|\n)(?:#{1,6}\s*)?${escapeRegex(name)}:?\s*\n+` +
-    "```json" +
-    String.raw`\s*([\s\S]*?)\n` +
-    "```";
-  const pattern = new RegExp(patternText, "u");
-  const match = raw.match(pattern);
-  if (!match) {
+function skipWhitespace(raw, index) {
+  let cursor = index;
+  while (cursor < raw.length && /\s/u.test(raw[cursor])) {
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function extractJsonValueText(raw, startIndex, name) {
+  const openChar = raw[startIndex];
+  const closeChar = openChar === "{" ? "}" : openChar === "[" ? "]" : "";
+  if (!closeChar) {
+    throw new Error(`Missing JSON payload after ${name}.`);
+  }
+
+  const stack = [closeChar];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex + 1; index < raw.length; index += 1) {
+    const char = raw[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      const expected = stack.pop();
+      if (char !== expected) {
+        throw new Error(`Invalid JSON boundary after ${name}: expected ${expected}, saw ${char}.`);
+      }
+      if (stack.length === 0) {
+        return raw.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  throw new Error(`Unterminated JSON payload after ${name}.`);
+}
+
+function extractNamedJsonBlockText(raw, name) {
+  const headingPattern = new RegExp(
+    String.raw`(?:^|\n)(?:#{1,6}\s*)?${escapeRegex(name)}:?\s*(?:\n|$)`,
+    "u",
+  );
+  const headingMatch = raw.match(headingPattern);
+  if (!headingMatch || headingMatch.index === undefined) {
     throw new Error(`Missing required ${name} JSON block in charter response.`);
   }
 
+  let cursor = headingMatch.index + headingMatch[0].length;
+  const afterHeading = raw.slice(cursor);
+  const fencedMatch = afterHeading.match(/^\s*```json\s*\n([\s\S]*?)\n```/u);
+  if (fencedMatch) {
+    return fencedMatch[1];
+  }
+
+  cursor = skipWhitespace(raw, cursor);
+  const labelMatch = raw.slice(cursor).match(/^JSON[ \t]*(?:\r?\n|$)/u);
+  if (labelMatch) {
+    cursor += labelMatch[0].length;
+  }
+
+  cursor = skipWhitespace(raw, cursor);
+  return extractJsonValueText(raw, cursor, name);
+}
+
+function extractNamedJsonBlock(raw, name) {
+  const blockText = extractNamedJsonBlockText(raw, name);
   try {
-    return JSON.parse(match[1]);
+    return JSON.parse(blockText);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid JSON in ${name}: ${message}`);
