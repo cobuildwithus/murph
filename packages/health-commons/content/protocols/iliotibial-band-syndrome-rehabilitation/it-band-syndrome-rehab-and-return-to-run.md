@@ -5,7 +5,7 @@ key: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-r
 slug: protocols/iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
 title: IT Band Syndrome Rehab And Return To Run
 summary: Use symptom-guided load reduction, hip and glute strengthening, movement-control work, and a cautious run/walk progression for suspected runner ITBS while routing red flags and escalation care away from self-guided rehab.
-status: draft
+status: field-testing
 quality: usable
 aliases:
   - IT band syndrome rehab

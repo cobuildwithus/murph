@@ -5,7 +5,7 @@ key: protocol_variant:creatine-supplementation/creatine-monohydrate
 slug: protocols/creatine-supplementation/creatine-monohydrate
 title: Creatine Monohydrate
 summary: Use plain creatine monohydrate consistently to test strength, repeated high-intensity work, body-weight changes, and GI tolerance while keeping safety boundaries stronger than efficacy claims.
-status: draft
+status: field-testing
 quality: usable
 aliases:
   - creatine monohydrate

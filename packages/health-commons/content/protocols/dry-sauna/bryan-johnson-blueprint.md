@@ -5,7 +5,7 @@ key: protocol_variant:dry-sauna/bryan-johnson-blueprint
 slug: protocols/dry-sauna/bryan-johnson-blueprint
 title: Bryan Johnson Sauna
 summary: "Source-attributed Blueprint dry-sauna routine: 20 minutes at about 93 C / 200 F after workouts, with hydration and source-specific cooling tactics; read the research as heat-load and safety context, not proof of Bryan Johnson's personal outcomes."
-status: draft
+status: field-testing
 quality: usable
 aliases:
   - Bryan Johnson sauna

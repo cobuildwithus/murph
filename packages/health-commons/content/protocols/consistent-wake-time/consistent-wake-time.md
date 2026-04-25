@@ -5,7 +5,7 @@ key: "protocol_variant:consistent-wake-time/consistent-wake-time"
 slug: "protocols/consistent-wake-time/consistent-wake-time"
 title: "Consistent Wake Time"
 summary: "Choose a realistic daily wake/rise-time window and keep it stable while protecting enough sleep, then test whether wake-time regularity and daytime sleepiness or alertness signals improve."
-status: "draft"
+status: "field-testing"
 quality: "usable"
 aliases:
   - "consistent wake time"
