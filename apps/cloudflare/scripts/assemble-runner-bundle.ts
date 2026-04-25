@@ -84,7 +84,10 @@ async function assembleRunnerBundle(): Promise<void> {
       stagingBundleDir,
       tarballPaths,
       hostedRunnerWorkspacePackageNames,
-      { runtimePackageRoot: appDir },
+      {
+        repoRoot,
+        runtimePackageRoot: appDir,
+      },
     );
     await assertInstalledRunnerHealthCommonsRuntimeImport(stagingBundleDir);
     await pruneRunnerBundle(stagingBundleDir);

@@ -10,6 +10,7 @@ export async function installPackedRunnerDependencies(
   tarballPaths: Map<string, string>,
   runtimeWorkspaceClosure: readonly string[],
   input: {
+    repoRoot: string;
     runtimePackageRoot: string;
   },
 ): Promise<void> {
@@ -58,7 +59,9 @@ export async function installPackedRunnerDependencies(
     `${JSON.stringify(packageJson, null, 2)}\n`,
     "utf8",
   );
-  await installPinnedProductionDependencies(bundleDir);
+  await installPinnedProductionDependencies(bundleDir, {
+    repoRoot: input.repoRoot,
+  });
 }
 
 export async function assertInstalledRunnerHealthCommonsRuntimeImport(
@@ -175,11 +178,15 @@ function resolveInstalledPackageManifestPath(
 
 async function installPinnedProductionDependencies(
   installRoot: string,
+  input: {
+    repoRoot: string;
+  },
 ): Promise<void> {
   const installEnv = {
     COREPACK_ENABLE_AUTO_PIN: "0",
   };
 
+  await writeRunnerBundlePnpmInstallConfig(installRoot, input.repoRoot);
   await runPnpmCommand(["install", "--prod", "--lockfile-only"], {
     cwd: installRoot,
     env: installEnv,
@@ -188,6 +195,92 @@ async function installPinnedProductionDependencies(
     cwd: installRoot,
     env: installEnv,
   });
+}
+
+export async function writeRunnerBundlePnpmInstallConfig(
+  installRoot: string,
+  repoRoot: string,
+): Promise<void> {
+  const policy = await readWorkspaceMinimumReleaseAgePolicy(repoRoot);
+
+  if (policy === null) {
+    return;
+  }
+
+  const lines = [`minimum-release-age=${policy.minimumReleaseAge}`];
+  for (const excludedPackage of policy.minimumReleaseAgeExclude) {
+    lines.push(`minimum-release-age-exclude[]=${excludedPackage}`);
+  }
+
+  await writeFile(path.join(installRoot, ".npmrc"), `${lines.join("\n")}\n`, "utf8");
+}
+
+async function readWorkspaceMinimumReleaseAgePolicy(repoRoot: string): Promise<{
+  minimumReleaseAge: number;
+  minimumReleaseAgeExclude: string[];
+} | null> {
+  let workspaceConfig: string;
+  try {
+    workspaceConfig = await readFile(path.join(repoRoot, "pnpm-workspace.yaml"), "utf8");
+  } catch {
+    return null;
+  }
+
+  const minimumReleaseAgeMatch = /^minimumReleaseAge:\s*(\d+)\s*$/mu.exec(
+    workspaceConfig,
+  );
+  if (!minimumReleaseAgeMatch) {
+    return null;
+  }
+
+  const minimumReleaseAge = Number.parseInt(minimumReleaseAgeMatch[1] ?? "", 10);
+  if (!Number.isInteger(minimumReleaseAge) || minimumReleaseAge < 0) {
+    return null;
+  }
+
+  return {
+    minimumReleaseAge,
+    minimumReleaseAgeExclude: parseYamlStringList(
+      workspaceConfig,
+      "minimumReleaseAgeExclude",
+    ),
+  };
+}
+
+function parseYamlStringList(source: string, key: string): string[] {
+  const lines = source.split(/\r?\n/u);
+  const listStartIndex = lines.findIndex((line) => line.trim() === `${key}:`);
+  if (listStartIndex === -1) {
+    return [];
+  }
+
+  const values: string[] = [];
+  for (const line of lines.slice(listStartIndex + 1)) {
+    if (line.length > 0 && !/^\s/u.test(line)) {
+      break;
+    }
+
+    const match = /^\s*-\s+(.+?)\s*$/u.exec(line);
+    if (!match) {
+      continue;
+    }
+
+    values.push(stripYamlStringQuotes(match[1] ?? ""));
+  }
+
+  return values;
+}
+
+function stripYamlStringQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
 }
 
 async function runNodeImportProbe(
