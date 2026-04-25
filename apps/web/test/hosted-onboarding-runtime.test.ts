@@ -27,6 +27,7 @@ function createHostedOnboardingEnvironment(
     linqApiToken: null,
     linqConversationPhoneNumbers: [],
     linqIngressTypingDiagnosticBurstDelaysMs: [0],
+    linqIngressTypingDiagnosticBurstMode: "deferred",
     linqIngressTypingDiagnosticEnabled: false,
     linqIngressTypingDiagnosticTimeoutMs: 750,
     linqMaxActiveMembersPerConversationPhone: 1000,

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
     linqIngressTypingDiagnosticBurstDelaysMs: [0] as readonly number[],
+    linqIngressTypingDiagnosticBurstMode: "deferred" as "deferred" | "inline",
     linqIngressTypingDiagnosticEnabled: false,
     linqIngressTypingDiagnosticTimeoutMs: 750,
     nudgeHostedRunUserBestEffort: vi.fn(async () => true),
@@ -112,6 +113,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       linqApiToken: "linq-token",
       linqConversationPhoneNumbers: [],
       linqIngressTypingDiagnosticBurstDelaysMs: mocks.linqIngressTypingDiagnosticBurstDelaysMs,
+      linqIngressTypingDiagnosticBurstMode: mocks.linqIngressTypingDiagnosticBurstMode,
       linqIngressTypingDiagnosticEnabled: mocks.linqIngressTypingDiagnosticEnabled,
       linqIngressTypingDiagnosticTimeoutMs: mocks.linqIngressTypingDiagnosticTimeoutMs,
       linqMaxActiveMembersPerConversationPhone: null,
@@ -267,6 +269,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       outboundCount: 1,
     }));
     mocks.linqIngressTypingDiagnosticBurstDelaysMs = [0];
+    mocks.linqIngressTypingDiagnosticBurstMode = "deferred";
     mocks.linqIngressTypingDiagnosticEnabled = false;
     mocks.linqIngressTypingDiagnosticTimeoutMs = 750;
     mocks.nudgeHostedRunUserBestEffort.mockResolvedValue(true);
@@ -528,6 +531,7 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         burstAttempt: 1,
         burstDelayMs: 0,
+        burstMode: "deferred",
         burstTotal: 1,
         httpStatus: 204,
         responseReason: "wake-appended-active-member",
@@ -600,6 +604,7 @@ https://join.example.test/join/code_first_text`);
         "hosted-onboarding.webhook.linq.ingress-typing-burst",
         expect.objectContaining({
           deferredAttempts: 2,
+          burstMode: "deferred",
           responseReason: "wake-appended-active-member",
           totalAttempts: 3,
         }),
@@ -610,6 +615,7 @@ https://join.example.test/join/code_first_text`);
         }),
         "scheduled",
         expect.objectContaining({
+          burstMode: "deferred",
           deferred: true,
           responseReason: "wake-appended-active-member",
         }),
@@ -622,12 +628,124 @@ https://join.example.test/join/code_first_text`);
         expect.objectContaining({
           burstAttempt: 3,
           burstDelayMs: 30,
+          burstMode: "deferred",
           burstTotal: 3,
           httpStatus: 204,
         }),
       );
 
       await deferred[1]?.();
+      expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+        context: "webhook:linq",
+        userId: "member_123",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("can run the full ingress Linq typing burst inline before Cloudflare handoff", async () => {
+    vi.useFakeTimers();
+
+    try {
+      mocks.linqIngressTypingDiagnosticBurstDelaysMs = [0, 10, 30];
+      mocks.linqIngressTypingDiagnosticBurstMode = "inline";
+      mocks.linqIngressTypingDiagnosticEnabled = true;
+      const prisma = asPrismaTransactionClient({
+        hostedWebhookReceipt: {
+          create: vi.fn().mockResolvedValue({}),
+          findUnique: vi.fn().mockResolvedValue({
+            payloadJson: {
+              eventType: "message.received",
+              receiptAttemptCount: 1,
+              receiptStatus: "processing",
+            },
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        hostedMember: {
+          findUnique: vi.fn().mockResolvedValue({
+            billingStatus: HostedBillingStatus.active,
+            id: "member_123",
+            invites: [],
+            linqChatId: "chat_123",
+            phoneLookupKey: "+15551234567",
+          }),
+        },
+      });
+      const deferred: Array<() => Promise<void>> = [];
+
+      const responsePromise = handleHostedOnboardingLinqWebhook({
+        defer: (drain) => {
+          deferred.push(drain);
+        },
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          eventId: "evt_ingress_typing_inline_burst",
+        }),
+        signature: null,
+        timestamp: null,
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.sendHostedLinqTypingPing).toHaveBeenCalledTimes(1);
+      expect(deferred).toHaveLength(0);
+      expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10);
+      expect(mocks.sendHostedLinqTypingPing).toHaveBeenCalledTimes(2);
+      expect(deferred).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      await expect(responsePromise).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+
+      expect(mocks.sendHostedLinqTypingPing).toHaveBeenCalledTimes(3);
+      expect(mocks.sendHostedLinqTypingPing).toHaveBeenLastCalledWith({
+        chatId: "chat_123",
+        signal: undefined,
+        timeoutMs: 750,
+      });
+      expect(deferred).toHaveLength(1);
+      expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+      expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+        "hosted-onboarding.webhook.linq.ingress-typing-burst",
+        expect.objectContaining({
+          burstMode: "inline",
+          inlineAttempts: 3,
+          responseReason: "wake-appended-active-member",
+          totalAttempts: 3,
+        }),
+      );
+      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step: "hosted-onboarding.webhook.linq.ingress-typing-burst",
+        }),
+        "completed",
+        expect.objectContaining({
+          burstMode: "inline",
+          deferred: false,
+          responseReason: "wake-appended-active-member",
+        }),
+      );
+      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step: "hosted-onboarding.webhook.linq.ingress-typing",
+        }),
+        "started",
+        expect.objectContaining({
+          burstAttempt: 3,
+          burstDelayMs: 30,
+          burstMode: "inline",
+          burstTotal: 3,
+          httpStatus: 204,
+        }),
+      );
+
+      await deferred[0]?.();
       expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
         context: "webhook:linq",
         userId: "member_123",
@@ -693,6 +811,7 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         burstAttempt: 1,
         burstDelayMs: 0,
+        burstMode: "deferred",
         burstTotal: 1,
         errorName: "Error",
         responseReason: "wake-appended-active-member",

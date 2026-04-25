@@ -16,8 +16,11 @@ import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_CONTACT_PRIVACY_VERSION_PATTERN = /^v[0-9]+$/u;
 const DEFAULT_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS = [0] as const;
+const DEFAULT_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_MODE = "deferred";
 const MAX_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_ATTEMPTS = 8;
 const MAX_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAY_MS = 30_000;
+
+export type HostedLinqIngressTypingDiagnosticBurstMode = "deferred" | "inline";
 
 export interface HostedContactPrivacyKeyring {
   currentVersion: string;
@@ -34,6 +37,7 @@ export interface HostedOnboardingEnvironment {
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
   linqIngressTypingDiagnosticBurstDelaysMs: readonly number[];
+  linqIngressTypingDiagnosticBurstMode: HostedLinqIngressTypingDiagnosticBurstMode;
   linqIngressTypingDiagnosticEnabled: boolean;
   linqIngressTypingDiagnosticTimeoutMs: number;
   linqMaxActiveMembersPerConversationPhone: number | null;
@@ -74,6 +78,9 @@ export function readHostedOnboardingEnvironment(
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
     linqIngressTypingDiagnosticBurstDelaysMs: readLinqIngressTypingDiagnosticBurstDelaysMs(
       readEnv(source, "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS"),
+    ),
+    linqIngressTypingDiagnosticBurstMode: readLinqIngressTypingDiagnosticBurstMode(
+      readEnv(source, "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_MODE"),
     ),
     linqIngressTypingDiagnosticEnabled: readBoolean(
       readEnv(source, "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC"),
@@ -322,4 +329,22 @@ function readLinqIngressTypingDiagnosticBurstDelaysMs(
   }
 
   return Array.from(delays).sort((left, right) => left - right);
+}
+
+function readLinqIngressTypingDiagnosticBurstMode(
+  value: string | null,
+): HostedLinqIngressTypingDiagnosticBurstMode {
+  if (!value) {
+    return DEFAULT_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_MODE;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "deferred" || normalized === "inline") {
+    return normalized;
+  }
+
+  throw new TypeError(
+    "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_MODE must be deferred or inline.",
+  );
 }
