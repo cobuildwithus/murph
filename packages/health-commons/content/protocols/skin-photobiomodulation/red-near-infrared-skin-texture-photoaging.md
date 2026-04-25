@@ -38,6 +38,15 @@ relations:
     type: "secondary_biomarker"
     target: "biomarker:skin-tolerability-symptoms"
   -
+    type: "secondary_biomarker"
+    target: "biomarker:image-derived-wrinkle-length-area"
+  -
+    type: "secondary_biomarker"
+    target: "biomarker:calibrated-skin-color-pigment-delta"
+  -
+    type: "secondary_biomarker"
+    target: "biomarker:image-derived-skin-texture-index"
+  -
     type: "cites"
     target: "source_artifact:pmid-39960921"
   -
@@ -270,12 +279,13 @@ protocol:
     - "Run one 10-minute session on 5 days each week for 6 weeks, unless the selected device label is more conservative; do not increase duration, frequency, or closeness to chase faster results."
     - "Keep skincare actives, exfoliation, peels, fillers, lasers/IPL, PDT, sun exposure habits, and other cosmetic interventions as stable as practical during the run."
     - "After each session, log session minutes, mode, treatment area, eye protection, heat or discomfort, skin irritation, pigment changes, headache, eye symptoms, and any skincare or procedure changes."
-    - "Repeat the same standardized photos at week 4 and week 6; score only pre-specified regions and review adherence and confounders before interpreting the result."
+    - "Repeat the same standardized photos at week 4 and week 6; score only pre-specified regions and, if using optional image-derived endpoints, rerun the same ROI templates and ImageJ/Fiji settings before reviewing adherence and confounders."
   tips:
     - "Manufacturer wavelength and irradiance values are useful to record, but they are not the same as independent radiometry."
     - "A mask that sits on the skin has different exposure geometry from a panel; use a panel only as a separate fork with distance and angle logged."
     - "Periocular or crow's-feet outcomes are region-specific; do not count them as proof of whole-face change."
     - "A useful result should be visible across repeated photos or scores and still make sense after checking adherence, skincare, lighting, sun exposure, sleep, stress, and procedures."
+    - "Optional wrinkle-length, calibrated-color, and texture-index measurements are personal trend proxies only; use the same ROI, lighting, calibration, and free analysis workflow every time rather than changing methods mid-run."
   keepInMind:
     - "Direct home/facial red+NIR evidence is supportive but heterogeneous; this is a cautious self-test, not a promise of rejuvenation."
     - "Outcome changes are slow and may be subtle; first-session warmth, glow, or satisfaction is not the endpoint."
@@ -301,6 +311,10 @@ protocol:
     - "cosmetic procedures"
     - "sun exposure"
     - "standardized photo checkpoint"
+    - "optional wrinkle ROI line length or area"
+    - "optional color card or gray card reference"
+    - "optional calibrated color ROI delta"
+    - "optional image texture ROI index"
   stopConditions:
     - "Stop for tearing, distorted vision, temporary vision loss, persistent or recurrent afterimage, flashes, spots, floaters, blurry vision, eye pain, eye irritation, or any new ocular or visual symptom during or after use."
     - "Stop if eye inserts, shields, or goggles shift, fit poorly, feel hot, cause contact irritation or allergy, or cannot be used without removing them near the eyelids."
@@ -320,12 +334,16 @@ testPlans:
       - "biomarker:periocular-wrinkle-score"
       - "biomarker:skin-texture-roughness-score"
       - "biomarker:skin-tolerability-symptoms"
+      - "biomarker:image-derived-wrinkle-length-area"
+      - "biomarker:calibrated-skin-color-pigment-delta"
+      - "biomarker:image-derived-skin-texture-index"
     minimumAdherenceSessions: 24
     targetAdherenceSessions: 30
     notes:
       - "Use the 14 baseline days to lock camera, lighting, region, expression, skincare, and scoring rules before any intervention sessions."
       - "Score week-4 photos as an early check and week-6 photos as the first starter read; a 12-to-16-week extension can be created as a separate fork when the device label and user burden support it."
       - "Analyze standardized photo scores separately from satisfaction or skin-feel ratings because subjective and objective signals can diverge."
+      - "Use optional image-derived wrinkle, color, and texture metrics only when the ROI template, lighting, calibration, and analysis settings are locked before comparing baseline with week-4 or week-6 images."
       - "Treat tolerability and eye symptoms as safety outcomes, not as noise to be averaged away."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
@@ -557,6 +575,10 @@ experimentOnboarding:
       - "ocular_symptoms"
       - "skincare_changes"
       - "photo_checkpoint"
+      - "optional_wrinkle_roi_line_length_or_area"
+      - "optional_color_card_or_gray_card_reference"
+      - "optional_calibrated_color_roi_delta"
+      - "optional_image_texture_roi_index"
     confounders:
       - "sun_exposure"
       - "retinoids_or_acids"
