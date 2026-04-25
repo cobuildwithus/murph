@@ -11,6 +11,7 @@ aliases:
   - bmla-drugs-and-lasers-ipls-2018-11-30
 categories:
   - whole-body-photobiomodulation
+  - skin-photobiomodulation
 relations:
   -
     type: related_protocol
@@ -18,6 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:whole-body-photobiomodulation
+  -
+    type: related_protocol
+    target: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+  -
+    type: parent_family
+    target: experiment_family:skin-photobiomodulation
 source:
   kind: guideline
   title: Drugs and Lasers/IPLs
@@ -44,6 +51,16 @@ protocolEvidence:
     implication: Useful as a pragmatic comparator for medication-screening language.
     caveat: Consensus guidance for non-essential aesthetic lasers and IPLs, not peer-reviewed whole-body PBM evidence.
     displayPriority: 35
+  -
+    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
+    groupId: laser-ipl-medication-guidance
+    stance: safety_boundary
+    scope: adjacent_variant
+    result: not_efficacy_evidence
+    headline: BMLA guidance supports medication review while warning against overly rigid drug-light rules.
+    implication: Use for medication-screening process language and referral/test-patch caution, not for efficacy claims.
+    caveat: Translate laser/IPL cautions conservatively to PBM because device physics differ.
+    displayPriority: 63
 evidenceBucket: Safety, contraindication, and population-boundary evidence
 whyItMatters: This source provides concrete wait-period and test-patch advice that can inform practical screening language even though it is not direct PBM research.
 potentialMurphEndpoints:
@@ -71,3 +88,29 @@ This source is included for **Safety, contraindication, and population-boundary 
 **Protocol takeaway:** Use as practical screening context for medication and healing-risk questions, while keeping the evidence boundary explicit.
 
 **Claim use:** `safety-only`.
+
+## Skin Photobiomodulation Note
+
+This source is included for **photosensitizing-medication and retinoid safety boundary**.
+
+**Findings:** Guidance notes that many drug-avoidance lists are based on overly rigid interpretation of limited data and provides a structured safety-screening approach for laser/IPL settings.
+
+**Why it matters:** Use for medication-screening process language and referral/test-patch caution, not for efficacy claims.
+
+**Potential experiment signals:** intake medication checklist, nonessential procedure pause, test patch caution.
+
+**Protocol takeaway:** BMLA guidance supports medication review while warning against overly rigid drug-light rules. Translate laser/IPL cautions conservatively to PBM because device physics differ.
+
+**Claim use:** `safety-only`.
+
+### Extraction notes
+
+- **Population:** People considering laser/IPL/light-device procedures and practitioners screening medications.
+- **Intervention/exposure:** Medication review before laser/IPL or light-based procedures.
+- **Comparator/control:** Not applicable.
+- **Duration/follow-up:** Not applicable.
+- **Endpoints:** Photosensitivity reactions, medication lists, contraindication cautions, and procedure safety.
+- **Adverse events/safety notes:** Photosensitivity reactions and procedure-related burns/blisters are the relevant risks in higher-energy light procedures.
+- **Limitations:** Professional guidance page, not PBM clinical trial.; Laser/IPL context may overestimate risk for nonthermal red/NIR LED PBM.; Web-page date/source should be version-controlled.
+- **Population mismatch/directness:** Procedure safety boundary; not direct protocol evidence.
+- **Artifact/rights status:** unknown.
