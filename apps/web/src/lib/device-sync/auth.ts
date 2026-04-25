@@ -14,7 +14,7 @@ export interface AuthenticatedHostedUser {
   id: string;
   email: string | null;
   name: string | null;
-  source: "trusted-header" | "development-fallback";
+  source: "trusted-header";
 }
 
 export interface HostedUserAssertionClaims {
@@ -57,19 +57,9 @@ export async function requireAuthenticatedHostedUser(
     return signedHostedUser;
   }
 
-  if (!env.isProduction && env.devUserId) {
-    return {
-      id: env.devUserId,
-      email: env.devUserEmail,
-      name: env.devUserName,
-      source: "development-fallback",
-    };
-  }
-
   throw deviceSyncError({
     code: "AUTH_REQUIRED",
-    message:
-      "Hosted device-sync browser routes require a cryptographically verified hosted user assertion or DEVICE_SYNC_DEV_USER_ID in development.",
+    message: "Hosted device-sync browser routes require a cryptographically verified hosted user assertion.",
     retryable: false,
     httpStatus: 401,
   });

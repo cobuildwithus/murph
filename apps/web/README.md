@@ -270,12 +270,6 @@ deploys `apps/web`. Production is the minimum.
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
 
-Development fallback only:
-
-- `DEVICE_SYNC_DEV_USER_ID`
-- `DEVICE_SYNC_DEV_USER_EMAIL`
-- `DEVICE_SYNC_DEV_USER_NAME`
-
 ## Browser auth contract
 
 The lower-level assertion-backed device-sync bridge routes, such as
@@ -293,6 +287,8 @@ The signed assertion must include hosted user claims plus:
 
 Each assertion nonce is consumed once so replayed assertions fail even if the
 user tuple is unchanged.
+There is no unauthenticated development-user fallback; local development must
+exercise the same signed assertion contract.
 
 ## Secret hygiene and rotation
 
