@@ -7,12 +7,6 @@ export interface WorkerSendEmailBindingLike {
 
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
-  stopActiveRunMessagingActivity?(input: {
-    reason?: string | null;
-    runId: string;
-  }): Promise<{
-    stopped: boolean;
-  }>;
 }
 
 export interface WorkerBootstrapUserRunnerStubLike extends WorkerUserRunnerStubLike {

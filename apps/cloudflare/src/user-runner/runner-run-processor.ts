@@ -29,17 +29,11 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import type {
   HostedAssistantDeliveryOutcome,
-  HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
   computeHostedRunElapsedMs,
-  selectHostedRunMessagingActivityTarget,
-  startHostedRunMessagingActivity,
-  type HostedRunMessagingActivityHandle,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type { R2BucketLike } from "../bundle-store.js";
 import { createHostedBrowserVaultReplicaStore } from "../browser-vault-store.js";
@@ -233,7 +227,6 @@ export class RunnerRunProcessor {
     currentBundleRef: HostedExecutionBundleRef | null;
     events: HostedRuntimeDrainEvent[];
     primaryWake: HostedRuntimeEvent;
-    messagingActivityOwnedByExecutor?: boolean;
     run: HostedRunRecord;
     runToken?: string | null;
   }): Promise<RunnerRunDrainExecutionResult> {
@@ -304,56 +297,16 @@ export class RunnerRunProcessor {
         },
         resumeFinalize: false,
       },
-      messagingActivityOwnedByExecutor: input.messagingActivityOwnedByExecutor,
       primaryWake: input.primaryWake,
       run: input.run,
       runToken: input.runToken,
     });
   }
 
-  async startRunMessagingActivity(input: {
-    events: HostedRuntimeDrainEvent[];
-    run: HostedRunRecord;
-  }): Promise<HostedRunMessagingActivityHandle | null> {
-    if (!selectHostedRunMessagingActivityTarget(input.events)) {
-      return null;
-    }
-
-    const run = hostedRunRecordToExecutionRunContext(input.run);
-
-    try {
-      const runtimeEnv = await this.resolveRunnerRuntimeEnv(input.run.userId);
-
-      return startHostedRunMessagingActivity({
-        component: "runner",
-        events: input.events,
-        runtimeEnv,
-        run,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner",
-        details: {
-          eventCount: input.events.length,
-          runElapsedMs: computeHostedRunElapsedMs(run),
-        },
-        error,
-        eventId: hostedRunEventId(input.run.id),
-        level: "warn",
-        message: "Hosted run messaging activity could not be started; continuing without typing indicator.",
-        phase: "wake.running",
-        run,
-        userId: input.run.userId,
-      });
-      return null;
-    }
-  }
-
   async finalizeRunDrain(input: {
     committedResult?: HostedExecutionRunnerResult | null;
     currentBundleRef: HostedExecutionBundleRef | null;
     primaryWake: HostedRuntimeEvent;
-    messagingActivityOwnedByExecutor?: boolean;
     run: HostedRunRecord;
     runToken?: string | null;
   }): Promise<RunnerRunDrainExecutionResult> {
@@ -378,7 +331,6 @@ export class RunnerRunProcessor {
         },
         resumeFinalize: true,
       },
-      messagingActivityOwnedByExecutor: input.messagingActivityOwnedByExecutor,
       primaryWake: input.primaryWake,
       run: input.run,
       runToken: input.runToken,
@@ -390,7 +342,6 @@ export class RunnerRunProcessor {
     currentBundleRef: HostedExecutionBundleRef | null;
     events: HostedRuntimeDrainEvent[];
     lifecycle: RunnerRunDrainLifecyclePolicy;
-    messagingActivityOwnedByExecutor?: boolean;
     primaryWake: HostedRuntimeEvent;
     run: HostedRunRecord;
     runToken?: string | null;
@@ -440,9 +391,6 @@ export class RunnerRunProcessor {
           run: input.run,
         }),
         input.runToken,
-        {
-          messagingActivityOwnedByExecutor: input.messagingActivityOwnedByExecutor === true,
-        },
       );
 
       return await input.lifecycle.handleSuccess(runnerResult, context);
@@ -861,12 +809,6 @@ export class RunnerRunProcessor {
     };
   }
 
-  private async resolveRunnerMessagingActivityRuntimeEnv(
-    userId: string,
-  ): Promise<Record<string, string>> {
-    return this.resolveRunnerRuntimeEnv(userId);
-  }
-
   private async invokeRunner(
     userId: string,
     currentBundleRef: HostedExecutionBundleRef | null,
@@ -874,9 +816,6 @@ export class RunnerRunProcessor {
     run: HostedExecutionRunContext,
     runDrain: HostedRuntimeDrainRequest,
     runToken?: string | null,
-    options: {
-      messagingActivityOwnedByExecutor?: boolean;
-    } = {},
   ): Promise<HostedAssistantRuntimeJobResult> {
     if (!this.dependencies.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
@@ -903,9 +842,7 @@ export class RunnerRunProcessor {
         runDrain,
         ...(runToken ? { runToken } : {}),
       },
-      runtime: options.messagingActivityOwnedByExecutor === true
-        ? markHostedRunMessagingActivityOwnedByExecutor(runtimeConfig)
-        : runtimeConfig,
+      runtime: runtimeConfig,
     };
     void recordHostedRunBreadcrumbInWebBestEffort({
       baseUrl: this.dependencies.hostedWebBaseUrl,
@@ -1303,19 +1240,6 @@ function buildHostedRuntimeDrainRequest(input: {
     runId: input.run.id,
     triggerKind: input.run.triggerKind,
     userId: input.run.userId,
-  };
-}
-
-function markHostedRunMessagingActivityOwnedByExecutor(
-  runtimeConfig: HostedAssistantRuntimeConfig,
-): HostedAssistantRuntimeConfig {
-  return {
-    ...runtimeConfig,
-    forwardedEnv: {
-      ...runtimeConfig.forwardedEnv,
-      [HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV]:
-        HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
-    },
   };
 }
 

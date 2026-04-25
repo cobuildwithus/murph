@@ -229,43 +229,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
-  it("stops active run messaging activity through the Cloudflare internal effects port", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      ok: true,
-      stopped: true,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-    });
-
-    const result = await platform.messagingActivityPort!.stopActiveRunMessagingActivity({
-      reason: "before_committed_assistant_delivery",
-      runId: "run_123",
-    });
-
-    expect(result).toEqual({
-      stopped: true,
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "messaging activity stop fetch");
-    expect(request.url).toBe("http://results.worker/messaging-activity/stop-active");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.method).toBe("POST");
-    await expect(request.json()).resolves.toEqual({
-      reason: "before_committed_assistant_delivery",
-      runId: "run_123",
-    });
-  });
-
   it("fails closed before issuing internal-host requests when the per-run proxy token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({

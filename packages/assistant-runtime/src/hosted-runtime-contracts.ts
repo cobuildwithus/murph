@@ -18,7 +18,6 @@ export type {
   HostedRuntimeEffectsPort,
   HostedRuntimeIssueExportPort,
   HostedRuntimeIssueRecordResponse,
-  HostedRuntimeMessagingActivityPort,
   HostedRuntimePlatform,
   HostedRuntimeTurnInputPort,
   HostedRuntimeUsageExportPort,
@@ -41,19 +40,6 @@ export {
   computeHostedRunElapsedMs,
 } from "./hosted-runtime/utils.ts";
 export {
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_ENV,
-  HOSTED_RUN_MESSAGING_ACTIVITY_OWNER_EXECUTOR,
-  selectHostedRunMessagingActivityTarget,
-  shouldStartRuntimeHostedRunMessagingActivity,
-  startHostedRunMessagingActivity,
-  stopHostedRunMessagingActivity,
-} from "./hosted-runtime/typing.ts";
-export {
   deleteHostedLinqMessages,
   deleteHostedTelegramMessages,
 } from "./hosted-runtime/message-cleanup.ts";
-export type {
-  HostedMessagingActivityComponent,
-  HostedRunMessagingActivityHandle,
-  HostedRunMessagingActivityTarget,
-} from "./hosted-runtime/typing.ts";

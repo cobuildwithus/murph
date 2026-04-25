@@ -37,6 +37,10 @@ import {
 import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
+import {
+  startAssistantChannelTypingIndicator,
+  stopAssistantChannelTypingIndicator,
+} from './channel-typing.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { normalizeNullableString, normalizeRequiredText } from './shared.js'
 
@@ -172,128 +176,140 @@ export async function sendAssistantNotificationLocal(
       })
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
-      const providerOutcome = await executeProviderTurnWithRecovery({
+      const typingIndicator = startAssistantChannelTypingIndicator({
+        channelDependencies:
+          executionContext?.hosted?.channelTypingDependencies ?? null,
         input: messageInput,
-        plan: sharedPlan,
-        profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
-        resolvedSession: resolved.session,
-        routes,
-        turnCreatedAt,
-        turnId,
-      })
-      if (providerOutcome.kind === 'failed_terminal') {
-        throw annotateAssistantNotificationError(
-          providerOutcome.error,
-          buildAssistantNotificationObservabilityDetails({
-            stage: 'provider',
-            input: messageInput,
-            route: providerOutcome.route ?? routes[0] ?? null,
-            session: resolved.session,
-          }),
-        )
-      }
-
-      const providerResult = providerOutcome.providerTurn
-      const selectedRoute = providerResult.route
-      await persistPendingAssistantUsageEvent({
-        executionContext,
-        providerResult,
-        turnId,
-        vault: input.vault,
-      })
-      const responsePolicy: AssistantNotificationResponsePolicy =
-        input.responsePolicy ?? { kind: 'allow_send_or_skip' }
-      const decision = parseAssistantNotificationDecision(providerResult.response)
-
-      if (decision.kind === 'skip') {
-        assertAssistantNotificationSkipAllowed(responsePolicy)
-        return {
-          decision,
-          response: null,
-          session: providerResult.session,
-        }
-      }
-
-      const responseText = normalizeRequiredText(decision.text, 'notification response')
-      assertAssistantNotificationSendAllowed({
-        policy: responsePolicy,
-        text: responseText,
-      })
-
-      const state = createAssistantRuntimeStateService(input.vault)
-      await state.turns.createReceipt({
-        sessionId: providerResult.session.sessionId,
-        provider: selectedRoute.provider,
-        providerModel:
-          selectedRoute.providerOptions.model
-          ?? providerResult.session.providerOptions.model
-          ?? null,
-        prompt: messageInput.prompt,
-        deliveryRequested: true,
-        turnId,
-      })
-
-      const savedSession = await persistAssistantTurnAndSession({
-        assistantTranscriptText: responseText,
-        input: messageInput,
-        plan: sharedPlan,
-        persistUserPromptToTranscript: false,
-        providerResult,
-        resumeStatePolicy: 'clear',
-        session: providerResult.session,
-        turnCreatedAt,
-        turnId,
-      })
-      const deliveryOutcome = await deliverAssistantNotificationMessage({
-        dedupeToken: input.deliveryDedupeToken ?? null,
-        decisionSubject: decision.subject ?? null,
-        input: messageInput,
-        message: responseText,
-        session: savedSession,
+        session: resolved.session,
         sharedPlan,
-        turnId,
       })
-      await finalizeAssistantTurnFromDeliveryOutcome({
-        outcome: deliveryOutcome,
-        response: responseText,
-        turnId,
-        vault: input.vault,
-      })
-      if (
-        input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
-        (deliveryOutcome.kind === 'sent' || deliveryOutcome.kind === 'queued')
-      ) {
-        await markAssistantFirstContactSeen({
-          docIds: resolveAssistantNotificationFirstContactDocIds({
-            input: messageInput,
-            session: deliveryOutcome.session,
-            sharedPlan,
-          }),
-          seenAt: new Date().toISOString(),
+
+      try {
+        const providerOutcome = await executeProviderTurnWithRecovery({
+          input: messageInput,
+          plan: sharedPlan,
+          profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
+          resolvedSession: resolved.session,
+          routes,
+          turnCreatedAt,
+          turnId,
+        })
+        if (providerOutcome.kind === 'failed_terminal') {
+          throw annotateAssistantNotificationError(
+            providerOutcome.error,
+            buildAssistantNotificationObservabilityDetails({
+              stage: 'provider',
+              input: messageInput,
+              route: providerOutcome.route ?? routes[0] ?? null,
+              session: resolved.session,
+            }),
+          )
+        }
+
+        const providerResult = providerOutcome.providerTurn
+        const selectedRoute = providerResult.route
+        await persistPendingAssistantUsageEvent({
+          executionContext,
+          providerResult,
+          turnId,
           vault: input.vault,
         })
-      }
-      await state.status.refreshSnapshot()
+        const responsePolicy: AssistantNotificationResponsePolicy =
+          input.responsePolicy ?? { kind: 'allow_send_or_skip' }
+        const decision = parseAssistantNotificationDecision(providerResult.response)
 
-      if (deliveryOutcome.kind === 'failed') {
-        throw annotateAssistantNotificationError(
-          deliveryOutcome.error,
-          buildAssistantNotificationObservabilityDetails({
-            stage: 'delivery',
-            input: messageInput,
-            route: selectedRoute,
-            session: savedSession,
-          }),
-        )
-      }
+        if (decision.kind === 'skip') {
+          assertAssistantNotificationSkipAllowed(responsePolicy)
+          return {
+            decision,
+            response: null,
+            session: providerResult.session,
+          }
+        }
 
-      return {
-        decision: {
-          ...decision,
+        const responseText = normalizeRequiredText(decision.text, 'notification response')
+        assertAssistantNotificationSendAllowed({
+          policy: responsePolicy,
           text: responseText,
-        },
-        response: responseText,
-        session: deliveryOutcome.session,
+        })
+
+        const state = createAssistantRuntimeStateService(input.vault)
+        await state.turns.createReceipt({
+          sessionId: providerResult.session.sessionId,
+          provider: selectedRoute.provider,
+          providerModel:
+            selectedRoute.providerOptions.model
+            ?? providerResult.session.providerOptions.model
+            ?? null,
+          prompt: messageInput.prompt,
+          deliveryRequested: true,
+          turnId,
+        })
+
+        const savedSession = await persistAssistantTurnAndSession({
+          assistantTranscriptText: responseText,
+          input: messageInput,
+          plan: sharedPlan,
+          persistUserPromptToTranscript: false,
+          providerResult,
+          resumeStatePolicy: 'clear',
+          session: providerResult.session,
+          turnCreatedAt,
+          turnId,
+        })
+        const deliveryOutcome = await deliverAssistantNotificationMessage({
+          dedupeToken: input.deliveryDedupeToken ?? null,
+          decisionSubject: decision.subject ?? null,
+          input: messageInput,
+          message: responseText,
+          session: savedSession,
+          sharedPlan,
+          turnId,
+        })
+        await finalizeAssistantTurnFromDeliveryOutcome({
+          outcome: deliveryOutcome,
+          response: responseText,
+          turnId,
+          vault: input.vault,
+        })
+        if (
+          input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+          (deliveryOutcome.kind === 'sent' || deliveryOutcome.kind === 'queued')
+        ) {
+          await markAssistantFirstContactSeen({
+            docIds: resolveAssistantNotificationFirstContactDocIds({
+              input: messageInput,
+              session: deliveryOutcome.session,
+              sharedPlan,
+            }),
+            seenAt: new Date().toISOString(),
+            vault: input.vault,
+          })
+        }
+        await state.status.refreshSnapshot()
+
+        if (deliveryOutcome.kind === 'failed') {
+          throw annotateAssistantNotificationError(
+            deliveryOutcome.error,
+            buildAssistantNotificationObservabilityDetails({
+              stage: 'delivery',
+              input: messageInput,
+              route: selectedRoute,
+              session: savedSession,
+            }),
+          )
+        }
+
+        return {
+          decision: {
+            ...decision,
+            text: responseText,
+          },
+          response: responseText,
+          session: deliveryOutcome.session,
+        }
+      } finally {
+        await stopAssistantChannelTypingIndicator(typingIndicator)
       }
     },
   })

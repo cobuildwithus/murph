@@ -24,9 +24,6 @@ import {
   type HostedUserCryptoContext,
   type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
-import type {
-  HostedRunMessagingActivityHandle,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -92,11 +89,6 @@ export class HostedUserRunner {
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStoreFromEnvironment>;
-  private activeMessagingActivity: {
-    handle: HostedRunMessagingActivityHandle;
-    runId: string;
-    stopPromise: Promise<void> | null;
-  } | null = null;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
   private runDrainLock: Promise<void> | null = null;
@@ -502,8 +494,6 @@ export class HostedUserRunner {
       runProcessor: this.runProcessor,
       webControlTimeoutMs: this.env.webControlTimeoutMs,
       stateStore: this.stateStore,
-      stopActiveMessagingActivity: (input) => this.stopActiveMessagingActivity(input),
-      bindRunMessagingActivity: (input) => this.bindRunMessagingActivity(input),
       syncRunnerBundleCacheToCursor: (snapshotRef) =>
         this.syncRunnerBundleCacheToCursor(snapshotRef),
     };
@@ -721,73 +711,6 @@ export class HostedUserRunner {
       },
       run,
     );
-  }
-
-  private async bindRunMessagingActivity(input: {
-    handle: HostedRunMessagingActivityHandle | null;
-    runId: string;
-  }): Promise<void> {
-    if (!input.handle) {
-      return;
-    }
-
-    const active = this.activeMessagingActivity;
-    if (active && active.runId !== input.runId) {
-      await this.stopActiveMessagingActivity({});
-    }
-
-    this.activeMessagingActivity = {
-      handle: input.handle,
-      runId: input.runId,
-      stopPromise: null,
-    };
-  }
-
-  async stopActiveRunMessagingActivity(input: {
-    reason?: string | null;
-    runId: string;
-  }): Promise<{
-    stopped: boolean;
-  }> {
-    return this.stopActiveMessagingActivity({
-      runId: input.runId,
-    });
-  }
-
-  private async stopActiveMessagingActivity(input: {
-    runId?: string;
-  }): Promise<{
-    stopped: boolean;
-  }> {
-    const active = this.activeMessagingActivity;
-    if (!active) {
-      return {
-        stopped: false,
-      };
-    }
-
-    if (input.runId && active.runId !== input.runId) {
-      return {
-        stopped: false,
-      };
-    }
-
-    if (!active.stopPromise) {
-      active.stopPromise = (async () => {
-        try {
-          await active.handle.stop();
-        } finally {
-          if (this.activeMessagingActivity === active) {
-            this.activeMessagingActivity = null;
-          }
-        }
-      })();
-    }
-
-    await active.stopPromise;
-    return {
-      stopped: true,
-    };
   }
 
 }

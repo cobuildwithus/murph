@@ -2,7 +2,13 @@ import type { AssistantModelTarget } from '@murphai/operator-config/assistant-ba
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { SharePack } from '@murphai/contracts'
+import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { normalizeNullableString } from './shared.js'
+
+export type AssistantChannelTypingDependencies = Pick<
+  AssistantChannelDependencies,
+  'startLinqTyping' | 'startTelegramTyping'
+>
 
 export interface AssistantHostedDeviceConnectLink {
   authorizationUrl: string
@@ -34,6 +40,7 @@ export interface AssistantHostedShareLinkRequest {
 }
 
 export interface AssistantHostedExecutionContext {
+  channelTypingDependencies?: AssistantChannelTypingDependencies
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   issueDeviceConnectLink?(
@@ -58,6 +65,9 @@ export function normalizeAssistantExecutionContext(
   const hosted = input?.hosted
   const memberId = normalizeNullableString(hosted?.memberId)
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
+  const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
+    hosted?.channelTypingDependencies,
+  )
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
     hosted?.deviceConnectProviders,
   )
@@ -85,6 +95,11 @@ export function normalizeAssistantExecutionContext(
             defaultTarget,
           }
         : {}),
+      ...(channelTypingDependencies
+        ? {
+            channelTypingDependencies,
+          }
+        : {}),
       ...(deviceConnectProviders.length > 0
         ? {
             deviceConnectProviders,
@@ -102,6 +117,26 @@ export function normalizeAssistantExecutionContext(
           .filter((key): key is string => key !== null) ?? [],
     },
   }
+}
+
+function normalizeAssistantChannelTypingDependencies(
+  input: AssistantHostedExecutionContext['channelTypingDependencies'] | undefined,
+): AssistantChannelTypingDependencies | undefined {
+  if (!input) {
+    return undefined
+  }
+
+  const dependencies: AssistantChannelTypingDependencies = {}
+  if (typeof input.startLinqTyping === 'function') {
+    dependencies.startLinqTyping = input.startLinqTyping
+  }
+  if (typeof input.startTelegramTyping === 'function') {
+    dependencies.startTelegramTyping = input.startTelegramTyping
+  }
+
+  return dependencies.startLinqTyping || dependencies.startTelegramTyping
+    ? dependencies
+    : undefined
 }
 
 export function normalizeAssistantHostedDeviceConnectProviderKey(

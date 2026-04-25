@@ -11,17 +11,10 @@ import type {
   WorkerEnvironmentContract,
 } from "../worker-contracts.ts";
 
-interface RunnerOutboundUserRunnerStubLike extends WorkerBootstrapUserRunnerStubLike {
-  stopActiveRunMessagingActivity?(input: {
-    reason?: string | null;
-    runId: string;
-  }): Promise<{
-    stopped: boolean;
-  }>;
-}
+type RunnerOutboundUserRunnerStubLike = WorkerBootstrapUserRunnerStubLike;
 
 export interface RunnerOutboundEnvironmentSource
-  extends WorkerEnvironmentContract<RunnerOutboundUserRunnerStubLike> {}
+  extends WorkerEnvironmentContract<WorkerBootstrapUserRunnerStubLike> {}
 
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
