@@ -164,7 +164,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
             approvalPolicy: 'never',
             cwd: expectedWorkingDirectory,
             model: 'gpt-5',
-            sandbox: 'workspaceWrite',
+            sandbox: 'workspace-write',
             serviceName: 'murph',
           },
         })

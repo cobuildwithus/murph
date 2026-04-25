@@ -10,6 +10,11 @@ import { stripUndefinedRpcParams } from './app-server-rpc.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 
+type CodexAppServerSandboxMode =
+  | 'danger-full-access'
+  | 'read-only'
+  | 'workspace-write'
+
 export type CodexAppServerInputItem =
   | {
       type: 'text'
@@ -111,14 +116,14 @@ export function mapCodexAppServerApprovalPolicy(
 
 export function mapCodexAppServerSandboxMode(
   sandbox: AssistantSandbox | null | undefined,
-): string | undefined {
+): CodexAppServerSandboxMode | undefined {
   switch (sandbox) {
     case 'read-only':
-      return 'readOnly'
+      return 'read-only'
     case 'workspace-write':
-      return 'workspaceWrite'
+      return 'workspace-write'
     case 'danger-full-access':
-      return 'dangerFullAccess'
+      return 'danger-full-access'
     default:
       return undefined
   }

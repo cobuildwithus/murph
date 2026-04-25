@@ -169,7 +169,7 @@ describe('assistant codex runtime', () => {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
               model: 'gpt-5',
-              sandbox: 'workspaceWrite',
+              sandbox: 'workspace-write',
               serviceName: 'murph',
             },
           })
@@ -738,11 +738,11 @@ describe('assistant codex runtime', () => {
   })
 
   it.each([
-    ['read-only', 'readOnly'],
-    ['workspace-write', 'workspaceWrite'],
-    ['danger-full-access', 'dangerFullAccess'],
+    ['read-only', 'read-only'],
+    ['workspace-write', 'workspace-write'],
+    ['danger-full-access', 'danger-full-access'],
   ] as const)(
-    'maps sandbox %s to protocol sandbox %s on thread/start and thread/resume',
+    'uses Codex app-server SandboxMode %s on thread/start and thread/resume',
     async (sandbox, expectedSandbox) => {
       const workingDirectory = await createTempDir('assistant-codex-thread-context-')
       const expectedThreadContext = {
