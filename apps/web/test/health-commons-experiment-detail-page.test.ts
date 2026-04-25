@@ -139,7 +139,7 @@ describe("ExperimentDetailPage", () => {
         stance: "mixed",
       },
       {
-        count: 18,
+        count: 20,
         defaultOpen: false,
         id: "near-term-autonomic-vascular-and-immune-signals",
         label: "Near-term physiology and wearable signals",
@@ -160,7 +160,7 @@ describe("ExperimentDetailPage", () => {
         stance: "mixed",
       },
       {
-        count: 18,
+        count: 27,
         defaultOpen: false,
         id: "safety-dose-modality-and-context-boundaries",
         label: "Safety, dose, and modality boundaries",

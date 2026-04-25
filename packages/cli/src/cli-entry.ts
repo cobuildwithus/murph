@@ -273,7 +273,8 @@ async function prepareProgramArgsForExecution(input: {
     input.defaultVault === null &&
     !explicitVaultRequested &&
     commandNeedsVault &&
-    !(await hasEnabledIncurConfigFile(input.argv, input.configFiles, input.homeDirectory))
+    !(await hasEnabledIncurConfigFile(input.argv, input.configFiles, input.homeDirectory)) &&
+    !argsRequestJsonOutput(input.argv)
   ) {
     throw new VaultCliError(
       'missing_vault',
@@ -282,6 +283,27 @@ async function prepareProgramArgsForExecution(input: {
   }
 
   return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
+}
+
+function argsRequestJsonOutput(argv: readonly string[]): boolean {
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]
+    if (token === '--') {
+      return false
+    }
+    if (token === '--json' || token === '--format=json') {
+      return true
+    }
+    if (token === '--format') {
+      const value = argv[index + 1]
+      if (value === 'json') {
+        return true
+      }
+      index += 1
+    }
+  }
+
+  return false
 }
 
 async function hasEnabledIncurConfigFile(
