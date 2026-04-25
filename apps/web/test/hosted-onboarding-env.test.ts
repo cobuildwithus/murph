@@ -26,8 +26,6 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
-    expect(environment.linqIngressTypingDiagnosticBurstDelaysMs).toEqual([0]);
-    expect(environment.linqIngressTypingDiagnosticBurstMode).toBe("deferred");
     expect(environment.linqIngressTypingDiagnosticEnabled).toBe(false);
     expect(environment.linqIngressTypingDiagnosticTimeoutMs).toBe(750);
     expect(environment.stripePriceIdsByPlan).toEqual({
@@ -83,44 +81,11 @@ describe("readHostedOnboardingEnvironment", () => {
   it("reads the hosted Linq ingress typing diagnostic flag", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC: "1",
-      HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS: "3000,0,1000,1000",
-      HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_MODE: "inline",
       HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_TIMEOUT_MS: "1250",
     }));
 
-    expect(environment.linqIngressTypingDiagnosticBurstDelaysMs).toEqual([0, 1000, 3000]);
-    expect(environment.linqIngressTypingDiagnosticBurstMode).toBe("inline");
     expect(environment.linqIngressTypingDiagnosticEnabled).toBe(true);
     expect(environment.linqIngressTypingDiagnosticTimeoutMs).toBe(1250);
-  });
-
-  it("rejects invalid Linq ingress typing diagnostic burst delays", () => {
-    expect(() =>
-      readHostedOnboardingEnvironment(createProcessEnv({
-        HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS: "0,soon",
-      })),
-    ).toThrow(/comma-separated list of non-negative millisecond delays/u);
-  });
-
-  it("rejects invalid Linq ingress typing diagnostic burst modes", () => {
-    expect(() =>
-      readHostedOnboardingEnvironment(createProcessEnv({
-        HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_MODE: "background",
-      })),
-    ).toThrow(/must be deferred or inline/u);
-  });
-
-  it("caps Linq ingress typing diagnostic burst delays after deduping entries", () => {
-    const environment = readHostedOnboardingEnvironment(createProcessEnv({
-      HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS: "1,1,1,1,1,1,1,1,1",
-    }));
-
-    expect(environment.linqIngressTypingDiagnosticBurstDelaysMs).toEqual([0, 1]);
-    expect(() =>
-      readHostedOnboardingEnvironment(createProcessEnv({
-        HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS: "1,2,3,4,5,6,7,8",
-      })),
-    ).toThrow(/must not include more than 8 delays/u);
   });
 
   it("falls back to the Vercel production domain for the public base URL", () => {
