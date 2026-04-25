@@ -249,6 +249,34 @@ describe('buildAssistantSystemPrompt', () => {
     )
   })
 
+  it('tells the assistant to present links without text fences', () => {
+    const prompt = buildPrompt('bound-tools', null, {
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'WHOOP', provider: 'whoop' },
+      ],
+    })
+    const notificationPrompt = buildNotificationPrompt('linq', {
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'WHOOP', provider: 'whoop' },
+      ],
+    })
+
+    expect(prompt).toContain(
+      'Do not put standalone links or ordinary URLs in fenced code blocks.',
+    )
+    expect(prompt).toContain(
+      'For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line or as a normal Markdown link when the channel supports it.',
+    )
+    expect(prompt).toContain(
+      'Use code fences only for actual code, commands, JSON, logs, or multi-line snippets the user needs to copy; never label a fence as `text` just to display a URL.',
+    )
+    expect(notificationPrompt).toContain(
+      'Do not put standalone links or ordinary URLs in fenced code blocks.',
+    )
+  })
+
   it('tells the assistant to trust successful save receipts without inventing no-op writes', () => {
     const prompt = buildPrompt('bound-tools')
 
