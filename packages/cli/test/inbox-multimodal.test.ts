@@ -15,6 +15,29 @@ function makeCsv(rowCount: number): string {
   return ['timestamp,spo2,pulse,marker', ...rows].join('\n')
 }
 
+function makeJsonExport(recordCount: number): string {
+  return JSON.stringify(
+    {
+      exportedAt: '2026-04-17T10:00:00.000Z',
+      provider: 'example-export',
+      records: Array.from({ length: recordCount }, (_, index) => {
+        const minute = String(index).padStart(3, '0')
+        return {
+          id: `record-${minute}`,
+          timestamp: `2026-04-17T00:${minute}:00Z`,
+          metrics: {
+            oxygen: 94 + (index % 5),
+            pulse: 58 + (index % 8),
+          },
+          note: `sample-${minute}`,
+        }
+      }),
+    },
+    null,
+    2,
+  )
+}
+
 describe('buildInboxModelAttachmentBundle', () => {
   it('summarizes large CSV-like attachment evidence instead of duplicating raw parser text', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-model-'))
@@ -78,6 +101,70 @@ describe('buildInboxModelAttachmentBundle', () => {
       expect(bundle.combinedText).not.toContain('[derived-markdown]')
       expect(bundle.combinedText).not.toContain('[derived-tables]')
       expect(bundle.combinedText).not.toContain('sample-064')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('summarizes large JSON attachment evidence instead of duplicating raw parser text', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-model-'))
+    const json = makeJsonExport(125)
+    const derivedDir = path.join(
+      vaultRoot,
+      'derived',
+      'inbox',
+      'capture-1',
+      'attachment-1',
+    )
+    const manifestPath = path.join(derivedDir, 'manifest.json')
+    const plainPath = path.join(derivedDir, 'plain.txt')
+    const markdownPath = path.join(derivedDir, 'normalized.md')
+
+    try {
+      await mkdir(derivedDir, { recursive: true })
+      await writeFile(plainPath, json, 'utf8')
+      await writeFile(markdownPath, `\`\`\`json\n${json}\n\`\`\``, 'utf8')
+      await writeFile(
+        manifestPath,
+        JSON.stringify({
+          schema: 'murph.parser-manifest.v1',
+          paths: {
+            plainTextPath: 'derived/inbox/capture-1/attachment-1/plain.txt',
+            markdownPath: 'derived/inbox/capture-1/attachment-1/normalized.md',
+            tablesPath: null,
+          },
+        }),
+        'utf8',
+      )
+
+      const bundle = await buildInboxModelAttachmentBundle({
+        attachment: {
+          attachmentId: 'attachment-1',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/json',
+          fileName: 'wearable-export.json',
+          byteSize: json.length,
+          storedPath: 'raw/inbox/capture-1/attachments/attachment-1/export.json',
+          extractedText: json,
+          transcriptText: null,
+          derivedPath: 'derived/inbox/capture-1/attachment-1/manifest.json',
+          parseState: 'succeeded',
+        } as never,
+        captureId: 'capture-1',
+        vaultRoot,
+      })
+
+      expect(bundle.fragments.map((fragment) => fragment.kind)).toEqual([
+        'attachment_metadata',
+        'attachment_json_summary',
+      ])
+      expect(bundle.fragments[0]?.text).toContain(`byteSize: ${json.length}`)
+      expect(bundle.combinedText).toContain('Large JSON attachment summary:')
+      expect(bundle.combinedText).toContain('$.records: 125 items')
+      expect(bundle.combinedText).not.toContain('[derived-plain-text]')
+      expect(bundle.combinedText).not.toContain('[derived-markdown]')
+      expect(bundle.combinedText).not.toContain('record-064')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
