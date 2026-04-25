@@ -91,9 +91,9 @@ describe("@murphai/health-commons coverage scaffolding", () => {
     }
   });
 
-  it("reports stale build outputs when a generated file no longer matches", async () => {
+  it("checks deterministic generation without requiring generated files", async () => {
     const contentRoot = await createTempDir("health-commons-content-");
-    const generatedRoot = await createTempDir("health-commons-generated-");
+    const generatedRoot = path.join(contentRoot, "missing-generated");
 
     try {
       await writeFile(
@@ -102,22 +102,16 @@ describe("@murphai/health-commons coverage scaffolding", () => {
         "utf8",
       );
       await writeHealthCommonsGeneratedArtifacts({
-        check: false,
+        check: true,
         contentRoot,
         generatedRoot,
       });
-      await writeFile(path.join(generatedRoot, "redirects.json"), '{"redirects":[]}\n', "utf8");
 
       await expect(
-        writeHealthCommonsGeneratedArtifacts({
-          check: true,
-          contentRoot,
-          generatedRoot,
-        }),
-      ).rejects.toThrow(/Health Commons generated artifacts are stale/u);
+        readFile(path.join(generatedRoot, "catalog.json"), "utf8"),
+      ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(contentRoot, { recursive: true, force: true });
-      await rm(generatedRoot, { recursive: true, force: true });
     }
   });
 

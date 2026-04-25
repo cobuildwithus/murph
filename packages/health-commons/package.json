@@ -32,10 +32,11 @@
     "generate": "pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts",
     "generate:check": "pnpm generate --check",
     "artifacts:r2:dry-run": "pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/sync-cloudflare-r2.ts --dry-run",
-    "test:vitest": "pnpm --dir ../.. exec vitest run --config packages/health-commons/vitest.config.ts --no-coverage",
-    "test:coverage": "pnpm --dir ../.. exec vitest run --config packages/health-commons/vitest.config.ts --coverage",
+    "test:vitest": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/health-commons/vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/health-commons/vitest.config.ts --coverage",
     "test": "pnpm test:vitest",
     "verify": "pnpm typecheck && pnpm test && pnpm generate:check",
+    "prepack": "pnpm build",
     "artifacts:hash": "pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/hash-artifact.ts",
     "artifacts:r2": "pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/sync-cloudflare-r2.ts"
   },

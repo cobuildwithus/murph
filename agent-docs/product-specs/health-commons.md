@@ -11,7 +11,7 @@ Murph needs a public, living Health Commons for protocol pages, biomarker pages,
 The Health Commons is not a private user vault, not a raw research warehouse, and not a feed of raw personal results.
 
 - Public reusable health knowledge belongs in `packages/health-commons/content/**` as typed pages and small manifests.
-- Generated runtime projections, catalog artifacts, and aggregate outcome summaries belong in `packages/health-commons/generated/**`.
+- Generated runtime projections, catalog artifacts, and aggregate outcome summaries materialize under `packages/health-commons/generated/**` as ignored build artifacts.
 - Private user runs and private outcome cards continue to live outside the Health Commons, bound to exact commons keys and revisions.
 - Explicit public contributions may inform generated cohort summaries, but raw private run records never become article prose.
 - Large PDFs, screenshots, and extracted full text stay outside Git and are referenced by artifact manifests.

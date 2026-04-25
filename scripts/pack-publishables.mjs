@@ -184,6 +184,20 @@ async function materializeStage(entry, context, stageDir) {
   );
 }
 
+async function ensureGeneratedPackageArtifacts(context) {
+  if (!context.workspacePackageByName.has('@murphai/health-commons')) {
+    return;
+  }
+
+  await execFileAsync(
+    process.execPath,
+    ['scripts/ensure-health-commons-generated.mjs'],
+    {
+      cwd: context.repoRoot,
+    },
+  );
+}
+
 const options = parseReleaseArgs(process.argv.slice(2), {
   defaults: {
     clean: false,
@@ -240,6 +254,7 @@ await mkdir(outDir, { recursive: true });
 await mkdir(path.dirname(packOutputPath), { recursive: true });
 await rm(stageRoot, { force: true, recursive: true });
 await mkdir(stageRoot, { recursive: true });
+await ensureGeneratedPackageArtifacts(context);
 
 const packedPackages = [];
 

@@ -32,6 +32,7 @@
     "test:coverage": "bash scripts/workspace-verify.sh test:coverage",
     "test:diff": "bash scripts/workspace-verify.sh test:diff",
     "verify:acceptance": "bash scripts/workspace-verify.sh verify:acceptance",
+    "health-commons:generate": "node scripts/ensure-health-commons-generated.mjs",
     "test:scenario-integrity": "tsx e2e/smoke/verify-scenario-integrity.ts",
     "test:smoke": "pnpm test:scenario-integrity",
     "verify:cli": "bash scripts/workspace-verify.sh verify:cli",

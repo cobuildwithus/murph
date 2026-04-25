@@ -65,7 +65,7 @@ Always read these before repo code/docs/test/config work:
 
 - Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default.
 - Preserve unrelated working-tree edits in the current checkout. Do not overwrite, discard, or revert work you did not make.
-- For broad content-only sweeps, treat generated catalog artifacts as landing-time outputs rather than branch-by-branch truth. Prefer committing the authored source files first (`content/**/*.md`, `content/**/*.json`, `content/**/*.jsonl`) and regenerate/commit `generated/*` at the final shared landing, or earlier only when a schema, loader, test fixture, or runtime consumer change specifically depends on those derived files changing in the same diff.
+- For broad content-only sweeps, treat Health Commons generated catalog artifacts as ignored build outputs rather than branch-by-branch truth. Commit authored source files (`packages/health-commons/content/**/*.md`, `packages/health-commons/content/**/*.json`, `packages/health-commons/content/**/*.jsonl`) plus any intentional generator/schema/test changes; do not commit regenerated `packages/health-commons/generated/**` files.
 - If verification or build commands introduce tracked edits outside the intended task scope, check `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before removing or reverting them. If another active row plausibly owns those files, stop and coordinate instead of cleaning them up unilaterally.
 - Document architecture-significant changes in the matching durable docs.
 - Use the completion and verification docs for detailed workflow and command selection.
