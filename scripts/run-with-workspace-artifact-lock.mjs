@@ -32,7 +32,7 @@ const useDetachedChildProcessGroup = process.platform !== "win32";
 const invocation = parseInvocation(process.argv.slice(2));
 
 if (process.env[WORKSPACE_ARTIFACT_LOCK_HELD_ENV] === "1") {
-  process.exit(runCommand(invocation.commandArgs, process.env));
+  process.exit(await runCommand(invocation.commandArgs, process.env));
 }
 
 mkdirSync(lockRoot, { recursive: true });
