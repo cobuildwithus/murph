@@ -598,3 +598,53 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
     },
   })
 })
+
+test('assistant self delivery targets treat iMessage as the linq route alias', async () => {
+  const homeDirectory = await createTempHome('operator-config-home-')
+
+  await saveAssistantSelfDeliveryTarget(
+    {
+      channel: ' iMessage ',
+      deliveryTarget: ' chat-123 ',
+      identityId: ' identity-1 ',
+      participantId: null,
+      threadId: ' chat-123 ',
+    },
+    homeDirectory,
+  )
+
+  assert.deepEqual(await listAssistantSelfDeliveryTargets(homeDirectory), [
+    {
+      channel: 'linq',
+      deliveryTarget: 'chat-123',
+      identityId: 'identity-1',
+      participantId: null,
+      threadId: 'chat-123',
+    },
+  ])
+
+  assert.deepEqual(await resolveAssistantSelfDeliveryTarget('i-message', homeDirectory), {
+    channel: 'linq',
+    deliveryTarget: 'chat-123',
+    identityId: 'identity-1',
+    participantId: null,
+    threadId: 'chat-123',
+  })
+
+  assert.deepEqual(
+    await applyAssistantSelfDeliveryTargetDefaults(
+      {
+        channel: 'iMessage',
+      },
+      { allowSingleSavedTargetFallback: false },
+      homeDirectory,
+    ),
+    {
+      channel: 'linq',
+      deliveryTarget: 'chat-123',
+      identityId: 'identity-1',
+      participantId: null,
+      threadId: 'chat-123',
+    },
+  )
+})

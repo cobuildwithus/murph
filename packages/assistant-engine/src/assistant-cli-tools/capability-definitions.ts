@@ -128,7 +128,7 @@ export function createAssistantRuntimeToolDefinitions(
     defineHandAuthoredHelperTool({
       name: 'assistant.selfTarget.list',
       description:
-        'List saved outbound self-target routes such as email, Telegram, or phone delivery settings.',
+        'List saved outbound self-target routes such as iMessage (internal channel `linq`), Telegram, or email delivery settings.',
       inputSchema: z.object({}),
       inputExample: {},
       execute: () => listAssistantSelfDeliveryTargets(),
@@ -136,12 +136,12 @@ export function createAssistantRuntimeToolDefinitions(
     defineHandAuthoredHelperTool({
       name: 'assistant.selfTarget.show',
       description:
-        'Show the saved outbound self-target route for one channel.',
+        'Show the saved outbound self-target route for one channel. Use `linq` or `iMessage` for iMessage routes.',
       inputSchema: z.object({
         channel: z.string().min(1),
       }),
       inputExample: {
-        channel: 'telegram',
+        channel: 'linq',
       },
       execute: ({ channel }) => resolveAssistantSelfDeliveryTarget(channel),
     }),

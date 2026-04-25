@@ -533,7 +533,7 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
         expression: "0 9 * * 1",
       },
       route: {
-        channel: "telegram",
+        channel: " iMessage ",
         deliveryTarget: 123,
         identityId: "  identity-01  ",
         participantId: "participant-01",
@@ -547,7 +547,7 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
   assert.equal(created.record.status, "active");
   assert.equal(created.record.continuityPolicy, "preserve");
   assert.deepEqual(created.record.route, {
-    channel: "telegram",
+    channel: "linq",
     deliveryTarget: "123",
     identityId: "identity-01",
     participantId: "participant-01",

@@ -168,20 +168,19 @@ function hasAssistantProviderNativeResume(
 function resolveAssistantProviderContextSections(
   input: AssistantProviderTurnExecutionInput,
 ): string[] {
-  if (hasAssistantProviderNativeResume(input)) {
-    return []
-  }
-
   const contextLines =
     input.sessionContext?.binding
       ? getAssistantBindingContextLines(input.sessionContext.binding)
       : []
+  const continuityContext = hasAssistantProviderNativeResume(input)
+    ? null
+    : normalizeNullableString(input.continuityContext)
 
   return [
     contextLines.length > 0
       ? `Conversation context:\n${contextLines.join('\n')}`
       : null,
-    normalizeNullableString(input.continuityContext),
+    continuityContext,
   ].filter((section): section is string => Boolean(section))
 }
 

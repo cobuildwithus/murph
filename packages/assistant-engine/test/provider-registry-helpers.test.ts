@@ -240,6 +240,35 @@ describe('assistant provider registry helpers', () => {
       }),
     ).toBe('User message:\nWhat changed today?')
 
+    expect(
+      resolveAssistantProviderPrompt({
+        continuityContext: 'Do not resend this on native resume.',
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+        resumeProviderSessionId: 'codex-session-1',
+        sessionContext: {
+          binding,
+        },
+        systemPrompt: 'You are Murph.',
+        userPrompt: '  What changed today?  ',
+        workingDirectory: '/tmp/provider-tests',
+      }),
+    ).toBe(
+      [
+        'Conversation context:',
+        'channel: telegram',
+        'identity: identity-1',
+        'actor: actor-1',
+        'thread: thread-1',
+        'thread is direct: true',
+        'delivery: thread -> thread-1',
+        '',
+        'User message:',
+        'What changed today?',
+      ].join('\n'),
+    )
+
     expect(() =>
       resolveAssistantProviderPrompt({
         providerConfig: normalizeAssistantProviderConfig({
@@ -351,12 +380,13 @@ describe('assistant provider registry helpers', () => {
             type: 'text',
             text: [
               'Conversation context:',
-              'channel: linq',
+              'channel: linq (user-facing: iMessage)',
               'identity: identity-9',
               'actor: actor-9',
               'thread: chat-9',
               'thread is direct: false',
               'delivery: thread -> chat-9',
+              'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
               '',
               'Prefer the latest delivery target.',
             ].join('\n'),

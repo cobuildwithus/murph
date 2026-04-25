@@ -187,12 +187,23 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
   const object = requireObject(value, "route");
 
   return {
-    channel: requireString(object.channel, "route.channel", 120),
+    channel: normalizeAutomationRouteChannel(object.channel),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
   };
+}
+
+function normalizeAutomationRouteChannel(value: unknown): string {
+  const channel = requireString(value, "route.channel", 120);
+  switch (channel.toLowerCase()) {
+    case "imessage":
+    case "i-message":
+      return "linq";
+    default:
+      return channel;
+  }
 }
 
 function normalizeAutomationInstructions(value: unknown): string {

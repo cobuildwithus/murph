@@ -320,4 +320,37 @@ describe('assistant bindings', () => {
       }),
     ).toBeNull()
   })
+
+  it('renders linq bindings with iMessage user-facing guidance', () => {
+    const binding = createAssistantBinding({
+      actorId: 'actor-1',
+      channel: 'linq',
+      deliveryKind: 'thread',
+      deliveryTarget: 'chat-99',
+      identityId: 'identity-1',
+      threadId: 'chat-99',
+      threadIsDirect: true,
+    })
+
+    expect(getAssistantBindingContextLines(binding)).toEqual([
+      'channel: linq (user-facing: iMessage)',
+      'identity: identity-1',
+      'actor: actor-1',
+      'thread: chat-99',
+      'thread is direct: true',
+      'delivery: thread -> chat-99',
+      'iMessage route note: when the user asks to text or remind them here, use this conversation route with internal channel "linq"; call it iMessage in user-facing text.',
+    ])
+
+    const unknownDirectnessBinding = createAssistantBinding({
+      channel: 'linq',
+      deliveryKind: 'thread',
+      deliveryTarget: 'chat-unknown',
+      threadId: 'chat-unknown',
+    })
+
+    expect(getAssistantBindingContextLines(unknownDirectnessBinding)).toContain(
+      'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
+    )
+  })
 })
