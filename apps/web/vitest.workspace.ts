@@ -76,8 +76,6 @@ const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
         "hosted-member-email-runtime-boundary.test.ts",
         "hosted-share-*.test.ts",
         "internal.test.ts",
-        "linq-control-plane.test.ts",
-        "linq-webhook-route.test.ts",
         "share-link-client.test.ts",
       ],
     },

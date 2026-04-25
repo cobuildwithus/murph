@@ -366,8 +366,6 @@ Hosted settings-authenticated wearable routes:
 Assertion-authenticated browser-to-agent bridge routes:
 
 - `POST /api/device-sync/agents/pair`
-- `GET /api/linq/bindings`
-- `POST /api/linq/bindings`
 
 Public provider-facing routes:
 
@@ -375,8 +373,7 @@ Public provider-facing routes:
 - `POST /api/device-sync/webhooks/:provider`
 - `GET /api/device-sync/webhooks/oura`
 - `GET /api/device-sync/webhooks/strava`
-- `GET /api/linq/webhook`
-- `POST /api/linq/webhook`
+- `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/telegram/webhook`
 
 Local-agent routes:
@@ -385,8 +382,6 @@ Local-agent routes:
 - `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
-- `POST /api/linq/agents/pair`
-- `GET /api/linq/agent/events`
 
 Internal hosted maintenance and Cloudflare callback routes:
 

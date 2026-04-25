@@ -261,8 +261,16 @@ describe("hosted Prisma baseline migration", () => {
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
     );
+    const legacyLinqDropMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260425000000_drop_legacy_linq_control_plane/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
+      "20260425000000_drop_legacy_linq_control_plane",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -330,9 +338,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain(
       'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_replaced_by_event_id_fkey" FOREIGN KEY ("user_id", "replaced_by_event_id") REFERENCES "hosted_ingress_event_alias"("user_id", "event_id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED',
     );
-    expect(baselineMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "linq_webhook_event_user_id_event_id_key" ON "linq_webhook_event"("user_id", "event_id")',
-    );
+    expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_webhook_event"');
+    expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_recipient_binding"');
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');
     expect(baselineMigrationSql).toContain('"trigger_kind" TEXT');
@@ -411,6 +418,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(readHostedMemberModelNames(schema).sort()).toEqual(
       Object.keys(HOSTED_MEMBER_SCHEMA_GUARD).sort(),
     );
+    expect(schema).not.toContain("model LinqRecipientBinding");
+    expect(schema).not.toContain("model LinqWebhookEvent");
   });
 
   it("keeps hosted-ingress runtime storage aligned between the Prisma schema and baseline migration", () => {
