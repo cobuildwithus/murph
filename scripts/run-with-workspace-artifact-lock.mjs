@@ -28,6 +28,10 @@ const lockRoot = resolveWorkspaceArtifactLockRoot(repoRoot);
 const lockPath = path.join(lockRoot, LOCK_DIRECTORY_NAME);
 const metadataPath = path.join(lockPath, LOCK_METADATA_FILE_NAME);
 const useDetachedChildProcessGroup = process.platform !== "win32";
+let activeChild = null;
+let forcedExitCode = null;
+let lockHeld = false;
+let lastWaitLogAtMs = 0;
 
 const invocation = parseInvocation(process.argv.slice(2));
 
@@ -57,10 +61,6 @@ const ownerMetadata = {
   pid: process.pid,
   startedAt: new Date().toISOString(),
 };
-let activeChild = null;
-let forcedExitCode = null;
-let lockHeld = false;
-let lastWaitLogAtMs = 0;
 
 const releaseLock = () => {
   if (!lockHeld) {
