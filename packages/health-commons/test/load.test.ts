@@ -1,10 +1,10 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { readAllHealthCommonsArtifactManifests } from "../src/load.ts";
+import { readAllHealthCommonsArtifactManifests, readHealthCommonsContent } from "../src/load.ts";
 
 const sourcePage = `---
 schemaVersion: murph.commons.page.v1
@@ -68,6 +68,38 @@ describe("Health Commons artifact manifests", () => {
       expect.objectContaining({
         artifactId: "art_test_page_html",
         sourceKey: "source_artifact:test-page",
+      }),
+    ]);
+  });
+
+  it("loads standalone evidence appraisal JSONL records", async () => {
+    const contentRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-"));
+    await mkdir(path.join(contentRoot, "evidence-appraisals"), { recursive: true });
+    await writeFile(
+      path.join(contentRoot, "evidence-appraisals", "example.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.commons.evidence-appraisal.v1",
+        key: "evidence_appraisal:example",
+        sourceKey: "source_artifact:test-page",
+        targetKey: "protocol_variant:test-protocol",
+        targetKind: "protocol_variant",
+        groupId: "example-group",
+        stance: "supports",
+        scope: "direct_protocol",
+        result: "positive",
+        headline: "Example headline",
+        implication: "Example implication",
+      })}\n`,
+      "utf8",
+    );
+
+    const content = await readHealthCommonsContent(contentRoot);
+
+    expect(content.evidenceAppraisals).toEqual([
+      expect.objectContaining({
+        key: "evidence_appraisal:example",
+        sourceKey: "source_artifact:test-page",
+        targetKey: "protocol_variant:test-protocol",
       }),
     ]);
   });

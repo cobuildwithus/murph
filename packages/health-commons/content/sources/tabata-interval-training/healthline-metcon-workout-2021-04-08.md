@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: web_page
   canonicalIdBasis: url
-  url: https://www.healthline.com/health/fitness/metcon-workout
-  sourceKind: web_page
+  identifiers:
+    url: https://www.healthline.com/health/fitness/metcon-workout
+  canonicalUrl: https://www.healthline.com/health/fitness/metcon-workout
 sourceKind: web_page
 source:
   kind: web_page

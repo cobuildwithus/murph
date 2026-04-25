@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: web_page
   canonicalIdBasis: url
-  url: https://www.trainingpeaks.com/blog/work-to-rest-ratio-the-benefits-of-40-20-workouts/
-  sourceKind: web_page
+  identifiers:
+    url: https://www.trainingpeaks.com/blog/work-to-rest-ratio-the-benefits-of-40-20-workouts/
+  canonicalUrl: https://www.trainingpeaks.com/blog/work-to-rest-ratio-the-benefits-of-40-20-workouts/
 sourceKind: web_page
 source:
   kind: web_page

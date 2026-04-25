@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: web_page
   canonicalIdBasis: url
-  url: https://sweat.com/blogs/fitness/tabata
-  sourceKind: web_page
+  identifiers:
+    url: https://sweat.com/blogs/fitness/tabata
+  canonicalUrl: https://sweat.com/blogs/fitness/tabata
 sourceKind: web_page
 source:
   kind: web_page

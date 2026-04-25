@@ -4,16 +4,23 @@ import {
   HEALTH_COMMONS_ARTIFACT_MANIFEST_SCHEMA_VERSION,
   HEALTH_COMMONS_CATALOG_SCHEMA_VERSION,
   HEALTH_COMMONS_CHANGE_SCHEMA_VERSION,
+  HEALTH_COMMONS_EVIDENCE_APPRAISAL_SCHEMA_VERSION,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION,
   HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
+  HEALTH_COMMONS_SOURCE_ARTIFACT_INDEX_SCHEMA_VERSION,
+  HEALTH_COMMONS_SOURCE_INDEX_SCHEMA_VERSION,
   healthCommonsArtifactManifestSchema,
   healthCommonsArtifactPointerSchema,
   healthCommonsCatalogEntitySchema,
   healthCommonsCatalogSchema,
   healthCommonsChangeRecordSchema,
   healthCommonsClaimSchema,
+  healthCommonsEvidenceAppraisalSchema,
   healthCommonsPageFrontmatterSchema,
   healthCommonsRedirectsFileSchema,
+  healthCommonsSourceArtifactIndexSchema,
+  healthCommonsSourceIdentitySchema,
+  healthCommonsSourceIndexSchema,
   isHealthCommonsEntityType,
 } from "../src/health-commons.ts";
 import { safeParseContract } from "../src/validate.ts";
@@ -50,6 +57,23 @@ const validCatalogEntity = {
     runSpecRevisionId: null,
     recipeHash: null,
   },
+} as const;
+
+const validEvidenceAppraisal = {
+  schemaVersion: HEALTH_COMMONS_EVIDENCE_APPRAISAL_SCHEMA_VERSION,
+  key: "evidence_appraisal:pmid-29849692:dry-sauna",
+  sourceKey: "source_artifact:pmid-29849692",
+  targetKey: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  targetKind: "protocol_variant",
+  groupId: "dry-sauna-evidence",
+  stance: "supports",
+  scope: "direct_protocol",
+  result: "positive",
+  endpointKeys: ["biomarker:resting-heart-rate"],
+  findingKeys: ["finding:pmid-29849692/heat-exposure"],
+  headline: "Sauna exposure was associated with improved vascular markers.",
+  implication: "The source can support a dry-sauna evidence group.",
+  displayPriority: 10,
 } as const;
 
 const validProtocolVariantPageWithOnboarding = {
@@ -226,6 +250,44 @@ describe("@murphai/contracts health commons schemas", () => {
       data: validSourceArtifactPage,
     });
     expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validSourceArtifactPage,
+        relations: [
+          {
+            type: "registry_for",
+            target: "source_artifact:pmid-29849692",
+          },
+          {
+            type: "publication_for",
+            target: "source_artifact:nct-example",
+          },
+        ],
+        sourceIdentity: {
+          identityKind: "scholarly_work",
+          canonicalIdBasis: "pmid",
+          identifiers: {
+            pmid: "29849692",
+            doi: "10.1000/example",
+          },
+          canonicalUrl: "https://pubmed.ncbi.nlm.nih.gov/29849692/",
+          identityAliases: ["pubmed:29849692"],
+        },
+        sourceFindings: [
+          {
+            findingId: "finding:pmid-29849692/heat-exposure",
+            extractedFromArtifactId: "art_pmid_29849692_pdf",
+            sourceRevisionId: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            extractionRevisionId: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            findingKind: "intervention_result",
+            summary: "Reusable source finding.",
+            evidenceUse: ["efficacy"],
+          },
+        ],
+      }),
+    ).toMatchObject({
+      success: true,
+    });
+    expect(
       safeParseContract(
         healthCommonsPageFrontmatterSchema,
         validProtocolVariantPageWithOnboarding,
@@ -261,6 +323,7 @@ describe("@murphai/contracts health commons schemas", () => {
             artifacts: [validArtifactPointer],
           },
         ],
+        evidenceAppraisals: [validEvidenceAppraisal],
       }),
     ).toEqual({
       success: true,
@@ -277,7 +340,71 @@ describe("@murphai/contracts health commons schemas", () => {
             artifacts: [validArtifactPointer],
           },
         ],
+        evidenceAppraisals: [validEvidenceAppraisal],
       },
+    });
+    expect(safeParseContract(healthCommonsEvidenceAppraisalSchema, validEvidenceAppraisal)).toEqual({
+      success: true,
+      data: validEvidenceAppraisal,
+    });
+    expect(
+      safeParseContract(healthCommonsSourceIndexSchema, {
+        schemaVersion: HEALTH_COMMONS_SOURCE_INDEX_SCHEMA_VERSION,
+        generatedFromCatalogHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        sources: [
+          {
+            sourceKey: "source_artifact:pmid-29849692",
+            relativePath: "sources/pmid-29849692.md",
+            title: "PMID 29849692",
+            sourceKind: "web_page",
+            identityKind: "scholarly_work",
+            canonicalIdBasis: "pmid",
+            identifiers: {
+              pmid: "29849692",
+              doi: "10.1000/example",
+            },
+            canonicalUrl: "https://pubmed.ncbi.nlm.nih.gov/29849692/",
+            sourceUrl: "https://example.com/pmid-29849692",
+            identityAliases: ["pubmed:29849692"],
+            identityKeys: ["pmid:29849692"],
+            artifactIds: ["art_pmid_29849692_pdf"],
+            findingIds: ["finding:pmid-29849692/heat-exposure"],
+            metadataFetchedAt: null,
+            extractionStatus: "findings_available",
+            sourceRevisionId: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          },
+        ],
+        identityLookup: [
+          {
+            identityKey: "pmid:29849692",
+            sourceKeys: ["source_artifact:pmid-29849692"],
+          },
+        ],
+        duplicateIdentities: [],
+      }),
+    ).toMatchObject({
+      success: true,
+    });
+    expect(
+      safeParseContract(healthCommonsSourceArtifactIndexSchema, {
+        schemaVersion: HEALTH_COMMONS_SOURCE_ARTIFACT_INDEX_SCHEMA_VERSION,
+        generatedFromCatalogHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        artifacts: [
+          {
+            ...validArtifactPointer,
+            manifestKey: "source_artifact:pmid-29849692/research-artifacts",
+            sourceKey: "source_artifact:pmid-29849692",
+          },
+        ],
+        sources: [
+          {
+            sourceKey: "source_artifact:pmid-29849692",
+            artifactIds: ["art_pmid_29849692_pdf"],
+          },
+        ],
+      }),
+    ).toMatchObject({
+      success: true,
     });
     expect(
       safeParseContract(healthCommonsRedirectsFileSchema, {
@@ -419,6 +546,44 @@ describe("@murphai/contracts health commons schemas", () => {
       safeParseContract(healthCommonsPageFrontmatterSchema, {
         ...validBiomarkerPageWithRanking,
         biomarker: undefined,
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validBiomarkerPageWithRanking,
+        sourceIdentity: {
+          identityKind: "scholarly_work",
+          canonicalIdBasis: "pmid",
+          identifiers: {
+            pmid: "29849692",
+          },
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsSourceIdentitySchema, {
+        identityKind: "scholarly_work",
+        canonicalIdBasis: "doi",
+        identifiers: {
+          pmid: "29849692",
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validSourceArtifactPage,
+        sourceFindings: [
+          {
+            findingId: "finding:pmid-29849692/empty",
+            findingKind: "context",
+          },
+        ],
       }),
     ).toMatchObject({
       success: false,

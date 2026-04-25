@@ -19,10 +19,12 @@ relations:
   -
     type: parent_family
     target: experiment_family:tabata-interval-training
-canonicalMetadata:
+sourceIdentity:
+  identityKind: web_page
   canonicalIdBasis: url
-  url: https://boxclock.app/emom-vs-tabata-vs-amrap
-  sourceKind: web_page
+  identifiers:
+    url: https://boxclock.app/emom-vs-tabata-vs-amrap
+  canonicalUrl: https://boxclock.app/emom-vs-tabata-vs-amrap
 sourceKind: web_page
 source:
   kind: web_page

@@ -112,6 +112,7 @@ function createContentSet(input: {
   return {
     artifactManifests: [],
     changes: [],
+    evidenceAppraisals: [],
     pages: [createBiomarkerPage(), createProtocolPage(input)],
     redirects: [],
   };

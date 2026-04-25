@@ -4,6 +4,11 @@ export const HEALTH_COMMONS_PAGE_SCHEMA_VERSION = "murph.commons.page.v1" as con
 export const HEALTH_COMMONS_CATALOG_SCHEMA_VERSION = "murph.commons.catalog.v1" as const;
 export const HEALTH_COMMONS_CHANGE_SCHEMA_VERSION = "murph.commons.change.v1" as const;
 export const HEALTH_COMMONS_ARTIFACT_MANIFEST_SCHEMA_VERSION = "murph.commons.artifact-manifest.v1" as const;
+export const HEALTH_COMMONS_EVIDENCE_APPRAISAL_SCHEMA_VERSION =
+  "murph.commons.evidence-appraisal.v1" as const;
+export const HEALTH_COMMONS_SOURCE_INDEX_SCHEMA_VERSION = "murph.commons.source-index.v1" as const;
+export const HEALTH_COMMONS_SOURCE_ARTIFACT_INDEX_SCHEMA_VERSION =
+  "murph.commons.source-artifact-index.v1" as const;
 export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION =
   "murph.commons.experiment-onboarding.v1" as const;
 export const HEALTH_COMMONS_REDIRECTS_SCHEMA_VERSION = "murph.commons.redirects.v1" as const;
@@ -27,13 +32,17 @@ export const HEALTH_COMMONS_RELATION_TYPES = [
   "child_family",
   "cites",
   "contraindicates",
+  "duplicate_source_identity",
   "fork_of",
   "measures",
   "mirror_of",
   "parent_family",
   "primary_biomarker",
+  "publication_for",
   "readable_mirror",
   "related_protocol",
+  "registry_for",
+  "same_work_as",
   "secondary_biomarker",
   "source_person",
 ] as const;
@@ -144,6 +153,64 @@ export const HEALTH_COMMONS_RESEARCH_LANDSCAPE_CONFIDENCE_LABELS = [
 
 export type HealthCommonsResearchLandscapeConfidenceLabel = (typeof HEALTH_COMMONS_RESEARCH_LANDSCAPE_CONFIDENCE_LABELS)[number];
 
+export const HEALTH_COMMONS_SOURCE_IDENTITY_KINDS = [
+  "scholarly_work",
+  "trial_registry",
+  "guideline",
+  "web_page",
+  "podcast",
+  "book",
+  "dataset",
+  "other",
+] as const;
+
+export type HealthCommonsSourceIdentityKind = (typeof HEALTH_COMMONS_SOURCE_IDENTITY_KINDS)[number];
+
+export const HEALTH_COMMONS_SOURCE_CANONICAL_ID_BASES = [
+  "pmid",
+  "pmcid",
+  "doi",
+  "url",
+  "registry_id",
+  "title_hash",
+] as const;
+
+export type HealthCommonsSourceCanonicalIdBasis =
+  (typeof HEALTH_COMMONS_SOURCE_CANONICAL_ID_BASES)[number];
+
+export const HEALTH_COMMONS_SOURCE_FINDING_KINDS = [
+  "adverse_event",
+  "context",
+  "intervention_result",
+  "measurement_validation",
+  "mechanistic",
+  "safety",
+  "other",
+] as const;
+
+export type HealthCommonsSourceFindingKind = (typeof HEALTH_COMMONS_SOURCE_FINDING_KINDS)[number];
+
+export const HEALTH_COMMONS_SOURCE_FINDING_EVIDENCE_USES = [
+  "adjacent_variant",
+  "context",
+  "efficacy",
+  "mechanism",
+  "measurement",
+  "safety",
+] as const;
+
+export type HealthCommonsSourceFindingEvidenceUse =
+  (typeof HEALTH_COMMONS_SOURCE_FINDING_EVIDENCE_USES)[number];
+
+export const HEALTH_COMMONS_SOURCE_EXTRACTION_STATUSES = [
+  "metadata_only",
+  "artifacts_available",
+  "findings_available",
+] as const;
+
+export type HealthCommonsSourceExtractionStatus =
+  (typeof HEALTH_COMMONS_SOURCE_EXTRACTION_STATUSES)[number];
+
 export const HEALTH_COMMONS_BIOMARKER_METRIC_DOMAINS = [
   "activity",
   "body_state",
@@ -202,7 +269,7 @@ export const HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES = [
 export type HealthCommonsBiomarkerCommunityOutcomeState =
   (typeof HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES)[number];
 
-const KEY_PATTERN = "^[a-z_]+:[a-z0-9][a-z0-9._/-]*(?:@[A-Za-z0-9._:-]+)?$";
+const KEY_PATTERN = "^[a-z_]+:[a-z0-9][a-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
@@ -658,6 +725,7 @@ export const healthCommonsProtocolEvidenceAppraisalSchema = z
     scope: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_SCOPES),
     result: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_RESULTS),
     endpointKeys: z.array(healthCommonsKeySchema).optional(),
+    findingKeys: z.array(healthCommonsKeySchema).optional(),
     headline: longStringSchema,
     implication: longStringSchema,
     caveat: longStringSchema.optional(),
@@ -667,6 +735,30 @@ export const healthCommonsProtocolEvidenceAppraisalSchema = z
 
 export type HealthCommonsProtocolEvidenceAppraisal = z.infer<
   typeof healthCommonsProtocolEvidenceAppraisalSchema
+>;
+
+export const healthCommonsEvidenceAppraisalSchema = z
+  .object({
+    schemaVersion: z.literal(HEALTH_COMMONS_EVIDENCE_APPRAISAL_SCHEMA_VERSION),
+    key: healthCommonsKeySchema,
+    sourceKey: healthCommonsKeySchema,
+    targetKey: healthCommonsKeySchema,
+    targetKind: healthCommonsEntityTypeSchema,
+    groupId: healthCommonsStableIdSchema,
+    stance: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_STANCES),
+    scope: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_SCOPES),
+    result: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_RESULTS),
+    endpointKeys: z.array(healthCommonsKeySchema).optional(),
+    findingKeys: z.array(healthCommonsKeySchema).optional(),
+    headline: longStringSchema,
+    implication: longStringSchema,
+    caveat: longStringSchema.optional(),
+    displayPriority: z.number().int().optional(),
+  })
+  .strict();
+
+export type HealthCommonsEvidenceAppraisal = z.infer<
+  typeof healthCommonsEvidenceAppraisalSchema
 >;
 
 export const healthCommonsResearchLandscapeGroupSchema = z
@@ -697,6 +789,115 @@ export const healthCommonsResearchLandscapeSchema = z
 export type HealthCommonsResearchLandscape = z.infer<
   typeof healthCommonsResearchLandscapeSchema
 >;
+
+export const healthCommonsSourceIdentityIdentifiersSchema = z
+  .object({
+    pmid: z.string().regex(/^\d+$/u).optional(),
+    pmcid: shortStringSchema.optional(),
+    doi: shortStringSchema.optional(),
+    registryId: shortStringSchema.optional(),
+    url: z.string().url().optional(),
+  })
+  .strict();
+
+export type HealthCommonsSourceIdentityIdentifiers = z.infer<
+  typeof healthCommonsSourceIdentityIdentifiersSchema
+>;
+
+export const healthCommonsSourceIdentitySchema = z
+  .object({
+    identityKind: z.enum(HEALTH_COMMONS_SOURCE_IDENTITY_KINDS),
+    canonicalIdBasis: z.enum(HEALTH_COMMONS_SOURCE_CANONICAL_ID_BASES),
+    identifiers: healthCommonsSourceIdentityIdentifiersSchema.optional(),
+    canonicalUrl: z.string().url().optional(),
+    identityAliases: z.array(shortStringSchema).optional(),
+  })
+  .strict()
+  .superRefine((identity, context) => {
+    const identifiers = Object.values(identity.identifiers ?? {}).filter((value) => Boolean(value));
+    const hasUrlIdentity = Boolean(identity.identifiers?.url || identity.canonicalUrl);
+
+    if (
+      identifiers.length === 0
+      && !identity.canonicalUrl
+      && (!identity.identityAliases || identity.identityAliases.length === 0)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity must include at least one identifier, canonicalUrl, or identityAlias.",
+        path: ["identifiers"],
+      });
+    }
+
+    if (identity.canonicalIdBasis === "url" && !hasUrlIdentity) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity canonicalIdBasis=url requires identifiers.url or canonicalUrl.",
+        path: ["canonicalIdBasis"],
+      });
+    }
+
+    if (identity.canonicalIdBasis === "pmid" && !identity.identifiers?.pmid) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity canonicalIdBasis=pmid requires identifiers.pmid.",
+        path: ["identifiers", "pmid"],
+      });
+    }
+
+    if (identity.canonicalIdBasis === "doi" && !identity.identifiers?.doi) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity canonicalIdBasis=doi requires identifiers.doi.",
+        path: ["identifiers", "doi"],
+      });
+    }
+
+    if (identity.canonicalIdBasis === "pmcid" && !identity.identifiers?.pmcid) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity canonicalIdBasis=pmcid requires identifiers.pmcid.",
+        path: ["identifiers", "pmcid"],
+      });
+    }
+
+    if (identity.canonicalIdBasis === "registry_id" && !identity.identifiers?.registryId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity canonicalIdBasis=registry_id requires identifiers.registryId.",
+        path: ["identifiers", "registryId"],
+      });
+    }
+  });
+
+export type HealthCommonsSourceIdentity = z.infer<typeof healthCommonsSourceIdentitySchema>;
+
+export const healthCommonsSourceFindingSchema = z
+  .object({
+    findingId: healthCommonsKeySchema,
+    sourceKey: healthCommonsKeySchema.optional(),
+    extractedFromArtifactId: healthCommonsStableIdSchema.optional(),
+    sourceRevisionId: z.string().startsWith("sha256:").optional(),
+    extractionRevisionId: z.string().startsWith("sha256:").optional(),
+    findingKind: z.enum(HEALTH_COMMONS_SOURCE_FINDING_KINDS),
+    population: longStringSchema.optional(),
+    exposure: longStringSchema.optional(),
+    outcome: longStringSchema.optional(),
+    summary: longStringSchema.optional(),
+    evidenceUse: z.array(z.enum(HEALTH_COMMONS_SOURCE_FINDING_EVIDENCE_USES)).optional(),
+  })
+  .strict()
+  .superRefine((finding, context) => {
+    if (!finding.summary && !finding.outcome) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceFindings entries must include summary or outcome.",
+        path: ["summary"],
+      });
+    }
+  });
+
+export type HealthCommonsSourceFinding = z.infer<typeof healthCommonsSourceFindingSchema>;
 
 export const healthCommonsSourceSchema = z
   .object({
@@ -987,7 +1188,9 @@ export const healthCommonsPageFrontmatterSchema = z
     whyItWorks: z.array(longStringSchema).optional(),
     claims: z.array(healthCommonsClaimSchema).optional(),
     safety: healthCommonsSafetySchema.optional(),
+    sourceIdentity: healthCommonsSourceIdentitySchema.optional(),
     source: healthCommonsSourceSchema.optional(),
+    sourceFindings: z.array(healthCommonsSourceFindingSchema).optional(),
     researchEvidence: healthCommonsResearchEvidenceSchema.optional(),
     protocolEvidence: z.array(healthCommonsProtocolEvidenceAppraisalSchema).optional(),
     researchLandscape: healthCommonsResearchLandscapeSchema.optional(),
@@ -1047,6 +1250,22 @@ export const healthCommonsPageFrontmatterSchema = z
         code: z.ZodIssueCode.custom,
         message: "source_artifact pages must include source metadata.",
         path: ["source"],
+      });
+    }
+
+    if (page.entityType !== "source_artifact" && page.sourceIdentity) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity is only valid on source_artifact pages.",
+        path: ["sourceIdentity"],
+      });
+    }
+
+    if (page.entityType !== "source_artifact" && page.sourceFindings) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceFindings are only valid on source_artifact pages.",
+        path: ["sourceFindings"],
       });
     }
 
@@ -1117,6 +1336,86 @@ export const healthCommonsRevisionSchema = z
 
 export type HealthCommonsRevision = z.infer<typeof healthCommonsRevisionSchema>;
 
+export const healthCommonsSourceIndexEntrySchema = z
+  .object({
+    sourceKey: healthCommonsKeySchema,
+    relativePath: healthCommonsRelativePathSchema,
+    title: shortStringSchema,
+    sourceKind: shortStringSchema.nullable(),
+    identityKind: z.enum(HEALTH_COMMONS_SOURCE_IDENTITY_KINDS).nullable(),
+    canonicalIdBasis: z.enum(HEALTH_COMMONS_SOURCE_CANONICAL_ID_BASES).nullable(),
+    identifiers: healthCommonsSourceIdentityIdentifiersSchema,
+    canonicalUrl: z.string().url().nullable(),
+    sourceUrl: z.string().url().nullable(),
+    identityAliases: z.array(shortStringSchema),
+    identityKeys: z.array(nonEmptyStringSchema.max(1_000)),
+    artifactIds: z.array(healthCommonsStableIdSchema),
+    findingIds: z.array(healthCommonsKeySchema),
+    metadataFetchedAt: z.string().datetime().nullable(),
+    extractionStatus: z.enum(HEALTH_COMMONS_SOURCE_EXTRACTION_STATUSES),
+    sourceRevisionId: z.string().startsWith("sha256:"),
+  })
+  .strict();
+
+export type HealthCommonsSourceIndexEntry = z.infer<typeof healthCommonsSourceIndexEntrySchema>;
+
+export const healthCommonsSourceIdentityLookupEntrySchema = z
+  .object({
+    identityKey: nonEmptyStringSchema.max(1_000),
+    sourceKeys: z.array(healthCommonsKeySchema).min(1),
+  })
+  .strict();
+
+export type HealthCommonsSourceIdentityLookupEntry = z.infer<
+  typeof healthCommonsSourceIdentityLookupEntrySchema
+>;
+
+export const healthCommonsSourceIndexSchema = z
+  .object({
+    schemaVersion: z.literal(HEALTH_COMMONS_SOURCE_INDEX_SCHEMA_VERSION),
+    generatedFromCatalogHash: z.string().startsWith("sha256:"),
+    sources: z.array(healthCommonsSourceIndexEntrySchema),
+    identityLookup: z.array(healthCommonsSourceIdentityLookupEntrySchema),
+    duplicateIdentities: z.array(healthCommonsSourceIdentityLookupEntrySchema),
+  })
+  .strict();
+
+export type HealthCommonsSourceIndex = z.infer<typeof healthCommonsSourceIndexSchema>;
+
+export const healthCommonsSourceArtifactIndexEntrySchema = z.intersection(
+  healthCommonsArtifactPointerSchema,
+  z
+    .object({
+      manifestKey: healthCommonsKeySchema,
+      sourceKey: healthCommonsKeySchema,
+    })
+    .strict(),
+);
+
+export type HealthCommonsSourceArtifactIndexEntry = z.infer<
+  typeof healthCommonsSourceArtifactIndexEntrySchema
+>;
+
+export const healthCommonsSourceArtifactIndexSchema = z
+  .object({
+    schemaVersion: z.literal(HEALTH_COMMONS_SOURCE_ARTIFACT_INDEX_SCHEMA_VERSION),
+    generatedFromCatalogHash: z.string().startsWith("sha256:"),
+    artifacts: z.array(healthCommonsSourceArtifactIndexEntrySchema),
+    sources: z.array(
+      z
+        .object({
+          sourceKey: healthCommonsKeySchema,
+          artifactIds: z.array(healthCommonsStableIdSchema),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+export type HealthCommonsSourceArtifactIndex = z.infer<
+  typeof healthCommonsSourceArtifactIndexSchema
+>;
+
 export const healthCommonsCatalogEntitySchema = z.intersection(
   healthCommonsPageFrontmatterSchema,
   z
@@ -1138,6 +1437,7 @@ export const healthCommonsCatalogSchema = z
     redirects: z.array(healthCommonsRedirectSchema),
     changes: z.array(healthCommonsChangeRecordSchema),
     artifactManifests: z.array(healthCommonsArtifactManifestSchema),
+    evidenceAppraisals: z.array(healthCommonsEvidenceAppraisalSchema).default([]),
   })
   .strict();
 
