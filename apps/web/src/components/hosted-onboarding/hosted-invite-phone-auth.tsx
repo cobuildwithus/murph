@@ -12,17 +12,20 @@ import {
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 
 interface HostedInvitePhoneAuthProps {
+  initialPhoneNumber?: string | null;
   inviteCode: string;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
 }
 
 export function HostedInvitePhoneAuth({
+  initialPhoneNumber,
   inviteCode,
   onCompleted,
   onSignOut,
 }: HostedInvitePhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
+    initialPhoneNumber,
     inviteCode,
     intent: "signup",
     onCompleted,

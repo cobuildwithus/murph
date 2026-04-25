@@ -95,6 +95,7 @@ export function JoinInviteStageContent({
       {status.stage === "verify" ? (
         <JoinInviteVerificationPanel
           awaitingInviteSessionResolution={awaitingInviteSessionResolution}
+          initialPhoneNumber={status.invite?.phonePrefill ?? null}
           inviteCode={inviteCode}
           statusRefreshErrorMessage={statusRefreshErrorMessage}
           statusRefreshRetryPending={statusRefreshRetryPending}
