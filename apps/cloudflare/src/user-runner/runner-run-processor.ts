@@ -975,7 +975,7 @@ export class RunnerRunProcessor {
       callbackSigning: this.dependencies.env.webCallbackSigning,
       method: "GET",
       path: `/api/internal/hosted-execution/share/${encodeURIComponent(input.shareId)}/payload`,
-      timeoutMs: this.dependencies.env.runnerTimeoutMs,
+      timeoutMs: this.dependencies.env.webControlTimeoutMs,
     });
 
     if (response.status === 404) {
@@ -1013,7 +1013,7 @@ export class RunnerRunProcessor {
       callbackSigning: this.dependencies.env.webCallbackSigning,
       method: "GET",
       path: `/api/internal/hosted-execution/vault-sync/${encodeURIComponent(input.sessionId)}/payload`,
-      timeoutMs: this.dependencies.env.runnerTimeoutMs,
+      timeoutMs: this.dependencies.env.webControlTimeoutMs,
     });
 
     if (response.status === 404) {

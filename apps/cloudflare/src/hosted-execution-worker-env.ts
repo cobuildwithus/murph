@@ -25,6 +25,7 @@ export interface HostedExecutionWorkerEnvironment {
   retryDelayMs: number;
   runnerReadyTimeoutMs: number;
   runnerTimeoutMs: number;
+  webControlTimeoutMs: number;
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -105,8 +106,13 @@ export function readHostedExecutionWorkerEnvironment(
     ),
     runnerTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS),
-      60_000,
+      600_000,
       "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS",
+    ),
+    webControlTimeoutMs: parsePositiveInteger(
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS),
+      120_000,
+      "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
     ),
   };
 }

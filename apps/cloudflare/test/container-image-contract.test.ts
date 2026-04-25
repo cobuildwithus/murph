@@ -35,8 +35,9 @@ function createDeployEnvironment() {
     retryDelayMs: "30000",
     runnerCommitTimeoutMs: "30000",
     runnerReadyTimeoutMs: "20000",
-    runnerTimeoutMs: "120000",
+    runnerTimeoutMs: "600000",
     traceHeadSamplingRate: 0.1,
+    webControlTimeoutMs: "120000",
     workerName: "murph-hosted",
     workerVars: {},
   }

@@ -442,7 +442,7 @@ export class HostedUserRunner {
         },
         boundUserId: input.userId,
         callbackSigning: this.env.webCallbackSigning,
-        timeoutMs: this.env.runnerTimeoutMs,
+        timeoutMs: this.env.webControlTimeoutMs,
       });
     } catch (error) {
       if (isHostedRunStaleRunnerAcquireError(error)) {
@@ -500,7 +500,7 @@ export class HostedUserRunner {
       resolveAcquiredRunPreparedSnapshotRef: (acquired) =>
         this.resolveAcquiredRunPreparedSnapshotRef(acquired),
       runProcessor: this.runProcessor,
-      runnerTimeoutMs: this.env.runnerTimeoutMs,
+      webControlTimeoutMs: this.env.webControlTimeoutMs,
       stateStore: this.stateStore,
       stopActiveMessagingActivity: (input) => this.stopActiveMessagingActivity(input),
       bindRunMessagingActivity: (input) => this.bindRunMessagingActivity(input),
@@ -554,7 +554,7 @@ export class HostedUserRunner {
         baseUrl: this.readHostedWebControlBaseUrl(),
         boundUserId: record.userId,
         callbackSigning: this.env.webCallbackSigning,
-        timeoutMs: this.env.runnerTimeoutMs,
+        timeoutMs: this.env.webControlTimeoutMs,
       });
 
       return {
@@ -583,7 +583,7 @@ export class HostedUserRunner {
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: userId,
       callbackSigning: this.env.webCallbackSigning,
-      timeoutMs: this.env.runnerTimeoutMs,
+      timeoutMs: this.env.webControlTimeoutMs,
     });
 
     return runStatus.cursor.committedSeq;

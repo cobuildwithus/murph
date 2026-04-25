@@ -65,6 +65,7 @@ export interface HostedDeployAutomationEnvironment {
   runnerReadyTimeoutMs: string;
   runnerTimeoutMs: string;
   traceHeadSamplingRate: number;
+  webControlTimeoutMs: string;
   workerName: string;
   workerVars: Record<string, string>;
 }
@@ -118,13 +119,18 @@ export function readHostedDeployAutomationEnvironment(
     ),
     runnerTimeoutMs: normalizePositiveIntegerString(
       source.CF_RUNNER_TIMEOUT_MS,
-      "120000",
+      "600000",
       "CF_RUNNER_TIMEOUT_MS",
     ),
     traceHeadSamplingRate: normalizeSamplingRate(
       source.CF_TRACE_HEAD_SAMPLING_RATE,
       DEFAULT_TRACE_HEAD_SAMPLING_RATE,
       "CF_TRACE_HEAD_SAMPLING_RATE",
+    ),
+    webControlTimeoutMs: normalizePositiveIntegerString(
+      source.CF_WEB_CONTROL_TIMEOUT_MS,
+      "120000",
+      "CF_WEB_CONTROL_TIMEOUT_MS",
     ),
     workerName: requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
     workerVars: readHostedWorkerVars(source),
