@@ -18,7 +18,12 @@ type StoredRunnerInvocationState = {
   eventIds: string[];
 };
 
+type StoredRunnerOutputBundleFaultState = {
+  invalidArchiveInvocationsRemaining: number;
+};
+
 const pollIntervalMs = 50;
+const invalidHostedBundleArchiveBase64 = "bm90LWEtaG9zdGVkLWJ1bmRsZS1hcmNoaXZl";
 
 export async function armRunnerCommitPause(
   bucket: R2BucketLike,
@@ -125,6 +130,51 @@ export async function clearRunnerInvocationState(
   } satisfies StoredRunnerInvocationState));
 }
 
+export async function armInvalidRunnerOutputBundleFault(input: {
+  bucket: R2BucketLike;
+  invocations: number;
+  userId: string;
+}): Promise<void> {
+  await input.bucket.put(runnerOutputBundleFaultObjectKey(input.userId), JSON.stringify({
+    invalidArchiveInvocationsRemaining: Math.max(0, Math.trunc(input.invocations)),
+  } satisfies StoredRunnerOutputBundleFaultState));
+}
+
+export async function clearRunnerOutputBundleFault(
+  bucket: R2BucketLike,
+  userId: string,
+): Promise<void> {
+  if (bucket.delete) {
+    await bucket.delete(runnerOutputBundleFaultObjectKey(userId));
+    return;
+  }
+
+  await bucket.put(runnerOutputBundleFaultObjectKey(userId), JSON.stringify({
+    invalidArchiveInvocationsRemaining: 0,
+  } satisfies StoredRunnerOutputBundleFaultState));
+}
+
+export async function consumeInvalidRunnerOutputBundleFault(input: {
+  bucket: R2BucketLike;
+  userId: string;
+}): Promise<boolean> {
+  const state = await readRunnerOutputBundleFault(input.bucket, input.userId);
+  if (!state || state.invalidArchiveInvocationsRemaining <= 0) {
+    return false;
+  }
+
+  const remaining = state.invalidArchiveInvocationsRemaining - 1;
+  if (remaining <= 0) {
+    await clearRunnerOutputBundleFault(input.bucket, input.userId);
+  } else {
+    await input.bucket.put(runnerOutputBundleFaultObjectKey(input.userId), JSON.stringify({
+      invalidArchiveInvocationsRemaining: remaining,
+    } satisfies StoredRunnerOutputBundleFaultState));
+  }
+
+  return true;
+}
+
 export async function pauseRunnerCommitIfArmed(input: {
   bucket: R2BucketLike;
   request: HostedAssistantRuntimeJobRequest;
@@ -226,6 +276,7 @@ export async function readRunnerRuntimeTimerWake(
 export function buildSyntheticCommittedRunnerResult(
   request: HostedAssistantRuntimeJobRequest,
   input?: {
+    bundle?: string | null;
     effectId?: string;
   },
 ): HostedAssistantRuntimeJobResult {
@@ -243,7 +294,7 @@ export function buildSyntheticCommittedRunnerResult(
     },
     phase: "prepared",
     result: {
-      bundle: request.bundle ?? btoa(`vault:${resolvePrimaryWake(request).eventId}`),
+      bundle: input?.bundle ?? buildSyntheticHostedVaultBundle(request),
       result: {
         eventsHandled: 1,
         ...(nextWakeAt === null ? {} : { nextWakeAt }),
@@ -268,7 +319,7 @@ export function buildSyntheticCompletedRunnerResult(
       schema: "murph.gateway-projection-snapshot.v1",
     },
     result: {
-      bundle: request.bundle ?? btoa(`vault:${resolvePrimaryWake(request).eventId}`),
+      bundle: buildSyntheticHostedVaultBundle(request),
       result: {
         eventsHandled: 1,
         ...(nextWakeAt === null ? {} : { nextWakeAt }),
@@ -354,6 +405,23 @@ function runnerRuntimeTimerWakeObjectKey(userId: string): string {
   return `test/runtime-timer-wakes/${encodeURIComponent(userId)}.json`;
 }
 
+function runnerOutputBundleFaultObjectKey(userId: string): string {
+  return `test/runner-output-bundle-faults/${encodeURIComponent(userId)}.json`;
+}
+
+async function readRunnerOutputBundleFault(
+  bucket: R2BucketLike,
+  userId: string,
+): Promise<StoredRunnerOutputBundleFaultState | null> {
+  const object = await bucket.get(runnerOutputBundleFaultObjectKey(userId));
+
+  if (!object) {
+    return null;
+  }
+
+  return JSON.parse(new TextDecoder().decode(await object.arrayBuffer())) as StoredRunnerOutputBundleFaultState;
+}
+
 function resolveSyntheticGeneratedAt(request: HostedAssistantRuntimeJobRequest): string {
   return resolvePrimaryWake(request).occurredAt;
 }
@@ -378,6 +446,14 @@ function resolvePrimaryWake(
 ) {
   const [firstEvent] = request.runDrain.events;
   return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(request.runDrain);
+}
+
+function buildSyntheticHostedVaultBundle(_request: HostedAssistantRuntimeJobRequest): string | null {
+  return null;
+}
+
+export function buildInvalidHostedBundleArchivePayload(): string {
+  return invalidHostedBundleArchiveBase64;
 }
 
 function sleep(delayMs: number): Promise<void> {

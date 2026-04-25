@@ -11,6 +11,7 @@ import type {
   HostedRunCommitRequest,
   HostedRunFinalizeRequest,
   HostedRunLogRequest,
+  HostedRunLogRecord,
   HostedRunReleaseFinalizeRequest,
   HostedRunStatusRequest,
   HostedWakeCommitRequest,
@@ -59,6 +60,7 @@ export interface HostedLocalTestWorkerClient {
 export interface HostedLocalTestWorkerFixture {
   client: HostedLocalTestWorkerClient;
   dispose(): Promise<void>;
+  getHostedRunLogs(userId: string): Promise<HostedRunLogRecord[]>;
   waitForRunnerPauseEntry(eventId: string): Promise<void>;
   waitForUserStatus(
     userId: string,
@@ -172,6 +174,7 @@ export async function startHostedLocalTestWorkerFixture(input: {
     return {
       client,
       dispose,
+      getHostedRunLogs: hostedWakeControl.getLogs,
       waitForRunnerPauseEntry: async (eventId: string): Promise<void> => {
         const startedAt = Date.now();
 
@@ -390,6 +393,7 @@ async function requestJson(input: {
 
 async function startHostedWakeControlServer(): Promise<{
   baseUrl: string;
+  getLogs(userId: string): Promise<HostedRunLogRecord[]>;
   server: Server;
 }> {
   const bucket = new Map<string, string>();
@@ -599,6 +603,17 @@ async function startHostedWakeControlServer(): Promise<{
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
+    getLogs: async (userId: string) => {
+      const result = await readTestHostedRunStatus({
+        body: {
+          includeLogs: true,
+        },
+        bucket: testBucket,
+        userId,
+      });
+
+      return result.logs ?? [];
+    },
     server,
   };
 }

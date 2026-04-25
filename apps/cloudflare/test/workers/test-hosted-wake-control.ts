@@ -10,6 +10,7 @@ import type {
   HostedRunFinalizeResponse,
   HostedRunLogRequest,
   HostedRunLogResponse,
+  HostedRunLogRecord,
   HostedRunRecord,
   HostedRunReleaseFinalizeRequest,
   HostedRunReleaseFinalizeResponse,
@@ -158,6 +159,7 @@ type StoredHostedWakeControlState = {
   activeRun: StoredHostedRunRecord | null;
   assistantNextWakeAt: string | null;
   cursor: HostedExecutionCursorState;
+  logs: HostedRunLogRecord[];
   nextRunId: number;
   nextSeq: number;
   wakes: StoredHostedWakeRecord[];
@@ -914,9 +916,18 @@ export async function readTestHostedRunStatus(input: {
   userId: string;
 }): Promise<HostedRunStatusResponse> {
   const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
+  const filteredLogs = state.logs.filter((log) =>
+    input.body.runId ? log.runId === input.body.runId : true
+  );
+  const limit = typeof input.body.limit === "number" && Number.isFinite(input.body.limit)
+    ? Math.max(0, Math.trunc(input.body.limit))
+    : filteredLogs.length;
 
   return {
     cursor: state.cursor,
+    ...(input.body.includeLogs
+      ? { logs: filteredLogs.slice(-limit) }
+      : {}),
     pendingIngressEventCount: countPendingWakes(state),
     run: state.activeRun ? toHostedRunRecord(state.activeRun) : null,
   };
@@ -948,9 +959,24 @@ export async function recordTestHostedRunLog(input: {
   bucket: R2BucketLike;
   userId: string;
 }): Promise<HostedRunLogResponse> {
-  void input;
+  const state = await readStoredHostedWakeControlState(input.bucket, input.userId);
+  const now = new Date().toISOString();
+  const log: HostedRunLogRecord = {
+    at: normalizeStoredWakeTimestamp(input.body.at ?? null) ?? now,
+    component: input.body.component,
+    createdAt: now,
+    id: `log_${state.logs.length + 1}`,
+    level: input.body.level,
+    message: input.body.message,
+    phase: input.body.phase,
+    ...(input.body.redacted === undefined ? {} : { redacted: input.body.redacted }),
+    runId: input.body.runId,
+    userId: input.userId,
+  };
+  state.logs.push(log);
+  await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
   return {
-    log: null,
+    log,
     logged: true,
   };
 }
@@ -976,6 +1002,7 @@ async function readStoredHostedWakeControlState(
         userId,
         version: "0",
       },
+      logs: [],
       nextRunId: 1,
       nextSeq: 0,
       wakes: [],
@@ -997,6 +1024,7 @@ async function readStoredHostedWakeControlState(
       userId: parsed.cursor?.userId ?? userId,
       version: parsed.cursor?.version ?? "0",
     },
+    logs: parsed.logs ?? [],
     nextRunId: parsed.nextRunId ?? 1,
     nextSeq: parsed.nextSeq ?? 0,
     wakes: parsed.wakes ?? [],
