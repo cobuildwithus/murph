@@ -797,7 +797,7 @@ export function SetupWizardApp(
                   ? createSetupWizardBulletRow(
                       {
                         body:
-                          '`localhost` is only Murph’s local receiver. When a provider asks for a callback or webhook URL, paste the public HTTPS address instead.',
+                          'OAuth callbacks can stay on localhost for local setup. Only webhook URLs need the public HTTPS address from a tunnel or hosted deployment.',
                         label: 'Important',
                         tone: 'warn',
                       },
@@ -811,7 +811,18 @@ export function SetupWizardApp(
                   ? createElement(
                       Text,
                       { color: resolveSetupWizardToneColor('muted'), bold: true },
-                      'Local test path',
+                      'Webhook tunnel path',
+                    )
+                  : null,
+                publicUrlReview.tunnelCommands.length > 0
+                  ? createElement(
+                      Text,
+                      {
+                        color: resolveSetupWizardToneColor('muted'),
+                        dimColor: true,
+                        key: 'public-url-tunnel-note',
+                      },
+                      '  Use the tunnel URL only for provider webhook fields. Keep OAuth callback fields on localhost; do not use the tunnel for control routes.',
                     )
                   : null,
                 ...publicUrlReview.tunnelCommands.map((command) =>

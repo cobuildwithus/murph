@@ -307,15 +307,15 @@ test('setup scheduled updates can be fully opted out during onboarding', async (
   }
 })
 
-test('public URL review recommends hosted apps/web for wearable ingress when no public base is configured', () => {
+test('public URL review keeps wearable callbacks local and webhooks public when no public base is configured', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: [],
     wearables: ['garmin', 'oura', 'whoop'],
   })
 
   assert.equal(review.enabled, true)
-  assert.equal(review.recommendedStrategy, 'hosted')
-  assert.match(review.summary, /Hosted `apps\/web`/u)
+  assert.equal(review.recommendedStrategy, 'local')
+  assert.match(review.summary, /callbacks can stay on localhost/u)
   assert.deepEqual(
     review.targets.map((target) => [
       target.localReceiverUrl,
@@ -325,12 +325,12 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
     [
       [
         'http://localhost:8788/oauth/garmin/callback',
-        'https://<your-public-host>/oauth/garmin/callback',
+        'http://localhost:8788/oauth/garmin/callback',
         'required',
       ],
       [
         'http://localhost:8788/oauth/whoop/callback',
-        'https://<your-public-host>/oauth/whoop/callback',
+        'http://localhost:8788/oauth/whoop/callback',
         'required',
       ],
       [
@@ -340,7 +340,7 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
       ],
       [
         'http://localhost:8788/oauth/oura/callback',
-        'https://<your-public-host>/oauth/oura/callback',
+        'http://localhost:8788/oauth/oura/callback',
         'required',
       ],
       [
@@ -357,9 +357,9 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
   assert.match(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
-      strategy: 'hosted',
+      strategy: 'local',
     }),
-    /hosted `apps\/web`/u,
+    /localhost OAuth callback/u,
   )
 })
 
@@ -374,15 +374,15 @@ test('public URL review stays hidden when no public callbacks are needed', () =>
   assert.deepEqual(review.targets, [])
 })
 
-test('public URL review keeps hosted wearable guidance for wearable callbacks only', () => {
+test('public URL review keeps local callback guidance for wearable callbacks only', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: [],
     wearables: ['garmin', 'oura', 'whoop'],
   })
 
   assert.equal(review.enabled, true)
-  assert.equal(review.recommendedStrategy, 'hosted')
-  assert.match(review.summary, /Hosted `apps\/web`/u)
+  assert.equal(review.recommendedStrategy, 'local')
+  assert.match(review.summary, /callbacks can stay on localhost/u)
   assert.deepEqual(
     review.targets.map((target) => `${target.label}:${target.requirement}`),
     [
@@ -396,21 +396,40 @@ test('public URL review keeps hosted wearable guidance for wearable callbacks on
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
-      strategy: 'hosted',
+      strategy: 'local',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
+    'Register the shown localhost OAuth callback URLs. Only add a public HTTPS URL for optional provider webhooks.',
   )
 })
 
-test('public URL review stays hidden when a public device-sync base is already configured', () => {
+test('public URL review keeps local callback guidance when a public device-sync base is already configured', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: [],
     wearables: ['whoop'],
     publicBaseUrl: 'https://health.example.test/api/device-sync',
   })
 
-  assert.equal(review.enabled, false)
-  assert.equal(review.targets.length, 0)
+  assert.equal(review.enabled, true)
+  assert.deepEqual(
+    review.targets.map((target) => [
+      target.label,
+      target.localReceiverUrl,
+      target.providerUrl,
+    ]),
+    [
+      [
+        'WHOOP callback',
+        'http://localhost:8788/oauth/whoop/callback',
+        'http://localhost:8788/oauth/whoop/callback',
+      ],
+      [
+        'WHOOP webhook',
+        'http://localhost:8788/webhooks/whoop',
+        'https://health.example.test/api/device-sync/webhooks/whoop',
+      ],
+    ],
+  )
+  assert.deepEqual(review.tunnelCommands, [])
 })
 
 test('interactive onboarding treats public URL guidance as informational and never forwards a strategy into setup', async () => {
@@ -1560,18 +1579,19 @@ test('interactive onboarding prompts for missing channel and wearable credential
         channels: ['email'],
         env: {},
         helpText: [
-          'Garmin/WHOOP/Oura/Strava need a public callback URL. Hosted `apps/web` is the easiest stable base.',
+          'Device OAuth callbacks can stay on localhost. Only optional webhooks need a public HTTPS URL.',
           '',
-          '`localhost` is only Murph’s local receiver. Do not paste a localhost URL into Garmin, WHOOP, Oura, or Strava. Use a public HTTPS URL from a tunnel or hosted deployment instead.',
+          'OAuth callbacks can use Murph’s localhost receiver for local setup. Only provider webhooks need a public HTTPS URL from a tunnel or hosted deployment.',
           '',
-          'Local test path:',
+          'Webhook tunnel path:',
+          '  Use the tunnel URL only for provider webhook fields. Keep OAuth callback fields on localhost; do not use the tunnel for control routes.',
           '  ngrok http 8788',
           '  cloudflared tunnel --url http://localhost:8788',
           '',
           'Oura callback (required)',
           '  Local receiver: http://localhost:8788/oauth/oura/callback',
-          '  Paste into provider: https://<your-public-host>/oauth/oura/callback',
-          '  Required. Oura redirect URIs must match this public callback URL exactly.',
+          '  Paste into provider: http://localhost:8788/oauth/oura/callback',
+          '  Required. Oura redirect URIs must match this localhost callback URL exactly.',
           '',
           'Oura webhook (optional)',
           '  Local receiver: http://localhost:8788/webhooks/oura',

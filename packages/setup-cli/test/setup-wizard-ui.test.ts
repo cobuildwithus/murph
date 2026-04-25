@@ -131,10 +131,10 @@ test('setup wizard answered, detail, and hint rows render the expected labels an
   assert.equal(collectElementText(keyValue), 'Assistant: Codex')
 
   const publicUrl = createSetupWizardPublicUrlTargetRow({
-    detail: 'Required. Register this redirect URL in the Garmin dashboard.',
+    detail: 'Required. Register this localhost callback URL in the Garmin dashboard.',
     label: 'Garmin callback',
     localReceiverUrl: 'http://127.0.0.1:8788/oauth/garmin/callback',
-    providerUrl: 'https://<your-public-host>/oauth/garmin/callback',
+    providerUrl: 'http://127.0.0.1:8788/oauth/garmin/callback',
     requirement: 'required',
   })
   assert.equal(
@@ -144,8 +144,8 @@ test('setup wizard answered, detail, and hint rows render the expected labels an
       '  Local receiver: ',
       'http://127.0.0.1:8788/oauth/garmin/callback',
       '  Paste into provider: ',
-      'https://<your-public-host>/oauth/garmin/callback',
-      '  Required. Register this redirect URL in the Garmin dashboard.',
+      'http://127.0.0.1:8788/oauth/garmin/callback',
+      '  Required. Register this localhost callback URL in the Garmin dashboard.',
     ].join(''),
   )
 
@@ -190,9 +190,9 @@ test('setup wizard UI omits optional rows cleanly and keeps selected inactive ro
   const answered = createSetupWizardAnsweredBlock(
     {
       label: 'Public links',
-      value: 'Local tunnel',
+      value: 'Webhook tunnel',
     },
     'answered-without-detail',
   )
-  assert.equal(collectElementText(answered), '◇ Public links  Local tunnel')
+  assert.equal(collectElementText(answered), '◇ Public links  Webhook tunnel')
 })

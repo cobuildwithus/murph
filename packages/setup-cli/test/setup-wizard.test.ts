@@ -277,8 +277,9 @@ test('setup wizard extracted option and public-url helpers keep labels and trimm
   assert.equal(formatSetupWearable('oura'), 'Oura')
   assert.equal(formatSetupScheduledUpdate('environment-health-watch'), 'Environment health watch')
   assert.equal(formatSetupScheduledUpdate('custom-update'), 'custom-update')
+  assert.equal(formatSetupPublicUrlStrategy('local'), 'Local callbacks')
   assert.equal(formatSetupPublicUrlStrategy('hosted'), 'Hosted web app')
-  assert.equal(formatSetupPublicUrlStrategy('tunnel'), 'Local tunnel')
+  assert.equal(formatSetupPublicUrlStrategy('tunnel'), 'Webhook tunnel')
   assert.equal(normalizeSetupWizardText('  https://murph.example  '), 'https://murph.example')
   assert.equal(normalizeSetupWizardText('   '), null)
   assert.equal(normalizeSetupWizardText(undefined), null)
@@ -394,28 +395,50 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
   })
 }, WIZARD_TEST_TIMEOUT_MS)
 
-test('setup wizard public URL guidance stays disabled when a public base URL is already set', () => {
+test('setup wizard public URL guidance keeps local callbacks when a public webhook base is already set', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: [],
     wearables: ['oura'],
-    publicBaseUrl: 'https://murph.example',
+    publicBaseUrl: 'https://murph.example/device-sync/',
     deviceSyncLocalBaseUrl: ' http://127.0.0.1:8788 ',
   })
 
-  assert.equal(review.enabled, false)
-  assert.equal(review.recommendedStrategy, 'hosted')
-  assert.deepEqual(review.targets, [])
-  assert.equal(review.summary, '')
+  assert.equal(review.enabled, true)
+  assert.equal(review.recommendedStrategy, 'local')
+  assert.match(review.summary, /callbacks can stay on localhost/u)
+  assert.deepEqual(
+    review.targets.map((target) => [
+      target.label,
+      target.localReceiverUrl,
+      target.providerUrl,
+      target.requirement,
+    ]),
+    [
+      [
+        'Oura callback',
+        'http://127.0.0.1:8788/oauth/oura/callback',
+        'http://127.0.0.1:8788/oauth/oura/callback',
+        'required',
+      ],
+      [
+        'Oura webhook',
+        'http://127.0.0.1:8788/webhooks/oura',
+        'https://murph.example/device-sync/webhooks/oura',
+        'optional',
+      ],
+    ],
+  )
+  assert.deepEqual(review.tunnelCommands, [])
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
-      strategy: 'hosted',
+      strategy: 'local',
     }),
-    '',
+    'Register the shown localhost OAuth callback URLs. Only add a public HTTPS URL for optional provider webhooks.',
   )
 })
 
-test('setup wizard public URL guidance recommends hosted web for wearables', () => {
+test('setup wizard public URL guidance keeps callbacks local and webhooks public', () => {
   const review = buildSetupWizardPublicUrlReview({
     channels: [],
     wearables: ['garmin', 'oura'],
@@ -423,8 +446,8 @@ test('setup wizard public URL guidance recommends hosted web for wearables', () 
   })
 
   assert.equal(review.enabled, true)
-  assert.equal(review.recommendedStrategy, 'hosted')
-  assert.match(review.summary, /Hosted `apps\/web`/u)
+  assert.equal(review.recommendedStrategy, 'local')
+  assert.match(review.summary, /callbacks can stay on localhost/u)
   assert.deepEqual(
     review.targets.map((target) => [
       target.label,
@@ -436,13 +459,13 @@ test('setup wizard public URL guidance recommends hosted web for wearables', () 
       [
         'Garmin callback',
         'http://127.0.0.1:8788/oauth/garmin/callback',
-        'https://<your-public-host>/oauth/garmin/callback',
+        'http://127.0.0.1:8788/oauth/garmin/callback',
         'required',
       ],
       [
         'Oura callback',
         'http://127.0.0.1:8788/oauth/oura/callback',
-        'https://<your-public-host>/oauth/oura/callback',
+        'http://127.0.0.1:8788/oauth/oura/callback',
         'required',
       ],
       [
@@ -464,9 +487,16 @@ test('setup wizard public URL guidance recommends hosted web for wearables', () 
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
+      strategy: 'local',
+    }),
+    'Register the shown localhost OAuth callback URLs. Only add a public HTTPS URL for optional provider webhooks.',
+  )
+  assert.equal(
+    describeSetupWizardPublicUrlStrategyChoice({
+      review,
       strategy: 'hosted',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
+    'Use hosted `apps/web` only when you intentionally run the hosted receiver. For local setup, keep OAuth callbacks on localhost and use public HTTPS only for webhook targets.',
   )
 })
 
@@ -477,7 +507,7 @@ test('setup wizard public URL guidance stays disabled when no public callbacks a
   })
 
   assert.equal(review.enabled, false)
-  assert.equal(review.recommendedStrategy, 'hosted')
+  assert.equal(review.recommendedStrategy, 'local')
   assert.deepEqual(review.targets, [])
   assert.equal(review.summary, '')
 })
@@ -492,14 +522,14 @@ test('setup wizard public URL help text renders warnings, docs, and provider-les
           url: 'https://developer.whoop.com/docs/developing/oauth/',
         },
       ],
-      recommendedStrategy: 'hosted',
-      summary: 'Hosted `apps/web` is the easiest stable base.',
+      recommendedStrategy: 'local',
+      summary: 'Device OAuth callbacks can stay on localhost.',
       targets: [
         {
           detail: 'Register this redirect URL in the WHOOP dashboard.',
           label: 'WHOOP callback',
           localReceiverUrl: 'http://127.0.0.1:8788/oauth/whoop/callback',
-          providerUrl: 'https://murph.example/oauth/whoop/callback',
+          providerUrl: 'http://127.0.0.1:8788/oauth/whoop/callback',
           requirement: 'required',
         },
       ],
@@ -508,16 +538,17 @@ test('setup wizard public URL help text renders warnings, docs, and provider-les
   })
 
   assert.deepEqual(lines, [
-    'Hosted `apps/web` is the easiest stable base.',
+    'Device OAuth callbacks can stay on localhost.',
     '',
-    '`localhost` is only Murph’s local receiver. Do not paste a localhost URL into Garmin, WHOOP, Oura, or Strava. Use a public HTTPS URL from a tunnel or hosted deployment instead.',
+    'OAuth callbacks can use Murph’s localhost receiver for local setup. Only provider webhooks need a public HTTPS URL from a tunnel or hosted deployment.',
     '',
-    'Local test path:',
+    'Webhook tunnel path:',
+    '  Use the tunnel URL only for provider webhook fields. Keep OAuth callback fields on localhost; do not use the tunnel for control routes.',
     '  ngrok http 8788',
     '',
     'WHOOP callback (required)',
     '  Local receiver: http://127.0.0.1:8788/oauth/whoop/callback',
-    '  Paste into provider: https://murph.example/oauth/whoop/callback',
+    '  Paste into provider: http://127.0.0.1:8788/oauth/whoop/callback',
     '  Register this redirect URL in the WHOOP dashboard.',
     '',
     'Provider setup docs:',
@@ -531,7 +562,7 @@ test('setup wizard public URL help text renders warnings, docs, and provider-les
       review: {
         enabled: false,
         providerDocs: [],
-        recommendedStrategy: 'hosted',
+        recommendedStrategy: 'local',
         summary: '',
         targets: [],
         tunnelCommands: [],
@@ -550,8 +581,8 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
   })
 
   assert.equal(review.enabled, true)
-  assert.equal(review.recommendedStrategy, 'hosted')
-  assert.match(review.summary, /public callback URL/u)
+  assert.equal(review.recommendedStrategy, 'local')
+  assert.match(review.summary, /callbacks can stay on localhost/u)
   assert.deepEqual(
     review.targets.map((target) => [
       target.label,
@@ -563,7 +594,7 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
       [
         'WHOOP callback',
         'http://127.0.0.1:9797/oauth/whoop/callback',
-        'https://<your-public-host>/oauth/whoop/callback',
+        'http://127.0.0.1:9797/oauth/whoop/callback',
         'required',
       ],
       [
@@ -585,16 +616,16 @@ test('setup wizard public URL guidance trims local endpoints and lists WHOOP tar
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
-      strategy: 'hosted',
+      strategy: 'local',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
+    'Register the shown localhost OAuth callback URLs. Only add a public HTTPS URL for optional provider webhooks.',
   )
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
       strategy: 'tunnel',
     }),
-    'Expose the local callback routes through a tunnel. Keep Murph listening on localhost, then paste the public HTTPS tunnel URL into each provider.',
+    'Expose the local webhook routes through a tunnel. Keep OAuth callbacks on localhost, then paste the public HTTPS tunnel URL only for webhook targets.',
   )
 })
 
@@ -606,7 +637,7 @@ test('setup wizard public URL guidance includes Strava callback and webhook targ
   })
 
   assert.equal(review.enabled, true)
-  assert.equal(review.recommendedStrategy, 'hosted')
+  assert.equal(review.recommendedStrategy, 'local')
   assert.deepEqual(
     review.targets.map((target) => [
       target.label,
@@ -618,7 +649,7 @@ test('setup wizard public URL guidance includes Strava callback and webhook targ
       [
         'Strava callback',
         'http://127.0.0.1:8788/oauth/strava/callback',
-        'https://<your-public-host>/oauth/strava/callback',
+        'http://127.0.0.1:8788/oauth/strava/callback',
         'required',
       ],
       [
@@ -636,9 +667,9 @@ test('setup wizard public URL guidance includes Strava callback and webhook targ
   assert.equal(
     describeSetupWizardPublicUrlStrategyChoice({
       review,
-      strategy: 'hosted',
+      strategy: 'local',
     }),
-    'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.',
+    'Register the shown localhost OAuth callback URLs. Only add a public HTTPS URL for optional provider webhooks.',
   )
 })
 
@@ -650,7 +681,7 @@ test('setup wizard public URL guidance stays enabled when the configured public 
   })
 
   assert.equal(review.enabled, true)
-  assert.equal(review.targets[0]?.providerUrl, 'https://<your-public-host>/oauth/oura/callback')
+  assert.equal(review.targets[0]?.providerUrl, 'http://localhost:8788/oauth/oura/callback')
 })
 
 test('setup wizard public URL guidance handles invalid public URLs and tunnel command edge cases', () => {
@@ -662,7 +693,7 @@ test('setup wizard public URL guidance handles invalid public URLs and tunnel co
   assert.equal(invalidPublicBaseReview.enabled, true)
   assert.equal(
     invalidPublicBaseReview.targets[0]?.providerUrl,
-    'https://<your-public-host>/oauth/garmin/callback',
+    'http://localhost:8788/oauth/garmin/callback',
   )
 
   const ipv6LoopbackReview = buildSetupWizardPublicUrlReview({
@@ -674,7 +705,7 @@ test('setup wizard public URL guidance handles invalid public URLs and tunnel co
 
   const httpTunnelReview = buildSetupWizardPublicUrlReview({
     channels: [],
-    wearables: ['garmin'],
+    wearables: ['oura'],
     deviceSyncLocalBaseUrl: 'http://127.0.0.1/base',
   })
   assert.deepEqual(httpTunnelReview.tunnelCommands, [
@@ -684,7 +715,7 @@ test('setup wizard public URL guidance handles invalid public URLs and tunnel co
 
   const httpsTunnelReview = buildSetupWizardPublicUrlReview({
     channels: [],
-    wearables: ['garmin'],
+    wearables: ['oura'],
     deviceSyncLocalBaseUrl: 'https://127.0.0.1/base',
   })
   assert.deepEqual(httpsTunnelReview.tunnelCommands, [
@@ -694,7 +725,7 @@ test('setup wizard public URL guidance handles invalid public URLs and tunnel co
 
   const unsupportedTunnelReview = buildSetupWizardPublicUrlReview({
     channels: [],
-    wearables: ['garmin'],
+    wearables: ['oura'],
     deviceSyncLocalBaseUrl: 'ws://127.0.0.1/base',
   })
   assert.deepEqual(unsupportedTunnelReview.tunnelCommands, [
@@ -750,8 +781,9 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     )
     assert.match(
       publicLinkOutput,
-      /Paste into provider: https:\/\/<your-public-host>\/oauth\/whoop\/callback/u,
+      /Paste into provider: http:\/\/localhost:8788\/oauth\/whoop\/callback/u,
     )
+    assert.match(publicLinkOutput, /Webhook tunnel path/u)
     assert.match(publicLinkOutput, /ngrok http 8788/u)
     assert.match(
       publicLinkOutput,

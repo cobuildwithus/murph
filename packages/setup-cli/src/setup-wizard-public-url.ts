@@ -52,7 +52,7 @@ const SETUP_PROVIDER_DOCS = {
   }>
 >
 
-export type SetupPublicUrlStrategy = 'hosted' | 'tunnel'
+export type SetupPublicUrlStrategy = 'local' | 'hosted' | 'tunnel'
 export type SetupWizardPublicUrlRequirement = 'required' | 'optional'
 
 export interface SetupWizardPublicUrlDocLink {
@@ -83,40 +83,44 @@ export function buildSetupWizardPublicUrlReview(input: {
   publicBaseUrl?: string | null
   deviceSyncLocalBaseUrl?: string | null
 }): SetupWizardPublicUrlReview {
-  const publicBaseUrl = normalizeSetupWizardText(input.publicBaseUrl)
+  const publicBaseUrl = resolveSetupWizardConfiguredPublicBaseUrl(
+    input.publicBaseUrl,
+  )
   const selectedWearables = sortSetupWizardWearables(input.wearables)
-  const needsPublicStrategy = selectedWearables.length > 0
+  const needsUrlReview = selectedWearables.length > 0
   const deviceSyncLocalBaseUrl =
     normalizeSetupWizardText(input.deviceSyncLocalBaseUrl) ??
     DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL
 
-  if (!needsPublicStrategy || isConfiguredPublicBaseUrl(publicBaseUrl)) {
+  if (!needsUrlReview) {
     return {
       enabled: false,
       providerDocs: [],
-      recommendedStrategy: 'hosted',
+      recommendedStrategy: 'local',
       summary: '',
       targets: [],
       tunnelCommands: [],
     }
   }
 
+  const targets = buildSetupWizardPublicUrlTargets({
+    wearables: selectedWearables,
+    deviceSyncLocalBaseUrl,
+    publicBaseUrl,
+  })
+  const hasPublicWebhookTargets = hasSetupWizardPublicWebhookTargets(targets)
+
   return {
     enabled: true,
     providerDocs: buildSetupWizardProviderDocs(selectedWearables),
-    recommendedStrategy:
-      selectedWearables.length > 0 ? 'hosted' : 'tunnel',
+    recommendedStrategy: 'local',
     summary: describeSetupWizardPublicUrlSummary({
-      wearables: selectedWearables,
+      targets,
     }),
-    targets: buildSetupWizardPublicUrlTargets({
-      wearables: selectedWearables,
-      deviceSyncLocalBaseUrl,
-    }),
-    tunnelCommands:
-      selectedWearables.length > 0
-        ? buildSetupWizardDeviceSyncTunnelCommands(deviceSyncLocalBaseUrl)
-        : [],
+    targets,
+    tunnelCommands: hasPublicWebhookTargets && publicBaseUrl === null
+      ? buildSetupWizardDeviceSyncTunnelCommands(deviceSyncLocalBaseUrl)
+      : [],
   }
 }
 
@@ -128,15 +132,26 @@ export function describeSetupWizardPublicUrlStrategyChoice(input: {
     return ''
   }
 
-  if (input.strategy === 'hosted') {
-    return 'Use hosted `apps/web` for Garmin/WHOOP/Oura/Strava so callbacks stay on one stable public base.'
+  if (input.strategy === 'local') {
+    return 'Register the shown localhost OAuth callback URLs. Only add a public HTTPS URL for optional provider webhooks.'
   }
 
-  return 'Expose the local callback routes through a tunnel. Keep Murph listening on localhost, then paste the public HTTPS tunnel URL into each provider.'
+  if (input.strategy === 'hosted') {
+    return 'Use hosted `apps/web` only when you intentionally run the hosted receiver. For local setup, keep OAuth callbacks on localhost and use public HTTPS only for webhook targets.'
+  }
+
+  return 'Expose the local webhook routes through a tunnel. Keep OAuth callbacks on localhost, then paste the public HTTPS tunnel URL only for webhook targets.'
 }
 
 export function formatSetupPublicUrlStrategy(strategy: SetupPublicUrlStrategy): string {
-  return strategy === 'hosted' ? 'Hosted web app' : 'Local tunnel'
+  switch (strategy) {
+    case 'local':
+      return 'Local callbacks'
+    case 'hosted':
+      return 'Hosted web app'
+    case 'tunnel':
+      return 'Webhook tunnel'
+  }
 }
 
 export function buildSetupWizardPublicUrlHelpText(input: {
@@ -151,16 +166,17 @@ export function buildSetupWizardPublicUrlHelpText(input: {
     '',
   ]
 
-  if (hasSetupWizardWearablePublicUrlTargets(input.review.targets)) {
+  if (input.review.targets.length > 0) {
     lines.push(
-      '`localhost` is only Murph’s local receiver. Do not paste a localhost URL into Garmin, WHOOP, Oura, or Strava. Use a public HTTPS URL from a tunnel or hosted deployment instead.',
+      'OAuth callbacks can use Murph’s localhost receiver for local setup. Only provider webhooks need a public HTTPS URL from a tunnel or hosted deployment.',
       '',
     )
   }
 
   if (input.review.tunnelCommands.length > 0) {
     lines.push(
-      'Local test path:',
+      'Webhook tunnel path:',
+      '  Use the tunnel URL only for provider webhook fields. Keep OAuth callback fields on localhost; do not use the tunnel for control routes.',
       ...input.review.tunnelCommands.map((command) => `  ${command}`),
       '',
     )
@@ -190,10 +206,14 @@ export function buildSetupWizardPublicUrlHelpText(input: {
 }
 
 function describeSetupWizardPublicUrlSummary(input: {
-  wearables: readonly SetupWearable[]
+  targets: readonly SetupWizardPublicUrlTarget[]
 }): string {
-  if (input.wearables.length > 0) {
-    return 'Garmin/WHOOP/Oura/Strava need a public callback URL. Hosted `apps/web` is the easiest stable base.'
+  if (hasSetupWizardPublicWebhookTargets(input.targets)) {
+    return 'Device OAuth callbacks can stay on localhost. Only optional webhooks need a public HTTPS URL.'
+  }
+
+  if (input.targets.length > 0) {
+    return 'Device OAuth callbacks can stay on localhost. No public tunnel is needed for this selection.'
   }
 
   return ''
@@ -202,6 +222,7 @@ function describeSetupWizardPublicUrlSummary(input: {
 function buildSetupWizardPublicUrlTargets(input: {
   wearables: readonly SetupWearable[]
   deviceSyncLocalBaseUrl: string
+  publicBaseUrl: string | null
 }): SetupWizardPublicUrlTarget[] {
   const targets: SetupWizardPublicUrlTarget[] = []
 
@@ -212,10 +233,10 @@ function buildSetupWizardPublicUrlTargets(input: {
     ).toString()
     targets.push({
       detail:
-        'Required. Register this public callback URL in your Garmin app setup before you connect Garmin.',
+        'Required. Register this localhost callback URL in your Garmin app setup before you connect Garmin.',
       label: 'Garmin callback',
       localReceiverUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(localReceiverUrl),
+      providerUrl: localReceiverUrl,
       requirement: 'required',
     })
   }
@@ -227,10 +248,10 @@ function buildSetupWizardPublicUrlTargets(input: {
     ).toString()
     targets.push({
       detail:
-        'Required. Register this public redirect URL in the WHOOP Developer Dashboard.',
+        'Required. Register this localhost redirect URL in the WHOOP Developer Dashboard.',
       label: 'WHOOP callback',
       localReceiverUrl: callbackUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(callbackUrl),
+      providerUrl: callbackUrl,
       requirement: 'required',
     })
 
@@ -243,7 +264,10 @@ function buildSetupWizardPublicUrlTargets(input: {
         'Optional. Add this public webhook URL only if you want realtime WHOOP updates.',
       label: 'WHOOP webhook',
       localReceiverUrl: webhookUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(webhookUrl),
+      providerUrl: buildSetupWizardPublicProviderUrl(
+        webhookUrl,
+        input.publicBaseUrl,
+      ),
       requirement: 'optional',
     })
   }
@@ -255,10 +279,10 @@ function buildSetupWizardPublicUrlTargets(input: {
     ).toString()
     targets.push({
       detail:
-        'Required. Oura redirect URIs must match this public callback URL exactly.',
+        'Required. Oura redirect URIs must match this localhost callback URL exactly.',
       label: 'Oura callback',
       localReceiverUrl: callbackUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(callbackUrl),
+      providerUrl: callbackUrl,
       requirement: 'required',
     })
 
@@ -271,7 +295,10 @@ function buildSetupWizardPublicUrlTargets(input: {
         'Optional today. Oura can work without webhooks; use this public URL only if you enable Oura webhooks.',
       label: 'Oura webhook',
       localReceiverUrl: webhookUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(webhookUrl),
+      providerUrl: buildSetupWizardPublicProviderUrl(
+        webhookUrl,
+        input.publicBaseUrl,
+      ),
       requirement: 'optional',
     })
   }
@@ -283,10 +310,10 @@ function buildSetupWizardPublicUrlTargets(input: {
     ).toString()
     targets.push({
       detail:
-        'Required for the OAuth redirect. In Strava, keep this callback under your configured callback domain.',
+        'Required for the OAuth redirect. In Strava, keep the callback domain set to localhost for local setup.',
       label: 'Strava callback',
       localReceiverUrl: callbackUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(callbackUrl),
+      providerUrl: callbackUrl,
       requirement: 'required',
     })
 
@@ -299,7 +326,10 @@ function buildSetupWizardPublicUrlTargets(input: {
         'Optional. Strava allows one app-global webhook subscription; use this public URL only if you enable Strava webhooks.',
       label: 'Strava webhook',
       localReceiverUrl: webhookUrl,
-      providerUrl: buildSetupWizardPublicProviderUrl(webhookUrl),
+      providerUrl: buildSetupWizardPublicProviderUrl(
+        webhookUrl,
+        input.publicBaseUrl,
+      ),
       requirement: 'optional',
     })
   }
@@ -326,17 +356,26 @@ function buildSetupWizardProviderDocs(
   return docs
 }
 
-function hasSetupWizardWearablePublicUrlTargets(
+function hasSetupWizardPublicWebhookTargets(
   targets: readonly SetupWizardPublicUrlTarget[],
 ): boolean {
-  return targets.length > 0
+  return targets.some((target) => (
+    target.providerUrl !== null && target.providerUrl !== target.localReceiverUrl
+  ))
 }
 
-function isConfiguredPublicBaseUrl(value: string | null): boolean {
-  if (value === null) {
-    return false
+function resolveSetupWizardConfiguredPublicBaseUrl(
+  value: string | null | undefined,
+): string | null {
+  const normalizedValue = normalizeSetupWizardText(value)
+  if (normalizedValue === null) {
+    return null
   }
 
+  return isConfiguredPublicBaseUrl(normalizedValue) ? normalizedValue : null
+}
+
+function isConfiguredPublicBaseUrl(value: string): boolean {
   try {
     const parsed = new URL(value)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -393,11 +432,26 @@ function resolveSetupWizardTunnelPort(parsed: URL): string | null {
   }
 }
 
-function buildSetupWizardPublicProviderUrl(localReceiverUrl: string): string {
+function buildSetupWizardPublicProviderUrl(
+  localReceiverUrl: string,
+  publicBaseUrl: string | null,
+): string {
   try {
     const parsed = new URL(localReceiverUrl)
-    const suffix = `${parsed.pathname}${parsed.search}`
-    return `${SETUP_PUBLIC_URL_PLACEHOLDER_HOST}${suffix}`
+    const suffixPath = parsed.pathname.startsWith('/')
+      ? parsed.pathname
+      : `/${parsed.pathname}`
+
+    if (publicBaseUrl !== null) {
+      const base = new URL(publicBaseUrl)
+      const basePath = base.pathname.replace(/\/+$/u, '')
+      base.pathname = `${basePath}${suffixPath}`
+      base.search = parsed.search
+      base.hash = ''
+      return base.toString()
+    }
+
+    return `${SETUP_PUBLIC_URL_PLACEHOLDER_HOST}${suffixPath}${parsed.search}`
   } catch {
     return `${SETUP_PUBLIC_URL_PLACEHOLDER_HOST}${localReceiverUrl}`
   }
