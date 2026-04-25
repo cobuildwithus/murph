@@ -124,10 +124,107 @@ test("commons protocol list and show expose protocol revisions distinctly from p
   assert.ok(showData.protocol.testPlans.length > 0);
 });
 
+test("commons protocol list treats wildcard categories as unfiltered", async () => {
+  const cli = createCommonsSliceCli();
+
+  const result = await runInProcessJsonCli<{
+    filters: {
+      categories: string[];
+      query: string | null;
+      status: string | null;
+    };
+    protocols: Array<{
+      entityType: string;
+      key: string;
+    }>;
+    total: number;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "list",
+    "--query",
+    "sauna",
+    "--category",
+    "*",
+    "--status",
+    "*",
+    "--limit",
+    "20",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.filters.query, "sauna");
+  assert.deepEqual(data.filters.categories, []);
+  assert.equal(data.filters.status, null);
+  assert.ok(data.total > 0);
+  assert.ok(data.protocols.every((protocol) => protocol.entityType === "protocol_variant"));
+  assert.ok(
+    data.protocols.some(
+      (protocol) =>
+        protocol.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    ),
+  );
+});
+
+test("commons protocol list stays aligned with search results when wildcard categories are ignored", async () => {
+  const cli = createCommonsSliceCli();
+
+  const searchResult = await runInProcessJsonCli<{
+    hits: Array<{
+      entityType: string;
+      key: string;
+    }>;
+    total: number;
+  }>(cli, [
+    "commons",
+    "search",
+    "sauna",
+    "--type",
+    "protocol_variant",
+    "--limit",
+    "20",
+  ]);
+
+  const listResult = await runInProcessJsonCli<{
+    filters: {
+      categories: string[];
+      query: string | null;
+    };
+    protocols: Array<{
+      entityType: string;
+      key: string;
+    }>;
+    total: number;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "list",
+    "--query",
+    "sauna",
+    "--category",
+    "*",
+    "--limit",
+    "20",
+  ]);
+
+  assert.equal(searchResult.envelope.ok, true);
+  assert.equal(listResult.envelope.ok, true);
+  const searchData = requireData(searchResult.envelope);
+  const listData = requireData(listResult.envelope);
+  assert.deepEqual(listData.filters.categories, []);
+  assert.equal(listData.filters.query, "sauna");
+  assert.deepEqual(
+    listData.protocols.map((protocol) => protocol.key),
+    searchData.hits.map((hit) => hit.key),
+  );
+});
+
 test("commons source list returns public source artifacts", async () => {
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli<{
     filters: {
+      kind: string | null;
       protocol: string | null;
     };
     sources: Array<{
@@ -145,12 +242,15 @@ test("commons source list returns public source artifacts", async () => {
     "list",
     "--protocol",
     "red-light-glasses-before-bed",
+    "--kind",
+    "*",
     "--limit",
     "5",
   ]);
 
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
+  assert.equal(data.filters.kind, null);
   assert.equal(data.filters.protocol, "red-light-glasses-before-bed");
   assert.ok(data.total > 0);
   assert.ok(data.sources.length > 0);

@@ -35,6 +35,9 @@ describe('Health Commons bound assistant tools', () => {
         sourceArtifactCount: expect.any(Number),
       },
     })
+    const searchProtocolKeys = (
+      searchResult as { results: Array<{ entity: { key: string } }> }
+    ).results.map((result) => result.entity.key)
 
     const protocolResult = await executeBoundTool(listProtocols!, {
       query: 'sauna',
@@ -47,6 +50,30 @@ describe('Health Commons bound assistant tools', () => {
         sourceArtifactCount: expect.any(Number),
       },
     })
+
+    const wildcardProtocolResult = await executeBoundTool(listProtocols!, {
+      categories: ['*'],
+      query: 'sauna',
+      status: ['*'],
+    })
+    expect(JSON.stringify(wildcardProtocolResult)).toContain(FINNISH_DRY_SAUNA_KEY)
+    expect(wildcardProtocolResult).toMatchObject({
+      filters: {
+        categories: [],
+        ignoredWildcards: {
+          categories: ['*'],
+          statuses: ['*'],
+        },
+        status: [],
+      },
+    })
+    expect(
+      (
+        wildcardProtocolResult as {
+          protocols: Array<{ key: string }>
+        }
+      ).protocols.map((protocol) => protocol.key),
+    ).toEqual(searchProtocolKeys)
   })
 
   it('returns Health Commons diagnostics on all bound tool result shapes', async () => {
@@ -84,6 +111,17 @@ describe('Health Commons bound assistant tools', () => {
         protocolKeyOrSlug: 'source_artifact:aasm-scoring-manual-v3',
       }),
     )
+  })
+
+  it('rejects unknown non-wildcard protocol statuses instead of returning empty results', async () => {
+    const tools = createHealthCommonsToolDefinitions()
+
+    await expect(
+      executeTool(tools, 'healthCommons.listProtocols', {
+        query: 'sauna',
+        status: ['active'],
+      }),
+    ).rejects.toThrow(/Unknown Health Commons status filter "active"/u)
   })
 })
 
