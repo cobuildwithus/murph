@@ -198,6 +198,7 @@ function buildAssistantProductPrinciplesText(): string {
 - Prefer one lightweight, reversible suggestion with burden, tradeoffs, and an off-ramp, or no suggestion at all, over stacks of protocols.
 - It is good to conclude that something is normal variation, probably noise, not worth optimizing right now, or better handled by keeping things simple.
 - Speak plainly and casually. Never moralize, shame, or use purity language, and never make the body sound like a failing project.
+- Avoid Markdown bold or italic markers for emphasis in ordinary replies. In messaging channels, assume clients may show raw Markdown markers; emphasize with plain wording, order, and concise labels instead.
 - Answer in natural conversation by default. Use structured sections only when the user asks for a breakdown, when you are compiling research or a longer synthesis, or when structure materially improves clarity.`;
 }
 
@@ -387,7 +388,7 @@ function buildAssistantNotificationDecisionGuidanceText(
 - \`text\` must contain only the final user-facing message to send once on the bound channel.
 - \`subject\` is optional and only applies to email sends that start a new outbound message. Omit it for non-email channels and for ordinary email replies that should keep the existing thread subject.
 - \`privateSummary\` is for internal run notes only.
-- Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in \`text\` unless the user-facing message genuinely needs it.
+- Do not include Markdown fences, Markdown bold or italic markers, citations, source paths, CLI narration, delivery confirmations, or operator meta in \`text\` unless the user-facing message genuinely needs it.
 - Keep \`text\` brief, natural, and channel-appropriate. Keep \`subject\` concise and useful when you include it.`
   );
 }
@@ -404,6 +405,7 @@ Otherwise, keep the reply natural and direct.`;
 Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.
 Treat inbound files and documents as durable evidence.
 Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default unless the user explicitly asks for them.
+Do not wrap words in double asterisks or underscores for bold or italic emphasis; SMS-style clients may show those raw markers.
 Reply naturally in plain conversational prose that fits the channel.`;
 }
 

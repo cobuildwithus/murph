@@ -14,6 +14,7 @@ function buildPrompt(
     assistantHostedDeviceConnectAvailable?: boolean
     assistantHostedDeviceConnectProviders?: Array<{ label: string; provider: string }>
     assistantToolNameAliases?: Record<string, string>
+    channel?: string | null
     onboardingGuidance?: boolean
   },
 ) {
@@ -30,7 +31,7 @@ function buildPrompt(
       options?.assistantHostedDeviceConnectProviders ?? [],
     assistantKnowledgeToolsAvailable: false,
     assistantToolNameAliases: options?.assistantToolNameAliases ?? null,
-    channel: null,
+    channel: options?.channel ?? null,
     cliAccess: {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
@@ -232,6 +233,20 @@ describe('buildAssistantSystemPrompt', () => {
       'In local chat, mention relative file paths, record ids, dates, or source details when they genuinely help the user verify something or when the user asks for that level of detail.',
     )
     expect(prompt).toContain('Otherwise, keep the reply natural and direct.')
+  })
+
+  it('discourages raw Markdown emphasis in user-facing messaging channels', () => {
+    const prompt = buildPrompt('bound-tools', null, { channel: 'telegram' })
+
+    expect(prompt).toContain(
+      'Avoid Markdown bold or italic markers for emphasis in ordinary replies.',
+    )
+    expect(prompt).toContain(
+      'In messaging channels, assume clients may show raw Markdown markers; emphasize with plain wording, order, and concise labels instead.',
+    )
+    expect(prompt).toContain(
+      'Do not wrap words in double asterisks or underscores for bold or italic emphasis; SMS-style clients may show those raw markers.',
+    )
   })
 
   it('tells the assistant to trust successful save receipts without inventing no-op writes', () => {
@@ -506,6 +521,9 @@ describe('buildAssistantNotificationDecisionSystemPrompt', () => {
     )
     expect(prompt).toContain(
       'Default to skip for experiment notifications unless there is a user-opted-in reminder due now, broken or missing data that blocks interpretation, a weekly summary, a review-ready transition, or a safety follow-up that genuinely needs outreach.',
+    )
+    expect(prompt).toContain(
+      'Do not include Markdown fences, Markdown bold or italic markers, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text` unless the user-facing message genuinely needs it.',
     )
     expect(prompt).toContain('The bound outbound channel is telegram.')
   })
