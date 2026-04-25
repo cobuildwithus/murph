@@ -22,6 +22,10 @@ relations:
 source:
   kind: "web_page"
   title: "A Dosing Study of Hyperbaric Oxygen Therapy (HBOT) on Epigenetic Aging"
+  authors: "ClinicalTrials.gov record"
+  year: 2022
+  journal: "ClinicalTrials.gov"
+  citation: "ClinicalTrials.gov record. A Dosing Study of Hyperbaric Oxygen Therapy (HBOT) on Epigenetic Aging. ClinicalTrials.gov. 2022. https://clinicaltrials.gov/study/NCT05297019"
   url: "https://clinicaltrials.gov/study/NCT05297019"
 researchEvidence:
   designKind: "other"

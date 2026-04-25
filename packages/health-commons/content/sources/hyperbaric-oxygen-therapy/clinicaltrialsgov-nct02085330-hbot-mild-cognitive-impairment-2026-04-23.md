@@ -22,6 +22,10 @@ relations:
 source:
   kind: "web_page"
   title: "Hyperbaric Oxygen Therapy for Mild Cognitive Impairment"
+  authors: "ClinicalTrials.gov record"
+  year: 2014
+  journal: "ClinicalTrials.gov"
+  citation: "ClinicalTrials.gov record. Hyperbaric Oxygen Therapy for Mild Cognitive Impairment. ClinicalTrials.gov. 2014. https://clinicaltrials.gov/study/NCT02085330"
   url: "https://clinicaltrials.gov/study/NCT02085330"
 researchEvidence:
   designKind: "other"

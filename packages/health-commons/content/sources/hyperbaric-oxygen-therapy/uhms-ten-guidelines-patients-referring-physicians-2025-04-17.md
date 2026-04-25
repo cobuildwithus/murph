@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "Ten Guidelines for Patients and Referring Physicians In Selecting Safe Hyperbaric Oxygen Treatments"
+  authors: "Undersea and Hyperbaric Medical Society"
+  year: 2025
+  journal: "UHMS"
+  citation: "Undersea and Hyperbaric Medical Society. Ten Guidelines for Patients and Referring Physicians In Selecting Safe Hyperbaric Oxygen Treatments. UHMS. 2025. https://www.uhms.org/images/Safety-Articles/Hyperbaric%20Safety%20bullet%20%20v4.17.25%20Clean-u.pdf"
   url: "https://www.uhms.org/images/Safety-Articles/Hyperbaric%20Safety%20bullet%20%20v4.17.25%20Clean-u.pdf"
 researchEvidence:
   designKind: "guideline"

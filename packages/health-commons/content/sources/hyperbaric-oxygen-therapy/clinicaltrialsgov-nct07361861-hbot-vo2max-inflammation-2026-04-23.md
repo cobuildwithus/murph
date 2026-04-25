@@ -22,6 +22,10 @@ relations:
 source:
   kind: "web_page"
   title: "Evaluating Whether Hyperbaric Oxygen Therapy Can Improve VO₂-Max and Reduce Inflammation Markers in Healthy Adults Ages 30-60"
+  authors: "ClinicalTrials.gov record"
+  year: 2026
+  journal: "ClinicalTrials.gov"
+  citation: "ClinicalTrials.gov record. Evaluating Whether Hyperbaric Oxygen Therapy Can Improve VO₂-Max and Reduce Inflammation Markers in Healthy Adults Ages 30-60. ClinicalTrials.gov. 2026. https://clinicaltrials.gov/study/NCT07361861"
   url: "https://clinicaltrials.gov/study/NCT07361861"
 researchEvidence:
   designKind: "other"

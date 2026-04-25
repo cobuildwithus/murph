@@ -22,6 +22,10 @@ relations:
 source:
   kind: "web_page"
   title: "Hyperbaric Oxygen Therapy for Cognition in Diabetic Elderly at High Dementia Risk"
+  authors: "ClinicalTrials.gov record"
+  year: 2025
+  journal: "ClinicalTrials.gov"
+  citation: "ClinicalTrials.gov record. Hyperbaric Oxygen Therapy for Cognition in Diabetic Elderly at High Dementia Risk. ClinicalTrials.gov. 2025. https://clinicaltrials.gov/study/NCT03036254"
   url: "https://clinicaltrials.gov/study/NCT03036254"
 researchEvidence:
   designKind: "randomized_controlled_trial"

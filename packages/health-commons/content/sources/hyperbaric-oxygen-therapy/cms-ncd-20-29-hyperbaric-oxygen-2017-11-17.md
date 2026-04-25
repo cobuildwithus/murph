@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "National Coverage Determination (NCD) for Hyperbaric Oxygen Therapy (20.29)"
+  authors: "Centers for Medicare & Medicaid Services (CMS)"
+  year: 2017
+  journal: "Medicare Coverage Database"
+  citation: "Centers for Medicare & Medicaid Services (CMS). National Coverage Determination (NCD) for Hyperbaric Oxygen Therapy (20.29). Medicare Coverage Database. 2017. https://www.cms.gov/medicare-coverage-database/view/ncd.aspx?ncdid=12"
   url: "https://www.cms.gov/medicare-coverage-database/view/ncd.aspx?ncdid=12"
 researchEvidence:
   designKind: "guideline"

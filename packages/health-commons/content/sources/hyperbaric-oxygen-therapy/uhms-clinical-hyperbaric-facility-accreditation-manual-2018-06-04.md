@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "Clinical Hyperbaric Facility Accreditation Manual, Fourth Edition"
+  authors: "Undersea and Hyperbaric Medical Society"
+  year: 2018
+  journal: "UHMS"
+  citation: "Undersea and Hyperbaric Medical Society. Clinical Hyperbaric Facility Accreditation Manual, Fourth Edition. UHMS. 2018. https://www.uhms.org/images/Accreditation-Documents/Fourth_Edition_UHMS_Accreditation_Manual_Final_6-4-2018a.pdf"
   url: "https://www.uhms.org/images/Accreditation-Documents/Fourth_Edition_UHMS_Accreditation_Manual_Final_6-4-2018a.pdf"
 researchEvidence:
   designKind: "guideline"

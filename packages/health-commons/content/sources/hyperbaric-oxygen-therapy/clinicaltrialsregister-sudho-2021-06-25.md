@@ -22,6 +22,10 @@ relations:
 source:
   kind: "web_page"
   title: "Hyperbaric oxygen treatment added to standard care for acute idiopathic sudden sensorineural hearing loss - a multicentre randomized controlled trial (SuDHO)"
+  authors: "Helse-Bergen HF, Haukeland University Hospital"
+  year: 2021
+  journal: "European Union Clinical Trials Register"
+  citation: "Helse-Bergen HF, Haukeland University Hospital. Hyperbaric oxygen treatment added to standard care for acute idiopathic sudden sensorineural hearing loss - a multicentre randomized controlled trial (SuDHO). European Union Clinical Trials Register. 2021. https://www.clinicaltrialsregister.eu/ctr-search/trial/2021-002284-22/NO"
   url: "https://www.clinicaltrialsregister.eu/ctr-search/trial/2021-002284-22/NO"
 researchEvidence:
   designKind: "randomized_controlled_trial"

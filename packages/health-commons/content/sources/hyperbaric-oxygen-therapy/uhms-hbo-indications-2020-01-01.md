@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "HBO Indications (2020)"
+  authors: "Undersea and Hyperbaric Medical Society (UHMS)"
+  year: 2020
+  journal: "UHMS Featured Resources"
+  citation: "Undersea and Hyperbaric Medical Society (UHMS). HBO Indications (2020). UHMS Featured Resources. 2020. https://www.uhms.org/resources/featured-resources/hbo-indications.html"
   url: "https://www.uhms.org/resources/featured-resources/hbo-indications.html"
 researchEvidence:
   designKind: "guideline"
