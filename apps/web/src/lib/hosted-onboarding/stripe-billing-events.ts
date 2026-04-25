@@ -155,6 +155,7 @@ export async function applyStripeInvoicePaid(
     billingStatus: HostedBillingStatus.active,
     canonicalBillingStatus: resolvedCanonicalBillingStatus,
     dispatchContext,
+    freshnessPolicy: "positive-invoice-entitlement",
     member: preparedMember,
     stripeCustomerId:
       coerceStripeObjectId(invoice.customer)
