@@ -46,6 +46,15 @@ const assistantCliRouteEstimateValueOptions = new Set([
   '--waypoint',
   '--elevationSampleSpacingMeters',
 ])
+const assistantCliExperimentApplyOnboardingSensitiveValueOptions = new Set([
+  '--analysis-note',
+  '--context-note',
+  '--dose',
+  '--safety-note',
+  '--schedule',
+  '--setup-answer',
+  '--stop-condition',
+])
 
 export interface PreparedAssistantCliExecutionRequest {
   args: string[]
@@ -136,8 +145,18 @@ function normalizeAssistantCliRunArgs(args: readonly string[]): string[] {
 
 function redactAssistantCliArgv(args: readonly string[]): string[] {
   const redactedArgs = args.map((token) => redactAssistantCliArg(token))
+  const commandPath = readAssistantCliCommandPath(args)
 
-  if (readAssistantCliCommandPath(args) !== 'route estimate') {
+  if (commandPath === 'experiment apply-onboarding') {
+    return redactAssistantCliOptionValues({
+      args,
+      redactedArgs,
+      optionNames: assistantCliExperimentApplyOnboardingSensitiveValueOptions,
+      placeholder: '<REDACTED_EXPERIMENT_ONBOARDING_VALUE>',
+    })
+  }
+
+  if (commandPath !== 'route estimate') {
     return redactedArgs
   }
 
@@ -194,6 +213,41 @@ function redactAssistantCliArgv(args: readonly string[]): string[] {
   }
 
   return redactedArgs
+}
+
+function redactAssistantCliOptionValues(input: {
+  args: readonly string[]
+  optionNames: ReadonlySet<string>
+  placeholder: string
+  redactedArgs: string[]
+}): string[] {
+  for (let index = 0; index < input.args.length; index += 1) {
+    const token = input.args[index]
+    if (!token || token === '--') {
+      break
+    }
+
+    if (!token.startsWith('-')) {
+      continue
+    }
+
+    const optionToken = token.split('=', 1)[0] ?? token
+    if (!input.optionNames.has(optionToken)) {
+      continue
+    }
+
+    if (token.includes('=')) {
+      input.redactedArgs[index] = `${optionToken}=${input.placeholder}`
+      continue
+    }
+
+    if (index + 1 < input.args.length) {
+      input.redactedArgs[index + 1] = input.placeholder
+      index += 1
+    }
+  }
+
+  return input.redactedArgs
 }
 
 function redactAssistantCliArg(token: string): string {

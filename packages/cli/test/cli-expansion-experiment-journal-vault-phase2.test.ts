@@ -46,6 +46,27 @@ async function runSliceCli<TData>(
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
+async function runRawSliceCli(args: string[]): Promise<string> {
+  const cli = createSliceCli()
+  const output: string[] = []
+
+  await cli.serve(args, {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return output.join('').trim()
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  assert.equal(typeof value, 'object', `${label} must be an object`)
+  assert.ok(value && !Array.isArray(value), `${label} must be a non-array object`)
+  return value as Record<string, unknown>
+}
+
 async function rewriteVaultMetadataWithFormatVersion(
   vaultRoot: string,
   formatVersion: number,
@@ -55,6 +76,439 @@ async function rewriteVaultMetadataWithFormatVersion(
   metadata.formatVersion = formatVersion
   await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
 }
+
+test('experiment apply-onboarding schema exposes typed onboarding flags', async () => {
+  const schema = JSON.parse(
+    await runRawSliceCli([
+      'experiment',
+      'apply-onboarding',
+      '--schema',
+      '--format',
+      'json',
+    ]),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('id' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['id'])
+  assert.equal('input' in schema.options.properties, false)
+  assert.equal('protocolKey' in schema.options.properties, true)
+  assert.equal('pageRevisionId' in schema.options.properties, true)
+  assert.equal('runSpecRevisionId' in schema.options.properties, true)
+  assert.equal('baselineDays' in schema.options.properties, true)
+  assert.equal('interventionDays' in schema.options.properties, true)
+  assert.equal('schedule' in schema.options.properties, true)
+  assert.equal('dose' in schema.options.properties, true)
+  assert.equal('sessionField' in schema.options.properties, true)
+  assert.equal('setupAnswer' in schema.options.properties, true)
+  assert.equal('missedLogFollowup' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
+})
+
+test('experiment update schema exposes scalar fields instead of a hidden input payload', async () => {
+  const schema = JSON.parse(
+    await runRawSliceCli(['experiment', 'update', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('id' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['id'])
+  assert.equal('input' in schema.options.properties, false)
+  assert.equal('title' in schema.options.properties, true)
+  assert.equal('hypothesis' in schema.options.properties, true)
+  assert.equal('startedOn' in schema.options.properties, true)
+  assert.equal('status' in schema.options.properties, true)
+  assert.equal('body' in schema.options.properties, true)
+  assert.equal('tag' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
+})
+
+test('experiment onboarding llms discovery exposes apply flags and hides update input', async () => {
+  const applyDiscovery = await runRawSliceCli([
+    'experiment',
+    'apply-onboarding',
+    '--llms-full',
+  ])
+  const updateDiscovery = await runRawSliceCli(['experiment', 'update', '--llms-full'])
+
+  assert.match(applyDiscovery, /experiment apply-onboarding/u)
+  assert.match(applyDiscovery, /protocolKey/u)
+  assert.match(applyDiscovery, /pageRevisionId/u)
+  assert.match(applyDiscovery, /schedule/u)
+  assert.match(applyDiscovery, /dose/u)
+  assert.match(applyDiscovery, /setupAnswer/u)
+  assert.match(applyDiscovery, /missedLogFollowup/u)
+  assert.match(updateDiscovery, /experiment update/u)
+  assert.match(updateDiscovery, /title/u)
+  assert.match(updateDiscovery, /status/u)
+  assert.doesNotMatch(updateDiscovery, /input/u)
+})
+
+test.sequential(
+  'experiment apply-onboarding maps public run options into canonical frontmatter',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-onboarding-'))
+    const pageRevisionId = `sha256:${'a'.repeat(64)}`
+    const runSpecRevisionId = `sha256:${'b'.repeat(64)}`
+
+    try {
+      await runSliceCli([
+        'init',
+        '--vault',
+        vaultRoot,
+        '--timezone',
+        'America/Los_Angeles',
+      ])
+      const created = await runSliceCli<{
+        experimentId: string
+        slug: string
+      }>([
+        'experiment',
+        'create',
+        'sauna-daily',
+        '--title',
+        'Sauna Daily',
+        '--hypothesis',
+        'Dry sauna sessions improve overnight recovery.',
+        '--started-on',
+        '2026-05-01',
+        '--status',
+        'planned',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(created.ok, true)
+
+      const noOptions = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--vault',
+        vaultRoot,
+      ])
+      const statusOnly = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--status',
+        'active',
+        '--vault',
+        vaultRoot,
+      ])
+      const missingProtocolTriplet = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--protocol-key',
+        'protocol_variant:dry-sauna/finnish-standard-3x-week',
+        '--page-revision-id',
+        pageRevisionId,
+        '--vault',
+        vaultRoot,
+      ])
+      const invalidRevision = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--protocol-key',
+        'protocol_variant:dry-sauna/finnish-standard-3x-week',
+        '--page-revision-id',
+        'sha256:not-a-real-revision',
+        '--run-spec-revision-id',
+        runSpecRevisionId,
+        '--vault',
+        vaultRoot,
+      ])
+      const invalidProtocolKey = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--protocol-key',
+        'biomarker:resting-heart-rate',
+        '--page-revision-id',
+        pageRevisionId,
+        '--run-spec-revision-id',
+        runSpecRevisionId,
+        '--vault',
+        vaultRoot,
+      ])
+      const conflictingBaselineWindow = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--baseline-start',
+        '2026-05-01',
+        '--baseline-end',
+        '2026-05-10',
+        '--baseline-days',
+        '7',
+        '--vault',
+        vaultRoot,
+      ])
+      const confounderOnly = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--confounder-field',
+        'after_exercise',
+        '--vault',
+        vaultRoot,
+      ])
+      const applied = await runSliceCli<{
+        experimentId: string
+        slug: string
+        status: string
+      }>([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--status',
+        'active',
+        '--protocol-key',
+        'protocol_variant:dry-sauna/finnish-standard-3x-week',
+        '--page-revision-id',
+        pageRevisionId,
+        '--run-spec-revision-id',
+        runSpecRevisionId,
+        '--test-plan-id',
+        'resting-heart-rate-21d',
+        '--baseline-days',
+        '7',
+        '--intervention-start',
+        '2026-05-08',
+        '--intervention-days',
+        '14',
+        '--modality',
+        'dry_sauna',
+        '--schedule',
+        'Three evening sauna sessions per week.',
+        '--dose',
+        '20 minutes per session at a comfortable heat.',
+        '--sessions-per-week',
+        '3',
+        '--target-sessions',
+        '6',
+        '--minimum-useful-sessions',
+        '4',
+        '--session-field',
+        'duration_minutes',
+        '--session-field',
+        'timing',
+        '--confounder-field',
+        'after_exercise',
+        '--stop-condition',
+        'Stop for dizziness or chest pain.',
+        '--primary-biomarker-key',
+        'biomarker:resting-heart-rate',
+        '--secondary-biomarker-key',
+        'biomarker:sleep-efficiency',
+        '--desired-direction',
+        'decrease',
+        '--analysis-note',
+        'Compare the seven-day baseline to the intervention window.',
+        '--onboarding-completed-at',
+        '2026-04-30T15:00:00.000Z',
+        '--setup-answer',
+        'session_timing=Evening after training',
+        '--setup-answer',
+        'standalone_context=shift work, travel',
+        '--safety-caution-level',
+        'low',
+        '--safety-disposition',
+        'continue_with_caution',
+        '--positive-question-id',
+        'heat_intolerance',
+        '--safety-note',
+        'No contraindications reported.',
+        '--context-note',
+        'Keep training load stable where possible.',
+        '--reminder-policy',
+        'sauna_reminder_policy',
+        '--reminder-option-id',
+        'evening_reminder',
+        '--reminders-enabled',
+        '--check-in-cadence',
+        'daily',
+        '--notification-style',
+        'send_scheduled_summary',
+        '--missed-log-followup',
+        'default_on',
+        '--weekly-digest-enabled',
+        '--vault',
+        vaultRoot,
+      ])
+      const shown = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'experiment',
+        'show',
+        'sauna-daily',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(noOptions.ok, false)
+      assert.match(noOptions.error.message ?? '', /requires at least one/u)
+      assert.equal(statusOnly.ok, false)
+      assert.match(
+        statusOnly.error.message ?? '',
+        /Use experiment update for status-only changes/u,
+      )
+      assert.equal(missingProtocolTriplet.ok, false)
+      assert.match(
+        missingProtocolTriplet.error.message ?? '',
+        /requires --protocol-key, --page-revision-id, and --run-spec-revision-id/u,
+      )
+      assert.equal(invalidRevision.ok, false)
+      assert.match(
+        invalidRevision.error.message ?? '',
+        /sha256: followed by 64 lowercase hexadecimal characters|sha256:<64 lowercase hex>/u,
+      )
+      assert.equal(invalidProtocolKey.ok, false)
+      assert.match(invalidProtocolKey.error.message ?? '', /protocol_variant key/u)
+      assert.equal(conflictingBaselineWindow.ok, false)
+      assert.match(conflictingBaselineWindow.error.message ?? '', /conflicts with --baseline-days/u)
+      assert.equal(confounderOnly.ok, false)
+      assert.match(confounderOnly.error.message ?? '', /--confounder-field requires --session-field/u)
+
+      assert.equal(applied.ok, true)
+      assert.equal(applied.meta?.command, 'experiment apply-onboarding')
+      assert.equal(requireData(applied).status, 'active')
+      assert.equal(requireData(applied).experimentId, requireData(created).experimentId)
+      assert.equal(shown.ok, true)
+
+      const experimentData = requireData(shown).entity.data
+      assert.equal(experimentData.status, 'active')
+
+      const protocolRef = requireRecord(experimentData.protocolRef, 'protocolRef')
+      assert.deepEqual(protocolRef, {
+        key: 'protocol_variant:dry-sauna/finnish-standard-3x-week',
+        pageRevisionId,
+        runSpecRevisionId,
+        testPlanId: 'resting-heart-rate-21d',
+      })
+
+      const runPlan = requireRecord(experimentData.runPlan, 'runPlan')
+      assert.equal(runPlan.baselineStart, '2026-05-01')
+      assert.equal(runPlan.baselineEnd, '2026-05-07')
+      assert.equal(runPlan.interventionStart, '2026-05-08')
+      assert.equal(runPlan.interventionEnd, '2026-05-21')
+      assert.equal(runPlan.modality, 'dry_sauna')
+      assert.equal(runPlan.schedule, 'Three evening sauna sessions per week.')
+      assert.equal(runPlan.dose, '20 minutes per session at a comfortable heat.')
+      assert.equal(runPlan.sessionsPerWeek, 3)
+      assert.equal(runPlan.targetSessions, 6)
+      assert.equal(runPlan.minimumUsefulSessions, 4)
+      assert.equal('baselineDays' in runPlan, false)
+      assert.equal('interventionDays' in runPlan, false)
+      assert.deepEqual(runPlan.stopConditions, ['Stop for dizziness or chest pain.'])
+
+      const logging = requireRecord(runPlan.logging, 'runPlan.logging')
+      assert.deepEqual(logging.sessionFields, ['duration_minutes', 'timing'])
+      assert.deepEqual(logging.confounderFields, ['after_exercise'])
+
+      const analysisPlan = requireRecord(experimentData.analysisPlan, 'analysisPlan')
+      assert.equal(analysisPlan.primaryBiomarkerKey, 'biomarker:resting-heart-rate')
+      assert.deepEqual(analysisPlan.secondaryBiomarkerKeys, [
+        'biomarker:sleep-efficiency',
+      ])
+      assert.equal(analysisPlan.desiredDirection, 'decrease')
+      assert.deepEqual(analysisPlan.notes, [
+        'Compare the seven-day baseline to the intervention window.',
+      ])
+
+      const onboarding = requireRecord(experimentData.onboarding, 'onboarding')
+      assert.equal(onboarding.completedAt, '2026-04-30T15:00:00.000Z')
+      assert.deepEqual(onboarding.contextNotes, [
+        'Keep training load stable where possible.',
+      ])
+      const setupAnswers = requireRecord(onboarding.setupAnswers, 'onboarding.setupAnswers')
+      assert.equal(setupAnswers.session_timing, 'Evening after training')
+      assert.equal(setupAnswers.standalone_context, 'shift work, travel')
+      const safety = requireRecord(onboarding.safety, 'onboarding.safety')
+      assert.equal(safety.cautionLevel, 'low')
+      assert.equal(safety.disposition, 'continue_with_caution')
+      assert.deepEqual(safety.positiveQuestionIds, ['heat_intolerance'])
+      assert.deepEqual(safety.notes, ['No contraindications reported.'])
+
+      const assistantSupport = requireRecord(
+        experimentData.assistantSupport,
+        'assistantSupport',
+      )
+      assert.equal(assistantSupport.reminderPolicy, 'sauna_reminder_policy')
+      assert.equal(assistantSupport.reminderOptionId, 'evening_reminder')
+      assert.equal(assistantSupport.remindersEnabled, true)
+      assert.equal(assistantSupport.checkInCadence, 'daily')
+      assert.equal(assistantSupport.notificationStyle, 'send_scheduled_summary')
+      assert.equal(assistantSupport.missedLogFollowup, 'default_on')
+      assert.equal(assistantSupport.weeklyDigestEnabled, true)
+
+      const partialApply = await runSliceCli([
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--setup-answer',
+        'heat_source=infrared sauna',
+        '--missed-log-followup',
+        'opt_in_only',
+        '--vault',
+        vaultRoot,
+      ])
+      const shownAfterPartial = await runSliceCli<{
+        entity: {
+          data: Record<string, unknown>
+        }
+      }>([
+        'experiment',
+        'show',
+        'sauna-daily',
+        '--vault',
+        vaultRoot,
+      ])
+      const partialData = requireData(shownAfterPartial).entity.data
+      const partialProtocolRef = requireRecord(partialData.protocolRef, 'protocolRef')
+      const partialRunPlan = requireRecord(partialData.runPlan, 'runPlan')
+      const partialOnboarding = requireRecord(partialData.onboarding, 'onboarding')
+      const partialSetupAnswers = requireRecord(
+        partialOnboarding.setupAnswers,
+        'onboarding.setupAnswers',
+      )
+      const partialAssistantSupport = requireRecord(
+        partialData.assistantSupport,
+        'assistantSupport',
+      )
+
+      assert.equal(partialApply.ok, true)
+      assert.deepEqual(partialProtocolRef, protocolRef)
+      assert.equal(partialRunPlan.schedule, 'Three evening sauna sessions per week.')
+      assert.deepEqual(partialRunPlan.stopConditions, ['Stop for dizziness or chest pain.'])
+      assert.equal(partialSetupAnswers.session_timing, 'Evening after training')
+      assert.equal(partialSetupAnswers.heat_source, 'infrared sauna')
+      assert.equal(partialAssistantSupport.reminderOptionId, 'evening_reminder')
+      assert.equal(partialAssistantSupport.missedLogFollowup, 'opt_in_only')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
 
 test.sequential(
   'experiment context log can write a dedicated experiment_context event from simple context payloads',
@@ -216,7 +670,6 @@ test.sequential(
   'experiment update, checkpoint, and stop mutate the experiment page and append lifecycle events',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-phase2-'))
-    const updatePayloadPath = path.join(vaultRoot, 'experiment-update.json')
     const checkpointPayloadPath = path.join(vaultRoot, 'experiment-checkpoint.json')
 
     try {
@@ -244,18 +697,6 @@ test.sequential(
       assert.equal(created.ok, true)
 
       await writeFile(
-        updatePayloadPath,
-        JSON.stringify({
-          lookup: 'focus-sprint',
-          title: 'Focus Sprint Updated',
-          hypothesis: 'Walking after lunch improves the afternoon energy dip.',
-          status: 'paused',
-          body: '# Focus Sprint Updated\n\n## Plan\n\nKeep the walks short and consistent.\n',
-          tags: ['energy', 'walking'],
-        }),
-        'utf8',
-      )
-      await writeFile(
         checkpointPayloadPath,
         JSON.stringify({
           lookup: 'focus-sprint',
@@ -273,8 +714,19 @@ test.sequential(
       }>([
         'experiment',
         'update',
-        '--input',
-        `@${updatePayloadPath}`,
+        'focus-sprint',
+        '--title',
+        'Focus Sprint Updated',
+        '--hypothesis',
+        'Walking after lunch improves the afternoon energy dip.',
+        '--status',
+        'paused',
+        '--body',
+        '# Focus Sprint Updated\n\n## Plan\n\nKeep the walks short and consistent.\n',
+        '--tag',
+        'energy',
+        '--tag',
+        'walking',
         '--vault',
         vaultRoot,
       ])
@@ -397,10 +849,11 @@ test.sequential(
   'experiment session/context logging feeds deterministic progress and outcome analysis for the same run',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-analysis-'))
-    const updatePayloadPath = path.join(vaultRoot, 'experiment-analysis-update.json')
     const firstSessionPayloadPath = path.join(vaultRoot, 'experiment-session-1.json')
     const secondSessionPayloadPath = path.join(vaultRoot, 'experiment-session-2.json')
     const contextPayloadPath = path.join(vaultRoot, 'experiment-context.json')
+    const pageRevisionId = `sha256:${'c'.repeat(64)}`
+    const runSpecRevisionId = `sha256:${'d'.repeat(64)}`
 
     try {
       await runSliceCli([
@@ -428,37 +881,6 @@ test.sequential(
       ])
       assert.equal(created.ok, true)
 
-      await writeFile(
-        updatePayloadPath,
-        JSON.stringify({
-          lookup: 'focus-sprint',
-          hypothesis: 'Heat exposure and consistent timing reduce resting heart rate.',
-          protocolRef: {
-            key: 'protocol_variant:dry-sauna/finnish-standard-3x-week',
-            pageRevisionId: 'sha256:protocol-page',
-            runSpecRevisionId: 'sha256:run-spec',
-            testPlanId: 'resting-heart-rate-21d',
-          },
-          runPlan: {
-            baselineStart: '2026-04-01',
-            baselineEnd: '2026-04-07',
-            interventionStart: '2026-04-08',
-            interventionEnd: '2026-04-21',
-            modality: 'sauna',
-            targetSessions: 4,
-            minimumUsefulSessions: 3,
-          },
-          analysisPlan: {
-            primaryBiomarkerKey: 'biomarker:resting-heart-rate',
-            desiredDirection: 'decrease',
-          },
-          assistantSupport: {
-            remindersEnabled: true,
-            weeklyDigestEnabled: false,
-          },
-        }),
-        'utf8',
-      )
       await writeFile(
         firstSessionPayloadPath,
         JSON.stringify({
@@ -502,9 +924,35 @@ test.sequential(
         status: string
       }>([
         'experiment',
-        'update',
-        '--input',
-        `@${updatePayloadPath}`,
+        'apply-onboarding',
+        'focus-sprint',
+        '--protocol-key',
+        'protocol_variant:dry-sauna/finnish-standard-3x-week',
+        '--page-revision-id',
+        pageRevisionId,
+        '--run-spec-revision-id',
+        runSpecRevisionId,
+        '--test-plan-id',
+        'resting-heart-rate-21d',
+        '--baseline-start',
+        '2026-04-01',
+        '--baseline-end',
+        '2026-04-07',
+        '--intervention-start',
+        '2026-04-08',
+        '--intervention-end',
+        '2026-04-21',
+        '--modality',
+        'sauna',
+        '--target-sessions',
+        '4',
+        '--minimum-useful-sessions',
+        '3',
+        '--primary-biomarker-key',
+        'biomarker:resting-heart-rate',
+        '--desired-direction',
+        'decrease',
+        '--reminders-enabled',
         '--vault',
         vaultRoot,
       ])
@@ -744,7 +1192,7 @@ test.sequential(
       ])
 
       assert.equal(updated.ok, true)
-      assert.equal(updated.meta?.command, 'experiment update')
+      assert.equal(updated.meta?.command, 'experiment apply-onboarding')
 
       assert.equal(sessionBySlug.ok, true)
       assert.equal(sessionBySlug.meta?.command, 'experiment session log')

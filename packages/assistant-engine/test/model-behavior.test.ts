@@ -88,3 +88,33 @@ describe('assistant GPT-5 execution prompt overlay', () => {
     expect(text).not.toContain('GPT-5 execution bias:')
   })
 })
+
+describe('assistant experiment onboarding guidance', () => {
+  it('points richer experiment setup at the typed apply-onboarding command', () => {
+    const prompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      allowSensitiveHealthContext: true,
+      assistantCommandAccessMode: 'bound-tools',
+      assistantHealthCommonsAccessMode: 'bound-tools',
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: true,
+      channel: 'telegram',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      currentLocalDate: '2026-04-15',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+      onboardingGuidance: false,
+      modelBehaviorProfile: 'gpt5-agentic',
+      turnTrigger: null,
+      vaultOverview: null,
+    })
+
+    expect(prompt).toContain('vault-cli experiment apply-onboarding <id>')
+    expect(prompt).toContain('vault-cli experiment apply-onboarding --schema --format json')
+    expect(prompt).toContain('accepted scalar flags')
+    expect(prompt).not.toContain('scaffold and update the experiment record')
+  })
+})

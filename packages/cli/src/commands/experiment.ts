@@ -1,5 +1,8 @@
 import {
   EXPERIMENT_STATUSES,
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
   experimentOutcomeSchema,
   experimentProgressSnapshotSchema,
 } from '@murphai/contracts'
@@ -14,6 +17,7 @@ import {
 } from '@murphai/vault-usecases'
 import {
   experimentCreateResultSchema,
+  isoTimestampSchema,
   listEntitySchema,
   localDateSchema,
   pathSchema,
@@ -21,13 +25,48 @@ import {
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 import { commonListLimitOptionSchema } from './command-factory-primitives.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
+const experimentSignalDirectionSchema = z.enum(['increase', 'decrease', 'stabilize'])
+const experimentCheckInCadenceSchema = z.enum(['none', 'daily', 'every_3_days', 'weekly'])
+const experimentNotificationStyleSchema = z.enum([
+  'skip_by_default',
+  'send_scheduled_summary',
+])
+const experimentSafetyCautionLevelSchema = z.enum(
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
+)
+const experimentSafetyDispositionSchema = z.enum(
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
+)
+const experimentMissedLogFollowupSchema = z.enum(
+  HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
+)
+const sha256RevisionOptionSchema = z
+  .string()
+  .regex(
+    /^sha256:[a-f0-9]{64}$/u,
+    'Expected sha256: followed by 64 lowercase hexadecimal characters.',
+  )
+  .describe('Content revision id in sha256:<64 lowercase hex> form.')
 const experimentLookupArgSchema = z.object({
   id: z.string().min(1).describe('Experiment id or slug to resolve.'),
 })
+
+const repeatableTextOptionSchema = (description: string) =>
+  z.array(z.string().min(1)).optional().describe(description)
+
+function normalizeSetupAnswerOptions(value: readonly string[] | undefined) {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const entries = value.map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+  return entries.length > 0 ? entries : undefined
+}
 
 const experimentListResultSchema = z.object({
   vault: pathSchema,
@@ -163,17 +202,247 @@ export function registerExperimentCommands(
   })
 
   experiment.command('update', {
-    description: 'Update one experiment frontmatter/body payload from a JSON payload file or stdin.',
-    args: z.object({}),
+    description: 'Update simple scalar experiment fields by id or slug.',
+    args: experimentLookupArgSchema,
     options: withBaseOptions({
-      input: inputFileOptionSchema,
+      title: z.string().min(1).optional().describe('Optional human-readable title.'),
+      hypothesis: z.string().min(1).optional().describe('Optional experiment hypothesis.'),
+      startedOn: localDateSchema.optional().describe('Optional experiment start date.'),
+      status: experimentStatusSchema.optional().describe('Optional experiment status.'),
+      body: z.string().min(1).optional().describe('Optional replacement markdown body.'),
+      tag: z
+        .array(slugSchema)
+        .optional()
+        .describe('Optional tags to store on the experiment. Repeat --tag for multiple values.'),
     }),
     output: experimentUpdateResultSchema,
-    async run({ options }) {
+    async run({ args, options }) {
       return services.core.updateExperiment({
         vault: String(options.vault ?? ''),
         requestId: requestIdFromOptions(options),
-        inputFile: normalizeInputFileOption(String(options.input ?? '')),
+        lookup: args.id,
+        title: options.title,
+        hypothesis: options.hypothesis,
+        startedOn: options.startedOn,
+        status: options.status,
+        body: options.body,
+        tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
+      })
+    },
+  })
+
+  experiment.command('apply-onboarding', {
+    description:
+      'Apply schema-discoverable protocol onboarding fields to an existing experiment.',
+    args: experimentLookupArgSchema,
+    options: withBaseOptions({
+      status: experimentStatusSchema
+        .optional()
+        .describe('Optional lifecycle status to set on the experiment.'),
+      protocolKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Health Commons protocol variant key to store under protocolRef.key.'),
+      pageRevisionId: sha256RevisionOptionSchema
+        .optional()
+        .describe('Protocol page content revision id in sha256:<64 lowercase hex> form.'),
+      runSpecRevisionId: sha256RevisionOptionSchema
+        .optional()
+        .describe('Protocol run spec revision id in sha256:<64 lowercase hex> form.'),
+      testPlanId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Chosen Health Commons test plan id for this run.'),
+      baselineStart: localDateSchema
+        .optional()
+        .describe('Canonical baseline window start date.'),
+      baselineEnd: localDateSchema.optional().describe('Canonical baseline window end date.'),
+      baselineDays: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe(
+          'Baseline length in days; requires baseline-start, baseline-end, or intervention-start.',
+        ),
+      interventionStart: localDateSchema
+        .optional()
+        .describe('Canonical intervention window start date.'),
+      interventionEnd: localDateSchema
+        .optional()
+        .describe('Canonical intervention window end date.'),
+      interventionDays: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Intervention length in days; requires intervention-start, intervention-end, or a baseline window.',
+        ),
+      modality: z.string().min(1).optional().describe('Intervention modality label.'),
+      schedule: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Plain-language schedule string for the run plan.'),
+      dose: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Plain-language dose string for the run plan.'),
+      sessionsPerWeek: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe('Planned sessions per week for adherence calculations.'),
+      targetSessions: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe('Target session count across the intervention window.'),
+      minimumUsefulSessions: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe('Minimum useful session count for interpreting the run.'),
+      sessionField: repeatableTextOptionSchema(
+        'Logging session field ids. Repeat --session-field for multiple values.',
+      ),
+      confounderField: repeatableTextOptionSchema(
+        'Logging confounder field ids. Repeat --confounder-field for multiple values.',
+      ),
+      stopCondition: repeatableTextOptionSchema(
+        'Stop condition text. Repeat --stop-condition for multiple values.',
+      ),
+      primaryBiomarkerKey: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Primary Health Commons biomarker key for the analysis plan.'),
+      secondaryBiomarkerKey: repeatableTextOptionSchema(
+        'Secondary Health Commons biomarker keys. Repeat --secondary-biomarker-key for multiple values.',
+      ),
+      desiredDirection: experimentSignalDirectionSchema
+        .optional()
+        .describe('Expected direction for the primary biomarker.'),
+      analysisNote: repeatableTextOptionSchema(
+        'Analysis plan note. Repeat --analysis-note for multiple values.',
+      ),
+      onboardingCompletedAt: isoTimestampSchema
+        .optional()
+        .describe('Timestamp when the protocol onboarding capture completed.'),
+      setupAnswer: repeatableTextOptionSchema(
+        'Setup answer as key=value. Repeat --setup-answer for multiple setup slots.',
+      ),
+      safetyCautionLevel: experimentSafetyCautionLevelSchema
+        .optional()
+        .describe('Onboarding safety caution level.'),
+      safetyDisposition: experimentSafetyDispositionSchema
+        .optional()
+        .describe('Onboarding safety disposition.'),
+      positiveQuestionId: repeatableTextOptionSchema(
+        'Positive safety question ids. Repeat --positive-question-id for multiple values.',
+      ),
+      safetyNote: repeatableTextOptionSchema(
+        'Safety note. Repeat --safety-note for multiple values.',
+      ),
+      contextNote: repeatableTextOptionSchema(
+        'Context note from onboarding. Repeat --context-note for multiple values.',
+      ),
+      reminderPolicy: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Reminder policy id selected during onboarding.'),
+      reminderOptionId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Reminder option id selected during onboarding.'),
+      remindersEnabled: z
+        .boolean()
+        .optional()
+        .describe('Whether assistant reminders are enabled for the run.'),
+      checkInCadence: experimentCheckInCadenceSchema
+        .optional()
+        .describe('Assistant check-in cadence for the run.'),
+      notificationStyle: experimentNotificationStyleSchema
+        .optional()
+        .describe('Assistant notification style for the run.'),
+      missedLogFollowup: experimentMissedLogFollowupSchema
+        .optional()
+        .describe('Assistant follow-up policy for missed logs.'),
+      weeklyDigestEnabled: z
+        .boolean()
+        .optional()
+        .describe('Whether weekly assistant digests are enabled for the run.'),
+    }),
+    output: experimentUpdateResultSchema,
+    async run({ args, options }) {
+      return services.core.applyExperimentOnboarding({
+        vault: String(options.vault ?? ''),
+        requestId: requestIdFromOptions(options),
+        lookup: args.id,
+        status: options.status,
+        protocolKey: options.protocolKey,
+        pageRevisionId: options.pageRevisionId,
+        runSpecRevisionId: options.runSpecRevisionId,
+        testPlanId: options.testPlanId,
+        baselineStart: options.baselineStart,
+        baselineEnd: options.baselineEnd,
+        baselineDays: options.baselineDays,
+        interventionStart: options.interventionStart,
+        interventionEnd: options.interventionEnd,
+        interventionDays: options.interventionDays,
+        modality: options.modality,
+        schedule: options.schedule,
+        dose: options.dose,
+        sessionsPerWeek: options.sessionsPerWeek,
+        targetSessions: options.targetSessions,
+        minimumUsefulSessions: options.minimumUsefulSessions,
+        sessionField: normalizeRepeatableFlagOption(
+          options.sessionField,
+          'session-field',
+        ),
+        confounderField: normalizeRepeatableFlagOption(
+          options.confounderField,
+          'confounder-field',
+        ),
+        stopCondition: normalizeRepeatableFlagOption(
+          options.stopCondition,
+          'stop-condition',
+        ),
+        primaryBiomarkerKey: options.primaryBiomarkerKey,
+        secondaryBiomarkerKey: normalizeRepeatableFlagOption(
+          options.secondaryBiomarkerKey,
+          'secondary-biomarker-key',
+        ),
+        desiredDirection: options.desiredDirection,
+        analysisNote: normalizeRepeatableFlagOption(
+          options.analysisNote,
+          'analysis-note',
+        ),
+        onboardingCompletedAt: options.onboardingCompletedAt,
+        setupAnswer: normalizeSetupAnswerOptions(options.setupAnswer),
+        safetyCautionLevel: options.safetyCautionLevel,
+        safetyDisposition: options.safetyDisposition,
+        positiveQuestionId: normalizeRepeatableFlagOption(
+          options.positiveQuestionId,
+          'positive-question-id',
+        ),
+        safetyNote: normalizeRepeatableFlagOption(options.safetyNote, 'safety-note'),
+        contextNote: normalizeRepeatableFlagOption(options.contextNote, 'context-note'),
+        reminderPolicy: options.reminderPolicy,
+        reminderOptionId: options.reminderOptionId,
+        remindersEnabled: options.remindersEnabled,
+        checkInCadence: options.checkInCadence,
+        notificationStyle: options.notificationStyle,
+        missedLogFollowup: options.missedLogFollowup,
+        weeklyDigestEnabled: options.weeklyDigestEnabled,
       })
     },
   })

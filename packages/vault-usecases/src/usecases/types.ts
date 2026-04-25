@@ -562,7 +562,59 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   ): Promise<ExperimentCreateResult>
   updateExperiment(
     input: CommandContext & {
-      inputFile: string
+      lookup: string
+      title?: string
+      hypothesis?: string
+      startedOn?: string
+      status?: ExperimentStatus
+      body?: string
+      tags?: readonly string[]
+    },
+  ): Promise<ExperimentUpdateResult>
+  applyExperimentOnboarding(
+    input: CommandContext & {
+      lookup: string
+      status?: ExperimentStatus
+      protocolKey?: string
+      pageRevisionId?: string
+      runSpecRevisionId?: string
+      testPlanId?: string
+      baselineStart?: string
+      baselineEnd?: string
+      baselineDays?: number
+      interventionStart?: string
+      interventionEnd?: string
+      interventionDays?: number
+      modality?: string
+      schedule?: string
+      dose?: string
+      sessionsPerWeek?: number
+      targetSessions?: number
+      minimumUsefulSessions?: number
+      sessionField?: readonly string[]
+      confounderField?: readonly string[]
+      stopCondition?: readonly string[]
+      primaryBiomarkerKey?: string
+      secondaryBiomarkerKey?: readonly string[]
+      desiredDirection?: "increase" | "decrease" | "stabilize"
+      analysisNote?: readonly string[]
+      onboardingCompletedAt?: string
+      setupAnswer?: readonly string[]
+      safetyCautionLevel?: "low" | "moderate" | "high" | "unknown"
+      safetyDisposition?:
+        | "continue_with_caution"
+        | "clinician_guidance_before_unsupervised_start"
+        | "do_not_start_unsupervised"
+      positiveQuestionId?: readonly string[]
+      safetyNote?: readonly string[]
+      contextNote?: readonly string[]
+      reminderPolicy?: string
+      reminderOptionId?: string
+      remindersEnabled?: boolean
+      checkInCadence?: "none" | "daily" | "every_3_days" | "weekly"
+      notificationStyle?: "skip_by_default" | "send_scheduled_summary"
+      missedLogFollowup?: "never" | "opt_in_only" | "default_on"
+      weeklyDigestEnabled?: boolean
     },
   ): Promise<ExperimentUpdateResult>
   checkpointExperiment(

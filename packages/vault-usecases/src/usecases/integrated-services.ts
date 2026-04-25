@@ -83,6 +83,7 @@ import {
 } from "./recipe.js"
 
 import {
+  applyExperimentOnboardingRecord,
   analyzeExperimentOutcomeRecord,
   appendJournalText,
   checkpointExperimentRecordFromInput,
@@ -96,7 +97,7 @@ import {
   showVaultStats as showVaultStatsUseCase,
   showVaultSummary as showVaultSummaryUseCase,
   stopExperimentRecord,
-  updateExperimentRecordFromInput,
+  updateExperimentRecord,
   updateVaultSummary,
   writeExperimentOutcomeRecord,
   createExperimentRecord,
@@ -273,10 +274,14 @@ function createIntegratedCoreServices(
     }) {
       return createExperimentRecord(input)
     },
-    async updateExperiment(input: CommandContext & {
-      inputFile: string
-    }) {
-      return updateExperimentRecordFromInput(input)
+    async updateExperiment(input) {
+      return updateExperimentRecord({
+        ...input,
+        tags: input.tags === undefined ? undefined : [...input.tags],
+      })
+    },
+    async applyExperimentOnboarding(input) {
+      return applyExperimentOnboardingRecord(input)
     },
     async checkpointExperiment(input: CommandContext & {
       inputFile: string
