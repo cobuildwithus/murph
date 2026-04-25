@@ -86,6 +86,7 @@ export const inboxModelTextFragmentSchema = z.object({
     'capture_text',
     'attachment_metadata',
     'attachment_extracted_text',
+    'attachment_tabular_summary',
     'attachment_transcript',
     'derived_plain_text',
     'derived_markdown',
