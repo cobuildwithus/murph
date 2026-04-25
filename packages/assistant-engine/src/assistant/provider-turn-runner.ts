@@ -31,6 +31,10 @@ import { resolveOpenAiCompatibleVercelStripeBillingHeaders } from './providers/o
 import {
   resolveAssistantRouteUserMessageContent,
 } from './rich-content-routing.js'
+import { appendAssistantTranscriptEntries } from './store.js'
+import {
+  buildAssistantProviderTranscriptAuditEntries,
+} from './transcript-audit.js'
 import {
   createAssistantUsageAttribution,
   resolveAssistantUsageEnvironment,
@@ -402,6 +406,15 @@ async function executeAssistantProviderAttempt(input: {
     })
     const session = recoveredSession ?? attemptPlan.session
     attachRecoveredAssistantSession(error, recoveredSession)
+    void appendAssistantTranscriptEntries(
+      executionPlan.input.vault,
+      session.sessionId,
+      buildAssistantProviderTranscriptAuditEntries({
+        error,
+        rawToolEvents: attemptMetadata.rawToolEvents,
+        routeLabel: attemptPlan.route.label,
+      }),
+    ).catch(() => undefined)
 
     const nextFailoverState = await recordAssistantFailoverRouteFailure({
       error,

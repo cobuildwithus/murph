@@ -55,6 +55,9 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
+  formatAssistantTranscriptAuditForReplay,
+} from '../transcript-audit.js'
+import {
   buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt,
   type AssistantHealthCommonsAccessMode,
@@ -655,24 +658,74 @@ export async function loadAssistantConversationMessages(input: {
     input.sessionId,
   )
 
-  return transcript
-    .slice(-input.limit)
-    .flatMap((entry) =>
-      isAssistantConversationTranscriptEntry(entry)
-        ? [{
-            role: entry.kind,
-            content: entry.text,
-          }]
-        : [],
-    )
+  return selectAssistantReplayMessages(transcript, input.limit)
 }
 
-function isAssistantConversationTranscriptEntry(entry: {
+export function selectAssistantReplayMessages(
+  entries: readonly {
+    createdAt?: string | null
+    kind: string
+    text: string
+  }[],
+  limit: number,
+): Array<{
+  content: string
+  role: 'assistant' | 'user'
+}> {
+  const replayLimit =
+    typeof limit === 'number' && Number.isFinite(limit)
+      ? Math.max(0, Math.trunc(limit))
+      : 0
+  if (replayLimit === 0) {
+    return []
+  }
+
+  const replayMessages: Array<{
+    content: string
+    role: 'assistant' | 'user'
+  }> = []
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const message = toAssistantReplayMessage(entries[index])
+    if (!message) {
+      continue
+    }
+    replayMessages.unshift(message)
+    if (replayMessages.length >= replayLimit) {
+      break
+    }
+  }
+
+  return replayMessages
+}
+
+function toAssistantReplayMessage(entry: {
+  createdAt?: string | null
   kind: string
   text: string
-}): entry is {
-  kind: 'assistant' | 'user'
-  text: string
-} {
-  return entry.kind === 'assistant' || entry.kind === 'user'
+} | undefined): {
+  content: string
+  role: 'assistant' | 'user'
+} | null {
+  if (!entry) {
+    return null
+  }
+  if (entry.kind === 'assistant' || entry.kind === 'user') {
+    return {
+      role: entry.kind,
+      content: entry.text,
+    }
+  }
+  if (entry.kind === 'error' || entry.kind === 'status') {
+    const auditContent = formatAssistantTranscriptAuditForReplay(entry)
+    if (!auditContent) {
+      return null
+    }
+
+    return {
+      role: 'user',
+      content: auditContent,
+    }
+  }
+
+  return null
 }
