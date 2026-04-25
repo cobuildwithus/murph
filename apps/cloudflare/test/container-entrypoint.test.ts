@@ -103,6 +103,45 @@ async function sendHostedContainerJsonRequest(input: {
   });
 }
 
+async function sendHostedContainerChunkedRequest(input: {
+  authorization?: string;
+  chunks: string[];
+  path: string;
+  port: number;
+}): Promise<{ json: unknown; status: number }> {
+  return await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      headers: {
+        ...(input.authorization ? { authorization: input.authorization } : {}),
+        "connection": "close",
+        "content-type": "application/json; charset=utf-8",
+      },
+      host: "127.0.0.1",
+      method: "POST",
+      path: input.path,
+      port: input.port,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        const bodyText = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          json: bodyText.length > 0 ? JSON.parse(bodyText) : null,
+          status: response.statusCode ?? 0,
+        });
+      });
+    });
+
+    request.on("error", reject);
+    for (const chunk of input.chunks) {
+      request.write(chunk);
+    }
+    request.end();
+  });
+}
+
 function buildJobBody(input: {
   wake: {
     event: Record<string, unknown>;
@@ -411,6 +450,47 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(413);
     await expect(response.json()).resolves.toEqual({
+      code: "request_body_too_large",
+      error: "Request body too large.",
+    });
+    expect(runnerSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects chunked oversized run requests while streaming without content-length", async () => {
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
+      finalGatewayProjectionSnapshot: null,
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
+      },
+    });
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerChunkedRequest({
+      authorization: "Bearer runner-token",
+      chunks: [
+        " ".repeat(hostedContainerRunRequestBodyLimitBytes),
+        " ",
+      ],
+      path: "/internal/run",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(413);
+    expect(response.json).toEqual({
       code: "request_body_too_large",
       error: "Request body too large.",
     });
