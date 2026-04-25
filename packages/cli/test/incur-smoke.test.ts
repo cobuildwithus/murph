@@ -84,8 +84,8 @@ async function runBuiltJsonCliFromCwd<TData = Record<string, unknown>>(
 function withMachineJsonOutput(args: string[]): string[] {
   const nextArgs = [...args]
 
-  if (!nextArgs.includes('--verbose')) {
-    nextArgs.push('--verbose')
+  if (!nextArgs.includes('--full-output')) {
+    nextArgs.push('--full-output')
   }
 
   if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
@@ -128,7 +128,7 @@ async function runJsonCli<TData>(
   const output: string[] = []
   let exitCode: number | null = null
 
-  await cli.serve([...args, '--format', 'json', '--verbose'], {
+  await cli.serve([...args, '--format', 'json', '--full-output'], {
     env: process.env,
     exit(code) {
       exitCode = code
@@ -163,11 +163,11 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
   assert.match(help, /mcp add\s+Register as MCP server/u)
-  assert.match(help, /skills add\s+Sync skill files to agents/u)
+  assert.match(help, /skills\s+Sync skill files to agents \(add, list\)/u)
   assert.match(help, /--config/u)
   assert.match(help, /--no-config/u)
   assert.match(help, /--schema\s+Show JSON Schema for command/u)
-  assert.match(help, /--verbose\s+Show full output envelope/u)
+  assert.match(help, /--full-output\s+Show full output envelope/u)
   assert.match(help, /--llms, --llms-full\s+Print LLM-readable manifest/u)
 })
 

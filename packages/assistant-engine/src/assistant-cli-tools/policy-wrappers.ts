@@ -29,7 +29,7 @@ const assistantCliRootFlags = new Set([
   '--no-config',
   '--schema',
   '--token-count',
-  '--verbose',
+  '--full-output',
   '--version',
 ])
 const assistantCliRootOptionsWithValues = new Set([

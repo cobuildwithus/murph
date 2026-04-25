@@ -484,7 +484,7 @@ test('interactive onboarding treats public URL guidance as informational and nev
   })
 
   try {
-    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--full-output'], {
       env: process.env,
       exit: () => {},
       stdout() {},
@@ -832,7 +832,7 @@ async function runSetupCli<TData>(
   })
   const output: string[] = []
 
-  await cli.serve([...args, '--verbose', '--format', 'json'], {
+  await cli.serve([...args, '--full-output', '--format', 'json'], {
     env: process.env,
     exit: () => {},
     stdout(chunk) {
@@ -1178,7 +1178,7 @@ test.sequential('onboard CLI reports successful setup metadata for post-setup ch
     } as ReturnType<typeof createSetupServices>,
   })
 
-  await cli.serve(['onboard', '--format', 'json', '--verbose'], {
+  await cli.serve(['onboard', '--format', 'json', '--full-output'], {
     env: process.env,
     exit: () => {},
     stdout() {},
@@ -1213,7 +1213,7 @@ test.sequential('onboard CLI does not report a handoff for dry-run setup', async
     } as ReturnType<typeof createSetupServices>,
   })
 
-  await cli.serve(['onboard', '--dryRun', '--format', 'json', '--verbose'], {
+  await cli.serve(['onboard', '--dryRun', '--format', 'json', '--full-output'], {
     env: process.env,
     exit: () => {},
     stdout() {},
@@ -1321,7 +1321,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   })
 
   try {
-    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'json', '--verbose'], {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'json', '--full-output'], {
       env: process.env,
       exit: () => {},
       stdout() {},
@@ -1332,7 +1332,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
     assert.deepEqual(receivedScheduledUpdates[0], null)
     assert.deepEqual(receivedWearables[0], null)
 
-    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--full-output'], {
       env: process.env,
       exit: () => {},
       stdout() {},
@@ -1394,7 +1394,7 @@ test('interactive onboarding on Linux starts with no default chat channels', asy
   })
 
   try {
-    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--full-output'], {
       env: process.env,
       exit: () => {},
       stdout() {},
@@ -1568,7 +1568,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
   })
 
   try {
-    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--full-output'], {
       env: process.env,
       exit: () => {},
       stdout() {},
@@ -1741,7 +1741,7 @@ test('interactive onboarding carries assistant API key defaults from the wizard 
   })
 
   try {
-    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--full-output'], {
       env: process.env,
       exit: () => {},
       stdout() {},
@@ -1874,7 +1874,7 @@ test('interactive onboarding clears stale assistant endpoint defaults when the w
         vaultRoot,
         '--format',
         'toon',
-        '--verbose',
+        '--full-output',
         '--assistantBaseUrl',
         'https://api.openai.com/v1',
         '--assistantApiKeyEnv',
@@ -2047,7 +2047,7 @@ test('onboard resolves assistant defaults from explicit assistant options when t
       'OLLAMA_API_KEY',
       '--format',
       'json',
-      '--verbose',
+      '--full-output',
     ],
     {
       env: process.env,
@@ -3482,7 +3482,7 @@ test('setup routing helpers recognize murph onboarding and active-vault selectio
   assert.equal(isSetupInvocation([], 'murph'), true)
   assert.equal(isSetupInvocation(['--help'], 'murph'), true)
   assert.equal(isSetupInvocation(['use', './vault'], 'murph'), true)
-  assert.equal(isSetupInvocation(['--verbose', '--format', 'json'], 'murph'), true)
+  assert.equal(isSetupInvocation(['--full-output', '--format', 'json'], 'murph'), true)
   assert.equal(
     isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'murph'),
     false,

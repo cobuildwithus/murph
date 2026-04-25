@@ -98,8 +98,8 @@ When that fast path applies:
 
 ## Incur-Backed CLI Guardrails
 
-- Model nested CLI verbs with real incur router groups. Do not use argv rewrites or synthetic action args to mimic nested commands, because `--schema`, `--llms`, `skills add`, and command-map typegen only stay truthful when the router tree itself is truthful.
-- Treat incur-owned transport and discovery features as framework behavior: `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Command-surface docs should describe Murph semantics and payloads, not restate incur defaults command-by-command unless the repo is deliberately constraining them.
+- Model nested CLI verbs with real incur router groups. Do not use argv rewrites or synthetic action args to mimic nested commands, because `--schema`, `--llms`, `skills add/list`, and command-map typegen only stay truthful when the router tree itself is truthful.
+- Treat incur-owned transport and discovery features as framework behavior: `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Command-surface docs should describe Murph semantics and payloads, not restate incur defaults command-by-command unless the repo is deliberately constraining them.
 - Keep `packages/cli/src/index.ts` default-exporting the root CLI and refresh `packages/cli/src/incur.generated.ts` whenever command topology changes. If `incur gen` is blocked by an unrelated build failure, record that explicitly in the handoff instead of silently leaving stale generated types.
 - `packages/cli/test/cli-test-helpers.ts` executes `packages/cli/dist/bin.js`, so source checks like `pnpm exec tsx packages/cli/src/bin.ts ...` are only a diagnostic shortcut. Final verification still needs the built CLI path or a clearly documented unrelated blocker.
 

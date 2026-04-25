@@ -1625,7 +1625,7 @@ async function runRegisteredCliJson<TData>(
   const output: string[] = []
   let exitCode: number | null = null
 
-  await cli.serve([...args, '--format', 'json', '--verbose'], {
+  await cli.serve([...args, '--format', 'json', '--full-output'], {
     env: process.env,
     exit(code) {
       exitCode = code

@@ -111,7 +111,7 @@ async function runInProcessInboxCli<TData>(
   const cli = createVaultCli(createUnwiredVaultServices(), inboxServices)
   const output: string[] = []
 
-  await cli.serve([...args, '--verbose', '--format', 'json'], {
+  await cli.serve([...args, '--full-output', '--format', 'json'], {
     env: process.env,
     exit: () => {},
     stdout(chunk) {

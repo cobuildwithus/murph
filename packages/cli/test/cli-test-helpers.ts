@@ -374,7 +374,7 @@ export async function runInProcessJsonCli<TData = Record<string, unknown>>(
   const output: string[] = []
   let exitCode: number | null = null
 
-  await cli.serve([...args, '--format', 'json', '--verbose'], {
+  await cli.serve([...args, '--format', 'json', '--full-output'], {
     env: options?.env ?? process.env,
     exit(code) {
       exitCode = code
@@ -503,8 +503,8 @@ function decodeCommandOutput(output: Buffer | string | undefined): string | null
 function withMachineOutput(args: string[]): string[] {
   const nextArgs = [...args]
 
-  if (!nextArgs.includes('--verbose')) {
-    nextArgs.push('--verbose')
+  if (!nextArgs.includes('--full-output')) {
+    nextArgs.push('--full-output')
   }
 
   if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
