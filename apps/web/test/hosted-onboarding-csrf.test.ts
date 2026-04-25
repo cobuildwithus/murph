@@ -148,6 +148,7 @@ function createHostedOnboardingEnvironment(
     linqApiBaseUrl: "https://linq.example.test",
     linqApiToken: null,
     linqConversationPhoneNumbers: [],
+    linqIngressTypingDiagnosticBurstDelaysMs: [0],
     linqIngressTypingDiagnosticEnabled: false,
     linqIngressTypingDiagnosticTimeoutMs: 750,
     linqMaxActiveMembersPerConversationPhone: null,

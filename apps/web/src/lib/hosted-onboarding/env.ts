@@ -15,6 +15,9 @@ import {
 import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_CONTACT_PRIVACY_VERSION_PATTERN = /^v[0-9]+$/u;
+const DEFAULT_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS = [0] as const;
+const MAX_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_ATTEMPTS = 8;
+const MAX_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAY_MS = 30_000;
 
 export interface HostedContactPrivacyKeyring {
   currentVersion: string;
@@ -30,6 +33,7 @@ export interface HostedOnboardingEnvironment {
   linqApiBaseUrl: string;
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
+  linqIngressTypingDiagnosticBurstDelaysMs: readonly number[];
   linqIngressTypingDiagnosticEnabled: boolean;
   linqIngressTypingDiagnosticTimeoutMs: number;
   linqMaxActiveMembersPerConversationPhone: number | null;
@@ -68,6 +72,9 @@ export function readHostedOnboardingEnvironment(
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
+    linqIngressTypingDiagnosticBurstDelaysMs: readLinqIngressTypingDiagnosticBurstDelaysMs(
+      readEnv(source, "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS"),
+    ),
     linqIngressTypingDiagnosticEnabled: readBoolean(
       readEnv(source, "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC"),
       false,
@@ -264,4 +271,55 @@ function readPositiveInteger(value: string | null, fallback: number, label: stri
   }
 
   return parsed;
+}
+
+function readLinqIngressTypingDiagnosticBurstDelaysMs(
+  value: string | null,
+): readonly number[] {
+  if (!value) {
+    return DEFAULT_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS;
+  }
+
+  const rawEntries = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (rawEntries.length === 0) {
+    return DEFAULT_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS;
+  }
+
+  const delays = new Set<number>([0]);
+
+  for (const entry of rawEntries) {
+    if (!/^[0-9]+$/u.test(entry)) {
+      throw new TypeError(
+        "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS must be a comma-separated list of non-negative millisecond delays.",
+      );
+    }
+
+    const parsed = parseInteger(entry);
+
+    if (parsed === null) {
+      throw new TypeError(
+        "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS must be a comma-separated list of non-negative millisecond delays.",
+      );
+    }
+
+    if (parsed > MAX_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAY_MS) {
+      throw new RangeError(
+        "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS entries must be at most 30000.",
+      );
+    }
+
+    delays.add(parsed);
+  }
+
+  if (delays.size > MAX_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_ATTEMPTS) {
+    throw new RangeError(
+      "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_BURST_DELAYS_MS must not include more than 8 delays.",
+    );
+  }
+
+  return Array.from(delays).sort((left, right) => left - right);
 }
