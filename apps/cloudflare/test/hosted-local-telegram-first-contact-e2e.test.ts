@@ -108,18 +108,13 @@ describe("hosted local Telegram auto-reply e2e", () => {
       reply_to_message_id: Number.parseInt(buildTelegramMessageId(userId), 10),
       text: HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
     });
-    const deleteRequest = await requireTelegramStub().waitForRequest({
-      expectedPath: `/bot${telegramBotToken}/deleteMessages`,
+    await requireTelegramStub().waitForRequestsToSettle({
       scenario: requireScenario(),
       userId,
     });
-    expect(requireTelegramStub().parseObservedJson(deleteRequest.body)).toMatchObject({
-      chat_id: buildTelegramThreadId(userId),
-      message_ids: [
-        Number.parseInt(buildTelegramMessageId(userId), 10),
-        9001,
-      ],
-    });
+    expect(requireTelegramStub().countObservedRequests(
+      `/bot${telegramBotToken}/deleteMessages`,
+    )).toBe(0);
   }, 300_000);
 
   it("keeps Telegram context when two messages arrive before hosted completion catches up", async () => {

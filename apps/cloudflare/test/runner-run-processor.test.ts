@@ -362,7 +362,7 @@ describe("runner wake processor side input hydration", () => {
 });
 
 describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () => {
-  it("deletes transient email data and provider-visible Linq and Telegram messages", async () => {
+  it("deletes transient email data and provider-visible Linq messages without deleting Telegram chat messages", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
@@ -466,13 +466,10 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       }),
       messageIds: ["linq_inbound_message", "linq_outbound_message"],
     });
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledWith(expect.objectContaining({
-      messageIds: ["7001234567", "9001", "9002"],
-      target: "6001234567",
-    }));
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
-  it("uses worker-reachable Telegram platform URLs for cleanup", async () => {
+  it("does not use worker-reachable Telegram platform URLs for cleanup", async () => {
     const { processor } = createInvokeRunnerProcessor({
       configSource: {
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
@@ -508,18 +505,10 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       ],
     });
 
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledWith(expect.objectContaining({
-      env: expect.objectContaining({
-        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-        TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
-      }),
-      messageIds: ["7001234567"],
-      target: "6001234567",
-    }));
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
-  it("does not retarget Telegram cleanup across unrelated chats when only one delivery succeeds", async () => {
+  it("does not delete Telegram messages across unrelated chats when only one delivery succeeds", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
@@ -592,23 +581,10 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       ],
     });
 
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledTimes(2);
-    expect(deleteHostedTelegramMessages.mock.calls.map(([input]) => ({
-      messageIds: [...input.messageIds].sort(),
-      target: input.target,
-    }))).toEqual([
-      {
-        messageIds: ["700-success", "9001", "9002"],
-        target: "chat-success",
-      },
-      {
-        messageIds: ["700-failed"],
-        target: "chat-failed",
-      },
-    ]);
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
-  it("does not retarget a plain-chat Telegram cleanup target to an unrelated sent target", async () => {
+  it("does not delete a plain-chat Telegram message or an unrelated sent target", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
@@ -655,19 +631,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       ],
     });
 
-    expect(deleteHostedTelegramMessages.mock.calls.map(([input]) => ({
-      messageIds: [...input.messageIds].sort(),
-      target: input.target,
-    }))).toEqual([
-      {
-        messageIds: ["7001234567"],
-        target: "6001234567",
-      },
-      {
-        messageIds: ["9001"],
-        target: "6007654321",
-      },
-    ]);
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
   it("keeps cleanup best-effort when one provider delete fails", async () => {
@@ -728,7 +692,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       ],
     })).resolves.toBeUndefined();
 
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledTimes(1);
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
   it("keeps cleanup best-effort when cleanup env resolution fails", async () => {
@@ -792,7 +756,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
     expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
-  it("retains only unresolved Telegram cleanup inputs when Telegram delete fails", async () => {
+  it("clears legacy Telegram cleanup inputs without deleting provider messages", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
@@ -803,72 +767,21 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
     const stateStore = Reflect.get(processor, "dependencies").stateStore as {
       clearPendingRunCleanup: ReturnType<typeof vi.fn>;
       readPendingRunCleanup: ReturnType<typeof vi.fn>;
+      writePendingRunCleanup: ReturnType<typeof vi.fn>;
     };
     const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
       runId: string,
     ) => Promise<unknown>;
-    vi.spyOn(hostedEmailModule, "deleteHostedEmailRawMessage").mockResolvedValue(undefined);
-    vi.spyOn(hostedRuntimeContractsModule, "deleteHostedLinqMessages").mockResolvedValue(undefined);
+    const writePendingRunCleanup = stateStore.writePendingRunCleanup as (
+      runId: string,
+      cleanup: unknown,
+    ) => Promise<void>;
     const deleteHostedTelegramMessages = vi.spyOn(
       hostedRuntimeContractsModule,
       "deleteHostedTelegramMessages",
     ).mockRejectedValue(new Error("telegram cleanup unavailable"));
 
-    await processor.persistPendingRunCleanupData({
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionEmailConversationMessageWake({
-          eventId: "email-wake",
-          identityId: "identity_123",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          rawMessageKey: "raw_message_key",
-          userId: "user_123",
-        }),
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
-          userId: "user_123",
-        }),
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledWith(expect.objectContaining({
-      messageIds: ["7001234567"],
-      target: "6001234567",
-    }));
-    expect(stateStore.clearPendingRunCleanup).not.toHaveBeenCalled();
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toEqual({
+    await writePendingRunCleanup("run-cleanup", {
       emailMessages: [],
       linqMessageIds: [],
       required: true,
@@ -879,9 +792,20 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
         },
       ],
     });
+
+    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
+      assistantDeliveryOutcomes: [],
+      runId: "run-cleanup",
+      userId: "user_123",
+      wakes: [],
+    })).resolves.toBeUndefined();
+
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
+    expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-cleanup");
+    await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
   });
 
-  it("persists adopted turn-input cleanup targets for later finalize cleanup", async () => {
+  it("persists adopted email and Linq cleanup targets for later finalize cleanup", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
@@ -941,12 +865,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       ],
       linqMessageIds: ["linq_adopted_inbound_message"],
       required: true,
-      telegramMessages: [
-        {
-          messageId: "7007654321",
-          target: "6007654321",
-        },
-      ],
+      telegramMessages: [],
     });
 
     await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
@@ -963,14 +882,11 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
     expect(deleteHostedLinqMessages).toHaveBeenCalledWith(expect.objectContaining({
       messageIds: ["linq_adopted_inbound_message"],
     }));
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledWith(expect.objectContaining({
-      messageIds: ["7007654321"],
-      target: "6007654321",
-    }));
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
     expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-adopted-cleanup");
   });
 
-  it("retains outcome-derived Telegram cleanup inputs on env failure and clears them after a later retry", async () => {
+  it("does not persist or retry outcome-derived Telegram cleanup inputs", async () => {
     const { processor, readRunnerSecrets } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
@@ -1039,31 +955,8 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       wakes: [],
     })).resolves.toBeUndefined();
 
+    expect(readRunnerSecrets).not.toHaveBeenCalled();
     expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-    expect(stateStore.clearPendingRunCleanup).not.toHaveBeenCalled();
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toEqual({
-      emailMessages: [],
-      linqMessageIds: [],
-      required: true,
-      telegramMessages: [
-        {
-          messageId: "7001234567",
-          target: "6001234567",
-        },
-        {
-          messageId: "9001",
-          target: "6007654321:topic:42",
-        },
-      ],
-    });
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes,
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
     expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-cleanup");
     await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
   });
@@ -1334,19 +1227,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       }),
       messageIds: ["linq_inbound_message", "linq_outbound_message"],
     });
-    expect(deleteHostedTelegramMessages.mock.calls.map(([input]) => ({
-      messageIds: [...input.messageIds].sort(),
-      target: input.target,
-    }))).toEqual([
-      {
-        messageIds: ["7001234567"],
-        target: "6001234567",
-      },
-      {
-        messageIds: ["9001", "9002"],
-        target: "6007654321",
-      },
-    ]);
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
     expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-cleanup");
     await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
   });
@@ -1444,7 +1325,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
     await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
   });
 
-  it("rewrites persisted Telegram cleanup targets only for an explicit migrated alias", async () => {
+  it("ignores persisted Telegram cleanup targets even when delivery reports a migrated alias", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
@@ -1534,31 +1415,10 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       wakes: [],
     });
 
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledTimes(4);
-    expect(deleteHostedTelegramMessages.mock.calls.map(([input]) => ({
-      messageIds: [...input.messageIds].sort(),
-      target: input.target,
-    })).sort((left, right) => left.target.localeCompare(right.target))).toEqual([
-      {
-        messageIds: ["9001"],
-        target: "-1001234567890:topic:42",
-      },
-      {
-        messageIds: ["700-stay-old"],
-        target: "-1002222222222:topic:7",
-      },
-      {
-        messageIds: ["9010"],
-        target: "-1003333333333:topic:99",
-      },
-      {
-        messageIds: ["700-migrate-old", "9002"],
-        target: "-1009876543210:topic:42",
-      },
-    ]);
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
-  it("uses failed_ambiguous Telegram delivery metadata for cleanup and explicit retargeting", async () => {
+  it("ignores failed_ambiguous Telegram delivery cleanup metadata", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
         HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
@@ -1622,19 +1482,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       wakes: [],
     });
 
-    expect(deleteHostedTelegramMessages.mock.calls.map(([input]) => ({
-      messageIds: [...input.messageIds].sort(),
-      target: input.target,
-    })).sort((left, right) => left.target.localeCompare(right.target))).toEqual([
-      {
-        messageIds: ["9001"],
-        target: "6001234567:topic:42",
-      },
-      {
-        messageIds: ["7001234567", "9002"],
-        target: "6007654321:topic:42",
-      },
-    ]);
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 
   it("keeps cleanup best-effort when pending cleanup sidecar read fails", async () => {
@@ -1728,10 +1576,7 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
       ],
     })).resolves.toBeUndefined();
 
-    expect(deleteHostedTelegramMessages).toHaveBeenCalledWith(expect.objectContaining({
-      messageIds: ["7001234567"],
-      target: "6001234567",
-    }));
+    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 });
 
