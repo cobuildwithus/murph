@@ -428,7 +428,7 @@ test("hosted member activation enables managed Linq auto-reply when first contac
   }
 });
 
-test("hosted member activation uses explicit UTC vault timezone fallback when no signup hint is present", async () => {
+test("hosted member activation uses New York vault timezone fallback when no signup hint is present", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
@@ -442,6 +442,34 @@ test("hosted member activation uses explicit UTC vault timezone fallback when no
             userId: "member_123",
           },
           eventId: "evt_activation_no_timezone",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        }),
+        {},
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+    });
+
+    assert.equal(mocks.vaultInit.mock.calls[0]?.[0]?.timezone, "America/New_York");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted member activation preserves an explicit signup timezone hint", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedWakeContext(
+        vaultRoot,
+        buildLegacyWake({
+          event: {
+            kind: "member.activated",
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
+            timeZone: "UTC",
+            userId: "member_123",
+          },
+          eventId: "evt_activation_explicit_utc",
           occurredAt: "2026-03-28T09:05:00.000Z",
         }),
         {},

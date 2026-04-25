@@ -72,6 +72,7 @@ const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelStat
   linqAutoReplyEnabled: false,
   telegramAutoReplyEnabled: false,
 };
+const DEFAULT_HOSTED_MEMBER_TIME_ZONE = "America/New_York";
 
 export async function prepareHostedWakeContext(
   vaultRoot: string,
@@ -123,8 +124,8 @@ export async function bootstrapHostedMemberContext(
 
   if (vaultCreated) {
     const timeZone = wake.kind === "member.activated"
-      ? wake.timeZone ?? "UTC"
-      : "UTC";
+      ? wake.timeZone ?? DEFAULT_HOSTED_MEMBER_TIME_ZONE
+      : DEFAULT_HOSTED_MEMBER_TIME_ZONE;
 
     await vaultServices.core.init({
       requestId,
