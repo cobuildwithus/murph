@@ -360,7 +360,7 @@ test('resolveAssistantLanguageModel uses the responses provider when no baseUrl 
 
   assert.equal(responsesModel.constructor?.name, 'OpenAIResponsesLanguageModel')
   assert.equal(responsesModel.modelId, 'anthropic/claude-sonnet-4-5')
-  assert.equal(responsesModel.specificationVersion, 'v2')
+  assert.equal(responsesModel.specificationVersion, 'v3')
   assert.equal(responsesModel.config?.provider, 'murph-assistant.responses')
   assert.equal(typeof responsesModel.config?.fetch, 'function')
   assert.equal(harnessMocks.createOpenAI.mock.calls.length, 1)
@@ -396,12 +396,43 @@ test('resolveAssistantLanguageModel uses the OpenAI responses provider for the o
 
   assert.equal(openAiResponsesModel.constructor?.name, 'OpenAIResponsesLanguageModel')
   assert.equal(openAiResponsesModel.modelId, 'gpt-5')
-  assert.equal(openAiResponsesModel.specificationVersion, 'v2')
+  assert.equal(openAiResponsesModel.specificationVersion, 'v3')
   assert.equal(openAiResponsesModel.config?.provider, 'openai.responses')
   assert.equal(typeof openAiResponsesModel.config?.fetch, 'function')
   assert.equal(headers?.authorization, 'Bearer secret-key')
   assert.equal(headers?.['x-test-header'], 'bundle')
   assert.match(String(headers?.['user-agent']), /^ai-sdk\/openai\//u)
+})
+
+test('resolveAssistantLanguageModel uses the Vercel AI Gateway responses provider as v3', () => {
+  process.env[TEST_API_KEY_ENV] = 'secret-key'
+
+  const model = resolveAssistantLanguageModel({
+    executionDriver: 'responses',
+    model: 'openai/gpt-5.4',
+    baseUrl: 'https://ai-gateway.vercel.sh/v1',
+    apiKeyEnv: TEST_API_KEY_ENV,
+    providerName: 'vercel-ai-gateway',
+  })
+  const vercelAiGatewayResponsesModel = model as {
+    constructor?: {
+      name?: string
+    }
+    modelId?: string
+    specificationVersion?: string
+    config?: {
+      fetch?: typeof fetch
+      provider?: string
+    }
+  }
+
+  assert.equal(vercelAiGatewayResponsesModel.constructor?.name, 'OpenAIResponsesLanguageModel')
+  assert.equal(vercelAiGatewayResponsesModel.modelId, 'openai/gpt-5.4')
+  assert.equal(vercelAiGatewayResponsesModel.specificationVersion, 'v3')
+  assert.equal(vercelAiGatewayResponsesModel.config?.provider, 'vercel-ai-gateway.responses')
+  assert.equal(typeof vercelAiGatewayResponsesModel.config?.fetch, 'function')
+  assert.equal(harnessMocks.createOpenAI.mock.calls.length, 1)
+  assert.equal(harnessMocks.createOpenAICompatible.mock.calls.length, 0)
 })
 
 

@@ -1132,6 +1132,14 @@ describe('assistant CLI tool capability seam', () => {
         }),
       ]),
     })
+    if (
+      typeof protocols !== 'object' ||
+      protocols === null ||
+      !('count' in protocols) ||
+      typeof protocols.count !== 'number'
+    ) {
+      throw new Error('Expected healthCommons.listProtocols to return a numeric count.')
+    }
     expect(protocols.count).toBeGreaterThanOrEqual(7)
 
     const search = await executeTool(tools, 'healthCommons.search', {
