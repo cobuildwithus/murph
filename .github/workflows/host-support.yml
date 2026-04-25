@@ -131,6 +131,9 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Health Commons catalog
+        run: pnpm health-commons:generate
+
       - name: Prepare built CLI runtime artifacts
         if: ${{ matrix.shard == 'cli' }}
         run: pnpm build:test-runtime:prepared

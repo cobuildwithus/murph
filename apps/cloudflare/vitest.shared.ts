@@ -2,11 +2,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  createVitestAliasesFromTsconfigPaths,
   createVitestWorkspaceRuntimeAliases,
   resolveWorkspaceSourceEntries,
 } from "../../config/workspace-source-resolution.ts";
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const appDir = path.join(repoRoot, "apps/cloudflare");
 
 export const cloudflareVitestAliases = [
   {
@@ -40,4 +42,16 @@ export const cloudflareVitestAliases = [
       "@murphai/vault-usecases": "packages/vault-usecases/src/index.ts",
     }),
   ),
+  ...createVitestAliasesFromTsconfigPaths({
+    workspaceDir: appDir,
+    specifierFilter: isCloudflareWorkspaceSourceSpecifier,
+  }),
 ];
+
+function isCloudflareWorkspaceSourceSpecifier(specifier: string): boolean {
+  return (
+    specifier === "#hosted-web-testing" ||
+    specifier === "murph" ||
+    specifier.startsWith("@murphai/")
+  );
+}

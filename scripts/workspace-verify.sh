@@ -376,6 +376,10 @@ run_test_runtime_artifact_build_with_retry() {
   run_command_with_retry "build:test-runtime:prepared" env NODE_OPTIONS="$filtered_node_options" pnpm build:test-runtime:prepared
 }
 
+generate_health_commons_catalog_with_retry() {
+  run_command_with_retry "health-commons generated catalog" pnpm health-commons:generate
+}
+
 run_package_command_with_retry() {
   local package_dir="$1"
   local command="$2"
@@ -506,6 +510,7 @@ run_test_apps() {
 
 prepare_repo_vitest_runtime_artifacts() {
   run_test_runtime_artifact_build_with_retry
+  run_timed_step "Health Commons generated catalog" generate_health_commons_catalog_with_retry
   run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
 }
 
@@ -805,6 +810,8 @@ run_test_packages_coverage() {
   run_timed_step "Tracked artifact hygiene" pnpm no-js
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
+  else
+    run_timed_step "Health Commons generated catalog" generate_health_commons_catalog_with_retry
   fi
   run_timed_step "All package coverage" run_all_package_coverage "$contracts_artifacts_prepared"
 }

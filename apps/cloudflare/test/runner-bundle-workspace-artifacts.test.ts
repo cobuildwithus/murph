@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  buildHostedRunnerWorkspaceArtifacts,
   buildHostedRunnerWorkspaceBuildArgs,
   buildWorkspacePackagePackPreflightArgs,
   mapWithConcurrency,
@@ -201,6 +202,10 @@ describe("runner bundle runtime artifact staging", () => {
     const tarballsDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-"));
 
     temporaryDirectories.push(tarballsDir);
+    await buildHostedRunnerWorkspaceArtifacts(
+      ["@murphai/health-commons"],
+      { repoRoot },
+    );
 
     const tarballs = await packWorkspacePackageArtifacts(
       ["@murphai/health-commons"],
