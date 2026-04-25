@@ -58,6 +58,7 @@ export const assistantTranscriptEntryKindValues = [
   'user',
   'assistant',
   'error',
+  'status',
 ] as const
 export const assistantTurnTriggerValues = [
   'manual-ask',

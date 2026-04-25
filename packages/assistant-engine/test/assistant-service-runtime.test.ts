@@ -130,6 +130,7 @@ import {
   selectAssistantTurnRouteOverride,
 } from "../src/assistant/service-turn-routes.ts";
 import { persistPendingAssistantUsageEvent } from "../src/assistant/service-usage.ts";
+import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
 import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
 
 type RuntimeStateStub = ReturnType<typeof createRuntimeStateStub>;
@@ -1550,6 +1551,73 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.resumeState).toBeNull();
   });
 
+  it("persists successful provider tool audit entries before the assistant transcript", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      turnCount: 2,
+    });
+
+    await persistAssistantTurnAndSession({
+      assistantTranscriptText: "The experiment exists.",
+      input: {
+        prompt: "Create the experiment.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        rawEvents: [
+          {
+            input: {
+              apiKey: "synthetic-private-value",
+              command: "vault-cli experiment create",
+            },
+            mode: "apply",
+            tool: "vault.cli.run",
+            type: "assistant.tool.succeeded",
+          },
+        ],
+        route: createRoute({ routeId: "route-tool-audit" }),
+        session,
+      }),
+      session,
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-finalizer-tool-audit",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
+      1,
+      session.sessionId,
+      [
+        {
+          kind: "status",
+          text:
+            `${ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX}Tool vault.cli.run succeeded in apply mode. Input keys: apiKey, command.`,
+        },
+      ]
+    );
+    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
+      2,
+      session.sessionId,
+      [
+        {
+          kind: "assistant",
+          text: "The experiment exists.",
+        },
+      ]
+    );
+    expect(
+      JSON.stringify(runtimeState.transcripts.append.mock.calls)
+    ).not.toContain("synthetic-private-value");
+  });
+
   it("skips duplicate user persistence when failure persistence already happened and rewrites the resume route on provider change", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:00:00.000Z"));
@@ -1830,6 +1898,7 @@ function createProviderResult(input?: {
   attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
   providerSessionId?: string | null;
+  rawEvents?: unknown[];
   response?: string;
   route?: ResolvedAssistantFailoverRoute;
   session?: AssistantSession;
@@ -1857,7 +1926,7 @@ function createProviderResult(input?: {
     provider: "openai-compatible" as const,
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     providerSessionId: input?.providerSessionId ?? "provider-session-1",
-    rawEvents: [],
+    rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",
     route: input?.route ?? createRoute(),
     session,

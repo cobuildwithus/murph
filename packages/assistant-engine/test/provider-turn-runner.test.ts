@@ -12,6 +12,7 @@ import type {
 import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.ts'
 
 const runnerMocks = vi.hoisted(() => ({
+  appendAssistantTranscriptEntries: vi.fn(),
   appendAssistantTurnReceiptEvent: vi.fn(),
   attachRecoveredAssistantSession: vi.fn(),
   buildAssistantActiveExperimentContextBlock: vi.fn(),
@@ -137,6 +138,7 @@ vi.mock('../src/assistant/provider-binding.ts', () => ({
 }))
 
 vi.mock('../src/assistant/store.ts', () => ({
+  appendAssistantTranscriptEntries: runnerMocks.appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries: runnerMocks.listAssistantTranscriptEntries,
 }))
 
@@ -167,6 +169,7 @@ describe('executeProviderTurnWithRecovery', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T14:30:00.000Z'))
+    runnerMocks.appendAssistantTranscriptEntries.mockReset().mockResolvedValue([])
     runnerMocks.appendAssistantTurnReceiptEvent.mockReset().mockResolvedValue(undefined)
     runnerMocks.attachRecoveredAssistantSession.mockReset()
     runnerMocks.buildAssistantNotificationDecisionSystemPrompt
@@ -1556,6 +1559,18 @@ describe('executeProviderTurnWithRecovery', () => {
       createFailedAttemptResult({
         error: toolError,
         executedToolCount: 1,
+        rawToolEvents: [
+          {
+            type: 'assistant.tool.failed',
+            mode: 'apply',
+            tool: 'vault.cli.run',
+            input: {
+              command: 'experiment update',
+            },
+            errorCode: 'TOOL_FAILURE',
+            errorMessage: 'CLI schema rejected payload.',
+          },
+        ],
       }),
     )
     runnerMocks.recoverAssistantSessionAfterProviderFailure.mockResolvedValue(
@@ -1588,6 +1603,20 @@ describe('executeProviderTurnWithRecovery', () => {
       expect.objectContaining({
         kind: 'provider.failover.applied',
       }),
+    )
+    expect(runnerMocks.appendAssistantTranscriptEntries).toHaveBeenCalledWith(
+      '/tmp/test-vault',
+      recoveredSession.sessionId,
+      [
+        expect.objectContaining({
+          kind: 'error',
+          text: expect.stringContaining('Tool vault.cli.run failed in apply mode'),
+        }),
+        expect.objectContaining({
+          kind: 'error',
+          text: expect.stringContaining('Provider route Primary failed'),
+        }),
+      ],
     )
   })
 
@@ -1893,13 +1922,14 @@ function createFailedAttemptResult(input: {
   error: unknown
   executedToolCount: number
   providerActionCount?: number
+  rawToolEvents?: readonly unknown[]
 }) {
   return {
     metadata: {
       activityLabels: input.activityLabels ?? [],
       executedToolCount: input.executedToolCount,
       providerActionCount: input.providerActionCount ?? 0,
-      rawToolEvents: [],
+      rawToolEvents: input.rawToolEvents ?? [],
     },
     ok: false as const,
     error: input.error,
@@ -1915,6 +1945,7 @@ function createSuccessfulAttemptResult(input: {
     metadata: {
       activityLabels: input.activityLabels ?? [],
       executedToolCount: 0,
+      providerActionCount: 0,
       rawToolEvents: [],
     },
     ok: true as const,

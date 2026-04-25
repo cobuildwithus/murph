@@ -14,6 +14,9 @@ import {
   writeAssistantSessionProviderSessionId,
 } from './provider-state.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
+import {
+  buildAssistantProviderTranscriptAuditEntries,
+} from './transcript-audit.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -64,6 +67,14 @@ export async function persistAssistantTurnAndSession(input: {
       detail: 'user prompt persisted after provider completion',
       at: input.turnCreatedAt,
     })
+  }
+
+  const auditEntries = buildAssistantProviderTranscriptAuditEntries({
+    rawToolEvents: input.providerResult.rawEvents,
+    routeLabel: input.providerResult.route.label,
+  })
+  if (auditEntries.length > 0) {
+    await state.transcripts.append(input.session.sessionId, auditEntries)
   }
 
   if (assistantTranscriptText !== null) {
