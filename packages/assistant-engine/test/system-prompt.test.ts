@@ -388,6 +388,9 @@ Ready to get started?`)
       'A Health Commons `protocol_variant` is a public reference protocol, not a private vault protocol record.',
     )
     expect(prompt).toContain(
+      'Do not say Health Commons lacks a relevant protocol, source, or page unless a same-turn Health Commons search/list/get lookup for the relevant terms actually returned no match.',
+    )
+    expect(prompt).toContain(
       'Do not use private `vault-cli protocol show` or `vault-cli protocol list` as the discovery path for public Health Commons protocols.',
     )
     expect(prompt).toContain(

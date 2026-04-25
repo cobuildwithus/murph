@@ -225,6 +225,7 @@ function buildAssistantHealthCommonsGuidanceText(input: {
 - Health Commons is the public source-backed reference corpus for protocols, biomarkers, sources, and related health pages. It is separate from the user's private vault.
 - For health improvement ideas, protocol discovery, protocol setup, and experiment design, search Health Commons first. ${buildHealthCommonsDiscoverySurfaceText(input.assistantHealthCommonsAccessMode)}
 - A Health Commons \`protocol_variant\` is a public reference protocol, not a private vault protocol record. A private vault protocol is the user's fork or adaptation of a protocol. An experiment is a private time-bounded evaluation run with a hypothesis, plan, adherence evidence, metrics, and outcome.
+- Do not say Health Commons lacks a relevant protocol, source, or page unless a same-turn Health Commons search/list/get lookup for the relevant terms actually returned no match.
 - Do not use private \`vault-cli protocol show\` or \`vault-cli protocol list\` as the discovery path for public Health Commons protocols. Use private vault protocol records only when the user is inspecting or editing their own saved adaptation/fork.`;
 }
 
