@@ -8,9 +8,10 @@ Batch:
 - Maximum source count: 40
 - Canonical source ledger input: {{CANONICAL_LEDGER_SOURCE}}
 - Extraction batch source: {{BATCH_SOURCE}}
+- Generated source index: packages/health-commons/generated/source-index.json
 
 Goal:
-For each source in this batch, create a Health Commons-ready source artifact draft and a set of atomic findings. Do not write the protocol synthesis yet.
+For each source in this batch, create or update a Health Commons-ready source artifact draft, reusable source-owned findings, and standalone evidence appraisal edges. Do not write the protocol synthesis yet. Resolve each source against the generated source index first; if `source-index.json.identityLookup` contains one `canonicalSourceKey` for a normalized PMID, DOI, PMCID, registry ID, title hash, or canonical URL, reuse that sourceKey and its existing artifact/finding state instead of refetching or duplicating the source page.
 
 For each source, extract:
 - canonical metadata: title, authors, year, journal or venue, DOI, PMID, PMCID, URL, citation
@@ -68,6 +69,17 @@ source:
   pmid: "..."
   doi: "..."
   url: "..."
+sourceIdentity:
+  identityKind: scholarly_work
+  canonicalIdBasis: pmid | doi | pmcid | registry_id | title_hash | url
+  identifiers:
+    pmid: "..."
+    doi: "..."
+    pmcid: "..."
+    registryId: "..."
+    titleHash: "64-character lowercase hex when title_hash is the canonical basis"
+    url: "..."
+  canonicalUrl: "..."
 researchEvidence:
   designKind: "..."
   designLabel: "..."
@@ -86,6 +98,18 @@ murphTakeaway: "..."
 studyDesign: "..."
 modality: "..."
 claimUse: supports-protocol | safety-only | context-only | do-not-use
+sourceFindings:
+  -
+    findingId: finding:...
+    sourceKey: source_artifact:...
+    extractedFromArtifactId: art_...
+    findingKind: adverse_event | context | intervention_result | measurement_validation | mechanistic | safety | other
+    population: "..."
+    exposure: "..."
+    outcome: "..."
+    summary: "..."
+    evidenceUse:
+      - efficacy
 murphV1Priority: High | Medium | Low
 pdfRightsStatus: open_access | permission_required | paywalled | unknown
 ---
@@ -111,29 +135,48 @@ This source is included for **{evidenceBucket}**.
 
 **Claim use:** `...`.
 
-## Atomic findings ledger
-Return JSON named ATOMIC_FINDINGS_V1:
+## Source findings ledger
+Return JSON named SOURCE_FINDINGS_V1. These records should be source-owned and reusable across future protocols:
 
 {
   "batchId": "{{BATCH_ID}}",
   "findings": [
     {
-      "findingId": "finding:{{PROTOCOL_SLUG}}:{SOURCE_STABLE_ID}:001",
+      "findingId": "finding:...",
       "sourceKey": "source_artifact:...",
-      "findingType": "dose | outcome | mechanism | safety | adverse_event | limitation | population | null_result | mixed_result",
+      "extractedFromArtifactId": "art_...",
+      "findingKind": "adverse_event | context | intervention_result | measurement_validation | mechanistic | safety | other",
       "population": "...",
-      "n": "...",
-      "intervention": "...",
-      "comparator": "...",
-      "endpoint": "...",
-      "effectOrDirection": "...",
-      "timeWindow": "...",
-      "directness": "...",
-      "claimUse": "...",
-      "confidence": "low | moderate | high | unknown",
+      "exposure": "...",
+      "outcome": "...",
       "summary": "...",
-      "limitations": ["..."],
-      "supportsProtocolSection": ["dose", "safety", "outcomes", "mechanism", "things-to-watch"]
+      "evidenceUse": ["adjacent_variant | context | efficacy | mechanism | measurement | safety"]
+    }
+  ]
+}
+
+## Evidence appraisals ledger
+Return JSON named EVIDENCE_APPRAISALS_V1. These records belong in packages/health-commons/content/evidence-appraisals/source-protocol-evidence/{{FAMILY_SLUG}}.jsonl, not in source page frontmatter:
+
+{
+  "batchId": "{{BATCH_ID}}",
+  "appraisals": [
+    {
+      "schemaVersion": "murph.commons.evidence-appraisal.v1",
+      "key": "evidence_appraisal:...",
+      "sourceKey": "source_artifact:...",
+      "targetKey": "protocol_variant:{{FAMILY_SLUG}}/{{PROTOCOL_SLUG}}",
+      "targetKind": "protocol_variant",
+      "groupId": "...",
+      "stance": "supports | mixed | does_not_confirm | contradicts | safety_boundary | context_only",
+      "scope": "direct_protocol | same_mechanism | clinical_supervised | adjacent_variant | measurement_context | general_guideline",
+      "result": "positive | mixed | no_clear_advantage | negative | not_efficacy_evidence",
+      "endpointKeys": ["biomarker:..."],
+      "findingKeys": ["finding:..."],
+      "headline": "...",
+      "implication": "...",
+      "caveat": "...",
+      "displayPriority": 10
     }
   ]
 }
@@ -147,3 +190,4 @@ Rules:
 - Do not promote adjacent-variant findings into direct protocol claims.
 - Do not claim causality from observational or mechanistic evidence.
 - Flag all uncertainty explicitly.
+- Do not emit `protocolEvidence`; source pages use source-owned `sourceFindings`, and protocol-specific interpretation lives in standalone evidence-appraisal records.

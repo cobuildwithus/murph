@@ -11,7 +11,9 @@ Review:
 - claims from: {{CLAIMS_SOURCE}}
 - researchLandscape
 - source pages
-- atomic findings from: {{ATOMIC_FINDINGS_SOURCE}}
+- source-owned findings from: {{ATOMIC_FINDINGS_SOURCE}}
+- standalone evidence appraisals from: {{ATOMIC_FINDINGS_SOURCE}}
+- generated source index at packages/health-commons/generated/source-index.json
 
 Output:
 1. Unsupported claims
@@ -21,9 +23,11 @@ Output:
 5. Missing important source pages
 6. Source keys that do not exist
 7. Findings whose claimUse classification should change
-8. Required edits, with exact replacement wording
+8. Evidence appraisals whose groupId or sourceKey does not match the protocol researchLandscape
+9. Required edits, with exact replacement wording
 
 Rules:
 - Be skeptical.
 - Prefer downgrading claim strength over deleting useful nuance.
 - Do not add new claims unless they cite source keys.
+- Do not reintroduce `protocolEvidence`; protocol-specific interpretation belongs in standalone evidence-appraisal records.

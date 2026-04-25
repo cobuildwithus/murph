@@ -531,76 +531,83 @@ claims:
       - Daytime use of strong filtering lenses is a different intervention.
 researchLandscape:
   bottomLine: "Best read as a low-burden evening-light self-experiment, not a sleep treatment: the circadian mechanism is real enough to test, but direct glasses trials are small, mixed, and weakest on objective wearable outcomes."
-  confidenceLabel: mixed
+  confidenceLabel: "mixed"
   primaryClaim: "High-filtering amber, red, or brown glasses may help some users feel less wired or fall asleep more easily when their last two pre-bed hours include bright rooms, screens, or cool-white light."
   mainCaveat: "The best objective adult synthesis found no statistically significant pooled actigraphy improvements, so the page should promise only a personal test of sleep onset and pre-bed wiredness—not insomnia treatment, eye-strain relief, retinal protection, or sleep-stage gains."
   groups:
     -
-      id: direct-adult-sleep-evidence
-      label: Direct adult sleep evidence
-      stance: mixed
+      id: "direct-adult-sleep-evidence"
+      label: "Direct adult sleep evidence"
+      stance: "mixed"
       summary: "Read this bucket as the actual bedtime-glasses evidence. It has a few small positive trials in people with insomnia symptoms, poor sleep, device use, or athletic evening routines, but the newest objective actigraphy meta-analysis found no statistically significant pooled gains in sleep onset, total sleep time, sleep efficiency, or wake after sleep onset. Plain-language takeaway: it is reasonable to test whether your own evenings feel less wired, but a wearable sleep-stage improvement is a maybe, not an expectation."
-      defaultOpen: true
       sourceKeys:
-        - source_artifact:pmid-41341515
-        - source_artifact:pmid-29101797
-        - source_artifact:pmid-26730983
-        - source_artifact:pmid-33707105
-        - source_artifact:pmid-30427265
-        - source_artifact:pmid-20030543
-        - source_artifact:pmid-37192881
-        - source_artifact:pmid-34030534
-        - source_artifact:pmid-37593770
-        - source_artifact:pmid-31752544
-        - source_artifact:pmid-30410784
-        - source_artifact:pmid-32658494
+        - "source_artifact:pmid-20030543"
+        - "source_artifact:pmid-26730983"
+        - "source_artifact:pmid-29101797"
+        - "source_artifact:pmid-30410784"
+        - "source_artifact:pmid-30427265"
+        - "source_artifact:pmid-31752544"
+        - "source_artifact:pmid-32658494"
+        - "source_artifact:pmid-33707105"
+        - "source_artifact:pmid-34030534"
+        - "source_artifact:pmid-37192881"
+        - "source_artifact:pmid-37593770"
+        - "source_artifact:pmid-41341515"
+      defaultOpen: true
     -
-      id: mechanism-dose-and-implementation
-      label: Mechanism and dose fidelity
-      stance: supports
+      id: "mechanism-dose-and-implementation"
+      label: "Mechanism and dose fidelity"
+      stance: "supports"
       summary: "This bucket explains why the test is plausible and why implementation can make or break it. Melanopic evening light from lamps and displays can affect melatonin and alertness, but glasses only reduce that signal if the lenses actually filter enough short-wavelength light and fit well enough to limit leakage. Plain-language takeaway: red or amber color is not enough; room brightness, screen brightness, wraparound fit, and not wearing strong filters during the day all matter."
       sourceKeys:
-        - source_artifact:pmid-40728371
-        - source_artifact:pmid-35298459
-        - source_artifact:doi-10.17617-1.4a6s-ec74
-        - source_artifact:pmid-16842544
-        - source_artifact:pmid-36854795
-        - source_artifact:pmid-21193540
-        - source_artifact:pmid-32168244
-        - source_artifact:pmid-25535358
-        - source_artifact:pmid-28045969
-        - source_artifact:pmid-41565717
-        - source_artifact:pmid-36051910
-        - source_artifact:pmid-31504080
+        - "source_artifact:doi-10.17617-1.4a6s-ec74"
+        - "source_artifact:pmid-16842544"
+        - "source_artifact:pmid-21193540"
+        - "source_artifact:pmid-25535358"
+        - "source_artifact:pmid-28045969"
+        - "source_artifact:pmid-31504080"
+        - "source_artifact:pmid-32168244"
+        - "source_artifact:pmid-35298459"
+        - "source_artifact:pmid-36051910"
+        - "source_artifact:pmid-36854795"
+        - "source_artifact:pmid-40728371"
+        - "source_artifact:pmid-41565717"
     -
-      id: measurement-and-claim-guardrails
-      label: Measurement and claim guardrails
-      stance: context_only
+      id: "measurement-and-claim-guardrails"
+      label: "Measurement and claim guardrails"
+      stance: "context_only"
       summary: "This bucket keeps the page honest about what the experiment can measure. Actigraphy and consumer wearables are useful trend proxies, but they can mistake quiet wakefulness for sleep, so pair them with a one-tap subjective sleep-onset and pre-bed-wiredness log. Eye-strain, headache, retinal-protection, and macular-health claims are outside this bedtime experiment."
       sourceKeys:
-        - source_artifact:pmid-29991437
-        - source_artifact:pmid-33587901
-        - source_artifact:doi-10.1111-opo.12406
+        - "source_artifact:doi-10.1111-opo.12406"
+        - "source_artifact:pmid-29991437"
+        - "source_artifact:pmid-33587901"
     -
-      id: adjacent-clinical-variants
-      label: Adjacent clinical variants
-      stance: safety_boundary
+      id: "adjacent-clinical-variants"
+      label: "Adjacent clinical variants"
+      stance: "safety_boundary"
       summary: "This bucket explains what not to generalize from. Delayed sleep phase, shift work, pregnancy, pediatrics, depression, bipolar/mania virtual-darkness protocols, and psychiatric-ward lighting all use related light-reduction ideas, but they involve different risks, timing, and supervision. Plain-language takeaway: those papers help set safety boundaries; they are not proof that ordinary bedtime glasses will work for a healthy adult."
       sourceKeys:
-        - source_artifact:pmid-26414986
-        - source_artifact:pmid-27322730
-        - source_artifact:pmid-15713707
-        - source_artifact:pmid-25287985
-        - source_artifact:pmid-41166315
-        - source_artifact:pmid-35024497
-        - source_artifact:pmid-35089982
-        - source_artifact:pmid-28488943
-        - source_artifact:pmid-27226262
-        - source_artifact:pmid-41421618
-        - source_artifact:pmid-31967375
-        - source_artifact:pmid-32276301
-        - source_artifact:pmid-35268469
-        - source_artifact:pmid-39642162
+        - "source_artifact:pmid-15713707"
+        - "source_artifact:pmid-25287985"
+        - "source_artifact:pmid-26414986"
+        - "source_artifact:pmid-27226262"
+        - "source_artifact:pmid-27322730"
+        - "source_artifact:pmid-28488943"
+        - "source_artifact:pmid-31967375"
+        - "source_artifact:pmid-32276301"
+        - "source_artifact:pmid-35024497"
+        - "source_artifact:pmid-35089982"
+        - "source_artifact:pmid-35268469"
+        - "source_artifact:pmid-39642162"
+        - "source_artifact:pmid-41166315"
+        - "source_artifact:pmid-41421618"
+    -
+      id: "glucose-circadian-context"
+      label: "Glucose Circadian Context"
+      stance: "context_only"
+      summary: "Circadian disruption can adversely affect glucose metabolism, making sleep timing relevant context for glucose trends. The Glucose Circadian Context group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31915891"
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

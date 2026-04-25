@@ -650,80 +650,227 @@ claims:
     caveats:
       - The later batch-005 extraction tightens this source to do-not-use for protocol assertions even though the canonical ledger still labels it context-only; that tighter later extraction is the safer interpretation because the source page and atomic findings both explicitly restrict it to claim mapping.
 researchLandscape:
-  bottomLine: Cold Plunge is a limited-confidence healthy-adult self-experiment. The clearest direct signal is delayed stress or affect improvement, while the clearest safety signal is first-minute cold shock and cardiorespiratory risk during entry.
-  confidenceLabel: limited
-  primaryClaim: A conservative, controlled head-out plunge is reasonable to test for later-same-day stress or mood change, but the evidence does not justify broad benefit promises or extreme dosing.
-  mainCaveat: Direct plunge evidence is still small, mixed, and demographically narrow, and much of the broader cold literature belongs to adjacent variants or safety context rather than direct efficacy.
+  bottomLine: "Cold Plunge is a limited-confidence healthy-adult self-experiment. The clearest direct signal is delayed stress or affect improvement, while the clearest safety signal is first-minute cold shock and cardiorespiratory risk during entry."
+  confidenceLabel: "limited"
+  primaryClaim: "A conservative, controlled head-out plunge is reasonable to test for later-same-day stress or mood change, but the evidence does not justify broad benefit promises or extreme dosing."
+  mainCaveat: "Direct plunge evidence is still small, mixed, and demographically narrow, and much of the broader cold literature belongs to adjacent variants or safety context rather than direct efficacy."
   groups:
     -
-      id: direct-healthy-adult-plunge-evidence
-      label: Direct healthy-adult plunge evidence
-      stance: mixed
-      summary: One healthy-adult review, a few small single-session studies, and one tiny repeated-use trial support cautious self-testing of mood/stress and limited resting cardiovascular signals, but not broad promised benefits.
+      id: "direct-healthy-adult-plunge-evidence"
+      label: "Direct healthy-adult plunge evidence"
+      stance: "mixed"
+      summary: "One healthy-adult review, a few small single-session studies, and one tiny repeated-use trial support cautious self-testing of mood/stress and limited resting cardiovascular signals, but not broad promised benefits."
       sourceKeys:
-        - source_artifact:pmid-39879231
-        - source_artifact:pmid-37866096
-        - source_artifact:doi-10.1002-lim2.53
-        - source_artifact:pmid-36829490
-        - source_artifact:pmid-33910456
-        - source_artifact:pmid-37711459
+        - "source_artifact:doi-10.1002-lim2.53"
+        - "source_artifact:pmid-33910456"
+        - "source_artifact:pmid-36829490"
+        - "source_artifact:pmid-37711459"
+        - "source_artifact:pmid-37866096"
+        - "source_artifact:pmid-39879231"
       defaultOpen: true
     -
-      id: entry-safety-and-cardiac-boundaries
-      label: Entry safety and cardiac boundaries
-      stance: safety_boundary
-      summary: The strongest cold-plunge evidence is actually about acute hazard framing: first-minute cold shock, respiratory loss of control, blood-pressure surges, arrhythmia plausibility, and the need for screening and clear stop conditions.
+      id: "entry-safety-and-cardiac-boundaries"
+      label: "Entry safety and cardiac boundaries"
+      stance: "safety_boundary"
+      summary: "The strongest cold-plunge evidence is actually about acute hazard framing: first-minute cold shock, respiratory loss of control, blood-pressure surges, arrhythmia plausibility, and the need for screening and clear stop conditions."
       sourceKeys:
-        - source_artifact:pmid-38211547
-        - source_artifact:pmid-2691172
-        - source_artifact:pmid-2010387
-        - source_artifact:pmid-16714416
-        - source_artifact:pmid-22547634
-        - source_artifact:pmid-26794588
-        - source_artifact:pmid-31178366
-        - source_artifact:pmid-40408371
+        - "source_artifact:pmid-16714416"
+        - "source_artifact:pmid-2010387"
+        - "source_artifact:pmid-22547634"
+        - "source_artifact:pmid-26794588"
+        - "source_artifact:pmid-2691172"
+        - "source_artifact:pmid-31178366"
+        - "source_artifact:pmid-38211547"
+        - "source_artifact:pmid-40408371"
       defaultOpen: true
     -
-      id: dose-and-mechanistic-boundaries
-      label: Dose and mechanistic boundaries
-      stance: context_only
-      summary: Mechanistic and boundary papers support treating cold plunge as a dose-dependent cold stressor. They help explain why colder or longer exposures raise strain, but they do not validate an extreme home target.
+      id: "dose-and-mechanistic-boundaries"
+      label: "Dose and mechanistic boundaries"
+      stance: "context_only"
+      summary: "Mechanistic and boundary papers support treating cold plunge as a dose-dependent cold stressor. They help explain why colder or longer exposures raise strain, but they do not validate an extreme home target."
       sourceKeys:
-        - source_artifact:pmid-10751106
-        - source_artifact:pmid-36150503
-        - source_artifact:pmid-25275647
-        - source_artifact:pmid-33820701
-        - source_artifact:pmid-37840386
+        - "source_artifact:pmid-10751106"
+        - "source_artifact:pmid-25275647"
+        - "source_artifact:pmid-33820701"
+        - "source_artifact:pmid-36150503"
+        - "source_artifact:pmid-37840386"
       defaultOpen: false
     -
-      id: athlete-recovery-and-training-context
-      label: Athlete recovery and training context
-      stance: mixed
-      summary: Post-exercise CWI and contrast-water papers support some soreness and delayed recovery endpoints, but they are exercise-context studies. Repeated post-resistance CWI can also trade short-term recovery against some strength-adaptation outcomes.
+      id: "athlete-recovery-and-training-context"
+      label: "Athlete recovery and training context"
+      stance: "mixed"
+      summary: "Post-exercise CWI and contrast-water papers support some soreness and delayed recovery endpoints, but they are exercise-context studies. Repeated post-resistance CWI can also trade short-term recovery against some strength-adaptation outcomes."
       sourceKeys:
-        - source_artifact:pmid-35157264
-        - source_artifact:pmid-36527593
-        - source_artifact:pmid-36744038
-        - source_artifact:pmid-27398915
-        - source_artifact:pmid-23377833
-        - source_artifact:pmid-33870188
-        - source_artifact:pmid-33146851
-        - source_artifact:pmid-35068365
+        - "source_artifact:pmid-23377833"
+        - "source_artifact:pmid-27398915"
+        - "source_artifact:pmid-33146851"
+        - "source_artifact:pmid-33870188"
+        - "source_artifact:pmid-35068365"
+        - "source_artifact:pmid-35157264"
+        - "source_artifact:pmid-36527593"
+        - "source_artifact:pmid-36744038"
       defaultOpen: false
     -
-      id: adjacent-variants-and-public-claims
-      label: Adjacent variants and public protocol claims
-      stance: context_only
-      summary: Winter swimming, cold showers, cryotherapy, and external named protocol pages help map adjacent expectations and public claims, but they should not be merged into Murph’s default cold-plunge assertions.
+      id: "adjacent-variants-and-public-claims"
+      label: "Adjacent variants and public protocol claims"
+      stance: "context_only"
+      summary: "Winter swimming, cold showers, cryotherapy, and external named protocol pages help map adjacent expectations and public claims, but they should not be merged into Murph’s default cold-plunge assertions."
       sourceKeys:
-        - source_artifact:pmid-15253480
-        - source_artifact:pmid-12078959
-        - source_artifact:pmid-10735978
-        - source_artifact:pmid-37381680
-        - source_artifact:pmid-27631616
-        - source_artifact:pmid-38478473
-        - source_artifact:hubermanlab-cold-exposure-2022-05-01
+        - "source_artifact:hubermanlab-cold-exposure-2022-05-01"
+        - "source_artifact:pmid-10735978"
+        - "source_artifact:pmid-12078959"
+        - "source_artifact:pmid-15253480"
+        - "source_artifact:pmid-27631616"
+        - "source_artifact:pmid-37381680"
+        - "source_artifact:pmid-38478473"
       defaultOpen: false
+    -
+      id: "adjacent-broad-soreness-review"
+      label: "Adjacent Broad Soreness Review"
+      stance: "context_only"
+      summary: "Older Cochrane review suggested some DOMS benefit versus passive recovery, but evidence quality was low and broader conclusions remained uncertain. The Adjacent Broad Soreness Review group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-22336838"
+    -
+      id: "adjacent-muscle-soreness-dose-response-review"
+      label: "Adjacent Muscle Soreness Dose Response Review"
+      stance: "context_only"
+      summary: "CWI modestly improved soreness versus passive recovery, with a commonly cited athlete-recovery window around 11-15°C for 11-15 minutes. The Adjacent Muscle Soreness Dose Response Review group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-26581833"
+    -
+      id: "adjacent-physical-performance-time-course-review"
+      label: "Adjacent Physical Performance Time Course Review"
+      stance: "context_only"
+      summary: "Performance recovery effects were time- and context-dependent: some early impairments coexisted with later recovery benefits. The Adjacent Physical Performance Time Course Review group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36862831"
+    -
+      id: "adjacent-protocol-dose-network-meta-analysis"
+      label: "Adjacent Protocol Dose Network Meta Analysis"
+      stance: "context_only"
+      summary: "Dose-stratified network meta-analysis found that 10-15 minute protocols at 5-10°C or 11-15°C ranked best for different acute recovery outcomes. The Adjacent Protocol Dose Network Meta Analysis group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-40078372"
+    -
+      id: "adjacent-soreness-parameter-review"
+      label: "Adjacent Soreness Parameter Review"
+      stance: "context_only"
+      summary: "Updated soreness review found CWI better than control for DOMS, with short-to-medium immersions looking most useful. The Adjacent Soreness Parameter Review group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36399666"
+    -
+      id: "athlete-sleep-and-recovery-study"
+      label: "Athlete Sleep And Recovery Study"
+      stance: "context_only"
+      summary: "Adding cold-water immersion to repeated heat training had minimal effect on objective sleep outcomes. The Athlete Sleep And Recovery Study group currently links one appraisal-backed source with adjacent variant scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-29801652"
+    -
+      id: "autonomic-recovery-comparison"
+      label: "Autonomic Recovery Comparison"
+      stance: "context_only"
+      summary: "Cold water immersion aided lactate clearance and showed limited HRV advantages over passive recovery. The Autonomic Recovery Comparison group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-22722961"
+    -
+      id: "autonomic-recovery-dose-trial"
+      label: "Autonomic Recovery Dose Trial"
+      stance: "context_only"
+      summary: "Among post-exercise recovery options, 15 minutes at 14°C restored several HRV markers sooner than control. The Autonomic Recovery Dose Trial group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-26614422"
+    -
+      id: "claim-calibration-and-risk"
+      label: "Claim Calibration And Risk"
+      stance: "safety_boundary"
+      summary: "The review concludes that the health-effect literature on voluntary cold-water exposure remains inconclusive and heavily confounded. The Claim Calibration And Risk group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36137565"
+    -
+      id: "cold-water-therapy-healthy-aging-review-2025"
+      label: "Cold Water Therapy Healthy Aging Review 2025"
+      stance: "context_only"
+      summary: "The review argues that deliberate cold-water exposure triggers physiological responses that may have relevance to healthy aging and healthspan. The Cold Water Therapy Healthy Aging Review 2025 group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39078461"
+    -
+      id: "mechanistic-neuroendocrine-context"
+      label: "Mechanistic Neuroendocrine Context"
+      stance: "context_only"
+      summary: "Cold stress altered neuroendocrine signaling, but this was a cold-air study rather than an immersion study. The Mechanistic Neuroendocrine Context group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-1517364"
+    -
+      id: "open-water-fatality-context"
+      label: "Open Water Fatality Context"
+      stance: "safety_boundary"
+      summary: "The review presents open-water event-safety guidance and notes that cardiac events appear to be a major cause of death in open-water swimming. The Open Water Fatality Context group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-24921042"
+    -
+      id: "parasympathetic-recovery-study"
+      label: "Parasympathetic Recovery Study"
+      stance: "context_only"
+      summary: "Cold-water immersion restored vagal-related HRV after supramaximal exercise more than control recovery. The Parasympathetic Recovery Study group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19074671"
+    -
+      id: "partial-body-cryotherapy-acute-2023"
+      label: "Partial Body Cryotherapy Acute 2023"
+      stance: "context_only"
+      summary: "The paper reports acute redistribution of circulating lymphocytes after a single partial-body cryotherapy exposure in a study that also compared CWI and control conditions. The Partial Body Cryotherapy Acute 2023 group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36348102"
+    -
+      id: "recovery-dose-trial"
+      label: "Recovery Dose Trial"
+      stance: "context_only"
+      summary: "Different post-exercise cold-water doses were compared, but no protocol clearly outperformed the others on DOMS outcomes. The Recovery Dose Trial group currently links one appraisal-backed source with adjacent variant scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-24768476"
+    -
+      id: "repeated-use-athlete-recovery-study"
+      label: "Repeated Use Athlete Recovery Study"
+      stance: "context_only"
+      summary: "Repeated cold-water immersion helped maintain sprint output but did not clearly improve waking HRV or sleep measures. The Repeated Use Athlete Recovery Study group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-22752345"
+    -
+      id: "resistance-exercise-recovery-trial"
+      label: "Resistance Exercise Recovery Trial"
+      stance: "context_only"
+      summary: "Cold-water immersion improved later submaximal function but not maximal strength or jump recovery after resistance exercise. The Resistance Exercise Recovery Trial group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-25121612"
+    -
+      id: "temperature-comparison-recovery-trial"
+      label: "Temperature Comparison Recovery Trial"
+      stance: "context_only"
+      summary: "Fifteen minutes at 14°C sometimes recovered better than 9°C, but overall group effects were not significant. The Temperature Comparison Recovery Trial group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-27430594"
+    -
+      id: "winter-swimming-acclimation-context"
+      label: "Winter Swimming Acclimation Context"
+      stance: "safety_boundary"
+      summary: "The review describes winter swimming as a stressful whole-body cold exposure with variable adaptation and recommends a stepwise build-up strategy. The Winter Swimming Acclimation Context group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31702722"
+    -
+      id: "winter-swimming-risk-overview"
+      label: "Winter Swimming Risk Overview"
+      stance: "safety_boundary"
+      summary: "The review says graded regular practice by experienced healthy people may be tolerated, but unfamiliar people remain at risk of death from cold shock or hypothermia. The Winter Swimming Risk Overview group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33276648"
+    -
+      id: "winter-swimming-thermogenesis-2021"
+      label: "Winter Swimming Thermogenesis 2021"
+      stance: "context_only"
+      summary: "Winter swimmers showed lower core temperature at thermal comfort and greater cold-induced thermogenesis than controls. The Winter Swimming Thermogenesis 2021 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-34755128"
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:

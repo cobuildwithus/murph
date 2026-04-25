@@ -11,7 +11,7 @@ Review:
 - protocol steps
 - stop conditions
 - safety block
-- adverse-event findings from: {{SAFETY_FINDINGS_SOURCE}}
+- adverse-event source findings and safety evidence appraisals from: {{SAFETY_FINDINGS_SOURCE}}
 - contraindication sources
 - population boundaries
 - user-facing wording
@@ -29,3 +29,4 @@ Rules:
 - Safety boundaries should not depend only on efficacy studies.
 - Case reports, guidelines, and clinical reviews can support safety boundaries.
 - Keep clinician-guided variants separate from ordinary wellness experiments.
+- Do not reintroduce source-local `protocolEvidence`.

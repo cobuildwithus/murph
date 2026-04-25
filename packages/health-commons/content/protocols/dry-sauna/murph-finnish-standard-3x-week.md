@@ -753,133 +753,144 @@ claims:
       - A null HRV signal does not automatically mean the protocol was not personally useful.
 researchLandscape:
   bottomLine: "Best read as a bounded dry-sauna self-experiment for near-term recovery and cardiovascular proxies, not as proof of long-term disease prevention or a guarantee that HRV, vascular, gut, or inflammatory markers will improve."
-  confidenceLabel: mixed
+  confidenceLabel: "mixed"
   primaryClaim: "The most practical support is for testing resting heart rate, optional morning blood pressure, recovery context, and session tolerance across repeated dry-sauna sessions."
   mainCaveat: "The strongest long-term findings are observational, several modern intervention endpoints are null or mixed, and post-exercise, cold-immersion, clinical, extreme-heat, infrared, and steam-sauna contexts must stay separate."
   groups:
     -
-      id: evidence-backbone-and-claim-calibration
+      id: "evidence-backbone-and-claim-calibration"
       label: "Evidence backbone and claim calibration"
-      stance: mixed
+      stance: "mixed"
       summary: "The strongest sauna page should lead with scope, not certainty: reviews and meta-analyses support a broad passive-heat rationale, but they also show heterogeneous protocols, mixed cardiometabolic effects, and many clinical caveats. Use these sources to frame what is plausible and what not to promise."
       sourceKeys:
-        - source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article
-        - source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases
-        - source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system
-        - source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna
-        - source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna
-        - source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio
-        - source_artifact:pmid-11165553
-        - source_artifact:pmid-16871826
-        - source_artifact:pmid-29351426
-        - source_artifact:pmid-29849692
-        - source_artifact:mayo-2018-sauna-review
-        - source_artifact:pmid-31102597
-        - source_artifact:pmid-33513711
-        - source_artifact:pmid-37270272
-        - source_artifact:pmid-38577299
-        - source_artifact:pmid-40202605
-        - source_artifact:pmid-41426898
-        - source_artifact:doi-10-1016-j-aimed-2024-09-009
-        - source_artifact:doi-10-3389-fcvm-2025-1537194
-        - source_artifact:pmid-41049507
-        - source_artifact:pmid-34363927
+        - "source_artifact:doi-10-1016-j-aimed-2024-09-009"
+        - "source_artifact:doi-10-3389-fcvm-2025-1537194"
+        - "source_artifact:mayo-2018-sauna-review"
+        - "source_artifact:pmid-11165553"
+        - "source_artifact:pmid-16871826"
+        - "source_artifact:pmid-29351426"
+        - "source_artifact:pmid-29849692"
+        - "source_artifact:pmid-31102597"
+        - "source_artifact:pmid-33513711"
+        - "source_artifact:pmid-34363927"
+        - "source_artifact:pmid-37270272"
+        - "source_artifact:pmid-38577299"
+        - "source_artifact:pmid-40202605"
+        - "source_artifact:pmid-41049507"
+        - "source_artifact:pmid-41426898"
+        - "source_artifact:sauna-1986-kauppinen-man-in-the-sauna-review-article"
+        - "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases"
+        - "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system"
+        - "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna"
+        - "source_artifact:sauna-1997-kauppinen-facts-and-fables-about-sauna"
+        - "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio"
     -
-      id: near-term-autonomic-vascular-and-immune-signals
+      id: "near-term-autonomic-vascular-and-immune-signals"
       label: "Near-term physiology and wearable signals"
-      stance: mixed
+      stance: "mixed"
       summary: "Acute Finnish-sauna papers make resting heart rate, blood pressure, HRV, and recovery context plausible short-horizon signals. The same group includes null or endpoint-specific findings, so these signals should be read as personal response markers rather than guaranteed improvements."
       sourceKeys:
-        - source_artifact:pmid-3766176
-        - source_artifact:pmid-3788622
-        - source_artifact:pmid-3174262
-        - source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a
-        - source_artifact:pmid-26152773
-        - source_artifact:pmid-29269746
-        - source_artifact:pmid-31126559
-        - source_artifact:pmid-31331560
-        - source_artifact:pmid-32951736
-        - source_artifact:pmid-31950931
-        - source_artifact:pmid-34622026
-        - source_artifact:pmid-38011189
-        - source_artifact:pmid-36813265
-        - source_artifact:doi-10.1080-23328940.2026.2645467
-        - source_artifact:pmid-31293098
-        - source_artifact:pmid-32615263
-        - source_artifact:pmid-24304490
-        - source_artifact:pmid-3218894
+        - "source_artifact:doi-10.1080-23328940.2026.2645467"
+        - "source_artifact:pmid-24304490"
+        - "source_artifact:pmid-26152773"
+        - "source_artifact:pmid-29269746"
+        - "source_artifact:pmid-31126559"
+        - "source_artifact:pmid-31293098"
+        - "source_artifact:pmid-31331560"
+        - "source_artifact:pmid-3174262"
+        - "source_artifact:pmid-31950931"
+        - "source_artifact:pmid-3218894"
+        - "source_artifact:pmid-32615263"
+        - "source_artifact:pmid-32951736"
+        - "source_artifact:pmid-34622026"
+        - "source_artifact:pmid-36813265"
+        - "source_artifact:pmid-3766176"
+        - "source_artifact:pmid-3788622"
+        - "source_artifact:pmid-38011189"
+        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2"
+        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3"
+        - "source_artifact:sauna-1989-kukkonen-harjula-haemodynamic-and-hormonal-responses-to-heat-exposure-in-a"
     -
-      id: long-term-finnish-cohort-and-real-world-context
+      id: "long-term-finnish-cohort-and-real-world-context"
       label: "Long-term Finnish cohort and real-world context"
-      stance: context_only
+      stance: "context_only"
       summary: "KIHD and related population papers explain why sauna is interesting for cardiovascular and healthspan framing. They are observational and often long-horizon, so they belong in rationale, screening, and baseline-context language rather than the result promise for a 21-day experiment."
       sourceKeys:
-        - source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children
-        - source_artifact:pmid-25705824
-        - source_artifact:pmid-29229091
-        - source_artifact:pmid-28905164
-        - source_artifact:pmid-27932366
-        - source_artifact:pmid-28633297
-        - source_artifact:pmid-28972808
-        - source_artifact:pmid-29897261
-        - source_artifact:pmid-30173212
-        - source_artifact:pmid-30486813
-        - source_artifact:pmid-29720543
-        - source_artifact:pmid-31372865
-        - source_artifact:pmid-35908583
-        - source_artifact:pmid-36255556
-        - source_artifact:pmid-37029766
-        - source_artifact:pmid-39446139
-        - source_artifact:pmid-38410962
-        - source_artifact:pmid-41340471
-        - source_artifact:pmid-38836690
+        - "source_artifact:pmid-25705824"
+        - "source_artifact:pmid-27932366"
+        - "source_artifact:pmid-28633297"
+        - "source_artifact:pmid-28905164"
+        - "source_artifact:pmid-28972808"
+        - "source_artifact:pmid-29229091"
+        - "source_artifact:pmid-29720543"
+        - "source_artifact:pmid-29897261"
+        - "source_artifact:pmid-30173212"
+        - "source_artifact:pmid-30486813"
+        - "source_artifact:pmid-31372865"
+        - "source_artifact:pmid-35908583"
+        - "source_artifact:pmid-36255556"
+        - "source_artifact:pmid-37029766"
+        - "source_artifact:pmid-38410962"
+        - "source_artifact:pmid-38836690"
+        - "source_artifact:pmid-39446139"
+        - "source_artifact:pmid-41340471"
+        - "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children"
     -
-      id: intervention-design-training-and-mixed-results
+      id: "intervention-design-training-and-mixed-results"
       label: "Intervention design, training, and mixed results"
-      stance: mixed
+      stance: "mixed"
       summary: "Intervention papers show that repeated sauna, post-exercise sauna, and clinical protocols can affect selected outcomes, but they also include modern null results for HRV, vascular markers, gut markers, and other endpoints. These studies shape dose, timing, and expectation setting more than they prove one universal benefit."
       sourceKeys:
-        - source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds
-        - source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients
-        - source_artifact:pmid-19154844
-        - source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys
-        - source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type
-        - source_artifact:pmid-25432420
-        - source_artifact:pmid-31490429
-        - source_artifact:pmid-31869820
-        - source_artifact:pmid-33211153
-        - source_artifact:pmid-34297227
-        - source_artifact:pmid-34199101
-        - source_artifact:pmid-35710395
-        - source_artifact:pmid-35785965
-        - source_artifact:pmid-37650138
-        - source_artifact:doi-10.3390-app151910762
-        - source_artifact:pmid-40611569
-        - source_artifact:pmid-41831305
+        - "source_artifact:doi-10.3390-app151910762"
+        - "source_artifact:pmid-19154844"
+        - "source_artifact:pmid-25432420"
+        - "source_artifact:pmid-31490429"
+        - "source_artifact:pmid-31869820"
+        - "source_artifact:pmid-33211153"
+        - "source_artifact:pmid-34199101"
+        - "source_artifact:pmid-34297227"
+        - "source_artifact:pmid-35710395"
+        - "source_artifact:pmid-35785965"
+        - "source_artifact:pmid-37650138"
+        - "source_artifact:pmid-40611569"
+        - "source_artifact:pmid-41831305"
+        - "source_artifact:sauna-1990-ernst-regular-sauna-bathing-and-the-incidence-of-common-colds"
+        - "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients"
+        - "source_artifact:sauna-2014-gryka-the-effect-of-sauna-bathing-on-lipid-profile-in-young-phys"
+        - "source_artifact:sauna-2015-kanji-efficacy-of-regular-sauna-bathing-for-chronic-tension-type"
     -
-      id: safety-dose-modality-and-context-boundaries
+      id: "safety-dose-modality-and-context-boundaries"
       label: "Safety, dose, and modality boundaries"
-      stance: safety_boundary
+      stance: "safety_boundary"
       summary: "Classic and modern physiology sources show why hydration, alcohol, medications, cold immersion, extreme heat, pregnancy/children, and dry-vs-steam modality need guardrails. They keep the default protocol conservative and stop high-heat or mixed-modality variants from being silently merged into ordinary Finnish dry sauna."
       sourceKeys:
-        - source_artifact:pmid-445022
-        - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons
-        - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2
-        - source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3
-        - source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm
-        - source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment
-        - source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities
-        - source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood
-        - source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c
-        - source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac
-        - source_artifact:pmid-34727008
-        - source_artifact:pmid-36078656
-        - source_artifact:pmid-41461792
-        - source_artifact:pmid-30800676
-        - source_artifact:pmid-38344040
-        - source_artifact:pmid-24899780
-        - source_artifact:pmid-3218892
-        - source_artifact:pmid-3218897
+        - "source_artifact:pmid-19154844"
+        - "source_artifact:pmid-24899780"
+        - "source_artifact:pmid-26152773"
+        - "source_artifact:pmid-30800676"
+        - "source_artifact:pmid-3218892"
+        - "source_artifact:pmid-3218897"
+        - "source_artifact:pmid-34727008"
+        - "source_artifact:pmid-36078656"
+        - "source_artifact:pmid-3788622"
+        - "source_artifact:pmid-38344040"
+        - "source_artifact:pmid-41461792"
+        - "source_artifact:pmid-445022"
+        - "source_artifact:sauna-1988-eisalo-the-finnish-sauna-and-cardiovascular-diseases"
+        - "source_artifact:sauna-1988-kukkonen-harjula-how-the-sauna-affects-the-endocrine-system"
+        - "source_artifact:sauna-1988-laitinen-lungs-and-ventilation-in-the-sauna"
+        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons"
+        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-2"
+        - "source_artifact:sauna-1989-kauppinen-sauna-shower-and-ice-water-immersion-physiological-respons-3"
+        - "source_artifact:sauna-1989-kauppinen-some-endocrine-responses-to-sauna-shower-and-ice-water-imm"
+        - "source_artifact:sauna-1989-markkola-sauna-habits-and-related-symptoms-in-finnish-children"
+        - "source_artifact:sauna-1990-jokinen-children-in-sauna-cardiovascular-adjustment"
+        - "source_artifact:sauna-1991-jokinen-children-in-sauna-electrocardiographic-abnormalities"
+        - "source_artifact:sauna-1992-roine-alcohol-and-sauna-bathing-effects-on-cardiac-rhythm-blood"
+        - "source_artifact:sauna-1994-kukkonen-harjula-cardiovascular-effects-of-atenolol-scopolamine-and-their-c"
+        - "source_artifact:sauna-1996-vanakoski-effects-of-heat-exposure-in-a-finnish-sauna-on-the-pharmac"
+        - "source_artifact:sauna-2000-keast-the-finnish-sauna-bath-and-its-use-in-patients-with-cardio"
+        - "source_artifact:sauna-2005-miyamoto-safety-and-efficacy-of-repeated-sauna-bathing-in-patients"
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

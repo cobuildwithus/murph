@@ -2071,236 +2071,1374 @@ claims:
       - Scale weight is a confounded signal during creatine use.
       - Lean-mass and body-fat-percentage changes should be interpreted alongside strength, training, diet, and waist or visual context.
 researchLandscape:
-  bottomLine: 'Creatine monohydrate has a usable but bounded evidence base for healthy-adult resistance-training and repeated high-intensity contexts; the page should preserve null, mixed, safety, and population-mismatch findings instead of selling a universal supplement claim. Anchor sources: source_artifact:pmid-39074168, source_artifact:pmid-40944139, source_artifact:pmid-36041731, source_artifact:pmid-40198156.'
-  confidenceLabel: moderate
-  primaryClaim: 'The default Murph protocol can reasonably test plain creatine monohydrate at 3–5 g/day, with optional split loading, for strength/high-intensity performance and tolerance endpoints in screened adults. Sources: source_artifact:pmid-8828669, source_artifact:pmid-12660409, source_artifact:pmid-39074168, source_artifact:pmid-40944139.'
-  mainCaveat: 'Do not generalize this protocol to alternative forms, cognition, endurance, fat loss, pregnancy/lactation, minors, kidney disease, bipolar/mania risk, muscle disorders, or disease-treatment contexts. Sources: source_artifact:pmid-36000773, source_artifact:doi-10.2903-j.efsa.2024.9100, source_artifact:pmid-30547033, source_artifact:pmid-41199218, source_artifact:pmid-41558805.'
+  bottomLine: "Creatine monohydrate has a usable but bounded evidence base for healthy-adult resistance-training and repeated high-intensity contexts; the page should preserve null, mixed, safety, and population-mismatch findings instead of selling a universal supplement claim. Anchor sources: source_artifact:pmid-39074168, source_artifact:pmid-40944139, source_artifact:pmid-36041731, source_artifact:pmid-40198156."
+  confidenceLabel: "moderate"
+  primaryClaim: "The default Murph protocol can reasonably test plain creatine monohydrate at 3–5 g/day, with optional split loading, for strength/high-intensity performance and tolerance endpoints in screened adults. Sources: source_artifact:pmid-8828669, source_artifact:pmid-12660409, source_artifact:pmid-39074168, source_artifact:pmid-40944139."
+  mainCaveat: "Do not generalize this protocol to alternative forms, cognition, endurance, fat loss, pregnancy/lactation, minors, kidney disease, bipolar/mania risk, muscle disorders, or disease-treatment contexts. Sources: source_artifact:pmid-36000773, source_artifact:doi-10.2903-j.efsa.2024.9100, source_artifact:pmid-30547033, source_artifact:pmid-41199218, source_artifact:pmid-41558805."
   groups:
     -
-      id: dose-implementation
-      label: 'Dose implementation: loading, maintenance, timing, and tolerability'
-      stance: supports
-      summary: Loading can raise stores quickly, no-loading can raise stores more slowly, maintenance is needed to keep stores elevated, and timing can be flexible. Co-ingestion evidence is mechanistically positive but outcome-mixed, so with-meal dosing is optional rather than mandatory; larger daily doses should be split for GI tolerance.
+      id: "dose-implementation"
+      label: "Dose implementation: loading, maintenance, timing, and tolerability"
+      stance: "supports"
+      summary: "Loading can raise stores quickly, no-loading can raise stores more slowly, maintenance is needed to keep stores elevated, and timing can be flexible. Co-ingestion evidence is mechanistically positive but outcome-mixed, so with-meal dosing is optional rather than mandatory; larger daily doses should be split for GI tolerance."
       sourceKeys:
-        - source_artifact:pmid-1327657
-        - source_artifact:pmid-8828669
-        - source_artifact:pmid-12660409
-        - source_artifact:pmid-20609257
-        - source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01
-        - source_artifact:pmid-28615996
-        - source_artifact:pmid-17908288
-        - source_artifact:pmid-23919405
-        - source_artifact:pmid-34610729
-        - source_artifact:pmid-36465581
-        - source_artifact:pmid-35010653
-        - source_artifact:pmid-8944667
-        - source_artifact:pmid-10956365
-        - source_artifact:pmid-20035494
-        - source_artifact:pmid-15903360
-        - source_artifact:pmid-39074168
-        - source_artifact:pmid-18373286
+        - "source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01"
+        - "source_artifact:pmid-10956365"
+        - "source_artifact:pmid-12660409"
+        - "source_artifact:pmid-1327657"
+        - "source_artifact:pmid-15903360"
+        - "source_artifact:pmid-17908288"
+        - "source_artifact:pmid-18373286"
+        - "source_artifact:pmid-20035494"
+        - "source_artifact:pmid-20609257"
+        - "source_artifact:pmid-23919405"
+        - "source_artifact:pmid-28615996"
+        - "source_artifact:pmid-34610729"
+        - "source_artifact:pmid-35010653"
+        - "source_artifact:pmid-36465581"
+        - "source_artifact:pmid-39074168"
+        - "source_artifact:pmid-8828669"
+        - "source_artifact:pmid-8944667"
       defaultOpen: true
     -
-      id: strength-volume-and-resistance-training-outcomes
-      label: Strength and training-volume endpoints
-      stance: supports
-      summary: Resistance-training and strength-test evidence supports using bench/chest press, squat or other repeated lift outputs, and completed training volume as primary outcomes, while keeping endpoint-specific nulls visible for handgrip, leg press, isokinetic torque, and equalized-volume training contexts.
+      id: "strength-volume-and-resistance-training-outcomes"
+      label: "Strength and training-volume endpoints"
+      stance: "supports"
+      summary: "Resistance-training and strength-test evidence supports using bench/chest press, squat or other repeated lift outputs, and completed training volume as primary outcomes, while keeping endpoint-specific nulls visible for handgrip, leg press, isokinetic torque, and equalized-volume training contexts."
       sourceKeys:
-        - source_artifact:pmid-40944139
-        - source_artifact:pmid-41328071
-        - source_artifact:pmid-29138605
-        - source_artifact:pmid-41388441
-        - source_artifact:pmid-9294877
-        - source_artifact:pmid-14685870
-        - source_artifact:doi-10.1519-1533-4287-2000-014-0182-aarspf-2.0.co-2
-        - source_artifact:pmid-10795791
+        - "source_artifact:doi-10.1519-1533-4287-2000-014-0182-aarspf-2.0.co-2"
+        - "source_artifact:pmid-10795791"
+        - "source_artifact:pmid-14685870"
+        - "source_artifact:pmid-29138605"
+        - "source_artifact:pmid-40944139"
+        - "source_artifact:pmid-41328071"
+        - "source_artifact:pmid-41388441"
+        - "source_artifact:pmid-9294877"
       defaultOpen: true
     -
-      id: repeated-sprint-and-peak-power-outcomes
-      label: Repeated sprint and peak-power endpoints
-      stance: mixed
-      summary: Short-term creatine shows a stronger signal for repeated-sprint mean power, work output, or late-sprint maintenance than for peak power, fatigue index, lactate, or sport-specific sprint outcomes; running, swimming, and active-female anaerobic evidence should be phrased as mixed.
+      id: "repeated-sprint-and-peak-power-outcomes"
+      label: "Repeated sprint and peak-power endpoints"
+      stance: "mixed"
+      summary: "Short-term creatine shows a stronger signal for repeated-sprint mean power, work output, or late-sprint maintenance than for peak power, fatigue index, lactate, or sport-specific sprint outcomes; running, swimming, and active-female anaerobic evidence should be phrased as mixed."
       sourceKeys:
-        - source_artifact:pmid-36041731
-        - source_artifact:pmid-40944139
-        - source_artifact:pmid-35334797
-        - source_artifact:pmid-40041626
-        - source_artifact:pmid-11834115
-        - source_artifact:pmid-16686553
-        - source_artifact:pmid-12930168
-        - source_artifact:pmid-39441446
-        - source_artifact:pmid-39861368
+        - "source_artifact:pmid-11834115"
+        - "source_artifact:pmid-12930168"
+        - "source_artifact:pmid-16686553"
+        - "source_artifact:pmid-35334797"
+        - "source_artifact:pmid-36041731"
+        - "source_artifact:pmid-39441446"
+        - "source_artifact:pmid-39861368"
+        - "source_artifact:pmid-40041626"
+        - "source_artifact:pmid-40944139"
       defaultOpen: true
     -
-      id: body-composition-recovery-and-tolerance-endpoints
-      label: Body-composition, recovery, and tolerance endpoints
-      stance: mixed
-      summary: Body weight, fat-free or lean-mass estimates, perceived recovery, and GI tolerance are experiment-relevant tracking endpoints, but body-composition changes are hydration-sensitive, perceived recovery is exploratory, and GI event rates were not consistently extracted.
+      id: "body-composition-recovery-and-tolerance-endpoints"
+      label: "Body-composition, recovery, and tolerance endpoints"
+      stance: "mixed"
+      summary: "Body weight, fat-free or lean-mass estimates, perceived recovery, and GI tolerance are experiment-relevant tracking endpoints, but body-composition changes are hydration-sensitive, perceived recovery is exploratory, and GI event rates were not consistently extracted."
       sourceKeys:
-        - source_artifact:pmid-41433021
-        - source_artifact:pmid-39074168
-        - source_artifact:pmid-39042054
-        - source_artifact:pmid-26509366
-        - source_artifact:pmid-36960692
-        - source_artifact:pmid-37675500
-        - source_artifact:pmid-40292479
-        - source_artifact:pmid-37432300
-        - source_artifact:pmid-34199588
-        - source_artifact:pmid-27193231
-        - source_artifact:pmid-19490606
-        - source_artifact:pmid-18373286
-        - source_artifact:pmid-32599716
-        - source_artifact:pmid-36465581
-        - source_artifact:pmid-41404326
+        - "source_artifact:pmid-18373286"
+        - "source_artifact:pmid-19490606"
+        - "source_artifact:pmid-26509366"
+        - "source_artifact:pmid-27193231"
+        - "source_artifact:pmid-32599716"
+        - "source_artifact:pmid-34199588"
+        - "source_artifact:pmid-36465581"
+        - "source_artifact:pmid-36960692"
+        - "source_artifact:pmid-37432300"
+        - "source_artifact:pmid-37675500"
+        - "source_artifact:pmid-39042054"
+        - "source_artifact:pmid-39074168"
+        - "source_artifact:pmid-40292479"
+        - "source_artifact:pmid-41404326"
+        - "source_artifact:pmid-41433021"
       defaultOpen: true
     -
-      id: renal-labs-and-kidney-risk-boundaries
-      label: Renal labs and kidney-risk boundaries
-      stance: safety_boundary
-      summary: Controlled and meta-analytic renal evidence is generally reassuring in studied populations, but creatinine can rise and kidney disease, transplant, dialysis, single-kidney status, nephrotoxic co-exposures, or unresolved abnormal labs require clinician-guided interpretation.
+      id: "renal-labs-and-kidney-risk-boundaries"
+      label: "Renal labs and kidney-risk boundaries"
+      stance: "safety_boundary"
+      summary: "Controlled and meta-analytic renal evidence is generally reassuring in studied populations, but creatinine can rise and kidney disease, transplant, dialysis, single-kidney status, nephrotoxic co-exposures, or unresolved abnormal labs require clinician-guided interpretation."
       sourceKeys:
-        - source_artifact:pmid-41199218
-        - source_artifact:pmid-31375416
-        - source_artifact:pmid-18188581
-        - source_artifact:pmid-23680457
-        - source_artifact:pmid-20976468
-        - source_artifact:pmid-32670557
-        - source_artifact:pmid-36986197
-        - source_artifact:pmid-30367015
-        - source_artifact:pmid-9643752
-        - source_artifact:pmid-10075534
-        - source_artifact:pmid-17046619
-        - source_artifact:pmid-25984094
+        - "source_artifact:pmid-10075534"
+        - "source_artifact:pmid-17046619"
+        - "source_artifact:pmid-18188581"
+        - "source_artifact:pmid-20976468"
+        - "source_artifact:pmid-23680457"
+        - "source_artifact:pmid-25984094"
+        - "source_artifact:pmid-30367015"
+        - "source_artifact:pmid-31375416"
+        - "source_artifact:pmid-32670557"
+        - "source_artifact:pmid-36986197"
+        - "source_artifact:pmid-41199218"
+        - "source_artifact:pmid-9643752"
       defaultOpen: true
     -
-      id: gi-body-water-and-heat-hydration-tolerability
-      label: GI, body-water, and heat/hydration tolerability
-      stance: mixed
-      summary: GI upset is plausible and appears more likely with large single servings, body weight and water/lean-mass estimates can rise, and current evidence does not support recommended-dose creatine as a dehydration/cramping/heat-intolerance hazard while still preserving standard heat and hydration precautions.
+      id: "gi-body-water-and-heat-hydration-tolerability"
+      label: "GI, body-water, and heat/hydration tolerability"
+      stance: "mixed"
+      summary: "GI upset is plausible and appears more likely with large single servings, body weight and water/lean-mass estimates can rise, and current evidence does not support recommended-dose creatine as a dehydration/cramping/heat-intolerance hazard while still preserving standard heat and hydration precautions."
       sourceKeys:
-        - source_artifact:pmid-18373286
-        - source_artifact:govuk-creatine-cognitive-function-2024-08-14
-        - source_artifact:pmid-41404326
-        - source_artifact:pmid-32599716
-        - source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01
-        - source_artifact:pmid-36041731
-        - source_artifact:pmid-12937471
-        - source_artifact:pmid-19295968
-        - source_artifact:pmid-18184753
-        - source_artifact:pmid-11445756
+        - "source_artifact:govuk-creatine-cognitive-function-2024-08-14"
+        - "source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01"
+        - "source_artifact:pmid-11445756"
+        - "source_artifact:pmid-12937471"
+        - "source_artifact:pmid-18184753"
+        - "source_artifact:pmid-18373286"
+        - "source_artifact:pmid-19295968"
+        - "source_artifact:pmid-32599716"
+        - "source_artifact:pmid-36041731"
+        - "source_artifact:pmid-41404326"
       defaultOpen: true
     -
-      id: formulation-head-to-head-boundaries
-      label: Formulation head-to-head boundaries
-      stance: supports
-      summary: Reviews describe monohydrate as the best-studied reference form, while direct comparisons of HCl, buffered creatine, ethyl ester, and creatyl-L-leucine do not show a reliable alternative-form advantage over monohydrate. Use these sources to prevent product-form creep, not to claim every monohydrate outcome is guaranteed.
+      id: "formulation-head-to-head-boundaries"
+      label: "Formulation head-to-head boundaries"
+      stance: "supports"
+      summary: "Reviews describe monohydrate as the best-studied reference form, while direct comparisons of HCl, buffered creatine, ethyl ester, and creatyl-L-leucine do not show a reliable alternative-form advantage over monohydrate. Use these sources to prevent product-form creep, not to claim every monohydrate outcome is guaranteed."
       sourceKeys:
-        - source_artifact:pmid-36000773
-        - source_artifact:pmid-35268011
-        - source_artifact:doi-10.1016-j.scispo.2019.07.013
-        - source_artifact:doi-10.1080-15502783.2025.2533658
-        - source_artifact:pmid-39545789
-        - source_artifact:doi-10.1163-17552559-00001101
-        - source_artifact:pmid-22971354
-        - source_artifact:pmid-19228401
-        - source_artifact:pmid-36007881
+        - "source_artifact:doi-10.1016-j.scispo.2019.07.013"
+        - "source_artifact:doi-10.1080-15502783.2025.2533658"
+        - "source_artifact:doi-10.1163-17552559-00001101"
+        - "source_artifact:pmid-19228401"
+        - "source_artifact:pmid-22971354"
+        - "source_artifact:pmid-35268011"
+        - "source_artifact:pmid-36000773"
+        - "source_artifact:pmid-36007881"
+        - "source_artifact:pmid-39545789"
       defaultOpen: true
     -
-      id: mixed-products-and-adjacent-forms
-      label: Mixed products and adjacent creatine forms
-      stance: context_only
-      summary: Pyruvate/citrate, nitrate, magnesium chelate, creatine serum, and protein/carbohydrate formulas may have product-specific or mechanistic findings, but co-ingredients, missing monohydrate comparators, acute endpoints, or incomplete arm-level extraction block attribution to plain creatine monohydrate.
+      id: "mixed-products-and-adjacent-forms"
+      label: "Mixed products and adjacent creatine forms"
+      stance: "context_only"
+      summary: "Pyruvate/citrate, nitrate, magnesium chelate, creatine serum, and protein/carbohydrate formulas may have product-specific or mechanistic findings, but co-ingredients, missing monohydrate comparators, acute endpoints, or incomplete arm-level extraction block attribution to plain creatine monohydrate."
       sourceKeys:
-        - source_artifact:pmid-17997838
-        - source_artifact:pmid-18269769
-        - source_artifact:pmid-14506619
-        - source_artifact:pmid-32998206
-        - source_artifact:pmid-27034623
-        - source_artifact:pmid-29244743
-        - source_artifact:pmid-17986903
-        - source_artifact:pmid-17095924
-        - source_artifact:pmid-17277594
-        - source_artifact:pmid-17679046
-        - source_artifact:pmid-9475647
-        - source_artifact:pmid-8944667
-        - source_artifact:pmid-8899067
-        - source_artifact:pmid-20035494
-        - source_artifact:pmid-15903360
+        - "source_artifact:pmid-14506619"
+        - "source_artifact:pmid-15903360"
+        - "source_artifact:pmid-17095924"
+        - "source_artifact:pmid-17277594"
+        - "source_artifact:pmid-17679046"
+        - "source_artifact:pmid-17986903"
+        - "source_artifact:pmid-17997838"
+        - "source_artifact:pmid-18269769"
+        - "source_artifact:pmid-20035494"
+        - "source_artifact:pmid-27034623"
+        - "source_artifact:pmid-29244743"
+        - "source_artifact:pmid-32998206"
+        - "source_artifact:pmid-8899067"
+        - "source_artifact:pmid-8944667"
+        - "source_artifact:pmid-9475647"
       defaultOpen: false
     -
-      id: adult-exercise-default-scope
-      label: Healthy adult exercise scope
-      stance: supports
-      summary: Adult resistance-training, strength/power, and repeated high-intensity contexts anchor the default protocol boundary. They support using creatine monohydrate as a healthy-adult experiment, while still preserving endpoint-specific null findings.
+      id: "adult-exercise-default-scope"
+      label: "Healthy adult exercise scope"
+      stance: "supports"
+      summary: "Adult resistance-training, strength/power, and repeated high-intensity contexts anchor the default protocol boundary. They support using creatine monohydrate as a healthy-adult experiment, while still preserving endpoint-specific null findings."
       sourceKeys:
-        - source_artifact:pmid-39074168
-        - source_artifact:pmid-40944139
-        - source_artifact:pmid-36041731
-        - source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01
-        - source_artifact:pmid-28615996
+        - "source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01"
+        - "source_artifact:pmid-28615996"
+        - "source_artifact:pmid-36041731"
+        - "source_artifact:pmid-39074168"
+        - "source_artifact:pmid-40944139"
       defaultOpen: true
     -
-      id: subgroup-modifiers-and-life-stage-boundaries
-      label: Subgroup modifiers and life-stage boundaries
-      stance: mixed
-      summary: Older adults, female athletes/adult women, vegetarians/vegans, and novice versus experienced lifters can shift expectations, but evidence is endpoint-, dose-, and context-dependent. Pediatric, pregnancy, postpartum, and lactation contexts should trigger clinician guidance rather than default self-experiment framing.
+      id: "subgroup-modifiers-and-life-stage-boundaries"
+      label: "Subgroup modifiers and life-stage boundaries"
+      stance: "mixed"
+      summary: "Older adults, female athletes/adult women, vegetarians/vegans, and novice versus experienced lifters can shift expectations, but evidence is endpoint-, dose-, and context-dependent. Pediatric, pregnancy, postpartum, and lactation contexts should trigger clinician guidance rather than default self-experiment framing."
       sourceKeys:
-        - source_artifact:pmid-29138605
-        - source_artifact:pmid-41388441
-        - source_artifact:doi-10.1515-teb-2024-0019
-        - source_artifact:pmid-34836013
-        - source_artifact:pmid-37221858
-        - source_artifact:pmid-33800439
-        - source_artifact:pmid-41433021
-        - source_artifact:pmid-14600563
-        - source_artifact:pmid-32349356
-        - source_artifact:pmid-40939139
-        - source_artifact:pmid-30547033
-        - source_artifact:pmid-33670822
-        - source_artifact:pmid-37008451
-        - source_artifact:pmid-24766646
-        - source_artifact:pmid-33540766
+        - "source_artifact:doi-10.1515-teb-2024-0019"
+        - "source_artifact:pmid-14600563"
+        - "source_artifact:pmid-24766646"
+        - "source_artifact:pmid-29138605"
+        - "source_artifact:pmid-30547033"
+        - "source_artifact:pmid-32349356"
+        - "source_artifact:pmid-33540766"
+        - "source_artifact:pmid-33670822"
+        - "source_artifact:pmid-33800439"
+        - "source_artifact:pmid-34836013"
+        - "source_artifact:pmid-37008451"
+        - "source_artifact:pmid-37221858"
+        - "source_artifact:pmid-40939139"
+        - "source_artifact:pmid-41388441"
+        - "source_artifact:pmid-41433021"
       defaultOpen: true
     -
-      id: adjacent-cognition-bone-and-disease-treatment-claims
-      label: Adjacent cognition, bone, and disease-treatment claims
-      stance: context_only
-      summary: Cognition-only, bone-only, and disease-treatment sources are useful for preventing overclaiming. They include mixed positive, null, safety, and population-mismatch findings, but they should not become default healthy-adult protocol promises.
+      id: "adjacent-cognition-bone-and-disease-treatment-claims"
+      label: "Adjacent cognition, bone, and disease-treatment claims"
+      stance: "context_only"
+      summary: "Cognition-only, bone-only, and disease-treatment sources are useful for preventing overclaiming. They include mixed positive, null, safety, and population-mismatch findings, but they should not become default healthy-adult protocol promises."
       sourceKeys:
-        - source_artifact:doi-10.2903-j.efsa.2024.9100
-        - source_artifact:govuk-creatine-cognitive-function-2024-08-14
-        - source_artifact:pmid-29704637
-        - source_artifact:pmid-39070254
-        - source_artifact:pmid-38582412
-        - source_artifact:pmid-25386713
-        - source_artifact:pmid-31257405
-        - source_artifact:pmid-37144634
-        - source_artifact:pmid-23740606
-        - source_artifact:pmid-24934384
-        - source_artifact:pmid-25668262
-        - source_artifact:pmid-41558805
+        - "source_artifact:doi-10.2903-j.efsa.2024.9100"
+        - "source_artifact:govuk-creatine-cognitive-function-2024-08-14"
+        - "source_artifact:pmid-23740606"
+        - "source_artifact:pmid-24934384"
+        - "source_artifact:pmid-25386713"
+        - "source_artifact:pmid-25668262"
+        - "source_artifact:pmid-29704637"
+        - "source_artifact:pmid-31257405"
+        - "source_artifact:pmid-37144634"
+        - "source_artifact:pmid-38582412"
+        - "source_artifact:pmid-39070254"
+        - "source_artifact:pmid-41558805"
       defaultOpen: false
     -
-      id: evidence-quality-and-interpretation-limits
-      label: Evidence quality and interpretation limits
-      stance: mixed
-      summary: The strongest layer is short-term RCT and meta-analysis evidence in resistance-training or repeated high-intensity contexts, but risk-of-bias concerns, short durations, endpoint heterogeneity, timing uncertainty, diet/training co-interventions, sparse subgroup evidence, and adjacent null findings limit generalization.
+      id: "evidence-quality-and-interpretation-limits"
+      label: "Evidence quality and interpretation limits"
+      stance: "mixed"
+      summary: "The strongest layer is short-term RCT and meta-analysis evidence in resistance-training or repeated high-intensity contexts, but risk-of-bias concerns, short durations, endpoint heterogeneity, timing uncertainty, diet/training co-interventions, sparse subgroup evidence, and adjacent null findings limit generalization."
       sourceKeys:
-        - source_artifact:pmid-12485548
-        - source_artifact:pmid-39074168
-        - source_artifact:pmid-40944139
-        - source_artifact:pmid-39519498
-        - source_artifact:pmid-39861368
-        - source_artifact:pmid-37221858
-        - source_artifact:pmid-36041731
-        - source_artifact:pmid-12660409
-        - source_artifact:pmid-14967873
-        - source_artifact:pmid-32599716
-        - source_artifact:pmid-36877404
-        - source_artifact:pmid-39441446
-        - source_artifact:doi-10.2903-j.efsa.2024.9100
-        - source_artifact:govuk-creatine-cognitive-function-2024-08-14
+        - "source_artifact:doi-10.2903-j.efsa.2024.9100"
+        - "source_artifact:govuk-creatine-cognitive-function-2024-08-14"
+        - "source_artifact:pmid-12485548"
+        - "source_artifact:pmid-12660409"
+        - "source_artifact:pmid-14967873"
+        - "source_artifact:pmid-32599716"
+        - "source_artifact:pmid-36041731"
+        - "source_artifact:pmid-36877404"
+        - "source_artifact:pmid-37221858"
+        - "source_artifact:pmid-39074168"
+        - "source_artifact:pmid-39441446"
+        - "source_artifact:pmid-39519498"
+        - "source_artifact:pmid-39861368"
+        - "source_artifact:pmid-40944139"
       defaultOpen: true
+    -
+      id: "absorption-form-background"
+      label: "Absorption Form Background"
+      stance: "context_only"
+      summary: "Creatine appears absorbable from solution, meat, and solid forms, but absorption kinetics differ. The Absorption Form Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11811571"
+    -
+      id: "acute-strength-fatigue-and-tolerability"
+      label: "Acute Strength Fatigue And Tolerability"
+      stance: "supports"
+      summary: "Short-term creatine improved selected high-repetition quadriceps measures in women without body-composition change. The Acute Strength Fatigue And Tolerability group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-12660408"
+    -
+      id: "acute-strength-fatigue-null-results"
+      label: "Acute Strength Fatigue Null Results"
+      stance: "mixed"
+      summary: "Creatine loading increased body weight but did not improve repeated isokinetic torque performance. The Acute Strength Fatigue Null Results group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10795791"
+    -
+      id: "adjacent-carbohydrate-formulation"
+      label: "Adjacent Carbohydrate Formulation"
+      stance: "context_only"
+      summary: "A creatine-plus-carbohydrate formulation improved some football training outcomes versus carbohydrate, but the design is formulation-adjacent. The Adjacent Carbohydrate Formulation group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1016-s0271-5317-98-00185-7"
+    -
+      id: "adjacent-dextrose-comparator"
+      label: "Adjacent Dextrose Comparator"
+      stance: "context_only"
+      summary: "Creatine-dextrose increased body mass more, while strength gains were broadly similar to protein-dextrose. The Adjacent Dextrose Comparator group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11740297"
+    -
+      id: "adjacent-endurance-context"
+      label: "Adjacent Endurance Context"
+      stance: "context_only"
+      summary: "The study concluded that 6 g/day creatine had positive effects on short-term exercise inserted into aerobic endurance exercise. The Adjacent Endurance Context group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9662683"
+    -
+      id: "adjacent-formulation-body-composition"
+      label: "Adjacent Formulation Body Composition"
+      stance: "context_only"
+      summary: "Creatine-containing supplementation increased body weight and fat/bone-free mass more than comparator in available summaries, but the formula was not creatine-alone. The Adjacent Formulation Body Composition group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9475647"
+    -
+      id: "adjacent-mixed-supplement-timing"
+      label: "Adjacent Mixed Supplement Timing"
+      stance: "context_only"
+      summary: "A mixed protein/glucose/creatine supplement near workouts outperformed morning/evening dosing in a small RT study. The Adjacent Mixed Supplement Timing group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-17095924"
+    -
+      id: "adjacent-protein-creatine-formula"
+      label: "Adjacent Protein Creatine Formula"
+      stance: "context_only"
+      summary: "Creatine-containing formula groups gained more mass/FFM in some comparisons, but protein/formula design makes this adjacent evidence. The Adjacent Protein Creatine Formula group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-17679046"
+    -
+      id: "adjacent-protein-creatine-training"
+      label: "Adjacent Protein Creatine Training"
+      stance: "context_only"
+      summary: "Whey plus creatine improved some lean-mass and strength outcomes, but the co-supplement design is adjacent evidence. The Adjacent Protein Creatine Training group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11591884"
+    -
+      id: "adjacent-rapid-weight-loss"
+      label: "Adjacent Rapid Weight Loss"
+      stance: "context_only"
+      summary: "Creatine during rapid body-mass reduction may help maintain some muscle performance measures, but this is a weight-cutting context. The Adjacent Rapid Weight Loss group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9660161"
+    -
+      id: "adjacent-whey-creatine-hypertrophy"
+      label: "Adjacent Whey Creatine Hypertrophy"
+      stance: "context_only"
+      summary: "Whey/creatine supplementation affected hypertrophy and strength-related outcomes in male bodybuilders, but the design is adjacent. The Adjacent Whey Creatine Hypertrophy group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-17277594"
+    -
+      id: "aging-cognition-boundary-context"
+      label: "Aging Cognition Boundary Context"
+      stance: "context_only"
+      summary: "The review found mostly positive older-adult cognition associations or effects, but the evidence base was small and partly observational. This review is useful for aging and Alzheimer’s disease boundary language, not for direct protocol efficacy. The Aging Cognition Boundary Context group currently links 2 appraisal-backed sources with adjacent variant scope and mixed, not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-21394604"
+        - "source_artifact:pmid-40971619"
+    -
+      id: "athlete-performance-background"
+      label: "Athlete Performance Background"
+      stance: "context_only"
+      summary: "Creatine is discussed as an adjunct to training for strength, size, and training volume in athletes. The Athlete Performance Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15212742"
+    -
+      id: "athlete-side-effects"
+      label: "Athlete Side Effects"
+      stance: "safety_boundary"
+      summary: "The review reported that literature shows a 1.0% to 2.3% increase in body mass and discusses side-effect claims in athletes. The Athlete Side Effects group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19124889"
+    -
+      id: "batch-004-doi-10.1016-j.scispo.2018.11.003"
+      label: "Batch 004 Doi 10.1016 J.scispo.2018.11.003"
+      stance: "supports"
+      summary: "Short-term loading improved several field-sport performance tests in female futsal players without extracted weight gain. The Batch 004 Doi 10.1016 J.scispo.2018.11.003 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1016-j.scispo.2018.11.003"
+    -
+      id: "batch-004-doi-10.1519-1533-4287-1998-012-0104-eovdoo-2.3.co-2"
+      label: "Batch 004 Doi 10.1519 1533 4287 1998 012 0104 Eovdoo 2.3.co 2"
+      stance: "mixed"
+      summary: "A dose-relative-to-fat-free-mass trial tested loading plus different maintenance doses, but detailed effects need confirmation. The Batch 004 Doi 10.1519 1533 4287 1998 012 0104 Eovdoo 2.3.co 2 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1519-1533-4287-1998-012-0104-eovdoo-2.3.co-2"
+    -
+      id: "batch-004-pmid-10063812"
+      label: "Batch 004 PMID 10063812"
+      stance: "mixed"
+      summary: "Creatine loading did not improve phosphocreatine resynthesis in this mechanistic study. The Batch 004 PMID 10063812 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10063812"
+    -
+      id: "batch-004-pmid-10585165"
+      label: "Batch 004 PMID 10585165"
+      stance: "mixed"
+      summary: "Acute loading improved swim intervals, but longer supplementation did not show a significant additional benefit. The Batch 004 PMID 10585165 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10585165"
+    -
+      id: "batch-004-pmid-10601174"
+      label: "Batch 004 PMID 10601174"
+      stance: "mixed"
+      summary: "Creatine uptake occurred, but the tested intermittent-performance endpoint did not improve. The Batch 004 PMID 10601174 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10601174"
+    -
+      id: "batch-004-pmid-10694120"
+      label: "Batch 004 PMID 10694120"
+      stance: "context_only"
+      summary: "Creatine improved alternating-intensity cycling performance in a small adjacent-context trial. The Batch 004 PMID 10694120 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10694120"
+    -
+      id: "batch-004-pmid-10997950"
+      label: "Batch 004 PMID 10997950"
+      stance: "supports"
+      summary: "About 7.7 g/day for 21 days improved force, power, and total work outcomes in a resistance-training context. The Batch 004 PMID 10997950 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10997950"
+    -
+      id: "batch-004-pmid-11099372"
+      label: "Batch 004 PMID 11099372"
+      stance: "supports"
+      summary: "Four days of split-dose creatine improved high-intensity exercise indices in both males and females. The Batch 004 PMID 11099372 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11099372"
+    -
+      id: "batch-004-pmid-11258645"
+      label: "Batch 004 PMID 11258645"
+      stance: "context_only"
+      summary: "Creatine loading did not improve tennis stroke/service performance in this adjacent sport-skill trial. The Batch 004 PMID 11258645 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11258645"
+    -
+      id: "batch-004-pmid-11323554"
+      label: "Batch 004 PMID 11323554"
+      stance: "supports"
+      summary: "Five-day loading improved total work in a long repeated-sprint protocol. The Batch 004 PMID 11323554 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11323554"
+    -
+      id: "batch-004-pmid-11985944"
+      label: "Batch 004 PMID 11985944"
+      stance: "supports"
+      summary: "Three-day loading increased thigh muscle volume and may have enhanced repeated cycle sprint performance. The Batch 004 PMID 11985944 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11985944"
+    -
+      id: "batch-004-pmid-12546637"
+      label: "Batch 004 PMID 12546637"
+      stance: "mixed"
+      summary: "Prolonged supplementation maintained fat-free-mass gain but did not improve endurance metabolic endpoints. The Batch 004 PMID 12546637 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-12546637"
+    -
+      id: "batch-004-pmid-12660409"
+      label: "Batch 004 PMID 12660409"
+      stance: "supports"
+      summary: "A 5-day loading phase increased muscle creatine, and 2-5 g/day maintained elevated stores for 6 weeks. The Batch 004 PMID 12660409 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-12660409"
+    -
+      id: "batch-004-pmid-12937471"
+      label: "Batch 004 PMID 12937471"
+      stance: "supports"
+      summary: "Loading plus maintenance increased muscle creatine, body mass, and total body water without altering fluid distribution. The Batch 004 PMID 12937471 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-12937471"
+    -
+      id: "batch-004-pmid-14767409"
+      label: "Batch 004 PMID 14767409"
+      stance: "mixed"
+      summary: "Female softball loading trial suggests mixed strength/endurance effects and includes washout relevance. The Batch 004 PMID 14767409 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-14767409"
+    -
+      id: "batch-004-pmid-14971965"
+      label: "Batch 004 PMID 14971965"
+      stance: "mixed"
+      summary: "A small women-only crossover trial compared 2 versus 5 days of loading with a 5-week washout. The Batch 004 PMID 14971965 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-14971965"
+    -
+      id: "batch-004-pmid-15902992"
+      label: "Batch 004 PMID 15902992"
+      stance: "supports"
+      summary: "This study compared erythrocyte and skeletal-muscle creatine accumulation after loading. The Batch 004 PMID 15902992 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15902992"
+    -
+      id: "batch-004-pmid-15903359"
+      label: "Batch 004 PMID 15903359"
+      stance: "mixed"
+      summary: "A 6 g/day for 6 days design tested whether a short low-dose schedule improves anaerobic performance. The Batch 004 PMID 15903359 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15903359"
+    -
+      id: "batch-004-pmid-17460334"
+      label: "Batch 004 PMID 17460334"
+      stance: "context_only"
+      summary: "Creatine plus glycerol hyperhydration is context-only and should not be treated as creatine-only evidence. The Batch 004 PMID 17460334 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-17460334"
+    -
+      id: "batch-004-pmid-20609257"
+      label: "Batch 004 PMID 20609257"
+      stance: "mixed"
+      summary: "Daily 3 g for 28 days raised muscle creatine/PCr but did not improve final sprint performance in a simulated cycling road race. The Batch 004 PMID 20609257 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-20609257"
+    -
+      id: "batch-004-pmid-21512399"
+      label: "Batch 004 PMID 21512399"
+      stance: "supports"
+      summary: "Different dosing frequencies during resistance training produced at least small muscle-size benefits in accessible abstracts. The Batch 004 PMID 21512399 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-21512399"
+    -
+      id: "batch-004-pmid-26664350"
+      label: "Batch 004 PMID 26664350"
+      stance: "mixed"
+      summary: "Five-day creatine loading did not improve upper-body anaerobic power in trained wrestlers. The Batch 004 PMID 26664350 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-26664350"
+    -
+      id: "batch-004-pmid-37630756"
+      label: "Batch 004 PMID 37630756"
+      stance: "mixed"
+      summary: "Five-day loading in active women showed possible high-hormone-phase fatigue-index benefits, with HRV largely null. The Batch 004 PMID 37630756 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-37630756"
+    -
+      id: "batch-004-pmid-8001541"
+      label: "Batch 004 PMID 8001541"
+      stance: "mixed"
+      summary: "An early repeated-cycling study tested creatine effects on high-intensity work and metabolic markers. The Batch 004 PMID 8001541 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8001541"
+    -
+      id: "batch-004-pmid-8203511"
+      label: "Batch 004 PMID 8203511"
+      stance: "supports"
+      summary: "Increased muscle creatine was linked to greater PCr resynthesis during a specific recovery window. The Batch 004 PMID 8203511 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8203511"
+    -
+      id: "batch-004-pmid-8504634"
+      label: "Batch 004 PMID 8504634"
+      stance: "mixed"
+      summary: "Early evidence tested oral creatine effects on muscle torque during repeated maximal exercise. The Batch 004 PMID 8504634 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8504634"
+    -
+      id: "batch-004-pmid-8599745"
+      label: "Batch 004 PMID 8599745"
+      stance: "supports"
+      summary: "Oral creatine loading was reported to enhance single and repeated short sprint performance in an early sprint study. The Batch 004 PMID 8599745 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8599745"
+    -
+      id: "batch-004-pmid-8760078"
+      label: "Batch 004 PMID 8760078"
+      stance: "supports"
+      summary: "Five-day loading increased muscle creatine and repeated maximal cycling work in a small male physiology study. The Batch 004 PMID 8760078 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8760078"
+    -
+      id: "batch-004-pmid-8828669"
+      label: "Batch 004 PMID 8828669"
+      stance: "supports"
+      summary: "Classic human evidence supports 20 g/day rapid loading, low-dose maintenance, and slower low-dose saturation. The Batch 004 PMID 8828669 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8828669"
+    -
+      id: "batch-004-pmid-8933496"
+      label: "Batch 004 PMID 8933496"
+      stance: "mixed"
+      summary: "Creatine did not improve sprint swimming performance in highly trained competitive swimmers. The Batch 004 PMID 8933496 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8933496"
+    -
+      id: "batch-004-pmid-9216554"
+      label: "Batch 004 PMID 9216554"
+      stance: "supports"
+      summary: "Creatine enhanced muscular performance during high-intensity resistance exercise in this direct trial. The Batch 004 PMID 9216554 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9216554"
+    -
+      id: "batch-004-pmid-9390981"
+      label: "Batch 004 PMID 9390981"
+      stance: "supports"
+      summary: "Creatine intake improved resistance-training performance in young women and provides post-cessation context. The Batch 004 PMID 9390981 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9390981"
+    -
+      id: "batch-004-pmid-9839847"
+      label: "Batch 004 PMID 9839847"
+      stance: "supports"
+      summary: "Creatine loading improved intermittent sprint capacity at the end of endurance exercise in cyclists. The Batch 004 PMID 9839847 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9839847"
+    -
+      id: "batch-009"
+      label: "Batch 009"
+      stance: "mixed"
+      summary: "For older adults doing resistance training, creatine has synthesis-level support for lean-tissue and strength gains. Creatine may add only a small regional hypertrophy benefit during resistance training. The Batch 009 group currently links 37 appraisal-backed sources with direct protocol, adjacent variant, clinical supervised scope and positive, mixed, no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1016-j.aehs.2026.01.001"
+        - "source_artifact:doi-10.1519-00124278-199805000-00010"
+        - "source_artifact:doi-10.1519-1533-4287-2000-014-0207-teocsd-2.0.co-2"
+        - "source_artifact:pearson-creatine-strength-power-1999-01-01"
+        - "source_artifact:pmid-10408330"
+        - "source_artifact:pmid-12560406"
+        - "source_artifact:pmid-14600563"
+        - "source_artifact:pmid-15129933"
+        - "source_artifact:pmid-17943308"
+        - "source_artifact:pmid-18309444"
+        - "source_artifact:pmid-20591625"
+        - "source_artifact:pmid-23053133"
+        - "source_artifact:pmid-24190049"
+        - "source_artifact:pmid-24392772"
+        - "source_artifact:pmid-24530883"
+        - "source_artifact:pmid-24576864"
+        - "source_artifact:pmid-24633488"
+        - "source_artifact:pmid-25664170"
+        - "source_artifact:pmid-25993883"
+        - "source_artifact:pmid-27523919"
+        - "source_artifact:pmid-28190980"
+        - "source_artifact:pmid-29138605"
+        - "source_artifact:pmid-30762623"
+        - "source_artifact:pmid-32349356"
+        - "source_artifact:pmid-33467377"
+        - "source_artifact:pmid-33652673"
+        - "source_artifact:pmid-33800439"
+        - "source_artifact:pmid-34199420"
+        - "source_artifact:pmid-34836013"
+        - "source_artifact:pmid-35688360"
+        - "source_artifact:pmid-37432300"
+        - "source_artifact:pmid-40673730"
+        - "source_artifact:pmid-40939139"
+        - "source_artifact:pmid-41062952"
+        - "source_artifact:pmid-41388441"
+        - "source_artifact:pmid-41433021"
+        - "source_artifact:pmid-9805101"
+    -
+      id: "body-composition-methods"
+      label: "Body Composition Methods"
+      stance: "supports"
+      summary: "One week of creatine increased total-body-water and fat-free-mass estimates detected by body-composition devices in available summaries. The Body Composition Methods group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-37675500"
+    -
+      id: "body-weight-water"
+      label: "Body Weight Water"
+      stance: "supports"
+      summary: "Seven days of creatine increased total body water by 2.3 ± 1.0 L and body weight by 1.0 ± 0.4 kg in the creatine group. Creatine increased total body weight and body-water estimates while percent body fat and caloric intake did not significantly change. The Body Weight Water group currently links 2 appraisal-backed sources with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-14636103"
+        - "source_artifact:pmid-26509366"
+    -
+      id: "body-weight-water-women"
+      label: "Body Weight Water Women"
+      stance: "supports"
+      summary: "Creatine increased total body water and DXA lean-mass estimates in female collegiate dancers in available summaries. The trial examined body mass and total, extracellular, and intracellular fluid markers across menstrual phases after creatine loading in women. The Body Weight Water Women group currently links 2 appraisal-backed sources with direct protocol scope and positive, mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36678300"
+        - "source_artifact:pmid-36960692"
+    -
+      id: "bone-boundary-context"
+      label: "Bone Boundary Context"
+      stance: "context_only"
+      summary: "Creatine monohydrate 3 g/day for 2 years did not improve bone health, lean mass, or muscle function in older women with osteopenia. Creatine during exercise did not improve BMD in this 2-year postmenopausal trial, though selected bone-geometry and function signals were reported. The Bone Boundary Context group currently links 4 appraisal-backed sources with adjacent variant scope and no clear advantage, mixed, not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-20126964"
+        - "source_artifact:pmid-25386713"
+        - "source_artifact:pmid-31257405"
+        - "source_artifact:pmid-37144634"
+    -
+      id: "brain-tbi-boundary-context"
+      label: "Brain Tbi Boundary Context"
+      stance: "context_only"
+      summary: "This review covers brain creatine and TBI-related hypotheses but is too distal for default protocol efficacy claims. The Brain Tbi Boundary Context group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-30086660"
+    -
+      id: "broad-nonrenal-safety"
+      label: "Broad Nonrenal Safety"
+      stance: "safety_boundary"
+      summary: "The analysis evaluated side effects from 685 human clinical trials and adverse-event report sources and described creatine as generally well tolerated. The Broad Nonrenal Safety group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-40198156"
+    -
+      id: "carbohydrate-coingestion"
+      label: "Carbohydrate Coingestion"
+      stance: "supports"
+      summary: "Carbohydrate co-ingestion augmented skeletal-muscle creatine accumulation during loading. The Carbohydrate Coingestion group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8944667"
+    -
+      id: "carbohydrate-coingestion-performance"
+      label: "Carbohydrate Coingestion Performance"
+      stance: "mixed"
+      summary: "Adding carbohydrate to acute creatine loading did not improve swimming gains beyond creatine alone. The Carbohydrate Coingestion Performance group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15903360"
+    -
+      id: "carbohydrate-coingestion-retention"
+      label: "Carbohydrate Coingestion Retention"
+      stance: "supports"
+      summary: "Creatine plus carbohydrate increased retention; adding prior exercise did not further increase retention in this protocol. The Carbohydrate Coingestion Retention group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-8899067"
+    -
+      id: "classic-performance-background"
+      label: "Classic Performance Background"
+      stance: "context_only"
+      summary: "Early evidence was mixed: laboratory repeated high-intensity tasks looked most promising, while field performance and chronic lean-mass claims needed confirmation. The Classic Performance Background group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9627907"
+    -
+      id: "clinical-body-composition-boundary"
+      label: "Clinical Body Composition Boundary"
+      stance: "context_only"
+      summary: "Creatine increased appendicular lean mass by 0.52 ± 0.13 kg versus placebo and intracellular water by 0.64 ± 0.22 L, but did not improve strength or objective physical function. The Clinical Body Composition Boundary group currently links one appraisal-backed source with clinical supervised scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-26414681"
+    -
+      id: "clinical-mental-health-boundary"
+      label: "Clinical Mental Health Boundary"
+      stance: "context_only"
+      summary: "The review included 5 RCTs; creatine showed some promise as adjunct treatment in adult major depression contexts but two creatine-treated participants experienced hypomania/mania. The Clinical Mental Health Boundary group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-41558805"
+    -
+      id: "clinical-population-boundary"
+      label: "Clinical Population Boundary"
+      stance: "context_only"
+      summary: "A 1741-participant Parkinson disease RCT was stopped for futility and found no clinical progression benefit; creatine 10 g/day was generally well tolerated. Creatine improved strength in muscular dystrophies but not metabolic myopathies; high-dose creatine worsened muscle pain/ADL in McArdle disease. The Clinical Population Boundary group currently links 3 appraisal-backed sources with general guideline scope and negative, mixed, no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-23740606"
+        - "source_artifact:pmid-24934384"
+        - "source_artifact:pmid-25668262"
+    -
+      id: "cognition-boundary-context"
+      label: "Cognition Boundary Context"
+      stance: "context_only"
+      summary: "The meta-analysis found benefits for memory and timed attention/processing-speed measures but no significant overall cognitive or executive-function improvement. A healthy-individual cognition review reported generally positive signals for short-term memory and intelligence/reasoning, while other cognitive domains remained unclear. The Cognition Boundary Context group currently links 6 appraisal-backed sources with adjacent variant, direct protocol scope and mixed, no clear advantage, positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-21118604"
+        - "source_artifact:pmid-29704637"
+        - "source_artifact:pmid-35984306"
+        - "source_artifact:pmid-37968687"
+        - "source_artifact:pmid-38582412"
+        - "source_artifact:pmid-39070254"
+    -
+      id: "common-safety-concerns"
+      label: "Common Safety Concerns"
+      stance: "safety_boundary"
+      summary: "The review states creatine monohydrate appears generally safe when used appropriately, while GI distress can occur especially with high single doses. The Common Safety Concerns group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-41404326"
+    -
+      id: "cramps-dehydration-myth"
+      label: "Cramps Dehydration Myth"
+      stance: "safety_boundary"
+      summary: "The review argues that evidence does not support the claim that creatine causes dehydration or muscle cramping, and some reports suggest thermoregulatory benefit. The Cramps Dehydration Myth group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-18184753"
+    -
+      id: "creatine-monohydrate"
+      label: "Creatine Monohydrate"
+      stance: "mixed"
+      summary: "EFSA did not accept the cognitive-function health claim for creatine. ODS frames creatine as useful mainly for repeated short, high-intensity exercise, not endurance. The Creatine Monohydrate group currently links 26 appraisal-backed sources with general guideline, same mechanism, direct protocol scope and not efficacy evidence, mixed, positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.2903-j.efsa.2024.9100"
+        - "source_artifact:govuk-creatine-cognitive-function-2024-08-14"
+        - "source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01"
+        - "source_artifact:pmid-10731017"
+        - "source_artifact:pmid-12433852"
+        - "source_artifact:pmid-12485548"
+        - "source_artifact:pmid-12945830"
+        - "source_artifact:pmid-17908288"
+        - "source_artifact:pmid-25946994"
+        - "source_artifact:pmid-27328852"
+        - "source_artifact:pmid-28615996"
+        - "source_artifact:pmid-28919842"
+        - "source_artifact:pmid-30935142"
+        - "source_artifact:pmid-33557850"
+        - "source_artifact:pmid-35986981"
+        - "source_artifact:pmid-36041731"
+        - "source_artifact:pmid-36877404"
+        - "source_artifact:pmid-37221858"
+        - "source_artifact:pmid-37892421"
+        - "source_artifact:pmid-39042054"
+        - "source_artifact:pmid-39074168"
+        - "source_artifact:pmid-39441446"
+        - "source_artifact:pmid-39519498"
+        - "source_artifact:pmid-39861368"
+        - "source_artifact:pmid-40944139"
+        - "source_artifact:pmid-41328071"
+    -
+      id: "doi-10.1016-j.scispo.2019.07.013"
+      label: "Doi 10.1016 J.scispo.2019.07.013"
+      stance: "supports"
+      summary: "Creatine hydrochloride did not clearly outperform monohydrate in a 1-week trained-men trial. The Doi 10.1016 J.scispo.2019.07.013 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1016-j.scispo.2019.07.013"
+    -
+      id: "doi-10.1080-15502783.2025.2533658"
+      label: "Doi 10.1080 15502783.2025.2533658"
+      stance: "supports"
+      summary: "Low-dose HCl and monohydrate produced similar outcomes, with no significant between-group superiority. The Doi 10.1080 15502783.2025.2533658 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1080-15502783.2025.2533658"
+    -
+      id: "doi-10.1163-17552559-00001101"
+      label: "Doi 10.1163 17552559 00001101"
+      stance: "supports"
+      summary: "HCl did not produce greater oxidative-stress marker effects than monohydrate in trained women. The Doi 10.1163 17552559 00001101 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1163-17552559-00001101"
+    -
+      id: "doi-10.16926-par.2021.09.11"
+      label: "Doi 10.16926 Par.2021.09.11"
+      stance: "context_only"
+      summary: "HCl-only soldier data are not monohydrate evidence. The Doi 10.16926 Par.2021.09.11 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.16926-par.2021.09.11"
+    -
+      id: "dose-individualization-background"
+      label: "Dose Individualization Background"
+      stance: "context_only"
+      summary: "Creatine dosing may need to vary by tissue target and population rather than assuming one universal dose. The Dose Individualization Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1016-j.aehs.2024.05.002"
+    -
+      id: "exercise-proximity-and-uptake"
+      label: "Exercise Proximity And Uptake"
+      stance: "supports"
+      summary: "Submaximal exercise promoted creatine and glycogen accumulation in exercised skeletal muscle. The Exercise Proximity And Uptake group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10444618"
+    -
+      id: "gi-tolerance-dose-splitting"
+      label: "Gi Tolerance Dose Splitting"
+      stance: "safety_boundary"
+      summary: "GI complaints were the primary endpoint; diarrhea, stomach upset, and belching were the most frequently reported complaints. The Gi Tolerance Dose Splitting group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-18373286"
+    -
+      id: "glut4-glycogen-mechanism"
+      label: "Glut4 Glycogen Mechanism"
+      stance: "context_only"
+      summary: "Creatine affected GLUT4/glycogen context after immobilization, but the population is a rehabilitation mismatch for routine users. The Glut4 Glycogen Mechanism group currently links one appraisal-backed source with same mechanism scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11147785"
+    -
+      id: "glycogen-glut4-mechanism"
+      label: "Glycogen Glut4 Mechanism"
+      stance: "context_only"
+      summary: "Creatine increased glycogen storage but did not increase GLUT-4 expression. The Glycogen Glut4 Mechanism group currently links one appraisal-backed source with same mechanism scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-14507259"
+    -
+      id: "glycogen-recovery-mechanism"
+      label: "Glycogen Recovery Mechanism"
+      stance: "supports"
+      summary: "Prior creatine loading enhanced muscle glycogen supercompensation in a glycogen-loading model. The Glycogen Recovery Mechanism group currently links one appraisal-backed source with same mechanism scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11445755"
+    -
+      id: "health-disease-background"
+      label: "Health Disease Background"
+      stance: "context_only"
+      summary: "Creatine has broad health and disease literature, but most of it is outside the direct healthy-user monohydrate protocol. The Health Disease Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33572884"
+    -
+      id: "heat-hydration-safety"
+      label: "Heat Hydration Safety"
+      stance: "safety_boundary"
+      summary: "The review found no evidence that recommended-dose creatine hinders heat dissipation or negatively affects body fluid balance. Creatine loading increased body mass by about 0.75 kg but did not worsen measured heat-exercise cardiovascular, sweat-rate, or rectal-temperature responses versus placebo. The Heat Hydration Safety group currently links 3 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11445756"
+        - "source_artifact:pmid-17685723"
+        - "source_artifact:pmid-19295968"
+    -
+      id: "historical-side-effects"
+      label: "Historical Side Effects"
+      stance: "safety_boundary"
+      summary: "The review states creatine causes weight gain due to water retention and that short-term recommended-dose use had not shown significant adverse effects, but early studies were small. The Historical Side Effects group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9884794"
+    -
+      id: "insulin-uptake-mechanism"
+      label: "Insulin Uptake Mechanism"
+      stance: "supports"
+      summary: "Insulin enhanced muscle creatine accumulation only at high physiological/supraphysiological exposure in a clamp model. The Insulin Uptake Mechanism group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-9843739"
+    -
+      id: "lean-mass-water-training"
+      label: "Lean Mass Water Training"
+      stance: "supports"
+      summary: "After 7 days, the creatine group gained 0.51 ± 1.79 kg more lean body mass than control, but 12 weeks of resistance training produced no between-group lean-mass difference. The Lean Mass Water Training group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-40292479"
+    -
+      id: "loading-modifier-background"
+      label: "Loading Modifier Background"
+      stance: "context_only"
+      summary: "Muscle creatine loading is variable and may be influenced by diet, exercise, and tissue characteristics. The Loading Modifier Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-12882483"
+    -
+      id: "mechanism-water-mri"
+      label: "Mechanism Water Mri"
+      stance: "context_only"
+      summary: "The study used MRI transverse relaxation to investigate muscle water-related changes after short-term creatine supplementation. The Mechanism Water Mri group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-12089606"
+    -
+      id: "misconceptions-boundary-context"
+      label: "Misconceptions Boundary Context"
+      stance: "context_only"
+      summary: "Misconceptions review can help prevent overclaiming, especially where creatine is confused with direct muscle-protein-synthesis or broad health claims. The Misconceptions Boundary Context group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39720835"
+    -
+      id: "morning-evening-time-of-day"
+      label: "Morning Evening Time Of Day"
+      stance: "mixed"
+      summary: "Morning versus evening creatine did not show a clear absolute timing advantage in a small elite female team sample. The Morning Evening Time Of Day group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35010653"
+    -
+      id: "muscle-growth-adjacent-context"
+      label: "Muscle Growth Adjacent Context"
+      stance: "context_only"
+      summary: "Scoping review suggests creatine can support muscle growth in healthy young trained contexts, but evidence gaps remain for older and disease populations. The Muscle Growth Adjacent Context group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35334912"
+    -
+      id: "nonrenal-labs-tolerability"
+      label: "Nonrenal Labs Tolerability"
+      stance: "safety_boundary"
+      summary: "Low-dose long-term supplementation did not produce laboratory abnormalities for the majority of parameters tested in professional basketball players. The Nonrenal Labs Tolerability group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15309421"
+    -
+      id: "nonrenal-metabolite-safety"
+      label: "Nonrenal Metabolite Safety"
+      stance: "safety_boundary"
+      summary: "The study monitored urinary methylamine, formaldehyde, and formate during short-term high-dose creatine exposure. The Nonrenal Metabolite Safety group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-16260971"
+    -
+      id: "observational-perceived-effects"
+      label: "Observational Perceived Effects"
+      stance: "safety_boundary"
+      summary: "In 219 collegiate athletes, survey data described creatine-use patterns and perceived negative effects, including GI distress and muscle cramping among some users. The Observational Perceived Effects group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10959929"
+    -
+      id: "older-adult-strength-training-context"
+      label: "Older Adult Strength Training Context"
+      stance: "context_only"
+      summary: "Creatine plus strength training in older adults improved lean mass and upper-body strength but not lower-body strength or BMD in the reported meta-analyses. The Older Adult Strength Training Context group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1515-teb-2024-0019"
+    -
+      id: "older-women-cognition-emotion-boundary"
+      label: "Older Women Cognition Emotion Boundary"
+      stance: "context_only"
+      summary: "Creatine did not significantly improve cognitive or emotional outcomes in this older-women trial; strength training improved emotional state and strength. The Older Women Cognition Emotion Boundary group currently links one appraisal-backed source with same mechanism scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-24098469"
+    -
+      id: "performance-recovery-background"
+      label: "Performance Recovery Background"
+      stance: "context_only"
+      summary: "Creatine is reviewed as ergogenic for several performance and recovery-related outcomes in healthy populations. The Performance Recovery Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-34199588"
+    -
+      id: "pharmacokinetics-background"
+      label: "Pharmacokinetics Background"
+      stance: "context_only"
+      summary: "Creatine pharmacokinetics are nonlinear and constrained by finite skeletal-muscle storage. The Pharmacokinetics Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-12793840"
+    -
+      id: "pharmacology-background"
+      label: "Pharmacology Background"
+      stance: "context_only"
+      summary: "Creatine monohydrate has plausible pharmacology, but this source is background rather than direct protocol evidence. The Pharmacology Background group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11356982"
+    -
+      id: "pmid-10362452"
+      label: "PMID 10362452"
+      stance: "context_only"
+      summary: "Creatine/pyruvate in-season arms are not clean monohydrate-only evidence. The PMID 10362452 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10362452"
+    -
+      id: "pmid-14506619"
+      label: "PMID 14506619"
+      stance: "context_only"
+      summary: "Magnesium-creatine chelate changed body-water measures in a small short study. The PMID 14506619 group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-14506619"
+    -
+      id: "pmid-15142023"
+      label: "PMID 15142023"
+      stance: "context_only"
+      summary: "Creatine serum was not as effective as creatine powder for cycle sprint performance. The PMID 15142023 group currently links one appraisal-backed source with adjacent variant scope and negative interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15142023"
+    -
+      id: "pmid-15142029"
+      label: "PMID 15142029"
+      stance: "context_only"
+      summary: "Chelated and low-dose creatine regimens were tested, but the formulation boundary is not monohydrate-only. The PMID 15142029 group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15142029"
+    -
+      id: "pmid-15513279"
+      label: "PMID 15513279"
+      stance: "context_only"
+      summary: "Creatine Serum did not deliver plasma creatine like monohydrate powder. The PMID 15513279 group currently links one appraisal-backed source with same mechanism scope and negative interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15513279"
+    -
+      id: "pmid-16287365"
+      label: "PMID 16287365"
+      stance: "context_only"
+      summary: "Creatine serum running-performance evidence is adjacent and not monohydrate-specific. The PMID 16287365 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-16287365"
+    -
+      id: "pmid-17986903"
+      label: "PMID 17986903"
+      stance: "context_only"
+      summary: "Creatine-protein-carbohydrate blends are not monohydrate-alone evidence. The PMID 17986903 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-17986903"
+    -
+      id: "pmid-17997838"
+      label: "PMID 17997838"
+      stance: "context_only"
+      summary: "Creatine pyruvate produced higher plasma creatine exposure than monohydrate, but clinical relevance is uncertain. The PMID 17997838 group currently links one appraisal-backed source with same mechanism scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-17997838"
+    -
+      id: "pmid-18269769"
+      label: "PMID 18269769"
+      stance: "context_only"
+      summary: "Pyruvate/citrate performance findings do not include a monohydrate comparator. The PMID 18269769 group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-18269769"
+    -
+      id: "pmid-19228401"
+      label: "PMID 19228401"
+      stance: "supports"
+      summary: "Creatine ethyl ester did not show superiority over monohydrate and raised serum creatinine more. The PMID 19228401 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19228401"
+    -
+      id: "pmid-21424716"
+      label: "PMID 21424716"
+      stance: "context_only"
+      summary: "Novel creatine forms generally lacked the regulatory and efficacy evidence base of monohydrate. The PMID 21424716 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-21424716"
+    -
+      id: "pmid-22432515"
+      label: "PMID 22432515"
+      stance: "context_only"
+      summary: "Solubility chemistry is not clinical superiority evidence. The PMID 22432515 group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-22432515"
+    -
+      id: "pmid-22817979"
+      label: "PMID 22817979"
+      stance: "context_only"
+      summary: "Sports-performance reviews support monohydrate dosing patterns but do not replace primary trial extraction. The PMID 22817979 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-22817979"
+    -
+      id: "pmid-22971354"
+      label: "PMID 22971354"
+      stance: "supports"
+      summary: "Buffered creatine did not outperform creatine monohydrate. The PMID 22971354 group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-22971354"
+    -
+      id: "pmid-23851411"
+      label: "PMID 23851411"
+      stance: "context_only"
+      summary: "Clinical review reinforces monohydrate as the best-studied form. The PMID 23851411 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-23851411"
+    -
+      id: "pmid-23957855"
+      label: "PMID 23957855"
+      stance: "context_only"
+      summary: "Creatine ethyl ester stability concerns support keeping CEE separate from monohydrate. The PMID 23957855 group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-23957855"
+    -
+      id: "pmid-25239988"
+      label: "PMID 25239988"
+      stance: "safety_boundary"
+      summary: "Creatine ethyl ester can falsely elevate serum creatinine without true kidney pathology. The PMID 25239988 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-25239988"
+    -
+      id: "pmid-27034623"
+      label: "PMID 27034623"
+      stance: "safety_boundary"
+      summary: "Creatine nitrate appeared tolerated over short-term dosing but remains an adjacent form. The PMID 27034623 group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-27034623"
+    -
+      id: "pmid-28019093"
+      label: "PMID 28019093"
+      stance: "context_only"
+      summary: "Sports-nutrition creatine forms require separate evidence classification. The PMID 28019093 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-28019093"
+    -
+      id: "pmid-29244743"
+      label: "PMID 29244743"
+      stance: "safety_boundary"
+      summary: "Short-term creatine nitrate up to 6 g/day appeared safe in measured blood/hemodynamic endpoints. The PMID 29244743 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-29244743"
+    -
+      id: "pmid-31384454"
+      label: "PMID 31384454"
+      stance: "safety_boundary"
+      summary: "Creatine ethyl ester can confound creatinine interpretation in a renal transplant patient. The PMID 31384454 group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31384454"
+    -
+      id: "pmid-31763026"
+      label: "PMID 31763026"
+      stance: "context_only"
+      summary: "Nitrate/creatinine blend comparisons should be quarantined from plain monohydrate claims. The PMID 31763026 group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31763026"
+    -
+      id: "pmid-32998206"
+      label: "PMID 32998206"
+      stance: "context_only"
+      summary: "Magnesium creatine chelate may affect repeated sprint outcomes, but it is not monohydrate evidence. The PMID 32998206 group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-32998206"
+    -
+      id: "pmid-35268011"
+      label: "PMID 35268011"
+      stance: "supports"
+      summary: "Creatine monohydrate has the strongest bioavailability, efficacy, safety, and regulatory evidence base. The PMID 35268011 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35268011"
+    -
+      id: "pmid-36000773"
+      label: "PMID 36000773"
+      stance: "supports"
+      summary: "Alternative creatine forms have limited direct evidence of superiority over creatine monohydrate. The PMID 36000773 group currently links one appraisal-backed source with general guideline scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36000773"
+    -
+      id: "pmid-36007881"
+      label: "PMID 36007881"
+      stance: "supports"
+      summary: "Creatine monohydrate increased muscle creatine; creatyl-L-leucine did not. The PMID 36007881 group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36007881"
+    -
+      id: "pmid-36544833"
+      label: "PMID 36544833"
+      stance: "context_only"
+      summary: "Many alternative creatine product claims were weakly supported and more expensive than monohydrate. The PMID 36544833 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36544833"
+    -
+      id: "pmid-39545789"
+      label: "PMID 39545789"
+      stance: "supports"
+      summary: "HCl and monohydrate both helped with resistance training, but HCl was not superior. The PMID 39545789 group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39545789"
+    -
+      id: "post-exercise-carbohydrate-recovery"
+      label: "Post Exercise Carbohydrate Recovery"
+      stance: "supports"
+      summary: "Creatine plus carbohydrate augmented early post-exercise muscle glycogen supercompensation. The Post Exercise Carbohydrate Recovery group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-27193231"
+    -
+      id: "pre-post-workout-timing"
+      label: "Pre Post Workout Timing"
+      stance: "mixed"
+      summary: "Post-workout creatine looked directionally favorable, but hard between-group certainty was limited. Pre- versus post-workout creatine did not change training adaptations versus each other in collegiate athletes. The Pre Post Workout Timing group currently links 3 appraisal-backed sources with direct protocol scope and mixed, no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-23919405"
+        - "source_artifact:pmid-34610729"
+        - "source_artifact:pmid-36465581"
+    -
+      id: "pregnancy-boundary"
+      label: "Pregnancy Boundary"
+      stance: "safety_boundary"
+      summary: "The source reviews experimental studies suggesting possible pregnancy/fetal/neonatal applications, but it is not default adult supplementation evidence. The review maps creatine metabolism in female reproduction, pregnancy, and early neonatal life, but does not establish a default pregnancy supplementation protocol. The Pregnancy Boundary group currently links 2 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-24766646"
+        - "source_artifact:pmid-33540766"
+    -
+      id: "protein-amino-acid-carbohydrate-coingestion"
+      label: "Protein Amino Acid Carbohydrate Coingestion"
+      stance: "supports"
+      summary: "A smaller mixed protein/amino-acid/carbohydrate strategy augmented creatine retention similarly to a large sugar bolus. The Protein Amino Acid Carbohydrate Coingestion group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-20035494"
+    -
+      id: "protein-carbohydrate-coingestion"
+      label: "Protein Carbohydrate Coingestion"
+      stance: "supports"
+      summary: "Protein plus carbohydrate augmented whole-body creatine retention similarly to a much larger carbohydrate dose. The Protein Carbohydrate Coingestion group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10956365"
+    -
+      id: "renal-safety-and-lab-interpretation"
+      label: "Renal Safety And Lab Interpretation"
+      stance: "safety_boundary"
+      summary: "Recommended-dose case report described acute renal failure that resolved after stopping creatine. One-year hemodialysis study reported body-composition gains but no MIS change. The Renal Safety And Lab Interpretation group currently links 36 appraisal-backed sources with general guideline scope and not efficacy evidence, mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-10075534"
+        - "source_artifact:pmid-10449011"
+        - "source_artifact:pmid-10657393"
+        - "source_artifact:pmid-10694109"
+        - "source_artifact:pmid-10953902"
+        - "source_artifact:pmid-10999421"
+        - "source_artifact:pmid-11224803"
+        - "source_artifact:pmid-12401856"
+        - "source_artifact:pmid-12500988"
+        - "source_artifact:pmid-12701816"
+        - "source_artifact:pmid-12937451"
+        - "source_artifact:pmid-14971966"
+        - "source_artifact:pmid-15886291"
+        - "source_artifact:pmid-17046619"
+        - "source_artifact:pmid-18188581"
+        - "source_artifact:pmid-18652082"
+        - "source_artifact:pmid-18780799"
+        - "source_artifact:pmid-19437189"
+        - "source_artifact:pmid-20060630"
+        - "source_artifact:pmid-20976468"
+        - "source_artifact:pmid-21574777"
+        - "source_artifact:pmid-23680457"
+        - "source_artifact:pmid-25899989"
+        - "source_artifact:pmid-25984094"
+        - "source_artifact:pmid-30367015"
+        - "source_artifact:pmid-31375416"
+        - "source_artifact:pmid-31531996"
+        - "source_artifact:pmid-31563660"
+        - "source_artifact:pmid-31859895"
+        - "source_artifact:pmid-32670557"
+        - "source_artifact:pmid-36986197"
+        - "source_artifact:pmid-38474743"
+        - "source_artifact:pmid-40743209"
+        - "source_artifact:pmid-41199218"
+        - "source_artifact:pmid-9404870"
+        - "source_artifact:pmid-9643752"
+    -
+      id: "repeated_sprint_power_trials"
+      label: "Repeated Sprint Power Trials"
+      stance: "mixed"
+      summary: "Early intermittent high-intensity exercise source directly aligned to repeated-sprint claims. Female soccer off-season trial found strength benefits with mixed body-composition results. The Repeated Sprint Power Trials group currently links 38 appraisal-backed sources with direct protocol, same mechanism, adjacent variant scope and positive, mixed, no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1111-j.1600-0838.1993.tb00378.x"
+        - "source_artifact:doi-10.1519-00124278-200011000-00011"
+        - "source_artifact:pmid-10449017"
+        - "source_artifact:pmid-10573659"
+        - "source_artifact:pmid-10694141"
+        - "source_artifact:pmid-10929216"
+        - "source_artifact:pmid-11072779"
+        - "source_artifact:pmid-11252467"
+        - "source_artifact:pmid-11581550"
+        - "source_artifact:pmid-11689738"
+        - "source_artifact:pmid-11708704"
+        - "source_artifact:pmid-11719888"
+        - "source_artifact:pmid-11828245"
+        - "source_artifact:pmid-11834115"
+        - "source_artifact:pmid-11842271"
+        - "source_artifact:pmid-11993621"
+        - "source_artifact:pmid-12930168"
+        - "source_artifact:pmid-12945828"
+        - "source_artifact:pmid-15705052"
+        - "source_artifact:pmid-16686553"
+        - "source_artifact:pmid-19490606"
+        - "source_artifact:pmid-19675499"
+        - "source_artifact:pmid-21941005"
+        - "source_artifact:pmid-23800565"
+        - "source_artifact:pmid-24991195"
+        - "source_artifact:pmid-26778661"
+        - "source_artifact:pmid-27768397"
+        - "source_artifact:pmid-29743825"
+        - "source_artifact:pmid-35334797"
+        - "source_artifact:pmid-40041626"
+        - "source_artifact:pmid-7572228"
+        - "source_artifact:pmid-8742865"
+        - "source_artifact:pmid-8876342"
+        - "source_artifact:pmid-9044225"
+        - "source_artifact:pmid-9294877"
+        - "source_artifact:pmid-9407259"
+        - "source_artifact:pmid-9562365"
+        - "source_artifact:pmid-9809381"
+    -
+      id: "resistance-training-null-and-boundary-results"
+      label: "Resistance Training Null And Boundary Results"
+      stance: "mixed"
+      summary: "Creatine did not augment trained-quadriceps adaptation to a precisely measured electrically stimulated overload stimulus. The Resistance Training Null And Boundary Results group currently links one appraisal-backed source with adjacent variant scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-11474331"
+    -
+      id: "resistance-training-strength-body-composition"
+      label: "Resistance Training Strength Body Composition"
+      stance: "mixed"
+      summary: "Creatine did not clearly add strength or training-volume gains when relative periodized training was equalized. Creatine-related strength gains appeared responder-dependent and linked to body-mass/estimated uptake changes. The Resistance Training Strength Body Composition group currently links 6 appraisal-backed sources with direct protocol scope and no clear advantage, mixed, positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1519-1533-4287-2000-014-0182-aarspf-2.0.co-2"
+        - "source_artifact:pmid-10731009"
+        - "source_artifact:pmid-11581551"
+        - "source_artifact:pmid-14685870"
+        - "source_artifact:pmid-14967873"
+        - "source_artifact:pmid-32599716"
+    -
+      id: "risk-assessment"
+      label: "Risk Assessment"
+      stance: "safety_boundary"
+      summary: "The risk assessment concluded that creatine monohydrate at common supplemental intakes is unlikely to pose risk when product purity is adequate. The Risk Assessment group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-16814437"
+    -
+      id: "sport-specific-power-and-body-composition"
+      label: "Sport Specific Power And Body Composition"
+      stance: "mixed"
+      summary: "Creatine improved several power and lean-body-mass measures in track-and-field athletes, but endpoints were sport-specific. The Sport Specific Power And Body Composition group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:kirksey-creatine-track-field-1999-01-01"
+    -
+      id: "sports-supplement-adjacent-context"
+      label: "Sports Supplement Adjacent Context"
+      stance: "context_only"
+      summary: "Broad supplement-timing review includes creatine but is not creatine-monohydrate-specific enough for direct protocol claims. The Sports Supplement Adjacent Context group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-28150472"
+    -
+      id: "strength-hypertrophy-context"
+      label: "Strength Hypertrophy Context"
+      stance: "context_only"
+      summary: "Older review reports larger strength and lifting-performance gains when creatine is paired with resistance training. The Strength Hypertrophy Context group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-14636102"
+    -
+      id: "timing-and-resistance-training"
+      label: "Timing And Resistance Training"
+      stance: "mixed"
+      summary: "Post-exercise creatine showed a lean-mass signal in a very small evidence base, but strength outcomes did not favor timing. The Timing And Resistance Training group currently links one appraisal-backed source with direct protocol scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:journalofexerciseandnutrition-creatine-timing-2018-10-10"
+    -
+      id: "timing-around-exercise"
+      label: "Timing Around Exercise"
+      stance: "mixed"
+      summary: "Post-exercise timing is biologically plausible and has some emerging support, but no consensus timing rule is justified. The Timing Around Exercise group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-34445003"
+    -
+      id: "timing-coingestion-foundational-loading"
+      label: "Timing Coingestion Foundational Loading"
+      stance: "supports"
+      summary: "Repeated 5 g creatine monohydrate doses increased skeletal-muscle creatine stores in humans. The Timing Coingestion Foundational Loading group currently links one appraisal-backed source with direct protocol scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-1327657"
+    -
+      id: "timing-mechanisms-and-practicality"
+      label: "Timing Mechanisms And Practicality"
+      stance: "mixed"
+      summary: "Creatine timing around exercise has plausible mechanisms, but human outcome data do not justify a strict clock-based prescription. The Timing Mechanisms And Practicality group currently links one appraisal-backed source with direct protocol scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35669557"
+    -
+      id: "youth-boundary"
+      label: "Youth Boundary"
+      stance: "safety_boundary"
+      summary: "The review found limited youth safety data and noted that several adolescent studies did not report adverse events. The review summarizes pediatric/adolescent creatine literature and emphasizes that adult defaults should not automatically transfer to minors. The Youth Boundary group currently links 3 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-30547033"
+        - "source_artifact:pmid-33670822"
+        - "source_artifact:pmid-37008451"
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

@@ -120,7 +120,7 @@ Return the following JSON blocks exactly once, using these exact headings and fe
 ## SOURCE_EXTRACTION_SCHEMA_V1
 ```json
 {
-  "fields": ["source metadata", "researchEvidence", "standalone evidence_appraisal records"]
+  "fields": ["source metadata", "sourceIdentity", "researchEvidence", "sourceFindings", "standalone evidence_appraisal records"]
 }
 ```
 

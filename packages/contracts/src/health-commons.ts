@@ -776,6 +776,7 @@ export const healthCommonsSourceIdentityIdentifiersSchema = z
     pmcid: shortStringSchema.optional(),
     doi: shortStringSchema.optional(),
     registryId: shortStringSchema.optional(),
+    titleHash: healthCommonsSha256HexSchema.optional(),
     url: z.string().url().optional(),
   })
   .strict();
@@ -846,6 +847,14 @@ export const healthCommonsSourceIdentitySchema = z
         code: z.ZodIssueCode.custom,
         message: "sourceIdentity canonicalIdBasis=registry_id requires identifiers.registryId.",
         path: ["identifiers", "registryId"],
+      });
+    }
+
+    if (identity.canonicalIdBasis === "title_hash" && !identity.identifiers?.titleHash) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "sourceIdentity canonicalIdBasis=title_hash requires identifiers.titleHash.",
+        path: ["identifiers", "titleHash"],
       });
     }
   });
@@ -1358,6 +1367,7 @@ export const healthCommonsSourceIdentityLookupEntrySchema = z
   .object({
     identityKey: nonEmptyStringSchema.max(1_000),
     sourceKeys: z.array(healthCommonsKeySchema).min(1),
+    canonicalSourceKey: healthCommonsKeySchema.nullable(),
   })
   .strict();
 

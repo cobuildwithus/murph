@@ -5,6 +5,7 @@ import {
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
   type HealthCommonsEntityType,
+  type HealthCommonsEvidenceAppraisal,
   type HealthCommonsProtocolSpec,
   type HealthCommonsRelation,
   type HealthCommonsRelationType,
@@ -104,11 +105,13 @@ export interface HealthCommonsResolvedRelation {
 
 export type HealthCommonsSourceReferenceKind =
   | "claim"
+  | "evidence_appraisal"
   | "relation"
   | "research_landscape"
   | "self";
 
 export interface HealthCommonsSourceReference {
+  appraisalKey: string | null;
   claimId: string | null;
   groupId: string | null;
   kind: HealthCommonsSourceReferenceKind;
@@ -206,6 +209,14 @@ export function createHealthCommonsCatalogReader(
   const entitiesByTrailingSlug = new Map<string, HealthCommonsEntity[]>();
   const redirectsBySource = new Map(catalog.redirects.map((redirect) => [redirect.from, redirect.to]));
   const redirectSourcesByTarget = new Map<string, string[]>();
+  const evidenceAppraisalsByTarget = new Map<string, HealthCommonsEvidenceAppraisal[]>();
+
+  for (const appraisal of catalog.evidenceAppraisals) {
+    const targetKey = stripRevision(appraisal.targetKey);
+    const existing = evidenceAppraisalsByTarget.get(targetKey) ?? [];
+    existing.push(appraisal);
+    evidenceAppraisalsByTarget.set(targetKey, existing);
+  }
 
   for (const entity of catalog.entities) {
     const existingByType = entitiesByType.get(entity.entityType) ?? [];
@@ -307,7 +318,9 @@ export function createHealthCommonsCatalogReader(
     }
 
     const limit = normalizeLimit(input.limit, DEFAULT_SOURCE_LIMIT);
-    return collectSourceReferences(entity, findByKey)
+    return collectSourceReferences(entity, findByKey, {
+      evidenceAppraisals: evidenceAppraisalsByTarget.get(entity.key) ?? [],
+    })
       .slice(0, limit)
       .map(({ reasons, source }) => ({
         reasons,
@@ -322,6 +335,7 @@ export function createHealthCommonsCatalogReader(
     }
 
     return collectSourceReferences(entity, findByKey, {
+      evidenceAppraisals: evidenceAppraisalsByTarget.get(entity.key) ?? [],
       includeSelf: input.includeSelf === true,
     }).map(({ source }) => source.key);
   };
@@ -451,7 +465,10 @@ export function createHealthCommonsCatalogReader(
 function collectSourceReferences(
   entity: HealthCommonsEntity,
   findByKey: (key: string) => HealthCommonsEntity | null,
-  options: { includeSelf?: boolean } = {},
+  options: {
+    evidenceAppraisals?: readonly HealthCommonsEvidenceAppraisal[];
+    includeSelf?: boolean;
+  } = {},
 ): { reasons: readonly HealthCommonsSourceReference[]; source: HealthCommonsEntity }[] {
   const references = new Map<string, { reasons: HealthCommonsSourceReference[]; source: HealthCommonsEntity }>();
 
@@ -486,6 +503,13 @@ function collectSourceReferences(
     }
   }
 
+  for (const appraisal of options.evidenceAppraisals ?? []) {
+    append(appraisal.sourceKey, sourceReference("evidence_appraisal", {
+      appraisalKey: appraisal.key,
+      groupId: appraisal.groupId,
+    }));
+  }
+
   for (const relation of entity.relations ?? []) {
     if (relation.type === "cites") {
       append(relation.target, sourceReference("relation", { relationType: relation.type }));
@@ -498,12 +522,14 @@ function collectSourceReferences(
 function sourceReference(
   kind: HealthCommonsSourceReferenceKind,
   options: {
+    appraisalKey?: string;
     claimId?: string;
     groupId?: string;
     relationType?: string;
   } = {},
 ): HealthCommonsSourceReference {
   return {
+    appraisalKey: options.appraisalKey ?? null,
     claimId: options.claimId ?? null,
     groupId: options.groupId ?? null,
     kind,

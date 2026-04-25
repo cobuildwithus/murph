@@ -574,88 +574,88 @@ claims:
       - A hot post-workout session can stack exercise stress, dehydration, and heat strain.
 researchLandscape:
   bottomLine: "The exact Blueprint routine is documented by Bryan Johnson / Blueprint sources, while the stronger independent literature is indirect: it supports sauna as a real heat-load and cardiovascular stimulus, adds fertility and safety boundaries, and gives mixed post-workout expectations. No trial validates the exact daily 93 C / 200 F post-workout routine or Bryan Johnson's personal outcome claims."
-  confidenceLabel: limited
+  confidenceLabel: "limited"
   primaryClaim: "Use this as a source-attributed, higher-burden sauna comparison and track tolerability, resting heart rate, HRV, symptoms, hydration, and training context rather than expecting Bryan Johnson's reported outcomes."
   mainCaveat: "The independent studies use different temperatures, session lengths, populations, and exercise pairings; the long-term Finnish cohort studies are observational; and the Blueprint outcome claims are one-person self-reports."
   groups:
     -
-      id: source-routine-spec
+      id: "source-routine-spec"
       label: "What the Blueprint routine says"
-      stance: supports
+      stance: "supports"
       summary: "These sources establish the external routine itself: about 20 minutes in a 200 F / 93 C dry sauna, daily, usually after a workout, with low humidity, hydration, and source-specific cooling tactics. They are the right sources for provenance and dose wording, not broad clinical proof."
       sourceKeys:
-        - source_artifact:bryan-johnson-sauna-protocol-2026-01-28
-        - source_artifact:bryan-johnson-morning-routine-2026-04-08
+        - "source_artifact:bryan-johnson-morning-routine-2026-04-08"
+        - "source_artifact:bryan-johnson-sauna-protocol-2026-01-28"
       defaultOpen: true
     -
-      id: personal-outcomes-not-causal
+      id: "personal-outcomes-not-causal"
       label: "Personal outcomes, not causal proof"
-      stance: does_not_confirm
+      stance: "does_not_confirm"
       summary: "Johnson reports toxin, microplastic, fertility, vascular, blood, and resting-heart-rate observations around his sauna practice. Those sources explain the protocol's motivation, but they are one-person reports with many confounders and should not be rendered as expected user outcomes."
       sourceKeys:
-        - source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06
-        - source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06
-        - source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12
+        - "source_artifact:linkedin-bryan-johnson-sauna-guide-2025-12-06"
+        - "source_artifact:x-bryan-johnson-comprehensive-sauna-guide-2025-12-06"
+        - "source_artifact:x-bryan-johnson-most-people-sauna-wrong-2025-11-12"
     -
-      id: independent-sauna-physiology-context
+      id: "independent-sauna-physiology-context"
       label: "Independent heat-load context"
-      stance: context_only
+      stance: "context_only"
       summary: "Independent reviews and acute physiology studies make the basic mechanism easier to trust: sauna raises heat strain, heart rate, sweating, vascular demand, and recovery burden. This supports tracking pulse, blood pressure, symptoms, and cooldown context, but it does not validate the exact daily Blueprint dose."
       sourceKeys:
-        - source_artifact:mayo-2018-sauna-review
-        - source_artifact:pmid-29269746
-        - source_artifact:pmid-31126559
-        - source_artifact:doi-10.1155-2014-106049
+        - "source_artifact:doi-10.1155-2014-106049"
+        - "source_artifact:mayo-2018-sauna-review"
+        - "source_artifact:pmid-29269746"
+        - "source_artifact:pmid-31126559"
       defaultOpen: true
     -
-      id: long-term-cohort-context
+      id: "long-term-cohort-context"
       label: "Long-term cohort context"
-      stance: context_only
+      stance: "context_only"
       summary: "Large Finnish cohort studies link more frequent sauna bathing with lower long-term cardiovascular and hypertension risk, which helps explain why sauna is interesting. These are not randomized tests and cannot prove a 21-day Blueprint-style self-experiment caused a wearable change."
       sourceKeys:
-        - source_artifact:pmid-25705824
-        - source_artifact:pmid-28633297
+        - "source_artifact:pmid-25705824"
+        - "source_artifact:pmid-28633297"
     -
-      id: post-workout-training-context
+      id: "post-workout-training-context"
       label: "Post-workout and recovery evidence"
-      stance: mixed
+      stance: "mixed"
       summary: "The post-exercise literature is not one-note: a modern exercise-plus-sauna RCT found cardiovascular add-on benefits, a newer HRV RCT found no extra HRV benefit, a swim-recovery crossover found worse next-day sprint performance, and a tiny runner crossover found endurance benefit. That is why this page asks users to log training load and next-workout performance."
       sourceKeys:
-        - source_artifact:pmid-35785965
-        - source_artifact:pmid-40611569
-        - source_artifact:pmid-31869820
-        - source_artifact:pmid-16877041
+        - "source_artifact:pmid-16877041"
+        - "source_artifact:pmid-31869820"
+        - "source_artifact:pmid-35785965"
+        - "source_artifact:pmid-40611569"
       defaultOpen: true
     -
-      id: core-temperature-dose-variant
+      id: "core-temperature-dose-variant"
       label: "Core-temperature dose variant"
-      stance: mixed
+      stance: "mixed"
       summary: "The April 2026 core-temperature posts change the interpretation of the original 20-minute routine: Johnson reports that reaching roughly 102.4 F / 39 C took closer to 31 minutes, and longer with face or neck cooling. This makes the threshold-targeted saunamaxx version a higher-burden variant rather than a silent replacement for the default page protocol."
       sourceKeys:
-        - source_artifact:bryan-johnson-saunamaxx-2026-04-14
-        - source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16
-        - source_artifact:x-bryan-johnson-core-temp-2026-04-16
-        - source_artifact:x-bryan-johnson-fired-review-2026-04-06
-        - source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03
-        - source_artifact:x-bryan-johnson-core-temp-update-2026-04-03
+        - "source_artifact:bryan-johnson-saunamaxx-2026-04-14"
+        - "source_artifact:linkedin-bryan-johnson-core-temp-2026-04-16"
+        - "source_artifact:linkedin-bryan-johnson-core-temp-prototype-2026-04-03"
+        - "source_artifact:x-bryan-johnson-core-temp-2026-04-16"
+        - "source_artifact:x-bryan-johnson-core-temp-update-2026-04-03"
+        - "source_artifact:x-bryan-johnson-fired-review-2026-04-06"
     -
-      id: safety-fertility-cooling-boundary
+      id: "safety-fertility-cooling-boundary"
       label: "Fertility and groin-cooling boundary"
-      stance: safety_boundary
+      stance: "safety_boundary"
       summary: "The independent fertility studies make the heat-risk caveat real, while Johnson's groin-cooling posts explain why his named routine includes an ice-pack tactic. Together they support a warning, not a promise that groin cooling prevents sauna-related fertility effects."
       sourceKeys:
-        - source_artifact:x-bryan-johnson-ice-balls-2026-04-09
-        - source_artifact:pmid-23411620
-        - source_artifact:pmid-9972494
+        - "source_artifact:pmid-23411620"
+        - "source_artifact:pmid-9972494"
+        - "source_artifact:x-bryan-johnson-ice-balls-2026-04-09"
       defaultOpen: true
     -
-      id: general-sauna-safety-screening
+      id: "general-sauna-safety-screening"
       label: "General sauna safety screen"
-      stance: safety_boundary
+      stance: "safety_boundary"
       summary: "General safety reviews support a conservative screen for cardiovascular disease, uncontrolled blood pressure, dehydration, alcohol or drug use, heat intolerance, pregnancy, medication issues, and red-flag symptoms. This matters more for a daily 200 F post-workout routine than for a gentler starter protocol."
       sourceKeys:
-        - source_artifact:pmid-11165553
-        - source_artifact:pmid-16871826
+        - "source_artifact:pmid-11165553"
+        - "source_artifact:pmid-16871826"
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:

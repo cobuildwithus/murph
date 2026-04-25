@@ -813,12 +813,12 @@ researchLandscape:
       stance: "supports"
       summary: "The strongest direct home source is the 630/850 nm sham-controlled crow's-feet mask RCT; additional home/facial red+NIR or red-to-NIR studies report texture, elasticity, brightening, satisfaction, or image-analysis signals, but they include small split-face, uncontrolled/unclear-control, male-only, device-validation, deeper-NIR, and LED-plus-topical designs. Do not read this group as clean LED-only proof for all full-face photoaging outcomes."
       sourceKeys:
-        - "source_artifact:pmid-39960921"
-        - "source_artifact:pmid-32649063"
         - "source_artifact:doi-10.3390-cosmetics12010004"
+        - "source_artifact:pmid-32649063"
+        - "source_artifact:pmid-32716115"
         - "source_artifact:pmid-37418018"
         - "source_artifact:pmid-39439130"
-        - "source_artifact:pmid-32716115"
+        - "source_artifact:pmid-39960921"
       defaultOpen: true
     -
       id: "clinic-and-methods-context"
@@ -827,41 +827,41 @@ researchLandscape:
       summary: "Older clinic-supervised 633/830 nm studies and radiometry/methods papers support plausibility and implementation discipline, but they are not exact home-mask dose templates; mixed red-only clinical evidence is handled in the mixed/null group."
       sourceKeys:
         - "source_artifact:pmid-16414908"
-        - "source_artifact:pmid-17566756"
         - "source_artifact:pmid-16989189"
+        - "source_artifact:pmid-17566756"
         - "source_artifact:pmid-17760698"
-        - "source_artifact:pmid-41032498"
         - "source_artifact:pmid-26964800"
         - "source_artifact:pmid-30044464"
+        - "source_artifact:pmid-41032498"
     -
       id: "mixed-and-adjacent-outcomes"
       label: "Mixed or adjacent variants"
       stance: "mixed"
       summary: "Red-only, amber/yellow, periocular-only, under-eye, neck, large-area panel, handheld, multimodal, and red-only clinical studies can inform boundaries and outcome choice; several preserve null or mixed findings for blinded clinical scales, hydration/viscoelasticity, objective wrinkle scores, comparator superiority, or broadband red/NIR advantage."
       sourceKeys:
-        - "source_artifact:pmid-40167796"
         - "source_artifact:pmid-15909229"
+        - "source_artifact:pmid-24286286"
+        - "source_artifact:pmid-28195844"
         - "source_artifact:pmid-36780572"
         - "source_artifact:pmid-39133416"
         - "source_artifact:pmid-39319750"
-        - "source_artifact:pmid-24286286"
+        - "source_artifact:pmid-40167796"
         - "source_artifact:pmid-41091280"
-        - "source_artifact:pmid-28195844"
     -
       id: "safety-boundaries"
       label: "Eye, heat, pigment, medication, and procedure safety boundaries"
       stance: "safety_boundary"
       summary: "Safety evidence and regulatory context support required eye protection, nonthermal use, no blue/UV/acne/PDT modes, conservative photosensitivity and pigment screening, and stop rules for ocular symptoms, irritation, blistering, or pigment change."
       sourceKeys:
-        - "source_artifact:pmid-39122507"
-        - "source_artifact:pmid-39335685"
-        - "source_artifact:pmid-37533142"
-        - "source_artifact:pmid-32541484"
-        - "source_artifact:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17"
-        - "source_artifact:pmid-31483941"
-        - "source_artifact:dermnet-drug-induced-photosensitivity-2026-04-24"
         - "source_artifact:aad-red-light-therapy-safety-2024-09-13"
         - "source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21"
+        - "source_artifact:dermnet-drug-induced-photosensitivity-2026-04-24"
+        - "source_artifact:pmid-31483941"
+        - "source_artifact:pmid-32541484"
+        - "source_artifact:pmid-37533142"
+        - "source_artifact:pmid-39122507"
+        - "source_artifact:pmid-39335685"
+        - "source_artifact:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17"
       defaultOpen: true
     -
       id: "excluded-protocol-families"
@@ -869,13 +869,652 @@ researchLandscape:
       stance: "context_only"
       summary: "PDT/photosensitizer, laser/IPL, post-procedure wound healing, acne, ophthalmology/myopia PBM, transcranial/intranasal PBM, infrared sauna, and whole-body panel records should be re-homed or used only as safety/context, not as direct cosmetic efficacy evidence."
       sourceKeys:
+        - "source_artifact:clinicaltrials-nct04145999-photobiomodulation-prp-facial-rejuvenation-2019-10-31"
         - "source_artifact:pmid-20456545"
         - "source_artifact:pmid-27257391"
-        - "source_artifact:clinicaltrials-nct04145999-photobiomodulation-prp-facial-rejuvenation-2019-10-31"
-        - "source_artifact:pmid-34575408"
         - "source_artifact:pmid-29356026"
+        - "source_artifact:pmid-34575408"
         - "source_artifact:pmid-36310510"
         - "source_artifact:pmid-40253006"
+    -
+      id: "alster-wanitphakdeedecha-2009-postfractional"
+      label: "Alster Wanitphakdeedecha 2009 Postfractional"
+      stance: "safety_boundary"
+      summary: "590 nm LED reduced early postfractional-laser erythema, with effects largely limited to early recovery. The Alster Wanitphakdeedecha 2009 Postfractional group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19397672"
+    -
+      id: "batch-001:clinicaltrials-nct04911140"
+      label: "Batch 001 Clinicaltrials NCT04911140"
+      stance: "context_only"
+      summary: "Registry anchor for the facial LED mask frequency trial and its planned arms/outcomes. The Batch 001 Clinicaltrials NCT04911140 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-nct04911140-led-mask-facial-rejuvenation-2021-06-02"
+    -
+      id: "batch-001:pmid-19146602"
+      label: "Batch 001 PMID 19146602"
+      stance: "supports"
+      summary: "A handheld LED device study reported visible fine-line/wrinkle improvement in most participants after treatment. The Batch 001 PMID 19146602 group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19146602"
+    -
+      id: "batch-001:pmid-36749255"
+      label: "Batch 001 PMID 36749255"
+      stance: "context_only"
+      summary: "Protocol/design paper defines dosing arms, planned sample size, and outcomes for the later facial LED mask frequency trial. The Batch 001 PMID 36749255 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36749255"
+    -
+      id: "batch-002-adjacent_variant"
+      label: "Batch 002 Adjacent Variant"
+      stance: "mixed"
+      summary: "A registry record describes a single-group iRestore face plus neck/chest LED mask study with daily 10-minute use and photo/questionnaire endpoints. A 1072 nm periocular light study reported self-identified improvements, but the wavelength and self-report design limit direct use. The Batch 002 Adjacent Variant group currently links 8 appraisal-backed sources with adjacent variant scope and not efficacy evidence, positive, negative interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-nct07025837-irestore-led-face-neck-chest-2024-09-06"
+        - "source_artifact:pmid-17852628"
+        - "source_artifact:pmid-19215260"
+        - "source_artifact:pmid-19839877"
+        - "source_artifact:pmid-27910259"
+        - "source_artifact:pmid-32949447"
+        - "source_artifact:pmid-33921839"
+        - "source_artifact:pmid-37522497"
+    -
+      id: "batch-002-background"
+      label: "Batch 002 Background"
+      stance: "context_only"
+      summary: "A ClinicalTrials.gov registry record describes a red/gold/IR LED combination intervention but provides no extracted outcome evidence for this batch. A protocol describes a planned red-versus-amber LED randomized trial for periorbital wrinkles, but it does not provide outcome data. The Batch 002 Background group currently links 2 appraisal-backed sources with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-nct04525573-2026-04-24"
+        - "source_artifact:pmid-29858421"
+    -
+      id: "batch-002-clinical_supervised"
+      label: "Batch 002 Clinical Supervised"
+      stance: "supports"
+      summary: "A clinic-supervised 590 nm LED photomodulation report described improvement in photoaging signs and no side effects in extracted summaries. A 590 nm LED study reported photoaging, profilometry, collagen I, and MMP-1 changes after repeated full-face exposure. The Batch 002 Clinical Supervised group currently links 4 appraisal-backed sources with clinical supervised scope and positive, not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15624743"
+        - "source_artifact:pmid-15654716"
+        - "source_artifact:pmid-16176771"
+        - "source_artifact:pmid-16414904"
+    -
+      id: "batch-002-same_mechanism"
+      label: "Batch 002 Same Mechanism"
+      stance: "context_only"
+      summary: "An OLED study provides adjacent safety/mechanism context for skin rejuvenation and wound healing, not a direct red+NIR facial-mask trial. The Batch 002 Same Mechanism group currently links one appraisal-backed source with same mechanism scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-38288650"
+    -
+      id: "batch-006-pmid-19150294"
+      label: "Batch 006 PMID 19150294"
+      stance: "context_only"
+      summary: "LED dermatology literature has long emphasized nonthermal PBM and device-parameter considerations. The Batch 006 PMID 19150294 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19150294"
+    -
+      id: "batch-006-pmid-19587693"
+      label: "Batch 006 PMID 19587693"
+      stance: "context_only"
+      summary: "Pulsed 660 nm LED exposure was associated with collagen-metabolism changes and clinical wrinkle/roughness improvement signals. The Batch 006 PMID 19587693 group currently links one appraisal-backed source with same mechanism scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19587693"
+    -
+      id: "batch-006-pmid-20799848"
+      label: "Batch 006 PMID 20799848"
+      stance: "context_only"
+      summary: "Pulsing parameters may change cellular responses to red light and should be reported. The Batch 006 PMID 20799848 group currently links one appraisal-backed source with general guideline scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-20799848"
+    -
+      id: "batch-006-pmid-22461763"
+      label: "Batch 006 PMID 22461763"
+      stance: "context_only"
+      summary: "Low-level light therapy can show biphasic dose responses, so higher dose is not automatically superior. The Batch 006 PMID 22461763 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-22461763"
+    -
+      id: "batch-006-pmid-24049929"
+      label: "Batch 006 PMID 24049929"
+      stance: "context_only"
+      summary: "Skin PBM mechanisms include mitochondrial and signaling effects, with broad dermatologic application claims. The Batch 006 PMID 24049929 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-24049929"
+    -
+      id: "batch-006-pmid-25705949"
+      label: "Batch 006 PMID 25705949"
+      stance: "context_only"
+      summary: "Home-use light-device evidence is often modest and limited by small, short, uncontrolled, or industry-sponsored studies. The Batch 006 PMID 25705949 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-25705949"
+    -
+      id: "batch-006-pmid-26155326"
+      label: "Batch 006 PMID 26155326"
+      stance: "context_only"
+      summary: "LED clinical experience and older studies show mixed context rather than definitive protocol evidence. The Batch 006 PMID 26155326 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-26155326"
+    -
+      id: "batch-006-pmid-28741866"
+      label: "Batch 006 PMID 28741866"
+      stance: "context_only"
+      summary: "Home optical devices span IPL, LED, heat, infrared, and other technologies and require indication-specific appraisal. The Batch 006 PMID 28741866 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-28741866"
+    -
+      id: "batch-006-pmid-29552272"
+      label: "Batch 006 PMID 29552272"
+      stance: "context_only"
+      summary: "LED phototherapy is reviewed across blue, red, and near-infrared dermatology applications. The Batch 006 PMID 29552272 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-29552272"
+    -
+      id: "batch-006-pmid-31345324"
+      label: "Batch 006 PMID 31345324"
+      stance: "context_only"
+      summary: "Skin rejuvenation evidence spans many light technologies that should not be collapsed into red/NIR LED PBM. The Batch 006 PMID 31345324 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31345324"
+    -
+      id: "batch-006-pmid-33471046"
+      label: "Batch 006 PMID 33471046"
+      stance: "context_only"
+      summary: "Aesthetic PBM evidence is promising but methodologically limited and not always LED-specific. The Batch 006 PMID 33471046 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33471046"
+    -
+      id: "batch-006-pmid-33594706"
+      label: "Batch 006 PMID 33594706"
+      stance: "context_only"
+      summary: "Combined low-level 640 nm red and 830 nm near-infrared exposure increased collagen/elastin-related markers in laboratory skin models. The Batch 006 PMID 33594706 group currently links one appraisal-backed source with same mechanism scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33594706"
+    -
+      id: "batch-006-pmid-33938981"
+      label: "Batch 006 PMID 33938981"
+      stance: "context_only"
+      summary: "Home dermatology devices require separate safety, efficacy, and usability appraisal from supervised clinical devices. The Batch 006 PMID 33938981 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33938981"
+    -
+      id: "batch-006-pmid-37252792"
+      label: "Batch 006 PMID 37252792"
+      stance: "context_only"
+      summary: "A commentary exists on a direct periocular wrinkle PBM RCT and should be checked before synthesizing that trial. The Batch 006 PMID 37252792 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-37252792"
+    -
+      id: "batch-006-pmid-38307144"
+      label: "Batch 006 PMID 38307144"
+      stance: "context_only"
+      summary: "PBM is discussed as a dermatology tool across multiple indications, including skin rejuvenation, but standardized trials remain needed. The Batch 006 PMID 38307144 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-38307144"
+    -
+      id: "batch-006-pmid-38309304"
+      label: "Batch 006 PMID 38309304"
+      stance: "context_only"
+      summary: "PBM mechanisms are parameter-dependent and involve mitochondrial and signaling pathways. The Batch 006 PMID 38309304 group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-38309304"
+    -
+      id: "batch-006-pmid-38476342"
+      label: "Batch 006 PMID 38476342"
+      stance: "context_only"
+      summary: "Facial-rejuvenation home-device studies need evidence-based efficacy assessment and validated endpoints. The Batch 006 PMID 38476342 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-38476342"
+    -
+      id: "batch-006-pmid-38674067"
+      label: "Batch 006 PMID 38674067"
+      stance: "context_only"
+      summary: "PBM skin literature spans mechanisms, dermatologic applications, and technology development. The Batch 006 PMID 38674067 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-38674067"
+    -
+      id: "batch-006-pmid-40751922"
+      label: "Batch 006 PMID 40751922"
+      stance: "context_only"
+      summary: "Recent review frames LED as a promising cosmetic dermatology modality across multiple indications. The Batch 006 PMID 40751922 group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-40751922"
+    -
+      id: "batch003:doi-10.5318-wjo.v4.i1.1:ocular"
+      label: "Batch003 Doi 10.5318 Wjo.v4.i1.1 Ocular"
+      stance: "safety_boundary"
+      summary: "Ocular damage secondary to lights and lasers: How to avoid and treat if necessary. The Batch003 Doi 10.5318 Wjo.v4.i1.1 Ocular group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.5318/wjo.v4.i1.1"
+    -
+      id: "batch003:fda-currentbody-series-2-k250966-2025-06-25:ocular"
+      label: "Batch003 FDA Currentbody Series 2 K250966 2025 06 25 Ocular"
+      stance: "safety_boundary"
+      summary: "510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H. The Batch003 FDA Currentbody Series 2 K250966 2025 06 25 Ocular group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-currentbody-series-2-k250966-2025-06-25"
+    -
+      id: "batch003:fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20:ocular"
+      label: "Batch003 FDA K221775 Led Light Therapy Mask Eye Protection 2022 12 20 Ocular"
+      stance: "safety_boundary"
+      summary: "510(k) Summary: LED Light Therapy Mask, models MK-78, MK-04, MK66-H, MK66R-B, EL00003. The Batch003 FDA K221775 Led Light Therapy Mask Eye Protection 2022 12 20 Ocular group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20"
+    -
+      id: "batch003:fda-k230124-led-facewear-mask-eye-protection-2023-02-09:ocular"
+      label: "Batch003 FDA K230124 Led Facewear Mask Eye Protection 2023 02 09 Ocular"
+      stance: "safety_boundary"
+      summary: "510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask. The Batch003 FDA K230124 Led Facewear Mask Eye Protection 2023 02 09 Ocular group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-k230124-led-facewear-mask-eye-protection-2023-02-09"
+    -
+      id: "batch003:fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27:ocular"
+      label: "Batch003 FDA K243040 Led Light Therapy Mask Eye Shield 2024 09 27 Ocular"
+      stance: "safety_boundary"
+      summary: "510(k) Summary: Shenzhen Siken LED Light Therapy Mask. The Batch003 FDA K243040 Led Light Therapy Mask Eye Shield 2024 09 27 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27"
+    -
+      id: "batch003:pmid-25790150:ocular"
+      label: "Batch003 PMID 25790150 Ocular"
+      stance: "safety_boundary"
+      summary: "Ocular adverse effects after facial cosmetic procedures: a review of case reports. The Batch003 PMID 25790150 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-25790150"
+    -
+      id: "batch003:pmid-28891192:ocular"
+      label: "Batch003 PMID 28891192 Ocular"
+      stance: "mixed"
+      summary: "Light therapy: is it safe for the eyes? The Batch003 PMID 28891192 Ocular group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-28891192"
+    -
+      id: "batch003:pmid-29552271:ocular"
+      label: "Batch003 PMID 29552271 Ocular"
+      stance: "safety_boundary"
+      summary: "Ocular Injury in Cosmetic Laser Treatments of the Face. The Batch003 PMID 29552271 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-29552271"
+    -
+      id: "batch003:pmid-32541484:ocular"
+      label: "Batch003 PMID 32541484 Ocular"
+      stance: "safety_boundary"
+      summary: "Photochemical Retinopathy induced by blue light emitted from a light-emitting diode Face Mask: A case report and literature review. The Batch003 PMID 32541484 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-32541484"
+    -
+      id: "batch003:pmid-33390779:ocular"
+      label: "Batch003 PMID 33390779 Ocular"
+      stance: "context_only"
+      summary: "Near Infrared (NIR) Light Therapy of Eye Diseases: A Review. The Batch003 PMID 33390779 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33390779"
+    -
+      id: "batch003:pmid-33731574:ocular"
+      label: "Batch003 PMID 33731574 Ocular"
+      stance: "safety_boundary"
+      summary: "Ocular Complications After Laser or Light-Based Therapy-Dangers Dermatologists Should Know. The Batch003 PMID 33731574 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33731574"
+    -
+      id: "batch003:pmid-34863776:ocular"
+      label: "Batch003 PMID 34863776 Ocular"
+      stance: "safety_boundary"
+      summary: "Effect of Repeated Low-Level Red-Light Therapy for Myopia Control in Children: A Multicenter Randomized Controlled Trial. The Batch003 PMID 34863776 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-34863776"
+    -
+      id: "batch003:pmid-35333214:ocular"
+      label: "Batch003 PMID 35333214 Ocular"
+      stance: "safety_boundary"
+      summary: "Review of Eye Injuries Associated With Dermatologic Laser Treatment. The Batch003 PMID 35333214 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35333214"
+    -
+      id: "batch003:pmid-35606999:ocular"
+      label: "Batch003 PMID 35606999 Ocular"
+      stance: "safety_boundary"
+      summary: "ICNIRP Guidelines on Limits of Exposure to Incoherent Visible and Infrared Radiation. The Batch003 PMID 35606999 Ocular group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35606999"
+    -
+      id: "batch003:pmid-37227712:ocular"
+      label: "Batch003 PMID 37227712 Ocular"
+      stance: "safety_boundary"
+      summary: "Retinal Damage After Repeated Low-level Red-Light Laser Exposure. The Batch003 PMID 37227712 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-37227712"
+    -
+      id: "batch003:pmid-37533142:ocular"
+      label: "Batch003 PMID 37533142 Ocular"
+      stance: "safety_boundary"
+      summary: "Preventing Eye Injuries From Light and Laser-Based Dermatologic Procedures: A Practical Review. The Batch003 PMID 37533142 Ocular group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-37533142"
+    -
+      id: "batch003:pmid-37858054:ocular"
+      label: "Batch003 PMID 37858054 Ocular"
+      stance: "safety_boundary"
+      summary: "Dermatologic laser-induced ocular and periocular complications: a review. The Batch003 PMID 37858054 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-37858054"
+    -
+      id: "batch003:pmid-39122507:ocular"
+      label: "Batch003 PMID 39122507 Ocular"
+      stance: "safety_boundary"
+      summary: "Keep an Eye on At-Home Devices: Energy-Based Acne and Anti-Aging Devices are Associated with Ocular Adverse Events in a Retrospective Analysis Using the MAUDE Database. The Batch003 PMID 39122507 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39122507"
+    -
+      id: "batch003:pmid-39211002:ocular"
+      label: "Batch003 PMID 39211002 Ocular"
+      stance: "context_only"
+      summary: "Photobiomodulation use in ophthalmology - an overview of translational research from bench to bedside. The Batch003 PMID 39211002 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39211002"
+    -
+      id: "batch003:pmid-39335685:ocular"
+      label: "Batch003 PMID 39335685 Ocular"
+      stance: "safety_boundary"
+      summary: "Ocular Complication in Facial Aesthetic Laser and Light Treatments: A Comprehensive Review. The Batch003 PMID 39335685 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39335685"
+    -
+      id: "batch003:pmid-39429338:ocular"
+      label: "Batch003 PMID 39429338 Ocular"
+      stance: "context_only"
+      summary: "Photobiomodulation in Ophthalmology: A Comprehensive Review of Bench-to-Bedside Research and Clinical Integration. The Batch003 PMID 39429338 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39429338"
+    -
+      id: "batch003:pmid-39547340:ocular"
+      label: "Batch003 PMID 39547340 Ocular"
+      stance: "context_only"
+      summary: "Correlation Between Repeated Low-Level Red Light-Induced Afterimage and Axial Changes in Myopia Control. The Batch003 PMID 39547340 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39547340"
+    -
+      id: "batch003:pmid-39672511:ocular"
+      label: "Batch003 PMID 39672511 Ocular"
+      stance: "mixed"
+      summary: "Safety of repeated low-level red-light therapy for myopia: A systematic review. The Batch003 PMID 39672511 Ocular group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39672511"
+    -
+      id: "batch003:ranzco-red-light-nir-pbm-eye-position-statement-2020-11-01:ocular"
+      label: "Batch003 RANZCO Red Light NIR PBM Eye Position Statement 2020 11 01 Ocular"
+      stance: "context_only"
+      summary: "RANZCO Position Statement: Impact of Red Light (photobiomodulation) near infrared light therapy (NIR). The Batch003 RANZCO Red Light NIR PBM Eye Position Statement 2020 11 01 Ocular group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:ranzco-red-light-nir-pbm-eye-position-statement-2020-11-01"
+    -
+      id: "batch003:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17:ocular"
+      label: "Batch003 TGA Neutrogena Led Mask Eye Damage Recall 2019 07 17 Ocular"
+      stance: "safety_boundary"
+      summary: "Neutrogena Visibly Clear Light Therapy Acne Mask and Activator: potential for eye damage recall notice. The Batch003 TGA Neutrogena Led Mask Eye Damage Recall 2019 07 17 Ocular group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17"
+    -
+      id: "bmla-light-treatment-guideline-2019"
+      label: "BMLA Light Treatment Guideline 2019"
+      stance: "safety_boundary"
+      summary: "BMLA guideline supports conservative boundaries for professional light-based treatments. The BMLA Light Treatment Guideline 2019 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:bmla-laser-ipl-treatment-guidelines-2019-05-01"
+    -
+      id: "consumer-red-light-safety"
+      label: "Consumer Red Light Safety"
+      stance: "safety_boundary"
+      summary: "AAD guidance supports cautious red/NIR PBM use with dermatologist review for darker skin, photosensitive conditions, medications, and eye protection. The Consumer Red Light Safety group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:aad-red-light-therapy-safety-2024-09-13"
+    -
+      id: "correia-2021-pdt-review"
+      label: "Correia 2021 PDT Review"
+      stance: "safety_boundary"
+      summary: "PDT depends on photosensitizer activation and reactive oxygen species, making it mechanistically distinct from PBM. The Correia 2021 PDT Review group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-34575408"
+    -
+      id: "fda-anti-wrinkle-light-2010"
+      label: "FDA Anti Wrinkle Light 2010"
+      stance: "context_only"
+      summary: "Handheld periocular wrinkle device used 605, 630, 660, and 855 nm LEDs. The FDA Anti Wrinkle Light 2010 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-anti-wrinkle-light-k092800-2010-01-15"
+    -
+      id: "fda-biophotas-celluma3-2017"
+      label: "FDA Biophotas Celluma3 2017"
+      stance: "context_only"
+      summary: "Celluma3 regulatory summary gives panel-style red/NIR dose context for full-face wrinkles. The FDA Biophotas Celluma3 2017 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-biophotas-celluma3-k171323-2017-09-01"
+    -
+      id: "fda-light-tree-mask-2022"
+      label: "FDA Light Tree Mask 2022"
+      stance: "context_only"
+      summary: "Full-face OTC wrinkle mask uses red 630±5 nm and NIR 830 nm LEDs. The FDA Light Tree Mask 2022 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-light-tree-led-mask-k221946-2022-11-22"
+    -
+      id: "fda-omnilux-new-u-2008"
+      label: "FDA Omnilux New U 2008"
+      stance: "context_only"
+      summary: "Early OTC periorbital wrinkle device cleared with red and near-infrared LEDs. The FDA Omnilux New U 2008 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-omnilux-new-u-k072459-2008-03-03"
+    -
+      id: "fda-wrinkle-retreat-pro-2025"
+      label: "FDA Wrinkle Retreat Pro 2025"
+      stance: "context_only"
+      summary: "Recent OTC full-face wrinkle mask combines amber, red, deep-red, and NIR LEDs. The FDA Wrinkle Retreat Pro 2025 group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-wrinkle-retreat-pro-k252983-2025-12-17"
+    -
+      id: "govuk-light-device-guidance-2015"
+      label: "Govuk Light Device Guidance 2015"
+      stance: "safety_boundary"
+      summary: "Professional light-device guidance emphasizes controlled use, training, hazard assessment, and incident response. The Govuk Light Device Guidance 2015 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:govuk-laser-ipl-led-guidance-2015-09-01"
+    -
+      id: "infrared-skin-boundary"
+      label: "Infrared Skin Boundary"
+      stance: "safety_boundary"
+      summary: "Infrared skin effects depend on wavelength, irradiance, dose, and heating context. Older infrared study suggested wrinkle/texture effects but did not improve hyperpigmented lesions. The Infrared Skin Boundary group currently links 2 appraisal-backed sources with general guideline, adjacent variant scope and not efficacy evidence, mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-16941737"
+        - "source_artifact:pmid-26745730"
+    -
+      id: "khoury-goldman-2008-led-after-ipl"
+      label: "Khoury Goldman 2008 Led After Ipl"
+      stance: "safety_boundary"
+      summary: "LED photomodulation may reduce erythema and discomfort after IPL, but this is an adjunctive procedure setting. The Khoury Goldman 2008 Led After Ipl group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-18254808"
+    -
+      id: "laser-ipl-medication-guidance"
+      label: "Laser Ipl Medication Guidance"
+      stance: "safety_boundary"
+      summary: "Laser/IPL medication guidance cautions against rigid overinterpretation of photosensitizing-drug lists. BMLA guidance supports medication review while warning against overly rigid drug-light rules. The Laser Ipl Medication Guidance group currently links 2 appraisal-backed sources with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:bmla-drugs-and-lasers-ipls-2018-11-30"
+        - "source_artifact:pmid-25192842"
+    -
+      id: "medication-photosensitivity"
+      label: "Medication Photosensitivity"
+      stance: "safety_boundary"
+      summary: "Photosensitizing medications warrant screening before elective light exposure. Many drugs have reported photosensitizing potential, but evidence strength differs. The Medication Photosensitivity group currently links 6 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:cdc-sun-exposure-photosensitizing-medications-2025-04-23"
+        - "source_artifact:dermnet-drug-induced-photosensitivity-2026-04-24"
+        - "source_artifact:pmid-21879777"
+        - "source_artifact:pmid-30888626"
+        - "source_artifact:pmid-33491908"
+        - "source_artifact:pmid-34451820"
+    -
+      id: "melasma-pbm-adjacent"
+      label: "Melasma PBM Adjacent"
+      stance: "mixed"
+      summary: "Small split-face melasma pilot suggested 940 nm pulsed PBM plus microdermabrasion reduced pigment versus control. Underpowered amber PBM versus tranexamic acid pilot found no clear MASI/PGA advantage. The Melasma PBM Adjacent group currently links 4 appraisal-backed sources with adjacent variant scope and positive, no clear advantage, mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-29657669"
+        - "source_artifact:pmid-30227084"
+        - "source_artifact:pmid-38018017"
+        - "source_artifact:pmid-40650752"
+    -
+      id: "nct04145999-pbm-prp-facial-rejuvenation"
+      label: "NCT04145999 PBM PRP Facial Rejuvenation"
+      stance: "context_only"
+      summary: "PBM combined with PRP is an adjunctive injectable protocol, not LED-only PBM. The NCT04145999 PBM PRP Facial Rejuvenation group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-nct04145999-photobiomodulation-prp-facial-rejuvenation-2019-10-31"
+    -
+      id: "nct07054710-cosmetic-light-mask"
+      label: "NCT07054710 Cosmetic Light Mask"
+      stance: "context_only"
+      summary: "Recent registry record tests an at-home cosmetic LED mask over 12 weeks. The NCT07054710 Cosmetic Light Mask group currently links one appraisal-backed source with direct protocol scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-nct07054710-cosmetic-light-mask-2026-04-24"
+    -
+      id: "nikolis-2016-klox-led-gel"
+      label: "Nikolis 2016 Klox Led Gel"
+      stance: "context_only"
+      summary: "KLOX gel plus LED is excluded because gel/light activation is not LED-only PBM. The Nikolis 2016 Klox Led Gel group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-27257391"
+    -
+      id: "oh-kim-2013-led-after-co2"
+      label: "Oh Kim 2013 Led After Co2"
+      stance: "safety_boundary"
+      summary: "635 nm LED was associated with faster erythema resolution after fractional CO2 laser in a small pilot. The Oh Kim 2013 Led After Co2 group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-23551853"
+    -
+      id: "oncologic-safety"
+      label: "Oncologic Safety"
+      stance: "safety_boundary"
+      summary: "Aesthetic PBM oncologic-safety review found no clinical signal of new or recurrent malignancy in available evidence. The Oncologic Safety group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36722207"
+    -
+      id: "pih-pie-led-adjacent"
+      label: "PIH PIE Led Adjacent"
+      stance: "context_only"
+      summary: "In a small induced PIE/PIH model, 830 nm LED showed therapeutic effects on erythema and melanin indices; 590 nm was more limited therapeutically. The PIH PIE Led Adjacent group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39899363"
+    -
+      id: "red-led-safety-dose-escalation"
+      label: "Red Led Safety Dose Escalation"
+      stance: "safety_boundary"
+      summary: "High-fluence red LED safety differed by skin phenotype, with dose-limiting reactions at very high fluences. The STARS 1 protocol established planned high-fluence red LED dose-escalation and adverse-event rules. The Red Led Safety Dose Escalation group currently links 3 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-27484782"
+        - "source_artifact:pmid-30894210"
+        - "source_artifact:pmid-31483941"
+    -
+      id: "red-led-safety-registry"
+      label: "Red Led Safety Registry"
+      stance: "safety_boundary"
+      summary: "ClinicalTrials.gov registration anchors the high-fluence red LED healthy-adult safety study. The registry documents Fitzpatrick I-III high-fluence red LED safety testing. The Red Led Safety Registry group currently links 2 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-nct02630303-2026-04-24"
+        - "source_artifact:clinicaltrials-nct03433222-2026-04-24"
+    -
+      id: "red-nir-optical-boundary"
+      label: "Red NIR Optical Boundary"
+      stance: "safety_boundary"
+      summary: "Skin color, tissue thickness, wavelength, and dose altered red/NIR laser penetration and temperature behavior. The Red NIR Optical Boundary group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-29178437"
+    -
+      id: "retinoid-photosensitivity"
+      label: "Retinoid Photosensitivity"
+      stance: "safety_boundary"
+      summary: "Controlled trials reported no tretinoin phototoxicity or photoallergy for a tested 0.05% gel formulation. Older retinoid photosensitivity evidence suggests rare or idiosyncratic reactions rather than a uniform retinoid rule. The Retinoid Photosensitivity group currently links 2 appraisal-backed sources with general guideline scope and not efficacy evidence, mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-19438994"
+        - "source_artifact:pmid-3530309"
+    -
+      id: "sanclemente-2011-mal-red-light-photodamage"
+      label: "Sanclemente 2011 Mal Red Light Photodamage"
+      stance: "context_only"
+      summary: "MAL plus red-light PDT is an exclusion anchor, despite facial photodamage outcomes. The Sanclemente 2011 Mal Red Light Photodamage group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-20456545"
+    -
+      id: "sensitive-skin-tolerability"
+      label: "Sensitive Skin Tolerability"
+      stance: "safety_boundary"
+      summary: "Small uncontrolled pilot found red LED phototherapy tolerable for sensitive skin, with nickel-goggle allergy as a reported side effect. The Sensitive Skin Tolerability group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-32118019"
+    -
+      id: "thermal-device-safety"
+      label: "Thermal Device Safety"
+      stance: "safety_boundary"
+      summary: "Regulatory notice flags >45°C surface skin temperature as unsafe without objective rationale and includes LEDs among covered energy devices. The Thermal Device Safety group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:canada-risk-thermal-harm-energy-devices-2020-08-21"
+    -
+      id: "trelles-allones-2006-post-blepharoplasty"
+      label: "Trelles Allones 2006 Post Blepharoplasty"
+      stance: "safety_boundary"
+      summary: "Red LED appeared to speed periocular post-procedure healing, but the setting is not standalone rejuvenation. The Trelles Allones 2006 Post Blepharoplasty group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-16581685"
+    -
+      id: "trelles-allones-mayo-2006-post-resurfacing"
+      label: "Trelles Allones Mayo 2006 Post Resurfacing"
+      stance: "safety_boundary"
+      summary: "Visible/NIR LED enhanced post-ablation healing, but did not show a clear standalone wrinkle endpoint advantage. The Trelles Allones Mayo 2006 Post Resurfacing group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1016-j.mla.2006.06.001"
+    -
+      id: "visible-light-photodermatology"
+      label: "Visible Light Photodermatology"
+      stance: "safety_boundary"
+      summary: "Visible light has biologic skin effects, including pigmentation and erythema. Visible light can interact with skin differently by skin type, with pigmentary concerns in darker skin. The Visible Light Photodermatology group currently links 3 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31922171"
+        - "source_artifact:pmid-32289393"
+        - "source_artifact:pmid-33640508"
+    -
+      id: "visible-light-photoprotection"
+      label: "Visible Light Photoprotection"
+      stance: "safety_boundary"
+      summary: "Visible-light photoprotection differs from UV-only photoprotection and may matter for pigment-prone users. The Visible Light Photoprotection group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33640513"
+    -
+      id: "visible-light-pigmentation"
+      label: "Visible Light Pigmentation"
+      stance: "safety_boundary"
+      summary: "Visible light can induce sustained pigmentation in melanocompetent skin. Blue/violet visible light induced persistent pigmentation, whereas 630 nm red light did not in this wavelength-comparison study. The Visible Light Pigmentation group currently links 4 appraisal-backed sources with general guideline, same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-20410914"
+        - "source_artifact:pmid-23111621"
+        - "source_artifact:pmid-24888214"
+        - "source_artifact:pmid-26121474"
+    -
+      id: "wanitphakdeedecha-2019-post-ablative-erythema"
+      label: "Wanitphakdeedecha 2019 Post Ablative Erythema"
+      stance: "mixed"
+      summary: "Post-resurfacing LED findings were mixed: split-face local comparisons were null, while group comparisons suggested lower erythema on some days. The Wanitphakdeedecha 2019 Post Ablative Erythema group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-30074109"
+    -
+      id: "wong-2019-topical-pdt-guideline"
+      label: "Wong 2019 Topical PDT Guideline"
+      stance: "safety_boundary"
+      summary: "Topical PDT guidance is relevant to photosensitizer exclusions, not PBM efficacy. The Wong 2019 Topical PDT Guideline group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-30506819"
+    -
+      id: "yoo-2015-led-after-filler"
+      label: "Yoo 2015 Led After Filler"
+      stance: "safety_boundary"
+      summary: "635/830 nm LED was reported for filler injection-site reactions, but evidence details are limited. The Yoo 2015 Led After Filler group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-25266806"
 ---
 
 ## Question this experiment answers

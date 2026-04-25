@@ -522,77 +522,98 @@ claims:
       - A flat or worse HRV signal does not automatically mean the protocol failed.
 researchLandscape:
   bottomLine: "Best read as a bounded cardio-fitness experiment: the strongest proof comes from two small direct 4x4 trials, the next layer shows how to hit the intended dose, and the rest mainly sets boundaries around safety, clinical mismatch, and nearby variants."
-  confidenceLabel: moderate
+  confidenceLabel: "moderate"
   primaryClaim: "If vigorous exercise is appropriate for you, the best-supported claim is that a well-executed 4x4 block can improve lab VO2max, and sometimes a wearable cardio-fitness proxy, over roughly six weeks."
   mainCaveat: "The direct 4x4 trials are small, while many larger papers come from supervised cardiac or cardiometabolic settings. Those studies help set boundaries, not prove that unscreened home users should self-treat disease or expect every metric to improve."
   groups:
     -
-      id: exact-or-close-4x4-trials
+      id: "exact-or-close-4x4-trials"
       label: "Exact or close 4x4 trials"
-      stance: supports
+      stance: "supports"
       summary: "Start here. These are the two closest direct tests of the classic long-interval 4x4 idea. They give the cleanest answer to whether this dose can move VO2max-style fitness outcomes."
       sourceKeys:
-        - source_artifact:pmid-17414804
-        - source_artifact:pmid-26440134
+        - "source_artifact:pmid-17414804"
+        - "source_artifact:pmid-26440134"
       defaultOpen: true
     -
-      id: dose-fidelity-and-implementation
+      id: "dose-fidelity-and-implementation"
       label: "Dose, target zone, and implementation"
-      stance: supports
+      stance: "supports"
       summary: "These sources explain how to make the session actually count as Norwegian 4x4: pace into the target zone, use heart-rate feedback instead of pure guesswork, and judge the workout by repeatable time in zone rather than by suffering alone."
       sourceKeys:
-        - source_artifact:ntnu-cerg-norwegian-4x4
-        - source_artifact:doi-10.3390-ijerph17145103
-        - source_artifact:pmid-23988787
+        - "source_artifact:doi-10.3390-ijerph17145103"
+        - "source_artifact:ntnu-cerg-norwegian-4x4"
+        - "source_artifact:pmid-23988787"
       defaultOpen: true
     -
-      id: broader-hiit-vo2-context
+      id: "broader-hiit-vo2-context"
       label: "Broader HIIT and VO2max context"
-      stance: context_only
+      stance: "context_only"
       summary: "These broader syntheses help explain why longer aerobic intervals are plausible for VO2max, and why individual response varies, but they are not direct proof that this exact 4x4 recipe will change a wearable score."
       sourceKeys:
-        - source_artifact:pmid-30733142
-        - source_artifact:pmid-24066036
+        - "source_artifact:pmid-24066036"
+        - "source_artifact:pmid-30733142"
     -
-      id: clinical-context-mixed-superiority
+      id: "clinical-context-mixed-superiority"
       label: "Clinical lineage and mixed superiority"
-      stance: mixed
+      stance: "mixed"
       summary: "This is where the Norwegian/CERG lineage came from, but it is also where overclaim risk lives. Early supervised clinical studies often looked favorable for interval training, while larger later trials and syntheses did not consistently show interval training beating moderate training or guideline care."
       sourceKeys:
-        - source_artifact:pmid-25464446
-        - source_artifact:pmid-28082387
-        - source_artifact:pmid-33560320
-        - source_artifact:pmid-29502328
-        - source_artifact:pmid-15179103
-        - source_artifact:pmid-17548726
-        - source_artifact:pmid-18606913
-        - source_artifact:pmid-18673303
-        - source_artifact:pmid-19958872
-        - source_artifact:pmid-21450580
-        - source_artifact:pmid-28385556
+        - "source_artifact:pmid-15179103"
+        - "source_artifact:pmid-17548726"
+        - "source_artifact:pmid-18606913"
+        - "source_artifact:pmid-18673303"
+        - "source_artifact:pmid-19958872"
+        - "source_artifact:pmid-21450580"
+        - "source_artifact:pmid-25464446"
+        - "source_artifact:pmid-28082387"
+        - "source_artifact:pmid-28385556"
+        - "source_artifact:pmid-29502328"
+        - "source_artifact:pmid-33560320"
     -
-      id: safety-boundary
+      id: "safety-boundary"
       label: "Safety boundaries"
-      stance: safety_boundary
+      stance: "safety_boundary"
       summary: "Low event rates mostly come from screened, supervised, or guideline-managed exercise settings. Useful safety context, but not a permission slip to ignore symptoms, clinician guidance, or post-viral/post-exertional red flags."
       sourceKeys:
-        - source_artifact:pmid-22879367
-        - source_artifact:pmid-30376749
-        - source_artifact:pmid-29416382
-        - source_artifact:pmid-32100573
-        - source_artifact:pmid-32860412
-        - source_artifact:pmid-33239350
+        - "source_artifact:pmid-22879367"
+        - "source_artifact:pmid-29416382"
+        - "source_artifact:pmid-30376749"
+        - "source_artifact:pmid-32100573"
+        - "source_artifact:pmid-32860412"
+        - "source_artifact:pmid-33239350"
     -
-      id: adjacent-variants-and-recovery-context
+      id: "adjacent-variants-and-recovery-context"
       label: "Nearby protocols and recovery context"
-      stance: context_only
+      stance: "context_only"
       summary: "Low-volume 1x4 HIIT, sprint-interval training, athlete studies, metabolic-syndrome syntheses, and HRV/autonomic reviews help prevent category mistakes. They are useful for variant separation and recovery interpretation, not as direct proof for the exact four-interval recipe."
       sourceKeys:
-        - source_artifact:pmid-30293954
-        - source_artifact:pmid-28846513
-        - source_artifact:pmid-39256000
-        - source_artifact:pmid-36314990
-        - source_artifact:pmid-37608507
+        - "source_artifact:pmid-28846513"
+        - "source_artifact:pmid-30293954"
+        - "source_artifact:pmid-36314990"
+        - "source_artifact:pmid-37608507"
+        - "source_artifact:pmid-39256000"
+    -
+      id: "glucose-exercise-context"
+      label: "Glucose Exercise Context"
+      stance: "context_only"
+      summary: "Regular physical activity and reduced sedentary time are central glucose-management context in type 2 diabetes. The Glucose Exercise Context group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35029593"
+    -
+      id: "hrv-exercise-modality-ranking"
+      label: "Hrv Exercise Modality Ranking"
+      stance: "supports"
+      summary: "HIIT ranked highly for several HRV outcomes in an adult exercise-modality network meta-analysis. The Hrv Exercise Modality Ranking group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39077654"
+    -
+      id: "hrv-exercise-training-synthesis"
+      label: "Hrv Exercise Training Synthesis"
+      stance: "supports"
+      summary: "Exercise training improved RMSSD and related HRV parameters in pooled healthy-adult RCTs. The Hrv Exercise Training Synthesis group currently links one appraisal-backed source with same mechanism scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39015867"
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:

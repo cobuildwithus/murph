@@ -257,21 +257,7 @@ describe("@murphai/health-commons catalog coverage", () => {
     const groupedCoverageMismatchContent: HealthCommonsContentSet = {
       artifactManifests: [],
       changes: [],
-      evidenceAppraisals: [
-        {
-          schemaVersion: "murph.commons.evidence-appraisal.v1",
-          key: "evidence_appraisal:sauna-example:wrong-group",
-          sourceKey: "source_artifact:sauna/example",
-          targetKey: "protocol_variant:dry-sauna/example",
-          targetKind: "protocol_variant",
-          groupId: "wrong-group",
-          stance: "supports",
-          scope: "direct_protocol",
-          result: "positive",
-          headline: "Example headline",
-          implication: "Example implication",
-        },
-      ],
+      evidenceAppraisals: [],
       redirects: [],
       pages: [
         biomarkerPage,
@@ -493,6 +479,168 @@ describe("@murphai/health-commons catalog coverage", () => {
         ],
       }),
     ).toThrow("findingKeys points to missing health commons source finding finding:sauna/missing");
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        pages: [
+          biomarkerPage,
+          source,
+          {
+            ...sourcePage("source_artifact:sauna/wrong-owner", "sauna-wrong-owner"),
+            frontmatter: {
+              ...sourcePage("source_artifact:sauna/wrong-owner", "sauna-wrong-owner").frontmatter,
+              sourceFindings: [
+                {
+                  findingId: "finding:sauna/wrong-owner",
+                  sourceKey: "source_artifact:sauna/example",
+                  findingKind: "context",
+                  summary: "This finding was assigned to the wrong source page.",
+                },
+              ],
+            },
+          },
+          protocol,
+        ],
+      }),
+    ).toThrow(
+      "source_artifact:sauna/wrong-owner sourceFindings finding:sauna/wrong-owner belongs to source_artifact:sauna/example; source-owned findings must live on their owning source page.",
+    );
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        pages: [
+          biomarkerPage,
+          source,
+          {
+            ...protocol,
+            frontmatter: {
+              ...protocol.frontmatter,
+              sourceFindings: [
+                {
+                  findingId: "finding:sauna/protocol-owned",
+                  sourceKey: "source_artifact:sauna/example",
+                  findingKind: "context",
+                  summary: "Protocol page must not own source findings.",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toThrow(
+      "protocol_variant:dry-sauna/example sourceFindings finding:sauna/protocol-owned belongs to source_artifact:sauna/example; source-owned findings must live on their owning source page.",
+    );
+
+    const protocolWithLandscape = {
+      ...protocolPage("protocol_variant:dry-sauna/example", "dry-sauna-example"),
+      frontmatter: {
+        ...protocolPage("protocol_variant:dry-sauna/example", "dry-sauna-example").frontmatter,
+        researchLandscape: {
+          bottomLine: "Standalone appraisals must align to landscape groups.",
+          confidenceLabel: "mixed",
+          primaryClaim: "Source-owned findings should map into the curated evidence landscape.",
+          mainCaveat: "Standalone appraisals must match the curated landscape.",
+          groups: [
+            {
+              id: "expected-group",
+              label: "Expected group",
+              stance: "supports",
+              summary: "Standalone appraisals must use this group.",
+              sourceKeys: ["source_artifact:sauna/example"],
+            },
+          ],
+        },
+      },
+    } satisfies HealthCommonsSourcePage;
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        pages: [biomarkerPage, source, protocolWithLandscape],
+        evidenceAppraisals: [
+          {
+            ...appraisal,
+            key: "evidence_appraisal:sauna-example:missing-landscape-group",
+            groupId: "missing-group",
+          },
+        ],
+      }),
+    ).toThrow("groupId missing-group does not exist in protocol_variant:dry-sauna/example researchLandscape");
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        pages: [
+          biomarkerPage,
+          source,
+          sourcePage("source_artifact:sauna/other", "sauna-other"),
+          {
+            ...protocolWithLandscape,
+            frontmatter: {
+              ...protocolWithLandscape.frontmatter,
+              researchLandscape: {
+                ...protocolWithLandscape.frontmatter.researchLandscape,
+                groups: [
+                  {
+                    ...protocolWithLandscape.frontmatter.researchLandscape.groups[0],
+                    sourceKeys: ["source_artifact:sauna/other"],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        evidenceAppraisals: [
+          {
+            ...appraisal,
+            key: "evidence_appraisal:sauna-example:source-not-listed",
+          },
+        ],
+      }),
+    ).toThrow("sourceKey source_artifact:sauna/example is not listed in protocol_variant:dry-sauna/example researchLandscape group expected-group");
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        pages: [biomarkerPage, source, protocol],
+        evidenceAppraisals: [
+          {
+            ...appraisal,
+            key: "evidence_appraisal:sauna-example:wrong-source-kind",
+            sourceKey: "protocol_variant:dry-sauna/example",
+          },
+        ],
+      }),
+    ).toThrow(
+      "evidence appraisal evidence_appraisal:sauna-example:wrong-source-kind sourceKey must point to source_artifact, but protocol_variant:dry-sauna/example is protocol_variant.",
+    );
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        pages: [
+          biomarkerPage,
+          source,
+          {
+            ...protocolWithLandscape,
+            frontmatter: {
+              ...protocolWithLandscape.frontmatter,
+              researchLandscape: {
+                ...protocolWithLandscape.frontmatter.researchLandscape,
+                groups: [
+                  {
+                    ...protocolWithLandscape.frontmatter.researchLandscape.groups[0],
+                    summary: "Standalone evidence-appraisal edges for Expected group are listed here so protocol source references resolve through the research landscape.",
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+    ).toThrow("researchLandscape group expected-group uses generated placeholder summary text");
   });
 
   it("builds source and artifact indexes from canonical identities, findings, and manifests", () => {
@@ -505,8 +653,9 @@ describe("@murphai/health-commons catalog coverage", () => {
           canonicalIdBasis: "doi",
           identifiers: {
             doi: "https://doi.org/10.2000/Indexed",
+            titleHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           },
-          canonicalUrl: "https://example.com/indexed-source/",
+          canonicalUrl: "https://example.com/indexed-source/?utm_source=newsletter&ok=1",
           identityAliases: ["pubmed:12345"],
         },
         sourceFindings: [
@@ -544,20 +693,29 @@ describe("@murphai/health-commons catalog coverage", () => {
     expect(sourceEntry).toMatchObject({
       artifactIds: ["art_example_pdf"],
       canonicalIdBasis: "doi",
-      canonicalUrl: "https://example.com/indexed-source/",
+      canonicalUrl: "https://example.com/indexed-source?ok=1",
       extractionStatus: "findings_available",
       findingIds: ["finding:example/indexed-summary"],
       identityKind: "scholarly_work",
+      sourceUrl: "https://example.com/indexed-source",
       identifiers: {
         doi: "https://doi.org/10.2000/Indexed",
-        url: "https://example.com/indexed-source/",
+        titleHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        url: "https://example.com/indexed-source?ok=1",
       },
     });
     expect(sourceEntry?.identityKeys).toEqual([
       "doi:10.2000/indexed",
       "pmid:12345",
+      "title_hash:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "url:https://example.com/indexed-source",
+      "url:https://example.com/indexed-source?ok=1",
     ]);
+    expect(sourceIndex.identityLookup).toContainEqual({
+      canonicalSourceKey: "source_artifact:example/indexed",
+      identityKey: "doi:10.2000/indexed",
+      sourceKeys: ["source_artifact:example/indexed"],
+    });
 
     const artifactIndex = buildHealthCommonsSourceArtifactIndex(catalog);
     expect(artifactIndex.artifacts).toEqual([
@@ -573,6 +731,27 @@ describe("@murphai/health-commons catalog coverage", () => {
         sourceKey: "source_artifact:example/indexed",
       },
     ]);
+
+    const sourceWithSensitiveUrl = {
+      ...sourcePage("source_artifact:example/sensitive-url", "sensitive-url"),
+      frontmatter: {
+        ...sourcePage("source_artifact:example/sensitive-url", "sensitive-url").frontmatter,
+        source: {
+          kind: "web_page",
+          url: "https://example.com/sensitive-url?token=secret",
+        },
+      },
+    } satisfies HealthCommonsSourcePage;
+    const catalogWithSensitiveUrl = buildHealthCommonsCatalogFromContent({
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [sourceWithSensitiveUrl],
+    });
+    expect(() => buildHealthCommonsSourceIndex(catalogWithSensitiveUrl)).toThrow(
+      "must not contain sensitive query parameter token",
+    );
   });
 
   it("rejects source finding references to missing artifacts", () => {

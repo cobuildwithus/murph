@@ -14,6 +14,7 @@ const buildHealthCommonsSourceIndexMock = vi.hoisted(() =>
       {
         identityKey: "pmid:1",
         sourceKeys: ["source_artifact:pmid-1"],
+        canonicalSourceKey: "source_artifact:pmid-1",
       },
     ],
     duplicateIdentities: [],

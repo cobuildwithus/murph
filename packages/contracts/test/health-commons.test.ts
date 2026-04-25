@@ -378,6 +378,7 @@ describe("@murphai/contracts health commons schemas", () => {
           {
             identityKey: "pmid:29849692",
             sourceKeys: ["source_artifact:pmid-29849692"],
+            canonicalSourceKey: "source_artifact:pmid-29849692",
           },
         ],
         duplicateIdentities: [],
@@ -602,6 +603,28 @@ describe("@murphai/contracts health commons schemas", () => {
       }),
     ).toMatchObject({
       success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsSourceIdentitySchema, {
+        identityKind: "scholarly_work",
+        canonicalIdBasis: "title_hash",
+        identifiers: {
+          doi: "10.1000/example",
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsSourceIdentitySchema, {
+        identityKind: "scholarly_work",
+        canonicalIdBasis: "title_hash",
+        identifiers: {
+          titleHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      }),
+    ).toMatchObject({
+      success: true,
     });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, {

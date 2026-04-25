@@ -77,7 +77,7 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   }
 
   assertUniqueSourceIdentities(content.pages);
-  const findingIds = collectSourceFindingIds(content.pages, keys);
+  const findingIds = collectSourceFindingIds(content.pages, keys, pagesByKey);
   const standaloneAppraisalMatches = validateEvidenceAppraisals(
     content.evidenceAppraisals,
     keys,
@@ -98,6 +98,11 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
       }
     }
     for (const group of page.frontmatter.researchLandscape?.groups ?? []) {
+      if (group.summary.includes("Standalone evidence-appraisal edges for")) {
+        throw new Error(
+          `${page.frontmatter.key} researchLandscape group ${group.id} uses generated placeholder summary text.`,
+        );
+      }
       for (const sourceKey of group.sourceKeys) {
         const sourceBaseKey = stripRevision(sourceKey);
         assertTargetExists(keys, sourceKey, `${page.frontmatter.key} researchLandscape group ${group.id}`);
@@ -159,11 +164,13 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
       artifactIds.set(artifact.artifactId, manifest.manifestKey);
       if (artifact.sourceKey) {
         assertTargetExists(keys, artifact.sourceKey, `artifact ${artifact.artifactId}`);
+        assertTargetEntityType(pagesByKey, artifact.sourceKey, "source_artifact", `artifact ${artifact.artifactId} sourceKey`);
       }
     }
   }
 
-  assertSourceFindingArtifactReferences(content.pages, artifactIds);
+  const artifactSourceKeys = collectArtifactSourceKeys(content.artifactManifests);
+  assertSourceFindingArtifactReferences(content.pages, artifactIds, artifactSourceKeys);
   warnDuplicateRecipeHashes(content.pages);
 }
 
@@ -172,7 +179,7 @@ export function buildHealthCommonsSourceIndex(catalog: HealthCommonsCatalog): He
   const sources = catalog.entities
     .filter((entity) => entity.entityType === "source_artifact")
     .map((entity): HealthCommonsSourceIndexEntry => {
-      const identifiers = collectSourceIdentifierFields(entity);
+      const identifiers = sanitizeSourceIndexIdentifiers(collectSourceIdentifierFields(entity));
       const artifactIds = artifactIdsBySource.get(entity.key) ?? [];
       const findingIds = (entity.sourceFindings ?? []).map((finding) => finding.findingId).sort();
       const extractionStatus = findingIds.length > 0
@@ -189,8 +196,8 @@ export function buildHealthCommonsSourceIndex(catalog: HealthCommonsCatalog): He
         identityKind: entity.sourceIdentity?.identityKind ?? null,
         canonicalIdBasis: entity.sourceIdentity?.canonicalIdBasis ?? null,
         identifiers,
-        canonicalUrl: entity.sourceIdentity?.canonicalUrl ?? identifiers.url ?? entity.source?.url ?? null,
-        sourceUrl: entity.source?.url ?? null,
+        canonicalUrl: sanitizeSourceIndexUrl(entity.sourceIdentity?.canonicalUrl ?? identifiers.url ?? entity.source?.url ?? null),
+        sourceUrl: sanitizeSourceIndexUrl(entity.source?.url ?? null),
         identityAliases: [...(entity.sourceIdentity?.identityAliases ?? [])].sort(),
         identityKeys: collectSourceIdentityKeys(entity),
         artifactIds,
@@ -295,6 +302,7 @@ function computeRevision(frontmatter: HealthCommonsPageFrontmatter, body: string
 function collectSourceFindingIds(
   pages: readonly HealthCommonsSourcePage[],
   keys: ReadonlyMap<string, string>,
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
 ): ReadonlySet<string> {
   const findingIds = new Map<string, string>();
 
@@ -306,6 +314,12 @@ function collectSourceFindingIds(
       }
       const declaredSourceKey = stripRevision(finding.sourceKey ?? page.frontmatter.key);
       assertTargetExists(keys, declaredSourceKey, `${page.frontmatter.key} sourceFindings ${finding.findingId} sourceKey`);
+      assertTargetEntityType(pagesByKey, declaredSourceKey, "source_artifact", `${page.frontmatter.key} sourceFindings ${finding.findingId} sourceKey`);
+      if (declaredSourceKey !== page.frontmatter.key) {
+        throw new Error(
+          `${page.frontmatter.key} sourceFindings ${finding.findingId} belongs to ${declaredSourceKey}; source-owned findings must live on their owning source page.`,
+        );
+      }
       findingIds.set(finding.findingId, page.frontmatter.key);
     }
   }
@@ -316,12 +330,29 @@ function collectSourceFindingIds(
 function assertSourceFindingArtifactReferences(
   pages: readonly HealthCommonsSourcePage[],
   artifactIds: ReadonlyMap<string, string>,
+  artifactSourceKeys: ReadonlyMap<string, string>,
 ): void {
   for (const page of pages) {
     for (const finding of page.frontmatter.sourceFindings ?? []) {
-      if (finding.extractedFromArtifactId && !artifactIds.has(finding.extractedFromArtifactId)) {
+      if (!finding.extractedFromArtifactId) {
+        continue;
+      }
+      if (!artifactIds.has(finding.extractedFromArtifactId)) {
         throw new Error(
           `${page.frontmatter.key} sourceFindings ${finding.findingId} extractedFromArtifactId points to missing artifact ${finding.extractedFromArtifactId}.`,
+        );
+      }
+
+      const findingSourceKey = stripRevision(finding.sourceKey ?? page.frontmatter.key);
+      const artifactSourceKey = artifactSourceKeys.get(finding.extractedFromArtifactId);
+      if (!artifactSourceKey) {
+        throw new Error(
+          `${page.frontmatter.key} sourceFindings ${finding.findingId} extractedFromArtifactId ${finding.extractedFromArtifactId} has no sourceKey in the artifact manifest.`,
+        );
+      }
+      if (artifactSourceKey !== findingSourceKey) {
+        throw new Error(
+          `${page.frontmatter.key} sourceFindings ${finding.findingId} extractedFromArtifactId ${finding.extractedFromArtifactId} belongs to ${artifactSourceKey}, not ${findingSourceKey}.`,
         );
       }
     }
@@ -345,6 +376,7 @@ function validateEvidenceAppraisals(
     appraisalKeys.set(appraisal.key, keys.get(appraisal.targetKey) ?? appraisal.targetKey);
 
     assertTargetExists(keys, appraisal.sourceKey, `evidence appraisal ${appraisal.key} sourceKey`);
+    assertTargetEntityType(pagesByKey, appraisal.sourceKey, "source_artifact", `evidence appraisal ${appraisal.key} sourceKey`);
     assertTargetExists(keys, appraisal.targetKey, `evidence appraisal ${appraisal.key} targetKey`);
 
     const targetPage = pagesByKey.get(stripRevision(appraisal.targetKey));
@@ -353,9 +385,21 @@ function validateEvidenceAppraisals(
         `Evidence appraisal ${appraisal.key} targetKind ${appraisal.targetKind} does not match ${appraisal.targetKey} entityType ${targetPage.frontmatter.entityType}.`,
       );
     }
+    const targetGroup = targetPage?.frontmatter.researchLandscape?.groups.find((group) => group.id === appraisal.groupId);
+    if (targetPage?.frontmatter.researchLandscape && !targetGroup) {
+      throw new Error(
+        `Evidence appraisal ${appraisal.key} groupId ${appraisal.groupId} does not exist in ${appraisal.targetKey} researchLandscape.`,
+      );
+    }
+    if (targetGroup && !targetGroup.sourceKeys.map(stripRevision).includes(stripRevision(appraisal.sourceKey))) {
+      throw new Error(
+        `Evidence appraisal ${appraisal.key} sourceKey ${appraisal.sourceKey} is not listed in ${appraisal.targetKey} researchLandscape group ${appraisal.groupId}.`,
+      );
+    }
 
     for (const endpointKey of appraisal.endpointKeys ?? []) {
       assertTargetExists(keys, endpointKey, `evidence appraisal ${appraisal.key} endpointKeys`);
+      assertTargetEntityType(pagesByKey, endpointKey, "biomarker", `evidence appraisal ${appraisal.key} endpointKeys`);
     }
     for (const findingKey of appraisal.findingKeys ?? []) {
       assertFindingExists(findingIds, findingKey, `evidence appraisal ${appraisal.key} findingKeys`);
@@ -380,6 +424,23 @@ function assertFindingExists(findingIds: ReadonlySet<string>, target: string, co
 function assertTargetExists(keys: ReadonlyMap<string, string>, target: string, context: string): void {
   if (!keys.has(stripRevision(target))) {
     throw new Error(`${context} points to missing health commons target ${target}.`);
+  }
+}
+
+function assertTargetEntityType(
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+  target: string,
+  expectedEntityType: HealthCommonsPageFrontmatter["entityType"],
+  context: string,
+): void {
+  const page = pagesByKey.get(stripRevision(target));
+  if (!page) {
+    return;
+  }
+  if (page.frontmatter.entityType !== expectedEntityType) {
+    throw new Error(
+      `${context} must point to ${expectedEntityType}, but ${target} is ${page.frontmatter.entityType}.`,
+    );
   }
 }
 
@@ -422,13 +483,11 @@ function assertUniqueSourceIdentities(pages: readonly HealthCommonsSourcePage[])
 const SOURCE_IDENTITY_DUPLICATE_RELATION_TYPES = new Set([
   "alias_of",
   "duplicate_source_identity",
-  "duplicate_source",
   "mirror_of",
   "publication_for",
   "readable_mirror",
   "registry_for",
   "same_work_as",
-  "source_variant",
 ]);
 
 function hasExplicitSourceIdentityDuplicateRelation(
@@ -458,6 +517,7 @@ function collectSourceIdentityKeys(frontmatter: HealthCommonsPageFrontmatter): s
   addIdentityKey(identityKeys, "pmcid", sourceIdentity?.identifiers?.pmcid);
   addIdentityKey(identityKeys, "doi", sourceIdentity?.identifiers?.doi);
   addIdentityKey(identityKeys, "registry_id", sourceIdentity?.identifiers?.registryId);
+  addIdentityKey(identityKeys, "title_hash", sourceIdentity?.identifiers?.titleHash);
   addIdentityKey(identityKeys, "url", sourceIdentity?.identifiers?.url);
   addIdentityKey(identityKeys, "url", sourceIdentity?.canonicalUrl);
 
@@ -472,21 +532,68 @@ function collectSourceIdentityKeys(frontmatter: HealthCommonsPageFrontmatter): s
 }
 
 function collectSourceIdentifierFields(frontmatter: HealthCommonsPageFrontmatter) {
+  const derivedIdentifiers = deriveIdentifierFieldsFromIdentityKeys(collectSourceIdentityKeys(frontmatter));
   const identifiers = compactIdentifiers({
-    pmid: frontmatter.sourceIdentity?.identifiers?.pmid ?? frontmatter.source?.pmid,
-    pmcid: frontmatter.sourceIdentity?.identifiers?.pmcid,
-    doi: frontmatter.sourceIdentity?.identifiers?.doi ?? frontmatter.source?.doi,
-    registryId: frontmatter.sourceIdentity?.identifiers?.registryId,
-    url: frontmatter.sourceIdentity?.identifiers?.url ?? frontmatter.sourceIdentity?.canonicalUrl ?? frontmatter.source?.url,
+    ...derivedIdentifiers,
+    pmid: frontmatter.sourceIdentity?.identifiers?.pmid ?? frontmatter.source?.pmid ?? derivedIdentifiers.pmid,
+    pmcid: frontmatter.sourceIdentity?.identifiers?.pmcid ?? derivedIdentifiers.pmcid,
+    doi: frontmatter.sourceIdentity?.identifiers?.doi ?? frontmatter.source?.doi ?? derivedIdentifiers.doi,
+    registryId: frontmatter.sourceIdentity?.identifiers?.registryId ?? derivedIdentifiers.registryId,
+    titleHash: frontmatter.sourceIdentity?.identifiers?.titleHash ?? derivedIdentifiers.titleHash,
+    url: frontmatter.sourceIdentity?.identifiers?.url ?? frontmatter.sourceIdentity?.canonicalUrl ?? frontmatter.source?.url ?? derivedIdentifiers.url,
   });
 
   return identifiers;
 }
 
-function compactIdentifiers(input: Record<string, string | undefined>) {
+function deriveIdentifierFieldsFromIdentityKeys(identityKeys: readonly string[]): Record<string, string> {
+  const identifiers: Record<string, string> = {};
+
+  for (const identityKey of identityKeys) {
+    const separatorIndex = identityKey.indexOf(":");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    const kind = identityKey.slice(0, separatorIndex);
+    const value = identityKey.slice(separatorIndex + 1);
+    if (!value) {
+      continue;
+    }
+
+    if (kind === "pmid" && !identifiers.pmid) {
+      identifiers.pmid = value;
+    } else if (kind === "pmcid" && !identifiers.pmcid) {
+      identifiers.pmcid = value;
+    } else if (kind === "doi" && !identifiers.doi) {
+      identifiers.doi = value;
+    } else if (kind === "registry_id" && !identifiers.registryId) {
+      identifiers.registryId = value;
+    } else if (kind === "title_hash" && !identifiers.titleHash) {
+      identifiers.titleHash = value;
+    } else if (kind === "url" && !identifiers.url) {
+      identifiers.url = value;
+    }
+  }
+
+  return identifiers;
+}
+
+function compactIdentifiers(input: Record<string, string | null | undefined>): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined && value.trim().length > 0),
+    Object.entries(input).flatMap(([key, value]) => {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        return [];
+      }
+      return [[key, value]];
+    }),
   );
+}
+
+function sanitizeSourceIndexIdentifiers(input: Record<string, string>): Record<string, string> {
+  return compactIdentifiers({
+    ...input,
+    url: sanitizeSourceIndexUrl(input.url),
+  });
 }
 
 function addIdentityKey(identityKeys: Set<string>, kind: string, value: string | undefined): void {
@@ -498,6 +605,48 @@ function addIdentityKey(identityKeys: Set<string>, kind: string, value: string |
   if (normalizedValue) {
     identityKeys.add(`${kind}:${normalizedValue}`);
   }
+
+  if (kind === "url" && value) {
+    for (const derivedIdentityKey of deriveIdentityKeysFromUrl(value)) {
+      identityKeys.add(derivedIdentityKey);
+    }
+  }
+}
+
+function deriveIdentityKeysFromUrl(value: string): string[] {
+  const identityKeys = new Set<string>();
+  const addDerived = (kind: string, rawValue: string | undefined) => {
+    if (!rawValue) {
+      return;
+    }
+    const normalizedValue = normalizeIdentityValue(kind, rawValue);
+    if (normalizedValue) {
+      identityKeys.add(kind + ":" + normalizedValue);
+    }
+  };
+
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase().replace(/^www\./u, "");
+    const path = decodeURIComponent(url.pathname);
+
+    if (host === "pubmed.ncbi.nlm.nih.gov") {
+      addDerived("pmid", path.match(/^\/?(\d+)(?:\/|$)/u)?.[1]);
+    }
+    if (host === "pmc.ncbi.nlm.nih.gov" || host === "ncbi.nlm.nih.gov") {
+      addDerived("pmcid", path.match(/(PMC\d+)/iu)?.[1]);
+    }
+    if (host === "doi.org" || host === "dx.doi.org") {
+      addDerived("doi", path.replace(/^\/+/u, ""));
+    }
+    if (host === "clinicaltrials.gov") {
+      addDerived("registry_id", path.match(/(NCT\d+)/iu)?.[1]);
+    }
+  } catch {
+    return [];
+  }
+
+  return [...identityKeys].sort();
 }
 
 function normalizeIdentityAlias(value: string): string | null {
@@ -547,6 +696,10 @@ function normalizeIdentityValue(kind: string, value: string): string | null {
   if (kind === "registry_id") {
     return trimmed.toLowerCase().replace(/^registry:/u, "").replace(/^registry_id:/u, "");
   }
+  if (kind === "title_hash") {
+    const normalized = trimmed.toLowerCase().replace(/^title[-_]hash:/u, "");
+    return /^[a-f0-9]{64}$/u.test(normalized) ? normalized : null;
+  }
 
   return normalizeAlias(trimmed);
 }
@@ -559,11 +712,60 @@ function normalizeDoi(value: string): string {
     .toLowerCase();
 }
 
+const TRACKING_URL_SEARCH_PARAMS = new Set(["dclid", "fbclid", "gclid", "mc_cid", "mc_eid"]);
+const SENSITIVE_URL_SEARCH_PARAMS = new Set([
+  "access_token",
+  "auth",
+  "authorization",
+  "code",
+  "id_token",
+  "password",
+  "sig",
+  "signature",
+  "token",
+]);
+
+function sanitizeSourceIndexUrl(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value.trim());
+    if (url.username || url.password) {
+      throw new Error("must not contain username or password");
+    }
+    for (const key of url.searchParams.keys()) {
+      const normalizedKey = key.toLowerCase();
+      if (
+        SENSITIVE_URL_SEARCH_PARAMS.has(normalizedKey)
+        || normalizedKey.endsWith("_token")
+        || normalizedKey.startsWith("x-amz-")
+        || normalizedKey.startsWith("x-goog-")
+      ) {
+        throw new Error(`must not contain sensitive query parameter ${key}`);
+      }
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("must not contain")) {
+      throw new Error(`Source index URL ${value} ${error.message}.`);
+    }
+    throw new Error(`Source index URL ${value} must be a valid URL.`);
+  }
+
+  return normalizeUrl(value);
+}
+
 function normalizeUrl(value: string): string {
   try {
     const url = new URL(value.trim());
     url.hash = "";
     url.pathname = url.pathname.replace(/\/+$/u, "");
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^utm_/iu.test(key) || TRACKING_URL_SEARCH_PARAMS.has(key.toLowerCase())) {
+        url.searchParams.delete(key);
+      }
+    }
     url.searchParams.sort();
     return url.toString().replace(/\/+$/u, "");
   } catch {
@@ -583,11 +785,28 @@ function buildIdentityLookup(sources: readonly HealthCommonsSourceIndexEntry[]) 
   }
 
   return [...sourceKeysByIdentity.entries()]
-    .map(([identityKey, sourceKeys]) => ({
-      identityKey,
-      sourceKeys: [...sourceKeys].sort(),
-    }))
+    .map(([identityKey, sourceKeys]) => {
+      const sortedSourceKeys = [...sourceKeys].sort();
+      return {
+        identityKey,
+        sourceKeys: sortedSourceKeys,
+        canonicalSourceKey: sortedSourceKeys.length === 1 ? sortedSourceKeys[0] : null,
+      };
+    })
     .sort((left, right) => left.identityKey.localeCompare(right.identityKey));
+}
+
+function collectArtifactSourceKeys(manifests: readonly HealthCommonsArtifactManifest[]): Map<string, string> {
+  const sourceKeyByArtifactId = new Map<string, string>();
+
+  for (const { artifact } of collectArtifactPointers(manifests)) {
+    if (!artifact.sourceKey) {
+      continue;
+    }
+    sourceKeyByArtifactId.set(artifact.artifactId, stripRevision(artifact.sourceKey));
+  }
+
+  return sourceKeyByArtifactId;
 }
 
 function collectArtifactIdsBySource(manifests: readonly HealthCommonsArtifactManifest[]): Map<string, string[]> {
