@@ -121,7 +121,7 @@ describe('Health Commons bound assistant tools', () => {
         query: 'sauna',
         status: ['active'],
       }),
-    ).rejects.toThrow(/Unknown Health Commons status filter "active"/u)
+    ).rejects.toThrow(/Unknown Health Commons status filter\. Expected one of:/u)
   })
 })
 

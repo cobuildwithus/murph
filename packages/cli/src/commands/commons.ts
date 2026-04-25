@@ -1,9 +1,13 @@
 import { Cli, z } from "incur";
 import {
   HEALTH_COMMONS_ENTITY_TYPES,
+  isHealthCommonsEntityType,
   type HealthCommonsCatalogEntity,
+  type HealthCommonsEntityType,
 } from "@murphai/contracts";
 import {
+  HEALTH_COMMONS_PAGE_STATUSES,
+  HEALTH_COMMONS_SOURCE_KINDS,
   getGeneratedHealthCommonsCatalogReader,
   type HealthCommonsCatalogReader,
 } from "@murphai/health-commons/runtime";
@@ -11,23 +15,8 @@ import { emptyArgsSchema } from "@murphai/operator-config/command-helpers";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 const commonsEntityTypeValues = HEALTH_COMMONS_ENTITY_TYPES;
-const commonsPageStatusValues = [
-  "draft",
-  "field-testing",
-  "reviewed",
-  "deprecated",
-  "community",
-] as const;
-const commonsSourceKindValues = [
-  "journal_article",
-  "review",
-  "guideline",
-  "book",
-  "podcast",
-  "external_protocol",
-  "web_page",
-  "other",
-] as const;
+const commonsPageStatusValues = HEALTH_COMMONS_PAGE_STATUSES;
+const commonsSourceKindValues = HEALTH_COMMONS_SOURCE_KINDS;
 const protocolEntityType = "protocol_variant" as const;
 const sourceEntityType = "source_artifact" as const;
 
@@ -232,9 +221,10 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         .optional()
         .describe("Optional text filter over protocol title, summary, aliases, categories, and body."),
       status: z
-        .enum(commonsPageStatusValues)
+        .string()
+        .min(1)
         .optional()
-        .describe(`Optional Health Commons page status filter: ${commonsPageStatusValues.join(", ")}.`),
+        .describe(`Optional Health Commons page status filter: ${commonsPageStatusValues.join(", ")}. Use * for all.`),
       category: z
         .array(z.string().min(1))
         .optional()
@@ -259,24 +249,24 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     output: commonsProtocolListResultSchema,
     async run({ options }) {
       const reader = getGeneratedHealthCommonsCatalogReader();
-      const categories = normalizeRepeatableStrings(options.category);
-      const protocols = queryMatchedCatalogEntities(reader, {
-        entityType: protocolEntityType,
+      const listOptions = {
+        categories: options.category,
+        limit: options.limit,
         query: options.query,
-      })
-        .filter(isProtocolEntity)
-        .filter((entity) => matchesStatus(entity, options.status))
-        .filter((entity) => matchesCategories(entity, categories))
-        .slice(0, options.limit)
-        .map(toEntitySummary);
+        statuses: options.status ? [options.status] : undefined,
+      };
+      const normalizedFilters = reader.normalizeListOptions(listOptions);
+      const protocols = reader
+        .listProtocolVariants(listOptions)
+        .map((protocol) => toEntitySummary(requireCatalogEntity(reader, protocol.key)));
 
       return {
         catalogHash: reader.catalogHash,
         filters: {
-          query: options.query ?? null,
-          status: options.status ?? null,
-          categories,
-          limit: options.limit,
+          query: normalizedFilters.query,
+          status: normalizedFilters.statuses[0] ?? null,
+          categories: [...normalizedFilters.categories],
+          limit: normalizedFilters.limit,
         },
         total: protocols.length,
         protocols,
@@ -348,18 +338,20 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         .optional()
         .describe("Optional text filter over source title, summary, citation, and body."),
       kind: z
-        .enum(commonsSourceKindValues)
+        .string()
+        .min(1)
         .optional()
-        .describe(`Optional source kind filter: ${commonsSourceKindValues.join(", ")}.`),
+        .describe(`Optional source kind filter: ${commonsSourceKindValues.join(", ")}. Use * for all.`),
       protocol: z
         .string()
         .min(1)
         .optional()
         .describe("Optional public Health Commons protocol key, slug, or route id to list only sources backing that protocol."),
       status: z
-        .enum(commonsPageStatusValues)
+        .string()
+        .min(1)
         .optional()
-        .describe(`Optional Health Commons page status filter: ${commonsPageStatusValues.join(", ")}.`),
+        .describe(`Optional Health Commons page status filter: ${commonsPageStatusValues.join(", ")}. Use * for all.`),
       limit: z
         .number()
         .int()
@@ -381,41 +373,33 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     async run({ options }) {
       const reader = getGeneratedHealthCommonsCatalogReader();
       const protocol = options.protocol
-        ? findCommonsEntity(reader, options.protocol)
+        ? findCommonsEntity(reader, options.protocol, [protocolEntityType])
         : null;
-      const queryMatchedSources = options.query
-        ? queryMatchedCatalogEntities(reader, {
-            entityType: sourceEntityType,
-            query: options.query,
-          })
-        : null;
-      const queryMatchedSourceKeys = queryMatchedSources
-        ? new Set(queryMatchedSources.map((entity) => entity.key))
-        : null;
-      const candidateSources = options.protocol
+      const candidateKeys = options.protocol
         ? protocol && isProtocolEntity(protocol)
-          ? collectProtocolSourceEntities(reader, protocol)
+          ? reader.collectSourceKeys({ entity: protocol })
           : []
-        : queryMatchedSources ?? reader.listByEntityType(sourceEntityType);
-      const sources = candidateSources
-        .filter(isSourceEntity)
-        .filter(
-          (entity) =>
-            queryMatchedSourceKeys === null || queryMatchedSourceKeys.has(entity.key),
-        )
-        .filter((entity) => matchesStatus(entity, options.status))
-        .filter((entity) => matchesSourceKind(entity, options.kind))
-        .slice(0, options.limit)
-        .map(toSourceSummary);
+        : undefined;
+      const listOptions = {
+        candidateKeys,
+        limit: options.limit,
+        query: options.query,
+        sourceKinds: options.kind ? [options.kind] : undefined,
+        statuses: options.status ? [options.status] : undefined,
+      };
+      const normalizedFilters = reader.normalizeListOptions(listOptions);
+      const sources = reader
+        .listSourceArtifacts(listOptions)
+        .map((source) => toSourceSummary(requireSourceEntity(reader, source.key)));
 
       return {
         catalogHash: reader.catalogHash,
         filters: {
-          query: options.query ?? null,
-          kind: options.kind ?? null,
+          query: normalizedFilters.query,
+          kind: normalizedFilters.sourceKinds[0] ?? null,
           protocol: options.protocol ?? null,
-          status: options.status ?? null,
-          limit: options.limit,
+          status: normalizedFilters.statuses[0] ?? null,
+          limit: normalizedFilters.limit,
         },
         total: sources.length,
         sources,
@@ -468,20 +452,21 @@ function normalizeCommonsQuery(input: {
   return text;
 }
 
-function normalizeEntityTypes(input: string[] | undefined): CommonsEntityType[] {
+function normalizeEntityTypes(input: string[] | undefined): HealthCommonsEntityType[] {
   const values = normalizeRepeatableStrings(input);
-  const allowedTypes = new Set<string>(commonsEntityTypeValues);
+  const entityTypes: HealthCommonsEntityType[] = [];
 
   for (const value of values) {
-    if (!allowedTypes.has(value)) {
+    if (!isHealthCommonsEntityType(value)) {
       throw new VaultCliError(
         "invalid_entity_type",
         `Unknown Health Commons entity type "${value}". Expected one of: ${commonsEntityTypeValues.join(", ")}.`,
       );
     }
+    entityTypes.push(value);
   }
 
-  return values as CommonsEntityType[];
+  return entityTypes;
 }
 
 function normalizeRepeatableStrings(input: string[] | undefined): string[] {
@@ -498,29 +483,32 @@ function normalizeRepeatableStrings(input: string[] | undefined): string[] {
 function findCommonsEntity(
   reader: HealthCommonsCatalogReader,
   lookup: string,
+  entityTypes: readonly HealthCommonsEntityType[] = commonsEntityTypeValues,
 ): HealthCommonsCatalogEntity | undefined {
   const byKey =
     reader.findByKey(lookup) ??
-    reader.findBySlug(lookup) ??
-    reader.findByRouteId({
-      entityType: protocolEntityType,
-      routeId: lookup,
-    }) ??
-    reader.findByRouteId({
-      entityType: sourceEntityType,
-      routeId: lookup,
-    });
+    reader.findBySlug(lookup);
 
-  if (byKey) {
+  if (byKey && entityTypes.includes(byKey.entityType)) {
     return byKey;
+  }
+
+  const routeMatch = uniqueEntityMatches(
+    entityTypes.map((entityType) =>
+      reader.findByRouteId({
+        entityType,
+        routeId: lookup,
+      }),
+    ),
+  )[0];
+
+  if (routeMatch) {
+    return routeMatch;
   }
 
   const normalizedLookup = normalizeLookup(lookup);
 
-  return [
-    ...reader.listByEntityType(protocolEntityType),
-    ...reader.listByEntityType(sourceEntityType),
-  ].find((entity) => {
+  return entityTypes.flatMap((entityType) => reader.listByEntityType(entityType)).find((entity) => {
     if (
       normalizeLookup(entity.key) === normalizedLookup ||
       normalizeLookup(entity.slug) === normalizedLookup
@@ -529,9 +517,27 @@ function findCommonsEntity(
     }
 
     return (entity.aliases ?? []).some(
-      (alias) => normalizeLookup(alias) === normalizedLookup,
+      (alias: string) => normalizeLookup(alias) === normalizedLookup,
     );
   });
+}
+
+function uniqueEntityMatches(
+  matches: readonly (HealthCommonsCatalogEntity | null)[],
+): HealthCommonsCatalogEntity[] {
+  const entities: HealthCommonsCatalogEntity[] = [];
+  const seen = new Set<string>();
+
+  for (const entity of matches) {
+    if (!entity || seen.has(entity.key)) {
+      continue;
+    }
+
+    seen.add(entity.key);
+    entities.push(entity);
+  }
+
+  return entities;
 }
 
 function requireCatalogEntity(
@@ -546,51 +552,20 @@ function requireCatalogEntity(
   return entity;
 }
 
-function collectProtocolSourceEntities(
+function requireSourceEntity(
   reader: HealthCommonsCatalogReader,
-  protocol: HealthCommonsCatalogEntity,
-): HealthCommonsCatalogEntity[] {
-  return reader
-    .collectSourceKeys({ entity: protocol })
-    .map((key) => reader.findByKey(key))
-    .filter(
-      (entity): entity is HealthCommonsCatalogEntity =>
-        entity !== null && entity.entityType === sourceEntityType,
-    );
+  key: string,
+): SourceArtifactEntity {
+  const entity = requireCatalogEntity(reader, key);
+  if (!isSourceEntity(entity)) {
+    throw new Error(`Health Commons catalog source list returned non-source entity ${key}.`);
+  }
+
+  return entity;
 }
 
 function normalizeLookup(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/gu, " ");
-}
-
-function matchesStatus(
-  entity: HealthCommonsCatalogEntity,
-  status: string | undefined,
-): boolean {
-  return !status || entity.status === status;
-}
-
-function matchesCategories(
-  entity: HealthCommonsCatalogEntity,
-  categories: readonly string[],
-): boolean {
-  if (categories.length === 0) {
-    return true;
-  }
-
-  const entityCategories = new Set(entity.categories ?? []);
-  return categories.every((category) => entityCategories.has(category));
-}
-
-function matchesSourceKind(
-  entity: HealthCommonsCatalogEntity,
-  kind: string | undefined,
-): boolean {
-  if (!kind || !isSourceEntity(entity)) {
-    return true;
-  }
-
-  return entity.source.kind === kind;
 }
 
 function isProtocolEntity(

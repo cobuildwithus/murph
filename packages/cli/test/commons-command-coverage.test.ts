@@ -289,6 +289,33 @@ test("commons source list applies high limits after protocol source collection",
   assert.ok(data.sources.every((source) => source.entityType === "source_artifact"));
 });
 
+test("commons source list keeps invalid protocol scopes empty", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    filters: {
+      protocol: string | null;
+    };
+    sources: Array<{
+      key: string;
+    }>;
+    total: number;
+  }>(cli, [
+    "commons",
+    "source",
+    "list",
+    "--protocol",
+    "not-a-health-commons-protocol",
+    "--limit",
+    "20",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.filters.protocol, "not-a-health-commons-protocol");
+  assert.equal(data.total, 0);
+  assert.deepEqual(data.sources, []);
+});
+
 test("commons search rejects unknown entity type filters", async () => {
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli(cli, [
@@ -325,6 +352,20 @@ test("commons filters reject invalid public corpus status and source kind values
 
   assert.equal(invalidStatus.exitCode, 1);
   assert.equal(invalidStatus.envelope.ok, false);
+  if (!invalidStatus.envelope.ok) {
+    assert.match(
+      invalidStatus.envelope.error.message ?? "",
+      /Unknown Health Commons status filter\. Expected one of:/u,
+    );
+    assert.doesNotMatch(invalidStatus.envelope.error.message ?? "", /active/u);
+  }
   assert.equal(invalidKind.exitCode, 1);
   assert.equal(invalidKind.envelope.ok, false);
+  if (!invalidKind.envelope.ok) {
+    assert.match(
+      invalidKind.envelope.error.message ?? "",
+      /Unknown Health Commons source kind filter\. Expected one of:/u,
+    );
+    assert.doesNotMatch(invalidKind.envelope.error.message ?? "", /study/u);
+  }
 });
