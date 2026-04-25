@@ -394,7 +394,7 @@ test("activity surfaces keep WHOOP workout metrics and convert energy-burned int
   assert.equal(maxHeartRate?.value, 168);
 });
 
-test("metric latest and trend surfaces keep fallback and aggregate-backed points", () => {
+test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {
   const vault = makeVault([
     makeSleepSession({
       entityId: "evt_sleep_04",
@@ -404,6 +404,36 @@ test("metric latest and trend surfaces keep fallback and aggregate-backed points
       recordedAt: "2026-04-04T06:05:00Z",
       startAt: "2026-04-03T22:30:00Z",
       endAt: "2026-04-04T06:15:00Z",
+    }),
+    makeObservation({
+      entityId: "evt_sleep_deep_04",
+      metric: "sleep-deep-minutes",
+      value: 100,
+      unit: "minutes",
+      dayKey: "2026-04-04",
+      occurredAt: "2026-04-04T06:00:00Z",
+      recordedAt: "2026-04-04T06:05:00Z",
+      resourceType: "sleep",
+    }),
+    makeObservation({
+      entityId: "evt_sleep_light_04",
+      metric: "sleep-light-minutes",
+      value: 200,
+      unit: "minutes",
+      dayKey: "2026-04-04",
+      occurredAt: "2026-04-04T06:00:00Z",
+      recordedAt: "2026-04-04T06:06:00Z",
+      resourceType: "sleep",
+    }),
+    makeObservation({
+      entityId: "evt_sleep_rem_04",
+      metric: "sleep-rem-minutes",
+      value: 120,
+      unit: "minutes",
+      dayKey: "2026-04-04",
+      occurredAt: "2026-04-04T06:00:00Z",
+      recordedAt: "2026-04-04T06:07:00Z",
+      resourceType: "sleep",
     }),
     makeActivitySession({
       entityId: "evt_run_05",
@@ -429,12 +459,16 @@ test("metric latest and trend surfaces keep fallback and aggregate-backed points
   const workoutMinutes = summarizeWearableMetricTrend(vault, "workout-minutes", { windowDays: 1 });
   const sessionCount = summarizeWearableMetricLatest(vault, "sessionCount", { windowDays: 1 });
 
-  assert.equal(totalSleep?.value, 465);
-  assert.equal(totalSleep?.points[0]?.value, 465);
+  assert.equal(totalSleep?.value, 420);
+  assert.equal(totalSleep?.points[0]?.value, 420);
   assert.equal(totalSleep?.provider, "oura");
   assert.equal(
-    totalSleep?.notes.some((note) => note.includes("Used the selected sleep session duration because no direct total-sleep metric was available.")),
+    totalSleep?.notes.some((note) => note.includes("Derived total sleep from selected deep, light, and REM stage minutes")),
     true,
+  );
+  assert.equal(
+    totalSleep?.notes.some((note) => note.includes("Used the selected sleep session duration because no direct total-sleep metric was available.")),
+    false,
   );
 
   assert.equal(timeInBed?.value, 465);
@@ -543,7 +577,7 @@ test("metric-trend and drift surfaces return compact structured bundles", () => 
 
   assert.equal(drift?.windowDays, 2);
   assert.equal(drift?.latest.latestDate, "2026-04-04");
-  assert.equal(drift?.signals.length, 11);
+  assert.equal(drift?.signals.length, 2);
   assert.equal(
     drift?.signals.some((signal) => signal.metric === "restingHeartRate" && signal.value === 51),
     true,
@@ -552,14 +586,7 @@ test("metric-trend and drift surfaces return compact structured bundles", () => 
     drift?.signals.some((signal) => signal.metric === "temperatureDeviation" && signal.value === 0.1),
     true,
   );
-  assert.equal(
-    drift?.signals.some((signal) => signal.metric === "estimatedVo2Max" && signal.value === null),
-    true,
-  );
-  assert.equal(
-    drift?.signals.some((signal) => signal.metric === "recoveryScore" && signal.value === null),
-    true,
-  );
+  assert.equal(drift?.signals.some((signal) => signal.value === null), false);
   assert.equal(
     drift?.notes.some((note) => note.includes("Compared recent and prior 2-day wearable windows")),
     true,

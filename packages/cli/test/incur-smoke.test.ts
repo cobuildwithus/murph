@@ -1486,6 +1486,14 @@ test('goal show help exposes only the global format flag', async () => {
   assert.match(help, /Global Options:[\s\S]*--format <toon\|json\|yaml\|md\|jsonl>/u)
 })
 
+test('wearables day help keeps the date positional and omits the old --date flag', async () => {
+  const help = await runRawCli(['wearables', 'day', '--help'])
+
+  assert.match(help, /Usage: vault-cli wearables day <date> \[options\]/u)
+  assert.match(help, /Calendar date in YYYY-MM-DD form\./u)
+  assert.doesNotMatch(help, /--date\b/u)
+})
+
 test('health command help surfaces examples and hints through Incur metadata', async () => {
   const goalUpsertHelp = await runRawCli(['goal', 'upsert', '--help'])
   const journalLinkHelp = await runRawCli(['journal', 'link', '--help'])

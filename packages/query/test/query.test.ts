@@ -420,7 +420,7 @@ test("readVault breaks equal event revisions by recordedAt when collapsing the c
   }
 });
 
-test("wearable source health reports derived sleep-window metrics for session-only providers", async () => {
+test("wearable source health reports sleep-window metrics for session-only providers", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-source-health-"));
 
   try {
@@ -455,11 +455,10 @@ test("wearable source health reports derived sleep-window metrics for session-on
     assert.equal(sourceHealth.length, 1);
     assert.equal(sourceHealth[0]?.provider, "whoop");
     assert.equal(sourceHealth[0]?.candidateMetrics, 1);
-    assert.equal(sourceHealth[0]?.selectedMetrics, 3);
+    assert.equal(sourceHealth[0]?.selectedMetrics, 2);
     assert.deepEqual(sourceHealth[0]?.metricsContributed, [
       "sessionMinutes",
       "timeInBedMinutes",
-      "totalSleepMinutes",
     ]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -644,7 +643,7 @@ test("wearable metric ranking balances specificity and recency ahead of provider
   }
 });
 
-test("sleep-window ranking uses scored evidence and marks session-derived fallbacks explicitly", async () => {
+test("sleep-window ranking does not treat selected session duration as total sleep", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-sleep-window-ranking-"));
 
   try {
@@ -700,17 +699,205 @@ test("sleep-window ranking uses scored evidence and marks session-derived fallba
     const sleep = summarizeWearableSleep(vault);
 
     assert.equal(sleep[0]?.sleepWindowProvider, "garmin");
-    assert.equal(sleep[0]?.totalSleepMinutes.selection.provider, "garmin");
-    assert.equal(sleep[0]?.totalSleepMinutes.selection.resolution, "fallback");
-    assert.equal(sleep[0]?.totalSleepMinutes.selection.fallbackFromMetric, "sessionMinutes");
+    assert.equal(sleep[0]?.provider, "garmin");
+    assert.equal(sleep[0]?.totalSleepMinutes.selection.value, null);
+    assert.equal(sleep[0]?.totalSleepMinutes.selection.provider, null);
+    assert.equal(sleep[0]?.totalSleepMinutes.selection.resolution, "none");
+    assert.equal(sleep[0]?.timeInBedMinutes.selection.provider, "garmin");
+    assert.equal(sleep[0]?.timeInBedMinutes.selection.resolution, "fallback");
+    assert.equal(sleep[0]?.timeInBedMinutes.selection.fallbackFromMetric, "sessionMinutes");
     assert.equal(
       sleep[0]?.notes.some((note) => note.includes("Selected Garmin sleep window recorded")),
       true,
     );
     assert.equal(
       sleep[0]?.notes.some((note) => note.includes("Used the selected sleep session duration because no direct total-sleep metric was available.")),
+      false,
+    );
+    assert.equal(
+      sleep[0]?.notes.some((note) => note.includes("Used the selected sleep session duration because no explicit time-in-bed metric was available.")),
       true,
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("sleep total derives from complete asleep stages and prefers direct totals", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-sleep-stage-total-"));
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_window_garmin_01",
+          kind: "sleep_session",
+          occurredAt: "2026-03-31T22:05:00Z",
+          recordedAt: "2026-04-01T06:20:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin overnight sleep",
+          startAt: "2026-03-31T22:05:00Z",
+          endAt: "2026-04-01T06:20:00Z",
+          durationMinutes: 495,
+          externalRef: {
+            system: "garmin",
+            resourceType: "sleep",
+            resourceId: "sleep_garmin_01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_deep_garmin_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T06:00:00Z",
+          recordedAt: "2026-04-01T06:10:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin sleep deep",
+          metric: "sleep-deep-minutes",
+          value: 95,
+          unit: "minutes",
+          externalRef: {
+            system: "garmin",
+            resourceType: "sleep",
+            resourceId: "sleep_garmin_01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_light_garmin_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T06:00:00Z",
+          recordedAt: "2026-04-01T06:11:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin sleep light",
+          metric: "sleep-light-minutes",
+          value: 210,
+          unit: "minutes",
+          externalRef: {
+            system: "garmin",
+            resourceType: "sleep",
+            resourceId: "sleep_garmin_01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_rem_garmin_01",
+          kind: "observation",
+          occurredAt: "2026-04-01T06:00:00Z",
+          recordedAt: "2026-04-01T06:12:00Z",
+          dayKey: "2026-04-01",
+          source: "device",
+          title: "Garmin sleep REM",
+          metric: "sleep-rem-minutes",
+          value: 85,
+          unit: "minutes",
+          externalRef: {
+            system: "garmin",
+            resourceType: "sleep",
+            resourceId: "sleep_garmin_01",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_total_oura_02",
+          kind: "observation",
+          occurredAt: "2026-04-02T06:00:00Z",
+          recordedAt: "2026-04-02T06:10:00Z",
+          dayKey: "2026-04-02",
+          source: "device",
+          title: "Oura sleep total",
+          metric: "sleep-total-minutes",
+          value: 410,
+          unit: "minutes",
+          externalRef: {
+            system: "oura",
+            resourceType: "summary",
+            resourceId: "summary_02",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_deep_oura_02",
+          kind: "observation",
+          occurredAt: "2026-04-02T06:00:00Z",
+          recordedAt: "2026-04-02T06:11:00Z",
+          dayKey: "2026-04-02",
+          source: "device",
+          title: "Oura sleep deep",
+          metric: "sleep-deep-minutes",
+          value: 90,
+          unit: "minutes",
+          externalRef: {
+            system: "oura",
+            resourceType: "summary",
+            resourceId: "summary_02",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_light_oura_02",
+          kind: "observation",
+          occurredAt: "2026-04-02T06:00:00Z",
+          recordedAt: "2026-04-02T06:12:00Z",
+          dayKey: "2026-04-02",
+          source: "device",
+          title: "Oura sleep light",
+          metric: "sleep-light-minutes",
+          value: 190,
+          unit: "minutes",
+          externalRef: {
+            system: "oura",
+            resourceType: "summary",
+            resourceId: "summary_02",
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_sleep_rem_oura_02",
+          kind: "observation",
+          occurredAt: "2026-04-02T06:00:00Z",
+          recordedAt: "2026-04-02T06:13:00Z",
+          dayKey: "2026-04-02",
+          source: "device",
+          title: "Oura sleep REM",
+          metric: "sleep-rem-minutes",
+          value: 80,
+          unit: "minutes",
+          externalRef: {
+            system: "oura",
+            resourceType: "summary",
+            resourceId: "summary_02",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const sleep = summarizeWearableSleep(vault);
+    const derivedNight = sleep.find((night) => night.date === "2026-04-01");
+    const directNight = sleep.find((night) => night.date === "2026-04-02");
+
+    assert.equal(derivedNight?.totalSleepMinutes.selection.value, 390);
+    assert.equal(derivedNight?.totalSleepMinutes.selection.provider, "garmin");
+    assert.equal(derivedNight?.totalSleepMinutes.selection.sourceFamily, "derived");
+    assert.equal(derivedNight?.totalSleepMinutes.selection.sourceKind, "sleep-stage-total");
+    assert.equal(
+      derivedNight?.notes.some((note) => note.includes("Derived total sleep from selected deep, light, and REM stage minutes")),
+      true,
+    );
+    assert.equal(directNight?.totalSleepMinutes.selection.value, 410);
+    assert.equal(directNight?.totalSleepMinutes.selection.sourceFamily, "event");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

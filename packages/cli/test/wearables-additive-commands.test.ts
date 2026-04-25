@@ -152,6 +152,16 @@ test('wearables additive commands return the shared normalized result envelopes'
       vault,
     }),
   )
+  const showWearableDay = vi.fn(
+    async (_input: { date: string; requestId: string | null; vault: string }) => ({
+      date: '2026-04-05',
+      filters: {
+        providers: ['whoop'],
+      },
+      summary: null,
+      vault,
+    }),
+  )
   const showWearableMetricLatest = vi.fn(
     async (_input: { metric: string; requestId: string | null; vault: string }) => ({
       filters: {
@@ -261,6 +271,11 @@ test('wearables additive commands return the shared normalized result envelopes'
       value: showWearableDrift,
       writable: true,
     },
+    showWearableDay: {
+      configurable: true,
+      value: showWearableDay,
+      writable: true,
+    },
     showWearableLatest: {
       configurable: true,
       value: showWearableLatest,
@@ -289,7 +304,6 @@ test('wearables additive commands return the shared normalized result envelopes'
       latestDate: string
       notes: string[]
     } | null
-    vault: string
   }>(cli, [
     'wearables',
     'latest',
@@ -305,14 +319,41 @@ test('wearables additive commands return the shared normalized result envelopes'
     'oura',
   ])
   assert.equal(latestResult.exitCode, null)
-  assert.equal(requireData(latestResult.envelope).vault, vault)
-  assert.equal(requireData(latestResult.envelope).summary?.latestDate, '2026-04-05')
+  const latestData = requireData(latestResult.envelope)
+  assert.equal('vault' in latestData, false)
+  assert.equal(latestData.summary?.latestDate, '2026-04-05')
   assert.deepEqual(showWearableLatest.mock.calls[0]?.[0], {
     date: undefined,
     from: '2026-04-01',
     providers: ['oura'],
     requestId: null,
     to: '2026-04-05',
+    vault,
+  })
+
+  const dayResult = await runInProcessJsonCli<{
+    date: string
+    filters: {
+      providers: string[]
+    }
+    summary: null
+  }>(cli, [
+    'wearables',
+    'day',
+    '2026-04-05',
+    '--vault',
+    vault,
+    '--provider',
+    'whoop',
+  ])
+  assert.equal(dayResult.exitCode, null)
+  const dayData = requireData(dayResult.envelope)
+  assert.equal('vault' in dayData, false)
+  assert.equal(dayData.date, '2026-04-05')
+  assert.deepEqual(showWearableDay.mock.calls[0]?.[0], {
+    date: '2026-04-05',
+    providers: ['whoop'],
+    requestId: null,
     vault,
   })
 
@@ -341,8 +382,10 @@ test('wearables additive commands return the shared normalized result envelopes'
     '5',
   ])
   assert.equal(metricLatestResult.exitCode, null)
-  assert.equal(requireData(metricLatestResult.envelope).summary?.metric, 'hrv')
-  assert.equal(requireData(metricLatestResult.envelope).summary?.requestedMetric, 'hrv')
+  const metricLatestData = requireData(metricLatestResult.envelope)
+  assert.equal('vault' in metricLatestData, false)
+  assert.equal(metricLatestData.summary?.metric, 'hrv')
+  assert.equal(metricLatestData.summary?.requestedMetric, 'hrv')
   assert.deepEqual(showWearableMetricLatest.mock.calls[0]?.[0], {
     date: '2026-04-05',
     from: undefined,
@@ -381,8 +424,10 @@ test('wearables additive commands return the shared normalized result envelopes'
     '9',
   ])
   assert.equal(metricTrendResult.exitCode, null)
-  assert.equal(requireData(metricTrendResult.envelope).summary?.metric, 'restingHeartRate')
-  assert.deepEqual(requireData(metricTrendResult.envelope).summary?.points.map((point) => point.date), [
+  const metricTrendData = requireData(metricTrendResult.envelope)
+  assert.equal('vault' in metricTrendData, false)
+  assert.equal(metricTrendData.summary?.metric, 'restingHeartRate')
+  assert.deepEqual(metricTrendData.summary?.points.map((point) => point.date), [
     '2026-04-03',
     '2026-04-05',
   ])
@@ -414,7 +459,9 @@ test('wearables additive commands return the shared normalized result envelopes'
     '6',
   ])
   assert.equal(driftResult.exitCode, null)
-  assert.deepEqual(requireData(driftResult.envelope).summary?.notes, [
+  const driftData = requireData(driftResult.envelope)
+  assert.equal('vault' in driftData, false)
+  assert.deepEqual(driftData.summary?.notes, [
     'HRV improved meaningfully over the recent window.',
   ])
   assert.deepEqual(showWearableDrift.mock.calls[0]?.[0], {

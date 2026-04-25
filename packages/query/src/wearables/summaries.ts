@@ -49,6 +49,13 @@ export function summarizeSleepNotes(input: {
     notes.push(`Selected total sleep: ${formatMetricValue(input.totalSleepMinutes.selection.value, "minutes")}.`);
   }
 
+  if (
+    input.totalSleepMinutes.selection.sourceFamily === "derived"
+    && input.totalSleepMinutes.selection.sourceKind === "sleep-stage-total"
+  ) {
+    notes.push("Derived total sleep from selected deep, light, and REM stage minutes; awake time is excluded.");
+  }
+
   if (input.totalSleepMinutes.selection.resolution === "fallback" && input.totalSleepMinutes.selection.fallbackReason) {
     notes.push(input.totalSleepMinutes.selection.fallbackReason);
   }

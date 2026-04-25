@@ -17,10 +17,10 @@ import {
   inferDaySummaryConfidence,
   summarizeMetricsConfidence,
 } from "./wearables/confidence.ts";
-import { formatMetricLabel, inferDefaultMetricFamily } from "./wearables/provider-policy.ts";
+import { formatMetricLabel, formatProviderName, inferDefaultMetricFamily } from "./wearables/provider-policy.ts";
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
 export { collectCanonicalWearableDataset } from "./wearables/canonical-records.ts";
-import { collectLatestDate, collectSortedDatesDesc, uniqueStrings } from "./wearables/shared.ts";
+import { collectLatestDate, collectSortedDatesDesc, latestIsoTimestamp, uniqueStrings } from "./wearables/shared.ts";
 import {
   resolveMetric,
   resolveSleepWindowSelection,
@@ -229,6 +229,52 @@ export function listWearableSleepNights(
   return listWearableSleepNightsFromDataset(collectWearableDataset(vault, filters));
 }
 
+const ASLEEP_STAGE_TOTAL_METRICS: readonly WearableMetricKey[] = [
+  "deepMinutes",
+  "lightMinutes",
+  "remMinutes",
+];
+
+function buildDerivedTotalSleepCandidates(
+  date: string,
+  candidates: readonly WearableMetricCandidate[],
+): WearableMetricCandidate[] {
+  return uniqueStrings(candidates.map((candidate) => candidate.provider))
+    .flatMap((provider) => {
+      const providerCandidates = candidates.filter((candidate) => candidate.provider === provider);
+      const stageSelections = ASLEEP_STAGE_TOTAL_METRICS.map((metric) =>
+        resolveMetric(metric, selectMetricCandidates(providerCandidates, metric), {
+          metricFamily: "sleep",
+        }).selection
+      );
+
+      if (stageSelections.some((selection) => selection.value === null)) {
+        return [];
+      }
+
+      return [{
+        candidateId: `${provider}:${date}:derived:totalSleepMinutes:stage-total`,
+        date,
+        externalRef: null,
+        metric: "totalSleepMinutes",
+        occurredAt: latestIsoTimestamp(stageSelections.map((selection) => selection.occurredAt)),
+        paths: uniqueStrings(stageSelections.flatMap((selection) => selection.paths)),
+        provider,
+        recordedAt: latestIsoTimestamp(stageSelections.map((selection) => selection.recordedAt)),
+        recordIds: uniqueStrings(stageSelections.flatMap((selection) => selection.recordIds)),
+        sourceFamily: "derived",
+        sourceKind: "sleep-stage-total",
+        title: `${formatProviderName(provider)} total sleep from stages`,
+        unit: "minutes",
+        value: Number(
+          stageSelections
+            .reduce((sum, selection) => sum + (selection.value ?? 0), 0)
+            .toFixed(4),
+        ),
+      }];
+    });
+}
+
 function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableSleepNight[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) => metricSetHas(SLEEP_METRIC_KEYS, candidate.metric)),
@@ -248,13 +294,19 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       sleepWindows.map((window) => buildSleepWindowMetricCandidate(window)),
       { metricFamily: "sleep" },
     );
-    const totalSleepMinutes = withSleepFallback(
-      resolveMetric("totalSleepMinutes", selectMetricCandidates(dateCandidates, "totalSleepMinutes"), {
+    const directTotalSleepMinutes = resolveMetric(
+      "totalSleepMinutes",
+      selectMetricCandidates(dateCandidates, "totalSleepMinutes"),
+      {
         metricFamily: "sleep",
-      }),
-      sessionMinutes,
-      "Used the selected sleep session duration because no direct total-sleep metric was available.",
+      },
     );
+    const totalSleepMinutes =
+      directTotalSleepMinutes.selection.value !== null
+        ? directTotalSleepMinutes
+        : resolveMetric("totalSleepMinutes", buildDerivedTotalSleepCandidates(date, dateCandidates), {
+            metricFamily: "sleep",
+          });
     const timeInBedMinutes = withSleepFallback(
       resolveMetric("timeInBedMinutes", selectMetricCandidates(dateCandidates, "timeInBedMinutes"), {
         metricFamily: "sleep",
@@ -334,6 +386,7 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
       lightMinutes,
       lowestHeartRate,
       notes,
+      provider: windowSelection.selection?.provider ?? null,
       remMinutes,
       respiratoryRate,
       sessionMinutes,
@@ -927,7 +980,7 @@ export function explainWearableDrift(
 
   const signals = DEFAULT_WEARABLE_DRIFT_SIGNALS
     .map((signal) => summarizeWearableMetricFromBundle(bundle, signal.metric, filters, signal.summaryKind))
-    .filter((signal): signal is WearableMetricLatestSummary => Boolean(signal));
+    .filter((signal): signal is WearableMetricLatestSummary => signal !== null && signal.value !== null);
   const notes = uniqueStrings([
     ...latest.notes,
     `Compared recent and prior ${resolveWearableMetricWindowDays(filters.windowDays)}-day wearable windows across the default sleep, recovery, and body signals.`,

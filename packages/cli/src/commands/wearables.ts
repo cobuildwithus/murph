@@ -12,7 +12,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeRepeatableEnumFlagOption } from '@murphai/vault-usecases'
 import {
   localDateSchema,
-  pathSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 
@@ -45,40 +44,16 @@ const wearableMetricArgSchema = z.object({
       'Wearable metric key or alias such as hrv, resting-heart-rate, steps, sleep-score, or skin-temp.',
     ),
 })
-
-const wearableExternalRefSchema = z.object({
-  system: nullableTextSchema,
-  resourceType: nullableTextSchema,
-  resourceId: nullableTextSchema,
-  version: nullableTextSchema,
-  facet: nullableTextSchema,
-})
-
-const wearableMetricCandidateSchema = z.object({
-  candidateId: z.string().min(1),
-  date: localDateSchema,
-  externalRef: wearableExternalRefSchema.nullable(),
-  metric: z.string().min(1),
-  occurredAt: nullableTimestampSchema,
-  paths: z.array(z.string().min(1)),
-  provider: z.string().min(1),
-  recordedAt: nullableTimestampSchema,
-  recordIds: z.array(z.string().min(1)),
-  sourceFamily: wearableSourceFamilySchema,
-  sourceKind: z.string().min(1),
-  title: nullableTextSchema,
-  unit: nullableTextSchema,
-  value: z.number(),
+const wearableDayArgSchema = z.object({
+  date: localDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
 })
 
 const wearableMetricSelectionSchema = z.object({
   fallbackFromMetric: nullableTextSchema,
   fallbackReason: nullableTextSchema,
   occurredAt: nullableTimestampSchema,
-  paths: z.array(z.string().min(1)),
   provider: nullableTextSchema,
   recordedAt: nullableTimestampSchema,
-  recordIds: z.array(z.string().min(1)),
   resolution: z.enum(['direct', 'fallback', 'none']),
   sourceFamily: wearableSourceFamilySchema.nullable(),
   sourceKind: nullableTextSchema,
@@ -96,7 +71,6 @@ const wearableMetricConfidenceSchema = z.object({
 })
 
 const wearableResolvedMetricSchema = z.object({
-  candidates: z.array(wearableMetricCandidateSchema),
   confidence: wearableMetricConfidenceSchema,
   metric: z.string().min(1),
   selection: wearableMetricSelectionSchema,
@@ -152,6 +126,7 @@ const wearableSleepSummarySchema = z.object({
   lightMinutes: wearableResolvedMetricSchema,
   lowestHeartRate: wearableResolvedMetricSchema,
   notes: z.array(z.string()),
+  provider: nullableTextSchema,
   remMinutes: wearableResolvedMetricSchema,
   respiratoryRate: wearableResolvedMetricSchema,
   sessionMinutes: wearableResolvedMetricSchema,
@@ -223,42 +198,36 @@ const wearableSurfaceFiltersSchema = wearableListFiltersSchema.omit({
 })
 
 export const wearablesDayResultSchema = z.object({
-  vault: pathSchema,
   date: localDateSchema,
   filters: wearableDayFiltersSchema,
   summary: wearableDaySummarySchema.nullable(),
 })
 
 export const wearablesSleepListResultSchema = z.object({
-  vault: pathSchema,
   filters: wearableListFiltersSchema,
   items: z.array(wearableSleepSummarySchema),
   count: z.number().int().nonnegative(),
 })
 
 export const wearablesActivityListResultSchema = z.object({
-  vault: pathSchema,
   filters: wearableListFiltersSchema,
   items: z.array(wearableActivitySummarySchema),
   count: z.number().int().nonnegative(),
 })
 
 export const wearablesBodyStateListResultSchema = z.object({
-  vault: pathSchema,
   filters: wearableListFiltersSchema,
   items: z.array(wearableBodyStateSummarySchema),
   count: z.number().int().nonnegative(),
 })
 
 export const wearablesRecoveryListResultSchema = z.object({
-  vault: pathSchema,
   filters: wearableListFiltersSchema,
   items: z.array(wearableRecoverySummarySchema),
   count: z.number().int().nonnegative(),
 })
 
 export const wearablesSourcesListResultSchema = z.object({
-  vault: pathSchema,
   filters: wearableListFiltersSchema,
   items: z.array(wearableSourceHealthSummarySchema),
   count: z.number().int().nonnegative(),
@@ -284,14 +253,11 @@ const wearableMetricTrendPointSchema = z
   .object({
     confidence: wearableConfidenceLevelSchema,
     date: localDateSchema,
-    paths: z.array(z.string().min(1)),
     provider: nullableTextSchema,
     recordedAt: nullableTimestampSchema,
-    recordIds: z.array(z.string().min(1)),
     unit: nullableTextSchema,
     value: z.number(),
   })
-  .passthrough()
 
 const wearablesMetricLatestSummarySchema = z
   .object({
@@ -302,13 +268,11 @@ const wearablesMetricLatestSummarySchema = z
     metric: wearableCanonicalMetricKeySchema,
     min: z.number().nullable(),
     notes: z.array(z.string()),
-    paths: z.array(z.string().min(1)),
     percentChange: z.number().nullable(),
     priorWindow: wearableMetricWindowStatsSchema,
     provider: nullableTextSchema,
     recentWindow: wearableMetricWindowStatsSchema,
     recordedAt: nullableTimestampSchema,
-    recordIds: z.array(z.string().min(1)),
     requestedMetric: z.string().trim().min(1),
     resolvedAlias: nullableTextSchema,
     summaryKind: wearableMetricSummaryKindSchema,
@@ -316,7 +280,6 @@ const wearablesMetricLatestSummarySchema = z
     value: z.number().nullable(),
     windowDays: z.number().int().positive().max(30),
   })
-  .passthrough()
 
 const wearablesLatestSummarySchema = z
   .object({
@@ -330,14 +293,12 @@ const wearablesLatestSummarySchema = z
     sleep: wearableSleepSummarySchema.nullable(),
     sourceHealth: z.array(wearableSourceHealthSummarySchema),
   })
-  .passthrough()
 
 const wearablesMetricTrendSummarySchema = z
   .object({
     ...wearablesMetricLatestSummarySchema.shape,
     points: z.array(wearableMetricTrendPointSchema),
   })
-  .passthrough()
 
 const wearablesDriftSummarySchema = z
   .object({
@@ -346,7 +307,6 @@ const wearablesDriftSummarySchema = z
     signals: z.array(wearablesMetricLatestSummarySchema),
     windowDays: z.number().int().positive().max(30),
   })
-  .passthrough()
 
 const wearableMetricFiltersResultSchema = wearableSurfaceFiltersSchema.extend({
   metric: z.string().trim().min(1),
@@ -361,33 +321,25 @@ export const wearablesLatestResultSchema = z
   .object({
     filters: wearableSurfaceFiltersSchema,
     summary: wearablesLatestSummarySchema.nullable(),
-    vault: pathSchema,
   })
-  .passthrough()
 
 export const wearablesMetricLatestResultSchema = z
   .object({
     filters: wearableMetricFiltersResultSchema,
     summary: wearablesMetricLatestSummarySchema.nullable(),
-    vault: pathSchema,
   })
-  .passthrough()
 
 export const wearablesMetricTrendResultSchema = z
   .object({
     filters: wearableMetricFiltersResultSchema,
     summary: wearablesMetricTrendSummarySchema.nullable(),
-    vault: pathSchema,
   })
-  .passthrough()
 
 export const wearablesDriftResultSchema = z
   .object({
     filters: wearableDriftFiltersResultSchema,
     summary: wearablesDriftSummarySchema.nullable(),
-    vault: pathSchema,
   })
-  .passthrough()
 
 type WearablesLatestResult = z.infer<typeof wearablesLatestResultSchema>
 type WearablesMetricLatestResult = z.infer<typeof wearablesMetricLatestResultSchema>
@@ -487,6 +439,15 @@ function normalizeWearableProviders(value: readonly string[] | undefined): strin
   ) ?? []
 }
 
+function withoutWearableVaultPath<TResult extends object>(
+  result: TResult,
+): Omit<TResult, 'vault'> {
+  const safeResult = { ...result } as Record<string, unknown>
+  delete safeResult.vault
+
+  return safeResult as Omit<TResult, 'vault'>
+}
+
 export function registerWearablesCommands(
   cli: Cli.Cli,
   services: VaultServices,
@@ -518,8 +479,7 @@ export function registerWearablesCommands(
         WearablesLatestResult,
         WearablesLatestInput
       >(services.query, 'showWearableLatest')
-
-      return showWearableLatest({
+      const result = await showWearableLatest({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         date: options.date,
@@ -527,22 +487,25 @@ export function registerWearablesCommands(
         to: options.to,
         providers: normalizeWearableProviders(options.provider),
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 
   wearables.command('day', {
     description:
       "Show Murph's deduplicated wearable day mirror for one date, including sleep, activity, body-state, recovery, and source-confidence notes.",
-    args: emptyArgsSchema,
+    args: wearableDayArgSchema,
     options: withBaseOptions({
-      date: localDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
       provider: repeatableProviderOptionSchema,
     }),
     examples: [
       {
+        args: {
+          date: '2026-04-05',
+        },
         description: 'Inspect one day of wearable evidence before drilling into raw records.',
         options: {
-          date: '2026-04-05',
           vault: './vault',
         },
       },
@@ -550,13 +513,15 @@ export function registerWearablesCommands(
     hint:
       'Use `wearables day` as the first read for date-specific wearable questions. Use the list subcommands for longer windows and provider/source freshness checks.',
     output: wearablesDayResultSchema,
-    async run({ options }) {
-      return services.query.showWearableDay({
+    async run({ args, options }) {
+      const result = await services.query.showWearableDay({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
-        date: options.date,
+        date: args.date,
         providers: normalizeWearableProviders(options.provider),
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -600,7 +565,7 @@ export function registerWearablesCommands(
         windowDays: options.windowDays,
       })
 
-      return result
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -639,7 +604,7 @@ export function registerWearablesCommands(
         windowDays: options.windowDays,
       })
 
-      return result
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -655,7 +620,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesSleepListResultSchema,
     async run({ options }) {
-      return services.query.listWearableSleep({
+      const result = await services.query.listWearableSleep({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         date: options.date,
@@ -664,6 +629,8 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -679,7 +646,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesActivityListResultSchema,
     async run({ options }) {
-      return services.query.listWearableActivity({
+      const result = await services.query.listWearableActivity({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         date: options.date,
@@ -688,6 +655,8 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -703,7 +672,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesBodyStateListResultSchema,
     async run({ options }) {
-      return services.query.listWearableBodyState({
+      const result = await services.query.listWearableBodyState({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         date: options.date,
@@ -712,6 +681,8 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -727,7 +698,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesRecoveryListResultSchema,
     async run({ options }) {
-      return services.query.listWearableRecovery({
+      const result = await services.query.listWearableRecovery({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         date: options.date,
@@ -736,6 +707,8 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -751,7 +724,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesSourcesListResultSchema,
     async run({ options }) {
-      return services.query.listWearableSources({
+      const result = await services.query.listWearableSources({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         date: options.date,
@@ -760,6 +733,8 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 
@@ -785,8 +760,7 @@ export function registerWearablesCommands(
         WearablesDriftResult,
         WearablesDriftInput
       >(services.query, 'showWearableDrift')
-
-      return showWearableDrift({
+      const result = await showWearableDrift({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         date: options.date,
@@ -795,6 +769,8 @@ export function registerWearablesCommands(
         providers: normalizeWearableProviders(options.provider),
         windowDays: options.windowDays,
       })
+
+      return withoutWearableVaultPath(result)
     },
   })
 

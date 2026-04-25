@@ -6,7 +6,27 @@ import { importWithMocks } from "./mock-import.ts";
 
 test("showWearableLatest forwards normalized surface filters to the shared query runtime", async () => {
   const readModel = { kind: "read-model" };
-  const summarizeWearableLatest = vi.fn(() => ({ latestDate: "2026-04-04" }));
+  const summarizeWearableLatest = vi.fn(() => ({
+    latestDate: "2026-04-04",
+    sleep: {
+      totalSleepMinutes: {
+        candidates: [{
+          candidateId: "candidate_01",
+          externalRef: {
+            resourceId: "provider-resource-01",
+          },
+          paths: ["ledger/events/2026/2026-04.jsonl"],
+          recordIds: ["evt_sleep_01"],
+        }],
+        selection: {
+          paths: ["ledger/events/2026/2026-04.jsonl"],
+          provider: "whoop",
+          recordIds: ["evt_sleep_01"],
+          value: 420,
+        },
+      },
+    },
+  }));
   const loadCoreRuntime = vi.fn();
   const loadImporterRuntime = vi.fn();
   const loadQueryRuntime = vi.fn(async () => ({
@@ -40,7 +60,6 @@ test("showWearableLatest forwards normalized surface filters to the shared query
     providers: ["oura"],
   }]]);
   assert.deepEqual(result, {
-    vault: "./vault",
     filters: {
       date: "2026-04-04",
       from: "2026-04-04",
@@ -49,8 +68,21 @@ test("showWearableLatest forwards normalized surface filters to the shared query
     },
     summary: {
       latestDate: "2026-04-04",
+      sleep: {
+        totalSleepMinutes: {
+          selection: {
+            provider: "whoop",
+            value: 420,
+          },
+        },
+      },
     },
   });
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes("candidate_01"), false);
+  assert.equal(serialized.includes("provider-resource-01"), false);
+  assert.equal(serialized.includes("ledger/events"), false);
+  assert.equal(serialized.includes("evt_sleep_01"), false);
   assert.equal(loadQueryRuntime.mock.calls.length, 1);
   assert.equal(loadCoreRuntime.mock.calls.length, 0);
   assert.equal(loadImporterRuntime.mock.calls.length, 0);
@@ -145,7 +177,6 @@ test("metric and drift wearable service methods use the shared assistant-aligned
     windowDays: 3,
   });
   assert.deepEqual(drift, {
-    vault: "./vault",
     filters: {
       date: null,
       from: null,
