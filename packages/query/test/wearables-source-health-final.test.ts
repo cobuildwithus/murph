@@ -281,7 +281,6 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
     "sessionCount",
     "sessionMinutes",
     "timeInBedMinutes",
-    "totalSleepMinutes",
   ]);
   assert.equal(
     beta?.notes.some((note) => note.includes("contributed candidate evidence but was not the preferred source")),

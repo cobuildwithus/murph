@@ -231,7 +231,7 @@ declare module 'incur' {
       'vault update': { args: {}; options: { vault: string; requestId?: string; title?: string; timezone?: string } }
       'wearables activity list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables body list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
-      'wearables day': { args: {}; options: { vault: string; requestId?: string; date: string; provider?: string[] } }
+      'wearables day': { args: { date: string }; options: { vault: string; requestId?: string; provider?: string[] } }
       'wearables drift': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
       'wearables latest': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[] } }
       'wearables metric latest': { args: { metric: string }; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }

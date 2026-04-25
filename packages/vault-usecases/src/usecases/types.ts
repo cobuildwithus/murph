@@ -333,11 +333,39 @@ export interface WearableDayFiltersResult {
   providers: string[]
 }
 
+export type WearablePublicProvenanceKey =
+  | "candidateId"
+  | "candidates"
+  | "externalRef"
+  | "paths"
+  | "recordIds"
+
+export type WearablePublicValue<T> =
+  T extends readonly (infer TItem)[]
+    ? WearablePublicValue<TItem>[]
+    : T extends object
+      ? {
+          [TKey in keyof T as TKey extends WearablePublicProvenanceKey
+            ? never
+            : TKey]: WearablePublicValue<T[TKey]>
+        }
+      : T
+
+export type WearablePublicDaySummary = WearablePublicValue<QueryWearableDaySummary>
+export type WearablePublicSleepSummary = WearablePublicValue<QueryWearableSleepSummary>
+export type WearablePublicActivitySummary = WearablePublicValue<QueryWearableActivitySummary>
+export type WearablePublicBodyStateSummary = WearablePublicValue<QueryWearableBodyStateSummary>
+export type WearablePublicRecoverySummary = WearablePublicValue<QueryWearableRecoverySummary>
+export type WearablePublicSourceHealthSummary = QueryWearableSourceHealthSummary
+export type WearablePublicLatestSummary = WearablePublicValue<QueryWearableLatestSummary>
+export type WearablePublicMetricLatestSummary = WearablePublicValue<QueryWearableMetricLatestSummary>
+export type WearablePublicMetricTrendSummary = WearablePublicValue<QueryWearableMetricTrendSummary>
+export type WearablePublicDriftSummary = WearablePublicValue<QueryWearableDriftSummary>
+
 export interface WearableDayResult {
-  vault: string
   date: string
   filters: WearableDayFiltersResult
-  summary: QueryWearableDaySummary | null
+  summary: WearablePublicDaySummary | null
 }
 
 export interface WearableListFiltersResult {
@@ -349,22 +377,20 @@ export interface WearableListFiltersResult {
 }
 
 export interface WearableListResult<TItem> {
-  vault: string
   filters: WearableListFiltersResult
   items: TItem[]
   count: number
 }
 
-export type WearableSleepListResult = WearableListResult<QueryWearableSleepSummary>
-export type WearableActivityListResult = WearableListResult<QueryWearableActivitySummary>
-export type WearableBodyStateListResult = WearableListResult<QueryWearableBodyStateSummary>
-export type WearableRecoveryListResult = WearableListResult<QueryWearableRecoverySummary>
-export type WearableSourceListResult = WearableListResult<QueryWearableSourceHealthSummary>
+export type WearableSleepListResult = WearableListResult<WearablePublicSleepSummary>
+export type WearableActivityListResult = WearableListResult<WearablePublicActivitySummary>
+export type WearableBodyStateListResult = WearableListResult<WearablePublicBodyStateSummary>
+export type WearableRecoveryListResult = WearableListResult<WearablePublicRecoverySummary>
+export type WearableSourceListResult = WearableListResult<WearablePublicSourceHealthSummary>
 
 export interface WearableLatestResult {
-  vault: string
   filters: Omit<WearableListFiltersResult, "limit">
-  summary: QueryWearableLatestSummary | null
+  summary: WearablePublicLatestSummary | null
 }
 
 export interface WearableMetricFiltersResult extends Omit<WearableListFiltersResult, "limit"> {
@@ -377,21 +403,18 @@ export interface WearableDriftFiltersResult extends Omit<WearableListFiltersResu
 }
 
 export interface WearableMetricLatestResult {
-  vault: string
   filters: WearableMetricFiltersResult
-  summary: QueryWearableMetricLatestSummary | null
+  summary: WearablePublicMetricLatestSummary | null
 }
 
 export interface WearableMetricTrendResult {
-  vault: string
   filters: WearableMetricFiltersResult
-  summary: QueryWearableMetricTrendSummary | null
+  summary: WearablePublicMetricTrendSummary | null
 }
 
 export interface WearableDriftResult {
-  vault: string
   filters: WearableDriftFiltersResult
-  summary: QueryWearableDriftSummary | null
+  summary: WearablePublicDriftSummary | null
 }
 
 export interface VaultShowResult {

@@ -21,6 +21,7 @@ import type {
   QueryServices,
   StopProtocolInput,
   VaultServices,
+  WearablePublicValue,
 } from "./types.js"
 import {
   createExplicitHealthCoreServices,
@@ -80,6 +81,7 @@ import {
   showRecipeRecord,
   upsertRecipeRecordFromInput,
 } from "./recipe.js"
+
 import {
   analyzeExperimentOutcomeRecord,
   appendJournalText,
@@ -106,6 +108,41 @@ import {
 } from "./experiment-journal-vault.js"
 import { addCaptureRecord } from "./capture.js"
 import { toVaultCliError } from "./vault-usecase-helpers.js"
+
+const PUBLIC_WEARABLE_PROVENANCE_KEYS = new Set([
+  "candidateId",
+  "candidates",
+  "externalRef",
+  "paths",
+  "recordIds",
+])
+
+function redactWearablePublicProvenance<T>(value: T): WearablePublicValue<T> {
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactWearablePublicProvenance(entry)) as WearablePublicValue<T>
+  }
+
+  if (!isJsonObjectRecord(value)) {
+    return value as WearablePublicValue<T>
+  }
+
+  const redacted: Record<string, unknown> = {}
+
+  for (const [key, child] of Object.entries(value)) {
+    if (PUBLIC_WEARABLE_PROVENANCE_KEYS.has(key)) {
+      continue
+    }
+
+    redacted[key] = redactWearablePublicProvenance(child)
+  }
+
+  // Public wearable envelopes preserve semantic values while dropping raw provenance.
+  return redacted as WearablePublicValue<T>
+}
+
+function isJsonObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
 
 interface IntegratedVaultServiceDependencies {
   foodAutoLogHooks?: FoodAutoLogHooks
@@ -754,10 +791,9 @@ function createIntegratedQueryServices(): QueryServices {
       })
 
       return {
-        vault: input.vault,
         date: normalized.date,
         filters: normalized.filters,
-        summary,
+        summary: redactWearablePublicProvenance(summary),
       }
     },
     async showWearableLatest(input: CommandContext & {
@@ -772,9 +808,8 @@ function createIntegratedQueryServices(): QueryServices {
       const summary = query.summarizeWearableLatest(readModel, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        summary,
+        summary: redactWearablePublicProvenance(summary),
       }
     },
     async showWearableMetricLatest(input: CommandContext & {
@@ -791,9 +826,8 @@ function createIntegratedQueryServices(): QueryServices {
       const summary = query.summarizeWearableMetricLatest(readModel, normalized.metric, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        summary,
+        summary: redactWearablePublicProvenance(summary),
       }
     },
     async showWearableMetricTrend(input: CommandContext & {
@@ -810,9 +844,8 @@ function createIntegratedQueryServices(): QueryServices {
       const summary = query.summarizeWearableMetricTrend(readModel, normalized.metric, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        summary,
+        summary: redactWearablePublicProvenance(summary),
       }
     },
     async showWearableDrift(input: CommandContext & {
@@ -831,7 +864,6 @@ function createIntegratedQueryServices(): QueryServices {
       const summary = query.explainWearableDrift(readModel, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: {
           date: normalized.filters.date,
           from: normalized.filters.from,
@@ -839,7 +871,7 @@ function createIntegratedQueryServices(): QueryServices {
           providers: normalized.filters.providers,
           windowDays: normalized.filters.windowDays,
         },
-        summary,
+        summary: redactWearablePublicProvenance(summary),
       }
     },
     async listWearableSleep(input: CommandContext & {
@@ -855,9 +887,8 @@ function createIntegratedQueryServices(): QueryServices {
       const items = query.summarizeWearableSleep(readModel, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        items,
+        items: redactWearablePublicProvenance(items),
         count: items.length,
       }
     },
@@ -874,9 +905,8 @@ function createIntegratedQueryServices(): QueryServices {
       const items = query.summarizeWearableActivity(readModel, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        items,
+        items: redactWearablePublicProvenance(items),
         count: items.length,
       }
     },
@@ -893,9 +923,8 @@ function createIntegratedQueryServices(): QueryServices {
       const items = query.summarizeWearableBodyState(readModel, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        items,
+        items: redactWearablePublicProvenance(items),
         count: items.length,
       }
     },
@@ -912,9 +941,8 @@ function createIntegratedQueryServices(): QueryServices {
       const items = query.summarizeWearableRecovery(readModel, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        items,
+        items: redactWearablePublicProvenance(items),
         count: items.length,
       }
     },
@@ -931,9 +959,8 @@ function createIntegratedQueryServices(): QueryServices {
       const items = query.summarizeWearableSourceHealth(readModel, normalized.queryFilters)
 
       return {
-        vault: input.vault,
         filters: normalized.filters,
-        items,
+        items: redactWearablePublicProvenance(items),
         count: items.length,
       }
     },

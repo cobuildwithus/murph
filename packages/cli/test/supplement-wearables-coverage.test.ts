@@ -360,17 +360,17 @@ test('wearables commands exercise day and list surfaces with provider normalizat
       providers: string[]
     }
     summary: unknown | null
-    vault: string
   }>(cli, [
     'wearables',
     'day',
-    '--date',
     '2026-04-05',
     '--vault',
     vaultRoot,
   ])
   assert.equal(dayWithoutProvider.exitCode, null)
-  assert.equal(requireData(dayWithoutProvider.envelope).filters.providers.length, 0)
+  const dayWithoutProviderData = requireData(dayWithoutProvider.envelope)
+  assert.equal('vault' in dayWithoutProviderData, false)
+  assert.equal(dayWithoutProviderData.filters.providers.length, 0)
 
   const dayWithProviders = await runInProcessJsonCli<{
     date: string
@@ -378,11 +378,9 @@ test('wearables commands exercise day and list surfaces with provider normalizat
       providers: string[]
     }
     summary: unknown | null
-    vault: string
   }>(cli, [
     'wearables',
     'day',
-    '--date',
     '2026-04-05',
     '--provider',
     'oura',
@@ -392,7 +390,9 @@ test('wearables commands exercise day and list surfaces with provider normalizat
     vaultRoot,
   ])
   assert.equal(dayWithProviders.exitCode, null)
-  assert.deepEqual(requireData(dayWithProviders.envelope).filters.providers, [
+  const dayWithProvidersData = requireData(dayWithProviders.envelope)
+  assert.equal('vault' in dayWithProvidersData, false)
+  assert.deepEqual(dayWithProvidersData.filters.providers, [
     'oura',
     'whoop',
   ])
@@ -521,7 +521,6 @@ test('wearables provider filters reject unsupported provider names in-process', 
   const result = await runInProcessJsonCli(cli, [
     'wearables',
     'day',
-    '--date',
     '2026-04-05',
     '--provider',
     'ottoai',

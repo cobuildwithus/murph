@@ -97,6 +97,7 @@ export interface WearableSleepNight {
   lightMinutes: WearableResolvedMetric;
   lowestHeartRate: WearableResolvedMetric;
   notes: string[];
+  provider: string | null;
   remMinutes: WearableResolvedMetric;
   respiratoryRate: WearableResolvedMetric;
   sessionMinutes: WearableResolvedMetric;

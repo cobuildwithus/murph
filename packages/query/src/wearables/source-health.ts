@@ -223,7 +223,7 @@ export function buildWearableSourceHealth(input: {
       const metricsContributed = uniqueStrings([
         ...providerMetricCandidates.map((candidate) => candidate.metric),
         ...(providerActivitySessionAggregates.length > 0 ? ["sessionCount", "sessionMinutes"] : []),
-        ...(providerSleepWindows.length > 0 ? ["sessionMinutes", "timeInBedMinutes", "totalSleepMinutes"] : []),
+        ...(providerSleepWindows.length > 0 ? ["sessionMinutes", "timeInBedMinutes"] : []),
       ]).sort();
 
       return {

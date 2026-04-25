@@ -19,9 +19,55 @@ export async function runMurphCliEntrypoint(
   argv: string[] = process.argv.slice(2),
   options: MurphCliRunOptions = {},
 ): Promise<void> {
+  installBrokenPipeHandler()
   installSqliteExperimentalWarningFilter()
   loadCliEnvFiles()
   await runMurphCliAction(argv, options)
+}
+
+let brokenPipeHandlerInstalled = false
+
+export function installBrokenPipeHandler(): void {
+  if (brokenPipeHandlerInstalled) {
+    return
+  }
+
+  brokenPipeHandlerInstalled = true
+
+  const handleStreamError = (
+    stream: 'stderr' | 'stdout',
+    error: Error & { code?: string },
+  ) => {
+    if (isBrokenPipeError(error)) {
+      process.exitCode = resolveBrokenPipeExitCode(stream, process.exitCode)
+      return
+    }
+
+    throw error
+  }
+
+  process.stdout.on('error', (error) => handleStreamError('stdout', error))
+  process.stderr.on('error', (error) => handleStreamError('stderr', error))
+}
+
+export function isBrokenPipeError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'EPIPE'
+  )
+}
+
+export function resolveBrokenPipeExitCode(
+  stream: 'stderr' | 'stdout',
+  currentExitCode: NodeJS.Process['exitCode'],
+): NodeJS.Process['exitCode'] {
+  if (stream === 'stdout' || currentExitCode === undefined || currentExitCode === 0) {
+    return 0
+  }
+
+  return currentExitCode
 }
 
 export async function runMurphCliAction(

@@ -8,7 +8,9 @@ import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shar
 import {
   formatMurphCliError,
   installSqliteExperimentalWarningFilter,
+  isBrokenPipeError,
   loadCliEnvFiles,
+  resolveBrokenPipeExitCode,
   runMurphCliEntrypoint,
   runMurphCliAction,
 } from "../src/cli-entry.ts";
@@ -124,6 +126,18 @@ test("formatMurphCliError reuses the shared structured formatter", () => {
       '- Invalid JSON in "<HOME_DIR>/vault/config.json".',
     ].join("\n"),
   );
+});
+
+test("isBrokenPipeError recognizes stdout pipe closure failures", () => {
+  assert.equal(isBrokenPipeError(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })), true);
+  assert.equal(isBrokenPipeError(Object.assign(new Error("write failed"), { code: "EACCES" })), false);
+  assert.equal(isBrokenPipeError(new Error("write EPIPE")), false);
+});
+
+test("resolveBrokenPipeExitCode preserves real failures when stderr closes", () => {
+  assert.equal(resolveBrokenPipeExitCode("stdout", 1), 0);
+  assert.equal(resolveBrokenPipeExitCode("stderr", 1), 1);
+  assert.equal(resolveBrokenPipeExitCode("stderr", undefined), 0);
 });
 
 test("installSqliteExperimentalWarningFilter suppresses SQLite experimental warnings only", () => {

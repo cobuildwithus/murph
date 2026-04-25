@@ -32,6 +32,7 @@ test("wearables day schema preserves fallback selection metadata", () => {
         lightMinutes: resolvedMetric(),
         lowestHeartRate: resolvedMetric(),
         notes: [],
+        provider: "oura",
         remMinutes: resolvedMetric(),
         respiratoryRate: resolvedMetric(),
         sessionMinutes: resolvedMetric({
@@ -81,6 +82,7 @@ test("wearables day schema preserves fallback selection metadata", () => {
   );
   assert.equal(parsed.summary?.sleep?.sessionMinutes.selection.resolution, "fallback");
   assert.equal(parsed.summary?.sleep?.sessionMinutes.selection.fallbackFromMetric, "totalSleepMinutes");
+  assert.equal("vault" in parsed, false);
 });
 
 test("additive wearables schemas stay compact and metric-aware", () => {
@@ -306,9 +308,13 @@ test("additive wearables schemas stay compact and metric-aware", () => {
   });
 
   assert.equal(latestParsed.summary?.day.date, "2026-04-05");
+  assert.equal("vault" in latestParsed, false);
   assert.equal(metricLatestParsed.summary?.metric, "restingHeartRate");
+  assert.equal("vault" in metricLatestParsed, false);
   assert.equal(metricTrendParsed.summary?.windowDays, 7);
+  assert.equal("vault" in metricTrendParsed, false);
   assert.equal(driftParsed.summary?.signals[0]?.metric, "hrv");
+  assert.equal("vault" in driftParsed, false);
 });
 
 function resolvedMetric(
