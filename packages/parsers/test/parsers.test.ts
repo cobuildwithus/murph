@@ -1174,10 +1174,68 @@ test("parseAttachment rejects unsafe or malformed attachment IDs before using sc
   assert.deepEqual(await fs.readdir(scratchRoot), []);
 });
 
-test("parseAttachment rejects oversized provider output before returning parser artifacts", async () => {
+test("parseAttachment accepts CSV-sized provider output within the raised text guardrail", async () => {
+  const scratchRoot = await makeTempDirectory("murph-parser-scratch-output-large");
+  const sourceRoot = await makeTempDirectory("murph-parser-scratch-output-large-source");
+  const inputPath = await writeExternalFile(sourceRoot, "scan.csv", "csv-bytes-placeholder");
+  const raisedTextLimit = 10 * 1024 * 1024;
+  const csvBlockCount = 31_500;
+  const registry = createParserRegistry([
+    {
+      id: "fake-csv",
+      locality: "local",
+      openness: "open_source",
+      runtime: "node",
+      priority: 100,
+      async discover() {
+        return {
+          available: true,
+          reason: "available for parser output limits test",
+        };
+      },
+      supports() {
+        return true;
+      },
+      async run() {
+        return {
+          text: "x".repeat(raisedTextLimit),
+          markdown: "m".repeat(1_000_000),
+          blocks: Array.from({ length: csvBlockCount }, (_, index) => ({
+            id: `row_${index}`,
+            kind: "line",
+            order: index,
+            text: `row ${index}`,
+          })),
+        };
+      },
+    },
+  ]);
+
+  const result = await parseAttachment({
+    artifact: {
+      captureId: "cap_output_large",
+      attachmentId: "att_output_large",
+      kind: "document",
+      fileName: "scan.csv",
+      mime: "text/comma-separated-values",
+      storedPath: "raw/inbox/example/scan.csv",
+      absolutePath: inputPath,
+    },
+    registry,
+    scratchRoot,
+  });
+
+  assert.equal(result.output.text.length, raisedTextLimit);
+  assert.equal(result.output.markdown.length, 1_000_000);
+  assert.equal(result.output.blocks.length, csvBlockCount);
+  assert.deepEqual(await fs.readdir(scratchRoot), []);
+});
+
+test("parseAttachment rejects provider output above the raised text guardrail", async () => {
   const scratchRoot = await makeTempDirectory("murph-parser-scratch-output-limits");
   const sourceRoot = await makeTempDirectory("murph-parser-scratch-output-limits-source");
   const inputPath = await writeExternalFile(sourceRoot, "scan.png", "image-bytes-placeholder");
+  const raisedTextLimit = 10 * 1024 * 1024;
   const registry = createParserRegistry([
     {
       id: "fake-image",
@@ -1196,7 +1254,7 @@ test("parseAttachment rejects oversized provider output before returning parser 
       },
       async run() {
         return {
-          text: "x".repeat(500_001),
+          text: "x".repeat(raisedTextLimit + 1),
         };
       },
     },

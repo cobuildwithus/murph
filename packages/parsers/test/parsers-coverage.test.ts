@@ -363,7 +363,7 @@ test("parseAttachment rejects malformed provider output at normalization boundar
     {
       message: /Parser blocks exceed/u,
       name: "too many blocks",
-      result: { blocks: new Array(5_001).fill(validBlock), text: "body" },
+      result: { blocks: new Array(100_001).fill(validBlock), text: "body" },
     },
     {
       message: /unsupported kind/u,
