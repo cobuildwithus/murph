@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertInstalledRunnerHealthCommonsRuntimeImport,
   pinInstalledDependencyVersions,
+  writeRunnerBundlePnpmInstallConfig,
 } from "../scripts/runner-bundle/dependency-install.js";
 
 const temporaryDirectories: string[] = [];
@@ -62,6 +63,40 @@ describe("runner bundle dependency pinning", () => {
     });
 
     expect(optionalDependencies).toEqual({});
+  });
+});
+
+describe("runner bundle pnpm install config", () => {
+  it("mirrors root minimum-release-age policy into the isolated bundle install", async () => {
+    const repoRoot = await createRuntimePackageRoot();
+    const installRoot = await createRuntimePackageRoot();
+
+    await writeFile(
+      path.join(repoRoot, "pnpm-workspace.yaml"),
+      [
+        "packages:",
+        "  - packages/*",
+        "minimumReleaseAge: 1440",
+        "minimumReleaseAgeExclude:",
+        "  - incur@0.4.4",
+        "  - '@cobuild/review-gpt@0.5.81'",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await writeRunnerBundlePnpmInstallConfig(installRoot, repoRoot);
+
+    await expect(
+      readFile(path.join(installRoot, ".npmrc"), "utf8"),
+    ).resolves.toBe(
+      [
+        "minimum-release-age=1440",
+        "minimum-release-age-exclude[]=incur@0.4.4",
+        "minimum-release-age-exclude[]=@cobuild/review-gpt@0.5.81",
+        "",
+      ].join("\n"),
+    );
   });
 });
 
