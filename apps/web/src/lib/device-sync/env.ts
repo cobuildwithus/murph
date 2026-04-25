@@ -16,9 +16,6 @@ export interface HostedDeviceSyncEnvironment {
   trustedUserAssertionHeader: string;
   trustedUserSignatureHeader: string;
   trustedUserSigningSecret: string | null;
-  devUserEmail: string | null;
-  devUserId: string | null;
-  devUserName: string | null;
 }
 
 const DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS = [
@@ -26,15 +23,6 @@ const DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS = [
 ] as const;
 const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
   "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
-] as const;
-const DEVICE_SYNC_DEV_USER_EMAIL_ENV_KEYS = [
-  "DEVICE_SYNC_DEV_USER_EMAIL",
-] as const;
-const DEVICE_SYNC_DEV_USER_ID_ENV_KEYS = [
-  "DEVICE_SYNC_DEV_USER_ID",
-] as const;
-const DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS = [
-  "DEVICE_SYNC_DEV_USER_NAME",
 ] as const;
 const DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS = [
   "DEVICE_SYNC_ENCRYPTION_KEY",
@@ -54,8 +42,15 @@ const DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS = [
 const DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET",
 ] as const;
+const REMOVED_DEVICE_SYNC_DEV_AUTH_ENV_KEYS = [
+  "DEVICE_SYNC_DEV_USER_ID",
+  "DEVICE_SYNC_DEV_USER_EMAIL",
+  "DEVICE_SYNC_DEV_USER_NAME",
+] as const;
 
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
+  assertRemovedDeviceSyncDevAuthEnvUnset(source);
+
   const encryptionKeyValue = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS);
   const encryptionKeyVersion = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS) ?? "v1";
   const encryptionKeyringJson = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEYRING_JSON_ENV_KEYS);
@@ -102,9 +97,6 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS)) ??
       "x-hosted-user-signature",
     trustedUserSigningSecret: readEnv(source, DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS),
-    devUserEmail: readEnv(source, DEVICE_SYNC_DEV_USER_EMAIL_ENV_KEYS) ?? null,
-    devUserId: readEnv(source, DEVICE_SYNC_DEV_USER_ID_ENV_KEYS) ?? null,
-    devUserName: readEnv(source, DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS) ?? null,
   };
 }
 
@@ -131,6 +123,20 @@ function readEnv(
   }
 
   return null;
+}
+
+function assertRemovedDeviceSyncDevAuthEnvUnset(source: NodeJS.ProcessEnv): void {
+  const configuredKeys = REMOVED_DEVICE_SYNC_DEV_AUTH_ENV_KEYS.filter((key) =>
+    Boolean(normalizeNullableString(source[key])),
+  );
+
+  if (configuredKeys.length === 0) {
+    return;
+  }
+
+  throw new TypeError(
+    `${configuredKeys.join(", ")} are no longer supported. Hosted device-sync browser routes require signed hosted-user assertions.`,
+  );
 }
 
 function normalizeHeaderName(value: string | null | undefined): string | null {

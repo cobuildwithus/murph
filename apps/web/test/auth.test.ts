@@ -24,9 +24,6 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   trustedUserAssertionHeader: "x-hosted-user-assertion",
   trustedUserSignatureHeader: "x-hosted-user-signature",
   trustedUserSigningSecret: "test-signing-secret",
-  devUserEmail: "dev@example.com",
-  devUserId: "dev-user",
-  devUserName: "Dev User",
 };
 
 describe("requireAuthenticatedHostedUser", () => {
@@ -156,20 +153,18 @@ describe("requireAuthenticatedHostedUser", () => {
     );
   });
 
-  it("falls back to the development user when trusted headers are absent", async () => {
+  it("rejects unauthenticated requests when trusted headers are absent", async () => {
     const request = new Request("https://example.test/device-sync");
 
-    await expect(
-      requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
-        nonceStore: createNonceStore(),
-        now: NOW,
-      }),
-    ).resolves.toEqual({
-      id: "dev-user",
-      email: "dev@example.com",
-      name: "Dev User",
-      source: "development-fallback",
-    });
+    await expectDeviceSyncError(
+      () =>
+        requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
+          nonceStore: createNonceStore(),
+          now: NOW,
+        }),
+      "AUTH_REQUIRED",
+      401,
+    );
   });
 });
 

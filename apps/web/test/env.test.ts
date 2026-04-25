@@ -10,14 +10,12 @@ describe("readHostedDeviceSyncEnvironment", () => {
       NODE_ENV: "test",
       DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://example.test/device-sync",
-      DEVICE_SYNC_DEV_USER_ID: "dev-user",
       OURA_CLIENT_ID: "oura-client",
       OURA_CLIENT_SECRET: "oura-secret",
       OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",
     });
 
     expect(environment.publicBaseUrl).toBe("https://example.test/device-sync");
-    expect(environment.devUserId).toBe("dev-user");
     expect(environment.trustedUserAssertionHeader).toBe("x-hosted-user-assertion");
     expect(environment.trustedUserSignatureHeader).toBe("x-hosted-user-signature");
     expect(environment).not.toHaveProperty("ouraWebhookVerificationToken");
@@ -82,5 +80,15 @@ describe("readHostedDeviceSyncEnvironment", () => {
         WHOOP_CLIENT_SECRET: "whoop-secret",
       }),
     ).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY/u);
+  });
+
+  it("rejects the removed development auth fallback env", () => {
+    expect(() =>
+      readHostedDeviceSyncEnvironment({
+        NODE_ENV: "test",
+        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        DEVICE_SYNC_DEV_USER_ID: "dev-user",
+      }),
+    ).toThrow(/DEVICE_SYNC_DEV_USER_ID.*no longer supported/u);
   });
 });
