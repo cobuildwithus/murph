@@ -368,13 +368,14 @@ wake_output_dir="\${run_dir}/downloads/\${label}"
 wake_status_file="\${wake_output_dir}/status.json"
 wake_thread_file="\${wake_output_dir}/thread.json"
 artifact_contract_status_file="\${wake_output_dir}/artifact-contract-status.json"
+tab_close_status_file="\${wake_output_dir}/tab-close-status.json"
 workflow_file="\${run_dir}/workflow.json"
 default_config_file="\${run_dir}/config/review-gpt-research.config.sh"
 work_profile_config_file="\${run_dir}/config/review-gpt-work-profile.sh"
 review_gpt_config="\${RESEARCH_REVIEW_GPT_CONFIG:-}"
 required_artifacts_json="[]"
 
-rm -f "\${result_file}" "\${stderr_file}" "\${artifact_contract_status_file}"
+rm -f "\${result_file}" "\${stderr_file}" "\${artifact_contract_status_file}" "\${tab_close_status_file}"
 
 if [[ "\${mode}" == "send" ]]; then
   rm -f "\${chat_url_file}" "\${thread_export_file}"
@@ -904,6 +905,190 @@ run_thread_wake() {
   "\${wake_cmd[@]}" >>"\${result_file}" 2>>"\${stderr_file}"
 }
 
+close_harvest_thread_tab() {
+  case "\${RESEARCH_CLOSE_HARVEST_TAB:-1}" in
+    0|false|FALSE|no|NO)
+      return 0
+      ;;
+  esac
+
+  if [[ ! -f "\${chat_url_file}" ]]; then
+    return 0
+  fi
+
+  local browser_endpoint=""
+  browser_endpoint="$(resolve_browser_endpoint || true)"
+
+  local close_status=0
+  if node - "\${browser_endpoint}" "$(tr -d '\\r\\n' < "\${chat_url_file}")" "\${tab_close_status_file}" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [browserEndpointArg, chatUrlArg, statusPath] = process.argv.slice(2);
+const schemaVersion = "murph.research.tab-close.v1";
+const parsedTimeoutMs = Number.parseInt(process.env.RESEARCH_TAB_CLOSE_TIMEOUT_MS || "5000", 10);
+const requestTimeoutMs = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0
+  ? parsedTimeoutMs
+  : 5000;
+
+function writeStatus(status) {
+  fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+  fs.writeFileSync(
+    statusPath,
+    JSON.stringify(
+      {
+        schemaVersion,
+        updatedAt: new Date().toISOString(),
+        ...status,
+      },
+      null,
+      2,
+    ) + "\\n",
+    "utf8",
+  );
+}
+
+function normalizeEndpoint(value) {
+  const trimmed = String(value ?? "").trim().replace(/\\/+$/u, "");
+  if (!trimmed) {
+    return "";
+  }
+  if (/^https?:\\/\\//iu.test(trimmed)) {
+    return trimmed;
+  }
+  return "http://" + trimmed;
+}
+
+function chatGptConversationId(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    if (host !== "chatgpt.com" && !host.endsWith(".chatgpt.com")) {
+      return "";
+    }
+    return url.pathname.match(/\\/c\\/([^/?#]+)/u)?.[1] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) });
+  if (!response.ok) {
+    throw new Error("CDP target list request failed with HTTP " + response.status);
+  }
+  return await response.json();
+}
+
+async function closeTarget(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) });
+  if (!response.ok) {
+    throw new Error("CDP target close request failed with HTTP " + response.status);
+  }
+}
+
+async function main() {
+  const browserEndpoint = normalizeEndpoint(browserEndpointArg);
+  const targetConversationId = chatGptConversationId(chatUrlArg);
+
+  if (!browserEndpoint) {
+    writeStatus({
+      state: "skipped",
+      reason: "missing-browser-endpoint",
+      matchedTargetCount: 0,
+      closedTargetIds: [],
+    });
+    return;
+  }
+
+  if (!targetConversationId) {
+    writeStatus({
+      state: "skipped",
+      reason: "missing-chatgpt-conversation-id",
+      matchedTargetCount: 0,
+      closedTargetIds: [],
+    });
+    return;
+  }
+
+  const listUrl = new URL("/json/list", browserEndpoint + "/").toString();
+  let targets;
+  try {
+    targets = await fetchJson(listUrl);
+  } catch (error) {
+    writeStatus({
+      state: "skipped",
+      reason: "browser-target-list-unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+      matchedTargetCount: 0,
+      closedTargetIds: [],
+    });
+    return;
+  }
+  const matchingTargets = (Array.isArray(targets) ? targets : []).filter((target) => {
+    const targetId = typeof target?.id === "string" ? target.id : "";
+    const targetUrl = typeof target?.url === "string" ? target.url : "";
+    return targetId && chatGptConversationId(targetUrl) === targetConversationId;
+  });
+
+  const closedTargetIds = [];
+  const closeErrors = [];
+
+  for (const target of matchingTargets) {
+    const targetId = String(target.id);
+    const closeUrl = new URL("/json/close/" + encodeURIComponent(targetId), browserEndpoint + "/").toString();
+    try {
+      await closeTarget(closeUrl);
+      closedTargetIds.push(targetId);
+    } catch (error) {
+      closeErrors.push({
+        targetId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  writeStatus({
+    state: closeErrors.length === 0 ? "succeeded" : "partial",
+    matchedTargetCount: matchingTargets.length,
+    closedTargetIds,
+    closeErrors,
+  });
+
+  if (closeErrors.length > 0) {
+    process.exitCode = 1;
+  }
+}
+
+main().catch((error) => {
+  writeStatus({
+    state: "failed",
+    reason: error instanceof Error ? error.message : String(error),
+    matchedTargetCount: 0,
+    closedTargetIds: [],
+  });
+  process.exitCode = 1;
+});
+NODE
+  then
+    close_status=0
+  else
+    close_status=$?
+  fi
+  if [[ "\${close_status}" -ne 0 ]]; then
+    echo "Research tab cleanup failed after successful harvest; see \${tab_close_status_file}" >&2
+    return 0
+  fi
+
+  if [[ -f "\${tab_close_status_file}" ]]; then
+    echo "Tab cleanup: \${tab_close_status_file}"
+  fi
+}
+
 copy_thread_export_from_wake() {
   if [[ -f "\${wake_thread_file}" ]]; then
     cp "\${wake_thread_file}" "\${thread_export_file}"
@@ -1086,6 +1271,8 @@ if [[ "\${response_required}" -eq 1 && ! -f "\${response_file}" ]]; then
   echo "Recovered response missing after thread wake: \${response_file}" >&2
   exit 67
 fi
+
+close_harvest_thread_tab
 
 if [[ "\${response_required}" -eq 1 ]]; then
   echo "Response: \${response_file}"

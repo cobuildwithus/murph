@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -1009,6 +1009,44 @@ exit 64
     }
   });
 
+  it("materializes recovered charter responses with JSON-label blocks", () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-json-label-"));
+    const outDir = path.join(tempRoot, "json-label-blocks");
+
+    try {
+      const initResult = runResearchInit("cold plunge", "--out-dir", outDir);
+      expect(initResult.status).toBe(0);
+
+      const recoveredCharterResponse = sampleCharterResponse
+        .replace(
+          /^## (CHARTER_MANIFEST_V1|SEARCH_SHARDS_V1|SECTION_SEAMS_V1|SOURCE_EXTRACTION_SCHEMA_V1|INITIAL_FILE_PLAN_V1)\n```json\n/gmu,
+          "$1\nJSON\n",
+        )
+        .replace(/^```\n/gmu, "");
+
+      writeFileSync(
+        path.join(outDir, "responses", "01-charter.md"),
+        recoveredCharterResponse,
+        "utf8",
+      );
+
+      const result = runResearchMaterialize("--workspace", outDir);
+
+      expect(result.status).toBe(0);
+      const materializedWorkflow = JSON.parse(
+        readFileSync(path.join(outDir, "workflow.json"), "utf8"),
+      ) as {
+        discoveryShards: Array<{ id: string }>;
+        status: string;
+      };
+      expect(materializedWorkflow.status).toBe("materialized");
+      expect(materializedWorkflow.discoveryShards[0]?.id).toBe("direct-cwi");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unsafe force targets that are not prior research scaffolds", () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-init-force-"));
@@ -1317,6 +1355,346 @@ exit 64
         ),
       ).toContain('"browserEndpoint": "http://127.0.0.1:17777"');
     } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("closes matching ChatGPT tabs only after a harvest succeeds locally", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-tab-close-"));
+    const outDir = path.join(tempRoot, "tab-close-success");
+    const closeLogPath = path.join(tempRoot, "closed-targets.txt");
+    const fakeBrowserServer = spawn(
+      process.execPath,
+      [
+        "-e",
+        `
+const fs = require("node:fs");
+const http = require("node:http");
+const closeLogPath = process.argv[1];
+const server = http.createServer((request, response) => {
+  if (request.url === "/json/list") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify([
+      {
+        id: "research-tab-1",
+        type: "page",
+        url: "https://chatgpt.com/c/research-tab-close",
+      },
+      {
+        id: "other-tab",
+        type: "page",
+        url: "https://chatgpt.com/c/other-thread",
+      },
+      {
+        id: "non-chatgpt-same-path",
+        type: "page",
+        url: "https://example.com/c/research-tab-close",
+      },
+    ]));
+    return;
+  }
+
+  if (request.url === "/json/close/research-tab-1") {
+    fs.appendFileSync(closeLogPath, "research-tab-1\\n", "utf8");
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("Target is closing");
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "text/plain" });
+  response.end("not found");
+});
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  console.log("http://127.0.0.1:" + address.port);
+});
+process.on("SIGTERM", () => {
+  server.close(() => process.exit(0));
+});
+`,
+        closeLogPath,
+      ],
+      {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    const browserEndpoint = await new Promise<string>((resolve, reject) => {
+      let output = "";
+      const timer = setTimeout(() => reject(new Error("Timed out starting fake CDP server.")), 5000);
+      fakeBrowserServer.stdout.setEncoding("utf8");
+      fakeBrowserServer.stdout.on("data", (chunk) => {
+        output += chunk;
+        const line = output.split(/\r?\n/u).find((entry) => entry.trim().length > 0);
+        if (line) {
+          clearTimeout(timer);
+          resolve(line.trim());
+        }
+      });
+      fakeBrowserServer.once("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Fake CDP server exited before ready: ${code ?? "signal"}`));
+      });
+    });
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir"
+  cat >"$output_dir/thread.json" <<JSON
+{"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Harvest finished."}]}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":[]}
+JSON
+  exit 0
+fi
+
+echo "unexpected pnpm args: $*" >&2
+exit 64
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "99-tab-close";
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", `${helperLabel}.txt`);
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/research-tab-close\n");
+
+      const tabCloseStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "tab-close-status.json",
+      );
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        path.join(outDir, "commands", "_run-review-gpt.sh"),
+        helperLabel,
+        null,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT: browserEndpoint,
+        },
+      );
+
+      expect(helperHarvestResult.status).toBe(0);
+      expect(helperHarvestResult.stderr).toBe("");
+      expect(helperHarvestResult.stdout).toContain(`Tab cleanup: ${tabCloseStatusPath}`);
+      expect(readFileSync(closeLogPath, "utf8")).toBe("research-tab-1\n");
+
+      const tabCloseStatus = JSON.parse(readFileSync(tabCloseStatusPath, "utf8")) as {
+        closedTargetIds: string[];
+        matchedTargetCount: number;
+        state: string;
+      };
+      expect(tabCloseStatus.state).toBe("succeeded");
+      expect(tabCloseStatus.matchedTargetCount).toBe(1);
+      expect(tabCloseStatus.closedTargetIds).toEqual(["research-tab-1"]);
+    } finally {
+      if (fakeBrowserServer.exitCode === null && fakeBrowserServer.signalCode === null) {
+        const stopped = new Promise<void>((resolve) => {
+          fakeBrowserServer.once("exit", () => resolve());
+        });
+        fakeBrowserServer.kill("SIGTERM");
+        await stopped;
+      }
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a successful harvest successful when tab cleanup fails", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-tab-close-fail-"));
+    const outDir = path.join(tempRoot, "tab-close-fail");
+    const fakeBrowserServer = spawn(
+      process.execPath,
+      [
+        "-e",
+        `
+const http = require("node:http");
+const server = http.createServer((request, response) => {
+  if (request.url === "/json/list") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify([
+      {
+        id: "research-tab-close-fails",
+        type: "page",
+        url: "https://chatgpt.com/c/research-tab-close-fails",
+      },
+    ]));
+    return;
+  }
+
+  if (request.url === "/json/close/research-tab-close-fails") {
+    response.writeHead(500, { "content-type": "text/plain" });
+    response.end("close failed");
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "text/plain" });
+  response.end("not found");
+});
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  console.log("http://127.0.0.1:" + address.port);
+});
+process.on("SIGTERM", () => {
+  server.close(() => process.exit(0));
+});
+`,
+      ],
+      {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    const browserEndpoint = await new Promise<string>((resolve, reject) => {
+      let output = "";
+      const timer = setTimeout(() => reject(new Error("Timed out starting fake CDP server.")), 5000);
+      fakeBrowserServer.stdout.setEncoding("utf8");
+      fakeBrowserServer.stdout.on("data", (chunk) => {
+        output += chunk;
+        const line = output.split(/\r?\n/u).find((entry) => entry.trim().length > 0);
+        if (line) {
+          clearTimeout(timer);
+          resolve(line.trim());
+        }
+      });
+      fakeBrowserServer.once("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Fake CDP server exited before ready: ${code ?? "signal"}`));
+      });
+    });
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const stubBinDir = path.join(tempRoot, "bin");
+      mkdirSync(stubBinDir, { recursive: true });
+      const stubPnpmPath = path.join(stubBinDir, "pnpm");
+      writeFileSync(
+        stubPnpmPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "thread" && "$4" == "wake" ]]; then
+  output_dir=""
+  chat_url=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --output-dir)
+        output_dir="$2"
+        shift 2
+        ;;
+      --chat-url)
+        chat_url="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  mkdir -p "$output_dir"
+  cat >"$output_dir/thread.json" <<JSON
+{"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Harvest finished."}]}
+JSON
+  cat >"$output_dir/status.json" <<JSON
+{"chatUrl":"$chat_url","downloadedArtifacts":[]}
+JSON
+  exit 0
+fi
+
+echo "unexpected pnpm args: $*" >&2
+exit 64
+`,
+        "utf8",
+      );
+      chmodSync(stubPnpmPath, 0o755);
+
+      const helperLabel = "99-tab-close-fails";
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", `${helperLabel}.txt`);
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/research-tab-close-fails\n");
+
+      const tabCloseStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "tab-close-status.json",
+      );
+      const helperHarvestResult = runGeneratedReviewGptHarvest(
+        path.join(outDir, "commands", "_run-review-gpt.sh"),
+        helperLabel,
+        null,
+        {
+          ...process.env,
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT: browserEndpoint,
+        },
+      );
+
+      expect(helperHarvestResult.status).toBe(0);
+      expect(helperHarvestResult.stderr).toContain(
+        `Research tab cleanup failed after successful harvest; see ${tabCloseStatusPath}`,
+      );
+
+      const tabCloseStatus = JSON.parse(readFileSync(tabCloseStatusPath, "utf8")) as {
+        closeErrors: Array<{ message: string; targetId: string }>;
+        closedTargetIds: string[];
+        matchedTargetCount: number;
+        state: string;
+      };
+      expect(tabCloseStatus.state).toBe("partial");
+      expect(tabCloseStatus.matchedTargetCount).toBe(1);
+      expect(tabCloseStatus.closedTargetIds).toEqual([]);
+      expect(tabCloseStatus.closeErrors).toEqual([
+        {
+          targetId: "research-tab-close-fails",
+          message: "CDP target close request failed with HTTP 500",
+        },
+      ]);
+    } finally {
+      if (fakeBrowserServer.exitCode === null && fakeBrowserServer.signalCode === null) {
+        const stopped = new Promise<void>((resolve) => {
+          fakeBrowserServer.once("exit", () => resolve());
+        });
+        fakeBrowserServer.kill("SIGTERM");
+        await stopped;
+      }
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
@@ -1835,6 +2213,12 @@ exit 0
         helperLabel,
         "artifact-contract-status.json",
       );
+      const tabCloseStatusPath = path.join(
+        outDir,
+        "downloads",
+        helperLabel,
+        "tab-close-status.json",
+      );
 
       const helperSendResult = runGeneratedReviewGptSend(
         helperScriptPath,
@@ -1854,6 +2238,7 @@ exit 0
         {
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT: "http://127.0.0.1:9",
         },
       );
 
@@ -1862,6 +2247,7 @@ exit 0
         "research step 02-discovery-direct-cwi is missing required local artifacts after thread wake",
       );
       expect(existsSync(artifactStatusPath)).toBe(true);
+      expect(existsSync(tabCloseStatusPath)).toBe(false);
 
       const artifactStatus = JSON.parse(readFileSync(artifactStatusPath, "utf8")) as {
         missingArtifacts: Array<{ expectedFileName: string; logicalName: string }>;
