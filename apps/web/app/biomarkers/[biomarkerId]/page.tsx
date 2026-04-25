@@ -5,6 +5,7 @@ import {
   listHealthCommonsBiomarkerRoutes,
   resolveHealthCommonsBiomarkerDetail,
 } from "@/src/lib/health-commons/biomarker-detail";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { BiomarkerPageClient } from "./biomarker-page-client";
 
 export function generateStaticParams(): Array<{ biomarkerId: string }> {
@@ -23,10 +24,13 @@ export async function generateMetadata({
     return {};
   }
 
-  return {
+  return createMurphPageMetadata({
     description: biomarker.summary,
+    openGraph: {
+      type: "article",
+    },
     title: `${biomarker.title} | Murph Biomarkers`,
-  };
+  });
 }
 
 export default async function BiomarkerPage({

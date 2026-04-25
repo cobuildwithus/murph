@@ -2,30 +2,36 @@ import type { Metadata } from "next";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { StickyNav } from "../sticky-nav";
 
-export const metadata: Metadata = {
+const SECURITY_METADATA_DESCRIPTION =
+  "How Murph keeps your health data yours. Hosted architecture, encryption, auth, and the local self-hosted lane.";
+const SECURITY_OPEN_GRAPH_IMAGE = {
+  alt: "Murph Security. Your health data stays yours.",
+  height: 630,
+  type: "image/png",
+  url: "/security/opengraph-image",
+  width: 1200,
+} as const;
+
+export const metadata: Metadata = createMurphPageMetadata({
   title: "Security · Murph",
-  description:
-    "How Murph keeps your health data yours. Hosted architecture, encryption, auth, and the local self-hosted lane.",
+  description: SECURITY_METADATA_DESCRIPTION,
   alternates: {
     canonical: "/security",
   },
   openGraph: {
-    title: "Security · Murph",
-    description:
-      "How Murph keeps your health data yours. Hosted architecture, encryption, auth, and the local self-hosted lane.",
-    siteName: "Murph",
+    images: [SECURITY_OPEN_GRAPH_IMAGE],
     type: "article",
   },
   twitter: {
-    card: "summary_large_image",
-    title: "Security · Murph",
     description:
       "How Murph keeps your health data yours.",
+    images: [SECURITY_OPEN_GRAPH_IMAGE],
   },
-};
+});
 
 export default async function SecurityPage() {
   const { authenticated } = await getHostedPageAuthSnapshot();

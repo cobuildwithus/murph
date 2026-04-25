@@ -58,7 +58,7 @@ vi.mock("../app/providers", () => ({
   },
 }));
 
-import RootLayout from "../app/layout";
+import RootLayout, { metadata } from "../app/layout";
 
 test("RootLayout renders the Apache footer with support and GitHub links", () => {
   const markup = renderToStaticMarkup(
@@ -82,4 +82,31 @@ test("RootLayout renders the Apache footer with support and GitHub links", () =>
   assert.doesNotMatch(markup, /rounded-full/u);
   assert.match(markup, /View the code on GitHub/);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
+});
+
+test("RootLayout provides default title, description, and preview image metadata", () => {
+  assert.ok(metadata.metadataBase instanceof URL);
+  assert.equal(metadata.title, "Murph — Discover what actually makes you healthier");
+  assert.equal(
+    metadata.description,
+    "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
+  );
+  assert.deepEqual(metadata.openGraph?.images, [
+    {
+      alt: "Murph — Wearable data, made useful.",
+      height: 630,
+      type: "image/png",
+      url: "/opengraph-image",
+      width: 1200,
+    },
+  ]);
+  assert.deepEqual(metadata.twitter?.images, [
+    {
+      alt: "Murph — Wearable data, made useful.",
+      height: 630,
+      type: "image/png",
+      url: "/opengraph-image",
+      width: 1200,
+    },
+  ]);
 });

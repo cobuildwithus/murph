@@ -1,7 +1,14 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+
+export const metadata: Metadata = createMurphPageMetadata({
+  title: "Checkout paused — Murph",
+  description: "Return to your Murph invite when you are ready to finish checkout.",
+});
 
 export default async function JoinInviteCancelPage(input: {
   params: Promise<{ inviteCode: string }>;

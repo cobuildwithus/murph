@@ -521,7 +521,26 @@ describe("BiomarkerPage", () => {
       }),
     })).resolves.toEqual(expect.objectContaining({
       description: expect.stringContaining("resting pulse trend"),
+      openGraph: expect.objectContaining({
+        images: [
+          expect.objectContaining({
+            height: 630,
+            url: "/opengraph-image",
+            width: 1200,
+          }),
+        ],
+        type: "article",
+      }),
       title: "Resting Heart Rate | Murph Biomarkers",
+      twitter: expect.objectContaining({
+        images: [
+          expect.objectContaining({
+            height: 630,
+            url: "/opengraph-image",
+            width: 1200,
+          }),
+        ],
+      }),
     }));
   });
 

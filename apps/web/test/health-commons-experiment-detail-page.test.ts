@@ -35,9 +35,41 @@ vi.mock("../app/(dashboard)/experiments/[experimentId]/experiment-detail-client"
   },
 }));
 
-import ExperimentDetailPage from "../app/(dashboard)/experiments/[experimentId]/page";
+import ExperimentDetailPage, {
+  generateMetadata,
+} from "../app/(dashboard)/experiments/[experimentId]/page";
 
 describe("ExperimentDetailPage", () => {
+  it("returns metadata for published experiment pages", async () => {
+    await expect(generateMetadata({
+      params: Promise.resolve({
+        experimentId: "finnish-sauna",
+      }),
+    })).resolves.toEqual(expect.objectContaining({
+      description: expect.stringContaining("sauna"),
+      openGraph: expect.objectContaining({
+        images: [
+          expect.objectContaining({
+            height: 630,
+            url: "/opengraph-image",
+            width: 1200,
+          }),
+        ],
+        type: "article",
+      }),
+      title: "Finnish Dry Sauna — Murph Experiments",
+      twitter: expect.objectContaining({
+        images: [
+          expect.objectContaining({
+            height: 630,
+            url: "/opengraph-image",
+            width: 1200,
+          }),
+        ],
+      }),
+    }));
+  });
+
   it("hands the Health Commons sauna protocol through to the client shell", async () => {
     const element = await ExperimentDetailPage({
       params: Promise.resolve({
