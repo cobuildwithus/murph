@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Default treatment lasts 10 minutes; wrinkle schedule summarized as 5 times weekly for 6 weeks
   aggregateRole: context
   cohortKey: fda-k230124-led-facewear-mask-eye-protection-2023-02-09
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch003:fda-k230124-led-facewear-mask-eye-protection-2023-02-09:ocular
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: 510(k) Summary: LUSTRE ClearSkin Renew Pro Facewear Mask
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: The extracted summary did not include a clinical study; it is regulatory context only.
-    displayPriority: 50
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It provides red/NIR dose context and explicitly identifies eye protection as a device component.
 potentialMurphEndpoints:

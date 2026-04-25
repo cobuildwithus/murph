@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: 8-week intervention with twice-weekly sessions on non-consecutive days
   aggregateRole: primary
   cohortKey: nct07224646-state-championship-soccer
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: state-championship-soccer-registry
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Recruiting registry describes a season-long whole-body PBM soccer protocol with repeated soreness, strength, jump, blood-count, and PSQI endpoints, but no outcomes are available yet.
-    implication: Useful for protocol cadence, endpoint selection, and planned safety boundaries in a sports setting.
-    caveat: Registry protocol only; no efficacy or adverse-event outcomes have been reported in the extracted materials.
-    displayPriority: 35
 evidenceBucket: Exercise-timed whole-body PBM sibling variant
 whyItMatters: This registry broadens source recall for repeated-use sports dosing and shows which weekly and end-of-season endpoints current investigators think are worth tracking.
 potentialMurphEndpoints:

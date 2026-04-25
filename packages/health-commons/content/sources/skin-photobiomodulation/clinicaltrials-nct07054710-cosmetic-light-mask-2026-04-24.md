@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: 12-week at-home use period with baseline and follow-up outcome collection.
   aggregateRole: context
   cohortKey: nct07054710-cosmetic-light-mask
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: nct07054710-cosmetic-light-mask
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Recent registry record tests an at-home cosmetic LED mask over 12 weeks.
-    implication: Useful for contemporary protocol design, outcomes, and exclusion criteria, but not yet a peer-reviewed efficacy source in this batch.
-    caveat: Registry-derived design details can change; no peer-reviewed results were extracted here.
-    displayPriority: 45
 evidenceBucket: contemporary cosmetic light-mask registry context
 whyItMatters: Provides a current, direct-protocol registry anchor for a consumer LED mask and highlights outcome domains likely to matter for Murph tracking.
 potentialMurphEndpoints:

@@ -39,27 +39,6 @@ researchEvidence:
   durationLabel: "8 weeks"
   aggregateRole: primary
   cohortKey: "doi-10.1080-15502783.2025.2533658-elite-athletes"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: formulation-head-to-head-boundaries
-    stance: supports
-    scope: adjacent_variant
-    result: positive
-    headline: "Included in the protocol evidence landscape group: Formulation head-to-head boundaries."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "doi-10.1080-15502783.2025.2533658"
-    stance: "supports"
-    scope: direct_protocol
-    result: "no_clear_advantage"
-    headline: "Low-dose HCl and monohydrate produced similar outcomes, with no significant between-group superiority."
-    implication: "This recent direct comparator supports keeping monohydrate as the default form and not treating HCl as superior at the same 5 g/day dose."
-    caveat: "Elite sport population and low-dose design; within-group jump changes should not be overread as between-form superiority."
-    displayPriority: 86
 evidenceBucket: "formulation_variant_boundary"
 whyItMatters: "It is a modern, direct, placebo-controlled HCl-versus-monohydrate trial in trained athletes using a common 5 g/day dose."
 potentialMurphEndpoints:

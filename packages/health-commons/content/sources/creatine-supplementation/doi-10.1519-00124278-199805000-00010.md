@@ -38,17 +38,6 @@ researchEvidence:
   durationLabel: "28-day experiment with supplementation on days 2 to 27."
   aggregateRole: primary
   cohortKey: "creatine-monohydrate:doi-10-1519-00124278-199805000-00010"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "batch-009"
-    stance: "supports"
-    scope: direct_protocol
-    result: "positive"
-    headline: "Creatine may improve repeated high-intensity bench performance in trained lifters; label the population boundary."
-    implication: "Direct early bench-press performance study in trained lifters."
-    caveat: "Highly trained male powerlifters; not general-population evidence. Small male powerlifter sample. Paywalled older source; full table extraction unavailable."
-    displayPriority: 80
 evidenceBucket: "population_boundary_adjacent_claims"
 whyItMatters: "Direct early bench-press performance study in trained lifters."
 potentialMurphEndpoints:

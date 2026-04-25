@@ -1,6 +1,6 @@
 import type {
   HealthCommonsCatalogEntity,
-  HealthCommonsProtocolEvidenceAppraisal,
+  HealthCommonsEvidenceAppraisal,
   HealthCommonsResearchEvidence,
   HealthCommonsResearchLandscapeGroup,
   HealthCommonsSource,
@@ -109,18 +109,14 @@ export function isCountedResearchSource(entity: HealthCommonsEntity): boolean {
 
 export function toStudy(
   entity: HealthCommonsEntity,
-  protocolKey?: string,
-  appraisal?: HealthCommonsProtocolEvidenceAppraisal,
+  appraisal?: HealthCommonsEvidenceAppraisal,
 ): Study {
   const source = entity.source;
   const evidence = entity.researchEvidence;
-  const resolvedAppraisal = appraisal ?? (protocolKey
-    ? findProtocolEvidenceAppraisal(entity, protocolKey)
-    : undefined);
   const extractedFinding = extractStudyFinding(entity.body);
   const fallbackFinding = extractedFinding
     ? undefined
-    : buildStudyFindingFallback(entity, resolvedAppraisal);
+    : buildStudyFindingFallback(entity, appraisal);
 
   return {
     type: researchEvidenceToStudyType(evidence, source),
@@ -136,36 +132,42 @@ export function toStudy(
     designLabel: evidence?.designLabel ?? (evidence
       ? formatResearchDesignLabel(evidence.designKind)
       : undefined),
-    groupId: resolvedAppraisal?.groupId,
-    stance: resolvedAppraisal?.stance,
-    scope: resolvedAppraisal?.scope,
-    result: resolvedAppraisal?.result,
-    headline: resolvedAppraisal?.headline,
+    groupId: appraisal?.groupId,
+    stance: appraisal?.stance,
+    scope: appraisal?.scope,
+    result: appraisal?.result,
+    headline: appraisal?.headline,
     finding: extractedFinding ?? fallbackFinding?.text,
     findingKind: extractedFinding ? "finding" : fallbackFinding?.kind,
-    implication: resolvedAppraisal?.implication,
-    caveat: resolvedAppraisal?.caveat,
-    displayPriority: resolvedAppraisal?.displayPriority,
+    implication: appraisal?.implication,
+    caveat: appraisal?.caveat,
+    displayPriority: appraisal?.displayPriority,
     url: source?.url,
   };
 }
 
 export function findProtocolEvidenceAppraisal(
-  entity: HealthCommonsEntity,
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
+  sourceKey: string,
   protocolKey: string,
-): HealthCommonsProtocolEvidenceAppraisal | undefined {
-  const matchingAppraisals = entity.protocolEvidence?.filter((appraisal) =>
-    appraisal.protocolKey === protocolKey
-  ) ?? [];
+): HealthCommonsEvidenceAppraisal | undefined {
+  const normalizedSourceKey = stripRevision(sourceKey);
+  const normalizedProtocolKey = stripRevision(protocolKey);
+  const matchingAppraisals = evidenceAppraisals.filter((appraisal) =>
+    stripRevision(appraisal.sourceKey) === normalizedSourceKey
+    && stripRevision(appraisal.targetKey) === normalizedProtocolKey
+  );
 
   return matchingAppraisals.length === 1 ? matchingAppraisals[0] : undefined;
 }
 
 export function toResearchGroups({
   citedStudySources,
+  evidenceAppraisals,
   protocol,
 }: {
   citedStudySources: readonly HealthCommonsEntity[];
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
   protocol: HealthCommonsCatalogEntity;
 }): BuiltResearchGroups {
   const landscapeGroups = protocol.researchLandscape?.groups ?? [];
@@ -184,9 +186,10 @@ export function toResearchGroups({
 
   const coveredSourceKeys = new Set<string>();
   const groups = landscapeGroups.flatMap((group) => {
-    const studies = orderGroupStudySources(group, sourcesByKey, protocol.key)
+    const studies = orderGroupStudySources(group, sourcesByKey, protocol.key, evidenceAppraisals)
       .flatMap((source) => {
         const appraisal = findGroupProtocolEvidenceAppraisal(
+          evidenceAppraisals,
           source,
           protocol.key,
           group.id,
@@ -196,7 +199,7 @@ export function toResearchGroups({
       .map((source) => {
         const [entity, appraisal] = source;
         coveredSourceKeys.add(entity.key);
-        return toStudy(entity, protocol.key, appraisal);
+        return toStudy(entity, appraisal);
       });
 
     if (studies.length === 0) {
@@ -226,6 +229,7 @@ function orderGroupStudySources(
   group: HealthCommonsResearchLandscapeGroup,
   sourcesByKey: ReadonlyMap<string, HealthCommonsEntity>,
   protocolKey: string,
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
 ): HealthCommonsEntity[] {
   const fromLandscapeOrder = group.sourceKeys.flatMap((sourceKey) => {
     const source = sourcesByKey.get(sourceKey);
@@ -233,8 +237,8 @@ function orderGroupStudySources(
   });
 
   return fromLandscapeOrder.sort((left, right) => {
-    const leftPriority = findStudyDisplayPriority(left, group.id, protocolKey);
-    const rightPriority = findStudyDisplayPriority(right, group.id, protocolKey);
+    const leftPriority = findStudyDisplayPriority(left, group.id, protocolKey, evidenceAppraisals);
+    const rightPriority = findStudyDisplayPriority(right, group.id, protocolKey, evidenceAppraisals);
     if (leftPriority !== rightPriority) {
       return leftPriority - rightPriority;
     }
@@ -247,18 +251,24 @@ function findStudyDisplayPriority(
   entity: HealthCommonsEntity,
   groupId: string,
   protocolKey: string,
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
 ): number {
-  return findGroupProtocolEvidenceAppraisal(entity, protocolKey, groupId)
+  return findGroupProtocolEvidenceAppraisal(evidenceAppraisals, entity, protocolKey, groupId)
     ?.displayPriority ?? Number.MAX_SAFE_INTEGER;
 }
 
 function findGroupProtocolEvidenceAppraisal(
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
   entity: HealthCommonsEntity,
   protocolKey: string,
   groupId: string,
-): HealthCommonsProtocolEvidenceAppraisal | undefined {
-  return entity.protocolEvidence?.find((appraisal) =>
-    appraisal.protocolKey === protocolKey && appraisal.groupId === groupId
+): HealthCommonsEvidenceAppraisal | undefined {
+  const normalizedSourceKey = stripRevision(entity.key);
+  const normalizedProtocolKey = stripRevision(protocolKey);
+  return evidenceAppraisals.find((appraisal) =>
+    stripRevision(appraisal.sourceKey) === normalizedSourceKey
+    && stripRevision(appraisal.targetKey) === normalizedProtocolKey
+    && appraisal.groupId === groupId
   );
 }
 
@@ -471,16 +481,19 @@ function formatResearchDesignLabel(
 export function toResearchStats({
   countedResearchSources,
   displaySources,
+  evidenceAppraisals,
   protocolKey,
   routeId,
 }: {
   countedResearchSources: readonly HealthCommonsEntity[];
   displaySources: readonly HealthCommonsEntity[];
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
   protocolKey: string;
   routeId: string;
 }): ExperimentProtocol["researchStats"] {
   const participantCountSources = participantCountResearchSources({
     countedResearchSources,
+    evidenceAppraisals,
     protocolKey,
     routeId,
   });
@@ -563,10 +576,12 @@ export function toResearchStats({
 
 function participantCountResearchSources({
   countedResearchSources,
+  evidenceAppraisals,
   protocolKey,
   routeId,
 }: {
   countedResearchSources: readonly HealthCommonsEntity[];
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
   protocolKey: string;
   routeId: string;
 }): readonly HealthCommonsEntity[] {
@@ -575,7 +590,7 @@ function participantCountResearchSources({
   }
 
   return countedResearchSources.filter((entity) =>
-    !isExcludedNorwegianParticipantCountSource(entity, protocolKey)
+    !isExcludedNorwegianParticipantCountSource(entity, protocolKey, evidenceAppraisals)
   );
 }
 
@@ -604,6 +619,7 @@ function sumPrimaryParticipantCount(
 function isExcludedNorwegianParticipantCountSource(
   entity: HealthCommonsEntity,
   protocolKey: string,
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
 ): boolean {
   const evidence = entity.researchEvidence;
 
@@ -614,14 +630,18 @@ function isExcludedNorwegianParticipantCountSource(
     return false;
   }
 
-  return entity.protocolEvidence?.some((appraisal) =>
-    appraisal.protocolKey === protocolKey && appraisal.stance === "safety_boundary"
-  ) ?? false;
+  const normalizedSourceKey = stripRevision(entity.key);
+  const normalizedProtocolKey = stripRevision(protocolKey);
+  return evidenceAppraisals.some((appraisal) =>
+    stripRevision(appraisal.sourceKey) === normalizedSourceKey
+    && stripRevision(appraisal.targetKey) === normalizedProtocolKey
+    && appraisal.stance === "safety_boundary"
+  );
 }
 
 function buildStudyFindingFallback(
   entity: HealthCommonsEntity,
-  appraisal: HealthCommonsProtocolEvidenceAppraisal | undefined,
+  appraisal: HealthCommonsEvidenceAppraisal | undefined,
 ): { kind: Study["findingKind"]; text: string } | undefined {
   const headline = normalizeStudyCardText(appraisal?.headline);
   const whyItMatters = normalizeStudyCardText(readPassthroughString(entity, "whyItMatters"));
@@ -651,6 +671,10 @@ function readPassthroughString(entity: HealthCommonsEntity, key: string): string
 function normalizeStudyCardText(value: string | undefined): string | undefined {
   const normalized = value?.replace(/\s+/gu, " ").trim();
   return normalized ? normalized : undefined;
+}
+
+function stripRevision(key: string): string {
+  return key.split("@")[0] ?? key;
 }
 
 function extractStudyFinding(body: string): string | undefined {

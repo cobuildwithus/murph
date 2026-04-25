@@ -35,18 +35,6 @@ researchEvidence:
   durationLabel: Weekly physical-activity dose guidance
   cohortKey: acsm-physical-activity-guidelines:adults
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: background_context
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Guideline context: short workouts should not be over-positioned as a complete activity plan.
-    implication: Use to frame Tabata 20/10 as a possible exercise component rather than a standalone replacement for weekly activity recommendations.
-    caveat: This is not Tabata efficacy evidence and does not test any 20/10 protocol.
-    displayPriority: 50
 evidenceBucket: background_context
 whyItMatters: It gives a conservative dose boundary for public-facing claims about four-minute workouts.
 potentialMurphEndpoints:

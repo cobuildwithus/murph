@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Per-treatment auto shutoff described; schedule not used as efficacy evidence here
   aggregateRole: context
   cohortKey: fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch003:fda-k243040-led-light-therapy-mask-eye-shield-2024-09-27:ocular
-    stance: safety_boundary
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: 510(k) Summary: Shenzhen Siken LED Light Therapy Mask
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: Regulatory documentation and blue/red/IR mixed-mode device, not a skin efficacy source.
-    displayPriority: 50
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It shows that consumer LED masks may incorporate protective eye shields and optical-radiation testing.
 potentialMurphEndpoints:

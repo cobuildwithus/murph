@@ -32,19 +32,6 @@ researchEvidence:
   cohortKey: "else-moodley-foam-rolling-itbfs-2016"
   notes:
     - "Metadata-pass extraction from the canonical source ledger; full-text effect details were not extracted in this pass."
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-    groupId: context-and-variant-boundaries
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:lateral-knee-pain
-    headline: "Merged 1 candidate row(s) from shard(s): cycling-specific-itbs. Passive/procedural or escalation evidence; keep separate from active exercise and graded retu..."
-    implication: "Use for context, boundary, or safety framing rather than direct efficacy claims."
-    caveat: "This source record preserves reducer classifications but does not replace source-level full-text extraction."
-    displayPriority: 55
 evidenceBucket: "passive_adjuncts_escalation_and_procedures"
 whyItMatters: "Merged 1 candidate row(s) from shard(s): cycling-specific-itbs. Passive/procedural or escalation evidence; keep separate from active exercise and graded return-to-run claims unless effects are separable. Includes cyclists with ITBFS and compares conservative treatments; thesis status and mixed runner/cyclist population require careful boundary labeling."
 potentialMurphEndpoints:

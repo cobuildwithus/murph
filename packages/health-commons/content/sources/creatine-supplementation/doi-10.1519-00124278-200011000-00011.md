@@ -38,17 +38,6 @@ researchEvidence:
   durationLabel: 13 weeks; 1 week loading plus maintenance during off-season training
   aggregateRole: primary
   cohortKey: cohort:doi-10.1519-00124278-200011000-00011
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: repeated_sprint_power_trials
-    stance: supports
-    scope: direct_protocol
-    result: mixed
-    headline: Female soccer off-season trial found strength benefits with mixed body-composition results.
-    implication: Can support strength/power-adjacent outcomes in trained female field-sport athletes.
-    caveat: Do not present as a clear lean-mass effect in this batch.
-    displayPriority: 70
 evidenceBucket: repeated_sprint_power_trials
 whyItMatters: Adds a female field-sport direct monohydrate trial to a male-heavy performance literature.
 potentialMurphEndpoints:

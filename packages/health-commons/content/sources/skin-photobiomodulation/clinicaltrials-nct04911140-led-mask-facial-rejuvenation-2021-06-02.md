@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Registry follow-up/duration should be cross-checked against publications
   aggregateRole: context
   cohortKey: clinicaltrials-nct04911140
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch-001:clinicaltrials-nct04911140
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Registry anchor for the facial LED mask frequency trial and its planned arms/outcomes.
-    implication: Use to verify planned dose, arms, and outcomes and to prevent double-counting registry data as study results.
-    caveat: Registry records can change over time and may differ from publications; dose discrepancies require explicit reconciliation.
-    displayPriority: 50
 evidenceBucket: direct facial LED trial registry and dose cross-check
 whyItMatters: The registry anchors the Bragato/Motta facial rejuvenation trial, allowing dose, arm, and outcome verification against publications.
 potentialMurphEndpoints:

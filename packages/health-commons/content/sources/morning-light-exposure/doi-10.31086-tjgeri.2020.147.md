@@ -36,43 +36,6 @@ researchEvidence:
   durationLabel: "Morning outdoor natural-light exposure for 40 minutes in two 5-day periods in June and July 2019"
   aggregateRole: "primary"
   cohortKey: "sansal-2020-elderly-outdoor-natural-light"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "direct-outdoor-natural-light"
-    stance: "supports"
-    scope: "direct_protocol"
-    result: "positive"
-    endpointKeys:
-      - "biomarker:sleep-quality"
-    headline: "A 40-minute morning outdoor natural-light protocol in older adults reported significant sleep-quality improvements."
-    implication: "Supports using outdoor daylight, not only indoor bright-light devices, as a candidate sleep experiment."
-    caveat: "Small long-term-care sample; authors cautioned that the study cannot define a precise illuminance or duration threshold for circadian response."
-    displayPriority: 88
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "outcomes-and-wearable-interpretation"
-    stance: "mixed"
-    scope: "direct_protocol"
-    result: "positive"
-    endpointKeys:
-      - "biomarker:sleep-quality"
-    headline: "A 40-minute morning outdoor natural-light protocol in older adults reported significant sleep-quality improvements."
-    implication: "Supports using outdoor daylight, not only indoor bright-light devices, as a candidate sleep experiment."
-    caveat: "Small long-term-care sample; authors cautioned that the study cannot define a precise illuminance or duration threshold for circadian response."
-    displayPriority: 88
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "population-modifiers"
-    stance: "context_only"
-    scope: "direct_protocol"
-    result: "positive"
-    endpointKeys:
-      - "biomarker:sleep-quality"
-    headline: "A 40-minute morning outdoor natural-light protocol in older adults reported significant sleep-quality improvements."
-    implication: "Supports using outdoor daylight, not only indoor bright-light devices, as a candidate sleep experiment."
-    caveat: "Small long-term-care sample; authors cautioned that the study cannot define a precise illuminance or duration threshold for circadian response."
-    displayPriority: 88
 evidenceBucket: "direct_outdoor_daylight_protocol"
 whyItMatters: "Directly tests the habit-relevant exposure—outdoor morning daylight—using measured illuminance and sleep-quality questionnaires."
 potentialMurphEndpoints:

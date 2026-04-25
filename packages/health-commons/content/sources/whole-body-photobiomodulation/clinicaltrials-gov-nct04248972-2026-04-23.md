@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: Short- and long-term follow-up were planned, but detailed schedule fields were not fully extractable from the registry record used here
   aggregateRole: primary
   cohortKey: nct04248972-fibromyalgia-rct
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: fm-rct-registry
-    stance: context_only
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    headline: Registry identifies the sham-controlled fibromyalgia whole-body PBM program but does not contribute extracted outcome results here.
-    implication: Useful for trial identification, comparator boundaries, and registry linkage.
-    caveat: Accessible registry extraction was sparse and did not expose posted results or detailed enrollment fields.
-    displayPriority: 40
 evidenceBucket: Chronic pain/fibromyalgia whole-body PBM sibling variant
 whyItMatters: This registry key anchors the RCT program identity and helps keep protocol, registry, and publication records aligned without treating them as interchangeable efficacy evidence.
 potentialMurphEndpoints:

@@ -31,20 +31,6 @@ researchEvidence:
   designKind: "narrative_review"
   designLabel: "Narrative review"
   aggregateRole: "synthesis"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: evidence-backbone-and-claim-calibration
-    stance: mixed
-    scope: same_mechanism
-    result: mixed
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:morning-blood-pressure
-    headline: "This narrative review separates common sauna claims from better-supported physiology and safety observations. The main finding is that sauna has plausible benefits and real risks, but many popular claims need careful framing."
-    implication: "This source supports plain-language guardrails and avoids overclaiming."
-    caveat: "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals."
-    displayPriority: 50
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

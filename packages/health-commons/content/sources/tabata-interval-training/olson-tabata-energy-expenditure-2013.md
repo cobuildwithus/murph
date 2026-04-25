@@ -36,18 +36,6 @@ researchEvidence:
   durationLabel: Single 4-minute all-out bodyweight squat-jump Tabata bout with post-exercise VO2 monitoring.
   cohortKey: olson-tabata-energy-expenditure-2013-active-adults
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: energy-cost-context
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Lower-certainty poster reports acute oxygen uptake and recovery response for squat-jump Tabata.
-    implication: Use only as context for acute energy expenditure and recovery cost, not as a primary peer-reviewed protocol claim.
-    caveat: Conference/poster source; full peer-reviewed methods and full statistical details are limited; content may be subject to copyright.
-    displayPriority: 75
 evidenceBucket: direct_original_dose_evidence
 whyItMatters: It is frequently cited in public Tabata energy-expenditure claims, so it needs a guarded claim boundary.
 potentialMurphEndpoints:

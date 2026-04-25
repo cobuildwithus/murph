@@ -36,27 +36,6 @@ researchEvidence:
     - "Ledger directness: clinical_supervised"
     - "Ledger claim use: context-only"
     - "Ledger priority: medium"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "healthy_aging_longevity_and_off_label_wellness"
-    stance: "context_only"
-    scope: "clinical_supervised"
-    result: "not_efficacy_evidence"
-    headline: "Direct registry-level source for longevity-marker endpoints beyond telomeres. Registry record; link to later publications if matched, but do not merge blindly."
-    implication: "Use this source according to its ledger role: context-only / clinical_supervised."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 50
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "healthy-aging-neurocognitive-and-performance-claims"
-    stance: "context_only"
-    scope: "clinical_supervised"
-    result: "not_efficacy_evidence"
-    headline: "Direct registry-level source for longevity-marker endpoints beyond telomeres. Registry record; link to later publications if matched, but do not merge blindly."
-    implication: "Use this source according to its ledger role: context-only / clinical_supervised."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 50
 evidenceBucket: "Healthy aging, longevity, and off-label wellness"
 claimUse: "context-only"
 directness: "clinical_supervised"

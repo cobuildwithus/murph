@@ -32,19 +32,6 @@ researchEvidence:
   cohortKey: "massgeneral-return-to-running-program-2026-04-24"
   notes:
     - "Metadata-pass extraction from the canonical source ledger; full-text effect details were not extracted in this pass."
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-    groupId: direct-runner-rehab
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:lateral-knee-pain
-    headline: "Merged 1 candidate row(s) from shard(s): external-clinical-protocols. External clinical template; may inform implementation comparison but is not efficacy pr..."
-    implication: "Use for context, boundary, or safety framing rather than direct efficacy claims."
-    caveat: "This source record preserves reducer classifications but does not replace source-level full-text extraction."
-    displayPriority: 55
 evidenceBucket: "external_clinical_protocol"
 whyItMatters: "Merged 1 candidate row(s) from shard(s): external-clinical-protocols. External clinical template; may inform implementation comparison but is not efficacy proof. Adjacent companion source for implementing the return-to-running step that Mass General's ITBS protocol names but does not fully detail."
 potentialMurphEndpoints:

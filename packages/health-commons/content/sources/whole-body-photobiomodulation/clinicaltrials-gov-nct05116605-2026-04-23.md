@@ -36,37 +36,6 @@ researchEvidence:
   durationLabel: 4-week baseline plus 4-week intervention
   aggregateRole: primary
   cohortKey: nct05116605-adults
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: direct-sleep-and-wellbeing-evidence
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Registry describes a direct NovoTHOR whole-body PBM implementation for sleep and performance, but no outcome results are available in the record used here.
-    implication: Useful for protocol cadence, endpoint selection, and exclusion boundaries.
-    caveat: Single-arm open-label registry with no placebo group and no extracted efficacy results.
-    displayPriority: 40
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: dose-and-implementation
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Registry describes a direct NovoTHOR whole-body PBM implementation for sleep and performance, but no outcome results are available in the record used here.
-    implication: Useful for protocol cadence, endpoint selection, and exclusion boundaries.
-    caveat: Single-arm open-label registry with no placebo group and no extracted efficacy results.
-    displayPriority: 40
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Registry describes a direct NovoTHOR whole-body PBM implementation for sleep and performance, but no outcome results are available in the record used here.
-    implication: Useful for protocol cadence, endpoint selection, and exclusion boundaries.
-    caveat: Single-arm open-label registry with no placebo group and no extracted efficacy results.
-    displayPriority: 40
 evidenceBucket: Starter whole-body wellness/sleep evidence
 whyItMatters: This is direct implementation context for a commercial whole-body light bed, including schedule, wearable outcomes, and safety exclusions.
 potentialMurphEndpoints:

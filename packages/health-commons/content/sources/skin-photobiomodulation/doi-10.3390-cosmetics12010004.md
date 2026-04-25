@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: 4 weeks
   aggregateRole: primary
   cohortKey: doi-10.3390-cosmetics12010004
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: direct-home-and-facial-red-nir
-    stance: supports
-    scope: direct_protocol
-    result: positive
-    headline: A small facial mask study reported improved brightening and anti-aging measures after 4 weeks of red-to-near-infrared LED exposure.
-    implication: Adds recent home-mask-style implementation evidence and tolerability context.
-    caveat: No sham or randomized comparator was extracted, and some reported endpoints include scalp measures rather than facial photoaging alone.
-    displayPriority: 70
 evidenceBucket: direct home/facial red+NIR or LED-mask benefit evidence
 whyItMatters: It is a recent open-access facial LED mask study with directly relevant red-to-NIR exposure, skin-brightening, anti-aging, and tolerability endpoints.
 potentialMurphEndpoints:

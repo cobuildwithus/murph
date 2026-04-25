@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Study-period exposure assessment; registry does not provide efficacy follow-up results
   aggregateRole: primary
   cohortKey: nct06866522-healthy-phototype-groups
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: This registry studies how much 660 nm and 850 nm light is reflected during non-contact whole-body PBM across skin phototype and sex, but it does not report clinical efficacy outcomes.
-    implication: Useful for device geometry, non-contact dosing assumptions, and phototype-related light-loss considerations.
-    caveat: Healthy-volunteer dosimetry registry rather than a therapeutic efficacy study.
-    displayPriority: 40
 evidenceBucket: Dose, device, and implementation reporting
 whyItMatters: Whole-body beds often irradiate skin without direct contact, so reflected-light loss and phototype differences matter for dose assumptions.
 potentialMurphEndpoints:

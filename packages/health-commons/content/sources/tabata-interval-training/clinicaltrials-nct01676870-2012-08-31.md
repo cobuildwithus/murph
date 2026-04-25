@@ -45,18 +45,6 @@ researchEvidence:
   aggregateRole: context
   notes:
     - Participant count is target/registry context, not an extracted completed-analysis denominator.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: clinicaltrials-nct01676870-2012-08-31
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Registry context for longer aerobic interval-training variants, not 20/10 Tabata.
-    implication: Useful for separating 4×4-minute and 1×4-minute interval protocols from Tabata 20/10 claims.
-    caveat: Registry record only in this batch; outcomes and adverse events must be extracted from corresponding publications before use.
-    displayPriority: 70
 evidenceBucket: trial_registry_context
 whyItMatters: It is a provenance source for adjacent HIIT volume comparisons and time-burden boundaries in metabolic syndrome.
 potentialMurphEndpoints:

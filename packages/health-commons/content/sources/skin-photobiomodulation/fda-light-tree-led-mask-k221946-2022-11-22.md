@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Device labeling context reports 10-minute treatments, five times weekly for six weeks; no independent efficacy follow-up extracted.
   aggregateRole: context
   cohortKey: fda-light-tree-mask-2022
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: fda-light-tree-mask-2022
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Full-face OTC wrinkle mask uses red 630±5 nm and NIR 830 nm LEDs.
-    implication: Useful for benchmarking contemporary mask parameters such as intensity, session length, LED count, and cumulative dose.
-    caveat: Regulatory substantial-equivalence statements do not establish efficacy for Murph skin-texture outcomes.
-    displayPriority: 40
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Provides a concrete consumer-mask implementation profile near common red/NIR protocol ranges while preserving the regulatory/evidence boundary.
 potentialMurphEndpoints:

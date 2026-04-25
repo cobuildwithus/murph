@@ -35,17 +35,6 @@ researchEvidence:
   durationLabel: Not applicable; included-study schedules and follow-up durations varied widely
   aggregateRole: synthesis
   cohortKey: martin-perez-2025-fibromyalgia-review
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: fm-pbmt-systematic-review
-    stance: mixed
-    scope: adjacent_variant
-    result: mixed
-    headline: Fibromyalgia systematic review reported overall PBMT benefit and suggested more sustained effects for whole-body delivery than localized treatment.
-    implication: Useful for comparing sibling variants and locating relevant fibromyalgia trials, but not for direct protocol claims.
-    caveat: The review combines localized and whole-body delivery modes, heterogeneous protocols, and studies with varied risk of bias.
-    displayPriority: 35
 evidenceBucket: Chronic pain/fibromyalgia whole-body PBM sibling variant
 whyItMatters: This review is the broadest fibromyalgia-specific PBMT synthesis in the batch and helps separate whole-body sibling-variant signals from localized PBMT literature.
 potentialMurphEndpoints:

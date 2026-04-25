@@ -35,17 +35,6 @@ researchEvidence:
   durationLabel: "4-week sauna-plus-resistance intervention"
   aggregateRole: "primary"
   cohortKey: "vojta-2025-extreme-heat-resistance-rct"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
-    groupId: "intervention-design-training-and-mixed-results"
-    stance: mixed
-    scope: adjacent_variant
-    result: mixed
-    headline: "Four-week 100 °C sauna plus resistance training is a high-burden training intervention."
-    implication: "Use as a boundary case for heat dose and training context, not a default consumer recipe."
-    caveat: "Extreme heat plus resistance training differs from the standard 15–20 minute stand-alone protocol."
-    displayPriority: 150
 evidenceBucket: Intervention design / reality checks
 whyItMatters: Adds a newer randomized dry-sauna training study and defines an upper-bound intensity that is far more aggressive than most consumer protocols.
 potentialMurphEndpoints:

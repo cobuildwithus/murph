@@ -33,17 +33,6 @@ researchEvidence:
   notes:
     - Canonical ledger records: 268.
     - Normalized extracted source-page drafts: 268 including ledger-completion stubs before bibliography.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: source-ledger-bibliography
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: Bibliography for the protocol package; not itself an outcome study.
-    implication: Use this page to find the underlying corpus and audit source coverage.
-    caveat: Claims should cite the individual source keys rather than relying on this bibliography page alone.
-    displayPriority: 100
 sourceLedger:
   protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
   familyKey: experiment_family:tabata-interval-training

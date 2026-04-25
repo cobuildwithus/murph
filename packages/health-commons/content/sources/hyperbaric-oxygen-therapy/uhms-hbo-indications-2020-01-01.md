@@ -36,37 +36,6 @@ researchEvidence:
     - "Ledger directness: direct_protocol"
     - "Ledger claim use: supports-protocol"
     - "Ledger priority: backbone"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "identity_boundary_supervision_and_variant_separation"
-    stance: "supports"
-    scope: "direct_protocol"
-    result: "positive"
-    headline: "Core UHMS definitional and indication page; explicitly distinguishes true HBOT from 'mild hyperbaric oxygen' use."
-    implication: "Use this source according to its ledger role: supports-protocol / direct_protocol."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "clinical-hbot-definition-and-supervision"
-    stance: "supports"
-    scope: "direct_protocol"
-    result: "positive"
-    headline: "Core UHMS definitional and indication page; explicitly distinguishes true HBOT from 'mild hyperbaric oxygen' use."
-    implication: "Use this source according to its ledger role: supports-protocol / direct_protocol."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "healthy-aging-neurocognitive-and-performance-claims"
-    stance: "supports"
-    scope: "direct_protocol"
-    result: "positive"
-    headline: "Core UHMS definitional and indication page; explicitly distinguishes true HBOT from 'mild hyperbaric oxygen' use."
-    implication: "Use this source according to its ledger role: supports-protocol / direct_protocol."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
 evidenceBucket: "Identity, boundary, supervision, and variant separation"
 claimUse: "supports-protocol"
 directness: "direct_protocol"

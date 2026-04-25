@@ -34,20 +34,6 @@ researchEvidence:
   durationLabel: "Acute alcohol plus sauna exposure"
   aggregateRole: "primary"
   cohortKey: "roine-1992-alcohol-sauna-volunteers"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:morning-blood-pressure
-    headline: "This crossover study tested sauna exposure with alcohol in healthy adults. The main finding is that alcohol can change the cardiac, blood-pressure, electrolyte, and cortisol context of sauna bathing."
-    implication: "This source supports logging alcohol and avoiding alcohol as a confounder during the experiment."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 60
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

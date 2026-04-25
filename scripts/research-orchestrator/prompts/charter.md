@@ -55,7 +55,7 @@ Return 6 to 10 discovery shards. For each shard:
 Define the fields every later source batch must extract:
 - source metadata
 - researchEvidence
-- protocolEvidence
+- standalone evidence_appraisal records
 - finding IDs
 - directness
 - claimUse
@@ -120,7 +120,7 @@ Return the following JSON blocks exactly once, using these exact headings and fe
 ## SOURCE_EXTRACTION_SCHEMA_V1
 ```json
 {
-  "fields": ["source metadata", "researchEvidence", "protocolEvidence"]
+  "fields": ["source metadata", "researchEvidence", "standalone evidence_appraisal records"]
 }
 ```
 

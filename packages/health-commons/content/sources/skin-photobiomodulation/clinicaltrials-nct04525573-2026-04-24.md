@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Not extracted from available batch notes.
   aggregateRole: context
   cohortKey: nct04525573
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch-002-background
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: A ClinicalTrials.gov registry record describes a red/gold/IR LED combination intervention but provides no extracted outcome evidence for this batch.
-    implication: Useful only as registry context and for tracking title/intervention ambiguity.
-    caveat: No results were extracted, and available registry/search titles appeared potentially inconsistent with the protocol’s skin-photoaging target.
-    displayPriority: 70
 evidenceBucket: wavelength sibling: red-only, amber/yellow, or broad-spectrum evidence
 whyItMatters: It flags a registered red/gold/IR combination intervention but should not be used as efficacy evidence.
 potentialMurphEndpoints:

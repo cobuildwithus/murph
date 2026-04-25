@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Approximately 10 weeks, 20 minutes per session, 3 times per week, total 30 sessions
   aggregateRole: primary
   cohortKey: nct07271927-parkinsons-disease
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: context_only
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    headline: Parkinson's registry plans about 30 whole-body PBM sessions over 10 weeks with motor, balance, cognitive, and safety endpoints.
-    implication: Useful for neurologic-disease implementation recall and safety screening, but not for efficacy claims because the study is open-label and single-arm.
-    caveat: Registry-only, uncontrolled, and disease-specific; no placebo arm or results are available.
-    displayPriority: 10
 evidenceBucket: Emerging disease-specific whole-body PBM variants
 whyItMatters: Shows that whole-body PBM is being tested in Parkinson's disease with explicit motor and cognitive outcome batteries and a safety frame, extending recall into neurologic disease.
 potentialMurphEndpoints:

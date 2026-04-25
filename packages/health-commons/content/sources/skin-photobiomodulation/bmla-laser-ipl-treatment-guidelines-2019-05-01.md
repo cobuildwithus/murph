@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Procedure-safety guidance; no treatment follow-up cohort.
   aggregateRole: context
   cohortKey: bmla-light-treatment-guideline-2019
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: bmla-light-treatment-guideline-2019
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: BMLA guideline supports conservative boundaries for professional light-based treatments.
-    implication: Use for safety-only protocol guardrails around eye protection, consent, active skin disorders, recent UV exposure, and adverse-response documentation.
-    caveat: Guideline is mainly laser/IPL and professional-procedure oriented; it should not be treated as efficacy evidence for LED PBM.
-    displayPriority: 60
 evidenceBucket: professional light-device procedure safety guideline
 whyItMatters: Helps define conservative exclusion and escalation anchors for people recently exposed to energy-based cosmetic procedures or with active skin reactions.
 potentialMurphEndpoints:

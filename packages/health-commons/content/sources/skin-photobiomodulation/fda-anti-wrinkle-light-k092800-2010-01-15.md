@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Device-use context reports a user-controlled 3-minute treatment; clinical follow-up not extracted.
   aggregateRole: context
   cohortKey: fda-anti-wrinkle-light-2010
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: fda-anti-wrinkle-light-2010
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Handheld periocular wrinkle device used 605, 630, 660, and 855 nm LEDs.
-    implication: Useful for historical label and periocular-use context, especially when separating eye-adjacent treatments from full-face masks.
-    caveat: This is a regulatory device record, not a source for standalone efficacy claims.
-    displayPriority: 50
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Frames early handheld anti-wrinkle LED device designs and reinforces the need for periocular-use caution.
 potentialMurphEndpoints:

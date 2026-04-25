@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Five eight-interval Tabata blocks with one-minute rests between movements
   cohortKey: crossfit-tabata-this-2004-06-09
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Defines the public 20/10 × 8 Tabata interval pattern but embeds it in a larger five-movement benchmark.
-    implication: Useful for exact timing and scoring terminology while preserving the boundary that benchmark volume is larger than a single Tabata block.
-    caveat: External benchmark programming; no controlled efficacy, biomarker, or adverse-event data.
-    displayPriority: 50
 evidenceBucket: external_protocol_claims
 whyItMatters: It anchors a widely copied public definition of 20/10 × 8 while showing how public benchmarks can multiply the original dose.
 potentialMurphEndpoints:

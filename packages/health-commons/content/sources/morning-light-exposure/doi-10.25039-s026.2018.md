@@ -35,17 +35,6 @@ researchEvidence:
   durationLabel: "Not applicable"
   aggregateRole: "synthesis"
   cohortKey: "source-cohort:doi-10.25039-s026.2018"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "dose-measurement-implementation"
-    stance: "context_only"
-    scope: "same_mechanism"
-    result: "not_efficacy_evidence"
-    headline: "CIE standard defines the metrology system underlying melanopic and α-opic light metrics."
-    implication: "Use for terminology and measurement standards when discussing mEDI or biologically effective light."
-    caveat: "A metrology standard is not health-outcome evidence."
-    displayPriority: 90
 evidenceBucket: "timing_dose_circadian_metrics"
 whyItMatters: "It anchors terminology for melanopic daylight dose calculations."
 potentialMurphEndpoints:

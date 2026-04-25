@@ -41,20 +41,6 @@ researchEvidence:
   durationLabel: Six-week short-term exercise intervention
   cohortKey: clinicaltrials-nct05097352-2026-04-24
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: clinicaltrials-nct05097352-2026-04-24
-    stance: safety_boundary
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:sleep-quality
-      - biomarker:hrv-rmssd
-    headline: Registry-only HIIT context for sleep, HRV, and trauma exposure; not a Tabata protocol source.
-    implication: Useful only for safety-boundary thinking about high-intensity exercise in stress-sensitive populations.
-    caveat: Do not merge any linked publication results into this registry source page; extract publications under separate source keys.
-    displayPriority: 75
 evidenceBucket: trial_registry_context
 whyItMatters: It flags that recovery, sleep, HRV, and trauma exposure can be relevant safety boundaries for high-intensity interval work.
 potentialMurphEndpoints:

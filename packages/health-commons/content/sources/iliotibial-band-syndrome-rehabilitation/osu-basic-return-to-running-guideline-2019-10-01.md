@@ -32,19 +32,6 @@ researchEvidence:
   cohortKey: "osu-basic-return-to-running-guideline-2019-10-01"
   notes:
     - "Metadata-pass extraction from the canonical source ledger; full-text effect details were not extracted in this pass."
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-    groupId: direct-runner-rehab
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:lateral-knee-pain
-    headline: "Merged 1 candidate row(s) from shard(s): external-clinical-protocols. External clinical template; may inform implementation comparison but is not efficacy pr..."
-    implication: "Use for context, boundary, or safety framing rather than direct efficacy claims."
-    caveat: "This source record preserves reducer classifications but does not replace source-level full-text extraction."
-    displayPriority: 55
 evidenceBucket: "external_clinical_protocol"
 whyItMatters: "Merged 1 candidate row(s) from shard(s): external-clinical-protocols. External clinical template; may inform implementation comparison but is not efficacy proof. Strong adjacent source for criterion-based return-to-run readiness and stop/progression rules when ITBS-specific protocols are sparse."
 potentialMurphEndpoints:

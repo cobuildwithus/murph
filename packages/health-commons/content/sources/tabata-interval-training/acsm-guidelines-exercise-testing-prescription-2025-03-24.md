@@ -33,18 +33,6 @@ researchEvidence:
   durationLabel: not applicable; guideline/book
   cohortKey: acsm-guidelines-exercise-testing-prescription-2025-03-24
   aggregateRole: primary
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: batch-006-safety-cardiac-screening
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Current ACSM testing and prescription standards can anchor stop-condition and contraindication language.
-    implication: Use as a current professional safety reference for intense exercise prescription boundaries; do not reproduce paywalled tables or detailed book text.
-    caveat: Book is paywalled; only metadata and public landing-page information were used here.
-    displayPriority: 35
 evidenceBucket: safety_cardiac_screening
 whyItMatters: The protocol page needs current safety anchors for vigorous intensity, testing, and stop conditions without copying copyrighted textbook content.
 potentialMurphEndpoints:

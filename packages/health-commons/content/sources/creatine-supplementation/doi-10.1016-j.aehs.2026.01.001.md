@@ -38,17 +38,6 @@ researchEvidence:
   durationLabel: "16 weeks."
   aggregateRole: primary
   cohortKey: "creatine-monohydrate:doi-10-1016-j-aehs-2026-01-001"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "batch-009"
-    stance: "supports"
-    scope: direct_protocol
-    result: "mixed"
-    headline: "3 g/day and 5 g/day may affect different endpoints in older untrained adults; generalize cautiously."
-    implication: "Recent direct dose-strategy RCT in a pragmatic older-adult training context."
-    caveat: "Adults ≥50, untrained, resistance-band training context. Small trial. Older untrained resistance-band population."
-    displayPriority: 80
 evidenceBucket: "population_boundary_adjacent_claims"
 whyItMatters: "Recent direct dose-strategy RCT in a pragmatic older-adult training context."
 potentialMurphEndpoints:

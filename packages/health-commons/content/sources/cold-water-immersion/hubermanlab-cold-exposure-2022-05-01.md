@@ -32,17 +32,6 @@ researchEvidence:
   populationLabel: Public-facing consumer audience
   aggregateRole: context
   cohortKey: huberman-cold-exposure-newsletter-2022
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:cold-water-immersion/cold-plunge
-    groupId: adjacent-variants-and-public-claims
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: This page packages protocol guidance and public claims about deliberate cold exposure, including dosing heuristics that are often repeated online.
-    implication: Useful only to map external claims users may bring in.
-    caveat: Not a primary study or a systematic review, and not suitable as evidence for protocol claims.
-    displayPriority: 50
 evidenceBucket: External protocol claims
 whyItMatters: Captures a high-salience external claim source without letting consumer protocol guidance back-fill evidence gaps.
 potentialMurphEndpoints:

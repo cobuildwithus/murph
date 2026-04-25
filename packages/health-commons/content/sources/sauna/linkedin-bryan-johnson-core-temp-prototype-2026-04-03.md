@@ -33,18 +33,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: core-temperature-dose-variant
-    stance: mixed
-    scope: measurement_context
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: "April 3 mirror reports an early core-temperature prototype with and without face-and-neck cooling."
-    implication: "Shows why cooling tactics can change the dose curve rather than merely making the same dose easier."
-    caveat: "Preliminary experiment later superseded by April 14-16 numbers."
-    displayPriority: 50
 artifacts:
   -
     artifactId: art_linkedin_bryan_johnson_core_temp_prototype_2026_04_03_html_snapshot

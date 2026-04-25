@@ -38,17 +38,6 @@ researchEvidence:
   durationLabel: Single sea immersion averaging 18 minutes 36 seconds at 13.6 °C versus non-immersion control
   aggregateRole: primary
   cohortKey: kelly-bird-2022-single-immersion-mood
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:cold-water-immersion/cold-plunge
-    groupId: direct-healthy-adult-plunge-evidence
-    stance: supports
-    scope: direct_protocol
-    result: positive
-    headline: A single cold-water immersion improved total mood disturbance scores in young healthy participants.
-    implication: Use for mood-upside hypotheses, but keep expectations tied to young healthy adults in an outdoor setting.
-    caveat: Outdoor sea immersion and expectancy effects limit generalization to indoor plunge tubs.
-    displayPriority: 30
 evidenceBucket: Direct single-immersion mood trial
 whyItMatters: One of the clearest single-session mood-positive studies in healthy young adults.
 potentialMurphEndpoints:

@@ -36,27 +36,6 @@ researchEvidence:
     - "Ledger directness: safety_boundary"
     - "Ledger claim use: context-only"
     - "Ledger priority: medium"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "adjacent_modalities_and_external_claims"
-    stance: "context_only"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "Authoritative FDA page on cleared HBOT indications, unproven claims, and consumer cautions about chambers."
-    implication: "Use this source according to its ledger role: context-only / safety_boundary."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 50
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "healthy-aging-neurocognitive-and-performance-claims"
-    stance: "context_only"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "Authoritative FDA page on cleared HBOT indications, unproven claims, and consumer cautions about chambers."
-    implication: "Use this source according to its ledger role: context-only / safety_boundary."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 50
 evidenceBucket: "Adjacent modalities and external claims"
 claimUse: "context-only"
 directness: "safety_boundary"

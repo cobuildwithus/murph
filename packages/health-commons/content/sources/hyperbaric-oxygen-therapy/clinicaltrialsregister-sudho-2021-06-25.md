@@ -36,17 +36,6 @@ researchEvidence:
     - "Ledger directness: clinical_supervised"
     - "Ledger claim use: context-only"
     - "Ledger priority: high"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "ent_and_sudden_sensorineural_hearing_loss"
-    stance: "context_only"
-    scope: "clinical_supervised"
-    result: "not_efficacy_evidence"
-    headline: "Direct randomized multicentre registry entry that may become a pivotal future source once results post. Registry record; link to later publications if matched, but do not merge blindly."
-    implication: "Use this source according to its ledger role: context-only / clinical_supervised."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 50
 evidenceBucket: "ENT and sudden sensorineural hearing loss"
 claimUse: "context-only"
 directness: "clinical_supervised"

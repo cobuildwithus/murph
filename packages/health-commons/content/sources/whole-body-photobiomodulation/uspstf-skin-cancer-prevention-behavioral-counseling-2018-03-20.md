@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: Not a single intervention follow-up; counseling recommendation informed by an evidence review
   aggregateRole: synthesis
   cohortKey: uspstf-2018-skin-cancer-counseling
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: uv-tanning-safety-boundary
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: USPSTF recommends counseling to reduce ultraviolet exposure and avoid indoor tanning, reinforcing the UV-risk boundary.
-    implication: This keeps indoor-tanning behavior and UV-risk evidence distinct from therapeutic red/NIR whole-body PBM.
-    caveat: This recommendation addresses ultraviolet exposure prevention, not therapeutic light treatment.
-    displayPriority: 45
 evidenceBucket: Adjacent-variant and exclusion boundary anchors
 whyItMatters: It grounds the UV-exposure boundary in a clinical preventive-services framework and reinforces that indoor tanning is a harm-prevention topic, not a PBM efficacy topic.
 potentialMurphEndpoints:

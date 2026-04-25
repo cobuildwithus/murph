@@ -33,17 +33,6 @@ evidenceBucket: "social_jetlag_youth_students"
 directness: "adjacent_variant"
 claimUse: "context-only"
 murphV1Priority: "low"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:consistent-wake-time/consistent-wake-time"
-    groupId: "social-jetlag-youth-and-school-context"
-    stance: "context_only"
-    scope: "adjacent_variant"
-    result: "not_efficacy_evidence"
-    headline: "Canonical Consistent Wake Time source used as adjacent, observational, measurement, or population-context evidence: Social Jetlag and Related Risks for Human Health."
-    implication: "Use this source only within the Consistent Wake Time evidence scope described by the protocol page."
-    caveat: "Do not promote this source beyond its directness and claim-use classification."
-    displayPriority: 40
 ---
 
 This source is included in the Consistent Wake Time research package for **social_jetlag_youth_students**.

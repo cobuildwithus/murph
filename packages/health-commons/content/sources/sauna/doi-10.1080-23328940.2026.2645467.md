@@ -35,17 +35,6 @@ researchEvidence:
   durationLabel: "Single acute sauna exposure"
   aggregateRole: "primary"
   cohortKey: "heinonen-2026-acute-immune-sauna"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
-    groupId: "near-term-autonomic-vascular-and-immune-signals"
-    stance: context_only
-    scope: direct_protocol
-    result: mixed
-    headline: "Acute Finnish sauna produced stronger immune-cell than cytokine responses."
-    implication: "Good mechanism context, but not a wearable outcome promise."
-    caveat: "Acute lab-marker study."
-    displayPriority: 80
 evidenceBucket: Acute and mechanistic
 whyItMatters: Newest mechanistic Finnish-sauna paper
 potentialMurphEndpoints:

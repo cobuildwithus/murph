@@ -36,17 +36,6 @@ researchEvidence:
     - "Ledger directness: clinical_supervised"
     - "Ledger claim use: context-only"
     - "Ledger priority: backbone"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "neurocognitive_and_restorative_clinical_hbot"
-    stance: "context_only"
-    scope: "clinical_supervised"
-    result: "not_efficacy_evidence"
-    headline: "Direct practice-guideline source that explicitly addresses HBOT in post-acute mTBI management."
-    implication: "Use this source according to its ledger role: context-only / clinical_supervised."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
 evidenceBucket: "Neurocognitive and restorative clinical HBOT"
 claimUse: "context-only"
 directness: "clinical_supervised"

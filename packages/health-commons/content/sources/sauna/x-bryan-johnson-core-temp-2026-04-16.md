@@ -33,18 +33,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: core-temperature-dose-variant
-    stance: mixed
-    scope: measurement_context
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: "Primary X source for the April 16 core-temperature update corroborates the threshold reinterpretation."
-    implication: "Use as provenance for the saunamaxx update while relying on readable mirrors for detail."
-    caveat: "X source and single-person report; accessibility and exact context are less stable than the mirrored writeup."
-    displayPriority: 30
 artifacts:
   -
     artifactId: art_x_bryan_johnson_core_temp_2026_04_16_html_snapshot

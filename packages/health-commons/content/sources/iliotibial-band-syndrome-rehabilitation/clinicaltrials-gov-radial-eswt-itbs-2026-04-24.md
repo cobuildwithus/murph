@@ -32,19 +32,6 @@ researchEvidence:
   cohortKey: "clinicaltrials-gov-radial-eswt-itbs-2026-04-24"
   notes:
     - "Metadata-pass extraction from the canonical source ledger; full-text effect details were not extracted in this pass."
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-    groupId: context-and-variant-boundaries
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:lateral-knee-pain
-    headline: "Merged 1 candidate row(s) from shard(s): passive-modalities-adjacent. Registry tracking only; do not use as efficacy evidence unless a linked publication/res..."
-    implication: "Use for context, boundary, or safety framing rather than direct efficacy claims."
-    caveat: "This source record preserves reducer classifications but does not replace source-level full-text extraction."
-    displayPriority: 75
 evidenceBucket: "clinical_trial_registry"
 whyItMatters: "Merged 1 candidate row(s) from shard(s): passive-modalities-adjacent. Registry tracking only; do not use as efficacy evidence unless a linked publication/results record is extracted separately. Ongoing/registered shockwave trial; useful for research tracking but not outcome claims until results are published."
 potentialMurphEndpoints:

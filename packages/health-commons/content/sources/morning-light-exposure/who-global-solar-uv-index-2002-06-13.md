@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: "Guideline; no follow-up."
   aggregateRole: "primary"
   cohortKey: "cohort:who-global-solar-uv-index-2002-06-13"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "safety-boundaries"
-    stance: "safety_boundary"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "The WHO Global Solar UV Index gives a public-health framework for deciding when outdoor light needs sun-protection boundaries."
-    implication: "Morning outdoor-light instructions should distinguish circadian light exposure from unnecessary UV exposure and use the UV Index for protection decisions."
-    caveat: "The guide supports safety framing only, not efficacy claims for morning light."
-    displayPriority: 70
 evidenceBucket: "safety_boundaries"
 whyItMatters: "The WHO Global Solar UV Index gives a public-health framework for deciding when outdoor light needs sun-protection boundaries."
 potentialMurphEndpoints:

@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: Not applicable
   aggregateRole: synthesis
   cohortKey: jung-2024-sleep-review
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: sleep-pbm-review-context
-    stance: context_only
-    scope: same_mechanism
-    result: not_efficacy_evidence
-    headline: Review says PBM-sleep research is promising but still early, heterogeneous, and under-standardized.
-    implication: Useful for mechanism mapping, safety boundaries, and endpoint ideas, not for direct whole-body efficacy claims.
-    caveat: Most summarized studies are transcranial, cervical, case-report, or special-population studies; only limited whole-body evidence appears.
-    displayPriority: 25
 evidenceBucket: Mechanism and review context
 whyItMatters: This review preserves uncertainty, mixed results, and safety caveats while mapping pathways that may matter for sleep-focused PBM experiments.
 potentialMurphEndpoints:

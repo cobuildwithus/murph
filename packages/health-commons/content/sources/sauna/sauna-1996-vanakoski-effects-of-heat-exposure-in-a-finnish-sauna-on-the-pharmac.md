@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: "Acute sauna plus midazolam exposure"
   aggregateRole: "primary"
   cohortKey: "vanakoski-1996-midazolam-sauna-volunteers"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: "This pharmacokinetic crossover study tested whether Finnish sauna heat changed midazolam handling. The main finding is a safety-context result: heat exposure can be relevant when interpreting medication metabolism and tolerance."
-    implication: "This source supports medication cautions rather than any sauna benefit claim."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 80
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

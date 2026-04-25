@@ -45,19 +45,6 @@ researchEvidence:
   aggregateRole: context
   notes:
     - Enrollment count is an estimated registry value, not an extracted analysis sample.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: clinicaltrials-nct04796532-2021-03-16
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:estimated-vo2max
-    headline: Registry describes Tabata-method HIIT in overweight women but does not provide extractable outcome evidence in this batch.
-    implication: Useful for implementation questions such as home versus class delivery and adherence context.
-    caveat: Registry-only source; do not use for outcomes unless a publication or posted results record is separately extracted.
-    displayPriority: 60
 evidenceBucket: trial_registry_context
 whyItMatters: It links a practical 20/10-style implementation to body composition, physical activity, and cardiorespiratory-fitness endpoints without providing results in this batch.
 potentialMurphEndpoints:

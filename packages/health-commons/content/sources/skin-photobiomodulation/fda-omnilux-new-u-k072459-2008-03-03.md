@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Device-use context only; clinical follow-up not extracted from this regulatory summary.
   aggregateRole: context
   cohortKey: fda-omnilux-new-u-2008
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: fda-omnilux-new-u-2008
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Early OTC periorbital wrinkle device cleared with red and near-infrared LEDs.
-    implication: Use this as device-implementation context for wavelengths and intended-use framing, not as proof of skin-texture or photoaging benefit.
-    caveat: FDA 510(k) substantial-equivalence summaries are regulatory device records and should not be counted as standalone human efficacy trials.
-    displayPriority: 40
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Anchors a historically important home-use red/NIR wrinkle device and clarifies that regulatory clearance is different from protocol efficacy evidence.
 potentialMurphEndpoints:

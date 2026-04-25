@@ -46,19 +46,6 @@ researchEvidence:
   aggregateRole: context
   notes:
     - Registry lists 16 enrolled participants and points to a published article, which should be extracted under its own source key for outcome claims.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: umin-r000063711-high-intensity-intermittent-cross-training-2024-10-08
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:estimated-vo2max
-    headline: Registry records an adjacent 20/10 cross-training protocol with alternating treadmill and bicycle bouts.
-    implication: Useful for verifying design, sample, and primary VO2max endpoint before extracting the linked publication.
-    caveat: Registry result fields do not provide effect estimates in this extraction; do not use linked publication outcomes until that article is separately extracted.
-    displayPriority: 60
 evidenceBucket: trial_registry_context
 whyItMatters: It preserves registration provenance for a modern Tabata-related cross-training study while keeping it separate from direct original protocol evidence.
 potentialMurphEndpoints:

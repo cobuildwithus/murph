@@ -35,17 +35,6 @@ researchEvidence:
   aggregateRole: "primary"
   aggregationNote: "Approximate count; same volunteer series as companion 1989 Kauppinen papers."
   cohortKey: "kauppinen-1989-sauna-shower-ice-water-volunteers"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: same_mechanism
-    result: not_efficacy_evidence
-    headline: "This acute physiology study measured endocrine responses to sauna, shower, and ice-water immersion. The main finding is that heat and cold sequences can activate stress-hormone responses."
-    implication: "This source supports caution around stacking sauna with cold exposure rather than treating the combination as a default protocol."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 170
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

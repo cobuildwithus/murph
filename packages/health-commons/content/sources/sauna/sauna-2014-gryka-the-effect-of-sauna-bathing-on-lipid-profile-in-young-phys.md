@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: "Repeated sauna sessions"
   aggregateRole: "primary"
   cohortKey: "gryka-2014-young-active-men"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: intervention-design-training-and-mixed-results
-    stance: mixed
-    scope: adjacent_variant
-    result: mixed
-    headline: "This single-arm study tested repeated sauna bathing in young physically active men and lipid markers. The main finding is that lipid and cardiometabolic markers were explored over repeated sessions, but without a strong control design."
-    implication: "This source is secondary cardiometabolic context rather than an MVP wearable endpoint."
-    caveat: "Repeated-intervention signals vary by population, dose, and outcome, so use them to justify testing rather than to promise improvement."
-    displayPriority: 20
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiometabolic record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

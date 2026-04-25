@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Duration not extracted in this batch
   cohortKey: clinicaltrials-tabata-nitric-oxide-maresin-2026-04-24
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: clinicaltrials-tabata-nitric-oxide-maresin-2026-04-24
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Registry candidate for mechanistic Tabata biomarker work, without extracted results.
-    implication: Useful as a watchlist item for nitric-oxide and inflammation-resolution biomarkers.
-    caveat: No peer-reviewed results or posted effects are available in this batch; do not cite for biomarker effects.
-    displayPriority: 85
 evidenceBucket: trial_registry_context
 whyItMatters: It flags an emerging mechanistic research direction but supplies no usable effect estimates yet.
 potentialMurphEndpoints:

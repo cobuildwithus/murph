@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Acute pre/post-treatment around a muscle-damage protocol with follow-up through 72 hours
   aggregateRole: primary
   cohortKey: nct05989815-pro-soccer-doms
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: soccer-prepost-sham-registry
-    stance: mixed
-    scope: adjacent_variant
-    result: mixed
-    headline: Completed registry materials suggest timing-dependent benefits for CK and soreness, but neither pre- nor post-exercise whole-body PBM improved muscle performance.
-    implication: Useful for sham-controlled sports implementation details and for separating soreness or biomarker signals from performance claims.
-    caveat: Evidence comes from registry materials and an attached report rather than a linked peer-reviewed publication in this batch.
-    displayPriority: 45
 evidenceBucket: Exercise-timed whole-body PBM sibling variant
 whyItMatters: This is an unusually detailed modern sham-controlled whole-body sports registry with direct timing comparisons and reported mixed results.
 potentialMurphEndpoints:

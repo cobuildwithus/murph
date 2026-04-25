@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Safety practice guidance; no treatment duration or follow-up cohort.
   aggregateRole: context
   cohortKey: govuk-light-device-guidance-2015
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: govuk-light-device-guidance-2015
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: Professional light-device guidance emphasizes controlled use, training, hazard assessment, and incident response.
-    implication: Use for safety guardrails around eye exposure, controlled areas, stop conditions, and escalation after incidents.
-    caveat: Guidance is broader than consumer red/NIR masks and includes lasers and IPL; it does not establish protocol efficacy.
-    displayPriority: 55
 evidenceBucket: professional light-device procedure safety guideline
 whyItMatters: Provides conservative safety-boundary language for optical-radiation hazards and responsible device use.
 potentialMurphEndpoints:

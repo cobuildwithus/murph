@@ -489,7 +489,7 @@ claims:
     caveats:
       - These papers mainly define upper boundaries, responder heterogeneity, or extreme-condition context rather than typical short indoor plunges.
       - Most participants were young healthy men.
-      - Several of these sources are broader in the ledger than in the later finding-level extraction; their atomic findings and source-page protocolEvidence scopes treat them as boundary or adjacent context.
+      - Several of these sources are broader in the ledger than in the later finding-level extraction; their atomic findings and standalone evidence-appraisal scopes treat them as boundary or adjacent context.
   -
     claimId: direct-evidence-centers-on-affect-stress-and-limited-cardiovascular-proxies
     type: evidence_scope

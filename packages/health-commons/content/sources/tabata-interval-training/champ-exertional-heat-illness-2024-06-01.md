@@ -34,18 +34,6 @@ researchEvidence:
   durationLabel: Prevention, field care, emergency care, hospital care, and return to duty
   cohortKey: champ-whec-2024-ehi-cpg
   aggregateRole: primary
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: safety-screening-and-stop-boundaries
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Current military CPG integrates heat illness with comorbid exertional conditions, including exertional rhabdomyolysis.
-    implication: A Tabata safety page should consider heat load, acclimatization, hydration, medications, illness, fitness, and emergency action planning rather than only interval timing.
-    caveat: Military guideline context is broader and often higher-stakes than consumer home Tabata practice.
-    displayPriority: 90
 evidenceBucket: safety_msk_rhabdo_heat_respiratory
 whyItMatters: It is a current operational safety boundary for intense exertion in heat, including prevention controls and return-to-duty management.
 potentialMurphEndpoints:

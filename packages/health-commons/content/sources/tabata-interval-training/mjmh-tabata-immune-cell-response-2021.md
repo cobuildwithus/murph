@@ -39,18 +39,6 @@ researchEvidence:
   durationLabel: 6 weeks; 3 sessions/week; four Tabata sets per session; each set used two exercise types with 20 seconds exercise and 10 seconds rest
   cohortKey: tabata-batch-002-mjmh-physically-inactive
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: wearable-and-recovery-context
-    stance: mixed
-    scope: direct_protocol
-    result: mixed
-    endpointKeys: []
-    headline: Six weeks of practical Tabata workouts increased total leukocyte and neutrophil counts, with no clear lymphocyte change and no clear body-composition change.
-    implication: Provides direct practical Tabata-workout biomarker context and confirms that HR and RPE were tracked during repeated sessions.
-    caveat: Small uncontrolled study, immune-cell surrogate endpoints, abstract/metadata-limited extraction, and the batch title 'healthy men' conflicts with canonical pages identifying physically inactive individuals.
-    displayPriority: 70
 evidenceBucket: direct_practical_20_10_trials
 whyItMatters: This source broadens the endpoint map beyond fitness by showing immune-cell biomarkers were measured during a practical Tabata-workout intervention, but it should not be treated as strong causal efficacy evidence.
 potentialMurphEndpoints:

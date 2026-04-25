@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: "Not applicable."
   aggregateRole: "primary"
   cohortKey: "cohort:who-ultraviolet-radiation-2022-06-21"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "safety-boundaries"
-    stance: "safety_boundary"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "WHO UV guidance distinguishes beneficial small UV exposure from excessive UV risk and recommends protection at UVI 3 or above."
-    implication: "Outdoor-light protocols should not equate more sun with better outcomes; use UV Index and protection measures."
-    caveat: "Safety-only public-health guidance."
-    displayPriority: 70
 evidenceBucket: "safety_boundaries"
 whyItMatters: "WHO UV guidance distinguishes beneficial small UV exposure from excessive UV risk and recommends protection at UVI 3 or above."
 potentialMurphEndpoints:

@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: Short-term oral creatine loading; exact duration not extracted from accessible record
   aggregateRole: primary
   cohortKey: cohort:doi-10.1111-j.1600-0838.1993.tb00378.x
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: repeated_sprint_power_trials
-    stance: supports
-    scope: direct_protocol
-    result: positive
-    headline: Early intermittent high-intensity exercise source directly aligned to repeated-sprint claims.
-    implication: Can support that creatine monohydrate was tested in repeated high-intensity exercise contexts.
-    caveat: Do not use for numeric effect-size claims without full text.
-    displayPriority: 70
 evidenceBucket: repeated_sprint_power_trials
 whyItMatters: This is an early direct protocol-performance source for repeated sprint/power outcomes.
 potentialMurphEndpoints:

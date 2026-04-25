@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: "Not applicable."
   aggregateRole: "primary"
   cohortKey: "cohort:aao-eye-damage-from-uv-light-2024-07-11"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "safety-boundaries"
-    stance: "safety_boundary"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "AAO public guidance supports UV eye-protection counseling for outdoor sunlight exposure."
-    implication: "Protocol safety should permit UV-blocking sunglasses/hats and advise eye-care review for ocular vulnerability or new eye symptoms."
-    caveat: "Safety-only professional guidance."
-    displayPriority: 70
 evidenceBucket: "safety_boundaries"
 whyItMatters: "AAO public guidance supports UV eye-protection counseling for outdoor sunlight exposure."
 potentialMurphEndpoints:

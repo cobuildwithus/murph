@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Position statement; dose, duration, and frequency varied across evidence base
   aggregateRole: context
   cohortKey: ranzco-red-light-nir-pbm-eye-position-statement-2020-11-01
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch003:ranzco-red-light-nir-pbm-eye-position-statement-2020-11-01:ocular
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: RANZCO Position Statement: Impact of Red Light (photobiomodulation) near infrared light therapy (NIR)
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: Addresses retinal disease therapies, not cosmetic skin texture/photoaging interventions.
-    displayPriority: 50
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It is an ophthalmology position statement that cautions about evidence limitations and dosing heterogeneity.
 potentialMurphEndpoints:

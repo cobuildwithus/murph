@@ -38,27 +38,6 @@ researchEvidence:
   durationLabel: "7 days"
   aggregateRole: primary
   cohortKey: "doi-10.1016-j.scispo.2019.07.013-trained-men"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: formulation-head-to-head-boundaries
-    stance: supports
-    scope: adjacent_variant
-    result: positive
-    headline: "Included in the protocol evidence landscape group: Formulation head-to-head boundaries."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "doi-10.1016-j.scispo.2019.07.013"
-    stance: "supports"
-    scope: direct_protocol
-    result: "no_clear_advantage"
-    headline: "Creatine hydrochloride did not clearly outperform monohydrate in a 1-week trained-men trial."
-    implication: "A short-term HCl comparison supports using monohydrate as the protocol default rather than switching to HCl for claimed absorption advantages."
-    caveat: "Short duration, male trained sample, and paywalled/full details not fully extracted; endpoints were short-term performance and hormones rather than muscle creatine retention."
-    displayPriority: 82
 evidenceBucket: "formulation_variant_boundary"
 whyItMatters: "This is a direct formulation comparator for HCl versus monohydrate and helps police claims that low-dose HCl is superior."
 potentialMurphEndpoints:

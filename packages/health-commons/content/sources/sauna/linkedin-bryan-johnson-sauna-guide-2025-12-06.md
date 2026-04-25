@@ -33,19 +33,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: personal-outcomes-not-causal
-    stance: does_not_confirm
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-    headline: "Readable LinkedIn mirror reports the same broad personal outcome claims and routine details."
-    implication: "Useful for interpreting Johnson's claims, while keeping them out of generalized efficacy copy."
-    caveat: "Mirror of a personal guide; it is not independent clinical evidence."
-    displayPriority: 30
 artifacts:
   -
     artifactId: art_linkedin_bryan_johnson_sauna_guide_2025_12_06_html_snapshot

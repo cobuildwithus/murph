@@ -32,19 +32,6 @@ researchEvidence:
   cohortKey: "mospace-itbs-cyclist-2007"
   notes:
     - "Metadata-pass extraction from the canonical source ledger; full-text effect details were not extracted in this pass."
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-    groupId: context-and-variant-boundaries
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:lateral-knee-pain
-    headline: "Merged 1 candidate row(s) from shard(s): cycling-specific-itbs. Cyclist-specific or bike-fit context; keep separate from runner return-to-run claims. Cyclist..."
-    implication: "Use for context, boundary, or safety framing rather than direct efficacy claims."
-    caveat: "This source record preserves reducer classifications but does not replace source-level full-text extraction."
-    displayPriority: 55
 evidenceBucket: "cycling_specific_adjacent_variant"
 whyItMatters: "Merged 1 candidate row(s) from shard(s): cycling-specific-itbs. Cyclist-specific or bike-fit context; keep separate from runner return-to-run claims. Cyclist-specific clinical protocol-style source with open repository access; should be treated as external protocol/context unless peer-review status is verified."
 potentialMurphEndpoints:

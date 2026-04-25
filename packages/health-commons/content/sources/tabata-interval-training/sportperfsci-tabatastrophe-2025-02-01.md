@@ -34,18 +34,6 @@ researchEvidence:
   durationLabel: Narrative source; no intervention follow-up.
   cohortKey: sportperfsci-tabatastrophe-2025-02-01
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: The report sharply separates original Tabata metabolism research from uncalibrated public 'Tabata' workouts.
-    implication: Use it as external-protocol disambiguation and a warning against public-workout overclaims.
-    caveat: Do not treat expert critique as direct clinical or efficacy evidence.
-    displayPriority: 25
 evidenceBucket: Reviews, definitions, and variant taxonomy
 whyItMatters: It is directly relevant to how a consumer-facing page should avoid public-protocol overload.
 potentialMurphEndpoints:

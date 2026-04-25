@@ -38,27 +38,6 @@ researchEvidence:
   durationLabel: "Included randomized trials of at least 5 weeks; specific durations vary"
   aggregateRole: context
   cohortKey: "older-adults-strength-training-review"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: subgroup-modifiers-and-life-stage-boundaries
-    stance: mixed
-    scope: adjacent_variant
-    result: mixed
-    headline: "Included in the protocol evidence landscape group: Subgroup modifiers and life-stage boundaries."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: "older-adult-strength-training-context"
-    stance: context_only
-    scope: general_guideline
-    result: mixed
-    headline: "Creatine plus strength training in older adults improved lean mass and upper-body strength but not lower-body strength or BMD in the reported meta-analyses."
-    implication: "Useful as population-specific background; do not generalize directly to all Murph users."
-    caveat: "Older-adult strength-training context and review-level evidence; not a direct Murph self-experiment trial."
-    displayPriority: 50
 evidenceBucket: "background_guidelines_external"
 whyItMatters: "Older adults may respond differently, and the source preserves both positive and null outcomes relevant to strength, body composition, and bone expectations."
 potentialMurphEndpoints:

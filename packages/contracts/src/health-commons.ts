@@ -717,26 +717,6 @@ export type HealthCommonsResearchEvidence = z.infer<
   typeof healthCommonsResearchEvidenceSchema
 >;
 
-export const healthCommonsProtocolEvidenceAppraisalSchema = z
-  .object({
-    protocolKey: healthCommonsKeySchema,
-    groupId: healthCommonsStableIdSchema,
-    stance: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_STANCES),
-    scope: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_SCOPES),
-    result: z.enum(HEALTH_COMMONS_PROTOCOL_EVIDENCE_RESULTS),
-    endpointKeys: z.array(healthCommonsKeySchema).optional(),
-    findingKeys: z.array(healthCommonsKeySchema).optional(),
-    headline: longStringSchema,
-    implication: longStringSchema,
-    caveat: longStringSchema.optional(),
-    displayPriority: z.number().int().optional(),
-  })
-  .strict();
-
-export type HealthCommonsProtocolEvidenceAppraisal = z.infer<
-  typeof healthCommonsProtocolEvidenceAppraisalSchema
->;
-
 export const healthCommonsEvidenceAppraisalSchema = z
   .object({
     schemaVersion: z.literal(HEALTH_COMMONS_EVIDENCE_APPRAISAL_SCHEMA_VERSION),
@@ -1192,13 +1172,28 @@ export const healthCommonsPageFrontmatterSchema = z
     source: healthCommonsSourceSchema.optional(),
     sourceFindings: z.array(healthCommonsSourceFindingSchema).optional(),
     researchEvidence: healthCommonsResearchEvidenceSchema.optional(),
-    protocolEvidence: z.array(healthCommonsProtocolEvidenceAppraisalSchema).optional(),
     researchLandscape: healthCommonsResearchLandscapeSchema.optional(),
     artifacts: z.array(healthCommonsArtifactPointerSchema).optional(),
     options: z.array(healthCommonsDisambiguationOptionSchema).optional(),
   })
   .passthrough()
   .superRefine((page, context) => {
+    const rawPage = page as Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(rawPage, "canonicalMetadata")) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "canonicalMetadata has been replaced by sourceIdentity.",
+        path: ["canonicalMetadata"],
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(rawPage, "protocolEvidence")) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "protocolEvidence has moved to standalone evidence_appraisal records.",
+        path: ["protocolEvidence"],
+      });
+    }
+
     if (page.entityType === "protocol_variant") {
       if (!page.protocol) {
         context.addIssue({

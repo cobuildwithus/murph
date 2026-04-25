@@ -31,27 +31,6 @@ researchEvidence:
   durationLabel: Registry record; extraction did not confirm completed results or a peer-reviewed follow-up window.
   aggregateRole: context
   cohortKey: nct04145999-pbm-prp-facial-rejuvenation
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: nct04145999-pbm-prp-facial-rejuvenation
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: PBM combined with PRP is an adjunctive injectable protocol, not LED-only PBM.
-    implication: Use only as an exclusion anchor and potential separate-protocol lead.
-    caveat: No peer-reviewed results extracted; injectable PRP confounds any PBM-only interpretation.
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: excluded-protocol-families
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: PBM combined with PRP is an adjunctive injectable protocol, not LED-only PBM.
-    implication: Use only as an exclusion anchor and potential separate-protocol lead.
-    caveat: No peer-reviewed results extracted; injectable PRP confounds any PBM-only interpretation.
-    displayPriority: 90
 evidenceBucket: exclusion anchor: PDT-like, photoconverter, or adjunctive PRP protocol
 whyItMatters: Prevents adjunctive injectable protocols from being folded into a home red/NIR skin-texture evidence base.
 potentialMurphEndpoints:

@@ -37,20 +37,6 @@ researchEvidence:
   durationLabel: "Acute sauna heat exposure"
   aggregateRole: "primary"
   cohortKey: "kukkonen-harjula-1989-heat-exposure-volunteers"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: near-term-autonomic-vascular-and-immune-signals
-    stance: supports
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:morning-blood-pressure
-    headline: "This acute Finnish-sauna study measured haemodynamic and hormonal responses in healthy adults. The main finding is that a sauna bath creates measurable cardiovascular and hormonal stress, even in healthy volunteers."
-    implication: "This source supports symptom screening, BP/RHR context, and conservative dose design."
-    caveat: "Acute mechanistic responses explain the heat load but are not direct repeated-protocol efficacy outcomes."
-    displayPriority: 30
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

@@ -45,19 +45,6 @@ studyDesign: Consensus statement
 modality: evening short-wavelength or melanopic light reduction
 redLightGlassesFocus: Yes
 murphV1Priority: High
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed"
-    groupId: "mechanism-dose-and-implementation"
-    stance: supports
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:sleep-onset-latency
-    headline: "Public-health light consensus supports bright days, low evening light, and darkness during sleep."
-    implication: "Frames glasses as one evening-light tool while preserving healthy daytime light exposure."
-    caveat: "Does not test glasses directly."
-    displayPriority: 30
 ---
 
 This source is included for **Public-health light guidance**.

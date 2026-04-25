@@ -30,19 +30,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: personal-outcomes-not-causal
-    stance: does_not_confirm
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-    headline: "Earlier X video thread traces the same personal outcome narrative before later Blueprint writeups."
-    implication: "Keeps the protocol lineage visible without turning early self-report claims into promised effects."
-    caveat: "Background provenance only; no controlled evidence or independent replication."
-    displayPriority: 40
 artifacts:
   -
     artifactId: art_x_bryan_johnson_most_people_sauna_wrong_2025_11_12_html_snapshot

@@ -35,47 +35,6 @@ researchEvidence:
   durationLabel: Typical loading 5-7 days; maintenance or gradual dosing over weeks.
   aggregateRole: primary
   cohortKey: cohort:ods-dietary-supplements-exercise-athletic-performance-2024-04-01
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: dose-implementation
-    stance: supports
-    scope: direct_protocol
-    result: positive
-    headline: "Included in the protocol evidence landscape group: Dose implementation: loading, maintenance, timing, and tolerability."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: gi-body-water-and-heat-hydration-tolerability
-    stance: mixed
-    scope: general_guideline
-    result: mixed
-    headline: "Included in the protocol evidence landscape group: GI, body-water, and heat/hydration tolerability."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: adult-exercise-default-scope
-    stance: supports
-    scope: direct_protocol
-    result: positive
-    headline: "Included in the protocol evidence landscape group: Healthy adult exercise scope."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: creatine-monohydrate
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: ODS frames creatine as useful mainly for repeated short, high-intensity exercise, not endurance.
-    implication: Use as background dosing, safety, and performance-scope context rather than a source-specific efficacy estimate.
-    caveat: Fact-sheet claims aggregate many studies and should be paired with primary trials or meta-analyses for efficacy claims.
-    displayPriority: 80
 evidenceBucket: background_guidelines_external
 whyItMatters: ODS summarizes creatine as a widely studied ergogenic supplement for short, high-intensity efforts, with weight gain as the most consistent side effect and limited value for endurance performance.
 potentialMurphEndpoints:

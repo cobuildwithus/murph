@@ -33,18 +33,6 @@ researchEvidence:
   durationLabel: not applicable; guideline/book
   cohortKey: acsm-exercise-testing-prescription-2021-01-01
   aggregateRole: primary
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: batch-006-safety-cardiac-screening
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Prior ACSM exercise testing and prescription standards remain useful background for safety-screening continuity.
-    implication: Use as background only if the 12th edition is unavailable or to interpret earlier sources that refer to prior ACSM editions.
-    caveat: Superseded by the 12th edition and rights-restricted; not direct protocol evidence.
-    displayPriority: 55
 evidenceBucket: safety_cardiac_screening
 whyItMatters: Some studies and forms still cite earlier ACSM editions, so the 11th edition can contextualize screening lineage.
 potentialMurphEndpoints:

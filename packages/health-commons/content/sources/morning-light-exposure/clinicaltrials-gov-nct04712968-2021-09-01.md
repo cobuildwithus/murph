@@ -35,19 +35,6 @@ researchEvidence:
   durationLabel: "Six-week intervention: minimum 30 minutes outdoors in morning daylight before 1 PM each day"
   aggregateRole: "context"
   cohortKey: "nct04712968-daylight-adjunctive-depression"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "safety-boundaries"
-    stance: "safety_boundary"
-    scope: "clinical_supervised"
-    result: "not_efficacy_evidence"
-    endpointKeys:
-      - "biomarker:sleep-quality"
-    headline: "Registry specified a six-week outdoor morning-daylight protocol of at least 30 minutes/day before 1 PM."
-    implication: "Useful for dose/timing design and adherence tooling, but not for efficacy claims."
-    caveat: "Terminated registry with actual enrollment of 12 and no extracted published results."
-    displayPriority: 65
 evidenceBucket: "direct_outdoor_daylight_protocol"
 whyItMatters: "Shows a clinically supervised protocol variant very close to Morning Outdoor Light Exposure, including timing, duration, tracker use, and a treatment-as-usual comparator."
 potentialMurphEndpoints:

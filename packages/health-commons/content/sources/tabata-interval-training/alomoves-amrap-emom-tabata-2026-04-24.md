@@ -40,18 +40,6 @@ researchEvidence:
   durationLabel: Tabata described as eight 20/10 rounds totaling about four minutes
   cohortKey: alomoves-amrap-emom-tabata-2026-04-24
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Compares Tabata with AMRAP and EMOM timer formats.
-    implication: Useful for preventing conflation of timer formats in protocol taxonomy.
-    caveat: Consumer explainer; no controlled outcomes or safety-event data.
-    displayPriority: 65
 evidenceBucket: external_protocol_claims
 whyItMatters: It shows public adjacency among workout timer labels that users may treat as interchangeable.
 potentialMurphEndpoints:

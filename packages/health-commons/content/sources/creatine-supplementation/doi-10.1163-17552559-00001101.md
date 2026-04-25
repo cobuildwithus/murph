@@ -38,27 +38,6 @@ researchEvidence:
   durationLabel: "8 weeks resistance training, 3 sessions per week"
   aggregateRole: context
   cohortKey: "doi-10.1163-17552559-00001101-trained-women"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: formulation-head-to-head-boundaries
-    stance: supports
-    scope: adjacent_variant
-    result: positive
-    headline: "Included in the protocol evidence landscape group: Formulation head-to-head boundaries."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "doi-10.1163-17552559-00001101"
-    stance: "supports"
-    scope: direct_protocol
-    result: "no_clear_advantage"
-    headline: "HCl did not produce greater oxidative-stress marker effects than monohydrate in trained women."
-    implication: "Female-population direct comparator evidence does not support replacing monohydrate with HCl for claimed superiority."
-    caveat: "Primary endpoints were oxidative stress/antioxidant biomarkers, not muscle creatine retention or classic performance outcomes; PDF redistribution rights are not established."
-    displayPriority: 70
 evidenceBucket: "formulation_variant_boundary"
 whyItMatters: "It expands direct formulation comparisons to trained women and biomarker outcomes."
 potentialMurphEndpoints:

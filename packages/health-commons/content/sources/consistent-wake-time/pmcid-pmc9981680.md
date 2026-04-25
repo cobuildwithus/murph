@@ -38,17 +38,6 @@ claimUse: "context-only"
 murphV1Priority: "medium"
 canonicalLedgerKey: "source_artifact:pmcid-pmc9981680"
 keyNormalizationNote: "PMCID-only key lowercased to satisfy current Health Commons key regex."
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:consistent-wake-time/consistent-wake-time"
-    groupId: "observational-regularity-context"
-    stance: "context_only"
-    scope: "same_mechanism"
-    result: "not_efficacy_evidence"
-    headline: "Canonical Consistent Wake Time source used as adjacent, observational, measurement, or population-context evidence: Irregular sleep and cardiometabolic risk: Clinical evidence and mechanisms."
-    implication: "Use this source only within the Consistent Wake Time evidence scope described by the protocol page."
-    caveat: "Do not promote this source beyond its directness and claim-use classification."
-    displayPriority: 40
 ---
 
 This source is included in the Consistent Wake Time research package for **sleep_regularity_observational**.

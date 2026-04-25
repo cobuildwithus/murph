@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: "6 weeks"
   aggregateRole: primary
   cohortKey: "kirksey-1999-track-field"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "sport-specific-power-and-body-composition"
-    stance: mixed
-    scope: direct_protocol
-    result: mixed
-    headline: "Creatine improved several power and lean-body-mass measures in track-and-field athletes, but endpoints were sport-specific."
-    implication: "Useful as adjacent sport-performance context, not as a broad default strength-training claim."
-    caveat: "Athlete sample, periodized preseason training, and sport-specific endpoints limit transfer to general resistance-training users; adverse events were not reported in the extracted abstract."
-    displayPriority: 95
 evidenceBucket: "strength_hypertrophy_trials"
 whyItMatters: "Preserves a primary field-sport/power trial that could otherwise be over-generalized into a generic gym-performance claim."
 potentialMurphEndpoints:
