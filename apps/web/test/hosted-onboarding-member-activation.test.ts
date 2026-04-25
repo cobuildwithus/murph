@@ -2,12 +2,21 @@ import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import type {
+  HostedMemberActivationCoreState,
+  HostedMemberSnapshot,
+} from "@/src/lib/hosted-onboarding/hosted-member-store";
 import type { HostedStripeDispatchContext } from "@/src/lib/hosted-onboarding/stripe-dispatch";
 
+type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
+  core: HostedMemberActivationCoreState;
+};
+
 const mocks = vi.hoisted(() => ({
+  clearHostedMemberPendingActivationTimeZone: vi.fn(),
   findHostedIngressByEventId: vi.fn(),
   lockHostedMemberRow: vi.fn(),
+  readHostedMemberActivationCoreState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
@@ -29,6 +38,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
 
   return {
     ...actual,
+    clearHostedMemberPendingActivationTimeZone: mocks.clearHostedMemberPendingActivationTimeZone,
+    readHostedMemberActivationCoreState: mocks.readHostedMemberActivationCoreState,
     readHostedMemberCoreState: mocks.readHostedMemberCoreState,
     readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
     updateHostedMemberCoreState: mocks.updateHostedMemberCoreState,
@@ -69,6 +80,7 @@ describe("hosted onboarding member activation", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
 
     mocks.findHostedIngressByEventId.mockResolvedValue(null);
+    mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     setActivationMemberSnapshot(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
@@ -227,6 +239,43 @@ describe("hosted onboarding member activation", () => {
             threadIsDirect: true,
           },
         }),
+      }),
+      tx: expect.anything(),
+    });
+  });
+
+  it("passes pending signup timezone into the activation wake and clears the hosted row", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        pendingActivationTimeZone: "America/Los_Angeles",
+      },
+    });
+    setActivationMemberSnapshot(member);
+
+    await activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_timezone",
+        sourceType: "stripe.invoice.paid",
+      },
+      memberId: member.core.id,
+      prisma: makeTransactionHarness() as never,
+    });
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.active,
+      memberId: "member_123",
+      prisma: expect.anything(),
+    });
+    expect(mocks.clearHostedMemberPendingActivationTimeZone).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: expect.anything(),
+    });
+    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(1, {
+      wake: expect.objectContaining({
+        kind: "member.activated",
+        timeZone: "America/Los_Angeles",
       }),
       tx: expect.anything(),
     });
@@ -466,11 +515,11 @@ describe("hosted onboarding member activation", () => {
 });
 
 function makeMemberSnapshot(overrides?: {
-  core?: Partial<HostedMemberSnapshot["core"]>;
+  core?: Partial<HostedMemberActivationSnapshot["core"]>;
   emailAuthorization?: HostedMemberSnapshot["emailAuthorization"];
   identity?: Partial<NonNullable<HostedMemberSnapshot["identity"]>>;
   routing?: HostedMemberSnapshot["routing"];
-}): HostedMemberSnapshot {
+}): HostedMemberActivationSnapshot {
   const core = overrides?.core ?? {};
   const identity = overrides?.identity ?? {};
 
@@ -480,6 +529,7 @@ function makeMemberSnapshot(overrides?: {
       billingStatus: core.billingStatus ?? HostedBillingStatus.incomplete,
       createdAt: core.createdAt ?? new Date("2026-04-12T00:00:00.000Z"),
       id: core.id ?? "member_123",
+      pendingActivationTimeZone: core.pendingActivationTimeZone ?? null,
       suspendedAt: core.suspendedAt ?? null,
       updatedAt: core.updatedAt ?? new Date("2026-04-12T00:00:00.000Z"),
     },
@@ -506,6 +556,7 @@ function makeMemberSnapshot(overrides?: {
 }
 
 function setActivationMemberSnapshot(member: HostedMemberSnapshot | null): void {
+  mocks.readHostedMemberActivationCoreState.mockResolvedValue(member?.core ?? null);
   mocks.readHostedMemberCoreState.mockResolvedValue(member?.core ?? null);
   mocks.readHostedMemberEmailAuthorization.mockResolvedValue(member?.emailAuthorization ?? null);
   mocks.readHostedMemberIdentity.mockResolvedValue(member?.identity ?? null);

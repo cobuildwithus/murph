@@ -14,6 +14,7 @@ import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 const mocks = vi.hoisted(() => ({
   inboxInit: vi.fn(),
   inboxList: vi.fn(),
+  vaultInit: vi.fn(),
 }));
 
 vi.mock("@murphai/inbox-services", () => ({
@@ -29,7 +30,8 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
   createIntegratedVaultServices() {
     return {
       core: {
-        async init(input: { vault: string }) {
+        async init(input: { timezone?: string; vault: string }) {
+          mocks.vaultInit(input);
           await mkdir(input.vault, { recursive: true });
           await writeFile(path.join(input.vault, "vault.json"), "{}", "utf8");
         },
@@ -74,6 +76,9 @@ function buildLegacyWake(input: {
         memberChannels: input.event.memberChannels as typeof DEFAULT_MEMBER_CHANNELS,
         memberId: input.event.userId ?? "member_123",
         occurredAt: input.occurredAt,
+        timeZone: typeof input.event.timeZone === "string"
+          ? input.event.timeZone
+          : null,
       });
     case "conversation.message":
       return buildHostedExecutionLinqConversationMessageWake({
@@ -326,6 +331,7 @@ test("hosted wake context still requires member activation bootstrap before foll
               linq: false,
               telegram: false,
             },
+            timeZone: "America/New_York",
             userId: "member_123",
           },
           eventId: "evt_activation",
@@ -352,6 +358,7 @@ test("hosted wake context still requires member activation bootstrap before foll
       });
     });
     await access(path.join(vaultRoot, "vault.json"));
+    assert.equal(mocks.vaultInit.mock.calls[0]?.[0]?.timezone, "America/New_York");
   } finally {
     await cleanup();
   }
@@ -417,6 +424,33 @@ test("hosted member activation enables managed Linq auto-reply when first contac
   } finally {
     restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
     restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    await cleanup();
+  }
+});
+
+test("hosted member activation uses explicit UTC vault timezone fallback when no signup hint is present", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedWakeContext(
+        vaultRoot,
+        buildLegacyWake({
+          event: {
+            kind: "member.activated",
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
+            userId: "member_123",
+          },
+          eventId: "evt_activation_no_timezone",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        }),
+        {},
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+    });
+
+    assert.equal(mocks.vaultInit.mock.calls[0]?.[0]?.timezone, "UTC");
+  } finally {
     await cleanup();
   }
 });

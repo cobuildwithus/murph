@@ -350,6 +350,7 @@ function createAuthenticatedMember() {
     billingStatus: HostedBillingStatus.not_started,
     createdAt: new Date("2026-03-27T12:00:00.000Z"),
     id: "member_123",
+    pendingActivationTimeZone: null,
     suspendedAt: null,
     updatedAt: new Date("2026-03-27T12:00:00.000Z"),
   };

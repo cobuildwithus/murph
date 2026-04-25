@@ -134,4 +134,59 @@ describe("hosted onboarding Privy completion route", () => {
       intent: "signin",
     }));
   });
+
+  it("passes a validated browser timezone to the completion service", async () => {
+    await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          timeZone: "America/Los_Angeles",
+        }),
+        headers: {
+          origin: "https://join.example.test",
+          "x-vercel-ip-timezone": "America/New_York",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+      timeZone: "America/Los_Angeles",
+    }));
+  });
+
+  it("falls back to the Vercel timezone header when the client value is invalid", async () => {
+    await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          timeZone: "Mars/Olympus",
+        }),
+        headers: {
+          origin: "https://join.example.test",
+          "x-vercel-ip-timezone": "America/New_York",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
+      timeZone: "America/New_York",
+    }));
+  });
+
+  it("omits timezone when both client and platform hints are invalid", async () => {
+    await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          timeZone: "Mars/Olympus",
+        }),
+        headers: {
+          origin: "https://join.example.test",
+          "x-vercel-ip-timezone": "Moon/Base",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(mocks.completeHostedPrivyVerification.mock.calls[0]?.[0]).not.toHaveProperty("timeZone");
+  });
 });

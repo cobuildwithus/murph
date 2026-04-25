@@ -1,6 +1,5 @@
 import {
   Prisma,
-  type HostedMember,
   type HostedShareLink,
   type PrismaClient,
 } from "@prisma/client";
@@ -12,6 +11,7 @@ import {
 import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { type HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 
 import {
   buildHostedShareAcceptanceEventId,
@@ -25,7 +25,7 @@ import {
 import type { AcceptHostedShareResult } from "./types";
 
 export async function acceptHostedShareLink(input: {
-  member?: HostedMember;
+  member?: HostedMemberCoreState;
   prisma?: PrismaClient;
   shareCode: string;
 }): Promise<AcceptHostedShareResult> {

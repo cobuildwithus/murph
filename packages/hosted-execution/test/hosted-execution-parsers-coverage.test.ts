@@ -534,6 +534,7 @@ describe("hosted execution parsers coverage", () => {
       const memberEvent = parseHostedExecutionEvent({
         kind: "member.activated",
         memberChannels: DEFAULT_MEMBER_CHANNELS,
+        timeZone: "America/Los_Angeles",
         userId: "user_123",
       });
       const deviceSyncEvent = parseHostedExecutionEvent({
@@ -567,7 +568,11 @@ describe("hosted execution parsers coverage", () => {
         userId: "user_123",
       });
 
-      expect(memberEvent.kind).toBe("member.activated");
+      if (memberEvent.kind !== "member.activated") {
+        throw new Error("Expected a member activation event.");
+      }
+
+      expect(memberEvent.timeZone).toBe("America/Los_Angeles");
       expect(deviceSyncEvent.kind).toBe("device-sync.wake");
     });
 

@@ -4,8 +4,10 @@
  * flattening them back into one wide row.
  */
 import {
+  HostedBillingStatus,
   type HostedMember,
   Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 
 import { createHostedEmailLookupKey } from "./contact-privacy";
@@ -44,6 +46,12 @@ const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>(
   updatedAt: true,
 });
 
+const hostedMemberActivationCoreStateSelect =
+  Prisma.validator<Prisma.HostedMemberSelect>()({
+    ...hostedMemberCoreStateSelect,
+    pendingActivationTimeZone: true,
+  });
+
 const hostedMemberEmailAuthorizationStateSelect =
   Prisma.validator<Prisma.HostedMemberEmailAuthorizationSelect>()({
     directPublicSenderAddressEncrypted: true,
@@ -65,6 +73,10 @@ const hostedMemberEmailAuthorizationLookupSelect =
 
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
+}>;
+
+export type HostedMemberActivationCoreState = Prisma.HostedMemberGetPayload<{
+  select: typeof hostedMemberActivationCoreStateSelect;
 }>;
 
 export interface HostedMemberVerifiedEmailFact {
@@ -161,6 +173,18 @@ export async function readHostedMemberCoreState(input: {
       id: input.memberId,
     },
     select: hostedMemberCoreStateSelect,
+  });
+}
+
+export async function readHostedMemberActivationCoreState(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberActivationCoreState | null> {
+  return input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: hostedMemberActivationCoreStateSelect,
   });
 }
 
@@ -404,7 +428,7 @@ function projectHostedMemberEmailAuthorizationLookup(
 export async function updateHostedMemberCoreState(input: {
   billingStatus?: HostedMember["billingStatus"];
   memberId: string;
-  prisma: Prisma.TransactionClient;
+  prisma: Prisma.TransactionClient | PrismaClient;
   suspendedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
   const data = {
@@ -430,6 +454,46 @@ export async function updateHostedMemberCoreState(input: {
     },
     data,
     select: hostedMemberCoreStateSelect,
+  });
+}
+
+export async function updateHostedMemberPendingActivationTimeZoneIfActivationPending(input: {
+  memberId: string;
+  pendingActivationTimeZone: string;
+  prisma: Prisma.TransactionClient | PrismaClient;
+}): Promise<boolean> {
+  const result = await input.prisma.hostedMember.updateMany({
+    where: {
+      billingStatus: {
+        in: [
+          HostedBillingStatus.incomplete,
+          HostedBillingStatus.not_started,
+        ],
+      },
+      id: input.memberId,
+    },
+    data: {
+      pendingActivationTimeZone: input.pendingActivationTimeZone,
+    },
+  });
+
+  return result.count > 0;
+}
+
+export async function clearHostedMemberPendingActivationTimeZone(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient | PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedMember.update({
+    where: {
+      id: input.memberId,
+    },
+    data: {
+      pendingActivationTimeZone: null,
+    },
+    select: {
+      id: true,
+    },
   });
 }
 
@@ -515,7 +579,11 @@ export function projectHostedMemberEmailAuthorizationState(
 function projectHostedMemberCoreState(
   member: Pick<
     HostedMember,
-    "billingStatus" | "createdAt" | "id" | "suspendedAt" | "updatedAt"
+    | "billingStatus"
+    | "createdAt"
+    | "id"
+    | "suspendedAt"
+    | "updatedAt"
   >,
 ): HostedMemberCoreState {
   return {

@@ -122,8 +122,13 @@ export async function bootstrapHostedMemberContext(
   const vaultCreated = !existsSync(vaultMetadataPath);
 
   if (vaultCreated) {
+    const timeZone = wake.kind === "member.activated"
+      ? wake.timeZone ?? "UTC"
+      : "UTC";
+
     await vaultServices.core.init({
       requestId,
+      timezone: timeZone,
       vault: vaultRoot,
     });
   }

@@ -586,6 +586,7 @@ describe("hosted wake parser contracts", () => {
         telegram: false,
       },
       occurredAt,
+      timeZone: "America/Los_Angeles",
       userId: "member-1",
     })).toEqual(buildHostedExecutionMemberActivatedWake({
       eventId: "wake_member",
@@ -596,7 +597,21 @@ describe("hosted wake parser contracts", () => {
       },
       memberId: "member-1",
       occurredAt,
+      timeZone: "America/Los_Angeles",
     }));
+
+    expect(() => parseHostedIngressEnvelope({
+      eventId: "wake_member_bad_timezone",
+      kind: "member.activated",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      occurredAt,
+      timeZone: "Mars/Olympus",
+      userId: "member-1",
+    })).toThrow(/valid IANA timezone/i);
 
     expect(parseHostedIngressEnvelope({
       eventId: "wake_notification",

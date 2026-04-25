@@ -1,7 +1,6 @@
 import {
   HostedBillingStatus,
   Prisma,
-  type HostedMember,
   type PrismaClient,
 } from "@prisma/client";
 
@@ -20,7 +19,11 @@ import {
 import {
   normalizeHostedWalletAddress,
 } from "./wallet-address";
-import { createHostedMember, readHostedMemberCoreState } from "./hosted-member-store";
+import {
+  createHostedMember,
+  type HostedMemberCoreState,
+  readHostedMemberCoreState,
+} from "./hosted-member-store";
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
@@ -50,7 +53,7 @@ export type { HostedMemberPrivyIdentityLookup };
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma?: PrismaClient;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => ensureHostedMemberForPhoneTx({
@@ -62,7 +65,7 @@ export async function ensureHostedMemberForPhone(input: {
 export async function ensureHostedMemberForPhoneTx(input: {
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
 
   if (!phoneLookupKey) {
@@ -129,10 +132,10 @@ export async function ensureHostedMemberForPhoneTx(input: {
 
 async function refreshHostedMemberForPhoneTx(input: {
   currentIdentity: HostedMemberIdentityLookup["identity"] | null;
-  member: HostedMember;
+  member: HostedMemberCoreState;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   await upsertHostedMemberIdentity({
     ...buildHostedMemberPhoneIdentityFields(input.phoneNumber),
     memberId: input.member.id,
@@ -155,7 +158,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
   now: Date;
   prisma?: PrismaClient;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => ensureHostedMemberForPrivyIdentityTx({
@@ -169,7 +172,7 @@ export async function requireExistingHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
   now: Date;
   prisma?: PrismaClient;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => requireExistingHostedMemberForPrivyIdentityTx({
@@ -183,10 +186,10 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   expectedPhoneHint?: string;
   expectedPhoneLookupKey?: string;
   identity: HostedPrivyIdentity;
-  member: HostedMember;
+  member: HostedMemberCoreState;
   prisma?: PrismaClient;
   now: Date;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
@@ -203,7 +206,7 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
   identity: HostedPrivyIdentity;
   now: Date;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
     identity: input.identity,
     prisma: input.prisma,
@@ -250,7 +253,7 @@ export async function requireExistingHostedMemberForPrivyIdentityTx(input: {
   identity: HostedPrivyIdentity;
   now: Date;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
     identity: input.identity,
     prisma: input.prisma,
@@ -277,10 +280,10 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   expectedPhoneHint?: string;
   expectedPhoneLookupKey?: string;
   identity: HostedPrivyIdentity;
-  member: HostedMember;
+  member: HostedMemberCoreState;
   prisma: Prisma.TransactionClient;
   now: Date;
-}): Promise<HostedMember> {
+}): Promise<HostedMemberCoreState> {
   await lockHostedMemberRow(input.prisma, input.member.id);
 
   const currentMember = await readHostedMemberCoreState({

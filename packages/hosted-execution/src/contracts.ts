@@ -75,6 +75,7 @@ export interface HostedExecutionMemberChannels {
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  timeZone?: string | null;
 }
 
 export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecutionBaseEvent {
@@ -304,6 +305,7 @@ export interface HostedExecutionConversationMessageWake extends HostedExecutionB
 export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseWake {
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  timeZone?: string | null;
 }
 
 export interface HostedExecutionAssistantNotificationRequestedWake

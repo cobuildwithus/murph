@@ -1,7 +1,4 @@
-import {
-  type HostedMember,
-  type PrismaClient,
-} from "@prisma/client";
+import { type PrismaClient } from "@prisma/client";
 import { assertContract, sharePackSchema, type SharePack } from "@murphai/contracts";
 
 import { getPrisma } from "../prisma";
@@ -10,7 +7,10 @@ import {
 } from "../hosted-onboarding/invite-service";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
+import {
+  readHostedMemberCoreState,
+  type HostedMemberCoreState,
+} from "../hosted-onboarding/hosted-member-store";
 
 import {
   buildHostedSharePreview,
@@ -100,7 +100,7 @@ export async function createHostedShareLink(input: {
 }
 
 export async function buildHostedSharePageData(input: {
-  authenticatedMember?: HostedMember | null;
+  authenticatedMember?: HostedMemberCoreState | null;
   inviteCode?: string | null;
   prisma?: PrismaClient;
   shareCode: string;

@@ -184,19 +184,20 @@ enum HostedIngressBehavior {
 }
 
 model HostedMember {
-  id              String                  @id
-  billingStatus   HostedBillingStatus     @default(not_started) @map("billing_status")
-  suspendedAt     DateTime?               @map("suspended_at")
-  createdAt       DateTime                @default(now()) @map("created_at")
-  updatedAt       DateTime                @updatedAt @map("updated_at")
-  invites         HostedInvite[]
-  aiUsage         HostedAiUsage[]
-  linqDailyStates HostedLinqDailyState[]
-  identity        HostedMemberIdentity?
-  routing         HostedMemberRouting?
-  billingRef      HostedMemberBillingRef?
-  emailAuthorization HostedMemberEmailAuthorization?
-  executionCursor HostedExecutionCursor?
+  id                         String                           @id
+  billingStatus              HostedBillingStatus              @default(not_started) @map("billing_status")
+  pendingActivationTimeZone  String?                          @map("pending_activation_time_zone")
+  suspendedAt                DateTime?                        @map("suspended_at")
+  createdAt                  DateTime                         @default(now()) @map("created_at")
+  updatedAt                  DateTime                         @updatedAt @map("updated_at")
+  invites                    HostedInvite[]
+  aiUsage                    HostedAiUsage[]
+  linqDailyStates            HostedLinqDailyState[]
+  identity                   HostedMemberIdentity?
+  routing                    HostedMemberRouting?
+  billingRef                 HostedMemberBillingRef?
+  emailAuthorization         HostedMemberEmailAuthorization?
+  executionCursor            HostedExecutionCursor?
   hostedIngressEvents        HostedIngressEvent[]
   hostedIngressEventAliases  HostedIngressEventAlias[]
   hostedIngressPayloads      HostedIngressPayload[]

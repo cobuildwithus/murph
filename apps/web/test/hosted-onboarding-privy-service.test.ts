@@ -68,6 +68,7 @@ type HostedMemberDelegate = {
   create?: (input: { data?: Record<string, unknown> }) => Promise<unknown>;
   findUnique?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
   update?: (input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
+  updateMany?: (input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>;
 };
 type HostedMemberFindUniqueInclude = {
   billingRef?: boolean;
@@ -158,6 +159,7 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     id: "member_123",
     linqChatId: null,
     maskedPhoneNumberHint: "*** 4567",
+    pendingActivationTimeZone: null,
     phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
     phoneNumberVerifiedAt: null,
     privyUserId: null,
@@ -377,6 +379,68 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
+  });
+
+  it("persists a valid signup timezone only as pending activation state", async () => {
+    const createdMember = makeMember({
+      id: "member_timezone",
+      phoneLookupKey: DEFAULT_PHONE_LOOKUP_KEY,
+      phoneNumberVerifiedAt: NOW,
+      privyUserId: "did:privy:user_123",
+      walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aA96045".toLowerCase(),
+      walletChainType: "ethereum",
+      walletCreatedAt: NOW,
+      walletProvider: "privy",
+    });
+    const createdInvite = makeInvite(createdMember, {
+      channel: "web",
+      id: "invite_timezone",
+      inviteCode: "public-timezone-invite",
+      memberId: "member_timezone",
+    });
+    const hostedMemberUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(createdInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue(createdMember),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
+        updateMany: hostedMemberUpdateMany,
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity(),
+        now: NOW,
+        prisma,
+        timeZone: "America/New_York",
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "public-timezone-invite",
+      memberId: "member_timezone",
+      stage: "checkout",
+    });
+
+    expect(hostedMemberUpdateMany).toHaveBeenCalledWith({
+      data: {
+        pendingActivationTimeZone: "America/New_York",
+      },
+      where: {
+        billingStatus: {
+          in: [
+            HostedBillingStatus.incomplete,
+            HostedBillingStatus.not_started,
+          ],
+        },
+        id: "member_timezone",
+      },
+    });
   });
 
   it.each([
@@ -1727,6 +1791,7 @@ function readHostedMemberDelegate(value: unknown): HostedMemberDelegate | undefi
   const create: HostedMemberDelegate["create"] | undefined = Reflect.get(value, "create");
   const findUnique: HostedMemberDelegate["findUnique"] | undefined = Reflect.get(value, "findUnique");
   const update: HostedMemberDelegate["update"] | undefined = Reflect.get(value, "update");
+  const updateMany: HostedMemberDelegate["updateMany"] | undefined = Reflect.get(value, "updateMany");
 
   return {
     ...(typeof create === "function"
@@ -1742,6 +1807,11 @@ function readHostedMemberDelegate(value: unknown): HostedMemberDelegate | undefi
     ...(typeof update === "function"
       ? {
           update,
+        }
+      : {}),
+    ...(typeof updateMany === "function"
+      ? {
+          updateMany,
         }
       : {}),
   };

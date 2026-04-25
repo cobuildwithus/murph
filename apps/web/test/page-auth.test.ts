@@ -145,6 +145,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2025-03-27T08:00:00.000Z"),
     id: "member_123",
+    pendingActivationTimeZone: null,
     suspendedAt: null,
     updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     ...overrides,
