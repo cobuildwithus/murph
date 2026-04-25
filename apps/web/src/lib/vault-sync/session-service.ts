@@ -16,6 +16,7 @@ import {
   hashHostedVaultSyncSecret,
   HOSTED_VAULT_SYNC_SESSION_TTL_MS,
   normalizeHostedVaultSyncPairingCode,
+  deleteHostedVaultSyncPayload,
   projectHostedVaultSyncSessionView,
   requireHostedVaultSyncAgentSession,
   upsertHostedVaultSyncPayload,
@@ -79,15 +80,24 @@ export async function revokeHostedVaultSyncSession(input: {
   sessionId: string;
 }): Promise<HostedVaultSyncSessionView> {
   const prisma = input.prisma ?? getPrisma();
-  await prisma.hostedVaultSyncSession.updateMany({
-    where: {
-      id: input.sessionId,
+  await prisma.$transaction(async (tx) => {
+    await tx.hostedVaultSyncSession.updateMany({
+      where: {
+        id: input.sessionId,
+        memberId: input.memberId,
+      },
+      data: {
+        agentTokenHash: null,
+        pairingCodeHash: null,
+        revokedAt: new Date(),
+        status: "revoked",
+      },
+    });
+    await deleteHostedVaultSyncPayload({
       memberId: input.memberId,
-    },
-    data: {
-      revokedAt: new Date(),
-      status: "revoked",
-    },
+      prisma: tx,
+      sessionId: input.sessionId,
+    });
   });
   const session = await prisma.hostedVaultSyncSession.findFirst({
     where: { id: input.sessionId, memberId: input.memberId },
@@ -355,8 +365,8 @@ export async function markHostedVaultSyncSessionCommittedFromRunSummary(input: {
 
   const prisma = input.prisma ?? getPrisma();
   await Promise.all(
-    sessions.map((session) =>
-      prisma.hostedVaultSyncSession.updateMany({
+    sessions.map(async (session) => {
+      await prisma.hostedVaultSyncSession.updateMany({
         where: {
           id: session.sessionId,
           memberId: input.memberId,
@@ -365,7 +375,12 @@ export async function markHostedVaultSyncSessionCommittedFromRunSummary(input: {
         data: {
           status: session.conflictCount > 0 ? "committed_with_conflicts" : "committed",
         },
-      }),
-    ),
+      });
+      await deleteHostedVaultSyncPayload({
+        memberId: input.memberId,
+        prisma,
+        sessionId: session.sessionId,
+      });
+    }),
   );
 }

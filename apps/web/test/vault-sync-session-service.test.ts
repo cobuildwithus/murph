@@ -17,11 +17,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   generateHostedVaultSyncPairingCode,
+  hashHostedVaultSyncSecret,
   HOSTED_VAULT_SYNC_SESSION_TTL_MS,
   normalizeHostedVaultSyncPairingCode,
   normalizeHostedVaultSyncSessionStatus,
   projectHostedVaultSyncPayload,
   projectHostedVaultSyncSessionView,
+  requireHostedVaultSyncAgentSession,
 } from "@/src/lib/vault-sync/shared";
 import {
   createHostedVaultSyncSession,
@@ -165,6 +167,54 @@ describe("vault sync shared projections", () => {
   });
 });
 
+describe("vault sync agent session auth", () => {
+  it("accepts the active session when the bearer token hash matches", async () => {
+    const agentToken = "vst_test_agent_token";
+    const session = buildVaultSyncAgentSession({
+      agentTokenHash: hashHostedVaultSyncSecret(agentToken),
+    });
+    const prisma = buildVaultSyncAuthPrisma(session);
+
+    await expect(requireHostedVaultSyncAgentSession({
+      prisma,
+      request: buildVaultSyncAgentRequest(agentToken),
+      sessionId: session.id,
+    })).resolves.toBe(session);
+  });
+
+  it("rejects an active session when the bearer token hash does not match", async () => {
+    const session = buildVaultSyncAgentSession({
+      agentTokenHash: hashHostedVaultSyncSecret("vst_expected_agent_token"),
+    });
+    const prisma = buildVaultSyncAuthPrisma(session);
+
+    await expect(requireHostedVaultSyncAgentSession({
+      prisma,
+      request: buildVaultSyncAgentRequest("vst_wrong_agent_token"),
+      sessionId: session.id,
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SYNC_SESSION_NOT_FOUND",
+      httpStatus: 404,
+    });
+  });
+
+  it("rejects malformed stored token hashes without length-comparison errors", async () => {
+    const session = buildVaultSyncAgentSession({
+      agentTokenHash: "short-hash",
+    });
+    const prisma = buildVaultSyncAuthPrisma(session);
+
+    await expect(requireHostedVaultSyncAgentSession({
+      prisma,
+      request: buildVaultSyncAgentRequest("vst_test_agent_token"),
+      sessionId: session.id,
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SYNC_SESSION_NOT_FOUND",
+      httpStatus: 404,
+    });
+  });
+});
+
 describe("vault sync commit projection", () => {
   it("reads plural vault-sync summaries when projecting queued session run status", async () => {
     const prisma = {
@@ -247,8 +297,12 @@ describe("vault sync commit projection", () => {
   });
 
   it("marks committed sessions with conflicts when the plural run summary reports vault-sync conflicts", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
+      hostedVaultSyncPayload: {
+        deleteMany,
+      },
       hostedVaultSyncSession: {
         updateMany,
       },
@@ -279,11 +333,21 @@ describe("vault sync commit projection", () => {
         },
       },
     });
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+        sessionId: "vsi_123",
+      },
+    });
   });
 
   it("ignores legacy singular vault-sync summaries after the hard cut", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
+      hostedVaultSyncPayload: {
+        deleteMany,
+      },
       hostedVaultSyncSession: {
         updateMany,
       },
@@ -303,11 +367,16 @@ describe("vault sync commit projection", () => {
     });
 
     expect(updateMany).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
   it("marks every vault-sync session reported by one run summary", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
+      hostedVaultSyncPayload: {
+        deleteMany,
+      },
       hostedVaultSyncSession: {
         updateMany,
       },
@@ -351,5 +420,58 @@ describe("vault sync commit projection", () => {
         memberId: "member_123",
       }),
     }));
+    expect(deleteMany).toHaveBeenCalledTimes(2);
+    expect(deleteMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        memberId: "member_123",
+        sessionId: "vsi_first",
+      },
+    });
+    expect(deleteMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        memberId: "member_123",
+        sessionId: "vsi_second",
+      },
+    });
   });
 });
+
+function buildVaultSyncAgentRequest(agentToken: string): Request {
+  return new Request("https://join.example.test/api/vault-sync/agent/sessions/vsi_123", {
+    headers: {
+      authorization: `Bearer ${agentToken}`,
+    },
+  });
+}
+
+function buildVaultSyncAgentSession(overrides: {
+  agentTokenHash: string | null;
+}) {
+  return {
+    agentTokenHash: overrides.agentTokenHash,
+    createdAt: new Date("2026-04-21T00:00:00.000Z"),
+    direction: "local_to_hosted",
+    expiresAt: new Date("2099-04-21T01:00:00.000Z"),
+    id: "vsi_123",
+    localManifestHash: null,
+    memberId: "member_123",
+    pairingCodeHash: null,
+    queuedAt: null,
+    queuedIngressEventId: null,
+    revokedAt: null,
+    sourceSchemaVersion: null,
+    sourceVaultId: null,
+    sourceVaultTitle: null,
+    status: "exchanged",
+    updatedAt: new Date("2026-04-21T00:00:00.000Z"),
+    uploadedAt: null,
+  };
+}
+
+function buildVaultSyncAuthPrisma(session: ReturnType<typeof buildVaultSyncAgentSession>) {
+  return {
+    hostedVaultSyncSession: {
+      findUnique: vi.fn().mockResolvedValue(session),
+    },
+  } as never;
+}

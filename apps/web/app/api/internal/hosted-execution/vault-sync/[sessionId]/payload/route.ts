@@ -3,7 +3,11 @@ import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-executi
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
-import { projectHostedVaultSyncPayload } from "@/src/lib/vault-sync/shared";
+import {
+  deleteHostedVaultSyncPayload,
+  isHostedVaultSyncPayloadTerminalStatus,
+  projectHostedVaultSyncPayload,
+} from "@/src/lib/vault-sync/shared";
 
 export const GET = withJsonError(async (
   request: Request,
@@ -11,11 +15,27 @@ export const GET = withJsonError(async (
 ) => {
   const memberId = await requireHostedCloudflareCallbackRequest(request);
   const sessionId = await resolveDecodedRouteParam(context.params, "sessionId");
-  const record = await getPrisma().hostedVaultSyncPayload.findUnique({
+  const prisma = getPrisma();
+  const record = await prisma.hostedVaultSyncPayload.findUnique({
     where: { sessionId },
     include: { session: true },
   });
-  if (!record || record.memberId !== memberId || record.session.revokedAt) {
+  const unavailable = Boolean(
+    record
+    && (
+      record.session.revokedAt
+      || record.session.expiresAt <= new Date()
+      || isHostedVaultSyncPayloadTerminalStatus(record.session.status)
+    ),
+  );
+  if (record && record.memberId === memberId && unavailable) {
+    await deleteHostedVaultSyncPayload({
+      memberId,
+      prisma,
+      sessionId,
+    });
+  }
+  if (!record || record.memberId !== memberId || unavailable) {
     throw hostedOnboardingError({
       code: "HOSTED_VAULT_SYNC_PAYLOAD_NOT_FOUND",
       httpStatus: 404,

@@ -34,8 +34,8 @@ export const POST = withJsonError(async (request: Request) => {
         memberId: userId,
         redactedSummary: response.run.redactedSummary,
       });
-    } catch (error) {
-      console.warn("Failed to update hosted vault sync session status after run commit.", error);
+    } catch {
+      console.warn("Failed to update hosted vault sync session status after run commit.");
     }
   }
 
