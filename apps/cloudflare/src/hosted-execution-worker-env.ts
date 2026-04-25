@@ -111,7 +111,7 @@ export function readHostedExecutionWorkerEnvironment(
     ),
     webControlTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS),
-      120_000,
+      30_000,
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS",
     ),
   };

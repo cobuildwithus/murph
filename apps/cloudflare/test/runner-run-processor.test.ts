@@ -97,7 +97,7 @@ function createReplicaPersistenceProcessor(input: {
     env: {
       maxEventAttempts: 3,
       runnerTimeoutMs: 60_000,
-      webControlTimeoutMs: 120_000,
+      webControlTimeoutMs: 30_000,
       webCallbackSigning: {
         keyId: "v1",
         privateKeyJwkJson: "{\"kty\":\"EC\"}",
@@ -195,7 +195,7 @@ function createInvokeRunnerProcessor(input: {
     env: {
       maxEventAttempts: 3,
       runnerTimeoutMs: input.runnerTimeoutMs ?? 60_000,
-      webControlTimeoutMs: input.webControlTimeoutMs ?? 120_000,
+      webControlTimeoutMs: input.webControlTimeoutMs ?? 30_000,
       webCallbackSigning: input.webCallbackSigning === null ? null : {
         keyId: "v1",
         privateKeyJwkJson: "{\"kty\":\"EC\"}",
@@ -2183,7 +2183,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       stateStore,
     } = createInvokeRunnerProcessor({
       runnerTimeoutMs: 600_000,
-      webControlTimeoutMs: 120_000,
+      webControlTimeoutMs: 30_000,
     });
     stateStore.readActiveRunLease.mockResolvedValue({
       eventId: "hosted-run:run-active",
@@ -2245,7 +2245,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       ensureRunnerStores: vi.fn(),
       env: {
         runnerTimeoutMs: 60_000,
-        webControlTimeoutMs: 120_000,
+        webControlTimeoutMs: 30_000,
         webCallbackSigning: {
           keyId: "v1",
           privateKeyJwkJson: "{\"kty\":\"EC\"}",

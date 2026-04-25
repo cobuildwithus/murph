@@ -129,7 +129,7 @@ export function readHostedDeployAutomationEnvironment(
     ),
     webControlTimeoutMs: normalizePositiveIntegerString(
       source.CF_WEB_CONTROL_TIMEOUT_MS,
-      "120000",
+      "30000",
       "CF_WEB_CONTROL_TIMEOUT_MS",
     ),
     workerName: requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
