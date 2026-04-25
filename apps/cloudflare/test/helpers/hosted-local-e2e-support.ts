@@ -13,7 +13,6 @@ const defaultHostedRunnerEnvProfiles = [
 export type HostedLocalAssistantProviderMode = "stub" | "live";
 
 export interface HostedLocalAssistantProviderStubState {
-  currentResponseText: string | null;
   queuedResponseTexts: string[];
 }
 
@@ -50,7 +49,6 @@ function dequeueAssistantProviderResponseText(input: {
 }): string | null {
   return (
     input.responseState?.queuedResponseTexts.shift()
-    ?? input.responseState?.currentResponseText
     ?? input.fallbackResponseText
     ?? null
   );

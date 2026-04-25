@@ -157,6 +157,7 @@ describe("hosted local Linq first-contact e2e", () => {
       expectedPath: expectedTypingPath,
     });
     const requestCountBeforeReply = requireLinqStub().observedRequests.length;
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT]);
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       directReplyUserId,
       materializedChatId,
@@ -171,7 +172,6 @@ describe("hosted local Linq first-contact e2e", () => {
       reason: "wake-appended-active-member",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(directReplyUserId);
     const completionPromise = requireScenario()
       .waitForHostedCompletion(directReplyUserId);
@@ -269,6 +269,7 @@ describe("hosted local Linq first-contact e2e", () => {
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
 
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       fastReplyUserId,
       materializedChatId,
@@ -298,7 +299,6 @@ describe("hosted local Linq first-contact e2e", () => {
       reason: "wake-appended-active-member",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
     const statusBeforeWait = await requireScenario().harness.readUserStatus(fastReplyUserId);
     await requireScenario().waitForLatestPendingWake(fastReplyUserId);
     await requireScenario().waitForHostedCompletion(fastReplyUserId);

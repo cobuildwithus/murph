@@ -50,7 +50,7 @@
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
     "runner:bundle:hosted-local": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-bundle-only-dependencies",
     "runner:bundle:assemble-only": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
-    "runner:docker:base": "docker build -f ../../Dockerfile.cloudflare-hosted-runner-base -t murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en ../..",
+    "runner:docker:base": "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-base -t murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en ../..",
     "runner:docker:build": "pnpm runner:bundle && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     "runner:docker:smoke:prepare": "pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only && node ../../scripts/rm-paths.mjs .deploy/smoke-dist && pnpm --dir ../.. exec tsc -p apps/cloudflare/tsconfig.smoke-build.json --pretty false && pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/sync-smoke-runner-bundle.ts",
     "runner:docker:smoke:built": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-docker-smoke.ts",

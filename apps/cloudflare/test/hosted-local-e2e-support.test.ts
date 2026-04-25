@@ -21,7 +21,6 @@ describe("startAssistantProviderStubServer", () => {
   it("serves queued responses through the OpenAI Responses API shape", async () => {
     const server = await startAssistantProviderStubServer({
       responseState: {
-        currentResponseText: null,
         queuedResponseTexts: ['{"kind":"send_message","privateSummary":"deliver","text":"hello"}'],
       },
     });
@@ -63,6 +62,25 @@ describe("startAssistantProviderStubServer", () => {
           input_tokens: 24,
           output_tokens: 11,
         },
+      });
+
+      const unqueuedResponse = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider stub")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: "hello again",
+            model: "stub-openrouter-model",
+          }),
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(unqueuedResponse.status).toBe(500);
+      await expect(unqueuedResponse.json()).resolves.toMatchObject({
+        error: expect.stringContaining("without a queued response"),
       });
     } finally {
       await stopHttpStubServer(server);

@@ -79,6 +79,7 @@ describe("hosted local Linq webhook e2e", () => {
       text: "U can call me Rocket Man",
     });
 
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT]);
     const webhookResponse = await postSignedLinqWebhook(webhookEvent);
     expect(webhookResponse.status).toBe(202);
     await expect(webhookResponse.json()).resolves.toMatchObject({
@@ -86,7 +87,6 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "wake-appended-active-member",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(webhookUserId);
     await requireScenario().waitForHostedCompletion(webhookUserId);
 
@@ -123,6 +123,7 @@ describe("hosted local Linq webhook e2e", () => {
       text: "I want to build more strength, improve endurance, and get fitter overall.",
     });
 
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
     const firstResponse = await postSignedLinqWebhook(firstWebhook);
     const secondResponse = await postSignedLinqWebhook(secondWebhook);
 
@@ -137,7 +138,6 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "wake-appended-active-member",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
     await requireScenario().waitForLatestPendingWake(webhookUserId);
     await requireScenario().waitForHostedCompletion(webhookUserId);
 
