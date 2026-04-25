@@ -298,6 +298,7 @@ describe("hosted runtime context coverage", () => {
       });
       expect(mocks.vaultInit).toHaveBeenCalledWith({
         requestId: "evt_activation",
+        timezone: "America/New_York",
         vault: vaultRoot,
       });
       await expect(readAutomationState(vaultRoot)).resolves.toMatchObject({
