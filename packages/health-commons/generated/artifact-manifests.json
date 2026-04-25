@@ -874,6 +874,12 @@
       "schemaVersion": "murph.commons.artifact-manifest.v1"
     },
     {
+      "artifacts": [],
+      "description": "Rights-safe artifact manifest for the Consistent Wake Time research run. The canonical ledger and extraction outputs recommend source pages and external links only; no PDFs, full-text binaries, or screenshots are staged for Git or R2 until rights and hashes are reviewed.",
+      "manifestKey": "source_artifact:consistent-wake-time-research-artifacts",
+      "schemaVersion": "murph.commons.artifact-manifest.v1"
+    },
+    {
       "artifacts": [
         {
           "accessNotes": "Open-access PDF candidate from the normalized artifact candidates. No PDF is included in this package; re-check license, hash locally, and upload only after rights review.",
