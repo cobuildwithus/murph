@@ -18,6 +18,13 @@ import {
 export const HOSTED_VAULT_SYNC_PAYLOAD_SCHEMA = "murph.hosted-vault-sync-payload.v1";
 export const HOSTED_VAULT_SYNC_SESSION_TTL_MS = 10 * 60 * 1000;
 export const HOSTED_VAULT_SYNC_MAX_BUNDLE_BASE64_LENGTH = 32 * 1024 * 1024;
+export const HOSTED_VAULT_SYNC_PAYLOAD_TERMINAL_STATUSES = [
+  "committed",
+  "committed_with_conflicts",
+  "expired",
+  "failed",
+  "revoked",
+] as const satisfies readonly HostedVaultSyncSessionStatus[];
 
 const HOSTED_VAULT_SYNC_PAYLOAD_FIELD = "hosted-vault-sync.payload";
 const HOSTED_VAULT_SYNC_PAIRING_CODE_LENGTH = 10;
@@ -149,7 +156,12 @@ export async function requireHostedVaultSyncAgentSession(input: {
   const session = await prisma.hostedVaultSyncSession.findUnique({
     where: { id: input.sessionId },
   });
-  if (!session || !session.agentTokenHash || session.agentTokenHash !== hashHostedVaultSyncSecret(token)) {
+  const tokenHash = hashHostedVaultSyncSecret(token);
+  if (
+    !session
+    || !session.agentTokenHash
+    || !hostedVaultSyncSecretHashesEqual(session.agentTokenHash, tokenHash)
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_VAULT_SYNC_SESSION_NOT_FOUND",
       httpStatus: 404,
@@ -164,6 +176,17 @@ export async function requireHostedVaultSyncAgentSession(input: {
     });
   }
   return session;
+}
+
+function hostedVaultSyncSecretHashesEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 export async function upsertHostedVaultSyncPayload(input: {
@@ -193,6 +216,23 @@ export async function upsertHostedVaultSyncPayload(input: {
       payloadSchema: HOSTED_VAULT_SYNC_PAYLOAD_SCHEMA,
     },
   });
+}
+
+export async function deleteHostedVaultSyncPayload(input: {
+  memberId?: string | null;
+  prisma: VaultSyncClient;
+  sessionId: string;
+}): Promise<void> {
+  await input.prisma.hostedVaultSyncPayload.deleteMany({
+    where: {
+      sessionId: input.sessionId,
+      ...(input.memberId ? { memberId: input.memberId } : {}),
+    },
+  });
+}
+
+export function isHostedVaultSyncPayloadTerminalStatus(status: string): boolean {
+  return (HOSTED_VAULT_SYNC_PAYLOAD_TERMINAL_STATUSES as readonly string[]).includes(status);
 }
 
 export function projectHostedVaultSyncPayload(
