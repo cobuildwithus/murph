@@ -1,5 +1,5 @@
-import { useUpdateEmail } from "@privy-io/react-auth";
-import { useEffect, useState } from "react";
+import { useLinkAccount, useUpdateEmail, useUser } from "@privy-io/react-auth";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   HostedPrivyEmailAccount,
@@ -22,8 +22,8 @@ export function useHostedEmailSettingsController(input: {
   authenticated: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
 }) {
-  const { sendCode, state, verifyCode } = useUpdateEmail();
-  const linkedAccounts = input.initialLinkedAccounts;
+  const { refreshUser, user } = useUser();
+  const linkedAccounts = readPrivyLinkedAccounts(user) ?? input.initialLinkedAccounts;
   const baseDisplayState = resolveHostedEmailSettingsDisplayState({
     linkedAccounts,
   });
@@ -35,6 +35,22 @@ export function useHostedEmailSettingsController(input: {
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
+  const updateEmailErrorRef = useRef(false);
+  const { sendCode, state, verifyCode } = useUpdateEmail({
+    onError: () => {
+      updateEmailErrorRef.current = true;
+    },
+  });
+  const { linkEmail } = useLinkAccount({
+    onError: () => {
+      setErrorMessage("We could not link that email address.");
+    },
+    onSuccess: (params) => {
+      if (params.linkMethod === "email") {
+        void handleLinkedEmailAccount(params.user);
+      }
+    },
+  });
 
   const overrideDisplayState = resolveHostedEmailSettingsDisplayState({
     linkedAccounts,
@@ -44,6 +60,7 @@ export function useHostedEmailSettingsController(input: {
   const effectiveVerifiedEmail = overrideDisplayState.currentVerifiedEmail;
   const normalizedCurrentEmail = overrideDisplayState.normalizedCurrentEmail;
   const canManageEmail = input.authenticated;
+  const canSendEmailUpdateCode = Boolean(effectiveCurrentEmail?.address);
   const isAwaitingCode = state.status === "awaiting-code-input";
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
@@ -78,7 +95,13 @@ export function useHostedEmailSettingsController(input: {
     }
 
     try {
+      updateEmailErrorRef.current = false;
       await sendCode({ newEmailAddress: nextEmailAddress });
+
+      if (updateEmailErrorRef.current) {
+        throw new Error("We could not send a verification code to that email address.");
+      }
+
       setPendingEmailAddress(nextEmailAddress);
       setDialogOpen(true);
       setCode("");
@@ -88,6 +111,11 @@ export function useHostedEmailSettingsController(input: {
   }
 
   async function handleSendCode(rawEmailAddress?: string) {
+    if (!canSendEmailUpdateCode) {
+      handleLinkEmail();
+      return;
+    }
+
     const nextEmailAddress = normalizeEmailAddress(rawEmailAddress ?? emailAddress);
 
     if (!nextEmailAddress) {
@@ -103,8 +131,13 @@ export function useHostedEmailSettingsController(input: {
   }
 
   async function handleResendCode(rawEmailAddress?: string) {
+    if (!canSendEmailUpdateCode) {
+      handleLinkEmail();
+      return;
+    }
+
     const nextEmailAddress = rawEmailAddress === undefined
-      ? normalizeEmailAddress(emailAddress) ?? pendingEmailAddress
+      ? normalizeEmailAddress(emailAddress)
       : normalizeEmailAddress(rawEmailAddress);
 
     if (!nextEmailAddress) {
@@ -137,9 +170,16 @@ export function useHostedEmailSettingsController(input: {
     let verifiedEmailAddress: string | null = null;
 
     try {
-      await verifyCode({ code: normalizedCode });
+      updateEmailErrorRef.current = false;
+      const updateResult = await verifyCode({ code: normalizedCode });
+
+      if (updateEmailErrorRef.current || !updateResult?.user) {
+        throw new Error("We could not verify that code.");
+      }
+
+      const refreshedUser = await refreshUser().catch(() => updateResult?.user ?? null);
       const nextEmail = resolveHostedEmailSettingsDisplayState({
-        linkedAccounts,
+        linkedAccounts: readPrivyLinkedAccounts(refreshedUser) ?? linkedAccounts,
       }).currentVerifiedEmail;
 
       verifiedEmailAddress = nextEmail?.address ?? pendingEmailAddress ?? normalizeEmailAddress(emailAddress);
@@ -166,6 +206,44 @@ export function useHostedEmailSettingsController(input: {
     }
 
     await syncVerifiedEmailAddress(verifiedEmailAddress, "verify");
+  }
+
+  function handleLinkEmail() {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setCode("");
+    setPendingEmailAddress(null);
+    setDialogOpen(false);
+
+    if (!input.authenticated) {
+      setErrorMessage("Sign in with your existing hosted account before you try to link an email address.");
+      return;
+    }
+
+    linkEmail();
+  }
+
+  async function handleLinkedEmailAccount(linkedUser: { linkedAccounts?: unknown }) {
+    const refreshedUser = await refreshUser().catch(() => linkedUser);
+    const displayState = resolveHostedEmailSettingsDisplayState({
+      linkedAccounts: readPrivyLinkedAccounts(refreshedUser) ?? linkedAccounts,
+    });
+    const linkedEmail = displayState.currentVerifiedEmail ?? displayState.currentEmail;
+
+    if (!linkedEmail?.address) {
+      setSuccessMessage("Email linked.");
+      return;
+    }
+
+    setEmailAddress(linkedEmail.address);
+
+    if (!displayState.currentVerifiedEmail) {
+      setSuccessMessage(`Email linked: ${linkedEmail.address}`);
+      return;
+    }
+
+    setVerifiedEmailOverride(displayState.currentVerifiedEmail);
+    await syncVerifiedEmailAddress(displayState.currentVerifiedEmail.address, "verify");
   }
 
   async function handleSyncVerifiedEmail() {
@@ -208,6 +286,7 @@ export function useHostedEmailSettingsController(input: {
     isSendingCode,
     isSubmittingCode,
     isSyncingEmailRoute,
+    canSendEmailUpdateCode,
     pendingEmailAddress,
     successMessage,
     setCode,
@@ -218,4 +297,16 @@ export function useHostedEmailSettingsController(input: {
     handleSyncVerifiedEmail,
     handleVerifyCode,
   };
+}
+
+function readPrivyLinkedAccounts(input: { linkedAccounts?: unknown } | null | undefined): readonly PrivyLinkedAccountLike[] | null {
+  if (!Array.isArray(input?.linkedAccounts)) {
+    return null;
+  }
+
+  return input.linkedAccounts.filter(isPrivyLinkedAccountLike);
+}
+
+function isPrivyLinkedAccountLike(value: unknown): value is PrivyLinkedAccountLike {
+  return typeof value === "object" && value !== null;
 }

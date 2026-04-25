@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef } from "react";
+
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 import { useHostedEmailSettingsController } from "./hosted-email-settings-controller";
@@ -13,6 +15,7 @@ export function HostedEmailSettings(props: {
   authenticated: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
 }) {
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
   const controller = useHostedEmailSettingsController({
     authenticated: props.authenticated,
     initialLinkedAccounts: props.initialLinkedAccounts,
@@ -53,6 +56,8 @@ export function HostedEmailSettings(props: {
           currentEmail={controller.effectiveCurrentEmail}
           currentVerifiedEmail={controller.effectiveVerifiedEmail}
           emailAddress={controller.emailAddress}
+          emailInputRef={emailInputRef}
+          canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
           isBusy={controller.isBusy}
           isSendingCode={controller.isSendingCode}
           isSyncingEmailRoute={controller.isSyncingEmailRoute}
@@ -68,6 +73,8 @@ export function HostedEmailSettings(props: {
       <HostedEmailVerificationDialog
         code={controller.code}
         dialogOpen={controller.dialogOpen}
+        emailAddress={controller.emailAddress}
+        emailInputRef={emailInputRef}
         isBusy={controller.isBusy}
         isSendingCode={controller.isSendingCode}
         isSubmittingCode={controller.isSubmittingCode}

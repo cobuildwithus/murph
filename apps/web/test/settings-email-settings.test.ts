@@ -6,14 +6,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
+type LinkAccountCallbacks = {
+  onError?: () => void;
+  onSuccess?: (params: {
+    linkedAccount: unknown;
+    linkMethod: string;
+    user: { linkedAccounts?: unknown };
+  }) => void;
+};
+
+type UpdateEmailCallbacks = {
+  onError?: () => void;
+};
+
 const mocks = vi.hoisted(() => ({
+  linkAccountCallbacks: null as LinkAccountCallbacks | null,
+  linkEmail: vi.fn(),
+  refreshUser: vi.fn(),
   sendCode: vi.fn(),
+  updateEmailCallbacks: null as UpdateEmailCallbacks | null,
+  useLinkAccount: vi.fn(),
   useUpdateEmail: vi.fn(),
+  useUser: vi.fn(),
   verifyCode: vi.fn(),
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
+  useLinkAccount: mocks.useLinkAccount,
   useUpdateEmail: mocks.useUpdateEmail,
+  useUser: mocks.useUser,
 }));
 
 vi.mock("@/src/components/ui/dialog", () => ({
@@ -44,12 +65,43 @@ let cleanupRender: (() => Promise<void>) | null = null;
 describe("HostedEmailSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.useUpdateEmail.mockReturnValue({
-      sendCode: mocks.sendCode,
-      state: {
-        status: "idle",
+    mocks.linkAccountCallbacks = null;
+    mocks.updateEmailCallbacks = null;
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [],
+    });
+    mocks.useLinkAccount.mockImplementation((callbacks: LinkAccountCallbacks) => {
+      mocks.linkAccountCallbacks = callbacks;
+
+      return {
+        linkEmail: mocks.linkEmail,
+      };
+    });
+    mocks.useUpdateEmail.mockImplementation((callbacks: UpdateEmailCallbacks) => {
+      mocks.updateEmailCallbacks = callbacks;
+
+      return {
+        sendCode: mocks.sendCode,
+        state: {
+          status: "idle",
+        },
+        verifyCode: mocks.verifyCode,
+      };
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: null,
+    });
+    mocks.verifyCode.mockResolvedValue({
+      user: {
+        linkedAccounts: [
+          {
+            address: "member@example.com",
+            latest_verified_at: 1771977600,
+            type: "email",
+          },
+        ],
       },
-      verifyCode: mocks.verifyCode,
     });
   });
 
@@ -87,6 +139,89 @@ describe("HostedEmailSettings", () => {
     assert.match(markup, /Save verified email/);
   });
 
+  it("uses Privy's email link flow when the hosted account has no email yet", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [],
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link email"),
+    );
+    expect(linkButton).toBeTruthy();
+    expect(container.querySelector('input[id="settings-email-address"]')).toBeNull();
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.linkEmail).toHaveBeenCalledTimes(1);
+    expect(mocks.sendCode).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-dialog-open="true"]')).toBeNull();
+    expect(container.textContent).not.toContain("We sent a verification code to");
+  });
+
+  it("syncs the verified email returned by Privy's link flow", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const linkedUser = {
+      linkedAccounts: [
+        {
+          address: "linked@example.com",
+          latest_verified_at: 1771977600,
+          type: "email",
+        },
+      ],
+    };
+    mocks.refreshUser.mockResolvedValueOnce(linkedUser);
+    const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      emailAddress: "linked@example.com",
+      ok: true,
+      runTriggered: true,
+      verifiedAt: "2026-04-25T00:00:00.000Z",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", syncFetch);
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [],
+      }),
+    );
+    cleanupRender = cleanup;
+
+    await act(async () => {
+      mocks.linkAccountCallbacks?.onSuccess?.({
+        linkedAccount: {
+          address: "linked@example.com",
+          latest_verified_at: 1771977600,
+          type: "email",
+        },
+        linkMethod: "email",
+        user: linkedUser,
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(syncFetch).toHaveBeenCalledWith(
+        "/api/settings/email/sync",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+    expect(container.textContent).toContain("Email verified");
+  });
+
   it("sends and verifies update-email codes from the live settings inputs", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
     const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
@@ -105,7 +240,13 @@ describe("HostedEmailSettings", () => {
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialLinkedAccounts: [
+          {
+            address: "old@example.com",
+            latest_verified_at: 1771891200,
+            type: "email",
+          },
+        ],
       }),
     );
     cleanupRender = cleanup;
@@ -114,7 +255,7 @@ describe("HostedEmailSettings", () => {
       'input[id="settings-email-address"]',
     ) as HTMLInputElement | null;
     const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send code"),
+      (candidate) => candidate.textContent?.includes("Send new code"),
     );
     expect(emailInput).toBeTruthy();
     expect(sendButton).toBeTruthy();
@@ -126,6 +267,7 @@ describe("HostedEmailSettings", () => {
       sendButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
+    expect(mocks.linkEmail).not.toHaveBeenCalled();
     expect(mocks.sendCode).toHaveBeenCalledWith({
       newEmailAddress: "member@example.com",
     });
@@ -158,12 +300,22 @@ describe("HostedEmailSettings", () => {
     );
   });
 
-  it("does not resend to a stale pending email after the visible email input is cleared", async () => {
+  it("does not open the verification prompt when Privy reports an update-email send error", async () => {
     const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    mocks.sendCode.mockImplementationOnce(async () => {
+      mocks.updateEmailCallbacks?.onError?.();
+    });
+
     const { cleanup, container, window } = await renderClientComponent(
       createElement(HostedEmailSettings, {
         authenticated: true,
-        initialLinkedAccounts: [],
+        initialLinkedAccounts: [
+          {
+            address: "old@example.com",
+            latest_verified_at: 1771891200,
+            type: "email",
+          },
+        ],
       }),
     );
     cleanupRender = cleanup;
@@ -172,7 +324,106 @@ describe("HostedEmailSettings", () => {
       'input[id="settings-email-address"]',
     ) as HTMLInputElement | null;
     const sendButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Send code"),
+      (candidate) => candidate.textContent?.includes("Send new code"),
+    );
+
+    await act(async () => {
+      if (emailInput) {
+        setInputValue(window, emailInput, "member@example.com");
+      }
+      sendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("We could not send a verification code to that email address.");
+    expect(container.textContent).not.toContain("We sent a verification code to");
+  });
+
+  it("does not sync the hosted email route when Privy reports an update-email verify error", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    mocks.verifyCode.mockImplementationOnce(async () => {
+      mocks.updateEmailCallbacks?.onError?.();
+      return undefined;
+    });
+    const syncFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      emailAddress: "member@example.com",
+      ok: true,
+      runTriggered: true,
+      verifiedAt: "2026-04-25T00:00:00.000Z",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", syncFetch);
+
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [
+          {
+            address: "old@example.com",
+            latest_verified_at: 1771891200,
+            type: "email",
+          },
+        ],
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const emailInput = container.querySelector(
+      'input[id="settings-email-address"]',
+    ) as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Send new code"),
+    );
+
+    await act(async () => {
+      if (emailInput) {
+        setInputValue(window, emailInput, "member@example.com");
+      }
+      sendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    const codeInput = container.querySelector(
+      'input[id="settings-email-code"]',
+    ) as HTMLInputElement | null;
+    const verifyButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Verify email"),
+    );
+
+    await act(async () => {
+      if (codeInput) {
+        setInputValue(window, codeInput, "123456");
+      }
+      verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(syncFetch).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("We could not verify that code.");
+  });
+
+  it("does not resend to a stale pending email after the visible email input is cleared", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [
+          {
+            address: "old@example.com",
+            latest_verified_at: 1771891200,
+            type: "email",
+          },
+        ],
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const emailInput = container.querySelector(
+      'input[id="settings-email-address"]',
+    ) as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Send new code"),
     );
     expect(emailInput).toBeTruthy();
     expect(sendButton).toBeTruthy();
@@ -194,6 +445,56 @@ describe("HostedEmailSettings", () => {
         setInputValue(window, emailInput, " ");
       }
       resendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(mocks.sendCode).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Enter a valid email address before we send a code.");
+  });
+
+  it("does not resend from the verification dialog after the visible email input is cleared", async () => {
+    const { HostedEmailSettings } = await import("@/src/components/settings/hosted-email-settings");
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(HostedEmailSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [
+          {
+            address: "old@example.com",
+            latest_verified_at: 1771891200,
+            type: "email",
+          },
+        ],
+      }),
+    );
+    cleanupRender = cleanup;
+
+    const emailInput = container.querySelector(
+      'input[id="settings-email-address"]',
+    ) as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Send new code"),
+    );
+
+    await act(async () => {
+      if (emailInput) {
+        setInputValue(window, emailInput, "member@example.com");
+      }
+      sendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      if (emailInput) {
+        setInputValue(window, emailInput, " ");
+      }
+    });
+
+    const dialog = container.querySelector('[data-dialog-open="true"]');
+    expect(dialog).toBeTruthy();
+    const dialogResendButton = Array.from(dialog?.querySelectorAll("button") ?? []).find(
+      (candidate) => candidate.textContent?.includes("Resend code"),
+    );
+
+    await act(async () => {
+      dialogResendButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
     expect(mocks.sendCode).toHaveBeenCalledTimes(1);
@@ -274,4 +575,5 @@ function setInputValue(
   const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
   descriptor?.set?.call(input, value);
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new window.Event("change", { bubbles: true }));
 }
