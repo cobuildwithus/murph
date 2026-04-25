@@ -23,9 +23,11 @@ import {
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../../src/worker-contracts.ts";
 import {
+  armInvalidRunnerOutputBundleFault,
   armRunnerCommitPause,
   buildSeededDuplicateCommitPayload,
   clearRunnerInvocationState,
+  clearRunnerOutputBundleFault,
   clearRunnerCommitPause,
   persistRunnerRuntimeTimerWake,
   readRunnerCommitPauseRequest,
@@ -418,6 +420,40 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     }
 
     await clearRunnerInvocationState((env as { BUNDLES: R2BucketLike }).BUNDLES, body.userId);
+    return Response.json({
+      ok: true,
+      userId: body.userId,
+    });
+  }
+
+  if (url.pathname === "/__test/runner/output-bundle-fault" && request.method === "POST") {
+    const body = await request.json() as { invocations?: unknown; userId?: unknown };
+
+    if (typeof body.userId !== "string" || body.userId.length === 0) {
+      return Response.json({ error: "userId is required." }, { status: 400 });
+    }
+
+    const invocations = typeof body.invocations === "number" ? body.invocations : 1;
+    await armInvalidRunnerOutputBundleFault({
+      bucket: (env as { BUNDLES: R2BucketLike }).BUNDLES,
+      invocations,
+      userId: body.userId,
+    });
+    return Response.json({
+      invocations,
+      ok: true,
+      userId: body.userId,
+    });
+  }
+
+  if (url.pathname === "/__test/runner/output-bundle-fault/clear" && request.method === "POST") {
+    const body = await request.json() as { userId?: unknown };
+
+    if (typeof body.userId !== "string" || body.userId.length === 0) {
+      return Response.json({ error: "userId is required." }, { status: 400 });
+    }
+
+    await clearRunnerOutputBundleFault((env as { BUNDLES: R2BucketLike }).BUNDLES, body.userId);
     return Response.json({
       ok: true,
       userId: body.userId,

@@ -7,8 +7,10 @@ import { DurableObject, env } from "cloudflare:workers";
 import { createRuntimeTimerSyntheticWake } from "@murphai/hosted-execution";
 
 import {
+  buildInvalidHostedBundleArchivePayload,
   buildSyntheticCommittedRunnerResult,
   buildSyntheticCompletedRunnerResult,
+  consumeInvalidRunnerOutputBundleFault,
   pauseRunnerCommitIfArmed,
   readRunnerRuntimeTimerWake,
   recordRunnerInvocation,
@@ -40,6 +42,15 @@ export class RunnerContainerTestDouble extends DurableObject {
       bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
       request: payload.job.request,
     });
+
+    if (await consumeInvalidRunnerOutputBundleFault({
+      bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
+      userId: payload.userId,
+    })) {
+      return buildSyntheticCommittedRunnerResult(payload.job.request, {
+        bundle: buildInvalidHostedBundleArchivePayload(),
+      });
+    }
 
     return payload.job.request.runDrain.resumeFinalize
       ? buildSyntheticCompletedRunnerResult(payload.job.request)

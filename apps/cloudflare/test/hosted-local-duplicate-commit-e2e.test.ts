@@ -14,6 +14,17 @@ const userId = "member_duplicate_commit_local_e2e";
 const stabilityUserId = "member_duplicate_commit_local_smoke_stability";
 const overlapUserId = "member_overlap_claim_local_e2e";
 const overlapEventId = "evt_serialized_run_loop_claim_local_e2e";
+const invalidBundleUserId = "member_invalid_bundle_observability_local_e2e";
+const invalidBundleActivationWake = buildHostedExecutionMemberActivatedWake({
+  eventId: `member.activated:stripe.invoice.paid:${invalidBundleUserId}:evt_invalid_bundle_local_e2e`,
+  memberId: invalidBundleUserId,
+  memberChannels: {
+    email: false,
+    linq: true,
+    telegram: false,
+  },
+  occurredAt: new Date().toISOString(),
+});
 const activationWake = buildHostedExecutionMemberActivatedWake({
   eventId: `member.activated:stripe.invoice.paid:${userId}:evt_duplicate_local_e2e`,
   memberId: userId,
@@ -252,4 +263,116 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
       userId: overlapUserId,
     });
   });
+
+  it("records actionable hosted-run diagnostics when the runner returns an invalid bundle archive", async () => {
+    const worker = workerFixture;
+    if (worker === null) {
+      throw new Error("Expected the hosted local test worker fixture to be initialized.");
+    }
+
+    await worker.client.postJson("/__test/runner/invocations/clear", {
+      userId: invalidBundleUserId,
+    });
+    await worker.client.postJson("/__test/runner/output-bundle-fault", {
+      invocations: 1,
+      userId: invalidBundleUserId,
+    });
+
+    const dispatchResult = await worker.client.postJson(
+      "/__test/wake-with-outcome",
+      invalidBundleActivationWake,
+    );
+    expect(dispatchResult).toMatchObject({
+      event: {
+        eventId: invalidBundleActivationWake.eventId,
+        state: "queued",
+        userId: invalidBundleUserId,
+      },
+      status: {
+        lastError: "Hosted bundle archive validation failed.",
+        lastErrorCode: "bundle_archive_validation_error",
+        pendingIngressEventCount: 1,
+        userId: invalidBundleUserId,
+      },
+    });
+
+    const invalidBundleLog = await waitForHostedRunLog(
+      worker,
+      invalidBundleUserId,
+      (log) => (
+        log.message === "Cloudflare runner invocation failed while preparing the hosted run snapshot."
+        && isRecord(log.redacted)
+        && log.redacted.errorCode === "bundle_archive_validation_error"
+        && log.redacted.errorName === "HostedBundleArchiveValidationError"
+      ),
+    );
+    expect(invalidBundleLog.message).not.toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+    expect(invalidBundleLog.phase).toBe("runtime_failed");
+    expect(invalidBundleLog.redacted).toMatchObject({
+      errorCode: "bundle_archive_validation_error",
+      errorMessage: "Hosted bundle archive validation failed.",
+      errorName: "HostedBundleArchiveValidationError",
+      reason: "runner_invocation_failed",
+    });
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await worker.client.postJson("/__test/alarm", {
+        userId: invalidBundleUserId,
+      });
+    }
+
+    const recoveredStatus = await worker.waitForUserStatus(
+      invalidBundleUserId,
+      (status) => status.pendingIngressEventCount === 0 && status.lastError === null,
+    );
+    expect(recoveredStatus).toMatchObject({
+      lastError: null,
+      pendingIngressEventCount: 0,
+      userId: invalidBundleUserId,
+    });
+
+    const finalInvocations = await worker.client.getJson(
+      `/__test/runner/invocations?userId=${encodeURIComponent(invalidBundleUserId)}`,
+    );
+    expect(finalInvocations).toMatchObject({
+      count: 3,
+      eventIds: [
+        invalidBundleActivationWake.eventId,
+        invalidBundleActivationWake.eventId,
+        expect.stringMatching(/^hosted-run:/u),
+      ],
+    });
+
+    await worker.client.postJson("/__test/runner/output-bundle-fault/clear", {
+      userId: invalidBundleUserId,
+    });
+    await worker.client.postJson("/__test/runner/invocations/clear", {
+      userId: invalidBundleUserId,
+    });
+  });
 });
+
+async function waitForHostedRunLog(
+  worker: HostedLocalTestWorkerFixture,
+  userId: string,
+  predicate: (log: Awaited<ReturnType<HostedLocalTestWorkerFixture["getHostedRunLogs"]>>[number]) => boolean,
+): Promise<Awaited<ReturnType<HostedLocalTestWorkerFixture["getHostedRunLogs"]>>[number]> {
+  const startedAt = Date.now();
+
+  while ((Date.now() - startedAt) < 30_000) {
+    const logs = await worker.getHostedRunLogs(userId);
+    const log = logs.find(predicate);
+    if (log) {
+      return log;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for hosted run log for ${userId}.`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
