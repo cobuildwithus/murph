@@ -55,6 +55,7 @@ Always read these before repo code/docs/test/config work:
 - Outside intentional dependency-edit flows, installs and setup paths must use the committed lockfile with `pnpm install --frozen-lockfile`.
 - Do not bypass pnpm's dependency-verification guard with `--config.verify-deps-before-run=false`; fix the underlying workspace state or report the blocker instead.
 - Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors; prove the type with control flow or helpers, or isolate the boundary with a narrow documented assertion.
+- Do not paper over bugs, unclear behavior, or architectural friction by adding more complexity. Work diligently to identify the root cause first, fix the underlying issue where feasible, and choose the simplest durable correction that preserves system invariants.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
 - Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
 - Do not weaken production runtime, auth, or env invariants to satisfy test, smoke, or build harnesses. Fix the harness with test-only config or wrapper scripts instead of adding bypass branches to app code.
