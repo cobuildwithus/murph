@@ -20,6 +20,9 @@ import {
   createHostedRunnerChildProcessEnv,
   resolveHostedRunnerTsxImportSpecifier,
 } from "./runner-child-launcher.ts";
+import {
+  assertHostedAssistantRuntimeJobResult,
+} from "./hosted-runtime-result-validation.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
@@ -115,11 +118,15 @@ export async function runHostedExecutionJobIsolatedDetailed(
       });
       const childResult = parseHostedRuntimeChildResult(stdoutChunks.join(""));
 
-      if (!childResult.ok || !isHostedAssistantRuntimeJobResult(childResult.result)) {
+      if (!childResult.ok) {
         throw createHostedRuntimeChildFailure(childResult.error, code);
       }
 
-      return childResult.result;
+      const result = childResult.result;
+      assertHostedAssistantRuntimeJobResult(result, {
+        bundleArchiveOperation: "runner-output",
+      });
+      return result;
     } finally {
       options?.signal?.removeEventListener("abort", abortHandler);
       terminateChildProcess(child.pid);
@@ -199,30 +206,6 @@ function createHostedRuntimeChildFailure(
     untyped.details = error.details;
   }
   return untyped;
-}
-
-function isHostedAssistantRuntimeJobResult(
-  value: unknown,
-): value is HostedAssistantRuntimeJobResult {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.phase !== undefined
-    && candidate.phase !== "prepared"
-    && candidate.phase !== "completed"
-  ) {
-    return false;
-  }
-
-  if (typeof candidate.result !== "object" || candidate.result === null) {
-    return false;
-  }
-
-  const runnerResult = candidate.result as Record<string, unknown>;
-  return "bundle" in runnerResult && "result" in runnerResult;
 }
 
 function forwardHostedRuntimeChildOutputChunk(input: {

@@ -13,21 +13,17 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
-  parseHostedExecutionRunnerResult,
-} from "@murphai/hosted-execution/parsers";
-
-import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "./internal-hosts.ts";
 import { methodNotAllowed } from "./json.ts";
 import {
   buildLocalInternalProxyRouteBaseUrl,
 } from "./local-internal-proxy-route.ts";
-import {
-  assertHostedBundlePayloadArchiveValid,
-} from "./hosted-bundle-validation.ts";
 import { buildHostedRunnerSupervisorEnv } from "./runner-env.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
+import {
+  assertHostedAssistantRuntimeJobResultAsync,
+} from "./hosted-runtime-result-validation.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -394,8 +390,9 @@ export class RunnerContainer extends Container {
         throw await classifyHostedRunnerContainerErrorResponse(response);
       }
 
-      const result = await response.json();
-      assertHostedRunnerContainerResult(result);
+      const result = await assertHostedAssistantRuntimeJobResultAsync(await response.json(), {
+        bundleArchiveOperation: "runner-output",
+      });
       completedSuccessfully = true;
       return result;
     } catch (error) {
@@ -1066,28 +1063,6 @@ function parseHostedExecutionContainerInvokeInput(
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId,
   };
-}
-
-function assertHostedRunnerContainerResult(
-  value: unknown,
-): asserts value is HostedAssistantRuntimeJobResult {
-  const record = requireRecord(value, "Hosted runner container result");
-  const phase = record.phase;
-
-  if (
-    phase !== undefined
-    && phase !== "completed"
-    && phase !== "prepared"
-  ) {
-    throw new TypeError("Hosted runner container result.phase must be completed or prepared.");
-  }
-
-  const runnerResult = parseHostedExecutionRunnerResult(record.result);
-  assertHostedBundlePayloadArchiveValid({
-    bundle: runnerResult.bundle,
-    expectedKind: "vault",
-    operation: "runner-output",
-  });
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

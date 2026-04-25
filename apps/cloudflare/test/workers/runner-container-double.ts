@@ -7,6 +7,9 @@ import { DurableObject, env } from "cloudflare:workers";
 import { createRuntimeTimerSyntheticWake } from "@murphai/hosted-execution";
 
 import {
+  assertHostedAssistantRuntimeJobResultAsync,
+} from "../../src/hosted-runtime-result-validation.js";
+import {
   buildInvalidHostedBundleArchivePayload,
   buildSyntheticCommittedRunnerResult,
   buildSyntheticCompletedRunnerResult,
@@ -47,17 +50,28 @@ export class RunnerContainerTestDouble extends DurableObject {
       bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
       userId: payload.userId,
     })) {
-      return buildSyntheticCommittedRunnerResult(payload.job.request, {
+      const result = buildSyntheticCommittedRunnerResult(payload.job.request, {
         bundle: buildInvalidHostedBundleArchivePayload(),
       });
+      return await validateRunnerDoubleResult(result);
     }
 
-    return payload.job.request.runDrain.resumeFinalize
+    const result = payload.job.request.runDrain.resumeFinalize
       ? buildSyntheticCompletedRunnerResult(payload.job.request)
       : buildSyntheticCommittedRunnerResult(payload.job.request);
+    return await validateRunnerDoubleResult(result);
   }
 
   async destroyInstance(): Promise<void> {}
+}
+
+async function validateRunnerDoubleResult(
+  result: HostedAssistantRuntimeJobResult,
+): Promise<HostedAssistantRuntimeJobResult> {
+  await assertHostedAssistantRuntimeJobResultAsync(result, {
+    bundleArchiveOperation: "runner-output",
+  });
+  return result;
 }
 
 async function resolvePrimaryWake(
