@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   buildHostedRunnerWorkspaceBuildArgs,
+  buildWorkspacePackagePackPreflightArgs,
   mapWithConcurrency,
   packWorkspacePackageArtifacts,
   stageHostedRunnerRuntimeArtifact,
@@ -50,6 +51,13 @@ describe("runner bundle runtime artifact staging", () => {
         MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "0",
       }),
     ).toThrow("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY must be a positive integer.");
+  });
+
+  it("generates Health Commons before scriptless runner package packing", () => {
+    expect(buildWorkspacePackagePackPreflightArgs("@murphai/health-commons")).toEqual([
+      "health-commons:generate",
+    ]);
+    expect(buildWorkspacePackagePackPreflightArgs("@murphai/runtime-state")).toBeNull();
   });
 
   it("waits for active bounded-concurrency work before rethrowing the first failure", async () => {

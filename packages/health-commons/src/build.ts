@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -15,7 +15,24 @@ export interface CliOptions {
 
 export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions): Promise<void> {
   const catalog = await buildHealthCommonsCatalog({ contentRoot: options.contentRoot });
-  const files = new Map<string, string>([
+  const files = buildGeneratedFiles(catalog);
+
+  if (options.check) {
+    await assertGeneratedArtifactsDeterministic(options.contentRoot, files);
+    return;
+  }
+
+  await mkdir(options.generatedRoot, { recursive: true });
+
+  for (const [fileName, nextContent] of files.entries()) {
+    await writeFile(path.join(options.generatedRoot, fileName), nextContent, "utf8");
+  }
+}
+
+function buildGeneratedFiles(
+  catalog: Awaited<ReturnType<typeof buildHealthCommonsCatalog>>,
+): Map<string, string> {
+  return new Map<string, string>([
     ["catalog.json", stablePrettyJson(catalog)],
     ["catalog.hash", `${catalog.catalogHash}\n`],
     ["entities.ndjson", catalog.entities.map((entity) => JSON.stringify(entity)).join("\n") + "\n"],
@@ -23,32 +40,24 @@ export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions):
     ["recent-changes.json", stablePrettyJson({ changes: catalog.changes })],
     ["artifact-manifests.json", stablePrettyJson({ artifactManifests: catalog.artifactManifests })],
   ]);
+}
 
-  await mkdir(options.generatedRoot, { recursive: true });
-
+async function assertGeneratedArtifactsDeterministic(
+  contentRoot: string,
+  expectedFiles: ReadonlyMap<string, string>,
+): Promise<void> {
+  const secondCatalog = await buildHealthCommonsCatalog({ contentRoot });
+  const secondFiles = buildGeneratedFiles(secondCatalog);
   const mismatches: string[] = [];
-  for (const [fileName, nextContent] of files.entries()) {
-    const absolutePath = path.join(options.generatedRoot, fileName);
-    if (options.check) {
-      let existing = "";
-      try {
-        existing = await readFile(absolutePath, "utf8");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw error;
-        }
-      }
-      if (existing !== nextContent) {
-        mismatches.push(fileName);
-      }
-      continue;
-    }
 
-    await writeFile(absolutePath, nextContent, "utf8");
+  for (const [fileName, expectedContent] of expectedFiles.entries()) {
+    if (secondFiles.get(fileName) !== expectedContent) {
+      mismatches.push(fileName);
+    }
   }
 
   if (mismatches.length > 0) {
-    throw new Error(`Health Commons generated artifacts are stale: ${mismatches.join(", ")}. Run pnpm --filter @murphai/health-commons generate.`);
+    throw new Error(`Health Commons generated artifacts are nondeterministic: ${mismatches.join(", ")}.`);
   }
 }
 

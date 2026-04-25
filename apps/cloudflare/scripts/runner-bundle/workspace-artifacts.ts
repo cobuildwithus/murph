@@ -10,6 +10,8 @@ import {
 
 import { runNpmCommand, runPnpmCommand } from "./process.js";
 
+const HEALTH_COMMONS_PACKAGE_NAME = "@murphai/health-commons";
+
 interface WorkspacePackageManifest {
   dependencies?: Record<string, string>;
   engines?: Record<string, string>;
@@ -142,6 +144,16 @@ export function buildHostedRunnerWorkspaceBuildArgs(
   ];
 }
 
+export function buildWorkspacePackagePackPreflightArgs(
+  packageName: string,
+): string[] | null {
+  if (packageName !== HEALTH_COMMONS_PACKAGE_NAME) {
+    return null;
+  }
+
+  return ["health-commons:generate"];
+}
+
 async function packWorkspacePackage(
   packageName: string,
   tarballsDir: string,
@@ -151,6 +163,12 @@ async function packWorkspacePackage(
 ): Promise<string> {
   const before = new Set(await readdir(tarballsDir));
   const packageDir = await resolveWorkspacePackageDirectory(input.repoRoot, packageName);
+  const preflightArgs = buildWorkspacePackagePackPreflightArgs(packageName);
+
+  if (preflightArgs) {
+    await runPnpmCommand(preflightArgs, { cwd: input.repoRoot });
+    await assertHealthCommonsGeneratedCatalog(packageDir);
+  }
 
   await runNpmCommand(
     ["pack", "--ignore-scripts", "--silent", "--pack-destination", tarballsDir],
@@ -168,6 +186,20 @@ async function packWorkspacePackage(
   }
 
   return path.join(tarballsDir, tarballName);
+}
+
+async function assertHealthCommonsGeneratedCatalog(packageDir: string): Promise<void> {
+  try {
+    await readFile(path.join(packageDir, "generated", "catalog.json"), "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      throw new Error(
+        "Health Commons generated catalog is missing after generation preflight.",
+      );
+    }
+
+    throw error;
+  }
 }
 
 async function resolveWorkspacePackageDirectory(

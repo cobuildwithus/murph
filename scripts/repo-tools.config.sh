@@ -78,6 +78,7 @@ audit_context_binary_exclude_globs=(
   "docs/assets/*.jpeg"
   "docs/assets/*.png"
   "docs/assets/*.webp"
+  "packages/health-commons/generated/**"
 )
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS \
   "${audit_context_binary_exclude_globs[@]}"
