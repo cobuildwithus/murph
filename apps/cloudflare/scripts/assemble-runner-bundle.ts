@@ -12,7 +12,10 @@ import {
   resolveHostedRunnerBuildPackageNames,
   resolveHostedRunnerWorkspacePackageNames,
 } from "./runner-bundle-contract.js";
-import { installPackedRunnerDependencies } from "./runner-bundle/dependency-install.js";
+import {
+  assertInstalledRunnerHealthCommonsRuntimeImport,
+  installPackedRunnerDependencies,
+} from "./runner-bundle/dependency-install.js";
 import { materializeFinalRunnerBundle } from "./runner-bundle/final-bundle.js";
 import {
   pruneRunnerBundle,
@@ -83,6 +86,7 @@ async function assembleRunnerBundle(): Promise<void> {
       hostedRunnerWorkspacePackageNames,
       { runtimePackageRoot: appDir },
     );
+    await assertInstalledRunnerHealthCommonsRuntimeImport(stagingBundleDir);
     await pruneRunnerBundle(stagingBundleDir);
     await rewriteRuntimePackageManifest(stagingBundleDir);
     await rewriteRuntimeBinWrappers(stagingBundleDir);

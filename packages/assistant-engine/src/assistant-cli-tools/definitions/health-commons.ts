@@ -29,6 +29,8 @@ const healthCommonsDefaultLimit = 10
 const healthCommonsMaxLimit = 50
 const healthCommonsDefaultBodyChars = 1_200
 const healthCommonsMaxBodyChars = 6_000
+const FINNISH_DRY_SAUNA_KEY =
+  'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
 
 const healthCommonsEntityTypeInputSchema = z.enum(HEALTH_COMMONS_ENTITY_TYPES)
 
@@ -160,11 +162,13 @@ async function searchHealthCommons(input: HealthCommonsSearchInput) {
     entityTypes: input.entityTypes,
     categories: input.categories,
     limit: normalizeLimit(input.limit),
+    includeBody: true,
   })
 
   return {
     schema: 'murph.health-commons.search-result.v1',
     corpus: healthCommonsPublicCorpus,
+    diagnostics: buildHealthCommonsDiagnostics(reader),
     note: healthCommonsPublicCorpusNote,
     query: input.query,
     count: results.length,
@@ -184,6 +188,7 @@ async function getHealthCommonsEntity(input: HealthCommonsGetInput) {
     return {
       schema: 'murph.health-commons.get-result.v1',
       corpus: healthCommonsPublicCorpus,
+      diagnostics: buildHealthCommonsDiagnostics(reader),
       note: healthCommonsPublicCorpusNote,
       lookup: input.keyOrSlug,
       entity: null,
@@ -198,6 +203,7 @@ async function getHealthCommonsEntity(input: HealthCommonsGetInput) {
   return {
     schema: 'murph.health-commons.get-result.v1',
     corpus: healthCommonsPublicCorpus,
+    diagnostics: buildHealthCommonsDiagnostics(reader),
     note: healthCommonsPublicCorpusNote,
     lookup: input.keyOrSlug,
     entity: {
@@ -241,6 +247,7 @@ async function listHealthCommonsProtocols(input: HealthCommonsListProtocolsInput
   return {
     schema: 'murph.health-commons.list-protocols-result.v1',
     corpus: healthCommonsPublicCorpus,
+    diagnostics: buildHealthCommonsDiagnostics(reader),
     note: healthCommonsPublicCorpusNote,
     filters: {
       query: input.query ?? null,
@@ -265,6 +272,7 @@ async function listHealthCommonsSources(input: HealthCommonsListSourcesInput) {
     return {
       schema: 'murph.health-commons.list-sources-result.v1',
       corpus: healthCommonsPublicCorpus,
+      diagnostics: buildHealthCommonsDiagnostics(reader),
       note: healthCommonsPublicCorpusNote,
       filters: {
         protocolKeyOrSlug: input.protocolKeyOrSlug,
@@ -306,6 +314,7 @@ async function listHealthCommonsSources(input: HealthCommonsListSourcesInput) {
   return {
     schema: 'murph.health-commons.list-sources-result.v1',
     corpus: healthCommonsPublicCorpus,
+    diagnostics: buildHealthCommonsDiagnostics(reader),
     note: healthCommonsPublicCorpusNote,
     filters: {
       protocolKeyOrSlug: input.protocolKeyOrSlug ?? null,
@@ -315,6 +324,16 @@ async function listHealthCommonsSources(input: HealthCommonsListSourcesInput) {
     },
     count: sources.length,
     sources: sources.map((source) => decorateCompactEntity(source)),
+  }
+}
+
+function buildHealthCommonsDiagnostics(reader: HealthCommonsCatalogReader) {
+  return {
+    catalogHash: reader.catalogHash,
+    protocolVariantCount: reader.listByEntityType('protocol_variant').length,
+    sourceArtifactCount: reader.listByEntityType('source_artifact').length,
+    finnishDrySaunaPresent:
+      reader.findByKey(FINNISH_DRY_SAUNA_KEY)?.title ?? null,
   }
 }
 

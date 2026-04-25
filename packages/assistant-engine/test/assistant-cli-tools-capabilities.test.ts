@@ -1163,6 +1163,49 @@ describe('assistant CLI tool capability seam', () => {
       ]),
     })
 
+    const bodyOnlySearch = await executeTool(tools, 'healthCommons.search', {
+      query: 'clinician-directed',
+      entityTypes: ['biomarker'],
+      limit: 5,
+    })
+    expect(bodyOnlySearch).toMatchObject({
+      query: 'clinician-directed',
+      results: expect.arrayContaining([
+        expect.objectContaining({
+          entity: expect.objectContaining({
+            key: 'biomarker:deep-sleep-minutes',
+          }),
+          matchedFields: expect.arrayContaining(['body']),
+        }),
+      ]),
+    })
+    const bodyOnlySearchResults =
+      typeof bodyOnlySearch === 'object' &&
+      bodyOnlySearch !== null &&
+      'results' in bodyOnlySearch &&
+      Array.isArray(bodyOnlySearch.results)
+        ? bodyOnlySearch.results
+        : []
+    const bodyOnlyResult = bodyOnlySearchResults.find(
+      (result) =>
+        typeof result === 'object' &&
+        result !== null &&
+        'entity' in result &&
+        typeof result.entity === 'object' &&
+        result.entity !== null &&
+        'key' in result.entity &&
+        result.entity.key === 'biomarker:deep-sleep-minutes',
+    )
+    expect(bodyOnlyResult).toBeDefined()
+    expect(bodyOnlyResult).toMatchObject({
+      matchedFields: expect.arrayContaining(['body']),
+    })
+    expect(bodyOnlyResult).not.toMatchObject({
+      entity: expect.objectContaining({
+        body: expect.anything(),
+      }),
+    })
+
     const finnishSaunaSearch = await executeTool(tools, 'healthCommons.search', {
       query: 'finnish sauna',
       entityTypes: ['protocol_variant'],

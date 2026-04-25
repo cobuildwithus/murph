@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { pinInstalledDependencyVersions } from "../scripts/runner-bundle/dependency-install.js";
+import {
+  assertInstalledRunnerHealthCommonsRuntimeImport,
+  pinInstalledDependencyVersions,
+} from "../scripts/runner-bundle/dependency-install.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -62,6 +65,28 @@ describe("runner bundle dependency pinning", () => {
   });
 });
 
+describe("runner bundle runtime import probes", () => {
+  it("accepts an installed Health Commons runtime subpath", async () => {
+    const runtimePackageRoot = await createRuntimePackageRoot();
+
+    await writeInstalledHealthCommonsRuntimePackage(runtimePackageRoot);
+
+    await expect(
+      assertInstalledRunnerHealthCommonsRuntimeImport(runtimePackageRoot),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a runner bundle without an importable Health Commons runtime", async () => {
+    const runtimePackageRoot = await createRuntimePackageRoot();
+
+    await expect(
+      assertInstalledRunnerHealthCommonsRuntimeImport(runtimePackageRoot),
+    ).rejects.toThrow(
+      "Runner bundle cannot import @murphai/health-commons/runtime from installed production dependencies.",
+    );
+  });
+});
+
 async function createRuntimePackageRoot(): Promise<string> {
   const runtimePackageRoot = await mkdtemp(
     path.join(tmpdir(), "murph-runner-bundle-dependency-install-"),
@@ -93,6 +118,39 @@ async function writeInstalledPackage(
       name: packageName,
       version,
     }),
+    "utf8",
+  );
+}
+
+async function writeInstalledHealthCommonsRuntimePackage(
+  runtimePackageRoot: string,
+): Promise<void> {
+  const packageRoot = path.join(
+    runtimePackageRoot,
+    "node_modules",
+    "@murphai",
+    "health-commons",
+  );
+
+  await mkdir(path.join(packageRoot, "dist"), { recursive: true });
+  await writeFile(
+    path.join(packageRoot, "package.json"),
+    JSON.stringify({
+      name: "@murphai/health-commons",
+      type: "module",
+      version: "1.0.0",
+      exports: {
+        "./runtime": {
+          default: "./dist/runtime.js",
+          import: "./dist/runtime.js",
+        },
+      },
+    }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(packageRoot, "dist", "runtime.js"),
+    "export const ok = true;\n",
     "utf8",
   );
 }

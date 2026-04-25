@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -58,6 +59,12 @@ export async function installPackedRunnerDependencies(
     "utf8",
   );
   await installPinnedProductionDependencies(bundleDir);
+}
+
+export async function assertInstalledRunnerHealthCommonsRuntimeImport(
+  bundleDir: string,
+): Promise<void> {
+  await runNodeImportProbe(bundleDir, "@murphai/health-commons/runtime");
 }
 
 function buildWorkspaceTarballOverrides(
@@ -180,6 +187,38 @@ async function installPinnedProductionDependencies(
   await runPnpmCommand(["install", "--prod", "--frozen-lockfile"], {
     cwd: installRoot,
     env: installEnv,
+  });
+}
+
+async function runNodeImportProbe(
+  cwd: string,
+  specifier: string,
+): Promise<void> {
+  const probeSource = `await import(${JSON.stringify(specifier)});`;
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      probeSource,
+    ], {
+      cwd,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(
+        new Error(
+          `Runner bundle cannot import ${specifier} from installed production dependencies.`,
+        ),
+      );
+    });
   });
 }
 

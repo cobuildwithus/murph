@@ -55,7 +55,13 @@ describe("runner bundle runtime artifact staging", () => {
     ).toThrow("MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY must be a positive integer.");
   });
 
-  it("generates Health Commons before scriptless runner package packing", () => {
+  it("prepares runtime artifacts before scriptless runner package packing", () => {
+    expect(buildWorkspacePackagePackPreflightArgs("@murphai/contracts")).toEqual([
+      "--filter",
+      "@murphai/contracts",
+      "run",
+      "build",
+    ]);
     expect(buildWorkspacePackagePackPreflightArgs("@murphai/health-commons")).toEqual([
       "health-commons:generate",
     ]);
@@ -243,6 +249,34 @@ describe("runner bundle runtime artifact staging", () => {
       slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
       title: "Finnish Dry Sauna",
     });
+  });
+
+  it("packs the Contracts runtime entrypoint for hosted runner installs", async () => {
+    const tarballsDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-"));
+
+    temporaryDirectories.push(tarballsDir);
+
+    const tarballs = await packWorkspacePackageArtifacts(
+      ["@murphai/contracts"],
+      tarballsDir,
+      { repoRoot },
+    );
+    const contractsTarball = tarballs.get("@murphai/contracts");
+
+    if (!contractsTarball) {
+      throw new Error("Contracts tarball was not packed.");
+    }
+
+    const { stdout } = await execFileAsync(
+      "tar",
+      ["-tzf", contractsTarball],
+      { maxBuffer: 8 * 1024 * 1024 },
+    );
+    const entries = stdout.split("\n");
+
+    expect(entries).toContain("package/dist/index.js");
+    expect(entries).toContain("package/dist/schemas.js");
+    expect(entries).toContain("package/package.json");
   });
 });
 

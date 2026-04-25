@@ -71,6 +71,7 @@
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
+    "@murphai/health-commons": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/inboxd": "workspace:*",
     "@murphai/parsers": "workspace:*",

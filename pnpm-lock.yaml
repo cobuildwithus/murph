@@ -47,6 +47,9 @@ importers:
       '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../../packages/gateway-core
+      '@murphai/health-commons':
+        specifier: workspace:*
+        version: link:../../packages/health-commons
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../../packages/hosted-execution
