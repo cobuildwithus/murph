@@ -237,6 +237,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
 
 export function buildHostedMemberActivationWelcomeRoute(input: {
   linqChatId: string | null;
+  linqRecipientPhone?: string | null;
   memberPhoneNumber?: string | null;
   phoneLookupKey: string | null;
   telegramThreadId: string | null;
@@ -244,6 +245,7 @@ export function buildHostedMemberActivationWelcomeRoute(input: {
 }): HostedExecutionAssistantNotificationRoute | null {
   return resolveHostedMemberAssistantNotificationRoute({
     linqChatId: input.linqChatId,
+    linqRecipientPhone: input.linqRecipientPhone ?? null,
     memberPhoneNumber: input.memberPhoneNumber ?? null,
     messaging: resolveHostedMemberMessagingState({
       identity: {
@@ -265,6 +267,7 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
     return {
       welcomeRoute: buildHostedMemberActivationWelcomeRoute({
         linqChatId: input.member.routing?.linqChatId ?? null,
+        linqRecipientPhone: input.member.routing?.linqRecipientPhone ?? null,
         memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
         phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
         telegramThreadId: input.member.routing?.telegramThreadId ?? null,
