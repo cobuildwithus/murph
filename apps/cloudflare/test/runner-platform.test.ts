@@ -457,6 +457,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("passes messaging return targets through the signed hosted device-sync connect-link route", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      authorizationUrl: "https://sync.example.test/oauth",
+      expiresAt: "2026-04-07T00:00:00.000Z",
+      provider: "whoop",
+      providerLabel: "WHOOP",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await platform.deviceSyncPort!.createConnectLink({
+      messagingReturnTarget: "telegram",
+      provider: "whoop",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const { init, input: url } = requireFetchCallArgs(
+      fetchMock.mock.calls[0],
+      "device-sync connect-link fetch",
+    );
+    expect(String(url)).toBe("https://web.example.test/api/internal/device-sync/providers/whoop/connect-link");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({
+      messagingReturnTarget: "telegram",
+    }));
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
   it("resolves delegated billing Stripe customers through the signed hosted web callback route", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       stripeCustomerId: "cus_123",

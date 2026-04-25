@@ -74,6 +74,83 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
+  it.each([
+    {
+      expectedReturnTo: "/api/device-sync/messaging-return?target=imessage",
+      messagingReturnTarget: "imessage",
+    },
+    {
+      expectedReturnTo: "/api/device-sync/messaging-return?target=telegram",
+      messagingReturnTarget: "telegram",
+    },
+  ] as const)(
+    "uses the $messagingReturnTarget messaging return route when requested by the signed callback",
+    async ({ expectedReturnTo, messagingReturnTarget }) => {
+      const response = await internalDeviceSyncConnectLinkRoute.POST(
+        new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+          body: JSON.stringify({ messagingReturnTarget }),
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+        {
+          params: Promise.resolve({
+            provider: "whoop",
+          }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.startConnection).toHaveBeenCalledWith(
+        "member_123",
+        "whoop",
+        expectedReturnTo,
+      );
+    },
+  );
+
+  it("rejects unsupported messaging return targets without starting a connection", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        body: JSON.stringify({ messagingReturnTarget: "sms://open" }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET",
+        message: "Hosted device connect-link messaging return target is invalid.",
+        retryable: false,
+      },
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted device-sync settings route failed.",
+      expect.objectContaining({
+        errorClass: "client_request",
+        errorDomain: "device-sync",
+        errorHttpStatus: 400,
+        errorResponseCode: "HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET",
+        errorResponseRetryable: false,
+        errorResponseStatus: 400,
+        errorRetryable: false,
+      }),
+    );
+  });
+
   it("maps rejected Cloudflare callbacks to a 401 without starting a connection", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 

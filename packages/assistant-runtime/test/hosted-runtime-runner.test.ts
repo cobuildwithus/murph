@@ -72,6 +72,19 @@ function buildLinqWake(eventId: string) {
   });
 }
 
+function buildTelegramWake(eventId: string) {
+  return buildHostedExecutionTelegramConversationMessageWake({
+    eventId,
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    telegramMessage: {
+      messageId: "telegram_message_123",
+      schema: "murph.hosted-telegram-message.v1",
+      threadId: "telegram_thread_123",
+    },
+    userId: "member_123",
+  });
+}
+
 function createSingleWakeRunDrain(
   wake: HostedIngressEnvelope,
   overrides: {
@@ -631,6 +644,86 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       }),
     );
   });
+
+  it.each([
+    {
+      expectedMessagingReturnTarget: "imessage",
+      label: "Linq/iMessage",
+      wake: buildLinqWake("evt_linq_device_connect"),
+    },
+    {
+      expectedMessagingReturnTarget: "telegram",
+      label: "Telegram",
+      wake: buildTelegramWake("evt_telegram_device_connect"),
+    },
+  ] as const)(
+    "passes a $label messaging return target when issuing hosted device links from chat wakes",
+    async ({ expectedMessagingReturnTarget, wake }) => {
+      const deviceSyncPort = {
+        applyUpdates: vi.fn(),
+        createConnectLink: vi.fn(async ({
+          provider,
+        }: {
+          messagingReturnTarget?: "imessage" | "telegram" | null;
+          provider: string;
+        }) => ({
+          authorizationUrl: `https://connect.example.test/${provider}`,
+          expiresAt: "2026-04-08T00:30:00.000Z",
+          provider,
+          providerLabel: provider.toUpperCase(),
+        })),
+        fetchSnapshot: vi.fn(),
+      };
+
+      mocks.executeHostedRunDrainForCommit.mockImplementationOnce(async (input) => {
+        await input.executionContext.hosted.issueDeviceConnectLink({
+          provider: "whoop",
+        });
+        return committedExecution;
+      });
+
+      await runHostedAssistantRuntimeJobInProcessDetailed(
+        {
+          request: {
+            bundle: "incoming-bundle",
+            run: HOSTED_RUN_CONTEXT,
+            runDrain: createSingleWakeRunDrain(wake),
+          },
+          runtime: {
+            resolvedConfig: createHostedRuntimeResolvedConfig({
+              deviceSync: {
+                providerConfigs: {
+                  whoop: {
+                    clientId: "whoop-client",
+                    clientSecret: "whoop-secret",
+                  },
+                },
+                publicBaseUrl: "https://device-sync.example.test",
+                secret: "secret_123",
+              },
+            }),
+          },
+        },
+        {
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            deviceSyncPort,
+            effectsPort: createHostedRuntimeEffectsPortStub(),
+          },
+        },
+      );
+
+      expect(deviceSyncPort.createConnectLink).toHaveBeenCalledWith({
+        messagingReturnTarget: expectedMessagingReturnTarget,
+        provider: "whoop",
+      });
+    },
+  );
 
   it("rejects unconfigured hosted device-link providers before the control-plane call", async () => {
     const deviceSyncPort = {
