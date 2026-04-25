@@ -20,6 +20,9 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
 
+const HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV = "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN";
+const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
+
 interface HostedContainerProcessDirectoryEntryLike {
   isDirectory(): boolean;
   name: string;
@@ -105,13 +108,20 @@ class HostedRunnerShellIsolationError extends Error {
   }
 }
 
+class HostedContainerRequestBodyTooLargeError extends RangeError {
+  constructor(limitBytes: number) {
+    super(`Hosted container runner request body exceeds ${limitBytes} bytes.`);
+    this.name = "HostedContainerRequestBodyTooLargeError";
+  }
+}
+
 export async function startHostedContainerEntrypoint(input: {
   controlToken: string | null;
   port?: number;
   runtime?: HostedContainerRuntimeOptions;
 }): Promise<ReturnType<typeof createServer>> {
   const runtime = resolveHostedContainerRuntimeDependencies(input.runtime);
-  let controlToken = normalizeOptionalString(input.controlToken);
+  const controlToken = normalizeOptionalString(input.controlToken);
   let activeHostedRunnerJobCount = 0;
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
@@ -148,11 +158,11 @@ export async function startHostedContainerEntrypoint(input: {
 
       const bearerToken = readBearerAuthorizationToken(request.headers.authorization);
 
-      if (!controlToken && !bearerToken) {
+      if (!controlToken) {
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "error",
-          message: "Hosted container entrypoint is missing its initial control token.",
+          message: "Hosted container entrypoint is missing its startup control token.",
           phase: "failed",
         });
         writeJsonResponse(response, 401, {
@@ -173,7 +183,6 @@ export async function startHostedContainerEntrypoint(input: {
         });
         return;
       }
-      controlToken ??= bearerToken;
 
       if (activeHostedRunnerJobCount > 0) {
         emitHostedExecutionStructuredLog({
@@ -190,14 +199,8 @@ export async function startHostedContainerEntrypoint(input: {
       activeHostedRunnerJobCount += 1;
       claimedRunnerSlot = true;
 
-      const chunks: Buffer[] = [];
-
-      for await (const chunk of request) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-
       try {
-        const requestBody: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        const requestBody: unknown = JSON.parse(await readHostedContainerRunRequestBody(request));
         const parsed = await parseHostedExecutionContainerRunRequest(
           requestBody,
           runtime,
@@ -383,9 +386,11 @@ function isHostedContainerCliEntrypoint(): boolean {
 
 async function startHostedContainerEntrypointCli(): Promise<void> {
   const port = Number.parseInt(process.env.PORT ?? "8080", 10) || 8080;
+  const controlToken = process.env[HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV] ?? null;
+  delete process.env[HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV];
 
   await startHostedContainerEntrypoint({
-    controlToken: null,
+    controlToken,
     port,
     runtime: {
       processIsolation: true,
@@ -426,6 +431,50 @@ function readBearerAuthorizationToken(value: string | undefined): string | null 
 
   const token = trimmed.slice("Bearer ".length).trim();
   return token.length > 0 ? token : null;
+}
+
+async function readHostedContainerRunRequestBody(request: IncomingMessage): Promise<string> {
+  const declaredLength = readContentLengthBytes(request.headers["content-length"]);
+
+  if (
+    declaredLength !== null
+    && declaredLength > HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES
+  ) {
+    throw new HostedContainerRequestBodyTooLargeError(
+      HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES,
+    );
+  }
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+
+    if (totalBytes > HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES) {
+      throw new HostedContainerRequestBodyTooLargeError(
+        HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES,
+      );
+    }
+
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks, totalBytes).toString("utf8");
+}
+
+function readContentLengthBytes(value: string | string[] | undefined): number | null {
+  if (Array.isArray(value)) {
+    return null;
+  }
+
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function timingSafeEquals(left: string, right: string): boolean {
@@ -687,6 +736,16 @@ function classifyRequestDecodeError(error: unknown): {
   payload: Record<string, unknown>;
   statusCode: number;
 } {
+  if (error instanceof HostedContainerRequestBodyTooLargeError) {
+    return {
+      payload: {
+        code: "request_body_too_large",
+        error: "Request body too large.",
+      },
+      statusCode: 413,
+    };
+  }
+
   const details = buildHostedExecutionSafeErrorDetails(error);
   const errorName = readHostedExecutionSafeErrorName(error);
 
