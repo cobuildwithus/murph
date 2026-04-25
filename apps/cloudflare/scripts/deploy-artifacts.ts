@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { readlink, readdir, readFile, stat, lstat, writeFile } from "node:fs/promises";
+import { readlink, readdir, readFile, realpath, stat, lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   buildHostedWorkerSecretsPayload,
@@ -23,6 +23,12 @@ const defaultAppDir = path.resolve(scriptDir, "..");
 const defaultRepoRoot = path.resolve(defaultAppDir, "../..");
 const expectedDeployContainerImage = "../../../Dockerfile.cloudflare-hosted-runner";
 const expectedDeployContainerBuildContext = "..";
+const healthCommonsPackageName = "@murphai/health-commons";
+const healthCommonsFinnishDrySaunaProtocol = {
+  key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
+  title: "Finnish Dry Sauna",
+} as const;
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -168,6 +174,8 @@ export async function assertPreparedDeployArtifacts(input: {
   if (manifest.bundleFingerprint !== expectedBundleFingerprint) {
     throw new Error("Prepared runner bundle changed after assembly; rebuild deploy artifacts before deploying.");
   }
+
+  await assertRunnerBundleHealthCommonsCatalog(input.runnerBundleDir);
 }
 
 async function readRunnerBundleManifest(bundleDir: string): Promise<RunnerBundleManifest> {
@@ -232,6 +240,8 @@ async function assertRunnerBundleShape(
     await assertReadableFile(path.join(bundleDir, "node_modules", ".bin", "murph"), "runner murph binary");
     await assertReadableFile(path.join(bundleDir, "node_modules", ".bin", "vault-cli"), "runner vault-cli binary");
   }
+
+  await assertRunnerBundleHealthCommonsPackageFiles(bundleDir);
 }
 
 function assertGeneratedWranglerConfig(config: Record<string, unknown>): void {
@@ -420,6 +430,328 @@ async function assertInstalledRunnerDependency(
   }
 
   throw new Error(`Missing runner dependency ${packageName}.`);
+}
+
+async function assertRunnerBundleHealthCommonsPackageFiles(bundleDir: string): Promise<void> {
+  const packageDirs = await findInstalledPackageDirectories(
+    path.join(bundleDir, "node_modules"),
+    healthCommonsPackageName,
+  );
+
+  if (packageDirs.length === 0) {
+    throw new Error(`Missing runner dependency ${healthCommonsPackageName}.`);
+  }
+
+  for (const packageDir of packageDirs) {
+    await resolveContainedRunnerDependencyFile({
+      filePath: path.join(packageDir, "dist", "runtime.js"),
+      label: "Health Commons runtime entrypoint",
+      packageName: healthCommonsPackageName,
+      rootDir: bundleDir,
+    });
+    await resolveContainedRunnerDependencyFile({
+      filePath: path.join(packageDir, "generated", "catalog.json"),
+      label: "Health Commons generated catalog",
+      packageName: healthCommonsPackageName,
+      rootDir: bundleDir,
+    });
+  }
+}
+
+async function assertRunnerBundleHealthCommonsCatalog(bundleDir: string): Promise<void> {
+  const packageDirs = await findInstalledPackageDirectories(
+    path.join(bundleDir, "node_modules"),
+    healthCommonsPackageName,
+  );
+
+  if (packageDirs.length === 0) {
+    throw new Error(`Missing runner dependency ${healthCommonsPackageName}.`);
+  }
+
+  for (const packageDir of packageDirs) {
+    const runtimePath = await resolveContainedRunnerDependencyFile({
+      filePath: path.join(packageDir, "dist", "runtime.js"),
+      label: "Health Commons runtime entrypoint",
+      packageName: healthCommonsPackageName,
+      rootDir: bundleDir,
+    });
+    const catalogPath = await resolveContainedRunnerDependencyFile({
+      filePath: path.join(packageDir, "generated", "catalog.json"),
+      label: "Health Commons generated catalog",
+      packageName: healthCommonsPackageName,
+      rootDir: bundleDir,
+    });
+    const catalog = await loadHealthCommonsCatalogThroughBundledRuntime({
+      catalogPath,
+      runtimePath,
+    });
+    assertHealthCommonsCatalogIncludesFinnishDrySauna(catalog);
+  }
+}
+
+async function loadHealthCommonsCatalogThroughBundledRuntime(input: {
+  catalogPath: string;
+  runtimePath: string;
+}): Promise<Record<string, unknown>> {
+  let runtimeModule: unknown;
+
+  try {
+    runtimeModule = await import(pathToFileURL(input.runtimePath).href);
+  } catch (error) {
+    throw new Error(
+      "Health Commons runtime entrypoint could not be loaded; rebuild deploy artifacts before deploying.",
+      { cause: error },
+    );
+  }
+
+  if (
+    !isRecordObject(runtimeModule) ||
+    typeof runtimeModule.loadGeneratedHealthCommonsCatalog !== "function"
+  ) {
+    throw new Error(
+      "Health Commons runtime entrypoint does not expose catalog validation; rebuild deploy artifacts before deploying.",
+    );
+  }
+
+  let catalog: unknown;
+
+  try {
+    catalog = runtimeModule.loadGeneratedHealthCommonsCatalog({
+      catalogPath: input.catalogPath,
+    });
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      throw new Error("Missing Health Commons generated catalog.");
+    }
+
+    throw new Error(
+      "Runner Health Commons generated catalog is invalid; rebuild deploy artifacts before deploying.",
+      { cause: error },
+    );
+  }
+
+  if (!isRecordObject(catalog)) {
+    throw new Error(
+      "Runner Health Commons generated catalog is invalid; rebuild deploy artifacts before deploying.",
+    );
+  }
+
+  return catalog;
+}
+
+async function resolveContainedRunnerDependencyFile(input: {
+  filePath: string;
+  label: string;
+  packageName: string;
+  rootDir: string;
+}): Promise<string> {
+  let entryStat;
+
+  try {
+    entryStat = await lstat(input.filePath);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      throw new Error(`Missing ${input.label}.`);
+    }
+
+    throw error;
+  }
+
+  if (entryStat.isSymbolicLink()) {
+    throw new Error(`${input.label} must not be a symlink.`);
+  }
+
+  if (!entryStat.isFile()) {
+    throw new Error(`${input.label} must be a file.`);
+  }
+
+  const [resolvedFilePath, resolvedRootDir] = await Promise.all([
+    realpath(input.filePath),
+    realpath(input.rootDir),
+  ]);
+
+  if (!isPathInsideDirectory(resolvedRootDir, resolvedFilePath)) {
+    throw new Error(`Runner dependency ${input.packageName} ${input.label} resolves outside the runner bundle.`);
+  }
+
+  return resolvedFilePath;
+}
+
+async function findInstalledPackageDirectories(
+  nodeModulesDir: string,
+  packageName: string,
+): Promise<string[]> {
+  const packageParts = packageName.split("/");
+  const packageDirs = new Set<string>();
+  const containmentRootDir = path.dirname(nodeModulesDir);
+
+  await collectInstalledPackageDirectories({
+    containmentRootDir,
+    currentDir: nodeModulesDir,
+    packageDirs,
+    packageName,
+    packageParts,
+  });
+
+  return [...packageDirs].sort();
+}
+
+async function collectInstalledPackageDirectories(input: {
+  containmentRootDir: string;
+  currentDir: string;
+  packageDirs: Set<string>;
+  packageName: string;
+  packageParts: readonly string[];
+}): Promise<void> {
+  await maybeCollectInstalledPackageDirectory(input.currentDir, input);
+
+  let entries;
+
+  try {
+    entries = await readdir(input.currentDir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(input.currentDir, entry.name);
+
+    if (entry.isSymbolicLink()) {
+      await maybeCollectInstalledPackageDirectory(entryPath, input);
+      continue;
+    }
+
+    if (!entry.isDirectory() || entry.name === ".bin") {
+      continue;
+    }
+
+    await collectInstalledPackageDirectories({
+      ...input,
+      currentDir: entryPath,
+    });
+  }
+}
+
+async function maybeCollectInstalledPackageDirectory(
+  packageDir: string,
+  input: {
+    containmentRootDir: string;
+    packageDirs: Set<string>;
+    packageName: string;
+    packageParts: readonly string[];
+  },
+): Promise<void> {
+  if (!isPackageDirectory(packageDir, input.packageParts)) {
+    return;
+  }
+
+  if (
+    !(await isContainedPackageDirectory({
+      packageDir,
+      packageName: input.packageName,
+      rootDir: input.containmentRootDir,
+    }))
+  ) {
+    return;
+  }
+
+  const packageJsonPath = path.join(packageDir, "package.json");
+
+  if (!(await isReadableFile(packageJsonPath))) {
+    return;
+  }
+
+  const packageJson = await readJsonObjectFile(packageJsonPath, "runner package manifest");
+
+  if (packageJson.name === input.packageName) {
+    input.packageDirs.add(packageDir);
+  }
+}
+
+async function isContainedPackageDirectory(input: {
+  packageDir: string;
+  packageName: string;
+  rootDir: string;
+}): Promise<boolean> {
+  let resolvedPackageDir: string;
+  let resolvedRootDir: string;
+
+  try {
+    [resolvedPackageDir, resolvedRootDir] = await Promise.all([
+      realpath(input.packageDir),
+      realpath(input.rootDir),
+    ]);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+
+  if (!isPathInsideDirectory(resolvedRootDir, resolvedPackageDir)) {
+    throw new Error(`Runner dependency ${input.packageName} resolves outside the runner bundle.`);
+  }
+
+  return true;
+}
+
+function isPathInsideDirectory(rootDir: string, candidatePath: string): boolean {
+  const relativePath = path.relative(rootDir, candidatePath);
+
+  return relativePath === "" ||
+    Boolean(relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+function isPackageDirectory(
+  directoryPath: string,
+  packageParts: readonly string[],
+): boolean {
+  const parts = directoryPath.split(path.sep);
+  const tail = parts.slice(-packageParts.length);
+
+  return tail.length === packageParts.length
+    && tail.every((part, index) => part === packageParts[index]);
+}
+
+function assertHealthCommonsCatalogIncludesFinnishDrySauna(
+  catalog: Record<string, unknown>,
+): void {
+  const entities = catalog.entities;
+
+  if (!Array.isArray(entities)) {
+    throw new Error(
+      "Runner Health Commons generated catalog is invalid; rebuild deploy artifacts before deploying.",
+    );
+  }
+
+  const protocol = entities.find((entity) =>
+    isRecordObject(entity) &&
+      entity.key === healthCommonsFinnishDrySaunaProtocol.key
+  );
+
+  if (
+    !isRecordObject(protocol) ||
+    protocol.entityType !== "protocol_variant" ||
+    protocol.slug !== healthCommonsFinnishDrySaunaProtocol.slug ||
+    protocol.title !== healthCommonsFinnishDrySaunaProtocol.title
+  ) {
+    throw new Error(
+      "Runner Health Commons generated catalog is stale or missing Finnish Dry Sauna; rebuild deploy artifacts before deploying.",
+    );
+  }
+}
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value),
+  );
 }
 
 async function hasPnpmVirtualPackageManifest(

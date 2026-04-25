@@ -18,6 +18,7 @@ import {
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const temporaryDirectories: string[] = [];
+const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 
 afterEach(async () => {
   await Promise.all(
@@ -223,5 +224,34 @@ describe("runner bundle runtime artifact staging", () => {
     expect(entries).toContain("package/dist/runtime.js");
     expect(entries).toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
+
+    const { stdout: catalogRaw } = await execFileAsync(
+      "tar",
+      ["-xOf", healthCommonsTarball, "package/generated/catalog.json"],
+      { maxBuffer: 32 * 1024 * 1024 },
+    );
+    const catalog: unknown = JSON.parse(catalogRaw);
+
+    expect(findCatalogEntity(catalog, finnishDrySaunaProtocolKey)).toMatchObject({
+      entityType: "protocol_variant",
+      key: finnishDrySaunaProtocolKey,
+      slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
+      title: "Finnish Dry Sauna",
+    });
   });
 });
+
+function findCatalogEntity(catalog: unknown, key: string): Record<string, unknown> | null {
+  if (!isRecord(catalog) || !Array.isArray(catalog.entities)) {
+    return null;
+  }
+
+  return catalog.entities.find((entity) =>
+    isRecord(entity) &&
+      entity.key === key
+  ) ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
