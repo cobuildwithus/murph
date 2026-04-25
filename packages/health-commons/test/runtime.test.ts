@@ -117,6 +117,69 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     });
   });
 
+  it("normalizes wildcard filters and keeps protocol search/list semantics aligned", () => {
+    const reader = getGeneratedHealthCommonsCatalogReader();
+
+    const wildcardStatusProtocolKeys = reader.listProtocolVariants({
+      limit: 20,
+      query: "sauna",
+      statuses: ["*"],
+    }).map((protocol) => protocol.key);
+    expect(wildcardStatusProtocolKeys).toContain(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+
+    const wildcardCategoryProtocolKeys = reader.listProtocolVariants({
+      categories: ["*"],
+      limit: 20,
+      query: "sauna",
+    }).map((protocol) => protocol.key);
+    expect(wildcardCategoryProtocolKeys).toContain(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+
+    const spacedCategoryKeys = reader.listProtocolVariants({
+      categories: ["passive heat"],
+      limit: 500,
+    }).map((protocol) => protocol.key);
+    const slugCategoryKeys = reader.listProtocolVariants({
+      categories: ["passive-heat"],
+      limit: 500,
+    }).map((protocol) => protocol.key);
+    expect(spacedCategoryKeys).toEqual(slugCategoryKeys);
+
+    const searchKeys = reader.search({
+      entityTypes: ["protocol_variant"],
+      includeBody: true,
+      limit: 500,
+      query: "sauna",
+    }).map((result) => result.entity.key);
+    const listKeys = reader.listProtocolVariants({
+      limit: 500,
+      query: "sauna",
+    }).map((protocol) => protocol.key);
+    expect(listKeys).toEqual(searchKeys);
+
+    expect(reader.normalizeListOptions({
+      categories: ["*"],
+      limit: 20,
+      query: "Sauna",
+      statuses: ["*"],
+    })).toMatchObject({
+      categories: [],
+      ignoredWildcards: {
+        categories: ["*"],
+        statuses: ["*"],
+      },
+      query: "sauna",
+      statuses: [],
+    });
+
+    expect(() => reader.listProtocolVariants({
+      statuses: ["active"],
+    })).toThrow(/Unknown Health Commons status filter "active"/u);
+  });
+
   it("resolves compact relations and source context for assistant tools", () => {
     const reader = getGeneratedHealthCommonsCatalogReader();
     const protocol = reader.findByRouteId({
