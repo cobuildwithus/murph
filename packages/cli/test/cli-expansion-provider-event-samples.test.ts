@@ -59,7 +59,7 @@ async function runSliceCli<TData>(args: string[]): Promise<CliEnvelope<TData>> {
   const cli = createSliceCli()
   const output: string[] = []
 
-  await cli.serve([...args, '--verbose', '--format', 'json'], {
+  await cli.serve([...args, '--full-output', '--format', 'json'], {
     env: process.env,
     exit: () => {},
     stdout(chunk) {

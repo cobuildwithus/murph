@@ -210,7 +210,7 @@ describe('assistant CLI policy wrappers', () => {
   it('still redacts route argv when global flags precede the command path', async () => {
     const prepared = await prepareAssistantCliExecutionRequest({
       args: [
-        '--verbose',
+        '--full-output',
         '--format',
         'json',
         'route',
@@ -224,7 +224,7 @@ describe('assistant CLI policy wrappers', () => {
     })
 
     expect(prepared.redactedArgv).toEqual([
-      '--verbose',
+      '--full-output',
       '--format',
       'json',
       'route',

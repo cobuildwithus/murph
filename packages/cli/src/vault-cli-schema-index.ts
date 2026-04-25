@@ -202,7 +202,7 @@ function extractSchemaCommandPath(argv: readonly string[]): string[] {
       continue
     }
     if (
-      token === '--verbose' ||
+      token === '--full-output' ||
       token === '--token-count' ||
       token === '--no-config'
     ) {

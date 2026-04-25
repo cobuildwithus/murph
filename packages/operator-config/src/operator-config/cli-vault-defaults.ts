@@ -68,7 +68,7 @@ const ROOT_FLAGS_WITHOUT_VALUES = new Set([
   '--json',
   '--no-config',
   '--token-count',
-  '--verbose',
+  '--full-output',
 ])
 
 const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([

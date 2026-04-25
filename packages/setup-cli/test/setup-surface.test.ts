@@ -75,7 +75,7 @@ async function runJsonCli(args: string[]): Promise<{
   const output: string[] = []
   let exitCode: number | null = null
 
-  await cli.serve([...args, '--format', 'json', '--verbose'], {
+  await cli.serve([...args, '--format', 'json', '--full-output'], {
     env: process.env,
     exit(code) {
       exitCode = code
@@ -102,7 +102,7 @@ async function runJsonCli(args: string[]): Promise<{
 async function runSetupCli(args: string[], options: SetupCliOptions): Promise<void> {
   const cli = createSetupCli(options)
 
-  await cli.serve([...args, '--verbose'], {
+  await cli.serve([...args, '--full-output'], {
     env: process.env,
     exit: () => {},
     stdout: () => {},

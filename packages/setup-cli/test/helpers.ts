@@ -67,7 +67,7 @@ export async function runSetupCliJson<TData>(
   const cli = createSetupCli(options)
   const output: string[] = []
 
-  await cli.serve([...args, '--verbose', '--format', 'json'], {
+  await cli.serve([...args, '--full-output', '--format', 'json'], {
     env: process.env,
     exit: () => {},
     stdout(chunk) {

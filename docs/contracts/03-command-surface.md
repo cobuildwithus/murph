@@ -176,7 +176,7 @@ The `assistant` noun is therefore runtime inspection/control only. If a future s
 
 `vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`; each upsert also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt plus the first-class assistant knowledge tools, not in `AGENTS.md`.
 
-The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--verbose`, `--schema`, `--llms`, `skills add`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-`, the command schema intentionally describes the file option; use the matching `scaffold` command for the payload shape. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
+The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-`, the command schema intentionally describes the file option; use the matching `scaffold` command for the payload shape. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
 
 Read-only vault metadata and audit commands require an initialized vault root and fail with `invalid_vault` before query reads when `vault.json` is missing. Missing default-vault routing failures use `missing_vault`; typed CLI errors include a boolean `retryable` field in the JSON error envelope.
 
@@ -257,8 +257,8 @@ Every command now uses native `incur` command definitions directly:
 1. `incur` validates positional arguments and named options against the command schema.
 2. The handler receives parsed `args` and `options` and delegates exactly one boundary call to `core`, `importers`, or `query`.
 3. The handler returns the command-specific payload directly.
-4. Non-verbose `--format json` writes that payload body directly to stdout.
-5. `--verbose --format json` wraps the same payload in incur's success/error envelope, including metadata and CTAs when present.
+4. Plain `--format json` writes that payload body directly to stdout.
+5. `--full-output --format json` wraps the same payload in incur's success/error envelope, including metadata and CTAs when present.
 6. Human-oriented rendering, alternate formats, completions, `--llms`, skills, and MCP surfaces are incur-owned and are not redefined here.
 
 Read surfaces intentionally separate summary from detail:
@@ -274,7 +274,7 @@ Read surfaces intentionally separate summary from detail:
 - `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `DEVICE_SYNC_BASE_URL` and then the Murph-managed local daemon default.
 - `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
-- Machine-stable callers that need metadata or CTA suggestions should prefer `--verbose --format json`. The payload examples below describe the `data` body emitted by non-verbose JSON mode.
+- Machine-stable callers that need metadata or CTA suggestions should prefer `--full-output --format json`. The payload examples below describe the `data` body emitted by plain JSON mode.
 - Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`. Comma-delimited tokens such as `--kind meal,note` are invalid and should be rewritten as repeated flags.
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
@@ -300,7 +300,7 @@ Read surfaces intentionally separate summary from detail:
 
 ## Success Output
 
-For non-verbose `--format json`, successful commands write the command payload directly:
+For plain `--format json`, successful commands write the command payload directly:
 
 ```json
 {
@@ -314,13 +314,13 @@ For non-verbose `--format json`, successful commands write the command payload d
 Field rules:
 
 - Success output is the command-specific payload described below, with no extra wrapper fields.
-- With `--verbose --format json`, the same payload appears under `data` in incur's success envelope.
+- With `--full-output --format json`, the same payload appears under `data` in incur's success envelope.
 - Exit code `0` indicates success.
 - The payload examples below are representative rather than exhaustive. Newer noun and mutation commands follow the same direct-payload rule and are covered by the runtime schemas in `packages/cli/src/**/*.ts`.
 
 ## Failure Output
 
-For non-verbose `--format json`, failed commands write a direct error object and exit non-zero:
+For plain `--format json`, failed commands write a direct error object and exit non-zero:
 
 ```json
 {
@@ -335,11 +335,11 @@ Field rules:
 - `code` is a stable string suitable for machine branching.
 - `message` is operator-facing and actionable.
 - `retryable` follows native `incur` semantics.
-- With `--verbose --format json`, the same error shape appears under `error` in incur's envelope.
+- With `--full-output --format json`, the same error shape appears under `error` in incur's envelope.
 
 ## Command Payloads
 
-The examples below are the full successful non-verbose `--format json` response bodies.
+The examples below are the full successful plain `--format json` response bodies.
 
 ### `init`
 

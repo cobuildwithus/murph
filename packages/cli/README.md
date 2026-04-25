@@ -155,7 +155,7 @@ pnpm --dir packages/cli gen:config-schema
 
 The package exports the CLI runtime plus assistant helper subpaths from `dist/**`, exposes both `murph` and `vault-cli` bins from the same built entrypoint, and keeps `src/index.ts` as the package entrypoint with `src/bin.ts` as the launcher.
 
-Machine-facing callers should rely on incur's native envelope via `--verbose --format json` instead of a Murph-specific wrapper contract.
+Machine-facing callers should rely on incur's native envelope via `--full-output --format json` instead of a Murph-specific wrapper contract.
 
 Current repo-local package responsibilities include:
 
