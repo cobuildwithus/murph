@@ -25,7 +25,7 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
     expect(environment.runnerTimeoutMs).toBe(600_000);
-    expect(environment.webControlTimeoutMs).toBe(120_000);
+    expect(environment.webControlTimeoutMs).toBe(30_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
     expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
     expect(environment.hostedIngressEncryption.keyVersion).toBe("v1");

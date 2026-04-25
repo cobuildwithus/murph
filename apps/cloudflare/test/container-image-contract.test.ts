@@ -37,7 +37,7 @@ function createDeployEnvironment() {
     runnerReadyTimeoutMs: "20000",
     runnerTimeoutMs: "600000",
     traceHeadSamplingRate: 0.1,
-    webControlTimeoutMs: "120000",
+    webControlTimeoutMs: "30000",
     workerName: "murph-hosted",
     workerVars: {},
   }
