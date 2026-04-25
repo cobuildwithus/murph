@@ -152,8 +152,8 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 250,
-        rollout_active_grace_period: 0,
-        rollout_step_percentage: [100],
+        rollout_active_grace_period: 300,
+        rollout_step_percentage: [10, 25, 50, 100],
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([
@@ -321,8 +321,10 @@ describe("hosted deploy automation helpers", () => {
     for (const expectedLine of [
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
+      "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
+      "Container rollout: \\`${{ inputs.container_rollout }}\\`",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
       "uses: docker/setup-buildx-action@v4",

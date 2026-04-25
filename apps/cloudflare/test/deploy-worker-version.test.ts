@@ -71,6 +71,7 @@ describe("runHostedWorkerDeployment", () => {
       }),
     });
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
+      containerRolloutMode: "gradual",
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: "manual direct deploy",
       includeSecrets: true,
@@ -137,6 +138,7 @@ describe("runHostedWorkerDeployment", () => {
     });
 
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
+      containerRolloutMode: "gradual",
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("direct deploy"),
       includeSecrets: true,
@@ -224,6 +226,7 @@ describe("runHostedWorkerDeployment", () => {
       }),
     });
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
+      containerRolloutMode: "gradual",
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("direct deploy"),
       includeSecrets: false,
@@ -253,6 +256,7 @@ describe("runHostedWorkerDeployment", () => {
     });
 
     expect(yesDependencies.deployDirect).toHaveBeenCalledWith({
+      containerRolloutMode: "gradual",
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("direct deploy"),
       includeSecrets: true,
@@ -260,6 +264,66 @@ describe("runHostedWorkerDeployment", () => {
       versionTag: expect.any(String),
       workerName: "hosted-worker",
     });
+  });
+
+  it("supports explicit immediate container rollout for hotfix deploys", async () => {
+    const finalDeployment: DeploymentStatusPayload = {
+      created_on: "2026-03-27T00:10:00.000Z",
+      versions: [
+        {
+          percentage: 100,
+          version_id: "version-direct",
+        },
+      ],
+    };
+    const dependencies = createDependencies({
+      readCurrentDeployment: vi
+        .fn<HostedWorkerDeploymentDependencies["readCurrentDeployment"]>()
+        .mockResolvedValue(finalDeployment),
+    });
+
+    await runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    });
+
+    expect(dependencies.deployDirect).toHaveBeenCalledWith({
+      containerRolloutMode: "immediate",
+      configPath: "/tmp/wrangler.generated.jsonc",
+      deploymentMessage: expect.stringContaining("direct deploy"),
+      includeSecrets: true,
+      secretsFilePath: "/tmp/worker-secrets.json",
+      versionTag: expect.any(String),
+      workerName: "hosted-worker",
+    });
+  });
+
+  it("rejects unknown container rollout modes before running Wrangler", async () => {
+    const dependencies = createDependencies();
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_CONTAINER_ROLLOUT: "fast",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    })).rejects.toThrow("HOSTED_EXECUTION_CONTAINER_ROLLOUT must be 'gradual' or 'immediate'.");
+
+    expect(dependencies.deployDirect).not.toHaveBeenCalled();
+    expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
   });
 
   it("rejects invalid prepared artifacts before running Wrangler", async () => {

@@ -80,6 +80,7 @@ Core execution tuning:
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
+- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant,parsers,web` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
@@ -275,7 +276,9 @@ That command:
 - renders the deploy config and worker secrets payload
 - assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`)
 - prepares the stable native runner base image with Docker's local cache
-- deploys the Worker directly with Wrangler using immediate container rollout, which builds only the small app image layer from the prepared runner bundle
+- deploys the Worker directly with Wrangler, relying on the configured gradual container rollout by default, which builds only the small app image layer from the prepared runner bundle
+
+The normal container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; leave it at `gradual` for ordinary deploys. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and should be reserved for hotfixes where interrupting active runner containers is acceptable.
 
 The GitHub `Deploy Cloudflare Hosted Execution` workflow prepares the same base image with Docker Buildx and the GitHub Actions cache before `wrangler deploy`, so normal production deploys avoid rebuilding the stable native parser stack during the `Deploy Worker` step.
 The workflow also runs `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base` before any deploy. That smoke builds the app image from a prepared runner bundle and executes the hosted runner inside Docker. Because the smoke overlays test entrypoints into `.deploy/runner-bundle/`, the workflow re-runs `deploy:artifacts` afterward and `deploy:worker:apply` rejects any smoke-mutated bundle that reaches the deploy step.
