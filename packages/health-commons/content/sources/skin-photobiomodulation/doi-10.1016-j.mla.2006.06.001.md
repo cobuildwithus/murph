@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: Post-procedure healing with 3- and 6-month follow-up assessments noted in indexed summaries.
   aggregateRole: context
   cohortKey: trelles-allones-mayo-2006-post-resurfacing
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: trelles-allones-mayo-2006-post-resurfacing
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: Visible/NIR LED enhanced post-ablation healing, but did not show a clear standalone wrinkle endpoint advantage.
-    implication: Use for adjunctive recovery and recent-procedure cautions only.
-    caveat: Post-ablative resurfacing population and procedure-specific wound-healing endpoints do not map to routine home LED protocols.
-    displayPriority: 62
 evidenceBucket: adjunctive recent-procedure or filler context
 whyItMatters: The source is commonly adjacent to red/NIR facial LED claims but addresses recovery after ablative procedures, not primary anti-photoaging.
 potentialMurphEndpoints:

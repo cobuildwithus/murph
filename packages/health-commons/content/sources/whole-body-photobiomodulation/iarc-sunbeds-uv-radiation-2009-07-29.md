@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: Not applicable
   aggregateRole: context
   cohortKey: iarc-2009-sunbeds-uv-radiation
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: family-definition-and-boundaries
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: IARC classifies UV-emitting tanning devices as carcinogenic to humans.
-    implication: This is the sharpest authoritative boundary against using sunbed or tanning-device comparisons in a whole-body red/NIR protocol.
-    caveat: The source addresses ultraviolet carcinogenicity, not therapeutic photobiomodulation.
-    displayPriority: 50
 evidenceBucket: Adjacent-variant and exclusion boundary anchors
 whyItMatters: It is the canonical safety-boundary statement showing that UV sunbeds sit in a carcinogenic-risk category, not a therapeutic PBM category.
 potentialMurphEndpoints:

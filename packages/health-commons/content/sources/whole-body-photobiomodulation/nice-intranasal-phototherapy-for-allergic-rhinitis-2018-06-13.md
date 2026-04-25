@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: Procedure typically delivered for several minutes per session; NICE emphasized repeated-use and long-term safety as research needs
   aggregateRole: synthesis
   cohortKey: nice-2018-intranasal-phototherapy-rhinitis
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: intranasal-phototherapy-boundary
-    stance: safety_boundary
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    headline: NICE concluded that evidence for intranasal phototherapy in allergic rhinitis was limited in quantity and quality and should remain in research settings.
-    implication: This is a strong external-protocol boundary source showing that nearby intranasal light procedures should not be generalized into whole-body PBM claims.
-    caveat: NICE specifically requested better reporting of wavelength, intensity, duration, repeated use, and long-term safety.
-    displayPriority: 40
 evidenceBucket: Adjacent-variant and exclusion boundary anchors
 whyItMatters: It gives a high-quality external benchmark for keeping intranasal phototherapy separate from whole-body PBM and for emphasizing parameter reporting and long-term safety.
 potentialMurphEndpoints:

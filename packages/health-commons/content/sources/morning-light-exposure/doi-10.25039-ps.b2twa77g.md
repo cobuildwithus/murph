@@ -35,17 +35,6 @@ researchEvidence:
   durationLabel: "Not applicable"
   aggregateRole: "synthesis"
   cohortKey: "source-cohort:doi-10.25039-ps.b2twa77g"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "dose-measurement-implementation"
-    stance: "context_only"
-    scope: "same_mechanism"
-    result: "not_efficacy_evidence"
-    headline: "CIE position statement gives professional guidance for proper light at the proper time."
-    implication: "Use as external protocol/measurement context and artifact candidate; do not treat as an outdoor trial."
-    caveat: "Position statement, not experimental evidence."
-    displayPriority: 90
 evidenceBucket: "timing_dose_circadian_metrics"
 whyItMatters: "It is an official professional guidance document and the only ledger source in this batch flagged for manifest entry."
 potentialMurphEndpoints:

@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: "4 weeks, 12 weeks, or 8 months across included timing studies"
   aggregateRole: context
   cohortKey: "creatine-timing-resistance-training-review"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: "timing-and-resistance-training"
-    stance: mixed
-    scope: direct_protocol
-    result: mixed
-    headline: "Post-exercise creatine showed a lean-mass signal in a very small evidence base, but strength outcomes did not favor timing."
-    implication: "Can support low-confidence timing guidance such as taking creatine near training, with no need to overstate post-workout superiority."
-    caveat: "Only three timing studies were pooled, populations were heterogeneous, and statistical power was low."
-    displayPriority: 64
 evidenceBucket: "strength_hypertrophy_synthesis"
 whyItMatters: "It is one of the few sources directly focused on creatine timing around resistance training, but it is too small to justify a strong timing rule."
 potentialMurphEndpoints:

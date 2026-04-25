@@ -36,19 +36,6 @@ researchEvidence:
   durationLabel: "Single 4x4 cycling session"
   aggregateRole: "primary"
   cohortKey: "acala-2020-4x4-hr-response"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
-    groupId: dose-fidelity-and-implementation
-    stance: supports
-    scope: measurement_context
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:estimated-vo2max
-    headline: "The heart-rate-response study shows later intervals are where people usually spend the most time in the target zone, so four completed intervals does not automatically mean the right dose happened."
-    implication: "Log interval peaks and rough time in zone; later intervals often tell you more about fidelity than interval one."
-    caveat: "Single-session physiology is useful for implementation, but it does not tell you the long-term effect size of a 4x4 program."
-    displayPriority: 20
 evidenceBucket: "Dose, target zone, and implementation"
 whyItMatters: "Shows why target-zone fidelity should be logged instead of assuming that completing four intervals means the intended 4x4 dose was achieved."
 potentialMurphEndpoints:

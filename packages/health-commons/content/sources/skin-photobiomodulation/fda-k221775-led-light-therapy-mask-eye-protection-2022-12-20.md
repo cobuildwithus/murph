@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Wrinkle protocol summarized as 10 minutes, 5 times weekly for 6 weeks
   aggregateRole: context
   cohortKey: fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch003:fda-k221775-led-light-therapy-mask-eye-protection-2022-12-20:ocular
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: 510(k) Summary: LED Light Therapy Mask, models MK-78, MK-04, MK66-H, MK66R-B, EL00003
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: Regulatory substantial-equivalence summary, not independent clinical efficacy evidence.
-    displayPriority: 50
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It documents removable eye protection in red/NIR LED face-mask designs used for wrinkle indications.
 potentialMurphEndpoints:

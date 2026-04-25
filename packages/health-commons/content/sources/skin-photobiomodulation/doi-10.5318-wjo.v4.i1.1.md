@@ -32,17 +32,6 @@ researchEvidence:
   durationLabel: Review; exposure and follow-up varied
   aggregateRole: synthesis
   cohortKey: doi-10.5318-wjo.v4.i1.1
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch003:doi-10.5318-wjo.v4.i1.1:ocular
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: Ocular damage secondary to lights and lasers: How to avoid and treat if necessary
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: Broad lights/lasers scope and no direct red/NIR skin-protocol outcomes.
-    displayPriority: 50
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It provides ophthalmology-oriented prevention guidance for light and laser ocular hazards.
 potentialMurphEndpoints:

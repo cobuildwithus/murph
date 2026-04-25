@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: "Varies by cited literature; no single intervention duration"
   aggregateRole: primary
   cohortKey: "mixed-review-populations"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: "dose-individualization-background"
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: "Creatine dosing may need to vary by tissue target and population rather than assuming one universal dose."
-    implication: "Use as background for dose ranges and individualization language, not as a direct Murph protocol efficacy claim."
-    caveat: "Narrative review; it does not test a single creatine-monohydrate self-experiment protocol."
-    displayPriority: 52
 evidenceBucket: "background_guidelines_external"
 whyItMatters: "It helps explain why a protocol may mention loading, maintenance, relative dosing, and population-specific caution without making one-size-fits-all claims."
 potentialMurphEndpoints:

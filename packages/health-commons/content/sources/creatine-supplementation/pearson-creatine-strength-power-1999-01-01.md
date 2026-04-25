@@ -35,17 +35,6 @@ researchEvidence:
   durationLabel: "10 weeks."
   aggregateRole: primary
   cohortKey: "creatine-monohydrate:pearson-creatine-strength-power-1999-01-01"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "batch-009"
-    stance: "supports"
-    scope: direct_protocol
-    result: "positive"
-    headline: "5 g/day without loading has historical support in athletes, but not as adult-general evidence."
-    implication: "Practical no-loading 5 g/day training study."
-    caveat: "Male collegiate football players. Small collegiate male football sample. Manual source without PMID/DOI in canonical ledger; verify bibliographic details before publication."
-    displayPriority: 50
 evidenceBucket: "population_boundary_adjacent_claims"
 whyItMatters: "Practical no-loading 5 g/day training study."
 potentialMurphEndpoints:

@@ -30,18 +30,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: safety-fertility-cooling-boundary
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: "X update reports groin icing during sauna and a personal fertility-marker change."
-    implication: "Justifies treating groin cooling and fertility concerns as source-specific safety boundaries."
-    caveat: "Self-experiment claim only; it does not prove groin icing makes sauna fertility-safe."
-    displayPriority: 10
 artifacts:
   -
     artifactId: art_x_bryan_johnson_ice_balls_2026_04_09_html_snapshot

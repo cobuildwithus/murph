@@ -32,17 +32,6 @@ researchEvidence:
     - "Ledger directness: direct_protocol"
     - "Ledger claim use: do-not-use"
     - "Ledger priority: exclude"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "adjacent_modalities_and_external_claims"
-    stance: "context_only"
-    scope: "direct_protocol"
-    result: "not_efficacy_evidence"
-    headline: "Representative clinic marketing page tying direct HBOT aging studies to premium anti-aging claims. Excluded from extraction; keep only for audit or why-excluded context."
-    implication: "Use this source according to its ledger role: do-not-use / direct_protocol."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 50
 evidenceBucket: "Adjacent modalities and external claims"
 claimUse: "do-not-use"
 directness: "direct_protocol"

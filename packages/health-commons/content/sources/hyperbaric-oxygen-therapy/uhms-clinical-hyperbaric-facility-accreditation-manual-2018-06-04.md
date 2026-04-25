@@ -36,27 +36,6 @@ researchEvidence:
     - "Ledger directness: safety_boundary"
     - "Ledger claim use: safety-only"
     - "Ledger priority: backbone"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "safety_contraindications_adverse_events_and_facility_hazards"
-    stance: "safety_boundary"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "Major facility operations reference used by accredited HBOT programs and cited in UHMS safety materials."
-    implication: "Use this source according to its ledger role: safety-only / safety_boundary."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "clinical-hbot-definition-and-supervision"
-    stance: "safety_boundary"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "Major facility operations reference used by accredited HBOT programs and cited in UHMS safety materials."
-    implication: "Use this source according to its ledger role: safety-only / safety_boundary."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
 evidenceBucket: "Safety, contraindications, adverse events, and facility hazards"
 claimUse: "safety-only"
 directness: "safety_boundary"

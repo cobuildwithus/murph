@@ -46,17 +46,6 @@ studyDesign: Systematic review
 modality: evening short-wavelength or melanopic light reduction
 redLightGlassesFocus: Contextual
 murphV1Priority: Low
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed"
-    groupId: "measurement-and-claim-guardrails"
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: "Earlier systematic review found high-quality evidence lacking for broad blue-light spectacle claims."
-    implication: "Supports conservative claim language and defers to newer reviews for sleep-specific conclusions."
-    caveat: "Pre-Cochrane review with overlapping but older literature."
-    displayPriority: 30
 ---
 
 This source is included for **Eye and sleep claim calibration**.

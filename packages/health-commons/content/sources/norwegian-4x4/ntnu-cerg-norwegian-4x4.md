@@ -31,17 +31,6 @@ researchEvidence:
   designLabel: "Public protocol guidance"
   populationLabel: "Public-facing exercise guidance"
   aggregateRole: "context"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:norwegian-4x4/norwegian-4x4
-    groupId: dose-fidelity-and-implementation
-    stance: supports
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: "Defines the public 4x4 recipe and makes the key coaching point explicit: build toward about 90% max HR instead of going all-out early."
-    implication: "Use this page to coach the session: hard but repeatable, usually 2–3 sessions per week for fitness, and clinician guidance first if CAD or exercise-test concerns apply."
-    caveat: "This is expert protocol guidance, not a randomized outcome trial; HRmax estimates and unsupervised safety boundaries still vary by person."
-    displayPriority: 10
 evidenceBucket: "Dose, target zone, and implementation"
 whyItMatters: "This is the practical recipe anchor for what most people mean by Norwegian 4x4, including pacing into the target zone instead of sprinting too hard too soon."
 potentialMurphEndpoints:

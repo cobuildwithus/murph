@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: Not a trial follow-up; policy guidance on regulation and risk management of sunbeds
   aggregateRole: synthesis
   cohortKey: who-2017-artificial-tanning-devices
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: uv-tanning-safety-boundary
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: WHO places artificial tanning devices in a UV-risk and public-health-regulation domain rather than a therapeutic PBM domain.
-    implication: This is a high-value safety boundary source to prevent sunbed or tanning-device analogies from entering whole-body red/NIR protocol copy.
-    caveat: This source concerns UV-emitting tanning devices, not therapeutic red/NIR devices.
-    displayPriority: 50
 evidenceBucket: Adjacent-variant and exclusion boundary anchors
 whyItMatters: Whole-body light beds are easy to confuse with tanning devices; this source draws a hard UV-risk boundary and shows the regulatory context is entirely different.
 potentialMurphEndpoints:

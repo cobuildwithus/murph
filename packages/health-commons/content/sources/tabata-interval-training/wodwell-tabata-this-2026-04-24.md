@@ -40,18 +40,6 @@ researchEvidence:
   durationLabel: Five Tabata blocks with one-minute rests after the first four blocks
   cohortKey: wodwell-tabata-this-2026-04-24
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Preserves 20/10 × 8 timing but repeats it across a five-movement benchmark.
-    implication: Useful for public-workout taxonomy and dose boundary, not for health outcomes.
-    caveat: Workout-library record; no original trial data or safety denominator.
-    displayPriority: 55
 evidenceBucket: external_protocol_claims
 whyItMatters: It shows how an exact Tabata timer pattern can be embedded in a much larger benchmark workout.
 potentialMurphEndpoints:

@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: Not applicable; regulatory guidance
   aggregateRole: context
   cohortKey: fda-2023-pbm-guidance
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: regulatory-definition-and-safety-boundaries
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: FDA defines PBM as non-heating light therapy and expects wavelength, dose, irradiance, pulsing, target-area, and safety reporting in premarket submissions.
-    implication: Useful for device-description completeness and for keeping whole-body claims inside nonthermal, safety-aware boundaries.
-    caveat: Draft nonbinding regulatory guidance rather than a clinical efficacy study.
-    displayPriority: 45
 evidenceBucket: Dose, device, and implementation reporting
 whyItMatters: It provides an official nonthermal PBM definition plus a practical checklist of parameters and safety tests that should remain visible in protocol documentation.
 potentialMurphEndpoints:

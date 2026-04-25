@@ -30,20 +30,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Source-attributed personal protocol and outcome report; do not treat as population-level evidence.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: source-routine-spec
-    stance: supports
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:hrv-rmssd
-    headline: "Primary Blueprint article defines the daily 20-minute 200 F dry-sauna routine and beginner adaptation boundary."
-    implication: "Use it to render the source-attributed protocol and to keep Johnson's personal daily routine separate from a safer starter dose."
-    caveat: "This is a one-person source report and protocol description, not population-level efficacy evidence."
-    displayPriority: 10
 artifacts:
   -
     artifactId: art_bryan_johnson_sauna_protocol_2026_01_28_html_snapshot

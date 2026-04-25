@@ -33,18 +33,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: core-temperature-dose-variant
-    stance: mixed
-    scope: measurement_context
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: "Readable April 16 mirror says Johnson needed about 31 minutes to cross his 102.4 F / 39 C threshold."
-    implication: "Supports treating duration and core-temperature dose as separate concepts on the protocol page."
-    caveat: "Readable mirror of a single-person update, not a protocol trial."
-    displayPriority: 20
 artifacts:
   -
     artifactId: art_linkedin_bryan_johnson_core_temp_2026_04_16_html_snapshot

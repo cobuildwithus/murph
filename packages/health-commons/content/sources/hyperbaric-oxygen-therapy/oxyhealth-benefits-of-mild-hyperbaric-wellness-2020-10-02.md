@@ -32,17 +32,6 @@ researchEvidence:
     - "Ledger directness: adjacent_variant"
     - "Ledger claim use: do-not-use"
     - "Ledger priority: exclude"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "adjacent_modalities_and_external_claims"
-    stance: "context_only"
-    scope: "adjacent_variant"
-    result: "not_efficacy_evidence"
-    headline: "Manufacturer/distributor page showing how mild-chamber wellness claims are framed for consumers. Excluded from extraction; keep only for audit or why-excluded context."
-    implication: "Use this source according to its ledger role: do-not-use / adjacent_variant."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 50
 evidenceBucket: "Adjacent modalities and external claims"
 claimUse: "do-not-use"
 directness: "adjacent_variant"

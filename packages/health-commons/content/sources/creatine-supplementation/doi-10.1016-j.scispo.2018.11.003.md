@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: 7-day loading period in accessible extracts
   aggregateRole: primary
   cohortKey: cohort:creatine-monohydrate:doi-10.1016-j.scispo.2018.11.003
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: batch-004-doi-10.1016-j.scispo.2018.11.003
-    stance: supports
-    scope: direct_protocol
-    result: positive
-    headline: Short-term loading improved several field-sport performance tests in female futsal players without extracted weight gain.
-    implication: Supports short loading as an optional route when rapid high-intensity performance effects are the goal.
-    caveat: Do not generalize sport-specific agility and sprint outcomes to all users or all endpoints.
-    displayPriority: 75
 evidenceBucket: dose_loading_maintenance
 whyItMatters: This adds women/team-sport loading evidence and a weight-gain boundary.
 potentialMurphEndpoints:

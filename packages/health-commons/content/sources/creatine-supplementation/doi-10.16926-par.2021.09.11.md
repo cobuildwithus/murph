@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: "Not fully extracted"
   aggregateRole: context
   cohortKey: "doi-10.16926-par.2021.09.11-soldiers-hcl"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "doi-10.16926-par.2021.09.11"
-    stance: "context_only"
-    scope: adjacent_variant
-    result: "not_efficacy_evidence"
-    headline: "HCl-only soldier data are not monohydrate evidence."
-    implication: "Do not use this source to compare HCl with monohydrate or support monohydrate protocol claims."
-    caveat: "No monohydrate comparator and limited extraction detail; rights status unknown."
-    displayPriority: 25
 evidenceBucket: "formulation_variant_boundary"
 whyItMatters: "It preserves an HCl-adjacent record while preventing unsupported cross-form claims."
 potentialMurphEndpoints:

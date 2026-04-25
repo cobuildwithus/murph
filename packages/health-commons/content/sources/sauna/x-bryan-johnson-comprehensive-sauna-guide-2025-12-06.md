@@ -34,19 +34,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: personal-outcomes-not-causal
-    stance: does_not_confirm
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-    headline: "Comprehensive X guide reports Johnson's broad toxin, vascular, fertility, blood, and resting-heart-rate claims."
-    implication: "Use as provenance for what Johnson reported, not as an expected-outcome claim for users."
-    caveat: "Single-person self-report with many possible confounders and no controlled comparator."
-    displayPriority: 20
 artifacts:
   -
     artifactId: art_x_bryan_johnson_comprehensive_sauna_guide_2025_12_06_html_snapshot

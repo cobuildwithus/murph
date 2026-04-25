@@ -77,19 +77,6 @@ researchEvidence:
   durationLabel: "..."
   aggregateRole: primary
   cohortKey: "..."
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:{{FAMILY_SLUG}}/{{PROTOCOL_SLUG}}
-    groupId: "..."
-    stance: supports | mixed | opposes | context_only | safety_boundary
-    scope: direct_protocol | same_mechanism | adjacent_variant | clinical_supervised | safety_boundary | background
-    result: positive | mixed | no_clear_advantage | negative | not_efficacy_evidence
-    endpointKeys:
-      - biomarker:...
-    headline: "..."
-    implication: "..."
-    caveat: "..."
-    displayPriority: 50
 evidenceBucket: "..."
 whyItMatters: "..."
 potentialMurphEndpoints:
@@ -102,6 +89,15 @@ claimUse: supports-protocol | safety-only | context-only | do-not-use
 murphV1Priority: High | Medium | Low
 pdfRightsStatus: open_access | permission_required | paywalled | unknown
 ---
+
+For every source page that supports a researchLandscape group, also emit a
+standalone evidence-appraisal JSONL record under
+`packages/health-commons/content/evidence-appraisals/source-protocol-evidence/{{FAMILY_SLUG}}.jsonl`.
+Each record must use schema `murph.commons.evidence-appraisal.v1`, a key prefixed
+`evidence_appraisal:`, the source page key, target protocol key
+`protocol_variant:{{FAMILY_SLUG}}/{{PROTOCOL_SLUG}}`, targetKind `protocol_variant`,
+groupId, stance, scope, result, endpointKeys, headline, implication, optional
+caveat, and displayPriority.
 
 This source is included for **{evidenceBucket}**.
 

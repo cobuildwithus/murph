@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: Once daily 10-minute evening use for 12 weeks, with questionnaires every 2 weeks and baseline/Week 12 photos.
   aggregateRole: context
   cohortKey: nct07025837
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch-002-adjacent_variant
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: A registry record describes a single-group iRestore face plus neck/chest LED mask study with daily 10-minute use and photo/questionnaire endpoints.
-    implication: Useful as device-geometry and protocol-design context for large-area face/neck/chest consumer devices.
-    caveat: Registry/protocol-only source in this batch; no posted outcome effects were extracted, and there is no comparator arm.
-    displayPriority: 70
 evidenceBucket: adjacent device or combination-intervention evidence
 whyItMatters: It is close to consumer mask use and includes face plus neck/chest anatomy, but the single-group registry design prevents efficacy claims in this extraction.
 potentialMurphEndpoints:

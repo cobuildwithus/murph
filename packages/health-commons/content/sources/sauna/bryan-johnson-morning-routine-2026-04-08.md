@@ -29,20 +29,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: source-routine-spec
-    stance: supports
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:hrv-rmssd
-    headline: "Morning-routine page corroborates the 20-minute 200 F daily sauna and adds routine-level tactics."
-    implication: "Supports the page's exact timing, groin-cooling, head-protection, and tracking details for the Blueprint routine."
-    caveat: "It repeats the same single-person source family and does not add independent outcome evidence."
-    displayPriority: 20
 artifacts:
   -
     artifactId: art_bryan_johnson_morning_routine_2026_04_08_html_snapshot

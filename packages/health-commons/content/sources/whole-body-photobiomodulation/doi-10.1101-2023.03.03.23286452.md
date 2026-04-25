@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: 18 sessions over approximately 6 weeks plus 24-week follow-up
   aggregateRole: primary
   cohortKey: fitzmaurice-2023-fm-feasibility
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: sibling-variant-literatures
-    stance: context_only
-    scope: clinical_supervised
-    result: positive
-    headline: This supervised single-arm whole-body NovoTHOR feasibility study reported broad symptom improvement and high acceptability after 18 sessions, but it has no control group and remains a preprint with title-metadata conflict.
-    implication: Useful for disease-specific supervised implementation context and candidate outcome selection, not as a direct consumer efficacy claim.
-    caveat: Accessible source surfaces disagree on whether the title is chronic-pain or fibromyalgia focused; the study is uncontrolled, preprint-only, and includes internal dose-reporting inconsistencies that should not be normalized away.
-    displayPriority: 45
 evidenceBucket: Dose, device, and implementation reporting
 whyItMatters: This is the closest supervised whole-body clinical implementation source in the batch, but it remains population-mismatched for unsupervised wellness use and should stay inside a clinical-supervised context bucket.
 potentialMurphEndpoints:

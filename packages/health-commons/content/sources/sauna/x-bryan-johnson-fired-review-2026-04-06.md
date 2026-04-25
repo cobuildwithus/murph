@@ -30,18 +30,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: core-temperature-dose-variant
-    stance: mixed
-    scope: measurement_context
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: "After 232 sessions, Johnson reported that the older 20-minute routine did not hit his core-temperature threshold."
-    implication: "Prevents treating the original 20-minute routine and later threshold-targeted variant as identical."
-    caveat: "Review thread from the same source family, not independent validation."
-    displayPriority: 40
 artifacts:
   -
     artifactId: art_x_bryan_johnson_fired_review_2026_04_06_html_snapshot

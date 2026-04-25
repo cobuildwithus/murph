@@ -97,30 +97,17 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         assertTargetExists(keys, sourceKey, `${page.frontmatter.key} claim ${claim.claimId}`);
       }
     }
-    for (const appraisal of page.frontmatter.protocolEvidence ?? []) {
-      assertTargetExists(keys, appraisal.protocolKey, `${page.frontmatter.key} protocolEvidence ${appraisal.groupId} protocolKey`);
-      for (const endpointKey of appraisal.endpointKeys ?? []) {
-        assertTargetExists(keys, endpointKey, `${page.frontmatter.key} protocolEvidence ${appraisal.groupId} endpointKeys`);
-      }
-      for (const findingKey of appraisal.findingKeys ?? []) {
-        assertFindingExists(findingIds, findingKey, `${page.frontmatter.key} protocolEvidence ${appraisal.groupId} findingKeys`);
-      }
-    }
     for (const group of page.frontmatter.researchLandscape?.groups ?? []) {
       for (const sourceKey of group.sourceKeys) {
         const sourceBaseKey = stripRevision(sourceKey);
         assertTargetExists(keys, sourceKey, `${page.frontmatter.key} researchLandscape group ${group.id}`);
-        const sourcePage = pagesByKey.get(sourceBaseKey);
-        const hasSourcePageAppraisal = sourcePage?.frontmatter.protocolEvidence?.some((appraisal) =>
-          stripRevision(appraisal.protocolKey) === page.frontmatter.key && appraisal.groupId === group.id
-        ) ?? false;
         const hasStandaloneAppraisal = standaloneAppraisalMatches.has(
           evidenceAppraisalMatchKey(sourceBaseKey, page.frontmatter.key, group.id),
         );
 
-        if (!hasSourcePageAppraisal && !hasStandaloneAppraisal) {
+        if (!hasStandaloneAppraisal) {
           throw new Error(
-            `${page.frontmatter.key} researchLandscape group ${group.id} source ${sourceKey} lacks matching protocolEvidence or evidence-appraisal edge.`,
+            `${page.frontmatter.key} researchLandscape group ${group.id} source ${sourceKey} lacks matching evidence-appraisal edge.`,
           );
         }
       }

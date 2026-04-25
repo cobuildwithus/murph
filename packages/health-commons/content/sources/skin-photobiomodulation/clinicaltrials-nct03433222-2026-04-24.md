@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: Planned nine sessions over three weeks in the associated protocol.
   aggregateRole: context
   cohortKey: cohort:clinicaltrials-nct03433222-2026-04-24
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: red-led-safety-registry
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: The registry documents Fitzpatrick I-III high-fluence red LED safety testing.
-    implication: Use with the protocol/publication to preserve the lighter-skin versus darker-skin safety distinction.
-    caveat: Do not use registry alone to claim effectiveness.
-    displayPriority: 68
 evidenceBucket: red-light skin safety and dose-escalation boundary
 whyItMatters: Use with the protocol/publication to preserve the lighter-skin versus darker-skin safety distinction.
 potentialMurphEndpoints:

@@ -2,6 +2,7 @@ import {
   healthCommonsCatalogSchema,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
+  type HealthCommonsEvidenceAppraisal,
   type HealthCommonsEntityType,
   type HealthCommonsRelationType,
 } from "@murphai/contracts";
@@ -18,6 +19,11 @@ export interface HealthCommonsCatalogReader {
   }): HealthCommonsEntity | null;
   findBySlug(slug: string): HealthCommonsEntity | null;
   listByEntityType(entityType: HealthCommonsEntityType): HealthCommonsEntity[];
+  listEvidenceAppraisals(input?: {
+    groupId?: string;
+    sourceKey?: string;
+    targetKey?: string;
+  }): HealthCommonsEvidenceAppraisal[];
   listRelated(input: {
     entity: HealthCommonsEntity;
     relationTypes?: readonly HealthCommonsRelationType[];
@@ -37,6 +43,7 @@ export function createHealthCommonsCatalogReader(
   const entitiesByType = new Map<HealthCommonsEntityType, HealthCommonsEntity[]>();
   const entitiesByTrailingSlug = new Map<string, HealthCommonsEntity[]>();
   const redirectsBySource = new Map(catalog.redirects.map((redirect) => [redirect.from, redirect.to]));
+  const evidenceAppraisals = catalog.evidenceAppraisals;
 
   for (const entity of catalog.entities) {
     const existingByType = entitiesByType.get(entity.entityType) ?? [];
@@ -97,6 +104,22 @@ export function createHealthCommonsCatalogReader(
     listByEntityType(entityType: HealthCommonsEntityType) {
       return entitiesByType.get(entityType)?.slice() ?? [];
     },
+    listEvidenceAppraisals(input = {}) {
+      const sourceKey = input.sourceKey ? stripRevision(resolveKey(input.sourceKey)) : null;
+      const targetKey = input.targetKey ? stripRevision(resolveKey(input.targetKey)) : null;
+      return evidenceAppraisals.filter((appraisal) => {
+        if (sourceKey && stripRevision(resolveKey(appraisal.sourceKey)) !== sourceKey) {
+          return false;
+        }
+        if (targetKey && stripRevision(resolveKey(appraisal.targetKey)) !== targetKey) {
+          return false;
+        }
+        if (input.groupId && appraisal.groupId !== input.groupId) {
+          return false;
+        }
+        return true;
+      });
+    },
     listRelated({ entity, entityTypes, relationTypes }) {
       const relationTypeSet: ReadonlySet<string> | null = relationTypes
         ? new Set(relationTypes)
@@ -121,6 +144,10 @@ export function createHealthCommonsCatalogReader(
       });
     },
   };
+}
+
+function stripRevision(key: string): string {
+  return key.split("@")[0] ?? key;
 }
 
 function normalizeRouteId(value: string): string {

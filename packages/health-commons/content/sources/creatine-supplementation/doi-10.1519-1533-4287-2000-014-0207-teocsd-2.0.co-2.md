@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: "Approximately 5 weeks."
   aggregateRole: primary
   cohortKey: "creatine-monohydrate:doi-10-1519-1533-4287-2000-014-0207-teocsd-2-0-co-2"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "batch-009"
-    stance: "mixed"
-    scope: direct_protocol
-    result: "mixed"
-    headline: "Creatine may support upper-body strength in women during training, but body-composition/fatigue claims are mixed."
-    implication: "Direct women-specific creatine monohydrate study."
-    caveat: "Women-specific athlete/training context. Participant count was not recovered. Paywalled older source."
-    displayPriority: 80
 evidenceBucket: "population_boundary_adjacent_claims"
 whyItMatters: "Direct women-specific creatine monohydrate study."
 potentialMurphEndpoints:

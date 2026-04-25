@@ -38,17 +38,6 @@ researchEvidence:
   durationLabel: "8 weeks after initial loading-style dosing"
   aggregateRole: primary
   cohortKey: "stout-1999-football-creatine-carbohydrate"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: "adjacent-carbohydrate-formulation"
-    stance: context_only
-    scope: adjacent_variant
-    result: mixed
-    headline: "A creatine-plus-carbohydrate formulation improved some football training outcomes versus carbohydrate, but the design is formulation-adjacent."
-    implication: "Context for carbohydrate/creatine formulations during training, not a clean timing or monohydrate-only claim."
-    caveat: "Adjacent variant with football players, formulation arms, and sport-specific training; no PMID in canonical ledger."
-    displayPriority: 45
 evidenceBucket: "timing_coingestion"
 whyItMatters: "It is a boundary source for creatine-carbohydrate formulations that could otherwise be over-read as direct timing evidence."
 potentialMurphEndpoints:

@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: Registry source; exposure schedule aligns with the high-fluence red LED phase I safety program.
   aggregateRole: context
   cohortKey: cohort:clinicaltrials-nct02630303-2026-04-24
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: red-led-safety-registry
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: ClinicalTrials.gov registration anchors the high-fluence red LED healthy-adult safety study.
-    implication: Use for trial identity, arms, dates, and registry-reported outcomes, not as independent efficacy evidence.
-    caveat: Peer-reviewed results should be cited for outcome claims.
-    displayPriority: 70
 evidenceBucket: red-light skin safety and dose-escalation boundary
 whyItMatters: Use for trial identity, arms, dates, and registry-reported outcomes, not as independent efficacy evidence.
 potentialMurphEndpoints:

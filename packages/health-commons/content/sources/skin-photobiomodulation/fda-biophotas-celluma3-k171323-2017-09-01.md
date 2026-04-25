@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Device summary context reports 30-minute treatments, three times weekly for four weeks; clinical follow-up not extracted.
   aggregateRole: context
   cohortKey: fda-biophotas-celluma3-2017
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: fda-biophotas-celluma3-2017
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Celluma3 regulatory summary gives panel-style red/NIR dose context for full-face wrinkles.
-    implication: Useful for comparing mask and panel workflows and for extracting power density and dose ranges.
-    caveat: This is a regulatory summary and should not be merged with clinical efficacy trials.
-    displayPriority: 50
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Adds a non-mask LED form factor with explicit red/NIR wavelength and dose context, helping separate ergonomics from biological claims.
 potentialMurphEndpoints:

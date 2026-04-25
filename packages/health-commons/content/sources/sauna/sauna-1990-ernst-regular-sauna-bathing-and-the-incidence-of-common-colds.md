@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: "6-month follow-up"
   aggregateRole: "primary"
   cohortKey: "ernst-1990-common-colds-volunteers"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: intervention-design-training-and-mixed-results
-    stance: mixed
-    scope: adjacent_variant
-    result: positive
-    headline: "This controlled trial followed adults for common-cold incidence over six months. The main finding is that regular sauna bathing was tested as a respiratory-illness intervention, but it is not a direct wearable recovery signal."
-    implication: "This source supports illness-log context and keeps respiratory claims cautious."
-    caveat: "Repeated-intervention signals vary by population, dose, and outcome, so use them to justify testing rather than to promise improvement."
-    displayPriority: 40
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

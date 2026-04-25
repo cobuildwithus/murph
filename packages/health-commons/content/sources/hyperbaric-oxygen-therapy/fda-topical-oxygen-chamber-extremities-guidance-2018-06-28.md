@@ -36,27 +36,6 @@ researchEvidence:
     - "Ledger directness: adjacent_variant"
     - "Ledger claim use: context-only"
     - "Ledger priority: backbone"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "identity_boundary_supervision_and_variant_separation"
-    stance: "context_only"
-    scope: "adjacent_variant"
-    result: "not_efficacy_evidence"
-    headline: "Regulatory source that explicitly excludes full-body hyperbaric chambers and helps define the topical-oxygen boundary. Also surfaced in shard(s): adjacent-modalities-and-external-claims. Canonicalized on exact URL. Shard claim-use guesses differed."
-    implication: "Use this source according to its ledger role: context-only / adjacent_variant."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
-  -
-    protocolKey: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
-    groupId: "adjacent-oxygen-variants"
-    stance: "context_only"
-    scope: "adjacent_variant"
-    result: "not_efficacy_evidence"
-    headline: "Regulatory source that explicitly excludes full-body hyperbaric chambers and helps define the topical-oxygen boundary. Also surfaced in shard(s): adjacent-modalities-and-external-claims. Canonicalized on exact URL. Shard claim-use guesses differed."
-    implication: "Use this source according to its ledger role: context-only / adjacent_variant."
-    caveat: "This source page is a rights-safe metadata summary generated from the canonical ledger; do not infer sample size, effect size, adverse-event rate, DOI, PMID, or population details beyond the recorded metadata."
-    displayPriority: 10
 evidenceBucket: "Identity, boundary, supervision, and variant separation"
 claimUse: "context-only"
 directness: "adjacent_variant"

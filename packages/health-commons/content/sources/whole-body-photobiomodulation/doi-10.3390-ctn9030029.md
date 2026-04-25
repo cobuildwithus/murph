@@ -35,17 +35,6 @@ researchEvidence:
   durationLabel: Not applicable
   aggregateRole: synthesis
   cohortKey: fitzmaurice-2025-fibromyalgia-scoping-review
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: fm-pbmt-scoping-review
-    stance: context_only
-    scope: same_mechanism
-    result: not_efficacy_evidence
-    headline: Scoping review mapped promising but heterogeneous fibromyalgia PBMT evidence and argued that many NICE concerns may be addressable by existing literature.
-    implication: Useful for evidence mapping, policy framing, and identification of experiential outcomes.
-    caveat: Scoping review methodology does not provide pooled effect estimates or a direct causal summary; cost-effectiveness remains unresolved.
-    displayPriority: 30
 evidenceBucket: Chronic pain/fibromyalgia whole-body PBM sibling variant
 whyItMatters: This source is valuable for policy and implementation framing because it explicitly organizes the fibromyalgia PBMT literature around NICE concerns and remaining gaps.
 potentialMurphEndpoints:

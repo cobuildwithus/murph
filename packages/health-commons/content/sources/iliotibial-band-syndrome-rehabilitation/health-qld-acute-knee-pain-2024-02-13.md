@@ -32,19 +32,6 @@ researchEvidence:
   cohortKey: "health-qld-acute-knee-pain-2024-02-13"
   notes:
     - "Metadata-pass extraction from the canonical source ledger; full-text effect details were not extracted in this pass."
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-    groupId: safety-escalation
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:lateral-knee-pain
-    headline: "Merged 1 candidate row(s) from shard(s): differential-diagnosis-safety. Use for differential diagnosis, escalation, imaging, or red-flag routing rather than..."
-    implication: "Use for context, boundary, or safety framing rather than direct efficacy claims."
-    caveat: "This source record preserves reducer classifications but does not replace source-level full-text extraction."
-    displayPriority: 55
 evidenceBucket: "differential_diagnosis_and_safety_boundary"
 whyItMatters: "Merged 1 candidate row(s) from shard(s): differential-diagnosis-safety. Use for differential diagnosis, escalation, imaging, or red-flag routing rather than protocol efficacy. Orthopedic referral pathway with priority criteria for locked knee, displaced meniscal tear, collateral ligament injury, and osteochondral fragments."
 potentialMurphEndpoints:

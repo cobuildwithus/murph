@@ -35,20 +35,6 @@ researchEvidence:
   aggregateRole: "primary"
   aggregationNote: "Approximate count from older pediatric physiology metadata; deduped with companion ECG paper."
   cohortKey: "jokinen-children-sauna-cohort"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:morning-blood-pressure
-    headline: "This pediatric physiology study measured cardiovascular adjustment during acute sauna exposure. The main finding is that children can show measurable heart-rate and blood-pressure responses to sauna heat."
-    implication: "This source supports age-sensitive safety cautions rather than adult protocol claims."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 110
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

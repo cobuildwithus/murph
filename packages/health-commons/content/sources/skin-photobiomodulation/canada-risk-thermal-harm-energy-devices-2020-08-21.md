@@ -31,27 +31,6 @@ researchEvidence:
   durationLabel: Not applicable.
   aggregateRole: primary
   cohortKey: cohort:canada-risk-thermal-harm-energy-devices-2020-08-21
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: thermal-device-safety
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: Regulatory notice flags >45°C surface skin temperature as unsafe without objective rationale and includes LEDs among covered energy devices.
-    implication: Use for heat-related stop rules, device-temperature caution, and avoiding protocols that seek heating as a benefit.
-    caveat: Specific device risk depends on irradiance, contact, motion, spot size, skin type, and testing.
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: safety-boundaries
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: Regulatory notice flags >45°C surface skin temperature as unsafe without objective rationale and includes LEDs among covered energy devices.
-    implication: Use for heat-related stop rules, device-temperature caution, and avoiding protocols that seek heating as a benefit.
-    caveat: Specific device risk depends on irradiance, contact, motion, spot size, skin type, and testing.
-    displayPriority: 90
 evidenceBucket: thermal injury and energy-device safety boundary
 whyItMatters: Use for heat-related stop rules, device-temperature caution, and avoiding protocols that seek heating as a benefit.
 potentialMurphEndpoints:

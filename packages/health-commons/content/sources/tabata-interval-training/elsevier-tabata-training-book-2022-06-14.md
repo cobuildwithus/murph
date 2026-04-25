@@ -34,18 +34,6 @@ researchEvidence:
   durationLabel: Not applicable.
   cohortKey: elsevier-tabata-training-book-2022-06-14
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: reviews-definitions-and-variant-taxonomy
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: The book can clarify history but should not replace primary papers.
-    implication: Use for terminology/history only when peer-reviewed papers are insufficient.
-    caveat: Do not use commercial book descriptions as sole evidence for health outcomes.
-    displayPriority: 70
 evidenceBucket: Reviews, definitions, and variant taxonomy
 whyItMatters: It may help explain the origin story in plain language while keeping claim boundaries strict.
 potentialMurphEndpoints:

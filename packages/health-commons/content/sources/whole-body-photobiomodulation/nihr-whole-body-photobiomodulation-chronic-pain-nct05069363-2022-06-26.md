@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: Recruitment window January to September 2022; intervention schedule not fully extractable from the listing used here
   aggregateRole: primary
   cohortKey: nihr-nct05069363-chronic-pain
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: chronic-pain-nihr-registry
-    stance: context_only
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    headline: NIHR listing confirms a UK whole-body PBM chronic-pain study, but it does not contribute extracted outcome results.
-    implication: Useful for recruitment timing, public-trial discoverability, and protocol linkage.
-    caveat: Registry-style listing only; no extracted enrollment, effect estimates, or adverse-event results.
-    displayPriority: 30
 evidenceBucket: Chronic pain/fibromyalgia whole-body PBM sibling variant
 whyItMatters: The NIHR listing is a public-facing trace of the UK chronic-pain pathway and helps anchor the real-world trial ecosystem around the BMJ protocol paper.
 potentialMurphEndpoints:

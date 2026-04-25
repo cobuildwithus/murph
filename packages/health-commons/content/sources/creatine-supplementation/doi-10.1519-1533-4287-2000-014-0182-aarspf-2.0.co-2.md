@@ -38,27 +38,6 @@ researchEvidence:
   durationLabel: "5-day loading phase plus 32-day maintenance/training phase"
   aggregateRole: primary
   cohortKey: "syrotuik-2000-periodized-training"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: strength-volume-and-resistance-training-outcomes
-    stance: supports
-    scope: direct_protocol
-    result: positive
-    headline: "Included in the protocol evidence landscape group: Strength and training-volume endpoints."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: "protocol_variant:creatine-supplementation/creatine-monohydrate"
-    groupId: "resistance-training-strength-body-composition"
-    stance: mixed
-    scope: direct_protocol
-    result: no_clear_advantage
-    headline: "Creatine did not clearly add strength or training-volume gains when relative periodized training was equalized."
-    implication: "Useful as a tempering trial for resistance-training claims: creatine may not add a visible advantage in every well-controlled training design."
-    caveat: "Small male-only trial; accessible extraction did not provide all group sizes or adverse-event reporting; one bench-press total-lifting-volume signal was reported after acute loading."
-    displayPriority: 70
 evidenceBucket: "strength_hypertrophy_trials"
 whyItMatters: "Adds a direct, small RCT that helps prevent overclaiming; it tested creatine monohydrate with periodized resistance training but found mostly null between-group effects."
 potentialMurphEndpoints:

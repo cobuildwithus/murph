@@ -30,18 +30,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: core-temperature-dose-variant
-    stance: mixed
-    scope: measurement_context
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: "Substack update says 20-minute 200 F sessions may miss a 102.4 F / 39 C core-temperature target."
-    implication: "Separates the original 20-minute routine from the more aggressive core-temperature-threshold variant."
-    caveat: "Single-person ingestible-sensor experiment; not a safe default or generalized heat-shock prescription."
-    displayPriority: 10
 artifacts:
   -
     artifactId: art_bryan_johnson_saunamaxx_2026_04_14_html_snapshot

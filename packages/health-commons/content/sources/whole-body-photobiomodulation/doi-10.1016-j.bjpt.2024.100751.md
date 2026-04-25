@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: Two pre-test exposures within 6 hours of agility testing; 7-day washout
   aggregateRole: primary
   cohortKey: dos-santos-2024-agility-preliminary
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: acute-agility-preliminary
-    stance: mixed
-    scope: adjacent_variant
-    result: no_clear_advantage
-    headline: Acute whole-body PBM did not outperform placebo on the Illinois Agility Test in a preliminary trained-participant crossover study.
-    implication: Useful for recall of an abstract-only implementation variant and for preserving another null performance result.
-    caveat: Conference supplement abstract with only 10 participants and limited methodological detail.
-    displayPriority: 30
 evidenceBucket: Exercise-timed whole-body PBM sibling variant
 whyItMatters: This abstract-only record broadens source recall and preserves another negative acute-performance signal that should not be lost.
 potentialMurphEndpoints:

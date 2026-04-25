@@ -31,27 +31,6 @@ researchEvidence:
   durationLabel: Activator limited to 30 sessions of 10 minutes once daily
   aggregateRole: context
   cohortKey: tga-neutrogena-led-mask-eye-damage-recall-2019-07-17
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch003:tga-neutrogena-led-mask-eye-damage-recall-2019-07-17:ocular
-    stance: safety_boundary
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Neutrogena Visibly Clear Light Therapy Acne Mask and Activator: potential for eye damage recall notice
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: Regulatory recall for a red+blue acne mask, not a red/NIR photoaging protocol or trial.
-    displayPriority: 50
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: safety-boundaries
-    stance: safety_boundary
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Neutrogena Visibly Clear Light Therapy Acne Mask and Activator: potential for eye damage recall notice
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: Regulatory recall for a red+blue acne mask, not a red/NIR photoaging protocol or trial.
-    displayPriority: 50
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It names consumer-mask ocular symptoms and susceptible populations that belong in conservative safety boundaries.
 potentialMurphEndpoints:

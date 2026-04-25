@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Acute crossover with pre-test exposure and 7-day washout
   aggregateRole: primary
   cohortKey: rbr-8ksktby-trained-men-performance
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: trained-dynamometry-agility-registry
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Recruiting registry tests acute full-body PBM against placebo in trained men with torque, fatigue, agility, soreness, and perceived recovery outcomes.
-    implication: Useful for source recall and for tracking a larger planned follow-up to earlier preliminary sports studies.
-    caveat: Registry only; no outcome data yet.
-    displayPriority: 25
 evidenceBucket: Exercise-timed whole-body PBM sibling variant
 whyItMatters: This registry captures a larger planned trained-men protocol that combines dynamometry, agility, DOMS, and perceived recovery.
 potentialMurphEndpoints:

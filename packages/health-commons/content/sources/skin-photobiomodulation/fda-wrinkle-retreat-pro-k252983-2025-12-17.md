@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Device summary describes a 3-minute treatment with automatic shutoff; clinical follow-up not extracted.
   aggregateRole: context
   cohortKey: fda-wrinkle-retreat-pro-2025
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: fda-wrinkle-retreat-pro-2025
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Recent OTC full-face wrinkle mask combines amber, red, deep-red, and NIR LEDs.
-    implication: Useful for contemporary consumer-device implementation and eye-shield design context.
-    caveat: The 510(k) summary is not a peer-reviewed trial and should not be used to claim efficacy.
-    displayPriority: 40
 evidenceBucket: regulatory and consumer-device implementation context
 whyItMatters: Anchors modern consumer-mask features such as multiple wavelengths, short treatment time, protective eye shield, rechargeable controller, and auto shutoff.
 potentialMurphEndpoints:

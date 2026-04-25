@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Acute crossover with preconditioning exposures and a 1-week washout
   aggregateRole: primary
   cohortKey: rbr-7x65zj-rugby-fatigue
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: rugby-isokinetic-registry
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Suspended registry describes an acute rugby crossover protocol testing whole-body PBM before isokinetic fatigue and DOMS assessment, but no results are posted.
-    implication: Useful for source recall, preconditioning timing variants, and endpoint planning.
-    caveat: Suspended status and absence of results make this protocol-only context.
-    displayPriority: 25
 evidenceBucket: Exercise-timed whole-body PBM sibling variant
 whyItMatters: It broadens registry recall and preserves a preconditioning timing variant that may otherwise be missed in later synthesis.
 potentialMurphEndpoints:

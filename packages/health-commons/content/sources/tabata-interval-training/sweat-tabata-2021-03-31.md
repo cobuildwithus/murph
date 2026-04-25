@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Traditional four-minute Tabata block plus discussion of longer modern variants
   cohortKey: sweat-tabata-2021-03-31
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Mixes the exact 20/10 definition with longer and 40/20 modern variants.
-    implication: Useful for public-claim disambiguation: the word Tabata may refer to timing, intensity, or a broader workout style.
-    caveat: Consumer page; not a source of trial outcome estimates.
-    displayPriority: 55
 evidenceBucket: external_protocol_claims
 whyItMatters: It illustrates how public education can preserve the core timing while expanding the label to longer and altered-ratio workouts.
 potentialMurphEndpoints:

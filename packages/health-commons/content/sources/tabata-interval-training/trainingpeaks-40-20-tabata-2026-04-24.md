@@ -40,18 +40,6 @@ researchEvidence:
   durationLabel: Describes 40/20 interval workouts; not the 20/10 Tabata dose
   cohortKey: trainingpeaks-40-20-tabata-2026-04-24
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Uses the Tabata umbrella for 40/20 intervals, which are not the 20/10 protocol.
-    implication: Useful for explicitly excluding 40/20 claims from direct Tabata 20/10 efficacy synthesis.
-    caveat: Coaching article; no extracted trial outcome estimates for the 20/10 protocol.
-    displayPriority: 60
 evidenceBucket: external_protocol_claims
 whyItMatters: It is a clear altered-ratio example showing that public Tabata terminology can drift from 20/10 to 40/20.
 potentialMurphEndpoints:

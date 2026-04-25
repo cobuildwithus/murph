@@ -35,17 +35,6 @@ researchEvidence:
   aggregateRole: "primary"
   aggregationNote: "Approximate count; same volunteer series as companion 1989 Kauppinen papers."
   cohortKey: "kauppinen-1989-sauna-shower-ice-water-volunteers"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: "This thermal-sequence study measured body-fluid responses to sauna, shower, and ice-water exposure. The main finding is that brief heat and cold sequences can alter fluid balance enough that hydration status matters."
-    implication: "This source supports hydration logging and safety cautions."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 160
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

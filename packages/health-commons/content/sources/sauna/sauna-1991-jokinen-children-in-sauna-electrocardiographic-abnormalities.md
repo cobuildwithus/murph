@@ -35,19 +35,6 @@ researchEvidence:
   aggregateRole: "primary"
   aggregationNote: "Approximate count from older pediatric physiology metadata; deduped with companion cardiovascular paper."
   cohortKey: "jokinen-children-sauna-cohort"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-    headline: "This pediatric physiology study examined ECG changes around sauna exposure. The main finding is that acute sauna can interact with cardiac electrical monitoring in children, making safety context important."
-    implication: "This source reinforces conservative screening and symptom stop rules."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 120
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a safety / physiology record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

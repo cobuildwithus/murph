@@ -29,17 +29,6 @@ researchEvidence:
   aggregateRole: context
   notes:
     - Created because the canonical ledger required a source page, but no model extraction batch returned atomic findings for this record. Use only for boundary/exclusion context.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: External Tabata-style web or marketing context only.
-    implication: Do not use this source to support Murph efficacy claims; keep it as an exclusion or disambiguation record.
-    caveat: No atomic findings were extracted for this ledger-only record.
-    displayPriority: 90
 evidenceBucket: external_protocol_claims
 claimUse: context-only
 pdfRightsStatus: unknown

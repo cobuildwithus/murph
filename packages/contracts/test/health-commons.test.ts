@@ -565,6 +565,34 @@ describe("@murphai/contracts health commons schemas", () => {
       success: false,
     });
     expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validSourceArtifactPage,
+        canonicalMetadata: {
+          canonicalUrl: "https://example.com/legacy",
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validSourceArtifactPage,
+        protocolEvidence: [
+          {
+            protocolKey: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            groupId: "dry-sauna-evidence",
+            stance: "supports",
+            scope: "direct_protocol",
+            result: "positive",
+            headline: "Legacy source-local appraisal.",
+            implication: "This should now live in evidence-appraisal JSONL.",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
       safeParseContract(healthCommonsSourceIdentitySchema, {
         identityKind: "scholarly_work",
         canonicalIdBasis: "doi",

@@ -36,27 +36,6 @@ researchEvidence:
   durationLabel: 12-week assigned intervention plus beginning/end testing; Oura and monthly surveys through the study period
   aggregateRole: primary
   cohortKey: nct05963555-middle-aged-elderly
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: direct-sleep-and-wellbeing-evidence
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Registry includes a direct whole-body PBM arm in older adults, but no outcome results are available in the record used here.
-    implication: Useful for older-adult protocol variants, endpoint selection, and adherence expectations.
-    caveat: Three-arm open-label non-placebo registry; the record alone cannot establish a whole-body effect.
-    displayPriority: 35
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: dose-and-implementation
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: Registry includes a direct whole-body PBM arm in older adults, but no outcome results are available in the record used here.
-    implication: Useful for older-adult protocol variants, endpoint selection, and adherence expectations.
-    caveat: Three-arm open-label non-placebo registry; the record alone cannot establish a whole-body effect.
-    displayPriority: 35
 evidenceBucket: Starter whole-body wellness/sleep evidence
 whyItMatters: This adds older-adult direct-protocol context and shows how a whole-body arm was positioned against localized PBM and dry float therapy.
 potentialMurphEndpoints:

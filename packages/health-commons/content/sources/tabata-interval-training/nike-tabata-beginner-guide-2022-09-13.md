@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Four-minute Tabata block described; frequency advice varies by fitness level
   cohortKey: nike-tabata-beginner-guide-2022-09-13
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Defines the standard 20/10 × 8 structure and emphasizes beginner modifications and professional guidance.
-    implication: Useful for plain-language dose definition and safety boundaries for novice users.
-    caveat: Consumer education page; no outcome estimates, study sample, or adverse-event rates.
-    displayPriority: 50
 evidenceBucket: external_protocol_claims
 whyItMatters: It contrasts exact timing claims with cautious public safety advice for beginners and users with health considerations.
 potentialMurphEndpoints:

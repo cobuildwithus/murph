@@ -31,27 +31,6 @@ researchEvidence:
   durationLabel: Reaction timing differs by phototoxic versus photoallergic mechanism.
   aggregateRole: primary
   cohortKey: cohort:dermnet-drug-induced-photosensitivity-2026-04-24
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: medication-photosensitivity
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: DermNet provides practical symptom and timing language for drug-induced photosensitivity.
-    implication: Use for stop-condition language: burning, swelling, blistering, or persistent hyperpigmentation after light exposure should stop the protocol and prompt care.
-    caveat: Wavelength relevance must be considered for red/NIR devices.
-    displayPriority: 82
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: safety-boundaries
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: DermNet provides practical symptom and timing language for drug-induced photosensitivity.
-    implication: Use for stop-condition language: burning, swelling, blistering, or persistent hyperpigmentation after light exposure should stop the protocol and prompt care.
-    caveat: Wavelength relevance must be considered for red/NIR devices.
-    displayPriority: 82
 evidenceBucket: photosensitizing-medication and retinoid safety boundary
 whyItMatters: Use for stop-condition language: burning, swelling, blistering, or persistent hyperpigmentation after light exposure should stop the protocol and prompt care.
 potentialMurphEndpoints:

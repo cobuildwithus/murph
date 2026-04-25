@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: Not applicable.
   aggregateRole: context
   cohortKey: cohort:cdc-sun-exposure-photosensitizing-medications-2025-04-23
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: medication-photosensitivity
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: CDC travel guidance flags common medication categories associated with sun photosensitivity.
-    implication: Use as a conservative intake checklist and prompt for clinician/pharmacist review.
-    caveat: Sun/UV photosensitivity does not automatically equal red/NIR PBM photosensitivity.
-    displayPriority: 68
 evidenceBucket: photosensitizing-medication and retinoid safety boundary
 whyItMatters: Use as a conservative intake checklist and prompt for clinician/pharmacist review.
 potentialMurphEndpoints:

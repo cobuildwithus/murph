@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Single workout: 32 continuous 20/10 intervals
   cohortKey: crossfit-tabata-something-else-2007-08-21
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Uses exact 20/10 timing but expands the dose into 32 continuous intervals across four movements.
-    implication: Useful for warning that public Tabata labels can preserve interval timing while changing total volume, exercise variety, and fatigue burden.
-    caveat: External workout programming only; no controlled outcomes or safety event reporting.
-    displayPriority: 55
 evidenceBucket: external_protocol_claims
 whyItMatters: This source helps distinguish 20/10 timing from the full protocol dose; it is a public workout example, not efficacy evidence.
 potentialMurphEndpoints:

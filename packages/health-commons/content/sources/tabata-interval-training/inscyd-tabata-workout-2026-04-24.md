@@ -40,18 +40,6 @@ researchEvidence:
   durationLabel: Describes original protocol as under four minutes of interval work, excluding warm-up and cool-down
   cohortKey: inscyd-tabata-workout-2026-04-24
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: same_mechanism
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Explains original Tabata intensity and cautions that multiple Tabata sets differ from the original protocol.
-    implication: Useful for dose-drift correction and intensity language, but not a primary source for outcomes.
-    caveat: Public explainer; outcome statements should be traced to the original journal articles before protocol synthesis.
-    displayPriority: 45
 evidenceBucket: external_protocol_claims
 whyItMatters: It is a higher-quality public disambiguation source for separating the original laboratory dose from modern Tabata-labeled workouts.
 potentialMurphEndpoints:

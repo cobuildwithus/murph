@@ -33,17 +33,6 @@ researchEvidence:
   durationLabel: "Not applicable."
   aggregateRole: "primary"
   cohortKey: "cohort:cdc-protect-yourself-from-extreme-heat-2024-06-25"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "safety-boundaries"
-    stance: "safety_boundary"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "CDC heat guidance provides practical steps for modifying or avoiding outdoor activity during extreme heat."
-    implication: "Morning outdoor-light protocols should include heat-wave modifications and an indoor-light fallback."
-    caveat: "Safety-only guidance, not light efficacy evidence."
-    displayPriority: 70
 evidenceBucket: "safety_boundaries"
 whyItMatters: "CDC heat guidance provides practical steps for modifying or avoiding outdoor activity during extreme heat."
 potentialMurphEndpoints:

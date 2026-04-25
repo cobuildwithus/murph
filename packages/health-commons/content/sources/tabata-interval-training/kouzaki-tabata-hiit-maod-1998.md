@@ -33,19 +33,6 @@ researchEvidence:
   durationLabel: Not extracted.
   cohortKey: kouzaki-tabata-hiit-maod-1998-unverified
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: source-location-verification
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:estimated-vo2max
-    headline: Potentially relevant source, but not yet claim-ready.
-    implication: Do not use for protocol claims until bibliographic record, full text, sample, dose, and outcomes are verified.
-    caveat: No DOI, PMID, PMCID, URL, participant count, or results verified in this batch.
-    displayPriority: 90
 evidenceBucket: direct_original_dose_evidence
 whyItMatters: It may be part of the original Japanese Tabata evidence base, but preserving uncertainty prevents unsupported claim inflation.
 potentialMurphEndpoints:

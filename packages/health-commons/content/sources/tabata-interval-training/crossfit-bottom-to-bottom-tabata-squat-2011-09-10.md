@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Single Tabata squat variant followed by one-mile run
   cohortKey: crossfit-bottom-to-bottom-tabata-squat-2011-09-10
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Alters the 10-second rest into a bottom-squat hold and adds a running task.
-    implication: Useful for warning that rest-interval substitutions materially change load and safety considerations.
-    caveat: External workout page; no injury, rhabdomyolysis, or clinical safety event reporting.
-    displayPriority: 70
 evidenceBucket: external_protocol_claims
 whyItMatters: It is a boundary example where nominal Tabata timing masks a rest-interval and workload change.
 potentialMurphEndpoints:

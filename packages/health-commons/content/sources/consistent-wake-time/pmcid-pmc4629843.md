@@ -38,17 +38,6 @@ claimUse: "safety-only"
 murphV1Priority: "medium"
 canonicalLedgerKey: "source_artifact:pmcid-pmc4629843"
 keyNormalizationNote: "PMCID-only key lowercased to satisfy current Health Commons key regex."
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:consistent-wake-time/consistent-wake-time"
-    groupId: "clinical-and-safety-boundaries"
-    stance: "safety_boundary"
-    scope: "general_guideline"
-    result: "not_efficacy_evidence"
-    headline: "Canonical Consistent Wake Time source used for safety boundaries, supervision boundaries, or implementation cautions: Negative Impacts of Shiftwork and Long Work Hours."
-    implication: "Use this source only within the Consistent Wake Time evidence scope described by the protocol page."
-    caveat: "Do not promote this source beyond its directness and claim-use classification."
-    displayPriority: 40
 ---
 
 This source is included in the Consistent Wake Time research package for **safety_boundaries**.

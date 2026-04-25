@@ -36,29 +36,6 @@ researchEvidence:
   durationLabel: Single-session 4-minute routines, each completed twice across laboratory visits.
   cohortKey: scott-all-out-tabata-routines-2016-physically-active-adults
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: dose-fidelity-and-intensity
-    stance: mixed
-    scope: adjacent_variant
-    result: mixed
-    endpointKeys: []
-    headline: All-out 20s:10s routines had different energy costs by exercise mode.
-    implication: Use for community Tabata-style mode boundaries and energy-cost variability, not original cycle-ergometer adaptation claims.
-    caveat: Acute energy-cost study; all-out bodyweight/resistance routines; no training adaptation or clinical safety outcomes.
-    displayPriority: 60
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: cardiometabolic-body-composition-boundary
-    stance: mixed
-    scope: adjacent_variant
-    result: mixed
-    endpointKeys: []
-    headline: All-out 20s:10s routines had different energy costs by exercise mode.
-    implication: Use for community Tabata-style mode boundaries and energy-cost variability, not original cycle-ergometer adaptation claims.
-    caveat: Acute energy-cost study; all-out bodyweight/resistance routines; no training adaptation or clinical safety outcomes.
-    displayPriority: 60
 evidenceBucket: direct_original_dose_evidence
 whyItMatters: It directly shows that a generic 4-minute Tabata label does not imply a single energy cost.
 potentialMurphEndpoints:

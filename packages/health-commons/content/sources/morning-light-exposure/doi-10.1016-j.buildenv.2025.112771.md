@@ -37,17 +37,6 @@ researchEvidence:
   durationLabel: "Not applicable; measurement-methods review"
   aggregateRole: "synthesis"
   cohortKey: "van-duijnhoven-2025-wearable-loggers"
-protocolEvidence:
-  -
-    protocolKey: "protocol_variant:morning-light-exposure/morning-outdoor-light-exposure"
-    groupId: "dose-measurement-implementation"
-    stance: "context_only"
-    scope: "same_mechanism"
-    result: "not_efficacy_evidence"
-    headline: "Wearable light measurement is heterogeneous, and device validation/reporting gaps can limit comparability across studies."
-    implication: "Any Murph light-exposure experiment should specify measurement device, placement, thresholds, and limitations."
-    caveat: "Methods review only; no sleep or protocol efficacy outcome."
-    displayPriority: 75
 evidenceBucket: "free_living_observational_measurement"
 whyItMatters: "It is a backbone measurement source for interpreting all free-living wearable-light studies in this batch."
 potentialMurphEndpoints:

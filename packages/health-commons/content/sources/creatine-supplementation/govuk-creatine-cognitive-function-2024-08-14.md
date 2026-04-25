@@ -35,47 +35,6 @@ researchEvidence:
   durationLabel: Mixed; proposed daily intake was 3 g/day.
   aggregateRole: context
   cohortKey: cohort:govuk-creatine-cognitive-function-2024-08-14
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: gi-body-water-and-heat-hydration-tolerability
-    stance: mixed
-    scope: general_guideline
-    result: mixed
-    headline: "Included in the protocol evidence landscape group: GI, body-water, and heat/hydration tolerability."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: adjacent-cognition-bone-and-disease-treatment-claims
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: "Included in the protocol evidence landscape group: Adjacent cognition, bone, and disease-treatment claims."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: evidence-quality-and-interpretation-limits
-    stance: mixed
-    scope: general_guideline
-    result: mixed
-    headline: "Included in the protocol evidence landscape group: Evidence quality and interpretation limits."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: creatine-monohydrate
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: The UK regulator did not accept the proposed cognitive-function claim at 3 g/day.
-    implication: Use as context-only boundary for cognition claims in a creatine monohydrate protocol.
-    caveat: Regulatory health-claim evaluation; not exercise-performance evidence.
-    displayPriority: 50
 evidenceBucket: background_guidelines_external
 whyItMatters: The UKNHCC concluded that evidence did not establish a cause-and-effect relationship between up to 3 g/day creatine and improved cognitive function in healthy adults.
 potentialMurphEndpoints:

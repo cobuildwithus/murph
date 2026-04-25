@@ -34,18 +34,6 @@ researchEvidence:
   cohortKey: bryan-johnson-sauna-self-report
   notes:
     - Same single-person source family as the Bryan Johnson sauna protocol report.
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/bryan-johnson-blueprint
-    groupId: core-temperature-dose-variant
-    stance: mixed
-    scope: measurement_context
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: "Primary X source for the April 3 prototype reports 102.2 F / 39 C timing with and without cooling."
-    implication: "Useful as early dose-interpretation context, not as the main protocol target."
-    caveat: "Preliminary source, superseded by later saunamaxx updates."
-    displayPriority: 60
 artifacts:
   -
     artifactId: art_x_bryan_johnson_core_temp_update_2026_04_03_html_snapshot

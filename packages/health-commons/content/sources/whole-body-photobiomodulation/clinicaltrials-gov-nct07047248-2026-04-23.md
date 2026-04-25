@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: 20-minute intervention sessions with follow-up at 3 and 6 months
   aggregateRole: primary
   cohortKey: nct07047248-type2-diabetes
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: context_only
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    headline: Triple-blind placebo-controlled diabetes registry plans 20-minute whole-body PBM sessions with fasting glucose, HbA1c, and sleep-quality follow-up.
-    implication: Useful for tracking disease-specific implementation choices and longer follow-up endpoints without treating the registry as outcome evidence.
-    caveat: Registry protocol only; no efficacy results are reported, and the population is restricted to adults with stable type 2 diabetes.
-    displayPriority: 15
 evidenceBucket: Emerging disease-specific whole-body PBM variants
 whyItMatters: Shows that whole-body PBM is being operationalized as a longer-term metabolic intervention with placebo control, glycemic endpoints, and sleep-quality follow-up in a diabetes cohort.
 potentialMurphEndpoints:

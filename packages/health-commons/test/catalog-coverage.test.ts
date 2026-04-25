@@ -253,31 +253,29 @@ describe("@murphai/health-commons catalog coverage", () => {
     );
   });
 
-  it("rejects grouped research sources that lack matching same-group protocol evidence", () => {
+  it("rejects grouped research sources that lack matching same-group evidence appraisal", () => {
     const groupedCoverageMismatchContent: HealthCommonsContentSet = {
       artifactManifests: [],
       changes: [],
-      evidenceAppraisals: [],
+      evidenceAppraisals: [
+        {
+          schemaVersion: "murph.commons.evidence-appraisal.v1",
+          key: "evidence_appraisal:sauna-example:wrong-group",
+          sourceKey: "source_artifact:sauna/example",
+          targetKey: "protocol_variant:dry-sauna/example",
+          targetKind: "protocol_variant",
+          groupId: "wrong-group",
+          stance: "supports",
+          scope: "direct_protocol",
+          result: "positive",
+          headline: "Example headline",
+          implication: "Example implication",
+        },
+      ],
       redirects: [],
       pages: [
         biomarkerPage,
-        {
-          ...sourcePage("source_artifact:sauna/example", "sauna-example"),
-          frontmatter: {
-            ...sourcePage("source_artifact:sauna/example", "sauna-example").frontmatter,
-            protocolEvidence: [
-              {
-                protocolKey: "protocol_variant:dry-sauna/example",
-                groupId: "wrong-group",
-                stance: "supports",
-                scope: "direct_protocol",
-                result: "positive",
-                headline: "Example headline",
-                implication: "Example implication",
-              },
-            ],
-          },
-        },
+        sourcePage("source_artifact:sauna/example", "sauna-example"),
         {
           ...protocolPage("protocol_variant:dry-sauna/example", "dry-sauna-example"),
           frontmatter: {
@@ -303,7 +301,7 @@ describe("@murphai/health-commons catalog coverage", () => {
     };
 
     expect(() => validateHealthCommonsContent(groupedCoverageMismatchContent)).toThrow(
-      "protocol_variant:dry-sauna/example researchLandscape group expected-group source source_artifact:sauna/example lacks matching protocolEvidence or evidence-appraisal edge",
+      "protocol_variant:dry-sauna/example researchLandscape group expected-group source source_artifact:sauna/example lacks matching evidence-appraisal edge",
     );
   });
 
@@ -412,6 +410,89 @@ describe("@murphai/health-commons catalog coverage", () => {
     };
 
     expect(() => validateHealthCommonsContent(content)).not.toThrow();
+  });
+
+  it("validates standalone evidence appraisal identity and reference targets", () => {
+    const source = {
+      ...sourcePage("source_artifact:sauna/example", "sauna-example"),
+      frontmatter: {
+        ...sourcePage("source_artifact:sauna/example", "sauna-example").frontmatter,
+        sourceFindings: [
+          {
+            findingId: "finding:sauna/example-summary",
+            findingKind: "context",
+            summary: "Reusable source finding.",
+          },
+        ],
+      },
+    } satisfies HealthCommonsSourcePage;
+    const protocol = protocolPage("protocol_variant:dry-sauna/example", "dry-sauna-example", true);
+    const baseContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [biomarkerPage, source, protocol],
+    };
+    const appraisal = {
+      schemaVersion: "murph.commons.evidence-appraisal.v1",
+      key: "evidence_appraisal:sauna-example",
+      sourceKey: "source_artifact:sauna/example",
+      targetKey: "protocol_variant:dry-sauna/example",
+      targetKind: "protocol_variant",
+      groupId: "expected-group",
+      stance: "supports",
+      scope: "direct_protocol",
+      result: "positive",
+      headline: "Example headline",
+      implication: "Example implication",
+    } as const;
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        evidenceAppraisals: [appraisal, appraisal],
+      }),
+    ).toThrow("Duplicate evidence appraisal key evidence_appraisal:sauna-example");
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        evidenceAppraisals: [
+          {
+            ...appraisal,
+            key: "evidence_appraisal:sauna-example:bad-kind",
+            targetKind: "source_artifact",
+          },
+        ],
+      }),
+    ).toThrow("targetKind source_artifact does not match protocol_variant:dry-sauna/example entityType protocol_variant");
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        evidenceAppraisals: [
+          {
+            ...appraisal,
+            key: "evidence_appraisal:sauna-example:missing-endpoint",
+            endpointKeys: ["biomarker:missing"],
+          },
+        ],
+      }),
+    ).toThrow("endpointKeys points to missing health commons target biomarker:missing");
+
+    expect(() =>
+      validateHealthCommonsContent({
+        ...baseContent,
+        evidenceAppraisals: [
+          {
+            ...appraisal,
+            key: "evidence_appraisal:sauna-example:missing-finding",
+            findingKeys: ["finding:sauna/missing"],
+          },
+        ],
+      }),
+    ).toThrow("findingKeys points to missing health commons source finding finding:sauna/missing");
   });
 
   it("builds source and artifact indexes from canonical identities, findings, and manifests", () => {

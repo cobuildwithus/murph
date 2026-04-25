@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Two-week protocol with acute glucose follow-up through 24 hours after intervention
   aggregateRole: primary
   cohortKey: rbr-8v7rsdp-type2-diabetes-men
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Dose-response diabetes registry specifies 10-, 20-, and 30-minute 850 nm whole-body PBM tiers with capillary glucose monitoring through 24 hours.
-    implication: Useful for dose-range recall and glucose endpoint timing, while keeping single-wavelength near-infrared-only exposure separate from direct red-plus-near-infrared claims.
-    caveat: Registry-only with no results, male-only disease cohort, and an internal sample-size inconsistency between the target field and arm description.
-    displayPriority: 18
 evidenceBucket: Emerging disease-specific whole-body PBM variants
 whyItMatters: Fills a major dose-response gap with explicit 850 nm whole-body PBM exposure times, fluences, and serial glucose monitoring windows in a supervised diabetes cohort.
 potentialMurphEndpoints:

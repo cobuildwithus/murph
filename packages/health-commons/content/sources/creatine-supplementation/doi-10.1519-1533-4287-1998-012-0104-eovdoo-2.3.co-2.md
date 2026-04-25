@@ -38,17 +38,6 @@ researchEvidence:
   durationLabel: 5-day loading plus approximately 8-week supplementation period
   aggregateRole: primary
   cohortKey: cohort:creatine-monohydrate:doi-10.1519-1533-4287-1998-012-0104-eovdoo-2.3.co-2
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: batch-004-doi-10.1519-1533-4287-1998-012-0104-eovdoo-2.3.co-2
-    stance: mixed
-    scope: direct_protocol
-    result: mixed
-    headline: A dose-relative-to-fat-free-mass trial tested loading plus different maintenance doses, but detailed effects need confirmation.
-    implication: Useful for protocol dose-design context, especially whether maintenance should scale to fat-free mass.
-    caveat: Do not cite as positive or negative outcome evidence until full results are extracted.
-    displayPriority: 75
 evidenceBucket: dose_loading_maintenance
 whyItMatters: This fills a direct dose-response/body-composition gap.
 potentialMurphEndpoints:

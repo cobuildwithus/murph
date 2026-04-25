@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: Whole-body PBM versus placebo; detailed session count was not fully extractable from the registry record used here
   aggregateRole: primary
   cohortKey: nct05113589-fibromyalgia-circadian
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: fm-circadian-registry
-    stance: context_only
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    headline: Registry identifies a completed whole-body PBM fibromyalgia trial focused on circadian blood pressure, but no extracted results are included here.
-    implication: Useful for trial tracking and endpoint framing around autonomic physiology.
-    caveat: The accessible registry extract did not expose detailed enrollment or results tables.
-    displayPriority: 35
 evidenceBucket: Chronic pain/fibromyalgia whole-body PBM sibling variant
 whyItMatters: This registry key keeps the mechanistic blood-pressure trial separate from broader symptom papers and helps preserve endpoint directness.
 potentialMurphEndpoints:

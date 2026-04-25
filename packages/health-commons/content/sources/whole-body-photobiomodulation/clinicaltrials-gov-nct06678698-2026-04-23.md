@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Single intervention session with immediate post-testing and ambulatory blood pressure monitoring
   aggregateRole: primary
   cohortKey: nct06678698-hypertension
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Hypertension registry compares one full-body 660 nm LED panel session against modified ILIB and matched sham on acute vascular endpoints.
-    implication: Useful for acute cardiometabolic endpoint design and exclusion-based safety boundaries, while keeping it separate from direct red-plus-near-infrared protocol claims.
-    caveat: Registry only, disease-specific, and mixed with a modified ILIB arm; no efficacy results are available.
-    displayPriority: 15
 evidenceBucket: Emerging disease-specific whole-body PBM variants
 whyItMatters: Adds acute vascular endpoints and explicit exclusion-based safety boundaries when a full-body PBM panel is tested in hypertension, but the panel arm is a red-only adjacent variant rather than a direct red-and-near-infrared match.
 potentialMurphEndpoints:

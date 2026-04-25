@@ -34,17 +34,6 @@ researchEvidence:
   durationLabel: "8-week sauna intervention"
   aggregateRole: "primary"
   cohortKey: "kanji-2015-ctth-rct"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: intervention-design-training-and-mixed-results
-    stance: mixed
-    scope: adjacent_variant
-    result: positive
-    headline: "This randomized study tested regular sauna bathing for chronic tension-type headache. The main finding is that symptom outcomes can be studied with repeated sauna exposure, but the endpoint is condition-specific."
-    implication: "This source supports symptom-context notes, not a generic recovery claim."
-    caveat: "Repeated-intervention signals vary by population, dose, and outcome, so use them to justify testing rather than to promise improvement."
-    displayPriority: 30
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a symptoms / musculoskeletal record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

@@ -39,31 +39,6 @@ researchEvidence:
   durationLabel: 8 weeks; 3 sessions/week on non-consecutive days; 2 Tabata sets/session during weeks 1-4 and 3 sets/session during weeks 5-8
   cohortKey: tabata-batch-002-kul-sedentary-males
   aggregateRole: primary
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: practical-20-10-variants
-    stance: mixed
-    scope: direct_protocol
-    result: mixed
-    endpointKeys:
-      - biomarker:estimated-vo2max
-    headline: Sedentary men improved estimated VO2max, peak power output, and critical power after 8 weeks of practical 20/10 cycling or calisthenics HIIT, but body composition, 1RM strength, and sprint outcomes did not clearly improve.
-    implication: Supports the plausibility that practical 20/10 Tabata-style work can improve aerobic-power markers in sedentary men, and that calisthenics can be a viable mode when cycling equipment is unavailable.
-    caveat: This was not the original 170% VO2max protocol; cycling used approximately 120% peak power output, the program used 2-3 Tabata sets per session, there was no non-exercise control arm, and the sample was small and male-only.
-    displayPriority: 50
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: cardiometabolic-body-composition-boundary
-    stance: mixed
-    scope: direct_protocol
-    result: mixed
-    endpointKeys:
-      - biomarker:estimated-vo2max
-    headline: Sedentary men improved estimated VO2max, peak power output, and critical power after 8 weeks of practical 20/10 cycling or calisthenics HIIT, but body composition, 1RM strength, and sprint outcomes did not clearly improve.
-    implication: Supports the plausibility that practical 20/10 Tabata-style work can improve aerobic-power markers in sedentary men, and that calisthenics can be a viable mode when cycling equipment is unavailable.
-    caveat: This was not the original 170% VO2max protocol; cycling used approximately 120% peak power output, the program used 2-3 Tabata sets per session, there was no non-exercise control arm, and the sample was small and male-only.
-    displayPriority: 50
 evidenceBucket: direct_practical_20_10_trials
 whyItMatters: This is one of the most directly practical 20/10 training studies for a home-friendly bodyweight variant, while also preserving null findings for strength, sprint, and body composition.
 potentialMurphEndpoints:

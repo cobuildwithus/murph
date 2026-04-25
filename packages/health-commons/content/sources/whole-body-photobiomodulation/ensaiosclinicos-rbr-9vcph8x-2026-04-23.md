@@ -36,17 +36,6 @@ researchEvidence:
   durationLabel: Randomized crossover over a 15-day period
   aggregateRole: primary
   cohortKey: rbr-9vcph8x-copd
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: context_only
-    scope: clinical_supervised
-    result: not_efficacy_evidence
-    headline: COPD crossover registry uses Joovv Elite whole-body light and sham to study dyspnea, fatigue, functional tests, and respiratory pressures.
-    implication: Useful for extending recall beyond pain and sport into respiratory disease and function-oriented endpoints in a supervised whole-body PBM setting.
-    caveat: Registry protocol only; no efficacy results are posted, and exertional safety boundaries are explicit.
-    displayPriority: 15
 evidenceBucket: Emerging disease-specific whole-body PBM variants
 whyItMatters: Shows the modality moving into COPD with a crossover sham-controlled design and function-heavy endpoints rather than purely symptom scales.
 potentialMurphEndpoints:

@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Metcon formats vary; Tabata discussed as one subtype
   cohortKey: healthline-metcon-workout-2021-04-08
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Distinguishes metcon, HIIT, and Tabata rather than treating them as interchangeable.
-    implication: Useful for taxonomy and beginner-readiness cautions.
-    caveat: Consumer article; not direct Tabata intervention evidence.
-    displayPriority: 65
 evidenceBucket: external_protocol_claims
 whyItMatters: It supports a clean protocol taxonomy so broad metabolic-conditioning claims are not attributed to Tabata 20/10.
 potentialMurphEndpoints:

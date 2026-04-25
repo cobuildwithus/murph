@@ -29,27 +29,6 @@ researchEvidence:
   designKind: "narrative_review"
   designLabel: "Narrative physiology review"
   aggregateRole: "synthesis"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: "This narrative physiology review covers lung and ventilation responses in the sauna. The main finding is that respiratory effects are part of the sauna response, especially for heat tolerance and symptom context."
-    implication: "This source supports respiratory cautions and illness-context logging rather than a performance claim."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 150
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: evidence-backbone-and-claim-calibration
-    stance: mixed
-    scope: direct_protocol
-    result: mixed
-    headline: "This ventilation review keeps the evidence backbone grounded in real sauna respiratory physiology rather than generic wellness language."
-    implication: "Use it to frame tolerability and illness-context caveats without overpromising performance or recovery effects."
-    caveat: "Respiratory physiology reviews calibrate symptoms and plausibility; they do not prove a short home protocol outcome."
-    displayPriority: 160
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a respiratory / ent record marked lower priority for Murph v1 interpretation."
 potentialMurphEndpoints:

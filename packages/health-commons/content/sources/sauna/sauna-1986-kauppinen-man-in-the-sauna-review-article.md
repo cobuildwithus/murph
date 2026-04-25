@@ -31,21 +31,6 @@ researchEvidence:
   designKind: "narrative_review"
   designLabel: "Narrative review"
   aggregateRole: "synthesis"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: evidence-backbone-and-claim-calibration
-    stance: mixed
-    scope: same_mechanism
-    result: mixed
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:morning-blood-pressure
-      - biomarker:hrv-rmssd
-    headline: "This narrative review synthesizes classic Finnish sauna physiology, risks, and practical claims. The main finding is a broad context map: sauna produces meaningful heat stress, cardiovascular, thermal, fluid, and endocrine responses, but the evidence is mixed by outcome."
-    implication: "This source is background for rationale and guardrails, not a short-term wearable endpoint."
-    caveat: "Review evidence should calibrate rationale and claims; it does not prove this exact 21-day self-experiment will move wearable signals."
-    displayPriority: 80
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a general / mixed record marked medium priority for Murph v1 interpretation."
 potentialMurphEndpoints:

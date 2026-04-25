@@ -19,6 +19,7 @@ import { toExpert } from "./experiment-detail-experts";
 import { resolveProtocolImage } from "./experiment-detail-media";
 import {
   countResearchStudies,
+  findProtocolEvidenceAppraisal,
   formatResearchSummaryLabel,
   hasMixedResearchAndProvenanceSources,
   isCountedResearchSource,
@@ -137,8 +138,14 @@ function toExperimentDetail(
   });
   const citedDisplaySources = citedSources.filter(isDisplaySource);
   const countedResearchSources = citedDisplaySources.filter(isCountedResearchSource);
+  const evidenceAppraisals = catalog.listEvidenceAppraisals({
+    targetKey: protocol.key,
+  });
   const studies = sortStudySourcesForDisplay(citedDisplaySources)
-    .map((source) => toStudy(source, protocol.key));
+    .map((source) => toStudy(
+      source,
+      findProtocolEvidenceAppraisal(evidenceAppraisals, source.key, protocol.key),
+    ));
   const {
     coveredSourceCount: researchGroupCoveredSourceCount,
     groups: researchGroups,
@@ -146,6 +153,7 @@ function toExperimentDetail(
   } = toResearchGroups({
     protocol,
     citedStudySources: citedDisplaySources,
+    evidenceAppraisals,
   });
   const hasCompleteResearchGroupCoverage =
     researchGroups.length > 0
@@ -195,6 +203,7 @@ function toExperimentDetail(
     researchStats: toResearchStats({
       countedResearchSources,
       displaySources: citedDisplaySources,
+      evidenceAppraisals,
       protocolKey: protocol.key,
       routeId,
     }),

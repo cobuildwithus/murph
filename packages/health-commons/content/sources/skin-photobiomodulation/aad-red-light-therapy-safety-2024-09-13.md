@@ -31,27 +31,6 @@ researchEvidence:
   durationLabel: Not applicable.
   aggregateRole: primary
   cohortKey: cohort:aad-red-light-therapy-safety-2024-09-13
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: consumer-red-light-safety
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: AAD guidance supports cautious red/NIR PBM use with dermatologist review for darker skin, photosensitive conditions, medications, and eye protection.
-    implication: Use for user-facing safety boundaries and referral language.
-    caveat: FDA-cleared/public-risk language should not be interpreted as proof of effectiveness.
-    displayPriority: 86
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: safety-boundaries
-    stance: safety_boundary
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: AAD guidance supports cautious red/NIR PBM use with dermatologist review for darker skin, photosensitive conditions, medications, and eye protection.
-    implication: Use for user-facing safety boundaries and referral language.
-    caveat: FDA-cleared/public-risk language should not be interpreted as proof of effectiveness.
-    displayPriority: 86
 evidenceBucket: skin safety and screening boundary
 whyItMatters: Use for user-facing safety boundaries and referral language.
 potentialMurphEndpoints:

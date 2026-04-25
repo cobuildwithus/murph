@@ -41,18 +41,6 @@ researchEvidence:
   durationLabel: Tabata described as short fixed work/rest blocks, typically four to eight minutes per block
   cohortKey: boxclock-emom-tabata-amrap-2026-04-24
   aggregateRole: context
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
-    groupId: external-tabata-style-disambiguation
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    endpointKeys: []
-    headline: Frames Tabata as a fixed work/rest timer format distinct from EMOM and AMRAP.
-    implication: Useful for taxonomy, user-interface wording, and avoiding timer-format overclaiming.
-    caveat: Commercial timer page; not a source of clinical or performance effect estimates.
-    displayPriority: 65
 evidenceBucket: external_protocol_claims
 whyItMatters: It shows how timer products explain Tabata relative to other high-intensity formats while maintaining distinct timing rules.
 potentialMurphEndpoints:

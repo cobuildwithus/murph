@@ -40,27 +40,6 @@ researchEvidence:
   durationLabel: Standing professional guidance; page written 2018-11-30
   aggregateRole: synthesis
   cohortKey: bmla-2018-drugs-lasers-ipls-guidance
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-    groupId: safety-and-screening-boundaries
-    stance: safety_boundary
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: Practical guidance recommends especially strict delays after photodynamic therapy drugs, while many other photosensitizing medications warrant caution, test spots, and wavelength review rather than automatic exclusion.
-    implication: Useful as a pragmatic comparator for medication-screening language.
-    caveat: Consensus guidance for non-essential aesthetic lasers and IPLs, not peer-reviewed whole-body PBM evidence.
-    displayPriority: 35
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: laser-ipl-medication-guidance
-    stance: safety_boundary
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: BMLA guidance supports medication review while warning against overly rigid drug-light rules.
-    implication: Use for medication-screening process language and referral/test-patch caution, not for efficacy claims.
-    caveat: Translate laser/IPL cautions conservatively to PBM because device physics differ.
-    displayPriority: 63
 evidenceBucket: Safety, contraindication, and population-boundary evidence
 whyItMatters: This source provides concrete wait-period and test-patch advice that can inform practical screening language even though it is not direct PBM research.
 potentialMurphEndpoints:

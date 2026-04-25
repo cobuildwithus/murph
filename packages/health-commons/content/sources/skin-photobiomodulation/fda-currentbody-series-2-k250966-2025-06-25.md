@@ -31,17 +31,6 @@ researchEvidence:
   durationLabel: 10 minutes per treatment, 5 times weekly for 6 weeks in device summary
   aggregateRole: context
   cohortKey: fda-currentbody-series-2-k250966-2025-06-25
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:skin-photobiomodulation/red-near-infrared-skin-texture-photoaging
-    groupId: batch003:fda-currentbody-series-2-k250966-2025-06-25:ocular
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    headline: 510(k) Summary: CurrentBody Skin LED Light Therapy Mask Series 2, Model MK-90H
-    implication: Use as safety-boundary context; do not promote to direct skin efficacy evidence.
-    caveat: 510(k) substantial-equivalence documentation; not a clinical efficacy trial.
-    displayPriority: 50
 evidenceBucket: eye and face-adjacent ocular safety boundary
 whyItMatters: It is directly adjacent to the protocol device class and records eye inserts as part of the cleared device configuration.
 potentialMurphEndpoints:

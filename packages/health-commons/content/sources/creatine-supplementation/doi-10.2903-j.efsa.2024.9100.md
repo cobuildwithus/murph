@@ -36,37 +36,6 @@ researchEvidence:
   durationLabel: Mixed; acute high-dose studies and longer continuous supplementation were considered.
   aggregateRole: primary
   cohortKey: cohort:doi-10.2903-j.efsa.2024.9100
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: adjacent-cognition-bone-and-disease-treatment-claims
-    stance: context_only
-    scope: adjacent_variant
-    result: not_efficacy_evidence
-    headline: "Included in the protocol evidence landscape group: Adjacent cognition, bone, and disease-treatment claims."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: evidence-quality-and-interpretation-limits
-    stance: mixed
-    scope: general_guideline
-    result: mixed
-    headline: "Included in the protocol evidence landscape group: Evidence quality and interpretation limits."
-    implication: "Use this source within that landscape group while preserving the source-specific extraction caveats."
-    caveat: "Interpret alongside the source narrative and the protocol's stated scope limits."
-    displayPriority: 90
-  -
-    protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
-    groupId: creatine-monohydrate
-    stance: context_only
-    scope: general_guideline
-    result: not_efficacy_evidence
-    headline: EFSA did not accept the cognitive-function health claim for creatine.
-    implication: 'Use as a boundary source: cognition claims should not be generalized from sport-dose creatine evidence.'
-    caveat: Regulatory claim evaluation, not a direct exercise-performance trial; acute high-dose signals were judged insufficient or not generalizable.
-    displayPriority: 80
 evidenceBucket: background_guidelines_external
 whyItMatters: EFSA evaluated a proposed cognitive-function health claim for creatine and concluded that a cause-and-effect relationship was not established.
 potentialMurphEndpoints:

@@ -34,20 +34,6 @@ researchEvidence:
   durationLabel: "Acute sauna exposure under drug conditions"
   aggregateRole: "primary"
   cohortKey: "kukkonen-harjula-1994-drug-sauna-volunteers"
-protocolEvidence:
-  -
-    protocolKey: protocol_variant:dry-sauna/murph-finnish-standard-3x-week
-    groupId: safety-dose-modality-and-context-boundaries
-    stance: safety_boundary
-    scope: direct_protocol
-    result: not_efficacy_evidence
-    endpointKeys:
-      - biomarker:resting-heart-rate
-      - biomarker:morning-blood-pressure
-    headline: "This crossover study tested Finnish sauna exposure under atenolol, scopolamine, and combined drug conditions. The main finding is that medications can change cardiovascular responses to sauna heat."
-    implication: "This source supports medication-aware screening and clinician-guidance cautions."
-    caveat: "Safety and special-population records support screening, stopping rules, and logging; they are not efficacy proof."
-    displayPriority: 70
 evidenceBucket: Finnish dry-sauna corpus
 whyItMatters: "Expands the audited Finnish dry-sauna evidence corpus with a cardiovascular record marked high priority for Murph v1 interpretation."
 potentialMurphEndpoints:
