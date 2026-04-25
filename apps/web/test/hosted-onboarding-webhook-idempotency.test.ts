@@ -146,7 +146,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
     await expect(
       handleHostedOnboardingLinqWebhook({
-        rawBody: buildLinqMessageWebhookBody(),
+        rawBody: buildLinqMessageWebhookBody({
+          service: "iMessage",
+        }),
         signature: null,
         timestamp: null,
       }),
@@ -260,8 +262,11 @@ function buildLinqMessageWebhookBody(input: {
   eventType?: string;
   from?: string;
   isFromMe?: boolean;
+  service?: string;
   text?: string;
 } = {}): string {
+  const service = input.service ?? "sms";
+
   return JSON.stringify({
     api_version: "v3",
     created_at: "2026-03-26T12:00:00.000Z",
@@ -273,7 +278,7 @@ function buildLinqMessageWebhookBody(input: {
           handle: "+15550000000",
           id: "handle_owner_123",
           is_me: true,
-          service: "sms",
+          service,
         },
       },
       direction: input.isFromMe ? "outbound" : "inbound",
@@ -287,10 +292,10 @@ function buildLinqMessageWebhookBody(input: {
       sender_handle: {
         handle: input.from ?? "+15551234567",
         id: "handle_sender_123",
-        service: "sms",
+        service,
       },
       sent_at: "2026-03-26T12:00:00.000Z",
-      service: "sms",
+      service,
     },
     event_id: "evt_123",
     event_type: input.eventType ?? "message.received",

@@ -140,21 +140,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      welcomeRoute: {
-        actorId: "+15551234567",
-        channel: "linq",
-        delivery: {
-          kind: "participant",
-          source: {
-            fromPhoneNumber: "+15550100002",
-            kind: "linq",
-          },
-          target: "+15551234567",
-        },
-        identityId: "hbidx:phone:v1:test",
-        threadId: null,
-        threadIsDirect: true,
-      },
+      welcomeRoute: null,
     });
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
