@@ -13,7 +13,11 @@ import {
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
   parseHostedEmailRouteResolutionCallbackResponse,
 } from "@murphai/hosted-execution/hosted-email";
-import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
+import {
+  isHostedEmailAuthenticatedSenderVerdictAccepted,
+  normalizeHostedEmailAddress,
+  type HostedEmailAuthenticatedSenderVerdict,
+} from "@murphai/runtime-state";
 
 import {
   fetchHostedExecutionWebControlPlaneResponse,
@@ -48,6 +52,7 @@ export class HostedEmailIngressRouteResolutionError extends Error {
 }
 
 interface HostedEmailRouteCallbackContext {
+  authenticatedSender?: HostedEmailAuthenticatedSenderVerdict | null;
   fetchImpl?: typeof fetch;
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;
@@ -235,11 +240,16 @@ async function resolveHostedEmailPublicSenderIngressRoute(
 async function resolveHostedEmailRouteUserId(input: {
   aliasKey: string | null;
   context: HostedEmailRouteCallbackContext & {
+    authenticatedSender?: HostedEmailAuthenticatedSenderVerdict | null;
     envelopeFrom?: string | null;
     webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
     webControlBaseUrl?: string | null;
   };
 }): Promise<string | null> {
+  if (!isHostedEmailAuthenticatedSenderVerdictAccepted(input.context.authenticatedSender)) {
+    return null;
+  }
+
   if (!input.context.webCallbackSigning || !input.context.webControlBaseUrl) {
     throw new HostedEmailIngressRouteResolutionError(
       "Hosted email route resolution callback is not configured.",
@@ -252,6 +262,7 @@ async function resolveHostedEmailRouteUserId(input: {
       baseUrl: input.context.webControlBaseUrl,
       body: JSON.stringify({
         ...(input.aliasKey ? { aliasKey: input.aliasKey } : {}),
+        authenticatedSender: input.context.authenticatedSender ?? null,
         envelopeFrom: input.context.envelopeFrom ?? null,
         hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
         headerFrom: input.context.headerFrom ?? null,

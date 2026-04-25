@@ -93,6 +93,7 @@ export async function handleHostedEmailIngress(
     }
   };
   const route = await resolveHostedEmailIngressRoute({
+    authenticatedSender: message.authenticatedSender ?? null,
     config,
     envelopeFrom: message.from,
     fetchImpl: fetch,

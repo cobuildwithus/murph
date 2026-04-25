@@ -5,6 +5,7 @@ import { parseHostedEmailRouteCandidate } from "../src/hosted-email/route-addres
 import { parseHostedEmailRouteToken } from "../src/hosted-email/route-crypto.ts";
 import {
   createHostedEmailUserAddress,
+  resolveHostedEmailIngressRoute,
   resolveHostedEmailInboundRoute,
 } from "../src/hosted-email/routes.ts";
 
@@ -36,6 +37,11 @@ function createHostedEmailTestConfig() {
 const TEST_CALLBACK_SIGNING = {
   keyId: "v1",
   privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
+};
+const AUTHENTICATED_SENDER = {
+  dkimAligned: false,
+  dmarcPass: true,
+  spfAligned: false,
 };
 
 describe("hosted email route callbacks", () => {
@@ -122,6 +128,7 @@ describe("hosted email route callbacks", () => {
 
     await expect(resolveHostedEmailInboundRoute({
       config: resolveConfig,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -170,6 +177,7 @@ describe("hosted email route callbacks", () => {
 
     await expect(resolveHostedEmailInboundRoute({
       config,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -177,5 +185,22 @@ describe("hosted email route callbacks", () => {
       webCallbackSigning: TEST_CALLBACK_SIGNING,
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toBeNull();
+  });
+
+  it("returns null for public-sender ingress when the authenticated verdict is absent", async () => {
+    const config = createHostedEmailTestConfig();
+
+    await expect(resolveHostedEmailIngressRoute({
+      config,
+      authenticatedSender: null,
+      envelopeFrom: "owner@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Owner <owner@example.com>",
+      to: config.fromAddress,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).resolves.toBeNull();
+
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
   });
 });
