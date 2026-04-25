@@ -103,7 +103,12 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   });
 
   return {
-    welcomeRoute: null,
+    welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: null,
+      linqRecipientPhone: targetRecipientPhone,
+      memberPhoneNumber,
+      messaging,
+    }),
   };
 }
 
