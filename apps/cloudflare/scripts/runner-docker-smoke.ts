@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,48 +21,55 @@ const EXPECTED_VAULT_ID = "vault_01JNV40W8VFYQ2H7CMJY5A9R4K";
 const WAV_RELATIVE_PATH = "raw/smoke/hosted-runner.wav";
 const EXPECTED_TRANSCRIPT_SNIPPET = "hello";
 const IMAGE_TAG = "murph-cloudflare-runner";
+const SMOKE_BUNDLE_DIR = path.join(appDir, ".deploy", "runner-smoke-bundle");
 
 async function main(): Promise<void> {
-  const snapshot = await snapshotHostedExecutionContext({
-    vaultRoot: FIXTURE_VAULT_ROOT,
-  });
-  const bundle = encodeHostedBundleBase64(snapshot.bundle);
+  try {
+    const snapshot = await snapshotHostedExecutionContext({
+      vaultRoot: FIXTURE_VAULT_ROOT,
+    });
+    const bundle = encodeHostedBundleBase64(snapshot.bundle);
 
-  if (!bundle) {
-    throw new Error("Could not encode the hosted runner smoke fixture bundle.");
+    if (!bundle) {
+      throw new Error("Could not encode the hosted runner smoke fixture bundle.");
+    }
+
+    const output = await runDockerCommand([
+      "run",
+      "--rm",
+      "--platform",
+      "linux/amd64",
+      "--interactive",
+      "--network",
+      "none",
+      "--entrypoint",
+      "node",
+      IMAGE_TAG,
+      "dist/hosted-runner-smoke.js",
+    ], JSON.stringify({
+      bundle,
+      expectedTranscriptSnippet: EXPECTED_TRANSCRIPT_SNIPPET,
+      expectedVaultId: EXPECTED_VAULT_ID,
+      wavRelativePath: WAV_RELATIVE_PATH,
+    }));
+
+    const result = parseHostedRunnerSmokeResult(JSON.parse(output));
+
+    console.log(`Hosted runner smoke passed.`);
+    console.log(`childCwd=${result.childCwd}`);
+    console.log(`murphBin=${result.murphBin}`);
+    console.log(`vaultCliBin=${result.vaultCliBin}`);
+    console.log(`reportedVaultId=${result.reportedVaultId}`);
+    console.log(`vaultShowBytes=${result.vaultShowBytes}`);
+    console.log(`wavTranscriptProviderId=${result.wavTranscriptProviderId}`);
+    console.log(`wavTranscriptSha256=${result.wavTranscriptSha256}`);
+    console.log(`wavTranscriptMatchesExpectedSnippet=${result.wavTranscriptMatchesExpectedSnippet}`);
+    console.log(`normalizedTranscriptProviderId=${result.normalizedTranscriptProviderId}`);
+    console.log(`normalizedTranscriptSha256=${result.normalizedTranscriptSha256}`);
+    console.log(`normalizedTranscriptMatchesExpectedSnippet=${result.normalizedTranscriptMatchesExpectedSnippet}`);
+  } finally {
+    await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
   }
-
-  const output = await runDockerCommand([
-    "run",
-    "--rm",
-    "--interactive",
-    "--network",
-    "none",
-    "--entrypoint",
-    "node",
-    IMAGE_TAG,
-    "dist/hosted-runner-smoke.js",
-  ], JSON.stringify({
-    bundle,
-    expectedTranscriptSnippet: EXPECTED_TRANSCRIPT_SNIPPET,
-    expectedVaultId: EXPECTED_VAULT_ID,
-    wavRelativePath: WAV_RELATIVE_PATH,
-  }));
-
-  const result = parseHostedRunnerSmokeResult(JSON.parse(output));
-
-  console.log(`Hosted runner smoke passed.`);
-  console.log(`childCwd=${result.childCwd}`);
-  console.log(`murphBin=${result.murphBin}`);
-  console.log(`vaultCliBin=${result.vaultCliBin}`);
-  console.log(`reportedVaultId=${result.reportedVaultId}`);
-  console.log(`vaultShowBytes=${result.vaultShowBytes}`);
-  console.log(`wavTranscriptProviderId=${result.wavTranscriptProviderId}`);
-  console.log(`wavTranscriptSha256=${result.wavTranscriptSha256}`);
-  console.log(`wavTranscriptMatchesExpectedSnippet=${result.wavTranscriptMatchesExpectedSnippet}`);
-  console.log(`normalizedTranscriptProviderId=${result.normalizedTranscriptProviderId}`);
-  console.log(`normalizedTranscriptSha256=${result.normalizedTranscriptSha256}`);
-  console.log(`normalizedTranscriptMatchesExpectedSnippet=${result.normalizedTranscriptMatchesExpectedSnippet}`);
 }
 
 async function runDockerCommand(args: string[], stdinText: string): Promise<string> {

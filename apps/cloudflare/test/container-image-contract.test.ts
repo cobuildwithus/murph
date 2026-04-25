@@ -328,6 +328,10 @@ describe("hosted runner container image contract", () => {
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
     );
+    const smokeDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-hosted-runner-smoke", import.meta.url),
+      "utf8",
+    );
     const baseDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
       "utf8",
@@ -377,6 +381,15 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).not.toContain("whisper.cpp");
     expect(finalDockerfile).not.toContain("huggingface.co");
     expect(finalDockerfile).not.toContain("worker-secrets.json");
+    expect(smokeDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
+    expect(smokeDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
+    expect(smokeDockerfile).toContain(
+      "COPY --chown=runner:runner .deploy/runner-smoke-bundle/ /app/",
+    );
+    expect(smokeDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
+    expect(smokeDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
+    expect(smokeDockerfile).not.toContain("apt-get install");
+    expect(smokeDockerfile).not.toContain("worker-secrets.json");
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
@@ -389,6 +402,10 @@ describe("hosted runner container image contract", () => {
     ) as {
       scripts?: Record<string, string>;
     };
+    const runnerDockerSmokeScript = await readFile(
+      new URL("../scripts/runner-docker-smoke.ts", import.meta.url),
+      "utf8",
+    );
     const rendered = buildHostedWranglerDeployConfig(createDeployEnvironment());
     const [container] = rendered.containers as Array<Record<string, unknown>>;
 
@@ -405,7 +422,7 @@ describe("hosted runner container image contract", () => {
       "pnpm runner:bundle && pnpm runner:docker:base && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     );
     expect(packageJson.scripts?.["runner:docker:smoke"]).toBe(
-      "pnpm runner:docker:smoke:prepare && pnpm runner:docker:base && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
+      "pnpm runner:bundle && pnpm runner:docker:base && pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
     );
     expect(packageJson.scripts?.["runner:docker:smoke:prepared-base"]).toBe(
       "pnpm runner:docker:smoke:prepare && pnpm runner:docker:smoke:image && pnpm runner:docker:smoke:built",
@@ -421,7 +438,12 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["runner:bundle:assemble-only"]).toBe(
       "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
     );
-    expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain("pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only &&");
+    expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).not.toContain("runner:bundle:assemble-only");
+    expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain(".deploy/runner-smoke-bundle");
+    expect(packageJson.scripts?.["runner:docker:smoke:image"]).toBe(
+      "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-smoke -t murph-cloudflare-runner .",
+    );
+    expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain(
       "pnpm runner:bundle:hosted-local &&",
     );
@@ -440,13 +462,15 @@ describe("hosted runner container image contract", () => {
     expect(container.max_instances).toBe(1000);
   });
 
-  it("keeps only the prepared runner bundle from .deploy in the app-local Docker context", async () => {
+  it("keeps only runner bundle artifacts from .deploy in the app-local Docker context", async () => {
     const dockerignore = await readFile(new URL("../.dockerignore", import.meta.url), "utf8");
 
     expect(dockerignore).toContain("**");
     expect(dockerignore).toContain("!.deploy/");
     expect(dockerignore).toContain("!.deploy/runner-bundle/");
     expect(dockerignore).toContain("!.deploy/runner-bundle/**");
+    expect(dockerignore).toContain("!.deploy/runner-smoke-bundle/");
+    expect(dockerignore).toContain("!.deploy/runner-smoke-bundle/**");
     expect(dockerignore).not.toContain("!apps/cloudflare/.deploy/wrangler.generated.jsonc");
     expect(dockerignore).not.toContain("!apps/cloudflare/.deploy/worker-secrets.json");
   });

@@ -4,29 +4,41 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
-const defaultPreparedBundleDir = path.join(appDir, ".deploy", "runner-bundle");
+const defaultProductionBundleDir = path.join(appDir, ".deploy", "runner-bundle");
+const defaultSmokeBundleDir = path.join(appDir, ".deploy", "runner-smoke-bundle");
 const defaultBuiltSmokeDistDir = path.join(appDir, ".deploy", "smoke-dist");
 
 type SyncSmokeRunnerBundleOptions = {
   builtSmokeDistDir?: string;
-  preparedBundleDir?: string;
+  productionBundleDir?: string;
+  smokeBundleDir?: string;
 };
 
 export async function syncSmokeRunnerBundle(
   options: SyncSmokeRunnerBundleOptions = {},
 ): Promise<void> {
-  const preparedBundleDir = options.preparedBundleDir ?? defaultPreparedBundleDir;
+  const productionBundleDir = options.productionBundleDir ?? defaultProductionBundleDir;
+  const smokeBundleDir = options.smokeBundleDir ?? defaultSmokeBundleDir;
   const builtSmokeDistDir = options.builtSmokeDistDir ?? defaultBuiltSmokeDistDir;
-  const preparedDistDir = path.join(preparedBundleDir, "dist");
+  const smokeDistDir = path.join(smokeBundleDir, "dist");
 
-  await assertPreparedBundleExists({
+  await assertSmokeInputsExist({
     builtSmokeDistDir,
-    preparedBundleDir,
+    productionBundleDir,
   });
-  await mkdir(preparedDistDir, { recursive: true });
+  await rm(smokeBundleDir, {
+    force: true,
+    recursive: true,
+  });
 
   try {
-    await cp(builtSmokeDistDir, preparedDistDir, {
+    await cp(productionBundleDir, smokeBundleDir, {
+      force: true,
+      recursive: true,
+      verbatimSymlinks: true,
+    });
+    await mkdir(smokeDistDir, { recursive: true });
+    await cp(builtSmokeDistDir, smokeDistDir, {
       force: true,
       recursive: true,
     });
@@ -38,17 +50,17 @@ export async function syncSmokeRunnerBundle(
   }
 }
 
-async function assertPreparedBundleExists(options: {
+async function assertSmokeInputsExist(options: {
   builtSmokeDistDir: string;
-  preparedBundleDir: string;
+  productionBundleDir: string;
 }): Promise<void> {
-  const { builtSmokeDistDir, preparedBundleDir } = options;
-  await access(path.join(preparedBundleDir, "package.json"));
-  await access(path.join(preparedBundleDir, "node_modules"));
+  const { builtSmokeDistDir, productionBundleDir } = options;
+  await access(path.join(productionBundleDir, "package.json"));
+  await access(path.join(productionBundleDir, "node_modules"));
   await access(builtSmokeDistDir);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   await syncSmokeRunnerBundle();
-  console.log("Synced hosted runner smoke dist into the prepared runner bundle for local smoke.");
+  console.log("Synced hosted runner smoke dist into an isolated runner smoke bundle.");
 }

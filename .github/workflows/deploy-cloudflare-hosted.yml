@@ -239,10 +239,6 @@ jobs:
         if: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base
 
-      - name: Rebuild deploy artifacts for upload
-        if: ${{ inputs.deploy_worker }}
-        run: pnpm --dir apps/cloudflare deploy:artifacts
-
       - name: Show generated artifact paths
         run: ls -lah apps/cloudflare/.deploy
 

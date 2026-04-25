@@ -338,6 +338,10 @@ describe("hosted deploy automation helpers", () => {
     ]) {
       expect(workflow).toContain(expectedLine);
     }
+    expect(workflow).not.toContain("Rebuild deploy artifacts for upload");
+    expect([
+      ...workflow.matchAll(/run: pnpm --dir apps\/cloudflare deploy:artifacts/gmu),
+    ]).toHaveLength(1);
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");
     }
