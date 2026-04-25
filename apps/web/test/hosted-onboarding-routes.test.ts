@@ -142,6 +142,7 @@ describe("hosted onboarding routes", () => {
     });
     mocks.prepareHostedInvitePhoneCode.mockResolvedValue({
       phoneHint: "*** 4567",
+      phoneNumber: "+15551234567",
       sendAttemptId: "send_attempt_123",
     });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
@@ -586,6 +587,7 @@ describe("hosted onboarding routes", () => {
     });
     await expect(response.json()).resolves.toEqual({
       phoneHint: "*** 4567",
+      phoneNumber: "+15551234567",
       sendAttemptId: "send_attempt_123",
     });
   });

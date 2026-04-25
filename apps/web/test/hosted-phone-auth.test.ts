@@ -403,7 +403,8 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /\*\*\* 2671/);
-    assert.match(markup, /Enter full number/);
+    assert.match(markup, /Text me a code/);
+    assert.match(markup, /Use a different number/);
     assert.doesNotMatch(markup, /name="phone-number"/);
     assert.doesNotMatch(markup, /\+14155552671/);
     assert.doesNotMatch(markup, /disabled=""/);
@@ -422,6 +423,183 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /\*\*\* 2671/);
     assert.doesNotMatch(markup, /\+14155552671/);
     assert.doesNotMatch(markup, /name="phone-number"/);
+  });
+
+  it("requests a code for the stored invite phone without showing the raw number", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-verification-code-step", () => ({
+      HostedVerificationCodeStep({ description }: { description: string }) {
+        return React.createElement(
+          "div",
+          null,
+          React.createElement("p", null, "Verification code"),
+          React.createElement("p", null, description),
+        );
+      },
+    }));
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = typeof url === "string" ? url : url.toString();
+
+      if (requestUrl.endsWith("/send-code")) {
+        return new Response(JSON.stringify({
+          phoneHint: "*** 2671",
+          phoneNumber: "+14155552671",
+          sendAttemptId: "send_attempt_123",
+        }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      }
+
+      if (requestUrl.endsWith("/send-code/confirm")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      }
+
+      throw new Error(`Unexpected fetch ${requestUrl}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "*** 2671",
+      }),
+    );
+
+    try {
+      const sendButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Text me a code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(sendButton);
+
+      await act(async () => {
+        sendButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+14155552671",
+      });
+      const requestedUrls = fetch.mock.calls.map(([url]) =>
+        typeof url === "string" ? url : url.toString(),
+      );
+      assert.deepEqual(requestedUrls, [
+        "/api/hosted-onboarding/invites/invite-code/send-code",
+        "/api/hosted-onboarding/invites/invite-code/send-code/confirm",
+      ]);
+      assert.match(container.textContent ?? "", /Verification code/);
+      assert.match(container.textContent ?? "", /\*\*\* 2671/);
+      assert.doesNotMatch(container.textContent ?? "", /\+14155552671/);
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-verification-code-step");
+      vi.resetModules();
+    }
+  });
+
+  it("falls back to manual entry when the stored invite phone is unavailable", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow() {
+        return React.createElement(
+          "div",
+          null,
+          React.createElement("label", null, "Phone number"),
+          React.createElement("input", { name: "phone-number" }),
+        );
+      },
+      HostedPhoneAuthScaffold({
+        children,
+        errorMessage,
+      }: {
+        children: React.ReactNode;
+        errorMessage: string | null;
+      }) {
+        return React.createElement(
+          "div",
+          null,
+          errorMessage
+            ? React.createElement(
+                "div",
+                null,
+                React.createElement("p", null, "Unable to continue"),
+                React.createElement("p", null, errorMessage),
+              )
+            : null,
+          children,
+        );
+      },
+    }));
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = typeof url === "string" ? url : url.toString();
+
+      if (requestUrl.endsWith("/send-code")) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "SIGNUP_PHONE_UNAVAILABLE",
+            message: "Invite phone unavailable.",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 409,
+        });
+      }
+
+      throw new Error(`Unexpected fetch ${requestUrl}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    mocks.sendCode.mockResolvedValue(undefined);
+
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "*** 2671",
+      }),
+    );
+
+    try {
+      const sendButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Text me a code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(sendButton);
+
+      await act(async () => {
+        sendButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+      assert.deepEqual(fetch.mock.calls.map(([url]) =>
+        typeof url === "string" ? url : url.toString(),
+      ), [
+        "/api/hosted-onboarding/invites/invite-code/send-code",
+      ]);
+      assert.match(container.textContent ?? "", /Unable to continue/);
+      assert.match(container.textContent ?? "", /Enter the number that messaged Murph to continue\./);
+      assert.equal(container.querySelector("[name='phone-number']") !== null, true);
+      assert.doesNotMatch(container.textContent ?? "", /\*\*\* 2671/);
+      assert.doesNotMatch(container.textContent ?? "", /\+14155552671/);
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.resetModules();
+    }
   });
 
   it("does not render malformed masked invite phone hints verbatim", async () => {
@@ -450,7 +628,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /name="phone-number"/);
-    assert.doesNotMatch(markup, /Enter full number/);
+    assert.doesNotMatch(markup, /Use a different number/);
   });
 
   it("falls back to manual invite phone entry when there is no masked hint", async () => {
@@ -543,15 +721,17 @@ describe("HostedPhoneAuth", () => {
       assert.match(container.textContent ?? "", /\*\*\* 2671/);
       assert.equal(container.querySelector("[data-phone-number]"), null);
 
-      const enterFullNumberButton = [
+      const useDifferentNumberButton = [
         ...container.querySelectorAll("button"),
-      ].find((button) => button.textContent === "Enter full number") as
-        | HTMLButtonElement
-        | undefined;
-      assert.ok(enterFullNumberButton);
+      ].find(
+        (button) =>
+          button.textContent === "Use a different number"
+          && !button.hasAttribute("data-sign-out"),
+      ) as HTMLButtonElement | undefined;
+      assert.ok(useDifferentNumberButton);
 
       await act(async () => {
-        enterFullNumberButton.dispatchEvent(
+        useDifferentNumberButton.dispatchEvent(
           new Event("click", { bubbles: true }),
         );
       });
@@ -1264,7 +1444,7 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
-  it("starts invite signup in manual entry instead of the stored-phone shortcut", async () => {
+  it("starts invite signup in manual entry when no masked phone hint exists", async () => {
     const harness = await loadHostedInvitePhoneAuthHarness();
 
     renderToStaticMarkup(
@@ -1275,6 +1455,21 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(harness.flowProps.length, 1);
     assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);
+  });
+
+  it("starts invite signup with the stored masked phone shortcut when a hint exists", async () => {
+    const harness = await loadHostedInvitePhoneAuthHarness();
+
+    const markup = renderToStaticMarkup(
+      React.createElement(harness.HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "*** 2523",
+      }),
+    );
+
+    assert.equal(harness.flowProps.length, 0);
+    assert.match(markup, /\*\*\* 2523/);
+    assert.match(markup, /Text me a code/);
   });
 
   it("uses the manual-entry resend path while an invite code attempt is active", async () => {
@@ -1309,7 +1504,7 @@ describe("HostedPhoneAuth", () => {
     assert.equal(harness.flowProps.length, 1);
     harness.flowProps[0].onUseDifferentNumber();
 
-    assert.equal(harness.controller.handleResetPhoneAuthFlow.mock.calls.length, 1);
+    assert.equal(harness.controller.resetPhoneAuthFlow.mock.calls.length, 1);
   });
 });
 
@@ -1370,6 +1565,10 @@ function createHostedInvitePhoneAuthControllerHarness(
     handleResendCode: vi.fn(),
     pendingAction: null,
     handleResetPhoneAuthFlow: vi.fn(),
+    resetPhoneAuthFlow: vi.fn(),
+    sendVerificationCode: vi.fn(),
+    setErrorMessage: vi.fn(),
+    setPendingAction: vi.fn(),
     sharedFlowProps: {
       activeAttempt,
       code: "",

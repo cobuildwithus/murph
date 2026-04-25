@@ -335,7 +335,7 @@ describe("hosted-onboarding member-service barrel", () => {
 });
 
 describe("prepareHostedInvitePhoneCode", () => {
-  it("returns only a masked stored-phone hint and records the transient send attempt on the local identity row", async () => {
+  it("returns a stored phone for the Privy client send and records the transient send attempt", async () => {
     const hostedMemberIdentity = {
       findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
         memberId: "member_123",
@@ -359,9 +359,9 @@ describe("prepareHostedInvitePhoneCode", () => {
 
     expect(result).toEqual({
       phoneHint: "*** 4567",
+      phoneNumber: "+15551234567",
       sendAttemptId: expect.stringMatching(/^hbpc_/u),
     });
-    expect(result).not.toHaveProperty("phoneNumber");
 
     expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
       where: {
@@ -426,9 +426,9 @@ describe("prepareHostedInvitePhoneCode", () => {
 
     expect(result).toEqual({
       phoneHint: "*** 4567",
+      phoneNumber: "+15557654321",
       sendAttemptId: expect.stringMatching(/^hbpc_/u),
     });
-    expect(result).not.toHaveProperty("phoneNumber");
   });
 
   it("rate limits repeated invite send-code requests", async () => {

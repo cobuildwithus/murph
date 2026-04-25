@@ -416,6 +416,10 @@ export function useHostedPhoneAuthController({
     handleLogout,
     handleResetPhoneAuthFlow,
     handleResendCode,
+    resetPhoneAuthFlow,
+    sendVerificationCode,
+    setErrorMessage,
+    setPendingAction,
   };
 }
 

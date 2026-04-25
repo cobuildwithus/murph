@@ -52,7 +52,7 @@ describe("invite send-code lifecycle", () => {
     });
   });
 
-  it("records only the transient attempt id before returning a masked stored-phone hint", async () => {
+  it("records the transient attempt id before returning the phone for the Privy client send", async () => {
     storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity());
 
     const result = await prepareHostedInvitePhoneCode({
@@ -63,9 +63,9 @@ describe("invite send-code lifecycle", () => {
 
     expect(result).toEqual({
       phoneHint: "*** 4567",
+      phoneNumber: "+15551234567",
       sendAttemptId: expect.stringMatching(/^hbpc_/),
     });
-    expect(result).not.toHaveProperty("phoneNumber");
 
     expect(storeMocks.writeHostedMemberSignupPhoneState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -89,9 +89,9 @@ describe("invite send-code lifecycle", () => {
 
     expect(result).toEqual({
       phoneHint: "*** 4567",
+      phoneNumber: "+15557654321",
       sendAttemptId: expect.stringMatching(/^hbpc_/),
     });
-    expect(result).not.toHaveProperty("phoneNumber");
   });
 
   it("rate limits repeated invite send-code requests while an attempt is in flight", async () => {

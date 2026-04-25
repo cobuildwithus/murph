@@ -5,7 +5,14 @@ import { useEffect, useState } from "react";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import { useHostedPhoneAuthController } from "./hosted-phone-auth-controller";
-import { flushPendingInvitePhoneCodeMutation } from "./hosted-phone-auth-support";
+import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
+import {
+  abortInvitePhoneCodeSend,
+  finalizeInvitePhoneCodeSendConfirmation,
+  flushPendingInvitePhoneCodeMutation,
+  queuePendingInvitePhoneCodeMutation,
+  toErrorMessage,
+} from "./hosted-phone-auth-support";
 import {
   HostedPhoneAuthFlow,
   HostedPhoneAuthScaffold,
@@ -14,6 +21,12 @@ import { HostedInviteMaskedPhoneStep } from "./hosted-phone-auth-step-views";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 
 const HOSTED_INVITE_MASKED_PHONE_HINT_PATTERN = /^\*{3}\s+\d{4}$/u;
+
+interface InvitePhoneCodePayload {
+  phoneHint: string;
+  phoneNumber: string;
+  sendAttemptId: string;
+}
 
 interface HostedInvitePhoneAuthProps {
   inviteCode: string;
@@ -43,18 +56,69 @@ export function HostedInvitePhoneAuth({
     !manualEntryVisible
     && !controller.sharedFlowProps.activeAttempt
     && normalizedPhoneHint !== null;
+  const inviteShortcutActive = !manualEntryVisible && normalizedPhoneHint !== null;
 
   useEffect(() => {
     void flushPendingInvitePhoneCodeMutation(inviteCode);
   }, [inviteCode]);
 
-  function handleEnterFullNumber() {
-    controller.handleResetPhoneAuthFlow();
-    setManualEntryVisible(true);
+  async function handleInviteSendCode() {
+    controller.setErrorMessage(null);
+    controller.setPendingAction("send-code");
+
+    try {
+      await flushPendingInvitePhoneCodeMutation(inviteCode);
+      const payload = await requestHostedOnboardingJson<InvitePhoneCodePayload>({
+        method: "POST",
+        url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
+      });
+
+      try {
+        await controller.sendVerificationCode(payload.phoneNumber);
+      } catch (error) {
+        const abortSucceeded = await abortInvitePhoneCodeSend({
+          inviteCode,
+          sendAttemptId: payload.sendAttemptId,
+        });
+        if (!abortSucceeded) {
+          queuePendingInvitePhoneCodeMutation({
+            inviteCode,
+            kind: "abort",
+            sendAttemptId: payload.sendAttemptId,
+          });
+        }
+        throw error;
+      }
+
+      void finalizeInvitePhoneCodeSendConfirmation({
+        inviteCode,
+        sendAttemptId: payload.sendAttemptId,
+      });
+    } catch (error) {
+      if (error instanceof HostedOnboardingApiError && error.code === "SIGNUP_PHONE_UNAVAILABLE") {
+        controller.resetPhoneAuthFlow();
+        setManualEntryVisible(true);
+        controller.setErrorMessage("Enter the number that messaged Murph to continue.");
+        return;
+      }
+
+      controller.setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
+    } finally {
+      controller.setPendingAction(null);
+    }
+  }
+
+  async function handleResendCode() {
+    if (inviteShortcutActive && controller.sharedFlowProps.activeAttempt) {
+      await handleInviteSendCode();
+      return;
+    }
+
+    await controller.handleResendCode();
   }
 
   function handleUseDifferentNumber() {
-    controller.handleResetPhoneAuthFlow();
+    controller.resetPhoneAuthFlow();
     setManualEntryVisible(true);
   }
 
@@ -76,8 +140,10 @@ export function HostedInvitePhoneAuth({
       {showMaskedPhoneHint ? (
         <HostedInviteMaskedPhoneStep
           disabled={controller.flowDisabled}
+          pendingAction={controller.pendingAction}
           phoneHint={normalizedPhoneHint}
-          onEnterNumber={handleEnterFullNumber}
+          onSendCode={handleInviteSendCode}
+          onUseDifferentNumber={handleUseDifferentNumber}
         />
       ) : (
         <HostedPhoneAuthFlow
@@ -86,7 +152,7 @@ export function HostedInvitePhoneAuth({
           phoneFieldLabel="Phone number"
           phoneInputAutoFocus={manualEntryVisible}
           secondaryActionSize="sm"
-          onResendCode={controller.handleResendCode}
+          onResendCode={handleResendCode}
           onUseDifferentNumber={handleUseDifferentNumber}
         />
       )}

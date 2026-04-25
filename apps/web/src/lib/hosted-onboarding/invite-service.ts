@@ -353,7 +353,7 @@ export async function prepareHostedInvitePhoneCode(input: {
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
-}): Promise<{ phoneHint: string; sendAttemptId: string }> {
+}): Promise<{ phoneHint: string; phoneNumber: string; sendAttemptId: string }> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
 
@@ -402,6 +402,7 @@ export async function prepareHostedInvitePhoneCode(input: {
 
     return {
       phoneHint: readHostedPhoneHint(identity.maskedPhoneNumberHint ?? resumePhoneNumber),
+      phoneNumber: resumePhoneNumber,
       sendAttemptId,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
