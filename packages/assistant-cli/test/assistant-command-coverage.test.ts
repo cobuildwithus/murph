@@ -30,6 +30,7 @@ const commandMocks = vi.hoisted(() => ({
   redactAssistantDisplayPath: vi.fn((value: string) => `redacted:${value}`),
   redactAssistantSessionForDisplay: vi.fn((value) => value),
   redactAssistantSessionsForDisplay: vi.fn((value) => value),
+  resolveAssistantSelfDeliveryTarget: vi.fn(),
   reopenAssistantOnboarding: vi.fn(),
   resolveAssistantConversationAudience: vi.fn(),
   resolveAssistantConversationPolicy: vi.fn(),
@@ -92,6 +93,8 @@ vi.mock(
         commandMocks.clearAssistantSelfDeliveryTargets,
       listAssistantSelfDeliveryTargets:
         commandMocks.listAssistantSelfDeliveryTargets,
+      resolveAssistantSelfDeliveryTarget:
+        commandMocks.resolveAssistantSelfDeliveryTarget,
       resolveOperatorConfigPath: commandMocks.resolveOperatorConfigPath,
       saveAssistantSelfDeliveryTarget:
         commandMocks.saveAssistantSelfDeliveryTarget,
@@ -487,7 +490,7 @@ test('assistant ask rejects saved Linq delivery routes for the local assistant s
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
-      assert.match(error.message, /Linq routes are no longer supported/u)
+      assert.match(error.message, /iMessage routes are no longer supported/u)
       return true
     },
   )
@@ -935,6 +938,13 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     },
   ]
   commandMocks.listAssistantSelfDeliveryTargets.mockResolvedValue(savedTargets)
+  commandMocks.resolveAssistantSelfDeliveryTarget.mockResolvedValueOnce({
+    channel: 'linq',
+    deliveryTarget: 'chat-123',
+    identityId: 'identity-1',
+    participantId: null,
+    threadId: 'chat-123',
+  })
   commandMocks.saveAssistantSelfDeliveryTarget.mockResolvedValueOnce({
     channel: 'email',
     deliveryTarget: 'recipient@example.com',
@@ -942,7 +952,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     participantId: null,
     threadId: null,
   })
-  commandMocks.clearAssistantSelfDeliveryTargets.mockResolvedValueOnce(['telegram'])
+  commandMocks.clearAssistantSelfDeliveryTargets.mockResolvedValueOnce(['linq'])
 
   const listResult = await readCommand(selfTarget.commands, 'list').run({
     args: {},
@@ -950,7 +960,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
   })
   const showResult = await readCommand(selfTarget.commands, 'show').run({
     args: {
-      channel: '  TELEGRAM  ',
+      channel: '  iMessage  ',
     },
     options: {},
   })
@@ -1004,7 +1014,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
-      assert.match(error.message, /Linq routes are no longer supported/u)
+      assert.match(error.message, /iMessage routes are no longer supported/u)
       return true
     },
   )
@@ -1020,7 +1030,7 @@ test('self-target commands normalize channels, enforce email identity, and surfa
   })
   const clearResult = await readCommand(selfTarget.commands, 'clear').run({
     args: {
-      channel: 'telegram',
+      channel: 'i-message',
     },
     options: {},
   })
@@ -1031,7 +1041,13 @@ test('self-target commands normalize channels, enforce email identity, and surfa
   })
   assert.deepEqual(showResult, {
     configPath: 'redacted:/tmp/operator-config.json',
-    target: savedTargets[0],
+    target: {
+      channel: 'linq',
+      deliveryTarget: 'chat-123',
+      identityId: 'identity-1',
+      participantId: null,
+      threadId: 'chat-123',
+    },
   })
   assert.deepEqual(setResult, {
     configPath: 'redacted:/tmp/operator-config.json',
@@ -1044,9 +1060,17 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     },
   })
   assert.deepEqual(clearResult, {
-    clearedChannels: ['telegram'],
+    clearedChannels: ['linq'],
     configPath: 'redacted:/tmp/operator-config.json',
   })
+  assert.deepEqual(
+    commandMocks.resolveAssistantSelfDeliveryTarget.mock.calls[0]?.[0],
+    '  iMessage  ',
+  )
+  assert.deepEqual(
+    commandMocks.clearAssistantSelfDeliveryTargets.mock.calls[0]?.[0],
+    'linq',
+  )
   assert.deepEqual(commandMocks.saveAssistantSelfDeliveryTarget.mock.calls[0]?.[0], {
     channel: 'email',
     deliveryTarget: 'recipient@example.com',

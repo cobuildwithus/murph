@@ -265,5 +265,20 @@ function normalizeAssistantSelfDeliveryTargetChannel(
   channel: string | null | undefined,
   normalizeString: NormalizeOperatorConfigString,
 ): string | null {
-  return normalizeString(channel)?.toLowerCase() ?? null
+  const normalized = normalizeString(channel)?.toLowerCase() ?? null
+  return normalized
+    ? normalizeAssistantSelfDeliveryTargetChannelAlias(normalized)
+    : null
+}
+
+function normalizeAssistantSelfDeliveryTargetChannelAlias(
+  channel: string,
+): string {
+  switch (channel) {
+    case 'imessage':
+    case 'i-message':
+      return 'linq'
+    default:
+      return channel
+  }
 }

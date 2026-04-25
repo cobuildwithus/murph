@@ -132,8 +132,8 @@ describe('assistant channels runtime seam', () => {
       'direct chats',
     )
     expect(ASSISTANT_CHANNEL_ADAPTERS.linq.supportsIdempotencyKey).toBe(true)
-    expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply(groupCapture)).toContain(
-      'direct chats',
+    expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply(groupCapture)).toBe(
+      'iMessage auto-reply only runs for direct chats',
     )
     expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply(groupCapture)).toContain(
       'direct threads',
@@ -518,6 +518,21 @@ describe('assistant channels runtime seam', () => {
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
+      message: 'Outbound iMessage delivery requires LINQ_API_TOKEN.',
+    })
+
+    await expect(
+      startLinqTypingIndicator(
+        {
+          target: 'chat-1',
+        },
+        {
+          env: {},
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
+      message: 'Outbound iMessage delivery requires LINQ_API_TOKEN.',
     })
 
     await expect(
@@ -533,6 +548,7 @@ describe('assistant channels runtime seam', () => {
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+      message: 'iMessage delivery requires an explicit chat id or a stored thread binding.',
     })
 
     await expect(
@@ -618,6 +634,7 @@ describe('assistant channels runtime seam', () => {
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
+      message: 'Materializing an iMessage direct chat requires a sender phone number.',
     })
 
     const handle = await startLinqTypingIndicator(
@@ -838,23 +855,70 @@ describe('assistant channels runtime seam', () => {
       phoneNumbers: ['+15550000'],
     })
 
-    await expect(
-      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
-        {
-          actorId: ' +15550001 ',
-          bindingDelivery: createAssistantBindingDelivery('thread', ' stale-chat '),
-          explicitTarget: null,
-          idempotencyKey: ' idem-stale-thread ',
-          identityId: null,
-          message: 'hello again',
-          replyToMessageId: ' reply-9 ',
-        },
-        {
-          sendLinq,
-        },
-      ),
-    ).rejects.toMatchObject({
+    const staleRecovery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+      {
+        actorId: ' +15550001 ',
+        bindingDelivery: createAssistantBindingDelivery('thread', ' stale-chat '),
+        explicitTarget: null,
+        idempotencyKey: ' idem-stale-thread ',
+        identityId: null,
+        message: 'hello again',
+        replyToMessageId: ' reply-9 ',
+      },
+      {
+        sendLinq,
+      },
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(staleRecovery).toMatchObject({
       code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      message: expect.stringContaining(
+        'Recovered iMessage direct delivery did not return a chat id.',
+      ),
+    })
+    expect(staleRecovery).toMatchObject({
+      message: expect.not.stringContaining('Recovered Linq'),
+    })
+  })
+
+  it('keeps materialized Linq participant delivery confirmation-pending when no chat id is returned', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'created-message',
+    })
+
+    const materialized = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+      {
+        actorId: ' +15550001 ',
+        bindingDelivery: createAssistantBindingDelivery('participant', ' +15550001 '),
+        deliverySource: {
+          kind: 'linq',
+          fromPhoneNumber: '+15550000',
+        },
+        explicitTarget: null,
+        idempotencyKey: ' idem-created ',
+        identityId: null,
+        message: 'welcome',
+        replyToMessageId: null,
+      },
+      {
+        sendLinq,
+      },
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(materialized).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      message: expect.stringContaining(
+        'Materialized iMessage participant delivery did not return a chat id.',
+      ),
+    })
+    expect(materialized).toMatchObject({
+      message: expect.not.stringContaining('Materialized Linq'),
     })
   })
 

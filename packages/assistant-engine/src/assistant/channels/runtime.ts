@@ -126,7 +126,7 @@ export async function sendLinqMessage(
   if (!token) {
     throw new VaultCliError(
       'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
-      'Outbound Linq delivery requires LINQ_API_TOKEN.',
+      'Outbound iMessage delivery requires LINQ_API_TOKEN.',
     )
   }
 
@@ -134,7 +134,7 @@ export async function sendLinqMessage(
   if (target.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-      'Linq delivery requires an explicit chat id or a stored thread binding.',
+      'iMessage delivery requires an explicit chat id or a stored thread binding.',
     )
   }
 
@@ -143,7 +143,7 @@ export async function sendLinqMessage(
     if (!fromPhoneNumber) {
       throw new VaultCliError(
         'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
-        'Materializing a Linq direct chat requires a sender phone number.',
+        'Materializing an iMessage direct chat requires a sender phone number.',
       )
     }
 
@@ -215,7 +215,7 @@ export async function startLinqTypingIndicator(
   if (!token) {
     throw new VaultCliError(
       'ASSISTANT_LINQ_API_TOKEN_REQUIRED',
-      'Outbound Linq delivery requires LINQ_API_TOKEN.',
+      'Outbound iMessage delivery requires LINQ_API_TOKEN.',
     )
   }
 
@@ -223,7 +223,7 @@ export async function startLinqTypingIndicator(
   if (chatId.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_CHANNEL_TARGET_REQUIRED',
-      'Linq delivery requires an explicit chat id or a stored thread binding.',
+      'iMessage delivery requires an explicit chat id or a stored thread binding.',
     )
   }
 

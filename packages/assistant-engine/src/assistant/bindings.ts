@@ -230,7 +230,7 @@ export function getAssistantBindingContextLines(
   binding: AssistantSessionBinding,
 ): string[] {
   return [
-    binding.channel ? `channel: ${binding.channel}` : null,
+    getAssistantBindingChannelContextLine(binding.channel),
     binding.identityId ? `identity: ${binding.identityId}` : null,
     binding.actorId ? `actor: ${binding.actorId}` : null,
     binding.threadId ? `thread: ${binding.threadId}` : null,
@@ -240,6 +240,7 @@ export function getAssistantBindingContextLines(
     binding.delivery
       ? `delivery: ${binding.delivery.kind} -> ${binding.delivery.target}`
       : null,
+    getAssistantBindingRouteContextNote(binding),
   ].filter((line): line is string => Boolean(line))
 }
 
@@ -263,6 +264,34 @@ function bindingConversationRef(input: {
     threadId: normalizeNullableString(input.threadId),
     directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
   }
+}
+
+function getAssistantBindingChannelContextLine(channel: string | null): string | null {
+  if (!channel) {
+    return null
+  }
+
+  return channel === 'linq'
+    ? 'channel: linq (user-facing: iMessage)'
+    : `channel: ${channel}`
+}
+
+function getAssistantBindingRouteContextNote(
+  binding: AssistantSessionBinding,
+): string | null {
+  if (binding.channel !== 'linq') {
+    return null
+  }
+
+  if (binding.threadIsDirect === true && (binding.delivery || binding.threadId)) {
+    return 'iMessage route note: when the user asks to text or remind them here, use this conversation route with internal channel "linq"; call it iMessage in user-facing text.'
+  }
+
+  if (binding.delivery || binding.threadId) {
+    return 'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.'
+  }
+
+  return 'iMessage route note: call this channel iMessage in user-facing text; use internal channel "linq" only for route fields.'
 }
 
 const assistantBindingIsolationFields = [

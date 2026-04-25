@@ -62,6 +62,7 @@ import {
   applyAssistantSelfDeliveryTargetDefaults,
   clearAssistantSelfDeliveryTargets,
   listAssistantSelfDeliveryTargets,
+  resolveAssistantSelfDeliveryTarget,
   resolveOperatorConfigPath,
   saveAssistantSelfDeliveryTarget,
 } from '@murphai/operator-config/operator-config'
@@ -94,22 +95,27 @@ const assistantKnownChannelOptionSchema = z
   .string()
   .min(1)
   .refine(
-    (value) => assistantChannelNameSchema.safeParse(value.trim().toLowerCase()).success,
-    'Supported assistant channels: telegram, linq, email.',
+    (value) => {
+      const normalized = normalizeAssistantChannelOption(value)
+      return normalized
+        ? assistantChannelNameSchema.safeParse(normalized).success
+        : false
+    },
+    'Supported assistant channels: telegram, linq/iMessage, email.',
   )
 const assistantLocalChannelOptionSchema = z
   .string()
   .min(1)
   .refine(
     (value) => {
-      const normalized = value.trim().toLowerCase()
+      const normalized = normalizeAssistantChannelOption(value)
       return normalized === 'telegram' || normalized === 'email'
     },
     'Supported local assistant channels: telegram, email.',
   )
 
 const LOCAL_ASSISTANT_LINQ_ERROR =
-  'Local assistant Linq routes are no longer supported. Hosted/shared assistant-engine Linq support remains available.'
+  'Local assistant iMessage routes are no longer supported. Hosted/shared assistant-engine iMessage support remains available.'
 const VAULT_METADATA_FILE = 'vault.json'
 
 function normalizeAssistantChannelOption(
@@ -120,9 +126,24 @@ function normalizeAssistantChannelOption(
   }
 
   const normalized = value.trim().toLowerCase()
+  const alias = normalizeAssistantChannelAlias(normalized)
+  if (alias) {
+    return alias
+  }
+
   const parsed = assistantChannelNameSchema.safeParse(normalized)
 
   return parsed.success ? parsed.data : normalized
+}
+
+function normalizeAssistantChannelAlias(value: string): string | null {
+  switch (value) {
+    case 'imessage':
+    case 'i-message':
+      return 'linq'
+    default:
+      return null
+  }
 }
 
 function normalizeAssistantBaseUrlOption(
@@ -1043,12 +1064,9 @@ export function registerAssistantCommands(
       }),
       output: assistantSelfDeliveryTargetShowResultSchema,
       async run(context) {
-        const targets = await listAssistantSelfDeliveryTargets()
         return {
           ...buildAssistantOperatorConfigResult(),
-          target:
-            targets.find((target) => target.channel === normalizeAssistantChannelOption(context.args.channel)) ??
-            null,
+          target: await resolveAssistantSelfDeliveryTarget(context.args.channel),
         }
       },
     })

@@ -77,14 +77,14 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   canAutoReply(capture) {
     return capture.threadIsDirect === true
       ? null
-      : 'Linq auto-reply only runs for direct chats'
+      : 'iMessage auto-reply only runs for direct chats'
   },
   isReadyForSetup(env) {
     return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
   supportsIdempotencyKey: true,
   targetRequiredMessage:
-    'Linq delivery requires an explicit chat id or a stored thread binding.',
+    'iMessage delivery requires an explicit chat id or a stored thread binding.',
   async startTypingIndicator({ candidate, dependencies }) {
     const startTyping = dependencies.startLinqTyping ?? startLinqTypingIndicator
     return (await startTyping({
@@ -125,7 +125,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       throw createAssistantDeliveryConfirmationPendingError(
         new VaultCliError(
           'ASSISTANT_LINQ_CHAT_ID_REQUIRED',
-          'Materialized Linq participant delivery did not return a chat id.',
+          'Materialized iMessage participant delivery did not return a chat id.',
         ),
       )
     }
@@ -269,7 +269,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
       throw createAssistantDeliveryConfirmationPendingError(
         new VaultCliError(
           'ASSISTANT_LINQ_CHAT_ID_REQUIRED',
-          'Recovered Linq direct delivery did not return a chat id.',
+          'Recovered iMessage direct delivery did not return a chat id.',
         ),
       )
     }
