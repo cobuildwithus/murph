@@ -77,7 +77,8 @@ Core execution tuning:
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
-- `CF_RUNNER_TIMEOUT_MS` defaults to `120000`
+- `CF_RUNNER_TIMEOUT_MS` defaults to `600000`
+- `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `120000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config

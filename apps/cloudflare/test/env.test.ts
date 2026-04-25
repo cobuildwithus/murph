@@ -24,7 +24,8 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerReadyTimeoutMs).toBe(20_000);
-    expect(environment.runnerTimeoutMs).toBe(60_000);
+    expect(environment.runnerTimeoutMs).toBe(600_000);
+    expect(environment.webControlTimeoutMs).toBe(120_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
     expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
     expect(environment.hostedIngressEncryption.keyVersion).toBe("v1");
@@ -64,6 +65,16 @@ describe("readHostedExecutionEnvironment", () => {
     }));
 
     expect(environment.runnerTimeoutMs).toBe(15_000);
+  });
+
+  it("keeps the hosted-web control timeout separate from the runner timeout", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000",
+      HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+    }));
+
+    expect(environment.runnerTimeoutMs).toBe(600_000);
+    expect(environment.webControlTimeoutMs).toBe(45_000);
   });
 
   it("reads the runner readiness timeout when configured", () => {

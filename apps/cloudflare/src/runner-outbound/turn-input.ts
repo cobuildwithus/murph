@@ -51,7 +51,7 @@ export async function handleRunnerTurnInputRefreshRequest(input: {
     },
     boundUserId: input.userId,
     callbackSigning: input.environment.webCallbackSigning,
-    timeoutMs: input.environment.runnerTimeoutMs,
+    timeoutMs: input.environment.webControlTimeoutMs,
   });
 
   const prefix = await resolveAdoptableHostedTurnInputPrefix({
@@ -76,7 +76,7 @@ export async function handleRunnerTurnInputRefreshRequest(input: {
     },
     boundUserId: input.userId,
     callbackSigning: input.environment.webCallbackSigning,
-    timeoutMs: input.environment.runnerTimeoutMs,
+    timeoutMs: input.environment.webControlTimeoutMs,
   });
 
   if (!adopted.adopted) {

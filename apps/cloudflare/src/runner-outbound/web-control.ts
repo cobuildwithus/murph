@@ -30,6 +30,6 @@ export async function handleRunnerWebControlRequest(input: {
     method: "POST",
     path: input.url.pathname,
     search: input.url.search || null,
-    timeoutMs: input.environment.runnerTimeoutMs,
+    timeoutMs: input.environment.webControlTimeoutMs,
   });
 }

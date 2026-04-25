@@ -184,6 +184,7 @@ describe("handleRunnerOutboundRequest", () => {
   it.each(ALLOWLISTED_WEB_CONTROL_CASES)(
     "proxies allowlisted hosted web-control path: $name",
     async ({ body, path }) => {
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
       const fetchMock = vi.fn(async (
         ..._args: Parameters<typeof fetch>
       ): Promise<Response> => new Response(JSON.stringify({
@@ -211,6 +212,8 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         createRunnerOutboundEnv({
           HOSTED_WEB_BASE_URL: "https://web.example.test",
+          HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000",
+          HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
         }),
         "member_123",
         RUNNER_PROXY_TOKEN,
@@ -233,8 +236,52 @@ describe("handleRunnerOutboundRequest", () => {
       const headers = new Headers(init?.headers);
       expect(headers.get("content-type")).toBe(body === undefined ? null : "application/json");
       expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+      expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("uses the hosted-web control timeout for turn-input refresh", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      events: [],
+      run: null,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/turn-input/refresh", {
+        body: JSON.stringify({
+          runId: "run_123",
+          runToken: "run_token_123",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000",
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      events: [],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+  });
 
   it("returns 404 for non-allowlisted web-control proxy paths", async () => {
     const fetchMock = vi.fn();

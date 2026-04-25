@@ -168,6 +168,7 @@ function createTestRuntimeEnvironment(
     retryDelayMs: 30_000,
     runnerReadyTimeoutMs: 20_000,
     runnerTimeoutMs: 60_000,
+    webControlTimeoutMs: 120_000,
     teeAutomationRecipientKeyId: null,
     teeAutomationRecipientPublicKey: null,
     vercelOidcValidation: {
@@ -760,6 +761,12 @@ describe("HostedUserRunner resumeFinalize drain", () => {
 
     expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(2);
     expect(webControlMocks.finalizeHostedRunInWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.acquireHostedRunFromWeb.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      timeoutMs: 120_000,
+    }));
+    expect(webControlMocks.finalizeHostedRunInWeb.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      timeoutMs: 120_000,
+    }));
     expect(result).toEqual({
       committedSeq: drainedCursor.committedSeq,
       requestedTargetSeq: null,
@@ -857,6 +864,12 @@ describe("HostedUserRunner resumeFinalize drain", () => {
 
     expect(webControlMocks.commitHostedRunToWeb).toHaveBeenCalledTimes(1);
     expect(webControlMocks.acquireHostedRunFromWeb).toHaveBeenCalledTimes(1);
+    expect(webControlMocks.acquireHostedRunFromWeb.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      timeoutMs: 120_000,
+    }));
+    expect(webControlMocks.commitHostedRunToWeb.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      timeoutMs: 120_000,
+    }));
     expect(result).toEqual({
       committedSeq: committedCursor.committedSeq,
       requestedTargetSeq: null,

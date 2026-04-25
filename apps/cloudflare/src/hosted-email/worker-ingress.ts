@@ -159,7 +159,7 @@ export async function handleHostedEmailIngress(
       boundUserId: route.userId,
       callbackSigning: environment.webCallbackSigning,
       fetchImpl: fetch,
-      timeoutMs: environment.runnerTimeoutMs,
+      timeoutMs: environment.webControlTimeoutMs,
     });
   } catch (error) {
     if (

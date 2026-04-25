@@ -97,6 +97,7 @@ function createReplicaPersistenceProcessor(input: {
     env: {
       maxEventAttempts: 3,
       runnerTimeoutMs: 60_000,
+      webControlTimeoutMs: 120_000,
       webCallbackSigning: {
         keyId: "v1",
         privateKeyJwkJson: "{\"kty\":\"EC\"}",
@@ -129,7 +130,9 @@ function createInvokeRunnerProcessor(input: {
   configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnvSource?: Readonly<Record<string, unknown>>;
   hostedWebBaseUrl?: string | null;
+  runnerTimeoutMs?: number;
   runnerSecrets?: Readonly<Record<string, string>>;
+  webControlTimeoutMs?: number;
   webCallbackSigning?: null;
 } = {}) {
   const readBundlesForRunner = vi.fn().mockResolvedValue(null);
@@ -191,7 +194,8 @@ function createInvokeRunnerProcessor(input: {
     ensureRunnerStores,
     env: {
       maxEventAttempts: 3,
-      runnerTimeoutMs: 60_000,
+      runnerTimeoutMs: input.runnerTimeoutMs ?? 60_000,
+      webControlTimeoutMs: input.webControlTimeoutMs ?? 120_000,
       webCallbackSigning: input.webCallbackSigning === null ? null : {
         keyId: "v1",
         privateKeyJwkJson: "{\"kty\":\"EC\"}",
@@ -2172,6 +2176,43 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     expect(ensureRunnerStores).not.toHaveBeenCalled();
   });
 
+  it("keeps an active run fresh for the full runner timeout instead of the web-control timeout", async () => {
+    const {
+      processor,
+      runnerContainerNamespace,
+      stateStore,
+    } = createInvokeRunnerProcessor({
+      runnerTimeoutMs: 600_000,
+      webControlTimeoutMs: 120_000,
+    });
+    stateStore.readActiveRunLease.mockResolvedValue({
+      eventId: "hosted-run:run-active",
+      run: {
+        attempt: 1,
+        runId: "run-active",
+        startedAt: new Date(Date.now() - 300_000).toISOString(),
+      },
+    });
+
+    const result = await processor.executeRunDrain({
+      currentBundleRef: null,
+      events: [],
+      primaryWake: createRuntimeTimerWake(),
+      run: createHostedRunRecord({
+        runId: "run-next",
+      }),
+      runToken: "run-token",
+    });
+
+    expect(result).toEqual({
+      cursorSnapshotRef: null,
+      finalizeRequired: false,
+      state: "backpressured",
+    });
+    expect(stateStore.beginRun).not.toHaveBeenCalled();
+    expect(runnerContainerNamespace.getByName).not.toHaveBeenCalled();
+  });
+
   it("keeps loopback Linq typing endpoints in the runner-owned messaging activity env", async () => {
     const { processor } = createInvokeRunnerProcessor({
       forwardedEnvSource: {
@@ -2204,6 +2245,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
       ensureRunnerStores: vi.fn(),
       env: {
         runnerTimeoutMs: 60_000,
+        webControlTimeoutMs: 120_000,
         webCallbackSigning: {
           keyId: "v1",
           privateKeyJwkJson: "{\"kty\":\"EC\"}",
@@ -2769,6 +2811,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
 
     expect(invokeHostedExecutionContainerRunner).toHaveBeenCalledTimes(2);
     expect(invokeHostedExecutionContainerRunner.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      timeoutMs: 60_000,
       job: expect.objectContaining({
         runtime: expect.objectContaining({
           forwardedEnv: expect.objectContaining({

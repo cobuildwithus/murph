@@ -89,6 +89,7 @@ const TEST_ENVIRONMENT = {
     keyId: "v1",
     privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
   },
+  webControlTimeoutMs: 120_000,
 };
 
 describe("hosted email worker ingress", () => {
@@ -246,6 +247,7 @@ describe("hosted email worker ingress", () => {
         selfAddress: replyAliasAddress,
       },
       boundUserId: "user_123",
+      timeoutMs: 120_000,
     });
     expect(mocks.drainHostedRuns).toHaveBeenCalledWith();
     expect(waitUntil).toHaveBeenCalledTimes(1);

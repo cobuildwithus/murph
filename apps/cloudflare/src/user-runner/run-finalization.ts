@@ -82,7 +82,7 @@ type HostedRunFinalizationStateStore = Pick<
 export interface HostedRunFinalizationContext extends HostedWakeInputContext {
   callbackSigning: HostedExecutionEnvironment["webCallbackSigning"];
   hostedWebBaseUrl: string;
-  runnerTimeoutMs: HostedExecutionEnvironment["runnerTimeoutMs"];
+  webControlTimeoutMs: HostedExecutionEnvironment["webControlTimeoutMs"];
   runProcessor: HostedRunFinalizationProcessor;
   stateStore: HostedRunFinalizationStateStore;
   bindRunMessagingActivity(input: {
@@ -174,7 +174,7 @@ export async function prepareAndCommitAcquiredHostedRun(
       },
       boundUserId: input.userId,
       callbackSigning: context.callbackSigning,
-      timeoutMs: context.runnerTimeoutMs,
+      timeoutMs: context.webControlTimeoutMs,
     });
 
     const cursor = commit.cursor;
@@ -325,7 +325,7 @@ export async function prepareAndCommitAcquiredHostedRun(
       },
       boundUserId: input.userId,
       callbackSigning: context.callbackSigning,
-      timeoutMs: context.runnerTimeoutMs,
+      timeoutMs: context.webControlTimeoutMs,
     });
 
     context.recordHostedRunBreadcrumb({
@@ -402,7 +402,7 @@ export async function prepareAndCommitAcquiredHostedRun(
         },
         boundUserId: input.userId,
         callbackSigning: context.callbackSigning,
-        timeoutMs: context.runnerTimeoutMs,
+        timeoutMs: context.webControlTimeoutMs,
       });
       if (
         !resumeFinalizeAcquire.acquired
@@ -587,7 +587,7 @@ export async function finalizeAcquiredHostedRun(
       },
       boundUserId: input.userId,
       callbackSigning: context.callbackSigning,
-      timeoutMs: context.runnerTimeoutMs,
+      timeoutMs: context.webControlTimeoutMs,
     });
 
     context.recordHostedRunBreadcrumb({
@@ -654,7 +654,7 @@ export async function finalizeAcquiredHostedRun(
     },
     boundUserId: input.userId,
     callbackSigning: context.callbackSigning,
-    timeoutMs: context.runnerTimeoutMs,
+    timeoutMs: context.webControlTimeoutMs,
   });
 
   context.recordHostedRunBreadcrumb({
@@ -852,7 +852,7 @@ export async function reconcileTrackedAuthoritativeCursorBestEffort(
     | "callbackSigning"
     | "ensureRunnerStores"
     | "hostedWebBaseUrl"
-    | "runnerTimeoutMs"
+    | "webControlTimeoutMs"
     | "runProcessor"
     | "stateStore"
   >,
@@ -937,7 +937,7 @@ export async function replayRecoveredPendingRunCleanupBestEffort(
     HostedRunFinalizationContext,
     | "callbackSigning"
     | "hostedWebBaseUrl"
-    | "runnerTimeoutMs"
+    | "webControlTimeoutMs"
     | "runProcessor"
     | "stateStore"
   >,
@@ -985,7 +985,7 @@ export async function replayRecoveredPendingRunCleanupBestEffort(
         },
         boundUserId: input.userId,
         callbackSigning: context.callbackSigning,
-        timeoutMs: context.runnerTimeoutMs,
+        timeoutMs: context.webControlTimeoutMs,
       });
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -1233,7 +1233,7 @@ export async function clearPendingRunCleanupDataBestEffort(
 export async function releaseHostedRunFinalizeForRetry(
   context: Pick<
     HostedRunFinalizationContext,
-    "callbackSigning" | "hostedWebBaseUrl" | "recordHostedRunBreadcrumb" | "runnerTimeoutMs"
+    "callbackSigning" | "hostedWebBaseUrl" | "recordHostedRunBreadcrumb" | "webControlTimeoutMs"
   >,
   input: {
     failureCode: string;
@@ -1253,7 +1253,7 @@ export async function releaseHostedRunFinalizeForRetry(
       },
       boundUserId: input.userId,
       callbackSigning: context.callbackSigning,
-      timeoutMs: context.runnerTimeoutMs,
+      timeoutMs: context.webControlTimeoutMs,
     });
 
     context.recordHostedRunBreadcrumb({
@@ -1289,7 +1289,7 @@ export async function releaseHostedRunFinalizeForRetry(
 async function quarantineAcquiredHostedRunAfterInvalidBundle(
   context: Pick<
     HostedRunFinalizationContext,
-    "callbackSigning" | "hostedWebBaseUrl" | "recordHostedRunBreadcrumb" | "runnerTimeoutMs"
+    "callbackSigning" | "hostedWebBaseUrl" | "recordHostedRunBreadcrumb" | "webControlTimeoutMs"
   >,
   input: {
     acquired: HostedRunAcquireResponse;
@@ -1338,7 +1338,7 @@ async function quarantineAcquiredHostedRunAfterInvalidBundle(
     },
     boundUserId: input.userId,
     callbackSigning: context.callbackSigning,
-    timeoutMs: context.runnerTimeoutMs,
+    timeoutMs: context.webControlTimeoutMs,
   });
 
   context.recordHostedRunBreadcrumb({
@@ -1366,7 +1366,7 @@ async function quarantineAcquiredHostedRunAfterInvalidBundle(
 async function failAcquiredHostedRun(
   context: Pick<
     HostedRunFinalizationContext,
-    "callbackSigning" | "hostedWebBaseUrl" | "recordHostedRunBreadcrumb" | "runnerTimeoutMs"
+    "callbackSigning" | "hostedWebBaseUrl" | "recordHostedRunBreadcrumb" | "webControlTimeoutMs"
   >,
   input: {
     acquired: HostedRunAcquireResponse;
@@ -1401,7 +1401,7 @@ async function failAcquiredHostedRun(
     },
     boundUserId: input.userId,
     callbackSigning: context.callbackSigning,
-    timeoutMs: context.runnerTimeoutMs,
+    timeoutMs: context.webControlTimeoutMs,
   });
   const breadcrumb = resolveFailureCommitBreadcrumb({
     commit,
@@ -1468,7 +1468,7 @@ function resolveFailureCommitBreadcrumb(input: {
 export async function mergeAdoptedHostedRunCommitInputs(
   context: Pick<
     HostedRunFinalizationContext,
-    "callbackSigning" | "hostedWebBaseUrl" | "runnerTimeoutMs"
+    "callbackSigning" | "hostedWebBaseUrl" | "webControlTimeoutMs"
   >,
   input: {
     adoptedEventResults?: HostedRunEventResult[] | null;
@@ -1488,7 +1488,7 @@ export async function mergeAdoptedHostedRunCommitInputs(
     },
     boundUserId: input.userId,
     callbackSigning: context.callbackSigning,
-    timeoutMs: context.runnerTimeoutMs,
+    timeoutMs: context.webControlTimeoutMs,
   });
   if (status.run?.id !== input.run.id) {
     throw new Error("Hosted run status refresh did not return the active run before commit.");
