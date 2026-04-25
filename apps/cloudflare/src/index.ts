@@ -52,6 +52,7 @@ import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
+  HostedBrowserVaultReplicaOwnershipError,
 } from "./browser-vault-store.ts";
 import {
   HostedUserRunner,
@@ -536,8 +537,18 @@ async function handleBrowserVaultSessionRoute(
   const replicaStore = createHostedBrowserVaultReplicaStore({
     bucket: context.env.BUNDLES,
     rootKey: crypto.rootKey,
+    userId,
   });
-  const replicaEnvelope = await replicaStore.readBrowserVaultReplicaEnvelope(body.replicaRef);
+  let replicaEnvelope;
+  try {
+    replicaEnvelope = await replicaStore.readBrowserVaultReplicaEnvelope(body.replicaRef);
+  } catch (error) {
+    if (error instanceof HostedBrowserVaultReplicaOwnershipError) {
+      replicaEnvelope = null;
+    } else {
+      throw error;
+    }
+  }
 
   if (!replicaEnvelope) {
     return json({

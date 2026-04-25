@@ -22,6 +22,7 @@ describe("hosted browser vault replica store", () => {
     const store = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      userId: "user_123",
     });
     type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
     const entities: BrowserVaultEntity[] = [{
@@ -138,6 +139,7 @@ describe("hosted browser vault replica store", () => {
     const store = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      userId: "user_123",
     });
 
     const firstRef = await store.writeBrowserVaultReplica({
@@ -207,10 +209,93 @@ describe("hosted browser vault replica store", () => {
     });
 
     await expect(foreignDeleteStore.deleteBrowserVaultReplica(foreignRef)).rejects.toThrow(
-      `Hosted browser vault replica ${foreignRef.objectKey} is outside the bound user replica namespace.`,
+      "Hosted browser vault replica is outside the bound user replica namespace.",
     );
 
     expect(bucket.deleted).toEqual([]);
     expect(bucket.objects.has(foreignRef.objectKey)).toBe(true);
+  });
+
+  it("refuses to read a replica outside the bound user's namespace before bucket lookup", async () => {
+    class TrackingBucket extends MemoryEncryptedR2Bucket {
+      readonly getCalls: string[] = [];
+
+      override async get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null> {
+        this.getCalls.push(key);
+        return super.get(key);
+      }
+    }
+
+    const bucket = new TrackingBucket();
+    const rootKey = createTestRootKey(41);
+    const ownerStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+      userId: "user_123",
+    });
+    const foreignReadStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+      userId: "user_456",
+    });
+
+    const foreignRef = await ownerStore.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
+        generatedAt: "2026-04-17T00:00:00.000Z",
+        sourceBundleHash: "e".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: null,
+          vaultRoot: "browser://vault",
+        }),
+      }),
+      userId: "user_123",
+    });
+
+    await expect(foreignReadStore.readBrowserVaultReplicaEnvelope(foreignRef)).rejects.toThrow(
+      "Hosted browser vault replica is outside the bound user replica namespace.",
+    );
+    expect(bucket.getCalls).toEqual([]);
+  });
+
+  it("refuses unbound replica reads before bucket lookup without echoing the object key", async () => {
+    class TrackingBucket extends MemoryEncryptedR2Bucket {
+      readonly getCalls: string[] = [];
+
+      override async get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null> {
+        this.getCalls.push(key);
+        return super.get(key);
+      }
+    }
+
+    const bucket = new TrackingBucket();
+    const rootKey = createTestRootKey(43);
+    const ownerStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+      userId: "user_123",
+    });
+    const unboundReadStore = createHostedBrowserVaultReplicaStore({
+      bucket,
+      rootKey,
+    });
+    const ref = await ownerStore.writeBrowserVaultReplica({
+      replica: await createBrowserVaultReplica({
+        generatedAt: "2026-04-17T00:00:00.000Z",
+        sourceBundleHash: "f".repeat(64),
+        vault: createVaultReadModel({
+          entities: [],
+          metadata: null,
+          vaultRoot: "browser://vault",
+        }),
+      }),
+      userId: "user_123",
+    });
+
+    await expect(unboundReadStore.readBrowserVaultReplicaEnvelope(ref)).rejects.toThrow(
+      "Hosted browser vault replica store requires a bound user for replica object access.",
+    );
+    await expect(unboundReadStore.readBrowserVaultReplicaEnvelope(ref)).rejects.not.toThrow(ref.objectKey);
+    expect(bucket.getCalls).toEqual([]);
   });
 });

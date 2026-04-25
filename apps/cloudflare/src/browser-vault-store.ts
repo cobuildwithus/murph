@@ -39,6 +39,13 @@ export interface HostedBrowserVaultReplicaStore {
   writeBrowserVaultReplica(input: { replica: unknown; userId: string }): Promise<HostedBrowserVaultReplicaRef>;
 }
 
+export class HostedBrowserVaultReplicaOwnershipError extends Error {
+  constructor(message = "Hosted browser vault replica is outside the bound user replica namespace.") {
+    super(message);
+    this.name = "HostedBrowserVaultReplicaOwnershipError";
+  }
+}
+
 export function createBrowserVaultReplicaAadFields(input: {
   ref: HostedBrowserVaultReplicaRef;
   userId: string;
@@ -74,6 +81,8 @@ export function createHostedBrowserVaultReplicaStore(input: {
     },
 
     async readBrowserVaultReplicaEnvelope(ref) {
+      await assertHostedBrowserVaultReplicaOwnedByUser(input, ref);
+
       const object = await input.bucket.get(ref.objectKey);
 
       if (!object) {
@@ -138,7 +147,9 @@ async function assertHostedBrowserVaultReplicaOwnedByUser(
   ref: HostedBrowserVaultReplicaRef,
 ): Promise<void> {
   if (!input.userId) {
-    return;
+    throw new HostedBrowserVaultReplicaOwnershipError(
+      "Hosted browser vault replica store requires a bound user for replica object access.",
+    );
   }
 
   const expectedPrefix = await hostedBrowserVaultReplicaUserPrefix({
@@ -146,9 +157,7 @@ async function assertHostedBrowserVaultReplicaOwnedByUser(
     userId: input.userId,
   });
   if (!ref.objectKey.startsWith(expectedPrefix)) {
-    throw new Error(
-      `Hosted browser vault replica ${ref.objectKey} is outside the bound user replica namespace.`,
-    );
+    throw new HostedBrowserVaultReplicaOwnershipError();
   }
 }
 
