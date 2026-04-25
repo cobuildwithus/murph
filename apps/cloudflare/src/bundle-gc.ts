@@ -1,5 +1,4 @@
 import {
-  listHostedBundleArtifacts,
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
@@ -15,6 +14,7 @@ import {
 import {
   HostedBundleArchiveValidationError,
   isHostedBundleArchiveValidationFailure,
+  listHostedBundleArtifactsAsync,
 } from "./hosted-bundle-validation.js";
 
 export class HostedBundleGarbageCollector {
@@ -145,10 +145,10 @@ export class HostedBundleGarbageCollector {
 
     try {
       return new Set(
-        listHostedBundleArtifacts({
+        (await listHostedBundleArtifactsAsync({
           bytes,
           expectedKind: "vault",
-        }).map((artifact) => artifact.ref.sha256),
+        })).map((artifact) => artifact.ref.sha256),
       );
     } catch (error) {
       if (!isHostedBundleArchiveValidationFailure(error)) {
