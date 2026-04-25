@@ -6,8 +6,10 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageReceivedEvent,
+  sendHostedLinqTypingPing,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
+import { getHostedOnboardingEnvironment } from "./runtime";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
@@ -97,6 +99,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
     }
 
+    await maybeStartHostedLinqIngressTypingDiagnostic({
+      plan,
+      signal: input.signal,
+    });
+
     responseReason = plan.response.reason ?? null;
     await maybeHandoffHostedExecutionWebhookWake({
       defer: input.defer,
@@ -122,6 +129,52 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
     });
     throw error;
+  }
+}
+
+async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
+  plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const chatId = input.plan.ingressTypingChatId?.trim() ?? "";
+
+  if (chatId.length === 0) {
+    return;
+  }
+
+  const environment = getHostedOnboardingEnvironment();
+
+  if (!environment.linqIngressTypingDiagnosticEnabled) {
+    return;
+  }
+
+  const typingTiming = startHostedOnboardingTiming(
+    "hosted-onboarding.webhook.linq.ingress-typing",
+    {
+      chatIdPresent: true,
+      responseReason: input.plan.response.reason ?? null,
+      timeoutMs: environment.linqIngressTypingDiagnosticTimeoutMs,
+    },
+  );
+
+  try {
+    const result = await sendHostedLinqTypingPing({
+      chatId,
+      signal: input.signal,
+      timeoutMs: environment.linqIngressTypingDiagnosticTimeoutMs,
+    });
+
+    finishHostedOnboardingTiming(typingTiming, result.ok ? "started" : "failed", {
+      httpStatus: result.status,
+      responseReason: input.plan.response.reason ?? null,
+      signalAbortedAfterTyping: input.signal?.aborted ?? false,
+    });
+  } catch (error) {
+    finishHostedOnboardingTiming(typingTiming, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      responseReason: input.plan.response.reason ?? null,
+      signalAbortedAfterTyping: input.signal?.aborted ?? false,
+    });
   }
 }
 

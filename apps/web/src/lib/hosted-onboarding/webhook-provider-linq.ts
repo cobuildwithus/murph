@@ -41,7 +41,6 @@ export type {
 } from "./webhook-provider-linq-types";
 import type {
   HostedOnboardingLinqDirectPlan,
-  HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq-types";
 
 export async function planHostedOnboardingLinqWebhook(input: {
@@ -198,15 +197,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
       tx: input.prisma,
     });
 
-    return buildActiveMemberDirectPlan({
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: false,
-        reason: "wake-appended-active-member",
-      },
-      wakeUserId: existingMember.id,
-    });
+    return {
+      ...buildActiveMemberDirectPlan({
+        desiredSideEffects: [],
+        response: {
+          ok: true,
+          ignored: false,
+          reason: "wake-appended-active-member",
+        },
+        wakeUserId: existingMember.id,
+      }),
+      ingressTypingChatId: summary.chatId,
+    };
   }
 
   const member = existingMember ?? await ensureHostedMemberForPhoneTx({

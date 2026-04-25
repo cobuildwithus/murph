@@ -30,6 +30,8 @@ export interface HostedOnboardingEnvironment {
   linqApiBaseUrl: string;
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
+  linqIngressTypingDiagnosticEnabled: boolean;
+  linqIngressTypingDiagnosticTimeoutMs: number;
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
@@ -66,6 +68,15 @@ export function readHostedOnboardingEnvironment(
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
+    linqIngressTypingDiagnosticEnabled: readBoolean(
+      readEnv(source, "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC"),
+      false,
+    ),
+    linqIngressTypingDiagnosticTimeoutMs: readPositiveInteger(
+      readEnv(source, "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_TIMEOUT_MS"),
+      750,
+      "HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_TIMEOUT_MS",
+    ),
     linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
       readEnv(source, "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER"),
       1000,
@@ -197,6 +208,24 @@ function readHostedLinqConversationPhoneNumbers(
 
 function readEnv(source: HostedOnboardingEnvSource, key: string): string | null {
   return normalizeNullableString(source[key]);
+}
+
+function readBoolean(value: string | null, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "1" || normalized === "true" || normalized === "yes") {
+    return true;
+  }
+
+  if (normalized === "0" || normalized === "false" || normalized === "no") {
+    return false;
+  }
+
+  return fallback;
 }
 
 function readHostedStripePriceIdsByPlan(
