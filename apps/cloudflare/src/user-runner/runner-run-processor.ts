@@ -52,8 +52,9 @@ import {
   invokeHostedExecutionContainerRunner,
 } from "../runner-container.js";
 import {
-  isHostedBundleArchiveValidationError,
+  type HostedBundleArchiveValidationOperation,
   isHostedBundleArchiveValidationFailure,
+  readHostedBundleArchiveValidationErrorDetails,
 } from "../hosted-bundle-validation.js";
 import {
   buildHostedRunnerAmbientEnv,
@@ -465,7 +466,11 @@ export class RunnerRunProcessor {
             "Cloudflare quarantined hosted run execution because the authoritative bundle archive is invalid.",
           phase: "quarantined",
           redacted: {
+            bundleArchiveOperation: invalidAuthoritativeBundle.operation,
+            bundleRefHash: invalidAuthoritativeBundle.refHash,
             bundleRefKey: invalidAuthoritativeBundle.refKey,
+            bundleRefSize: invalidAuthoritativeBundle.refSize,
+            bundleValidationSource: invalidAuthoritativeBundle.source,
             reason: "invalid_authoritative_snapshot",
             resumeFinalize: input.lifecycle.resumeFinalize,
           },
@@ -1182,17 +1187,33 @@ function resolveInvalidAuthoritativeBundleArchiveValidation(input: {
   currentBundleRef: HostedExecutionBundleRef | null;
   error: unknown;
 }): {
+  operation: HostedBundleArchiveValidationOperation;
+  refHash: string | null;
   refKey: string | null;
+  refSize: number | null;
+  source: "current-bundle-ref" | "validation-error";
 } | null {
-  if (isHostedBundleArchiveValidationError(input.error)) {
-    return input.error.operation === "runner-input"
-      ? { refKey: input.error.refKey }
+  const validationDetails = readHostedBundleArchiveValidationErrorDetails(input.error);
+
+  if (validationDetails) {
+    return validationDetails.operation === "runner-input"
+      ? {
+        operation: validationDetails.operation,
+        refHash: validationDetails.refHash,
+        refKey: validationDetails.refKey,
+        refSize: validationDetails.refSize,
+        source: "validation-error",
+      }
       : null;
   }
 
   if (input.currentBundleRef && isHostedBundleArchiveValidationFailure(input.error)) {
     return {
+      operation: "runner-input",
+      refHash: input.currentBundleRef.hash,
       refKey: input.currentBundleRef.key,
+      refSize: input.currentBundleRef.size,
+      source: "current-bundle-ref",
     };
   }
 
@@ -1200,7 +1221,7 @@ function resolveInvalidAuthoritativeBundleArchiveValidation(input: {
 }
 
 function isInvalidRunnerOutputBundleArchiveValidation(error: unknown): boolean {
-  return isHostedBundleArchiveValidationError(error) && error.operation === "runner-output";
+  return readHostedBundleArchiveValidationErrorDetails(error)?.operation === "runner-output";
 }
 
 function hostedRunEventId(runId: string): string {

@@ -21,6 +21,7 @@ export type HostedExecutionRunLevel = (typeof HOSTED_EXECUTION_RUN_LEVELS)[numbe
 
 export type HostedExecutionErrorCode =
   | "authorization_error"
+  | "bundle_archive_validation_error"
   | "configuration_error"
   | "durable_commit_error"
   | "durable_finalize_error"
@@ -38,6 +39,7 @@ const HOSTED_EXECUTION_SAFE_ERROR_NAMES = new Set([
   "AbortError",
   "Error",
   "EvalError",
+  "HostedBundleArchiveValidationError",
   "HostedExecutionConfigurationError",
   "RangeError",
   "ReferenceError",
@@ -64,6 +66,29 @@ const HOSTED_EXECUTION_ERROR_STATUS_PROPERTY_KEYS =
   ["status", "statusCode", "responseStatus"] as const;
 const HOSTED_EXECUTION_ERROR_PROPERTY_CONTAINER_KEYS =
   ["context", "details", "cause", "error", "response", "data"] as const;
+const HOSTED_EXECUTION_SAFE_ERROR_OWN_DETAIL_KEYS = new Set([
+  "action",
+  "attempt",
+  "attemptCount",
+  "bundleArchiveOperation",
+  "bundleRefHash",
+  "bundleRefKey",
+  "bundleRefPresent",
+  "bundleRefSize",
+  "expectedKind",
+  "kind",
+  "maxAttempts",
+  "maxEventAttempts",
+  "operation",
+  "phase",
+  "reason",
+  "refHash",
+  "refKey",
+  "refSize",
+  "retryable",
+  "runElapsedMs",
+  "timeoutMs",
+]);
 const HOSTED_EXECUTION_NAMED_ERROR_CODES = {
   RangeError: "range_error",
   ReferenceError: "reference_error",
@@ -73,6 +98,7 @@ const HOSTED_EXECUTION_NAMED_ERROR_CODES = {
 } as const satisfies Record<string, HostedExecutionErrorCode>;
 const HOSTED_EXECUTION_ERROR_SUMMARIES = {
   authorization_error: "Hosted execution authorization failed.",
+  bundle_archive_validation_error: "Hosted bundle archive validation failed.",
   configuration_error: "Hosted execution configuration is invalid.",
   durable_commit_error: "Hosted execution failed before recording a durable commit.",
   durable_finalize_error: "Hosted execution failed while finalizing a committed run.",
@@ -290,6 +316,24 @@ export function deriveHostedExecutionErrorCode(error: unknown): HostedExecutionE
 
   if (hostedExecutionMessageIncludesAny(message, ["returned http"])) {
     return "runner_http_error";
+  }
+
+  if (
+    name === "HostedBundleArchiveValidationError"
+    || hostedExecutionMessageIncludesAny(message, [
+      "hosted bundle archive",
+      "hosted bundle artifact integrity validation failed",
+      "hosted bundle payload must be valid base64",
+      "hosted bundle kind mismatch",
+    ])
+    || (detailCode
+      ? hostedExecutionMessageIncludesAny(detailCode, [
+          "bundle_archive_validation_error",
+          "hosted_bundle_archive_validation_error",
+        ])
+      : false)
+  ) {
+    return "bundle_archive_validation_error";
   }
 
   if (hostedExecutionMessageIncludesAny(message, ["authorization", "unauthorized", "forbidden"])) {
@@ -724,9 +768,11 @@ export function buildHostedExecutionSafeErrorDetails(
     readHostedExecutionObjectErrorProperty(error, ["details"]),
     hints,
   );
+  const ownProperties = readHostedExecutionSafeOwnErrorProperties(error, hints);
   const details: HostedExecutionStructuredLogDetails = {
     ...(nestedContext ?? {}),
     ...(nestedDetails ?? {}),
+    ...(ownProperties ? { errorProperties: ownProperties } : {}),
   };
   const errorDetail = normalizeHostedExecutionDiagnosticMessage(error.message);
   const operatorSummary = summarizeHostedExecutionError(error);
@@ -747,7 +793,7 @@ export function buildHostedExecutionSafeErrorDetails(
     details.errorDetail = errorDetail;
   }
 
-  if (errorCause) {
+  if (errorCause && errorCause !== errorDetail) {
     details.errorCause = errorCause;
   }
 
@@ -764,6 +810,38 @@ export function buildHostedExecutionSafeErrorDetails(
   }
 
   return Object.keys(details).length > 0 ? details : null;
+}
+
+function readHostedExecutionSafeOwnErrorProperties(
+  error: Error,
+  hints: HostedExecutionDetailSanitizationHints,
+): HostedExecutionStructuredLogDetails | null {
+  const entries = Object.keys(error)
+    .flatMap((key): Array<readonly [string, unknown]> => {
+      if (
+        !/^[A-Za-z0-9_.-]{1,64}$/u.test(key)
+        || !HOSTED_EXECUTION_SAFE_ERROR_OWN_DETAIL_KEYS.has(key)
+      ) {
+        return [];
+      }
+
+      const descriptor = Object.getOwnPropertyDescriptor(error, key);
+      if (!descriptor || !("value" in descriptor)) {
+        return [];
+      }
+
+      return [[key, descriptor.value] as const];
+    })
+    .slice(0, HOSTED_EXECUTION_MAX_DETAIL_KEYS);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return sanitizeHostedExecutionStructuredLogDetailsWithHints(
+    Object.fromEntries(entries) as HostedExecutionStructuredLogDetails,
+    hints,
+  );
 }
 
 function redactHostedExecutionText(value: string): string {

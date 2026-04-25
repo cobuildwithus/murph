@@ -371,7 +371,7 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain(
       "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
     );
-    expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "--"]');
+    expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     expect(finalDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).not.toContain("apt-get install");
     expect(finalDockerfile).not.toContain("whisper.cpp");

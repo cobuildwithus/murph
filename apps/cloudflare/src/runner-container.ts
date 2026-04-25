@@ -910,9 +910,13 @@ async function classifyHostedRunnerContainerErrorResponse(
       : {}),
     ...(responseBodyPreview ? { responseBodyPreview } : {}),
   });
-  const errorName = typeof payload?.errorName === "string" && payload.errorName.trim().length > 0
+  const payloadErrorName = typeof payload?.errorName === "string" && payload.errorName.trim().length > 0
     ? payload.errorName.trim()
-    : readHostedExecutionErrorNameForCode(code);
+    : null;
+  const codeErrorName = readHostedExecutionErrorNameForCode(code);
+  const errorName = codeErrorName && (!payloadErrorName || payloadErrorName === "Error")
+    ? codeErrorName
+    : payloadErrorName ?? codeErrorName;
 
   if (response.status === 503) {
     return new HostedExecutionConfigurationError(message, code, {
@@ -1394,6 +1398,8 @@ function sleep(delayMs: number): Promise<void> {
 
 function readHostedExecutionErrorNameForCode(code: string | null): string | null {
   switch (code) {
+    case "bundle_archive_validation_error":
+      return "HostedBundleArchiveValidationError";
     case "configuration_error":
       return "HostedExecutionConfigurationError";
     case "range_error":
