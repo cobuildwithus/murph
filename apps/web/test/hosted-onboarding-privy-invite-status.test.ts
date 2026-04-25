@@ -190,11 +190,98 @@ describe("getHostedInviteStatus", () => {
     expect(status.invite).toEqual({
       code: "invite-code",
       expiresAt: "2026-04-07T12:00:00.000Z",
+      phoneAuthTarget: {
+        kind: "saved",
+        phoneHint: "*** 4567",
+      },
       phoneHint: "*** 4567",
     });
     expect(status.invite).not.toHaveProperty("phonePrefill");
     expect(JSON.stringify(status)).not.toContain("+12025550123");
     expect(JSON.stringify(status)).not.toContain("+1 (202) 555-0123");
+  });
+
+  it("derives a saved phone target from signup phone when the stored hint is missing", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            identity: createIdentity({
+              ...buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: null,
+                privyUserId: null,
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: "+1 (202) 555-0123",
+                walletAddress: null,
+              }),
+              maskedPhoneNumberHint: null,
+              phoneNumberVerifiedAt: null,
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    const status = await getHostedInviteStatus({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(status).toMatchObject({
+      stage: "verify",
+    });
+    expect(status.invite).toEqual({
+      code: "invite-code",
+      expiresAt: "2026-04-07T12:00:00.000Z",
+      phoneAuthTarget: {
+        kind: "saved",
+        phoneHint: "*** 0123",
+      },
+      phoneHint: "*** 0123",
+    });
+    expect(status.invite).not.toHaveProperty("phonePrefill");
+    expect(JSON.stringify(status)).not.toContain("+12025550123");
+    expect(JSON.stringify(status)).not.toContain("+1 (202) 555-0123");
+  });
+
+  it("uses manual phone entry when no stored invite phone can be texted", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            identity: createIdentity({
+              ...buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: null,
+                privyUserId: null,
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: null,
+                walletAddress: null,
+              }),
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    const status = await getHostedInviteStatus({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+    });
+
+    expect(status.invite).toMatchObject({
+      phoneAuthTarget: {
+        kind: "manual",
+      },
+      phoneHint: null,
+    });
   });
 
   it("does not expose the stored phone after the invite is already active", async () => {
@@ -579,6 +666,16 @@ function createIdentity(overrides: Record<string, unknown> = {}) {
     walletChainType: null,
     walletCreatedAt: null,
     walletProvider: null,
+    ...buildHostedMemberIdentityPrivateColumns({
+      memberId: "member_123",
+      phoneNumber: "+14155554567",
+      privyUserId: null,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
+      walletAddress: null,
+    }),
     ...overrides,
   };
 }

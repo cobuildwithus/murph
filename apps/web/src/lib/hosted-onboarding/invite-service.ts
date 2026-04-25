@@ -6,7 +6,10 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import type { HostedInviteStatusPayload } from "./types";
+import type {
+  HostedInvitePhoneAuthTarget,
+  HostedInviteStatusPayload,
+} from "./types";
 
 import { getPrisma } from "../prisma";
 import { isHostedMemberActivationPending } from "./activation-progress";
@@ -29,6 +32,8 @@ import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import { deriveHostedOnboardingStage } from "./lifecycle";
 import {
+  projectHostedMemberIdentityState,
+  type HostedMemberIdentityState,
   readHostedMemberIdentity,
   writeHostedMemberSignupPhoneState,
 } from "./hosted-member-identity-store";
@@ -51,6 +56,16 @@ import {
 import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_INVITE_SEND_CODE_COOLDOWN_MS = 60_000;
+
+type HostedInvitePhoneAuthTargetWithNumber =
+  | {
+      kind: "saved";
+      phoneHint: string;
+      phoneNumber: string;
+    }
+  | {
+      kind: "manual";
+    };
 
 export async function getHostedInviteStatus(input: {
   authenticatedMember?: HostedMember | null;
@@ -135,6 +150,9 @@ export async function getHostedInviteStatus(input: {
     identity: invite.member.identity,
     routing: inviteRouting,
   });
+  const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(
+    projectHostedMemberIdentityState(inviteIdentity),
+  );
 
   return {
     billing: {
@@ -148,7 +166,8 @@ export async function getHostedInviteStatus(input: {
     invite: {
       code: invite.inviteCode,
       expiresAt: invite.expiresAt.toISOString(),
-      phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
+      phoneAuthTarget: toHostedInviteStatusPhoneAuthTarget(phoneAuthTarget),
+      phoneHint: phoneAuthTarget.kind === "saved" ? phoneAuthTarget.phoneHint : null,
     },
     messagingSetupRequired,
     murphPhoneNumber: resolveHostedInviteMurphPhoneNumber({
@@ -362,9 +381,9 @@ export async function prepareHostedInvitePhoneCode(input: {
     await lockHostedMemberRow(tx, invite.memberId);
 
     const identity = await readHostedInviteIdentityStateOrThrow(invite.memberId, tx);
-    const resumePhoneNumber = identity.phoneNumber ?? identity.signupPhoneNumber;
+    const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(identity);
 
-    if (!resumePhoneNumber) {
+    if (phoneAuthTarget.kind === "manual") {
       throw hostedOnboardingError({
         code: "SIGNUP_PHONE_UNAVAILABLE",
         message: "Enter the number that messaged Murph to continue.",
@@ -401,8 +420,8 @@ export async function prepareHostedInvitePhoneCode(input: {
     });
 
     return {
-      phoneHint: readHostedPhoneHint(identity.maskedPhoneNumberHint ?? resumePhoneNumber),
-      phoneNumber: resumePhoneNumber,
+      phoneHint: phoneAuthTarget.phoneHint,
+      phoneNumber: phoneAuthTarget.phoneNumber,
       sendAttemptId,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -494,6 +513,55 @@ export function requireHostedInviteMemberIdentity(
     message: "Hosted invite identity state is missing.",
     httpStatus: 500,
   });
+}
+
+function resolveHostedInvitePhoneAuthTarget(
+  identity: HostedMemberIdentityState,
+): HostedInvitePhoneAuthTargetWithNumber {
+  const phoneNumber = identity.phoneNumber ?? identity.signupPhoneNumber;
+
+  if (!phoneNumber) {
+    return {
+      kind: "manual",
+    };
+  }
+
+  const maskedPhoneHint = readHostedPhoneHint(identity.maskedPhoneNumberHint);
+
+  if (maskedPhoneHint !== "your number") {
+    return {
+      kind: "saved",
+      phoneHint: maskedPhoneHint,
+      phoneNumber,
+    };
+  }
+
+  const derivedPhoneHint = readHostedPhoneHint(phoneNumber);
+
+  if (derivedPhoneHint === "your number") {
+    return {
+      kind: "manual",
+    };
+  }
+
+  return {
+    kind: "saved",
+    phoneHint: derivedPhoneHint,
+    phoneNumber,
+  };
+}
+
+function toHostedInviteStatusPhoneAuthTarget(
+  target: HostedInvitePhoneAuthTargetWithNumber,
+): HostedInvitePhoneAuthTarget {
+  return target.kind === "saved"
+    ? {
+        kind: "saved",
+        phoneHint: target.phoneHint,
+      }
+    : {
+        kind: "manual",
+      };
 }
 
 function resolveHostedInviteMurphPhoneNumber(input: {

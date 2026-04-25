@@ -19,7 +19,8 @@ export interface HostedInviteStatusPayload {
   invite: {
     code: string;
     expiresAt: string;
-    phoneHint: string;
+    phoneAuthTarget?: HostedInvitePhoneAuthTarget;
+    phoneHint: string | null;
   } | null;
   messagingSetupRequired: boolean;
   murphPhoneNumber?: string | null;
@@ -30,6 +31,15 @@ export interface HostedInviteStatusPayload {
   };
   stage: HostedOnboardingStage;
 }
+
+export type HostedInvitePhoneAuthTarget =
+  | {
+      kind: "saved";
+      phoneHint: string;
+    }
+  | {
+      kind: "manual";
+    };
 
 export interface HostedPrivyCompletionPayload {
   inviteCode: string;

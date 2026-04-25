@@ -411,6 +411,7 @@ export function useHostedPhoneAuthController({
     errorMessage,
     flowDisabled,
     pendingAction,
+    privyReady: ready,
     sharedFlowProps,
     handleContinueAuthenticated,
     handleLogout,
