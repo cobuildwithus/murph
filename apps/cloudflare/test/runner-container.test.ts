@@ -88,8 +88,10 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
     expect(destroy).toHaveBeenCalledTimes(2);
 
-    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toEqual({
+    const supervisorEnv = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars;
+    expect(supervisorEnv).toMatchObject({
       PORT: "8080",
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
     });
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
@@ -99,7 +101,9 @@ describe("RunnerContainer", () => {
     expect(String(executeCalls[0]?.[0])).toBe("http://container/internal/run");
     const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
     const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
-    expect(firstAuthorization).toMatch(/^Bearer .+/u);
+    expect(firstAuthorization).toBe(
+      `Bearer ${supervisorEnv?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN}`,
+    );
     expect(secondAuthorization).toMatch(/^Bearer .+/u);
     expect(secondAuthorization).not.toBe(firstAuthorization);
 
@@ -224,8 +228,9 @@ describe("RunnerContainer", () => {
 
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     const envVars = startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars ?? {};
-    expect(envVars).toEqual({
+    expect(envVars).toMatchObject({
       PORT: "8080",
+      HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: expect.any(String),
     });
     expect(envVars).not.toHaveProperty("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK");
     expect(envVars).not.toHaveProperty("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY");
@@ -233,7 +238,7 @@ describe("RunnerContainer", () => {
     expect(envVars).not.toHaveProperty("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK");
   });
 
-  it("keeps operator secrets and control token out of supervisor procfs env", async () => {
+  it("keeps operator secrets out of supervisor procfs env", async () => {
     if (!existsSync("/proc/self/environ")) {
       return;
     }
@@ -262,7 +267,6 @@ describe("RunnerContainer", () => {
     }
     const procEnv = await readParentProcEnvironmentFromChild(envVars);
 
-    expect(procEnv).not.toContain("HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN");
     expect(procEnv).not.toContain("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK");
     expect(procEnv).not.toContain("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY");
     expect(procEnv).not.toContain("HOSTED_WAKE_ENCRYPTION_KEY");

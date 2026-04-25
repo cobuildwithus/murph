@@ -20,8 +20,12 @@ import {
 
 export function buildHostedRunnerSupervisorEnv(input: {
   port: number;
+  runnerControlToken?: string | null;
 }): Record<string, string> {
   return {
+    ...(input.runnerControlToken
+      ? { HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken }
+      : {}),
     PORT: String(input.port),
   };
 }

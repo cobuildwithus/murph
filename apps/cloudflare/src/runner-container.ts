@@ -528,6 +528,7 @@ export class RunnerContainer extends Container {
           enableInternet: true,
           envVars: buildHostedRunnerSupervisorEnv({
             port: RUNNER_PORT,
+            runnerControlToken,
           }),
         },
       });

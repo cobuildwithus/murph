@@ -28,6 +28,7 @@ import * as nodeRunner from "../src/node-runner.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 const nativeFetch = globalThis.fetch;
+const hostedContainerRunRequestBodyLimitBytes = 8 * 1024 * 1024;
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -284,7 +285,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("initializes the in-memory runner control token from the first authorized request", async () => {
+  it("rejects a first run bearer token when no startup control token exists", async () => {
     const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
       finalGatewayProjectionSnapshot: null,
       result: {
@@ -307,7 +308,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const accepted = await sendHostedContainerJsonRequest({
+    const rejected = await sendHostedContainerJsonRequest({
       authorization: "Bearer first-runner-token",
       body: JSON.stringify(buildJobBody({
         wake: {
@@ -319,23 +320,10 @@ describe("startHostedContainerEntrypoint", () => {
       path: "/internal/run",
       port: address.port,
     });
-    const rejected = await sendHostedContainerJsonRequest({
-      authorization: "Bearer second-runner-token",
-      body: JSON.stringify(buildJobBody({
-        wake: {
-          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_wrong_control_token",
-          occurredAt: "2026-03-26T12:01:00.000Z",
-        },
-      })),
-      path: "/internal/run",
-      port: address.port,
-    });
 
-    expect(accepted.status).toBe(200);
     expect(rejected.status).toBe(401);
     expect(rejected.json).toEqual({ error: "Unauthorized" });
-    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(runnerSpy).not.toHaveBeenCalled();
   });
 
   it("logs a structured listen failure when the container cannot start", async () => {
@@ -387,6 +375,46 @@ describe("startHostedContainerEntrypoint", () => {
       error: "Invalid JSON.",
       errorName: "SyntaxError",
     });
+  });
+
+  it("rejects oversized run requests before parsing JSON", async () => {
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
+      finalGatewayProjectionSnapshot: null,
+      result: {
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
+      },
+    });
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      body: " ".repeat(hostedContainerRunRequestBodyLimitBytes + 1),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      code: "request_body_too_large",
+      error: "Request body too large.",
+    });
+    expect(runnerSpy).not.toHaveBeenCalled();
   });
 
   it("rejects unauthorized run requests before decoding the body", async () => {
