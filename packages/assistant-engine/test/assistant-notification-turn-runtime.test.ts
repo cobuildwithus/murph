@@ -38,6 +38,8 @@ afterEach(() => {
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
   const persistedBeforeDelivery: string[] = []
+  const traceEvents: unknown[] = []
+  vi.stubEnv('HOSTED_LOG_FINGERPRINT_SECRET', 'notification-trace-secret')
   const initialSession = createAssistantSession({
     binding: {
       actorId: 'actor-initial',
@@ -148,6 +150,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       timezone: 'Australia/Sydney',
     })),
     resolveAssistantSessionForMessage: vi.fn(async () => ({
+      created: false,
       session: initialSession,
     })),
     resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
@@ -227,6 +230,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       },
     },
     instructions: 'Check whether the operator should be notified.',
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
     vault: '/vaults/test',
   })
 
@@ -295,6 +301,29 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     privateSummary: 'summary',
     text: 'Raw notification text',
   })
+
+  const contextTrace = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.context.diagnostics'),
+  )
+  expect(contextTrace).toBeDefined()
+  const rawEvent = (contextTrace as { rawEvent: Record<string, unknown> }).rawEvent
+  expect(rawEvent).toEqual(expect.objectContaining({
+    schema: 'murph.assistant-context-diagnostics.v1',
+    type: 'assistant.context.diagnostics',
+    source: 'assistant-notification',
+    stage: 'assistant-session-resolved',
+    fingerprintReady: true,
+    sessionResolutionCreated: false,
+    sessionTurnCount: 4,
+  }))
+  expect(rawEvent.actorFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(rawEvent.identityFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(rawEvent.threadFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(rawEvent.sessionFingerprint).toMatch(/^h1_[a-f0-9]{24}$/u)
+  expect(JSON.stringify(rawEvent)).not.toContain('actor-initial')
+  expect(JSON.stringify(rawEvent)).not.toContain('identity-initial')
+  expect(JSON.stringify(rawEvent)).not.toContain('thread-initial')
+  expect(JSON.stringify(rawEvent)).not.toContain(initialSession.sessionId)
 })
 
 test('sendAssistantNotificationLocal passes user-facing provider text through before outbound delivery', async () => {
@@ -1078,6 +1107,23 @@ function createRoute(input?: {
     providerOptions: createProviderOptions(input?.providerOptions),
     routeId: input?.routeId ?? 'route-primary',
   }
+}
+
+function isTraceEventWithRawType(
+  event: unknown,
+  type: string,
+): event is { rawEvent: Record<string, unknown> } {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) {
+    return false
+  }
+
+  const rawEvent = (event as { rawEvent?: unknown }).rawEvent
+  return (
+    rawEvent !== null &&
+    typeof rawEvent === 'object' &&
+    !Array.isArray(rawEvent) &&
+    (rawEvent as { type?: unknown }).type === type
+  )
 }
 
 function createAssistantSession(input?: {

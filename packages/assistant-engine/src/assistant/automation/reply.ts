@@ -14,6 +14,7 @@ import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
 } from '../provider-turn-recovery.js'
+import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
@@ -169,6 +170,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   inboxServices: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onStateProgress?: (
     state: AssistantAutomationStateProgress,
   ) => Promise<void> | void
@@ -235,6 +237,7 @@ export async function scanAssistantAutoReplyOnce(input: {
       enabledChannels,
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
+      onTraceEvent: input.onTraceEvent,
       providerHeartbeatMs: input.providerHeartbeatMs,
       providerLongRunningCommandStallTimeoutMs:
         input.providerLongRunningCommandStallTimeoutMs,
@@ -316,6 +319,7 @@ export async function processAssistantAutoReplyGroup(input: {
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -415,6 +419,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -460,6 +465,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     signal: input.signal,
     maxSessionAgeMs: input.sessionMaxAgeMs,
     onEvent: input.onEvent,
+    onTraceEvent: input.onTraceEvent,
     operatorAuthority: decision.operatorAuthority,
     primaryCapture: decision.primaryCapture,
     prompt: decision.prompt,
@@ -879,6 +885,7 @@ async function executeAssistantAutoReply(input: {
   signal?: AbortSignal
   maxSessionAgeMs: number | null
   onEvent?: (event: AssistantRunEvent) => void
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
@@ -918,6 +925,7 @@ async function executeAssistantAutoReply(input: {
       turnTrigger: 'automation-auto-reply',
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: watchdog.onProviderEvent,
+      onTraceEvent: input.onTraceEvent,
     })
     return resolveAssistantAutoReplySendResult({
       onEvent: input.onEvent,

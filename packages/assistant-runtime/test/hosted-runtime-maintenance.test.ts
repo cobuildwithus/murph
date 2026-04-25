@@ -35,6 +35,9 @@ vi.mock("../src/device-sync-service.ts", () => ({
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
+  HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
+    "murph.assistant-context-diagnostics.v1",
+  HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
   createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
   createInboxBackedAssistantTurnInputPort: mocks.createInboxBackedAssistantTurnInputPort,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
@@ -866,6 +869,30 @@ describe("runHostedDeviceSyncPass", () => {
 
 describe("runHostedAssistantRuntimeTimerLane", () => {
   it("runs assistant automation without sweeping parser or device-sync work", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onTraceEvent?.({
+        providerSessionId: null,
+        rawEvent: {
+          schema: "murph.assistant-context-diagnostics.v1",
+          type: "assistant.context.diagnostics",
+          stage: "assistant-session-resolved",
+          source: "assistant-message",
+          fingerprintReady: true,
+          channel: "linq",
+          actorFingerprint: "h1_111111111111111111111111",
+          sessionFingerprint: "h1_222222222222222222222222",
+          primaryConversationScope: "thread",
+          sessionResolutionCreated: false,
+          sessionTurnCount: 1,
+        },
+        updates: [],
+      });
+      return {
+        nextWakeAt: "2026-04-08T01:00:00.000Z",
+        progressed: false,
+      };
+    });
+
     const result = await runHostedAssistantRuntimeTimerLane({
       wake: {
         eventId: "evt_assistant_lane",
@@ -895,6 +922,17 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
           message: "Hosted assistant automation pass starting.",
         }),
         expect.objectContaining({
+          component: "runtime.context",
+          message: "Hosted assistant context fingerprints captured.",
+          redacted: expect.objectContaining({
+            actorFingerprint: "h1_111111111111111111111111",
+            channel: "linq",
+            sessionFingerprint: "h1_222222222222222222222222",
+            source: "assistant-message",
+            stage: "assistant-session-resolved",
+          }),
+        }),
+        expect.objectContaining({
           message: "Hosted assistant automation pass finished.",
         }),
       ],
@@ -911,6 +949,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       },
       inboxServices: expect.anything(),
       onEvent: expect.any(Function),
+      onTraceEvent: expect.any(Function),
       requestId: "req_123",
       vault: "/tmp/vault-root",
       vaultServices: expect.anything(),

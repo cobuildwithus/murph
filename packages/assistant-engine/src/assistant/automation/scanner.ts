@@ -4,6 +4,7 @@ import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantTurnInputPort } from '../turn-input.js'
 import { errorMessage } from '../shared.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
@@ -54,6 +55,7 @@ export async function scanAssistantAutomationOnce(input: {
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
   ) => Promise<void> | void
@@ -264,6 +266,7 @@ export async function scanAssistantAutomationOnce(input: {
         executionContext: input.executionContext,
         inboxServices: input.inboxServices,
         onEvent: input.onEvent,
+        onTraceEvent: input.onTraceEvent,
         providerHeartbeatMs: input.providerHeartbeatMs,
         providerLongRunningCommandStallTimeoutMs:
           input.providerLongRunningCommandStallTimeoutMs,
