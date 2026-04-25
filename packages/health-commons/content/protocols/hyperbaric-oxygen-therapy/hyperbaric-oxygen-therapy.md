@@ -516,8 +516,15 @@ attribution:
   ownerType: "murph"
   note: "Drafted from the 2026-04-23 Hyperbaric Oxygen Therapy research run; source keys are restricted to the canonical ledger, extraction drafts, and section synthesis artifacts in the uploaded snapshot."
 protocol:
-  doseSignature: "Clinician-prescribed systemic chamber HBOT · no Murph default pressure, frequency, duration, or session target · log exact prescribed pressure/oxygen/session/air-break/course details"
-  target: "Use only the treating clinician’s prescription for pressure, oxygen fraction, chamber type, session length, air breaks, frequency, and course length; keep planning-only if any dose field is unknown."
+  doseSignature: "Clinician-prescribed systemic chamber HBOT · log ATA/oxygen/session/air breaks · 60-90 min common outpatient sessions · 5x/week and 20-session defaults are tracking placeholders · course is indication-specific"
+  target: "Use the treating clinician’s prescription for pressure, oxygen fraction, chamber type, session length, air breaks, frequency, and course length; replace Murph defaults with the facility plan before starting."
+  frequency:
+    sessionsPerWeek: 5
+  durationMinutes:
+    min: 60
+    max: 90
+  interventionSessionsMinimum: 1
+  interventionSessionsTarget: 20
   steps:
     - "Start only from an active clinician-prescribed HBOT plan at a facility using appropriate chamber/device safety procedures; do not use Murph to initiate unsupervised HBOT."
     - "Before the first logged session, confirm the indication, chamber type, pressure units, oxygen delivery method, session duration, air-break schedule, planned number of sessions, and who is medically supervising the course."
@@ -527,7 +534,7 @@ protocol:
     - "After each session, log pressure/ATA, minutes completed, air breaks, symptoms, adverse events, glucose/BP checks if relevant, vision or ear changes, and whether the session was paused, shortened, or stopped."
     - "Keep mild/soft-chamber sessions, topical oxygen devices, normobaric oxygen, EWOT, athletic oxygen exposure, and named wellness programs out of this protocol log; track those as separate variants."
   tips:
-    - "Do not create an executable schedule until the clinician’s actual pressure, oxygen method, chamber type, session duration, air-break plan, frequency, and total planned sessions are known."
+    - "Replace the default schedule with the clinician’s actual pressure, oxygen method, chamber type, session duration, air-break plan, frequency, and total planned sessions; the 5x/week, 60-90 minute, and 20-session fields are tracking defaults, not a universal dose recommendation."
     - "Use the same pressure units the source/facility uses—ATA, bar, kPa, or atmospheres—and avoid silently converting unless the facility confirms the conversion."
     - "If diabetes or blood-pressure risk is present, ask the care team what pre/post checks and thresholds they want recorded."
     - "Treat missed, paused, or shortened sessions as dose-fidelity data rather than failures."
@@ -712,7 +719,11 @@ experimentOnboarding:
   planDefaults:
     testPlanId: "clinician-supervised-hbot-tolerance-49d"
     baselineDays: 7
-    firstSessionGuidance: "Do not create the run until the clinician/facility pressure, oxygen method, chamber type, session duration, air-break plan, frequency, total planned sessions, and supervision status are entered."
+    interventionDays: 42
+    sessionsPerWeek: 5
+    targetSessions: 20
+    minimumUsefulSessions: 1
+    firstSessionGuidance: "Do not begin unless the clinician/facility plan is active; replace the default HBOT schedule with the actual prescribed pressure, oxygen method, chamber type, session duration, air-break plan, frequency, and total planned sessions before logging the first session."
   logging:
     sessionFields:
       - "clinical_indication"
