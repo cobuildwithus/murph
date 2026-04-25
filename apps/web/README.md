@@ -446,5 +446,4 @@ Current hosted billing assumptions:
 - The launch tier is sold as one Stripe product with separate monthly and annual recurring prices.
 - `invoice.paid` is the only positive activation source.
 - `checkout.session.completed` and `customer.subscription.*` do not grant access.
-- RevNet issuance code remains in-tree but is currently hard-disabled.
 - Chargebacks, disputes, and refunds suspend hosted access pending manual review.

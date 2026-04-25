@@ -2,21 +2,6 @@ import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
-const mocks = vi.hoisted(() => ({
-  isHostedOnboardingRevnetEnabled: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/revnet")>(
-    "@/src/lib/hosted-onboarding/revnet",
-  );
-
-  return {
-    ...actual,
-    isHostedOnboardingRevnetEnabled: mocks.isHostedOnboardingRevnetEnabled,
-  };
-});
-
 import {
   lookupHostedMemberForPrivyIdentity,
   reconcileHostedPrivyIdentityOnMember,
@@ -36,7 +21,6 @@ describe("hosted-onboarding member-identity-service", () => {
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
     clearHostedOnboardingEnvCache();
     vi.clearAllMocks();
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
   });
 
   afterEach(() => {

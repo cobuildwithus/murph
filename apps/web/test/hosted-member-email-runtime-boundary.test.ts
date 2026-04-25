@@ -61,5 +61,4 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
-  "HostedRevnetIssuance",
 ]);

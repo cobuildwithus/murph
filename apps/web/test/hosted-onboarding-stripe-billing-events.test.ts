@@ -78,7 +78,6 @@ describe("hosted onboarding stripe billing events", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: "wake_123",
     });
 
@@ -96,7 +95,6 @@ describe("hosted onboarding stripe billing events", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: "wake_123",
     });
 
@@ -142,7 +140,6 @@ describe("hosted onboarding stripe billing events", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: "wake_123",
     });
 
@@ -175,7 +172,6 @@ describe("hosted onboarding stripe billing events", () => {
       ),
     ).resolves.toEqual({
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: null,
     });
 

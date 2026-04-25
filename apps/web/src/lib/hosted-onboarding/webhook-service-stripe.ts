@@ -6,7 +6,6 @@ import {
   nudgeHostedRunBestEffort,
 } from "../hosted-ingress/control";
 import { hostedOnboardingError } from "./errors";
-import { sanitizeHostedOnboardingLogString } from "./http";
 import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
@@ -14,7 +13,6 @@ import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
 } from "./stripe-event-reconciliation";
-import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 import type { HostedStripeWebhookResponse } from "./webhook-service-types";
 
 export async function handleHostedStripeWebhook(input: {
@@ -103,10 +101,6 @@ async function reconcileHostedStripeWebhookEvent(input: {
 
   if (reconciled.status !== "completed") {
     throw buildHostedStripeWebhookReconcileError(input.eventId);
-  }
-
-  if (reconciled.createdOrUpdatedRevnetIssuance) {
-    await drainHostedRevnetIssuanceSubmissionQueueBestEffort(input.prisma);
   }
 
   const hostedExecutionEventId = reconciled.hostedExecutionEventId ?? null;
@@ -279,23 +273,5 @@ function constructStripeWebhookEvent(input: {
       message: error instanceof Error ? error.message : "Invalid Stripe webhook signature.",
       httpStatus: 401,
     });
-  }
-}
-
-async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
-  prisma: PrismaClient,
-): Promise<void> {
-  try {
-    await drainHostedRevnetIssuanceSubmissionQueue({
-      limit: 1,
-      prisma,
-    });
-  } catch (error) {
-    console.error(
-      "Hosted RevNet issuance best-effort drain failed.",
-      sanitizeHostedOnboardingLogString(
-        error instanceof Error ? error.message : String(error),
-      ) ?? "Unknown error.",
-    );
   }
 }

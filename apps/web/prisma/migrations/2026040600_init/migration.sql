@@ -8,9 +8,6 @@ CREATE TYPE "HostedBillingStatus" AS ENUM ('not_started', 'active', 'incomplete'
 CREATE TYPE "HostedStripeEventStatus" AS ENUM ('pending', 'processing', 'completed', 'failed', 'poisoned');
 
 -- CreateEnum
-CREATE TYPE "HostedRevnetIssuanceStatus" AS ENUM ('pending', 'submitting', 'submitted', 'confirmed', 'failed');
-
--- CreateEnum
 CREATE TYPE "HostedIngressBehavior" AS ENUM ('ordered', 'coalescing');
 
 -- CreateTable
@@ -383,36 +380,6 @@ CREATE TABLE "hosted_stripe_event" (
 );
 
 -- CreateTable
-CREATE TABLE "hosted_revnet_issuance" (
-    "id" TEXT NOT NULL,
-    "member_id" TEXT NOT NULL,
-    "idempotency_key" TEXT NOT NULL,
-    "stripe_invoice_id" TEXT NOT NULL,
-    "stripe_payment_intent_id" TEXT,
-    "stripe_charge_id" TEXT,
-    "chain_id" INTEGER NOT NULL,
-    "project_id" TEXT NOT NULL,
-    "terminal_address" TEXT NOT NULL,
-    "payment_asset_address" TEXT NOT NULL,
-    "beneficiary_address" TEXT NOT NULL,
-    "stripe_payment_amount_minor" INTEGER NOT NULL,
-    "stripe_payment_currency" TEXT NOT NULL,
-    "payment_amount" TEXT NOT NULL,
-    "status" "HostedRevnetIssuanceStatus" NOT NULL DEFAULT 'pending',
-    "attempt_count" INTEGER NOT NULL DEFAULT 0,
-    "next_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "pay_tx_hash" TEXT,
-    "failure_code" TEXT,
-    "failure_message" TEXT,
-    "submitted_at" TIMESTAMP(3),
-    "confirmed_at" TIMESTAMP(3),
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "hosted_revnet_issuance_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "hosted_share_link" (
     "id" TEXT NOT NULL,
     "code_hash" TEXT NOT NULL,
@@ -782,30 +749,6 @@ CREATE INDEX "hosted_stripe_event_status_next_attempt_at_stripe_created_a_idx" O
 CREATE INDEX "hosted_stripe_event_claim_expires_at_idx" ON "hosted_stripe_event"("claim_expires_at");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_revnet_issuance_idempotency_key_key" ON "hosted_revnet_issuance"("idempotency_key");
-
--- CreateIndex
-CREATE UNIQUE INDEX "hosted_revnet_issuance_stripe_invoice_id_key" ON "hosted_revnet_issuance"("stripe_invoice_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "hosted_revnet_issuance_pay_tx_hash_key" ON "hosted_revnet_issuance"("pay_tx_hash");
-
--- CreateIndex
-CREATE INDEX "hosted_revnet_issuance_member_id_created_at_idx" ON "hosted_revnet_issuance"("member_id", "created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_revnet_issuance_status_created_at_idx" ON "hosted_revnet_issuance"("status", "created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_revnet_issuance_status_next_attempt_at_created_at_idx" ON "hosted_revnet_issuance"("status", "next_attempt_at", "created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_revnet_issuance_stripe_payment_intent_id_idx" ON "hosted_revnet_issuance"("stripe_payment_intent_id");
-
--- CreateIndex
-CREATE INDEX "hosted_revnet_issuance_stripe_charge_id_idx" ON "hosted_revnet_issuance"("stripe_charge_id");
-
--- CreateIndex
 CREATE UNIQUE INDEX "hosted_share_link_code_hash_key" ON "hosted_share_link"("code_hash");
 
 -- CreateIndex
@@ -957,9 +900,6 @@ ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_ingr
 
 -- AddForeignKey
 ALTER TABLE "hosted_invite" ADD CONSTRAINT "hosted_invite_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "hosted_revnet_issuance" ADD CONSTRAINT "hosted_revnet_issuance_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_share_payload" ADD CONSTRAINT "hosted_share_payload_share_id_fkey" FOREIGN KEY ("share_id") REFERENCES "hosted_share_link"("id") ON DELETE CASCADE ON UPDATE CASCADE;

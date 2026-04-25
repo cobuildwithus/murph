@@ -28,7 +28,6 @@ import {
   extractHostedPrivyVerifiedEmailAccount,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
-import { coerceHostedWalletAddress } from "./revnet";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
@@ -301,25 +300,4 @@ function deriveHostedBillingCheckoutCustomerBindingKey(input: {
   }
 
   return "customer:none";
-}
-
-export function requireHostedMemberWalletAddressForRevnet(member: {
-  id: string;
-  walletAddress: string | null | undefined;
-}) {
-  const walletAddress = coerceHostedWalletAddress(member.walletAddress);
-
-  if (!walletAddress) {
-    throw hostedOnboardingError({
-      code: "REVNET_BENEFICIARY_REQUIRED",
-      message: "Hosted RevNet issuance requires valid account setup details on the hosted member.",
-      httpStatus: 503,
-      retryable: true,
-      details: {
-        memberId: member.id,
-      },
-    });
-  }
-
-  return walletAddress;
 }

@@ -93,9 +93,6 @@ importers:
       '@base-ui/react':
         specifier: 1.3.0
         version: 1.3.0(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      '@cobuild/wire':
-        specifier: ^0.3.6
-        version: 0.3.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
       '@murphai/cloudflare-hosted-control':
         specifier: workspace:*
         version: link:../../packages/cloudflare-hosted-control
@@ -183,9 +180,6 @@ importers:
       tw-animate-css:
         specifier: 1.4.0
         version: 1.4.0
-      viem:
-        specifier: ^2.38.5
-        version: 2.47.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.2.1
@@ -1035,11 +1029,6 @@ packages:
 
   '@cobuild/review-gpt@0.5.81':
     resolution: {integrity: sha512-+DPebryOgysrhoPDVl7T6Ip7sPFDD23jxRsv698qwnFyr9HtWrWP+WMwKo9U8jTrgB2KqS6x7qsR+LMIrq0EOw==}
-    hasBin: true
-
-  '@cobuild/wire@0.3.6':
-    resolution: {integrity: sha512-NygZfMLvrSQpaFkPU1rXg14pW5dBz3YQ8XTRWfBggyxPPgo+CkglGxKzl5xFG7rX66DRVJpcULou+Z3vdWuvFg==}
-    engines: {node: '>=20'}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.45.0':
@@ -8685,15 +8674,6 @@ snapshots:
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
-
-  '@cobuild/wire@0.3.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)':
-    dependencies:
-      viem: 2.47.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-    transitivePeerDependencies:
-      - bufferutil
-      - typescript
-      - utf-8-validate
-      - zod
 
   '@coinbase/cdp-sdk@1.45.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)':
     dependencies:

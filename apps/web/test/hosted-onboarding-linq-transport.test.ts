@@ -19,10 +19,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   sendHostedLinqChatMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/stripe-revnet-issuance", () => ({
-  maybeIssueHostedRevnetForStripeInvoice: vi.fn(),
-}));
-
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   buildHostedLinqConversationHomeRedirectReply,

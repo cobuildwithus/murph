@@ -334,7 +334,7 @@ describe("hosted Privy request auth", () => {
     expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
   });
 
-  it("allows the completion route to proceed with a phone-only Privy session when RevNet is disabled", async () => {
+  it("allows the completion route to proceed with a phone-only Privy session", async () => {
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
       identity: {
         phone: {

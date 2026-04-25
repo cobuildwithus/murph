@@ -12,7 +12,6 @@ import {
 import {
   composeHostedMemberBillingSnapshot,
   type HostedMemberBillingSnapshot,
-  readHostedMemberBillingSnapshot,
   readHostedMemberCoreState,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
@@ -184,43 +183,7 @@ export async function findMemberForStripeReversal(input: {
     return directMember;
   }
 
-  if (!input.chargeId && !input.paymentIntentId) {
-    return null;
-  }
-
-  const issuance = await input.prisma.hostedRevnetIssuance.findFirst({
-    where: {
-      OR: [
-        ...(input.chargeId
-          ? [
-              {
-                stripeChargeId: input.chargeId,
-              },
-            ]
-          : []),
-        ...(input.paymentIntentId
-          ? [
-              {
-                stripePaymentIntentId: input.paymentIntentId,
-              },
-            ]
-          : []),
-      ],
-    },
-    include: {
-      member: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-
-  return issuance?.member
-    ? readHostedMemberBillingSnapshot({
-        memberId: issuance.member.id,
-        prisma: input.prisma,
-      })
-    : null;
+  return null;
 }
 
 export async function resolveStripeCustomerContext(input: {

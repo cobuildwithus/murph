@@ -178,14 +178,6 @@ enum HostedStripeEventStatus {
   poisoned
 }
 
-enum HostedRevnetIssuanceStatus {
-  pending
-  submitting
-  submitted
-  confirmed
-  failed
-}
-
 enum HostedIngressBehavior {
   ordered
   coalescing
@@ -198,7 +190,6 @@ model HostedMember {
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
   invites         HostedInvite[]
-  revnetIssuances HostedRevnetIssuance[]
   aiUsage         HostedAiUsage[]
   linqDailyStates HostedLinqDailyState[]
   identity        HostedMemberIdentity?
@@ -482,41 +473,6 @@ model HostedStripeEvent {
   @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
   @@index([claimExpiresAt])
   @@map("hosted_stripe_event")
-}
-
-model HostedRevnetIssuance {
-  id                       String                     @id
-  memberId                 String                     @map("member_id")
-  idempotencyKey           String                     @unique @map("idempotency_key")
-  stripeInvoiceId          String                     @unique @map("stripe_invoice_id")
-  stripePaymentIntentId    String?                    @map("stripe_payment_intent_id")
-  stripeChargeId           String?                    @map("stripe_charge_id")
-  chainId                  Int                        @map("chain_id")
-  projectId                String                     @map("project_id")
-  terminalAddress          String                     @map("terminal_address")
-  paymentAssetAddress      String                     @map("payment_asset_address")
-  beneficiaryAddress       String                     @map("beneficiary_address")
-  stripePaymentAmountMinor Int                        @map("stripe_payment_amount_minor")
-  stripePaymentCurrency    String                     @map("stripe_payment_currency")
-  paymentAmount            String                     @map("payment_amount")
-  status                   HostedRevnetIssuanceStatus @default(pending)
-  attemptCount             Int                        @default(0) @map("attempt_count")
-  nextAttemptAt            DateTime                   @default(now()) @map("next_attempt_at")
-  payTxHash                String?                    @unique @map("pay_tx_hash")
-  failureCode              String?                    @map("failure_code")
-  failureMessage           String?                    @map("failure_message")
-  submittedAt              DateTime?                  @map("submitted_at")
-  confirmedAt              DateTime?                  @map("confirmed_at")
-  createdAt                DateTime                   @default(now()) @map("created_at")
-  updatedAt                DateTime                   @updatedAt @map("updated_at")
-  member                   HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@index([memberId, createdAt])
-  @@index([status, createdAt])
-  @@index([status, nextAttemptAt, createdAt])
-  @@index([stripePaymentIntentId])
-  @@index([stripeChargeId])
-  @@map("hosted_revnet_issuance")
 }
 
 model HostedShareLink {

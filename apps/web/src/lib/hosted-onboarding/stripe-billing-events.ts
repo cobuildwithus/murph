@@ -125,7 +125,7 @@ export async function applyStripeInvoicePaid(
   prisma: Prisma.TransactionClient,
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
-): Promise<HostedStripeActivationOutcome & { createdOrUpdatedRevnetIssuance: boolean }> {
+): Promise<HostedStripeActivationOutcome> {
   const subscriptionId = coerceStripeInvoiceSubscriptionId(invoice);
   const member = await findMemberForStripeInvoice({
     invoice,
@@ -136,7 +136,6 @@ export async function applyStripeInvoicePaid(
   if (!member || !subscriptionId) {
     return {
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: null,
     };
   }
@@ -169,7 +168,6 @@ export async function applyStripeInvoicePaid(
   if (!updatedMember) {
     return {
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: null,
     };
   }
@@ -177,7 +175,6 @@ export async function applyStripeInvoicePaid(
   if (isHostedAccessBlockedBillingStatus(startingBillingStatus)) {
     return {
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: null,
     };
   }
@@ -191,7 +188,6 @@ export async function applyStripeInvoicePaid(
 
   return {
     activatedMemberId: activation.activated ? updatedMember.core.id : null,
-    createdOrUpdatedRevnetIssuance: false,
     hostedExecutionEventId: activation.hostedExecutionEventId,
   };
 }

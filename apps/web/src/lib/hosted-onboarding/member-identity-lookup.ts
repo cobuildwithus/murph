@@ -9,7 +9,7 @@ import {
   type HostedMemberRoutingLookupMatch,
 } from "./hosted-member-routing-store";
 import { type HostedPrivyIdentity } from "./privy";
-import { normalizeHostedWalletAddress } from "./revnet";
+import { normalizeHostedWalletAddress } from "./wallet-address";
 import {
   lookupHostedMemberIdentityByPhoneNumber,
   lookupHostedMemberIdentityByPrivyUserId,

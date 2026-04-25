@@ -14,7 +14,6 @@ import {
   resolveHostedPrivyTelegramAccountSelection,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
-import { isHostedOnboardingRevnetEnabled } from "./revnet";
 
 export const HOSTED_PRIVY_MEMBER_ID_METADATA_KEY = "murph_member_id";
 
@@ -67,14 +66,6 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
     throw hostedOnboardingError({
       code: "PRIVY_ACCOUNT_REQUIRED",
       message: "Finish email, phone, or Telegram verification before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  if (!wallet && isHostedOnboardingRevnetEnabled()) {
-    throw hostedOnboardingError({
-      code: "PRIVY_WALLET_REQUIRED",
-      message: "Finish setup before continuing.",
       httpStatus: 400,
     });
   }

@@ -38,21 +38,9 @@ describe("hosted onboarding entitlement", () => {
     })).toBe(false);
   });
 
-  it("derives activation readiness from active access plus revnet readiness", () => {
+  it("derives activation readiness from active access", () => {
     expect(deriveHostedEntitlement({
       billingStatus: HostedBillingStatus.active,
-      revnetRequired: true,
-      revnetIssuanceStatus: null,
-      suspendedAt: null,
-    })).toMatchObject({
-      accessAllowed: true,
-      activationReady: false,
-    });
-
-    expect(deriveHostedEntitlement({
-      billingStatus: HostedBillingStatus.active,
-      revnetRequired: false,
-      revnetIssuanceStatus: null,
       suspendedAt: null,
     })).toMatchObject({
       accessAllowed: true,

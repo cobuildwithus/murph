@@ -58,7 +58,6 @@ const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
         "hosted-onboarding-invite-send-code.test.ts",
         "hosted-onboarding-linq-*.test.ts",
         "hosted-onboarding-privy*.test.ts",
-        "hosted-onboarding-revnet*.test.ts",
         "hosted-onboarding-telegram-dispatch.test.ts",
         "hosted-phone-auth.test.ts",
         "invite-status-client.test.ts",

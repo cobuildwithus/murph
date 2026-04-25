@@ -1,14 +1,9 @@
-import {
-  HostedBillingStatus,
-  HostedRevnetIssuanceStatus,
-} from "@prisma/client";
+import { HostedBillingStatus } from "@prisma/client";
 
 import { hostedOnboardingError } from "./errors";
 
 export type HostedEntitlementInput = {
   billingStatus: HostedBillingStatus;
-  revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
-  revnetRequired?: boolean;
   suspendedAt?: Date | null;
 };
 
@@ -20,11 +15,9 @@ export type HostedEntitlement = {
 };
 
 export function deriveHostedEntitlement(input: HostedEntitlementInput): HostedEntitlement {
-  const revnetReady = !input.revnetRequired || input.revnetIssuanceStatus === HostedRevnetIssuanceStatus.confirmed;
-
   return {
     accessAllowed: hasHostedMemberGeneralAccess(input),
-    activationReady: hasHostedMemberActiveAccess(input) && revnetReady,
+    activationReady: hasHostedMemberActiveAccess(input),
     billingStatus: input.billingStatus,
     suspendedAt: input.suspendedAt ?? null,
   };

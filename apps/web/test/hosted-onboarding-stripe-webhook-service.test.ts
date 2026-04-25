@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   constructEvent: vi.fn(),
-  drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
   nudgeHostedRunBestEffort: vi.fn(),
   reconcileHostedStripeEventById: vi.fn(),
   recordHostedStripeEvent: vi.fn(),
@@ -33,10 +32,6 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   recordHostedStripeEvent: mocks.recordHostedStripeEvent,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/stripe-revnet-issuance", () => ({
-  drainHostedRevnetIssuanceSubmissionQueue: mocks.drainHostedRevnetIssuanceSubmissionQueue,
-}));
-
 import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/webhook-service-stripe";
 
 describe("hosted Stripe webhook service", () => {
@@ -44,11 +39,9 @@ describe("hosted Stripe webhook service", () => {
     vi.clearAllMocks();
     mocks.runtime.webhookSecret = "whsec_test_123";
     mocks.constructEvent.mockReturnValue(makeStripeEvent());
-    mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
     mocks.nudgeHostedRunBestEffort.mockResolvedValue("outbox");
     mocks.reconcileHostedStripeEventById.mockResolvedValue({
       activatedMemberId: "member_123",
-      createdOrUpdatedRevnetIssuance: false,
       eventId: "evt_123",
       hostedExecutionEventId: "dispatch_123",
       status: "completed",
@@ -255,7 +248,6 @@ describe("hosted Stripe webhook service", () => {
     });
     mocks.reconcileHostedStripeEventById.mockResolvedValueOnce({
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       eventId: "evt_123",
       hostedExecutionEventId: null,
       status: "failed",

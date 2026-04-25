@@ -39,7 +39,7 @@ import {
 } from "./hosted-member-identity-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import { type HostedPrivyIdentity, hasHostedPrivyPhoneAuthConfig } from "./privy";
-import { normalizeHostedWalletAddress } from "./revnet";
+import { normalizeHostedWalletAddress } from "./wallet-address";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
