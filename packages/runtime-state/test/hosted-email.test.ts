@@ -8,6 +8,7 @@ import {
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
   isHostedEmailInboundSenderAuthorized,
+  isHostedEmailAuthenticatedSenderVerdictAccepted,
   normalizeHostedEmailAddress,
   normalizeHostedEmailAddressList,
   normalizeHostedEmailMessageId,
@@ -99,6 +100,11 @@ test("hosted email reference chains and reply subjects normalize edge cases", ()
 test("hosted email direct sender lookup requires one matching envelope and header sender", () => {
   assert.equal(
     resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: "owner@example.com",
       headerFrom: "Owner <owner@example.com>",
     }),
@@ -107,12 +113,41 @@ test("hosted email direct sender lookup requires one matching envelope and heade
   assert.equal(
     resolveHostedEmailDirectSenderLookupAddress({
       envelopeFrom: "owner@example.com",
+      headerFrom: "Owner <owner@example.com>",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: false,
+        spfAligned: false,
+      },
+      envelopeFrom: "owner@example.com",
+      headerFrom: "Owner <owner@example.com>",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
+      envelopeFrom: "owner@example.com",
       headerFrom: null,
     }),
     null,
   );
   assert.equal(
     resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: null,
       headerFrom: "Owner <owner@example.com>",
     }),
@@ -120,6 +155,11 @@ test("hosted email direct sender lookup requires one matching envelope and heade
   );
   assert.equal(
     resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: true,
       headerFrom: "Owner <owner@example.com>",
@@ -128,10 +168,35 @@ test("hosted email direct sender lookup requires one matching envelope and heade
   );
   assert.equal(
     resolveHostedEmailDirectSenderLookupAddress({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: "owner@example.com",
       headerFrom: "Attacker <attacker@example.com>",
     }),
     null,
+  );
+});
+
+test("hosted email authenticated sender verdict requires explicit accepted provider proof", () => {
+  assert.equal(isHostedEmailAuthenticatedSenderVerdictAccepted(null), false);
+  assert.equal(
+    isHostedEmailAuthenticatedSenderVerdictAccepted({
+      dkimAligned: false,
+      dmarcPass: false,
+      spfAligned: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isHostedEmailAuthenticatedSenderVerdictAccepted({
+      dkimAligned: true,
+      dmarcPass: false,
+      spfAligned: false,
+    }),
+    true,
   );
 });
 
@@ -167,6 +232,11 @@ test("hosted email shared normalization rejects header-break injection strings",
 test("hosted email sender helpers authorize only the verified email", () => {
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       headerFrom: "owner@example.test",
       verifiedEmailAddress: "Owner@Example.Test",
     }),
@@ -174,6 +244,31 @@ test("hosted email sender helpers authorize only the verified email", () => {
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: null,
+      headerFrom: "owner@example.test",
+      verifiedEmailAddress: "Owner@Example.Test",
+    }),
+    false,
+  );
+  assert.equal(
+    isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: false,
+        spfAligned: false,
+      },
+      headerFrom: "owner@example.test",
+      verifiedEmailAddress: "Owner@Example.Test",
+    }),
+    false,
+  );
+  assert.equal(
+    isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       headerFrom: "friend@example.test",
       verifiedEmailAddress: "owner@example.test",
     }),
@@ -181,6 +276,11 @@ test("hosted email sender helpers authorize only the verified email", () => {
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: "teammate@example.test",
       verifiedEmailAddress: "owner@example.test",
     }),
@@ -188,6 +288,11 @@ test("hosted email sender helpers authorize only the verified email", () => {
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       headerFrom: "intruder@example.test",
       verifiedEmailAddress: "owner@example.test",
     }),
@@ -195,6 +300,11 @@ test("hosted email sender helpers authorize only the verified email", () => {
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: "intruder@example.test",
       headerFrom: "Owner <owner@example.test>",
       verifiedEmailAddress: "owner@example.test",
@@ -203,6 +313,11 @@ test("hosted email sender helpers authorize only the verified email", () => {
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       headerFrom: "Owner <owner@example.test>, Intruder <intruder@example.test>",
       verifiedEmailAddress: "owner@example.test",
     }),
@@ -210,6 +325,11 @@ test("hosted email sender helpers authorize only the verified email", () => {
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: "owner@example.test",
       hasRepeatedHeaderFrom: true,
       headerFrom: "owner@example.test",
@@ -219,6 +339,11 @@ test("hosted email sender helpers authorize only the verified email", () => {
   );
   assert.equal(
     isHostedEmailInboundSenderAuthorized({
+      authenticatedSender: {
+        dkimAligned: false,
+        dmarcPass: true,
+        spfAligned: false,
+      },
       envelopeFrom: null,
       headerFrom: null,
       verifiedEmailAddress: "owner@example.test",

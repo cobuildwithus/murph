@@ -71,6 +71,11 @@ const TEST_CALLBACK_SIGNING = {
   keyId: "v1",
   privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
 };
+const AUTHENTICATED_SENDER = {
+  dkimAligned: false,
+  dmarcPass: true,
+  spfAligned: false,
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -123,6 +128,7 @@ describe("hosted email routing and transport", () => {
     expect(secondAddress).toBe(firstAddress);
     await expect(resolveHostedEmailInboundRoute({
       config: TEST_CONFIG,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -216,6 +222,7 @@ describe("hosted email routing and transport", () => {
 
     await expect(resolveHostedEmailIngressRoute({
       config: TEST_CONFIG,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -249,6 +256,7 @@ describe("hosted email routing and transport", () => {
 
     await expect(resolveHostedEmailIngressRoute({
       config: TEST_CONFIG,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -270,6 +278,7 @@ describe("hosted email routing and transport", () => {
 
     await expect(resolveHostedEmailIngressRoute({
       config: TEST_CONFIG,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -299,6 +308,7 @@ describe("hosted email routing and transport", () => {
   it("surfaces public-sender callback config failures instead of treating them as clean misses", async () => {
     await expect(resolveHostedEmailIngressRoute({
       config: TEST_CONFIG,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -313,6 +323,7 @@ describe("hosted email routing and transport", () => {
 
     await expect(resolveHostedEmailIngressRoute({
       config: TEST_CONFIG,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",
@@ -353,6 +364,7 @@ describe("hosted email routing and transport", () => {
 
     await expect(resolveHostedEmailIngressRoute({
       config: TEST_CONFIG,
+      authenticatedSender: AUTHENTICATED_SENDER,
       envelopeFrom: "owner@example.com",
       hasRepeatedHeaderFrom: false,
       headerFrom: "Owner <owner@example.com>",

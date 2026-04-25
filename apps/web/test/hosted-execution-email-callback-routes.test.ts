@@ -74,6 +74,11 @@ let prismaClient: MockPrismaClient;
 const originalKeyId = process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID;
 const originalPublicJwk = process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK;
 const originalPublicKeyring = process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON;
+const AUTHENTICATED_SENDER = {
+  dkimAligned: false,
+  dmarcPass: true,
+  spfAligned: false,
+};
 
 describe("hosted execution email callback routes", () => {
   beforeAll(async () => {
@@ -180,6 +185,7 @@ describe("hosted execution email callback routes", () => {
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
         aliasKey: "replyalias1234",
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
@@ -211,6 +217,7 @@ describe("hosted execution email callback routes", () => {
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
         aliasKey: "replyalias1234",
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
@@ -223,6 +230,37 @@ describe("hosted execution email callback routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      userId: null,
+    });
+  });
+
+  it("returns userId null for alias-route resolution when the sender matches but lacks provider authentication", async () => {
+    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
+    mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
+      directPublicSender: null,
+      memberId: "member_123",
+      verifiedEmail: {
+        address: "owner@example.com",
+        lookupKey: "lookup_owner",
+        verifiedAt: new Date("2026-04-15T12:00:00.000Z"),
+      },
+    });
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        aliasKey: "replyalias1234",
+        envelopeFrom: "owner@example.com",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Owner <owner@example.com>",
+      }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberIdByReplyAliasLookupKey).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       userId: null,
     });
@@ -243,6 +281,7 @@ describe("hosted execution email callback routes", () => {
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
         aliasKey: "replyalias1234",
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "attacker@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Attacker <attacker@example.com>",
@@ -292,6 +331,7 @@ describe("hosted execution email callback routes", () => {
       const response = await resolveRoute.POST(await createSignedCallbackRequest({
         body: JSON.stringify({
           aliasKey: "replyalias1234",
+          authenticatedSender: AUTHENTICATED_SENDER,
           envelopeFrom: "owner@example.com",
           hasRepeatedHeaderFrom: false,
           headerFrom: "Owner <owner@example.com>",
@@ -314,6 +354,7 @@ describe("hosted execution email callback routes", () => {
 
     const response = await resolveRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
+        authenticatedSender: AUTHENTICATED_SENDER,
         envelopeFrom: "owner@example.com",
         hasRepeatedHeaderFrom: false,
         headerFrom: "Owner <owner@example.com>",
@@ -334,6 +375,27 @@ describe("hosted execution email callback routes", () => {
     });
     await expect(response.json()).resolves.toEqual({
       userId: "member_456",
+    });
+  });
+
+  it("returns userId null for direct-public sender resolution when provider authentication is absent", async () => {
+    mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress.mockResolvedValue("member_456");
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        envelopeFrom: "owner@example.com",
+        hasRepeatedHeaderFrom: false,
+        headerFrom: "Owner <owner@example.com>",
+      }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      userId: null,
     });
   });
 
@@ -370,6 +432,7 @@ describe("hosted execution email callback routes", () => {
 
       const response = await resolveRoute.POST(await createSignedCallbackRequest({
         body: JSON.stringify({
+          authenticatedSender: AUTHENTICATED_SENDER,
           envelopeFrom: "owner@example.com",
           hasRepeatedHeaderFrom: false,
           headerFrom: "Owner <owner@example.com>",

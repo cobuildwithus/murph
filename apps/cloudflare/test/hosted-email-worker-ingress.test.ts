@@ -91,6 +91,11 @@ const TEST_ENVIRONMENT = {
   },
   webControlTimeoutMs: 30_000,
 };
+const AUTHENTICATED_SENDER = {
+  dkimAligned: false,
+  dmarcPass: true,
+  spfAligned: false,
+};
 
 describe("hosted email worker ingress", () => {
   beforeEach(() => {
@@ -167,6 +172,7 @@ describe("hosted email worker ingress", () => {
     const setReject = vi.fn();
 
     await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "attacker@example.com",
       raw: buildRawEmail({
         from: "Attacker <attacker@example.com>",
@@ -193,6 +199,47 @@ describe("hosted email worker ingress", () => {
         level: "warn",
       }),
     );
+  });
+
+  it("does not treat forged raw authentication-result headers as provider-authenticated sender proof", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
+      JSON.stringify({ ok: true }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+    const setReject = vi.fn();
+
+    await handleHostedEmailIngress({
+      authenticatedSender: null,
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        extraHeaders: [
+          "Authentication-Results: mx.cloudflare.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=owner@example.com",
+          "ARC-Authentication-Results: i=1; mx.cloudflare.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=owner@example.com",
+        ],
+        from: "Owner <owner@example.com>",
+        to: replyAliasAddress,
+      }),
+      setReject,
+      to: replyAliasAddress,
+    }, createWorkerEnv(bucket));
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
   it("persists and dispatches alias ingress only after the web-owned verified-email authorization succeeds", async () => {
@@ -229,6 +276,7 @@ describe("hosted email worker ingress", () => {
     });
 
     await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -282,6 +330,7 @@ describe("hosted email worker ingress", () => {
     ));
 
     await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -326,6 +375,7 @@ describe("hosted email worker ingress", () => {
     ));
 
     await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -364,6 +414,7 @@ describe("hosted email worker ingress", () => {
     });
 
     await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -401,6 +452,7 @@ describe("hosted email worker ingress", () => {
     ));
 
     await expect(handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -437,6 +489,7 @@ describe("hosted email worker ingress", () => {
     ));
 
     await expect(handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -484,6 +537,7 @@ describe("hosted email worker ingress", () => {
     ));
 
     await expect(handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw,
       to: "assistant@mail.example.test",
@@ -516,6 +570,7 @@ describe("hosted email worker ingress", () => {
     ));
 
     await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -540,6 +595,7 @@ describe("hosted email worker ingress", () => {
     );
 
     await expect(handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -564,6 +620,7 @@ describe("hosted email worker ingress", () => {
     }));
 
     await expect(handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
       from: "owner@example.com",
       raw: buildRawEmail({
         from: "Owner <owner@example.com>",
@@ -612,10 +669,12 @@ function createWorkerEnv(bucket: MemoryEncryptedR2Bucket) {
 }
 
 function buildRawEmail(input: {
+  extraHeaders?: string[];
   from: string;
   to: string;
 }) {
   return [
+    ...(input.extraHeaders ?? []),
     `From: ${input.from}`,
     `To: ${input.to}`,
     "Subject: hello",

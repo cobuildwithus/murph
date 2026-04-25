@@ -172,6 +172,20 @@ export function normalizeHostedEmailAddressList(
   return values;
 }
 
+export interface HostedEmailAuthenticatedSenderVerdict {
+  dkimAligned: boolean;
+  dmarcPass: boolean;
+  spfAligned: boolean;
+}
+
+export function isHostedEmailAuthenticatedSenderVerdictAccepted(
+  value: HostedEmailAuthenticatedSenderVerdict | null | undefined,
+): boolean {
+  return value?.dkimAligned === true
+    || value?.dmarcPass === true
+    || value?.spfAligned === true;
+}
+
 export function resolveHostedEmailInboundSenderAddress(input: {
   envelopeFrom?: string | null;
   hasRepeatedHeaderFrom?: boolean;
@@ -193,10 +207,15 @@ export function resolveHostedEmailInboundSenderAddress(input: {
 }
 
 export function resolveHostedEmailDirectSenderLookupAddress(input: {
+  authenticatedSender?: HostedEmailAuthenticatedSenderVerdict | null;
   envelopeFrom?: string | null;
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;
 }): string | null {
+  if (!isHostedEmailAuthenticatedSenderVerdictAccepted(input.authenticatedSender)) {
+    return null;
+  }
+
   if (input.hasRepeatedHeaderFrom) {
     return null;
   }
@@ -216,11 +235,16 @@ export function resolveHostedEmailAuthorizedSenderAddresses(input: {
 }
 
 export function isHostedEmailInboundSenderAuthorized(input: {
+  authenticatedSender?: HostedEmailAuthenticatedSenderVerdict | null;
   envelopeFrom?: string | null;
   hasRepeatedHeaderFrom?: boolean;
   headerFrom?: string | null;
   verifiedEmailAddress?: string | null;
 }): boolean {
+  if (!isHostedEmailAuthenticatedSenderVerdictAccepted(input.authenticatedSender)) {
+    return false;
+  }
+
   const sender = resolveHostedEmailInboundSenderAddress(input);
 
   if (!sender) {
@@ -229,7 +253,6 @@ export function isHostedEmailInboundSenderAuthorized(input: {
 
   return resolveHostedEmailAuthorizedSenderAddresses(input).includes(sender);
 }
-
 function resolveHostedEmailHeaderSenderAddress(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;

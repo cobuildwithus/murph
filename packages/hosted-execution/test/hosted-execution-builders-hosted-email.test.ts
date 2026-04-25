@@ -436,14 +436,31 @@ describe("hosted email helpers", () => {
     });
     expect(parseHostedEmailRouteResolutionCallbackRequest({
       aliasKey: " replyalias1234 ",
+      authenticatedSender: {
+        dkimAligned: true,
+        dmarcPass: false,
+        spfAligned: false,
+      },
       envelopeFrom: "owner@example.test",
       hasRepeatedHeaderFrom: true,
       headerFrom: "Owner <owner@example.test>",
     })).toEqual({
       aliasKey: "replyalias1234",
+      authenticatedSender: {
+        dkimAligned: true,
+        dmarcPass: false,
+        spfAligned: false,
+      },
       envelopeFrom: "owner@example.test",
       hasRepeatedHeaderFrom: true,
       headerFrom: "Owner <owner@example.test>",
+    });
+    expect(parseHostedEmailRouteResolutionCallbackRequest({})).toEqual({
+      aliasKey: null,
+      authenticatedSender: null,
+      envelopeFrom: null,
+      hasRepeatedHeaderFrom: false,
+      headerFrom: null,
     });
     expect(parseHostedEmailRouteResolutionCallbackResponse({
       userId: "member_123",

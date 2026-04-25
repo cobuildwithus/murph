@@ -24,6 +24,7 @@ export interface HostedEmailReplyAliasRegistrationCallbackRequest {
 
 export interface HostedEmailRouteResolutionCallbackRequest {
   aliasKey: string | null;
+  authenticatedSender: HostedEmailAuthenticatedSenderVerdict | null;
   envelopeFrom: string | null;
   hasRepeatedHeaderFrom: boolean;
   headerFrom: string | null;
@@ -31,6 +32,12 @@ export interface HostedEmailRouteResolutionCallbackRequest {
 
 export interface HostedEmailRouteResolutionCallbackResponse {
   userId: string | null;
+}
+
+export interface HostedEmailAuthenticatedSenderVerdict {
+  dkimAligned: boolean;
+  dmarcPass: boolean;
+  spfAligned: boolean;
 }
 
 export function readHostedEmailCapabilities(
@@ -123,6 +130,7 @@ export function parseHostedEmailRouteResolutionCallbackRequest(
 
   return {
     aliasKey: normalizeHostedEmailCallbackString(record.aliasKey),
+    authenticatedSender: parseHostedEmailAuthenticatedSenderVerdict(record.authenticatedSender),
     envelopeFrom: normalizeHostedEmailCallbackString(record.envelopeFrom),
     hasRepeatedHeaderFrom: readHostedEmailCallbackBoolean(
       record.hasRepeatedHeaderFrom,
@@ -193,6 +201,31 @@ function readHostedEmailEnvString(source: EnvSource, key: string): string | null
 
 function normalizeHostedEmailCallbackString(value: unknown): string | null {
   return normalizeHostedExecutionString(typeof value === "string" ? value : null);
+}
+
+function parseHostedEmailAuthenticatedSenderVerdict(
+  value: unknown,
+): HostedEmailAuthenticatedSenderVerdict | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const record = requireObject(value, "Hosted email authenticated sender verdict");
+
+  return {
+    dkimAligned: readHostedEmailCallbackBoolean(
+      record.dkimAligned,
+      "Hosted email authenticated sender verdict dkimAligned",
+    ) ?? false,
+    dmarcPass: readHostedEmailCallbackBoolean(
+      record.dmarcPass,
+      "Hosted email authenticated sender verdict dmarcPass",
+    ) ?? false,
+    spfAligned: readHostedEmailCallbackBoolean(
+      record.spfAligned,
+      "Hosted email authenticated sender verdict spfAligned",
+    ) ?? false,
+  };
 }
 
 function readHostedEmailCallbackBoolean(
