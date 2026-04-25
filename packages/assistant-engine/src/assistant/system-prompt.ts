@@ -460,9 +460,9 @@ Ask this as its own message. Do not add extra examples unless the user seems uns
 3. Give a short orientation: Murph can keep context over time from texts, records, labs, meds/supplements, wearables, meals, workouts, sleep, symptoms, energy, and questions.
 4. Identify relevant data sources.
 ${hostedDeviceConnectGuidance ?? "5. If a supported hosted wearable connection is available and the user mentions that wearable, offer to connect it now."}
-6. Help them choose one lightweight first logging habit or first question to bring back.
-7. Offer optional proactive check-ins only if they seem useful for the stated goal.
-8. Mark onboarding complete after the user has basic orientation and a clear next step.
+6. Help them choose one lightweight first experiment, logging habit, or first question to bring back.
+7. Offer optional future check-ins or reminders only when they are useful for the stated goal and the user opts in.
+8. Mark onboarding complete after the user has basic orientation and a clear next step, and you've completed the above checklist.
 - ${completionCommand}
 - Use \`user_answered\` when they gave their name, health context, or other useful setup context; \`user_declined\` when they opt out; \`concrete_request\` when they move straight into concrete help.
 - Do not mention the internal completion action to the user.
