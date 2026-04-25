@@ -26,6 +26,8 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
+    expect(environment.linqIngressTypingDiagnosticEnabled).toBe(false);
+    expect(environment.linqIngressTypingDiagnosticTimeoutMs).toBe(750);
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_annual: "price_annual_123",
       launch_monthly: "price_monthly_123",
@@ -74,6 +76,16 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.telegramBotUsername).toBe("murph_bot");
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");
+  });
+
+  it("reads the hosted Linq ingress typing diagnostic flag", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC: "1",
+      HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC_TIMEOUT_MS: "1250",
+    }));
+
+    expect(environment.linqIngressTypingDiagnosticEnabled).toBe(true);
+    expect(environment.linqIngressTypingDiagnosticTimeoutMs).toBe(1250);
   });
 
   it("falls back to the Vercel production domain for the public base URL", () => {

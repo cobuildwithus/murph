@@ -71,6 +71,11 @@ describe("hosted local Linq webhook e2e", () => {
   it("routes a signed Linq webhook through apps/web and delivers the follow-up reply", async () => {
     const { chatId: materializedChatId, replyChatPath } = requireActiveLinqMember();
     const expectedReplyChatPath = replyChatPath;
+    const typingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
+    const typingCountBeforeWebhook = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: typingPath,
+    });
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
     const webhookEvent = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
@@ -86,6 +91,10 @@ describe("hosted local Linq webhook e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: typingPath,
+    })).toBeGreaterThanOrEqual(typingCountBeforeWebhook + 1);
 
     await requireScenario().waitForLatestPendingWake(webhookUserId);
     await requireScenario().waitForHostedCompletion(webhookUserId);
@@ -356,6 +365,7 @@ async function startLinqScenario(
     typeof additionalEnv === "function" ? additionalEnv(requireLinqStub()) : additionalEnv;
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
+      HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC: "1",
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
