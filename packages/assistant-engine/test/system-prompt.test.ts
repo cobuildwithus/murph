@@ -249,7 +249,7 @@ describe('buildAssistantSystemPrompt', () => {
     )
   })
 
-  it('tells the assistant to present links without text fences', () => {
+  it('tells the assistant to avoid fenced blocks unless the user needs them', () => {
     const prompt = buildPrompt('bound-tools', null, {
       assistantHostedDeviceConnectAvailable: true,
       assistantHostedDeviceConnectProviders: [
@@ -264,16 +264,19 @@ describe('buildAssistantSystemPrompt', () => {
     })
 
     expect(prompt).toContain(
-      'Do not put standalone links or ordinary URLs in fenced code blocks.',
+      'Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text.',
+    )
+    expect(prompt).toContain(
+      'Never use fences as a visual container for ordinary prose, lists, URLs, tool results, summaries, copied notes, or text/plain-text/Markdown blocks.',
     )
     expect(prompt).toContain(
       'For connect, share, invite, or OAuth links, write a brief sentence and then the raw URL on its own line or as a normal Markdown link when the channel supports it.',
     )
-    expect(prompt).toContain(
-      'Use code fences only for actual code, commands, JSON, logs, or multi-line snippets the user needs to copy; never label a fence as `text` just to display a URL.',
+    expect(notificationPrompt).toContain(
+      'Do not use fenced Markdown blocks in user-facing replies unless the user genuinely needs to see exact code, commands, JSON, logs, stack traces, diffs, or other preformatted multi-line technical text.',
     )
     expect(notificationPrompt).toContain(
-      'Do not put standalone links or ordinary URLs in fenced code blocks.',
+      'Never use fences as a visual container for ordinary prose, lists, URLs, tool results, summaries, copied notes, or text/plain-text/Markdown blocks.',
     )
   })
 
