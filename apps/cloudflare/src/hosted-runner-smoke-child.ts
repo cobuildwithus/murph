@@ -24,6 +24,9 @@ import {
 } from "./hosted-runner-smoke-contract.js";
 
 const execFileAsync = promisify(execFile);
+const FINNISH_DRY_SAUNA_KEY =
+  "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
+const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
 
 async function main(): Promise<void> {
   const input = parseHostedRunnerSmokeInput(parseJsonValue(await readStandardInput()));
@@ -103,6 +106,9 @@ async function runSmokeChecks(input: {
     );
   }
 
+  const healthCommonsRuntime = await runHealthCommonsSmoke();
+  const healthCommonsCli = await runHealthCommonsCliSmoke();
+
   const wavPath = path.join(input.vaultRoot, input.wavRelativePath);
   await assertPathExists(wavPath);
 
@@ -123,6 +129,12 @@ async function runSmokeChecks(input: {
 
   return {
     childCwd: process.cwd(),
+    healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
+    healthCommonsCliProtocolListBytes: healthCommonsCli.protocolListBytes,
+    healthCommonsCliSearchBytes: healthCommonsCli.searchBytes,
+    healthCommonsFinnishDrySaunaTitle: healthCommonsRuntime.finnishDrySaunaTitle,
+    healthCommonsRuntimeProtocolHitKeys: healthCommonsRuntime.runtimeProtocolHitKeys,
+    healthCommonsRuntimeSearchHitKeys: healthCommonsRuntime.runtimeSearchHitKeys,
     murphBin,
     normalizedTranscriptMatchesExpectedSnippet: transcriptMatchesExpectedSnippet(
       normalizedParse.text,
@@ -273,6 +285,106 @@ function parseReportedVaultId(vaultShowOutput: string): string {
   return reportedVaultId.trim();
 }
 
+async function runHealthCommonsSmoke(): Promise<{
+  catalogHash: string;
+  finnishDrySaunaTitle: string;
+  runtimeProtocolHitKeys: string[];
+  runtimeSearchHitKeys: string[];
+}> {
+  const runtime = await import(HEALTH_COMMONS_RUNTIME_MODULE) as SmokeHealthCommonsRuntime;
+  const reader = runtime.getGeneratedHealthCommonsCatalogReader();
+  const runtimeSearchHitKeys = reader
+    .search({
+      query: "sauna",
+      entityTypes: ["protocol_variant"],
+      limit: 20,
+      includeBody: true,
+    })
+    .map((hit) => hit.entity.key);
+  const runtimeProtocolHitKeys = reader
+    .listProtocolVariants({
+      query: "sauna",
+      limit: 20,
+    })
+    .map((entity) => entity.key);
+  const finnishDrySauna = reader.findByKey(FINNISH_DRY_SAUNA_KEY);
+
+  if (!finnishDrySauna) {
+    throw new Error(
+      `Health Commons runtime catalog is missing ${FINNISH_DRY_SAUNA_KEY}. catalogHash=${reader.catalogHash}`,
+    );
+  }
+
+  if (!runtimeSearchHitKeys.includes(FINNISH_DRY_SAUNA_KEY)) {
+    throw new Error(
+      `Health Commons runtime search did not return Finnish Dry Sauna. catalogHash=${reader.catalogHash}; hits=${runtimeSearchHitKeys.join(",")}`,
+    );
+  }
+
+  if (!runtimeProtocolHitKeys.includes(FINNISH_DRY_SAUNA_KEY)) {
+    throw new Error(
+      `Health Commons runtime protocol list did not return Finnish Dry Sauna. catalogHash=${reader.catalogHash}; hits=${runtimeProtocolHitKeys.join(",")}`,
+    );
+  }
+
+  return {
+    catalogHash: reader.catalogHash,
+    finnishDrySaunaTitle: finnishDrySauna.title,
+    runtimeProtocolHitKeys,
+    runtimeSearchHitKeys,
+  };
+}
+
+async function runHealthCommonsCliSmoke(): Promise<{
+  protocolListBytes: number;
+  searchBytes: number;
+}> {
+  const searchOutput = await runTextCommand("vault-cli", [
+    "commons",
+    "search",
+    "sauna",
+    "--type",
+    "protocol_variant",
+    "--limit",
+    "10",
+    "--format",
+    "json",
+  ]);
+  const protocolListOutput = await runTextCommand("vault-cli", [
+    "commons",
+    "protocol",
+    "list",
+    "--query",
+    "sauna",
+    "--limit",
+    "10",
+    "--format",
+    "json",
+  ]);
+
+  const searchJson = JSON.parse(searchOutput);
+  const protocolListJson = JSON.parse(protocolListOutput);
+  const serializedSearch = JSON.stringify(searchJson);
+  const serializedProtocolList = JSON.stringify(protocolListJson);
+
+  if (!serializedSearch.includes(FINNISH_DRY_SAUNA_KEY)) {
+    throw new Error(
+      `Hosted runner CLI Health Commons search smoke did not include ${FINNISH_DRY_SAUNA_KEY}.`,
+    );
+  }
+
+  if (!serializedProtocolList.includes(FINNISH_DRY_SAUNA_KEY)) {
+    throw new Error(
+      `Hosted runner CLI Health Commons protocol list smoke did not include ${FINNISH_DRY_SAUNA_KEY}.`,
+    );
+  }
+
+  return {
+    protocolListBytes: Buffer.byteLength(protocolListOutput, "utf8"),
+    searchBytes: Buffer.byteLength(searchOutput, "utf8"),
+  };
+}
+
 async function runCommand(
   file: string,
   args: string[],
@@ -362,6 +474,29 @@ function createSmokeArtifact(input: {
 interface SmokeParseResult {
   providerId: string;
   text: string;
+}
+
+interface SmokeHealthCommonsRuntime {
+  getGeneratedHealthCommonsCatalogReader(): SmokeHealthCommonsCatalogReader;
+}
+
+interface SmokeHealthCommonsCatalogReader {
+  catalogHash: string;
+  findByKey(key: string): { title: string } | null;
+  listProtocolVariants(input: {
+    limit: number;
+    query: string;
+  }): Array<{ key: string }>;
+  search(input: {
+    entityTypes: readonly ["protocol_variant"];
+    includeBody: true;
+    limit: number;
+    query: string;
+  }): Array<{
+    entity: {
+      key: string;
+    };
+  }>;
 }
 
 async function withSmokeProcessEnvironment<T>(input: {

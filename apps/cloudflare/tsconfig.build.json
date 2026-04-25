@@ -29,6 +29,9 @@
       "path": "../../packages/gateway-core"
     },
     {
+      "path": "../../packages/health-commons"
+    },
+    {
       "path": "../../packages/hosted-execution"
     },
     {

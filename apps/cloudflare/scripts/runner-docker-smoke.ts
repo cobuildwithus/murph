@@ -61,6 +61,12 @@ async function main(): Promise<void> {
     console.log(`vaultCliBin=${result.vaultCliBin}`);
     console.log(`reportedVaultId=${result.reportedVaultId}`);
     console.log(`vaultShowBytes=${result.vaultShowBytes}`);
+    console.log(`healthCommonsCatalogHash=${result.healthCommonsCatalogHash}`);
+    console.log(`healthCommonsFinnishDrySaunaTitle=${result.healthCommonsFinnishDrySaunaTitle}`);
+    console.log(`healthCommonsCliSearchBytes=${result.healthCommonsCliSearchBytes}`);
+    console.log(`healthCommonsCliProtocolListBytes=${result.healthCommonsCliProtocolListBytes}`);
+    console.log(`healthCommonsRuntimeSearchHitKeys=${result.healthCommonsRuntimeSearchHitKeys.join(",")}`);
+    console.log(`healthCommonsRuntimeProtocolHitKeys=${result.healthCommonsRuntimeProtocolHitKeys.join(",")}`);
     console.log(`wavTranscriptProviderId=${result.wavTranscriptProviderId}`);
     console.log(`wavTranscriptSha256=${result.wavTranscriptSha256}`);
     console.log(`wavTranscriptMatchesExpectedSnippet=${result.wavTranscriptMatchesExpectedSnippet}`);

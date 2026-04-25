@@ -71,7 +71,7 @@ describe("hosted runner container image contract", () => {
       '} from "./runner-bundle-contract.js";',
     );
     expect(bundleAssemblyScript).toContain(
-      'import { installPackedRunnerDependencies } from "./runner-bundle/dependency-install.js";',
+      'import {\n  assertInstalledRunnerHealthCommonsRuntimeImport,\n  installPackedRunnerDependencies,\n} from "./runner-bundle/dependency-install.js";',
     );
     expect(bundleAssemblyScript).toContain(
       'import { materializeFinalRunnerBundle } from "./runner-bundle/final-bundle.js";',
@@ -106,6 +106,9 @@ describe("hosted runner container image contract", () => {
     );
     expect(bundleAssemblyScript).toContain(
       "await installPackedRunnerDependencies(",
+    );
+    expect(bundleAssemblyScript).toContain(
+      "await assertInstalledRunnerHealthCommonsRuntimeImport(stagingBundleDir);",
     );
     expect(workspaceArtifactsScript).toContain(
       "const sortedPackageNames = await topologicallySortWorkspacePackageNames(",

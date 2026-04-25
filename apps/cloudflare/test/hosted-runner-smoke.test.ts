@@ -39,6 +39,16 @@ describe("runHostedRunnerSmokeDetailed", () => {
         child.stdout.end(
           JSON.stringify({
             childCwd: options.cwd,
+            healthCommonsCatalogHash: "sha256:catalog",
+            healthCommonsCliProtocolListBytes: 768,
+            healthCommonsCliSearchBytes: 512,
+            healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
+            healthCommonsRuntimeProtocolHitKeys: [
+              "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            ],
+            healthCommonsRuntimeSearchHitKeys: [
+              "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+            ],
             murphBin: "/app/node_modules/.bin/murph",
             normalizedTranscriptMatchesExpectedSnippet: true,
             normalizedTranscriptProviderId: "whisper.cpp",
@@ -68,6 +78,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
     });
 
     expect(result.childCwd).toMatch(/hosted-runner-smoke-launch-/u);
+    expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
     expect(result.murphBin).toContain("murph");
     expect(result.normalizedTranscriptSha256).toBe("normalized-hash");
     expect(result.wavTranscriptProviderId).toBe("whisper.cpp");

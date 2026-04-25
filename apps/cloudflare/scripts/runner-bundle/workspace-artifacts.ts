@@ -11,6 +11,7 @@ import {
 import { runNpmCommand, runPnpmCommand } from "./process.js";
 
 const HEALTH_COMMONS_PACKAGE_NAME = "@murphai/health-commons";
+const CONTRACTS_PACKAGE_NAME = "@murphai/contracts";
 
 interface WorkspacePackageManifest {
   dependencies?: Record<string, string>;
@@ -147,6 +148,10 @@ export function buildHostedRunnerWorkspaceBuildArgs(
 export function buildWorkspacePackagePackPreflightArgs(
   packageName: string,
 ): string[] | null {
+  if (packageName === CONTRACTS_PACKAGE_NAME) {
+    return ["--filter", CONTRACTS_PACKAGE_NAME, "run", "build"];
+  }
+
   if (packageName !== HEALTH_COMMONS_PACKAGE_NAME) {
     return null;
   }
@@ -167,8 +172,8 @@ async function packWorkspacePackage(
 
   if (preflightArgs) {
     await runPnpmCommand(preflightArgs, { cwd: input.repoRoot });
-    await assertHealthCommonsRuntimePackageFiles(packageDir);
   }
+  await assertWorkspacePackageRuntimeFiles(packageName, packageDir);
 
   await runNpmCommand(
     ["pack", "--ignore-scripts", "--silent", "--pack-destination", tarballsDir],
@@ -188,20 +193,41 @@ async function packWorkspacePackage(
   return path.join(tarballsDir, tarballName);
 }
 
-async function assertHealthCommonsRuntimePackageFiles(packageDir: string): Promise<void> {
-  await assertReadableHealthCommonsPackageFile(
+async function assertWorkspacePackageRuntimeFiles(
+  packageName: string,
+  packageDir: string,
+): Promise<void> {
+  if (packageName === CONTRACTS_PACKAGE_NAME) {
+    await assertReadablePackageFile(
+      packageDir,
+      path.join("dist", "index.js"),
+      "Contracts runtime entrypoint is missing before package packing; build workspace artifacts before packing.",
+    );
+    await assertReadablePackageFile(
+      packageDir,
+      path.join("dist", "schemas.js"),
+      "Contracts schemas entrypoint is missing before package packing; build workspace artifacts before packing.",
+    );
+    return;
+  }
+
+  if (packageName !== HEALTH_COMMONS_PACKAGE_NAME) {
+    return;
+  }
+
+  await assertReadablePackageFile(
     packageDir,
     path.join("dist", "runtime.js"),
     "Health Commons runtime entrypoint is missing before package packing; build workspace artifacts before packing.",
   );
-  await assertReadableHealthCommonsPackageFile(
+  await assertReadablePackageFile(
     packageDir,
     path.join("generated", "catalog.json"),
     "Health Commons generated catalog is missing after generation preflight.",
   );
 }
 
-async function assertReadableHealthCommonsPackageFile(
+async function assertReadablePackageFile(
   packageDir: string,
   relativePath: string,
   message: string,

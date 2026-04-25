@@ -9,6 +9,12 @@ export interface HostedRunnerSmokeInput {
 
 export interface HostedRunnerSmokeResult {
   childCwd: string;
+  healthCommonsCatalogHash: string;
+  healthCommonsCliProtocolListBytes: number;
+  healthCommonsCliSearchBytes: number;
+  healthCommonsFinnishDrySaunaTitle: string;
+  healthCommonsRuntimeProtocolHitKeys: readonly string[];
+  healthCommonsRuntimeSearchHitKeys: readonly string[];
   murphBin: string;
   normalizedTranscriptMatchesExpectedSnippet: boolean;
   normalizedTranscriptProviderId: string;
@@ -55,6 +61,30 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
 
   return {
     childCwd: readNonEmptyString(record.childCwd, "Hosted runner smoke result.childCwd"),
+    healthCommonsCatalogHash: readNonEmptyString(
+      record.healthCommonsCatalogHash,
+      "Hosted runner smoke result.healthCommonsCatalogHash",
+    ),
+    healthCommonsCliProtocolListBytes: readFiniteNumber(
+      record.healthCommonsCliProtocolListBytes,
+      "Hosted runner smoke result.healthCommonsCliProtocolListBytes",
+    ),
+    healthCommonsCliSearchBytes: readFiniteNumber(
+      record.healthCommonsCliSearchBytes,
+      "Hosted runner smoke result.healthCommonsCliSearchBytes",
+    ),
+    healthCommonsFinnishDrySaunaTitle: readNonEmptyString(
+      record.healthCommonsFinnishDrySaunaTitle,
+      "Hosted runner smoke result.healthCommonsFinnishDrySaunaTitle",
+    ),
+    healthCommonsRuntimeProtocolHitKeys: readNonEmptyStringArray(
+      record.healthCommonsRuntimeProtocolHitKeys,
+      "Hosted runner smoke result.healthCommonsRuntimeProtocolHitKeys",
+    ),
+    healthCommonsRuntimeSearchHitKeys: readNonEmptyStringArray(
+      record.healthCommonsRuntimeSearchHitKeys,
+      "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys",
+    ),
     murphBin: readNonEmptyString(record.murphBin, "Hosted runner smoke result.murphBin"),
     normalizedTranscriptMatchesExpectedSnippet: readBoolean(
       record.normalizedTranscriptMatchesExpectedSnippet,
@@ -123,6 +153,20 @@ function readBoolean(value: unknown, label: string): boolean {
   }
 
   return value;
+}
+
+function readNonEmptyStringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  if (value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty array.`);
+  }
+
+  return value.map((entry, index) =>
+    readNonEmptyString(entry, `${label}[${index}]`)
+  );
 }
 
 function readNonEmptyString(value: unknown, label: string): string {
