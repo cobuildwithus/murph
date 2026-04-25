@@ -33,6 +33,7 @@ import {
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
+  isHostedLinqIMessageFirstContact,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 export type {
@@ -209,6 +210,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }),
       ingressTypingChatId: summary.chatId,
     };
+  }
+
+  if (!isHostedLinqIMessageFirstContact(messageEvent)) {
+    return buildIgnoredLinqWebhookPlan("non-imessage-first-contact");
   }
 
   const member = existingMember ?? await ensureHostedMemberForPhoneTx({

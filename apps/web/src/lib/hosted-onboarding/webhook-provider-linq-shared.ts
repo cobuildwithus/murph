@@ -38,6 +38,12 @@ export type HostedOnboardingLinqMessageContext = {
   summary: ReturnType<typeof summarizeHostedLinqMessage>;
 };
 
+export function isHostedLinqIMessageFirstContact(
+  event: HostedLinqMessageReceivedEvent,
+): boolean {
+  return normalizeHostedLinqService(event.data.service) === "imessage";
+}
+
 export function resolveHostedOnboardingLinqMessageContext(
   event: HostedLinqWebhookEvent,
 ): HostedOnboardingLinqMessageContext {
@@ -189,4 +195,14 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
     occurredAt: input.occurredAt,
     prisma: input.prisma,
   });
+}
+
+function normalizeHostedLinqService(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  return normalized.length > 0 ? normalized : null;
 }
