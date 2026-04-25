@@ -1,6 +1,8 @@
 import {
   decodeHostedBundleBase64,
-  listHostedBundleArtifacts,
+  HOSTED_BUNDLE_SCHEMA,
+  listHostedBundleArtifacts as listHostedBundleArtifactsNode,
+  type HostedBundleArtifactLocation,
   type HostedExecutionBundleKind,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 import type {
@@ -9,6 +11,15 @@ import type {
 
 export const HOSTED_BUNDLE_ARCHIVE_VALIDATION_ERROR_CODE =
   "bundle_archive_validation_error";
+const MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
+const MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT = 50_000;
+const MAX_HOSTED_BUNDLE_PATH_LENGTH = 4_096;
+const MAX_HOSTED_BUNDLE_ROOT_LENGTH = 256;
+const BASE64_CANONICAL_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
+const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
+const hostedBundleTextDecoder = new TextDecoder();
 
 export type HostedBundleArchiveValidationOperation =
   | "cleanup-authoritative-next"
@@ -70,7 +81,7 @@ export function assertHostedBundleArchiveValid(input: {
   }
 
   try {
-    listHostedBundleArtifacts({
+    listHostedBundleArtifactsNode({
       bytes: input.bytes,
       expectedKind: input.expectedKind,
     });
@@ -115,6 +126,75 @@ export function assertHostedBundlePayloadArchiveValid(input: {
     operation: input.operation,
     ref: input.ref ?? null,
   });
+}
+
+export async function assertHostedBundleArchiveValidAsync(input: {
+  bytes: Uint8Array | ArrayBuffer | null;
+  expectedKind: HostedExecutionBundleKind;
+  operation: HostedBundleArchiveValidationOperation;
+  ref?: HostedExecutionBundleRef | null;
+}): Promise<void> {
+  if (!input.bytes) {
+    return;
+  }
+
+  try {
+    await listHostedBundleArtifactsAsync({
+      bytes: input.bytes,
+      expectedKind: input.expectedKind,
+    });
+  } catch (error) {
+    if (isHostedBundleArchiveValidationFailure(error)) {
+      throw new HostedBundleArchiveValidationError({
+        cause: error,
+        operation: input.operation,
+        ref: input.ref ?? null,
+      });
+    }
+
+    throw error;
+  }
+}
+
+export async function assertHostedBundlePayloadArchiveValidAsync(input: {
+  bundle: string | null;
+  expectedKind: HostedExecutionBundleKind;
+  operation: HostedBundleArchiveValidationOperation;
+  ref?: HostedExecutionBundleRef | null;
+}): Promise<void> {
+  let bytes: Uint8Array | null;
+
+  try {
+    bytes = decodeHostedBundleBase64(input.bundle);
+  } catch (error) {
+    if (isHostedBundleArchiveValidationFailure(error)) {
+      throw new HostedBundleArchiveValidationError({
+        cause: error,
+        operation: input.operation,
+        ref: input.ref ?? null,
+      });
+    }
+
+    throw error;
+  }
+
+  await assertHostedBundleArchiveValidAsync({
+    bytes,
+    expectedKind: input.expectedKind,
+    operation: input.operation,
+    ref: input.ref ?? null,
+  });
+}
+
+export async function listHostedBundleArtifactsAsync(input: {
+  bytes: Uint8Array | ArrayBuffer | null;
+  expectedKind: HostedExecutionBundleKind;
+}): Promise<HostedBundleArtifactLocation[]> {
+  if (!input.bytes) {
+    return [];
+  }
+
+  return parseHostedBundleArchiveForValidation(input.bytes, input.expectedKind);
 }
 
 export function isHostedBundleArchiveValidationError(
@@ -274,4 +354,247 @@ function readHostedBundleValidationMessage(cause: unknown): string {
   }
 
   return "Hosted bundle archive is invalid.";
+}
+
+async function parseHostedBundleArchiveForValidation(
+  bytes: Uint8Array | ArrayBuffer,
+  expectedKind: HostedExecutionBundleKind,
+): Promise<HostedBundleArtifactLocation[]> {
+  const compressed = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes;
+
+  if (compressed.byteLength > MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES} byte compressed size limit.`,
+    );
+  }
+
+  if (typeof DecompressionStream !== "function") {
+    return listHostedBundleArtifactsNode({
+      bytes: compressed,
+      expectedKind,
+    });
+  }
+
+  const uncompressed = await gunzipHostedBundleArchive(compressed);
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = JSON.parse(hostedBundleTextDecoder.decode(uncompressed)) as Record<string, unknown>;
+  } catch {
+    throw new Error("Hosted bundle archive is invalid.");
+  }
+
+  if (parsed.schema !== HOSTED_BUNDLE_SCHEMA || !Array.isArray(parsed.files)) {
+    throw new Error("Hosted bundle archive is invalid.");
+  }
+
+  if (!isHostedExecutionBundleKind(parsed.kind)) {
+    throw new Error("Hosted bundle archive kind is invalid.");
+  }
+
+  if (parsed.kind !== expectedKind) {
+    throw new Error(`Hosted bundle kind mismatch: expected ${expectedKind}, got ${parsed.kind}.`);
+  }
+
+  if (parsed.files.length > MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT} file entry limit.`,
+    );
+  }
+
+  const seen = new Set<string>();
+  const artifacts: HostedBundleArtifactLocation[] = [];
+  for (const file of parsed.files) {
+    const parsedFile = parseHostedBundleArchiveFileForValidation(file);
+    const key = `${parsedFile.root}:${parsedFile.path}`;
+    if (seen.has(key)) {
+      throw new Error("Hosted bundle archive contains duplicate file entries.");
+    }
+    seen.add(key);
+    if (parsedFile.artifact) {
+      artifacts.push({
+        path: parsedFile.path,
+        ref: parsedFile.artifact,
+        root: parsedFile.root,
+      });
+    }
+  }
+
+  return artifacts;
+}
+
+async function gunzipHostedBundleArchive(bytes: Uint8Array): Promise<Uint8Array> {
+  let response: Response;
+  try {
+    const compressedBuffer = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
+    response = new Response(
+      new Blob([compressedBuffer]).stream().pipeThrough(new DecompressionStream("gzip")),
+    );
+  } catch {
+    throw new Error("Hosted bundle archive is invalid.");
+  }
+
+  let uncompressed: Uint8Array;
+  try {
+    uncompressed = new Uint8Array(await response.arrayBuffer());
+  } catch {
+    throw new Error("Hosted bundle archive is invalid.");
+  }
+
+  if (uncompressed.byteLength > MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES} byte uncompressed size limit.`,
+    );
+  }
+
+  return uncompressed;
+}
+
+function parseHostedBundleArchiveFileForValidation(file: unknown): {
+  artifact?: HostedBundleArtifactLocation["ref"];
+  path: string;
+  root: string;
+} {
+  if (!file || typeof file !== "object" || Array.isArray(file)) {
+    throw new Error("Hosted bundle archive contains an invalid file entry.");
+  }
+
+  const record = file as Record<string, unknown>;
+  if (typeof record.path !== "string" || typeof record.root !== "string") {
+    throw new Error("Hosted bundle archive contains an invalid file entry.");
+  }
+
+  const parsed = {
+    path: normalizeHostedBundlePathForValidation(record.path),
+    root: normalizeHostedBundleRootForValidation(record.root),
+  };
+
+  if (typeof record.contentsBase64 === "string") {
+    assertCanonicalBase64ForValidation(
+      record.contentsBase64,
+      "Hosted bundle archive contains invalid inline file contents.",
+    );
+    return parsed;
+  }
+
+  if (record.artifact !== undefined) {
+    return {
+      ...parsed,
+      artifact: parseHostedBundleArtifactRefForValidation(record.artifact),
+    };
+  }
+
+  throw new Error("Hosted bundle archive contains an invalid file entry.");
+}
+
+function normalizeHostedBundlePathForValidation(value: string): string {
+  const candidate = value.replace(/\\/g, "/");
+
+  if (
+    !candidate
+    || candidate.includes("\u0000")
+    || WINDOWS_DRIVE_PREFIX_PATTERN.test(candidate)
+    || candidate.startsWith("/")
+  ) {
+    throw new Error("Hosted bundle path is invalid.");
+  }
+
+  const parts: string[] = [];
+  for (const part of candidate.split("/")) {
+    if (part.length === 0 || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      if (parts.length === 0) {
+        throw new Error("Hosted bundle path is invalid.");
+      }
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+
+  const normalized = parts.join("/");
+  if (!normalized || normalized.length > MAX_HOSTED_BUNDLE_PATH_LENGTH) {
+    throw new Error("Hosted bundle path is invalid.");
+  }
+
+  return normalized;
+}
+
+function normalizeHostedBundleRootForValidation(value: string): string {
+  const normalized = value.trim();
+
+  if (
+    normalized.length === 0
+    || normalized.length > MAX_HOSTED_BUNDLE_ROOT_LENGTH
+    || normalized.includes("\u0000")
+  ) {
+    throw new Error("Hosted bundle root is invalid.");
+  }
+
+  return normalized;
+}
+
+function parseHostedBundleArtifactRefForValidation(
+  value: unknown,
+): HostedBundleArtifactLocation["ref"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Hosted bundle archive contains invalid artifact metadata.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const byteSize = record.byteSize;
+  const sha256 = record.sha256;
+  if (
+    typeof byteSize !== "number"
+    || !Number.isSafeInteger(byteSize)
+    || byteSize < 0
+    || typeof sha256 !== "string"
+    || !SHA256_HEX_PATTERN.test(sha256)
+  ) {
+    throw new Error("Hosted bundle archive contains invalid artifact metadata.");
+  }
+
+  return {
+    byteSize,
+    sha256,
+  };
+}
+
+function assertCanonicalBase64ForValidation(
+  value: string,
+  errorMessage: string,
+): void {
+  if (value.length === 0) {
+    return;
+  }
+
+  if (value.length % 4 !== 0 || !BASE64_CANONICAL_PATTERN.test(value)) {
+    throw new Error(errorMessage);
+  }
+
+  let decoded: string;
+  try {
+    decoded = atob(value);
+  } catch {
+    throw new Error(errorMessage);
+  }
+
+  let encoded = "";
+  const chunkSize = 12_288;
+  for (let offset = 0; offset < decoded.length; offset += chunkSize) {
+    encoded += btoa(decoded.slice(offset, offset + chunkSize));
+  }
+
+  if (encoded !== value) {
+    throw new Error(errorMessage);
+  }
+}
+
+function isHostedExecutionBundleKind(value: unknown): value is HostedExecutionBundleKind {
+  return value === "vault" || value === "vault-sync-import";
 }

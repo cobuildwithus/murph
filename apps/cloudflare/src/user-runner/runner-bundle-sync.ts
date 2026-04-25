@@ -14,7 +14,7 @@ import {
   type R2BucketLike,
 } from "../bundle-store.js";
 import {
-  assertHostedBundleArchiveValid,
+  assertHostedBundleArchiveValidAsync,
   HostedBundleArchiveValidationError,
   isHostedBundleArchiveValidationFailure,
 } from "../hosted-bundle-validation.js";
@@ -57,7 +57,7 @@ export class RunnerBundleSync {
     const currentBundleRef = await this.resolveCurrentBundleRef(currentBundleRefOrVersion);
     const nextBundle = bundle ?? null;
     const nextBundleBytes = decodeHostedBundleBase64(nextBundle);
-    assertHostedBundleArchiveValid({
+    await assertHostedBundleArchiveValidAsync({
       bytes: nextBundleBytes,
       expectedKind: "vault",
       operation: "runner-output",
@@ -123,7 +123,7 @@ async function readRequiredBundleForRunner(input: {
       `Hosted vault bundle ${input.ref.key} is missing from R2.`,
     );
   }
-  assertHostedBundleArchiveValid({
+  await assertHostedBundleArchiveValidAsync({
     bytes,
     expectedKind: "vault",
     operation: "runner-input",
