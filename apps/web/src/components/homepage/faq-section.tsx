@@ -5,7 +5,7 @@ const launchPricingSummary = formatHostedLandingPricingLongSummary();
 const FAQ_ITEMS = [
   [
     "Where do the experiments come from?",
-    "AI analyzes published studies, clinical trials, and peer-reviewed research to build each protocol. Every experiment links to its sources so you can check the evidence yourself.",
+    "AI analyzes published studies, clinical trials, and other research sources to build each protocol. Every experiment links to its sources so you can check the evidence yourself.",
   ],
   [
     "Do I need a computer?",

@@ -168,7 +168,7 @@ function BrowseCard() {
             40+
           </span>
           <span className="text-[0.8125rem] text-[#736a58]">
-            experiments · 6 domains · peer-reviewed
+            experiments · 6 domains
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2">
