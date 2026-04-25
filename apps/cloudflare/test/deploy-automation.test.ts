@@ -333,12 +333,31 @@ describe("hosted deploy automation helpers", () => {
       "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
       "cache-from: type=gha,scope=cloudflare-runner-base",
       "cache-to: type=gha,mode=max,scope=cloudflare-runner-base",
-      "run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base",
+      "name: Run focused Cloudflare checks and smoke runner container image",
+      "pnpm --dir apps/cloudflare verify:parallel &",
+      "pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base &",
+      "name: Run focused Cloudflare checks",
+      "if: ${{ !inputs.deploy_worker }}",
+      "run: pnpm --dir apps/cloudflare verify:parallel",
       "run: pnpm --dir apps/cloudflare deploy:artifacts",
     ]) {
       expect(workflow).toContain(expectedLine);
     }
     expect(workflow).not.toContain("Rebuild deploy artifacts for upload");
+    expect(workflow).not.toContain("name: Smoke runner container image");
+    const prepareArtifactsStepIndex = workflow.indexOf("- name: Prepare deploy artifacts");
+    const prepareRunnerBaseImageStepIndex = workflow.indexOf("- name: Prepare runner base image");
+    const parallelChecksAndSmokeStepIndex = workflow.indexOf(
+      "- name: Run focused Cloudflare checks and smoke runner container image",
+    );
+    const deployWorkerStepIndex = workflow.indexOf("- name: Deploy Worker");
+    expect(prepareArtifactsStepIndex).toBeGreaterThanOrEqual(0);
+    expect(prepareRunnerBaseImageStepIndex).toBeGreaterThanOrEqual(0);
+    expect(parallelChecksAndSmokeStepIndex).toBeGreaterThanOrEqual(0);
+    expect(deployWorkerStepIndex).toBeGreaterThanOrEqual(0);
+    expect(prepareArtifactsStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
+    expect(prepareRunnerBaseImageStepIndex).toBeLessThan(parallelChecksAndSmokeStepIndex);
+    expect(parallelChecksAndSmokeStepIndex).toBeLessThan(deployWorkerStepIndex);
     expect([
       ...workflow.matchAll(/run: pnpm --dir apps\/cloudflare deploy:artifacts/gmu),
     ]).toHaveLength(1);
@@ -351,7 +370,9 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_OPTIONAL_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");
     }
-    expect(workflow).toContain("run: pnpm --dir apps/cloudflare verify:parallel");
+    expect([
+      ...workflow.matchAll(/pnpm --dir apps\/cloudflare verify:parallel/gmu),
+    ]).toHaveLength(2);
     expect(workflow).toContain('echo "- Container max instances: \\`${CF_CONTAINER_MAX_INSTANCES}\\`"');
     expect(workflow).toContain(
       "Native container image: base prepared from \\`Dockerfile.cloudflare-hosted-runner-base\\`; app layer built from \\`Dockerfile.cloudflare-hosted-runner\\` during deploy",
