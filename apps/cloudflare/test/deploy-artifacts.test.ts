@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -20,6 +20,22 @@ import {
   resolveHostedRunnerWorkspacePackageNames,
 } from "../scripts/runner-bundle-contract.js";
 
+const healthCommonsPackageName = "@murphai/health-commons";
+const finnishDrySaunaProtocol = {
+  body: "Finnish Dry Sauna fixture body.",
+  entityType: "protocol_variant",
+  key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  relativePath: "protocols/dry-sauna/murph-finnish-standard-3x-week.md",
+  revision: {
+    pageRevisionId: "sha256:test-page",
+    recipeHash: "sha256:test-recipe",
+    runSpecRevisionId: "sha256:test-run-spec",
+  },
+  schemaVersion: "murph.commons.page.v1",
+  slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
+  title: "Finnish Dry Sauna",
+} as const;
+
 describe("deploy artifact validation", () => {
   it("accepts a complete freshly assembled deploy artifact set", async () => {
     const fixture = await createDeployArtifactFixture();
@@ -37,6 +53,14 @@ describe("deploy artifact validation", () => {
     await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
   });
 
+  it("accepts a Health Commons dependency installed through pnpm's virtual store", async () => {
+    const fixture = await createDeployArtifactFixture({
+      virtualStorePackageName: healthCommonsPackageName,
+    });
+
+    await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
+  });
+
   it("rejects a missing runner workspace dependency", async () => {
     const fixture = await createDeployArtifactFixture();
     const missingPackageName = selectRunnerDependencyPackageName(fixture.workspacePackageNames);
@@ -48,6 +72,98 @@ describe("deploy artifact validation", () => {
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       `Missing runner dependency ${missingPackageName}.`,
+    );
+  });
+
+  it("rejects a runner bundle with a stale Health Commons catalog", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "catalog.json",
+      ),
+      `${JSON.stringify({
+        artifactManifests: [],
+        catalogHash: "sha256:stale",
+        changes: [],
+        entities: [],
+        redirects: [],
+        schemaVersion: "murph.commons.catalog.v1",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons generated catalog is stale or missing Finnish Dry Sauna",
+    );
+  });
+
+  it("rejects a runner bundle missing the Health Commons generated catalog", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await rm(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "catalog.json",
+      ),
+    );
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Missing Health Commons generated catalog.",
+    );
+  });
+
+  it("rejects a runner bundle with a schema-invalid Health Commons catalog", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "catalog.json",
+      ),
+      `${JSON.stringify({
+        catalogHash: "sha256:test",
+        entities: [finnishDrySaunaProtocol],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Runner Health Commons generated catalog is invalid",
+    );
+  });
+
+  it("rejects a runner bundle missing the Health Commons runtime entrypoint", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await rm(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "dist",
+        "runtime.js",
+      ),
+    );
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Missing Health Commons runtime entrypoint.",
     );
   });
 
@@ -90,6 +206,168 @@ describe("deploy artifact validation", () => {
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Prepared runner bundle changed after assembly",
+    );
+  });
+
+  it("does not execute bundled Health Commons runtime code before bundle integrity passes", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const markerPath = path.join(fixture.runnerBundleDir, "runtime-import-marker");
+
+    await writeFile(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "dist",
+        "runtime.js",
+      ),
+      `import { writeFileSync } from "node:fs";
+
+writeFileSync(${JSON.stringify(markerPath)}, "executed");
+
+export function loadGeneratedHealthCommonsCatalog() {
+  return {};
+}
+`,
+      "utf8",
+    );
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Prepared runner bundle changed after assembly",
+    );
+    await expect(access(markerPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects Health Commons package symlink escapes before executing external runtime code", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const externalRoot = await mkdtemp(path.join(os.tmpdir(), "health-commons-symlink-escape-"));
+    const externalPackageDir = path.join(externalRoot, "health-commons");
+    const markerPath = path.join(fixture.runnerBundleDir, "symlink-runtime-import-marker");
+    const packageDir = path.join(
+      fixture.runnerBundleDir,
+      "node_modules",
+      "@murphai",
+      "health-commons",
+    );
+
+    await rm(packageDir, { force: true, recursive: true });
+    await mkdir(path.join(externalPackageDir, "dist"), { recursive: true });
+    await mkdir(path.join(externalPackageDir, "generated"), { recursive: true });
+    await writeFile(
+      path.join(externalPackageDir, "package.json"),
+      `${JSON.stringify({
+        name: healthCommonsPackageName,
+        version: "1.0.0",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(externalPackageDir, "dist", "runtime.js"),
+      `import { writeFileSync } from "node:fs";
+
+writeFileSync(${JSON.stringify(markerPath)}, "executed");
+
+export function loadGeneratedHealthCommonsCatalog() {
+  return {};
+}
+`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(externalPackageDir, "generated", "catalog.json"),
+      `${JSON.stringify({
+        artifactManifests: [],
+        catalogHash: "sha256:test",
+        changes: [],
+        entities: [finnishDrySaunaProtocol],
+        redirects: [],
+        schemaVersion: "murph.commons.catalog.v1",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await symlink(externalPackageDir, packageDir, "dir");
+    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      `Runner dependency ${healthCommonsPackageName} resolves outside the runner bundle.`,
+    );
+    await expect(access(markerPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects Health Commons runtime file symlink escapes before executing external code", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const externalRoot = await mkdtemp(path.join(os.tmpdir(), "health-commons-runtime-escape-"));
+    const externalRuntimePath = path.join(externalRoot, "runtime.js");
+    const markerPath = path.join(fixture.runnerBundleDir, "runtime-symlink-import-marker");
+    const runtimePath = path.join(
+      fixture.runnerBundleDir,
+      "node_modules",
+      "@murphai",
+      "health-commons",
+      "dist",
+      "runtime.js",
+    );
+
+    await writeFile(
+      externalRuntimePath,
+      `import { writeFileSync } from "node:fs";
+
+writeFileSync(${JSON.stringify(markerPath)}, "executed");
+
+export function loadGeneratedHealthCommonsCatalog() {
+  return {};
+}
+`,
+      "utf8",
+    );
+    await rm(runtimePath);
+    await symlink(externalRuntimePath, runtimePath);
+    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Health Commons runtime entrypoint must not be a symlink.",
+    );
+    await expect(access(markerPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("rejects Health Commons catalog file symlink escapes", async () => {
+    const fixture = await createDeployArtifactFixture();
+    const externalRoot = await mkdtemp(path.join(os.tmpdir(), "health-commons-catalog-escape-"));
+    const externalCatalogPath = path.join(externalRoot, "catalog.json");
+    const catalogPath = path.join(
+      fixture.runnerBundleDir,
+      "node_modules",
+      "@murphai",
+      "health-commons",
+      "generated",
+      "catalog.json",
+    );
+
+    await writeFile(
+      externalCatalogPath,
+      `${JSON.stringify({
+        artifactManifests: [],
+        catalogHash: "sha256:test",
+        changes: [],
+        entities: [finnishDrySaunaProtocol],
+        redirects: [],
+        schemaVersion: "murph.commons.catalog.v1",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    await rm(catalogPath);
+    await symlink(externalCatalogPath, catalogPath);
+    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Health Commons generated catalog must not be a symlink.",
     );
   });
 
@@ -306,6 +584,64 @@ async function writeWorkspacePackageManifest(packageDir: string, packageName: st
     }, null, 2)}\n`,
     "utf8",
   );
+
+  if (packageName === healthCommonsPackageName) {
+    await mkdir(path.join(packageDir, "dist"), { recursive: true });
+    await mkdir(path.join(packageDir, "generated"), { recursive: true });
+    await writeFile(
+      path.join(packageDir, "dist", "runtime.js"),
+      `import { readFileSync } from "node:fs";
+
+export function loadGeneratedHealthCommonsCatalog(options = {}) {
+  const catalog = JSON.parse(readFileSync(options.catalogPath, "utf8"));
+
+  if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
+    throw new Error("Invalid Health Commons catalog.");
+  }
+
+  if (
+    catalog.schemaVersion !== "murph.commons.catalog.v1" ||
+    typeof catalog.catalogHash !== "string" ||
+    !catalog.catalogHash.startsWith("sha256:") ||
+    !Array.isArray(catalog.entities) ||
+    !Array.isArray(catalog.redirects) ||
+    !Array.isArray(catalog.changes) ||
+    !Array.isArray(catalog.artifactManifests)
+  ) {
+    throw new Error("Invalid Health Commons catalog.");
+  }
+
+  for (const entity of catalog.entities) {
+    if (
+      !entity ||
+      typeof entity !== "object" ||
+      typeof entity.body !== "string" ||
+      typeof entity.relativePath !== "string" ||
+      !entity.revision ||
+      typeof entity.revision !== "object"
+    ) {
+      throw new Error("Invalid Health Commons catalog entity.");
+    }
+  }
+
+  return catalog;
+}
+`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(packageDir, "generated", "catalog.json"),
+      `${JSON.stringify({
+        artifactManifests: [],
+        catalogHash: "sha256:test",
+        changes: [],
+        entities: [finnishDrySaunaProtocol],
+        redirects: [],
+        schemaVersion: "murph.commons.catalog.v1",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+  }
 }
 
 function selectRunnerDependencyPackageName(packageNames: readonly string[]): string {
