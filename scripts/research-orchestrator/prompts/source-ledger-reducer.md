@@ -6,17 +6,22 @@ Inputs:
 - All SOURCE_CANDIDATES_V1 outputs from: {{DISCOVERY_OUTPUTS_SOURCE}}
 - Protocol charter from: {{CHARTER_SOURCE}}
 - Existing source page inventory from: {{EXISTING_SOURCE_PAGE_INVENTORY_SOURCE}}
+- Generated source index from `packages/health-commons/generated/source-index.json`
 
 Goal:
-Create one deduped source ledger and split it into extraction batches of no more than 40 records each.
+Create one deduped source ledger and split it into extraction batches of no more than 40 records each. Every candidate must resolve through the generated source index before any fetch, extraction, or new source-page assignment.
 
 Dedupe rules:
-1. Same PMID wins over duplicate DOI or title rows.
-2. Same DOI without PMID becomes one DOI source.
-3. Same PMCID without PMID or DOI becomes one PMCID source.
-4. Same trial registration plus publication should be linked but not blindly merged.
-5. Reviews and the individual trials inside them remain separate records.
-6. External protocol or web sources should be dated by publication or snapshot date.
+1. Normalize PMID, DOI, PMCID, registry ID, canonical URL, and title hash. Use 64-character lowercase hex for `titleHash`.
+2. Check `source-index.json.identityLookup` first.
+3. If a lookup has one `canonicalSourceKey`, reuse that source key and its existing artifact/finding state.
+4. If `canonicalSourceKey` is null or multiple `sourceKeys` match, mark the candidate ambiguous and require explicit canonicalization before extraction.
+5. Same PMID wins over duplicate DOI or title rows.
+6. Same DOI without PMID becomes one DOI source.
+7. Same PMCID without PMID or DOI becomes one PMCID source.
+8. Same trial registration plus publication should be linked but not blindly merged.
+9. Reviews and the individual trials inside them remain separate records.
+10. External protocol or web sources should be dated by publication or snapshot date.
 
 Output:
 
@@ -32,15 +37,19 @@ Return JSON named CANONICAL_SOURCE_LEDGER_V1:
       "sourceKey": "source_artifact:...",
       "relativePath": "sources/{{FAMILY_SLUG}}/....md",
       "title": "...",
-      "canonicalIdBasis": "pmid | doi | pmcid | url | manual",
+      "canonicalIdBasis": "pmid | doi | pmcid | registry_id | title_hash | url",
       "doi": null,
       "pmid": null,
       "pmcid": null,
+      "registryId": null,
+      "titleHash": null,
       "url": "...",
+      "canonicalSourceKey": null,
+      "identityResolutionStatus": "existing_source | new_source | ambiguous",
       "sourceKind": "...",
       "studyDesign": "...",
       "evidenceBucket": "...",
-      "directness": "direct_protocol | same_mechanism | adjacent_variant | clinical_supervised | safety_boundary | background",
+      "directness": "direct_protocol | same_mechanism | clinical_supervised | adjacent_variant | measurement_context | general_guideline",
       "claimUse": "supports-protocol | safety-only | context-only | do-not-use",
       "priority": "backbone | high | medium | low | exclude",
       "needsSourcePage": true,

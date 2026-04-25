@@ -8,8 +8,10 @@ Section:
 
 Allowed source material:
 - CANONICAL_SOURCE_LEDGER_V1 from: {{CANONICAL_LEDGER_SOURCE}}
-- ATOMIC_FINDINGS_V1 outputs from: {{ATOMIC_FINDINGS_SOURCE}}
+- SOURCE_FINDINGS_V1 outputs from: {{ATOMIC_FINDINGS_SOURCE}}
+- EVIDENCE_APPRAISALS_V1 outputs from: {{ATOMIC_FINDINGS_SOURCE}}
 - Draft source pages from extraction batches at: {{SOURCE_PAGE_DRAFTS_SOURCE}}
+- Generated source index at packages/health-commons/generated/source-index.json
 - Existing Health Commons schema and page patterns
 
 Goal:
@@ -48,6 +50,8 @@ Return any group that belongs in researchLandscape.groups:
 - sourceKeys
 - defaultOpen
 
+Any researchLandscape group that lists sourceKeys must be backed by matching EVIDENCE_APPRAISALS_V1 records with the same target protocol, groupId, and sourceKey.
+
 ## Human-readable copy
 Draft concise copy for the protocol page:
 - what this means
@@ -63,5 +67,6 @@ List missing sources or missing extraction details that block confident synthesi
 
 Rules:
 - Every claim must cite source keys.
+- Prefer source-owned finding IDs plus appraisal keys for traceability when proposing claims.
 - Do not introduce new claims from memory.
 - Do not overrule extraction classifications unless you explain exactly why.

@@ -8,6 +8,8 @@ Inputs:
 - All source page drafts from: {{SOURCE_PAGE_DRAFTS_SOURCE}}
 - Section synthesis outputs from: {{SECTION_SYNTHESIS_SOURCE}}
 - Artifact candidates from: {{ARTIFACT_CANDIDATES_SOURCE}}
+- SOURCE_FINDINGS_V1 and EVIDENCE_APPRAISALS_V1 outputs from extraction
+- Generated source index: packages/health-commons/generated/source-index.json
 - Existing Health Commons examples
 
 Goal:
@@ -18,9 +20,10 @@ Files to draft:
 2. packages/health-commons/content/protocols/{{FAMILY_SLUG}}/{{PROTOCOL_SLUG}}.md
 3. packages/health-commons/content/sources/{{FAMILY_SLUG}}/*.md
 4. packages/health-commons/content/artifacts/{{FAMILY_SLUG}}/research-artifacts.json
-5. redirects or disambiguation page updates, if needed
-6. missing biomarker pages only if genuinely absent and necessary
-7. experimentOnboarding block if this protocol is intended to power Murph experiment creation
+5. packages/health-commons/content/evidence-appraisals/source-protocol-evidence/{{FAMILY_SLUG}}.jsonl
+6. redirects or disambiguation page updates, if needed
+7. missing biomarker pages only if genuinely absent and necessary
+8. experimentOnboarding block if this protocol is intended to power Murph experiment creation
 
 Protocol page requirements:
 - one-sentence summary
@@ -28,7 +31,7 @@ Protocol page requirements:
 - categories
 - parent family relation
 - biomarker relations
-- cites relations
+- minimal foundational relations; claims, researchLandscape groups, and evidence appraisal edges carry source references
 - lineage
 - attribution
 - protocol block:
@@ -66,6 +69,9 @@ List all source pages and whether each is:
 - update existing
 - skip or already present
 
+## Evidence appraisals
+Complete JSONL records for standalone protocol-specific appraisal edges.
+
 ## Artifact manifest
 Complete JSON draft with rights-safe defaults.
 
@@ -74,6 +80,8 @@ List tempting claims that should not be made.
 
 Rules:
 - No claim without source keys.
+- Do not emit `protocolEvidence`; write standalone evidence-appraisal records for protocol-specific interpretation.
+- Reuse existing sourceKeys from the generated source index instead of creating duplicate source pages.
 - Keep external named protocols separate from Murph canonical protocols.
 - Keep adjacent variants separate or clearly labeled.
 - Make the steps human-actionable, not metadata repeated in prose.

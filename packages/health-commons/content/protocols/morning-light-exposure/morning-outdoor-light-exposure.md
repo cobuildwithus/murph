@@ -725,113 +725,113 @@ claims:
       - Clinical light therapy can involve different timing, intensity, devices, monitoring, populations, and risk controls.
       - People already using a clinician-guided light plan should not replace it with this page.
 researchLandscape:
-  bottomLine: The landing evidence is useful but bounded: the closest direct evidence is small and older-adult/institutional, broader adult evidence is mostly observational, and safety boundaries come largely from adjacent bright-light, UV, eye, mood, and heat literature.
-  confidenceLabel: limited
-  primaryClaim: A repeatable outdoor morning-light habit is a plausible low-burden self-experiment for subjective sleep quality, sleep timing, morning alertness, and tolerability, not a proven treatment or a guaranteed wearable-sleep-stage intervention.
-  mainCaveat: Direct outdoor morning-light trials are sparse; indoor light, light boxes, dawn simulators, clinical light therapy, and bundled walking/exercise routines should not be pooled into the default outdoor protocol claim.
+  bottomLine: "The landing evidence is useful but bounded: the closest direct evidence is small and older-adult/institutional, broader adult evidence is mostly observational, and safety boundaries come largely from adjacent bright-light, UV, eye, mood, and heat literature."
+  confidenceLabel: "limited"
+  primaryClaim: "A repeatable outdoor morning-light habit is a plausible low-burden self-experiment for subjective sleep quality, sleep timing, morning alertness, and tolerability, not a proven treatment or a guaranteed wearable-sleep-stage intervention."
+  mainCaveat: "Direct outdoor morning-light trials are sparse; indoor light, light boxes, dawn simulators, clinical light therapy, and bundled walking/exercise routines should not be pooled into the default outdoor protocol claim."
   groups:
     -
-      id: direct-outdoor-natural-light
-      label: Direct outdoor or natural-light protocols
-      stance: supports
-      summary: Closest direct sources prescribe morning sunlight or outdoor natural light and report subjective sleep-quality improvements, but they are short, small, and mostly older-adult or institutional.
+      id: "direct-outdoor-natural-light"
+      label: "Direct outdoor or natural-light protocols"
+      stance: "supports"
+      summary: "Closest direct sources prescribe morning sunlight or outdoor natural light and report subjective sleep-quality improvements, but they are short, small, and mostly older-adult or institutional."
       sourceKeys:
-        - source_artifact:pmid-28786887
-        - source_artifact:doi-10.31086-tjgeri.2020.147
-        - source_artifact:pmid-19560724
+        - "source_artifact:doi-10.31086-tjgeri.2020.147"
+        - "source_artifact:pmid-19560724"
+        - "source_artifact:pmid-28786887"
       defaultOpen: true
     -
-      id: free-living-adult-context
-      label: Free-living adult timing and outdoor-light context
-      stance: mixed
-      summary: Adult survey, diary, UK Biobank, and measured outdoor-light studies make the habit plausible and help with timing, but they are mostly observational and endpoint-specific.
+      id: "free-living-adult-context"
+      label: "Free-living adult timing and outdoor-light context"
+      stance: "mixed"
+      summary: "Adult survey, diary, UK Biobank, and measured outdoor-light studies make the habit plausible and help with timing, but they are mostly observational and endpoint-specific."
       sourceKeys:
-        - source_artifact:pmid-41053799
-        - source_artifact:pmid-39077837
-        - source_artifact:pmid-41426466
-        - source_artifact:pmid-34488088
-        - source_artifact:pmid-37812713
+        - "source_artifact:pmid-34488088"
+        - "source_artifact:pmid-37812713"
+        - "source_artifact:pmid-39077837"
+        - "source_artifact:pmid-41053799"
+        - "source_artifact:pmid-41426466"
       defaultOpen: true
     -
-      id: dose-measurement-implementation
-      label: Dose, timing, and measurement implementation
-      stance: context_only
-      summary: These sources support logging timing, duration, season, weather, setting, indoor/outdoor status, and evening light instead of pretending there is a universal lux or minute threshold.
+      id: "dose-measurement-implementation"
+      label: "Dose, timing, and measurement implementation"
+      stance: "context_only"
+      summary: "These sources support logging timing, duration, season, weather, setting, indoor/outdoor status, and evening light instead of pretending there is a universal lux or minute threshold."
       sourceKeys:
-        - source_artifact:pmid-35298459
-        - source_artifact:doi-10.25039-ps.b2twa77g
-        - source_artifact:doi-10.25039-s026.2018
-        - source_artifact:doi-10.1016-j.buildenv.2025.112771
-        - source_artifact:pmid-32248548
-        - source_artifact:pmid-8639941
-        - source_artifact:pmid-29056090
+        - "source_artifact:doi-10.1016-j.buildenv.2025.112771"
+        - "source_artifact:doi-10.25039-ps.b2twa77g"
+        - "source_artifact:doi-10.25039-s026.2018"
+        - "source_artifact:pmid-29056090"
+        - "source_artifact:pmid-32248548"
+        - "source_artifact:pmid-35298459"
+        - "source_artifact:pmid-8639941"
     -
-      id: outcomes-and-wearable-interpretation
-      label: Outcomes and wearable interpretation
-      stance: mixed
-      summary: Self-reported sleep quality and timing are the cleanest endpoints. Actigraphy, wearable sleep, alertness, and lab circadian markers are useful but secondary, indirect, or research-only.
+      id: "outcomes-and-wearable-interpretation"
+      label: "Outcomes and wearable interpretation"
+      stance: "mixed"
+      summary: "Self-reported sleep quality and timing are the cleanest endpoints. Actigraphy, wearable sleep, alertness, and lab circadian markers are useful but secondary, indirect, or research-only."
       sourceKeys:
-        - source_artifact:pmid-28786887
-        - source_artifact:doi-10.31086-tjgeri.2020.147
-        - source_artifact:pmid-19560724
-        - source_artifact:pmid-41053799
-        - source_artifact:pmid-39077837
-        - source_artifact:pmid-34420891
-        - source_artifact:pmid-37374270
-        - source_artifact:pmid-19187411
+        - "source_artifact:doi-10.31086-tjgeri.2020.147"
+        - "source_artifact:pmid-19187411"
+        - "source_artifact:pmid-19560724"
+        - "source_artifact:pmid-28786887"
+        - "source_artifact:pmid-34420891"
+        - "source_artifact:pmid-37374270"
+        - "source_artifact:pmid-39077837"
+        - "source_artifact:pmid-41053799"
     -
-      id: adjacent-light-variants
-      label: Adjacent light variants
-      stance: context_only
-      summary: Indoor daylight, workplace/classroom lighting, light boxes, dawn simulators, SAD/depression protocols, and bundled light-plus-activity routines belong in separate variants or context buckets.
+      id: "adjacent-light-variants"
+      label: "Adjacent light variants"
+      stance: "context_only"
+      summary: "Indoor daylight, workplace/classroom lighting, light boxes, dawn simulators, SAD/depression protocols, and bundled light-plus-activity routines belong in separate variants or context buckets."
       sourceKeys:
-        - source_artifact:pmid-34639284
-        - source_artifact:pmid-18815716
-        - source_artifact:pmid-19187411
-        - source_artifact:pmid-14577838
-        - source_artifact:pmid-21797835
-        - source_artifact:pmid-32303523
-        - source_artifact:pmid-41065723
+        - "source_artifact:pmid-14577838"
+        - "source_artifact:pmid-18815716"
+        - "source_artifact:pmid-19187411"
+        - "source_artifact:pmid-21797835"
+        - "source_artifact:pmid-32303523"
+        - "source_artifact:pmid-34639284"
+        - "source_artifact:pmid-41065723"
     -
-      id: population-modifiers
-      label: Population and setting modifiers
-      stance: context_only
-      summary: Older-adult, adolescent, athlete, delayed-sleep-phase, shift-work, high-latitude, and travel/jet-lag evidence changes boundaries and logging; it does not define one universal morning-light rule.
+      id: "population-modifiers"
+      label: "Population and setting modifiers"
+      stance: "context_only"
+      summary: "Older-adult, adolescent, athlete, delayed-sleep-phase, shift-work, high-latitude, and travel/jet-lag evidence changes boundaries and logging; it does not define one universal morning-light rule."
       sourceKeys:
-        - source_artifact:pmid-28786887
-        - source_artifact:doi-10.31086-tjgeri.2020.147
-        - source_artifact:pmid-19560724
-        - source_artifact:pmid-41053799
-        - source_artifact:pmid-39077837
-        - source_artifact:pmid-34488088
-        - source_artifact:pmid-22390242
-        - source_artifact:pmid-26825618
-        - source_artifact:pmid-27964860
-        - source_artifact:pmid-30423177
-        - source_artifact:pmid-39219616
-        - source_artifact:pmid-39959124
-        - source_artifact:pmid-23910656
-        - source_artifact:pmid-28162893
+        - "source_artifact:doi-10.31086-tjgeri.2020.147"
+        - "source_artifact:pmid-19560724"
+        - "source_artifact:pmid-22390242"
+        - "source_artifact:pmid-23910656"
+        - "source_artifact:pmid-26825618"
+        - "source_artifact:pmid-27964860"
+        - "source_artifact:pmid-28162893"
+        - "source_artifact:pmid-28786887"
+        - "source_artifact:pmid-30423177"
+        - "source_artifact:pmid-34488088"
+        - "source_artifact:pmid-39077837"
+        - "source_artifact:pmid-39219616"
+        - "source_artifact:pmid-39959124"
+        - "source_artifact:pmid-41053799"
     -
-      id: safety-boundaries
-      label: Safety boundaries
-      stance: safety_boundary
-      summary: Direct outdoor harms reporting is sparse, so safety copy leans on adjacent bright-light therapy, bipolar/mood activation, migraine/photophobia, ocular/UV, photosensitivity-medication, and heat guidance.
+      id: "safety-boundaries"
+      label: "Safety boundaries"
+      stance: "safety_boundary"
+      summary: "Direct outdoor harms reporting is sparse, so safety copy leans on adjacent bright-light therapy, bipolar/mood activation, migraine/photophobia, ocular/UV, photosensitivity-medication, and heat guidance."
       sourceKeys:
-        - source_artifact:pmid-28786887
-        - source_artifact:clinicaltrials-gov-nct04712968-2021-09-01
-        - source_artifact:pmid-28891192
-        - source_artifact:pmid-29348073
-        - source_artifact:pmid-40705857
-        - source_artifact:pmid-10584776
-        - source_artifact:pmid-9464216
-        - source_artifact:pmid-30058044
-        - source_artifact:pmid-30888626
-        - source_artifact:pmid-34451820
-        - source_artifact:who-ultraviolet-radiation-2022-06-21
-        - source_artifact:who-global-solar-uv-index-2002-06-13
-        - source_artifact:cdc-protect-yourself-from-extreme-heat-2024-06-25
-        - source_artifact:aao-eye-damage-from-uv-light-2024-07-11
+        - "source_artifact:aao-eye-damage-from-uv-light-2024-07-11"
+        - "source_artifact:cdc-protect-yourself-from-extreme-heat-2024-06-25"
+        - "source_artifact:clinicaltrials-gov-nct04712968-2021-09-01"
+        - "source_artifact:pmid-10584776"
+        - "source_artifact:pmid-28786887"
+        - "source_artifact:pmid-28891192"
+        - "source_artifact:pmid-29348073"
+        - "source_artifact:pmid-30058044"
+        - "source_artifact:pmid-30888626"
+        - "source_artifact:pmid-34451820"
+        - "source_artifact:pmid-40705857"
+        - "source_artifact:pmid-9464216"
+        - "source_artifact:who-global-solar-uv-index-2002-06-13"
+        - "source_artifact:who-ultraviolet-radiation-2022-06-21"
       defaultOpen: true
 safety:
   cautionLevel: moderate

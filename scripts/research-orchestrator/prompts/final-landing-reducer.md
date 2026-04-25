@@ -16,13 +16,15 @@ Output:
 2. Final unified diff
 3. Final artifact manifest JSON
 4. Final source ledger JSON
-5. Final verification checklist
-6. Remaining non-blocking follow-ups
+5. Final evidence-appraisal JSONL records
+6. Final verification checklist
+7. Remaining non-blocking follow-ups
 
 Rules:
 - Apply all blocker fixes.
 - Do not add new unsupported claims while fixing text.
-- Keep all extraction batches traceable through source keys and finding IDs.
+- Keep all extraction batches traceable through source keys, finding IDs, and appraisal keys.
+- Do not reintroduce `protocolEvidence` or duplicate source pages while applying blocker fixes.
 - Preserve the <=40-source-per-extraction-run guarantee in the work log.
 - Include verification commands:
   - pnpm --filter @murphai/health-commons generate

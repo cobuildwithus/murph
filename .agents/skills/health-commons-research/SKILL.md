@@ -208,8 +208,18 @@ Generate one extraction command per batch and fan them out.
 Extraction completion targets per batch:
 
 - source page drafts
-- `ATOMIC_FINDINGS_V1`
+- `SOURCE_FINDINGS_V1`
+- `EVIDENCE_APPRAISALS_V1`
 - `ARTIFACT_CANDIDATES_V1`
+
+Before fetching or assigning a new source page, resolve each source through
+`packages/health-commons/generated/source-index.json`. Reuse an unambiguous
+`identityLookup[].canonicalSourceKey`; stop for explicit canonicalization when
+the lookup is ambiguous.
+
+Source findings are owned by the source artifact page via `sourceFindings`.
+Protocol-specific appraisal belongs in standalone `evidence_appraisal` records,
+not source page frontmatter.
 
 Normalize downloaded outputs under `downloads/<label>/normalized/` if the thread returns multiple copies or mixed naming.
 
@@ -219,7 +229,8 @@ Synthesize from:
 
 - charter
 - canonical source ledger
-- all extraction findings
+- source-owned extraction findings
+- standalone evidence appraisal records
 - source page drafts
 
 Expected section seams usually include:
@@ -243,6 +254,7 @@ Build the landing-ready package:
 - family page
 - protocol page
 - source pages
+- standalone evidence appraisal records
 - artifact manifest
 - redirects or disambiguation if needed
 - missing biomarker pages only when actually required
@@ -264,6 +276,7 @@ The final reducer should consolidate the builder plus QA outputs into the final 
 - file manifest
 - final page drafts
 - source page create/update/skip decisions
+- evidence appraisal create/update/skip decisions
 - artifact manifest
 - non-claims
 

@@ -711,90 +711,357 @@ claims:
       - source_artifact:pmid-40253006
 researchLandscape:
   bottomLine: "Whole-body red and near-infrared photobiomodulation is plausible enough for a careful measurement-first field test, but the direct evidence for this exact general variant is still limited, adjacent, device-specific, and parameter-sensitive."
-  confidenceLabel: limited
+  confidenceLabel: "limited"
   primaryClaim: "A cautious, explicitly logged whole-body red/NIR routine can support a gated measurement-first field test, not a validated sleep or recovery intervention."
   mainCaveat: "Much of the stronger or more positive literature belongs to sibling variants, adjacent modalities, or narrow populations rather than to a general healthy-adult whole-body protocol."
   groups:
     -
-      id: family-definition-and-boundaries
-      label: Family definition and boundaries
-      stance: context_only
+      id: "family-definition-and-boundaries"
+      label: "Family definition and boundaries"
+      stance: "context_only"
       summary: "Whole-body photobiomodulation should stay separate from localized PBM, red-light glasses, bright-light therapy, infrared sauna, and UV-tanning protocols."
       sourceKeys:
-        - source_artifact:pmid-40253006
-        - source_artifact:pmid-36927734
-        - source_artifact:pmid-37002704
-        - source_artifact:pmid-19602651
-        - source_artifact:iarc-sunbeds-uv-radiation-2009-07-29
+        - "source_artifact:iarc-sunbeds-uv-radiation-2009-07-29"
+        - "source_artifact:pmid-19602651"
+        - "source_artifact:pmid-36927734"
+        - "source_artifact:pmid-37002704"
+        - "source_artifact:pmid-40253006"
     -
-      id: direct-sleep-and-wellbeing-evidence
-      label: Direct sleep and wellbeing evidence
-      stance: mixed
+      id: "direct-sleep-and-wellbeing-evidence"
+      label: "Direct sleep and wellbeing evidence"
+      stance: "mixed"
       summary: "Direct whole-body sleep evidence is sparse; the closest controlled wellness trial is adjacent partial-body and null for sleep or circadian benefit, while direct whole-body sleep registries mostly contribute implementation context. The acute women-only metabolic crossover is direct whole-body exposure, but it should stay as metabolic context rather than sleep-efficacy evidence."
       sourceKeys:
-        - source_artifact:pmid-36671752
-        - source_artifact:clinicaltrials-gov-nct05116605-2026-04-23
-        - source_artifact:clinicaltrials-gov-nct05963555-2026-04-23
-        - source_artifact:pmid-41228430
+        - "source_artifact:clinicaltrials-gov-nct05116605-2026-04-23"
+        - "source_artifact:clinicaltrials-gov-nct05963555-2026-04-23"
+        - "source_artifact:pmid-36671752"
+        - "source_artifact:pmid-41228430"
     -
-      id: dose-and-implementation
-      label: Dose and implementation
-      stance: context_only
+      id: "dose-and-implementation"
+      label: "Dose and implementation"
+      stance: "context_only"
       summary: "Several extracted whole-body implementations use 12- to 20-minute sessions and 2–3 or 3 sessions per week, but these are device- and population-specific examples rather than a standardized dose; parameter standardization is poor and explicit dose logging matters."
       sourceKeys:
-        - source_artifact:pmid-40253006
-        - source_artifact:pmid-30550048
-        - source_artifact:pmid-30044464
-        - source_artifact:clinicaltrials-gov-nct05116605-2026-04-23
-        - source_artifact:clinicaltrials-gov-nct05963555-2026-04-23
-        - source_artifact:pmid-41228430
-        - source_artifact:pmid-37018063
-        - source_artifact:pmid-35222905
+        - "source_artifact:clinicaltrials-gov-nct05116605-2026-04-23"
+        - "source_artifact:clinicaltrials-gov-nct05963555-2026-04-23"
+        - "source_artifact:pmid-30044464"
+        - "source_artifact:pmid-30550048"
+        - "source_artifact:pmid-35222905"
+        - "source_artifact:pmid-37018063"
+        - "source_artifact:pmid-40253006"
+        - "source_artifact:pmid-41228430"
     -
-      id: sibling-variant-literatures
-      label: Sibling variant literatures
-      stance: context_only
+      id: "sibling-variant-literatures"
+      label: "Sibling variant literatures"
+      stance: "context_only"
       summary: "Athlete and exercise-timed recovery literature is mixed and includes null or trade-off signals, while fibromyalgia, chronic-pain, and cosmetic large-area PBM literatures are condition- or endpoint-specific and should remain separate from the general Murph variant."
       sourceKeys:
-        - source_artifact:pmid-39883205
-        - source_artifact:pmid-33345040
-        - source_artifact:pmid-37099210
-        - source_artifact:pmid-36006085
-        - source_artifact:pmid-36369323
-        - source_artifact:pmid-38356644
-        - source_artifact:pmid-35222905
-        - source_artifact:doi-10.1101-2023.03.03.23286452
-        - source_artifact:pmid-41710353
-        - source_artifact:pmid-37753995
-        - source_artifact:pmid-24286286
+        - "source_artifact:doi-10.1101-2023.03.03.23286452"
+        - "source_artifact:pmid-24286286"
+        - "source_artifact:pmid-33345040"
+        - "source_artifact:pmid-35222905"
+        - "source_artifact:pmid-36006085"
+        - "source_artifact:pmid-36369323"
+        - "source_artifact:pmid-37099210"
+        - "source_artifact:pmid-37753995"
+        - "source_artifact:pmid-38356644"
+        - "source_artifact:pmid-39883205"
+        - "source_artifact:pmid-41710353"
     -
-      id: safety-and-screening-boundaries
-      label: Safety and screening boundaries
-      stance: safety_boundary
+      id: "safety-and-screening-boundaries"
+      label: "Safety and screening boundaries"
+      stance: "safety_boundary"
       summary: "Eye safety, high-local-dose skin reactions, photosensitizing and healing-risk medications, oncology context, thyroid and skin-boundary exclusions, and registry exclusion patterns for pregnancy or lactation, seizure risk, pacemakers or implanted devices, unstable cardiovascular, metabolic, neurologic, pulmonary, or psychiatric disease all argue for stronger screening than the internet red-light narrative usually uses."
       sourceKeys:
-        - source_artifact:pmid-31483941
-        - source_artifact:pmid-39672511
-        - source_artifact:pmid-38180093
-        - source_artifact:pmid-39335685
-        - source_artifact:pmid-28891192
-        - source_artifact:bmla-drugs-and-lasers-ipls-2018-11-30
-        - source_artifact:pmid-34021422
-        - source_artifact:pmid-36110957
-        - source_artifact:pmid-31109692
-        - source_artifact:pmid-33107198
-        - source_artifact:pmid-29466089
-        - source_artifact:clinicaltrials-gov-nct05116605-2026-04-23
-        - source_artifact:clinicaltrials-gov-nct06678698-2026-04-23
-        - source_artifact:clinicaltrials-gov-nct07047248-2026-04-23
-        - source_artifact:clinicaltrials-gov-nct07271927-2026-04-23
-        - source_artifact:ensaiosclinicos-rbr-8v7rsdp-2026-04-23
-        - source_artifact:ensaiosclinicos-rbr-9vcph8x-2026-04-23
-        - source_artifact:clinicaltrials-gov-nct06866522-2026-04-23
-        - source_artifact:pmid-34451820
-        - source_artifact:pmid-24590242
-        - source_artifact:pmid-33921839
-        - source_artifact:pmid-39319750
+        - "source_artifact:bmla-drugs-and-lasers-ipls-2018-11-30"
+        - "source_artifact:clinicaltrials-gov-nct05116605-2026-04-23"
+        - "source_artifact:clinicaltrials-gov-nct06678698-2026-04-23"
+        - "source_artifact:clinicaltrials-gov-nct06866522-2026-04-23"
+        - "source_artifact:clinicaltrials-gov-nct07047248-2026-04-23"
+        - "source_artifact:clinicaltrials-gov-nct07271927-2026-04-23"
+        - "source_artifact:ensaiosclinicos-rbr-8v7rsdp-2026-04-23"
+        - "source_artifact:ensaiosclinicos-rbr-9vcph8x-2026-04-23"
+        - "source_artifact:pmid-24590242"
+        - "source_artifact:pmid-28891192"
+        - "source_artifact:pmid-29466089"
+        - "source_artifact:pmid-31109692"
+        - "source_artifact:pmid-31483941"
+        - "source_artifact:pmid-33107198"
+        - "source_artifact:pmid-33921839"
+        - "source_artifact:pmid-34021422"
+        - "source_artifact:pmid-34451820"
+        - "source_artifact:pmid-36110957"
+        - "source_artifact:pmid-38180093"
+        - "source_artifact:pmid-39319750"
+        - "source_artifact:pmid-39335685"
+        - "source_artifact:pmid-39672511"
+    -
+      id: "590nm-photoaging-cohort"
+      label: "590nm Photoaging Cohort"
+      stance: "context_only"
+      summary: "An early 590 nm full-panel facial photomodulation cohort reported photoaging improvement in 90% of participants with no side effects noted. The 590nm Photoaging Cohort group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15624743"
+    -
+      id: "590nm-photoaging-trial"
+      label: "590nm Photoaging Trial"
+      stance: "context_only"
+      summary: "Eight 590 nm full-face LED treatments were associated with clinical, profilometric, and histologic photoaging improvements. The 590nm Photoaging Trial group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-15654716"
+    -
+      id: "633-830-facial-single-arm"
+      label: "633 830 Facial Single Arm"
+      stance: "context_only"
+      summary: "Combined 633 nm and 830 nm facial LED therapy improved wrinkle-related profilometry and patient-reported softness in a small single-arm study. The 633 830 Facial Single Arm group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-16414908"
+    -
+      id: "633-830-photoaged-skin"
+      label: "633 830 Photoaged Skin"
+      stance: "context_only"
+      summary: "Nine combined 633/830 nm facial LED treatments were associated with wrinkle improvement and thicker collagen fibers on electron microscopy. The 633 830 Photoaged Skin group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-16989189"
+    -
+      id: "660nm-frequency-facial-rct"
+      label: "660nm Frequency Facial RCT"
+      stance: "context_only"
+      summary: "A facial rejuvenation frequency trial found null photographic wrinkle-score differences but positive ImageJ and satisfaction signals, with no clear gain from the higher session frequency. The 660nm Frequency Facial RCT group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-40167796"
+    -
+      id: "acute-agility-preliminary"
+      label: "Acute Agility Preliminary"
+      stance: "mixed"
+      summary: "Acute whole-body PBM did not outperform placebo on the Illinois Agility Test in a preliminary trained-participant crossover study. The Acute Agility Preliminary group currently links one appraisal-backed source with adjacent variant scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.1016-j.bjpt.2024.100751"
+    -
+      id: "bright-light-therapy-boundary"
+      label: "Bright Light Therapy Boundary"
+      stance: "context_only"
+      summary: "Bright-light therapy showed modest antidepressant benefit in seasonal affective disorder, but this is bright-light psychiatry evidence rather than whole-body PBM evidence. The Bright Light Therapy Boundary group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31574513"
+    -
+      id: "chronic-pain-feasibility-protocol"
+      label: "Chronic Pain Feasibility Protocol"
+      stance: "context_only"
+      summary: "Protocol outlines a supervised NHS whole-body NovoTHOR feasibility pathway for chronic pain, but no efficacy results are reported. The Chronic Pain Feasibility Protocol group currently links one appraisal-backed source with clinical supervised scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-35768101"
+    -
+      id: "chronic-pain-nihr-registry"
+      label: "Chronic Pain Nihr Registry"
+      stance: "context_only"
+      summary: "NIHR listing confirms a UK whole-body PBM chronic-pain study, but it does not contribute extracted outcome results. The Chronic Pain Nihr Registry group currently links one appraisal-backed source with clinical supervised scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:nihr-whole-body-photobiomodulation-chronic-pain-nct05069363-2022-06-26"
+    -
+      id: "clinical-psychiatric-pbm-boundary"
+      label: "Clinical Psychiatric PBM Boundary"
+      stance: "context_only"
+      summary: "The review describes preliminary antidepressant and mechanistic signals for transcranial or systemic PBM, but evidence quality was limited and not specific to whole-body exposure. The Clinical Psychiatric PBM Boundary group currently links one appraisal-backed source with same mechanism scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-30248638"
+    -
+      id: "crows-feet-mask-rct"
+      label: "Crows Feet Mask RCT"
+      stance: "safety_boundary"
+      summary: "A sham-controlled 630/850 nm periocular mask trial found significant wrinkle-score improvements and described treatment as safe, well tolerated, and painless. The Crows Feet Mask RCT group currently links one appraisal-backed source with general guideline scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-39960921"
+    -
+      id: "dermatology-led-meta-analysis"
+      label: "Dermatology Led Meta Analysis"
+      stance: "safety_boundary"
+      summary: "This dermatology LED meta-analysis showed strong pooled acne effects and positive direction for some yellow/NIR applications, but important heterogeneity for other conditions. The Dermatology Led Meta Analysis group currently links one appraisal-backed source with general guideline scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36310510"
+    -
+      id: "dermatology-led-rct-review"
+      label: "Dermatology Led RCT Review"
+      stance: "safety_boundary"
+      summary: "A dermatology LED review found generally few reported adverse events, but the evidence base was heterogeneous and often methodologically weak. The Dermatology Led RCT Review group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-29356026"
+    -
+      id: "exercise-pbmt-guideline"
+      label: "Exercise Pbmt Guideline"
+      stance: "context_only"
+      summary: "Recommendations paper argues that PBMT has a dose window and that future sports trials need stronger reporting, but it is built mainly on localized PBMT evidence rather than whole-body trials. The Exercise Pbmt Guideline group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-30591412"
+    -
+      id: "female-basketball-red-light-rct"
+      label: "Female Basketball Red Light RCT"
+      stance: "supports"
+      summary: "Nightly whole-body red-light exposure improved sleep quality, increased serum melatonin, and improved 12-minute run performance in elite female basketball players. The Female Basketball Red Light RCT group currently links one appraisal-backed source with adjacent variant scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-23182016"
+    -
+      id: "fm-circadian-mechanistic-rct"
+      label: "Fm Circadian Mechanistic RCT"
+      stance: "supports"
+      summary: "Placebo-controlled fibromyalgia RCT reported physiologic changes in circadian blood pressure, tenderness thresholds, and tissue elasticity after whole-body PBM. The Fm Circadian Mechanistic RCT group currently links one appraisal-backed source with clinical supervised scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36359198"
+    -
+      id: "fm-circadian-registry"
+      label: "Fm Circadian Registry"
+      stance: "context_only"
+      summary: "Registry identifies a completed whole-body PBM fibromyalgia trial focused on circadian blood pressure, but no extracted results are included here. The Fm Circadian Registry group currently links one appraisal-backed source with clinical supervised scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-gov-nct05113589-2026-04-23"
+    -
+      id: "fm-experience-analysis"
+      label: "Fm Experience Analysis"
+      stance: "context_only"
+      summary: "Qualitative interviews described a positive recovery-like process during whole-body PBMT, but this is experiential rather than controlled efficacy evidence. The Fm Experience Analysis group currently links one appraisal-backed source with clinical supervised scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-38791077"
+    -
+      id: "fm-pbmt-scoping-review"
+      label: "Fm Pbmt Scoping Review"
+      stance: "context_only"
+      summary: "Scoping review mapped promising but heterogeneous fibromyalgia PBMT evidence and argued that many NICE concerns may be addressable by existing literature. The Fm Pbmt Scoping Review group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.3390-ctn9030029"
+    -
+      id: "fm-pbmt-systematic-review"
+      label: "Fm Pbmt Systematic Review"
+      stance: "mixed"
+      summary: "Fibromyalgia systematic review reported overall PBMT benefit and suggested more sustained effects for whole-body delivery than localized treatment. The Fm Pbmt Systematic Review group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.3390-app15084161"
+    -
+      id: "fm-rct-registry"
+      label: "Fm RCT Registry"
+      stance: "context_only"
+      summary: "Registry identifies the sham-controlled fibromyalgia whole-body PBM program but does not contribute extracted outcome results here. The Fm RCT Registry group currently links one appraisal-backed source with clinical supervised scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-gov-nct04248972-2026-04-23"
+    -
+      id: "foundational-sleep-pbm-commentary"
+      label: "Foundational Sleep PBM Commentary"
+      stance: "context_only"
+      summary: "Commentary argues PBM may improve sleep, especially via nocturnal transcranial mechanisms, but it does not provide direct whole-body efficacy data. The Foundational Sleep PBM Commentary group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-36018149"
+    -
+      id: "intranasal-pbm-boundary"
+      label: "Intranasal PBM Boundary"
+      stance: "context_only"
+      summary: "Intranasal PBM is positioned as a distinct local or systemic-adjacent PBM strategy, not as whole-body exposure. The Intranasal PBM Boundary group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31812948"
+    -
+      id: "intranasal-phototherapy-boundary"
+      label: "Intranasal Phototherapy Boundary"
+      stance: "safety_boundary"
+      summary: "NICE concluded that evidence for intranasal phototherapy in allergic rhinitis was limited in quantity and quality and should remain in research settings. The Intranasal Phototherapy Boundary group currently links one appraisal-backed source with clinical supervised scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:nice-intranasal-phototherapy-for-allergic-rhinitis-2018-06-13"
+    -
+      id: "oncology-commentary-evidence-hierarchy"
+      label: "Oncology Commentary Evidence Hierarchy"
+      stance: "safety_boundary"
+      summary: "This commentary emphasizes that existing in vivo and clinical PBMT evidence is more relevant than theoretical in vitro concern when judging tumor safety. The Oncology Commentary Evidence Hierarchy group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-32198559"
+    -
+      id: "oral-oncology-pbm-boundary"
+      label: "Oral Oncology PBM Boundary"
+      stance: "safety_boundary"
+      summary: "Localized PBM was recommended for prevention of oral mucositis in specific supervised oncology settings, with no general treatment recommendation and no parameter interchangeability. The Oral Oncology PBM Boundary group currently links one appraisal-backed source with clinical supervised scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31286228"
+    -
+      id: "pbm-umbrella-review"
+      label: "PBM Umbrella Review"
+      stance: "mixed"
+      summary: "Umbrella review found the strongest fibromyalgia support for fatigue, while several other fibromyalgia endpoints remained low or very low certainty or nonsignificant. The PBM Umbrella Review group currently links one appraisal-backed source with same mechanism scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-40770824"
+    -
+      id: "regulatory-definition-and-safety-boundaries"
+      label: "Regulatory Definition And Safety Boundaries"
+      stance: "context_only"
+      summary: "FDA defines PBM as non-heating light therapy and expects wavelength, dose, irradiance, pulsing, target-area, and safety reporting in premarket submissions. The Regulatory Definition And Safety Boundaries group currently links one appraisal-backed source with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:fda-pbm-devices-guidance-2023-01-12"
+    -
+      id: "rugby-isokinetic-registry"
+      label: "Rugby Isokinetic Registry"
+      stance: "context_only"
+      summary: "Suspended registry describes an acute rugby crossover protocol testing whole-body PBM before isokinetic fatigue and DOMS assessment, but no results are posted. The Rugby Isokinetic Registry group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:ensaiosclinicos-rbr-7x65zj-2026-04-23"
+    -
+      id: "sleep-pbm-review-context"
+      label: "Sleep PBM Review Context"
+      stance: "context_only"
+      summary: "Review says PBM-sleep research is promising but still early, heterogeneous, and under-standardized. The Sleep PBM Review Context group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:doi-10.17241-smr.2024.02593"
+    -
+      id: "soccer-prepost-sham-registry"
+      label: "Soccer Prepost Sham Registry"
+      stance: "mixed"
+      summary: "Completed registry materials suggest timing-dependent benefits for CK and soreness, but neither pre- nor post-exercise whole-body PBM improved muscle performance. The Soccer Prepost Sham Registry group currently links one appraisal-backed source with adjacent variant scope and mixed interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-gov-nct05989815-2026-04-23"
+    -
+      id: "sports-pbm-narrative-review"
+      label: "Sports PBM Narrative Review"
+      stance: "context_only"
+      summary: "Narrative review summarizes potential sports benefits and mechanisms for PBM, while emphasizing that dosage and treatment parameters are not yet standardized. The Sports PBM Narrative Review group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-34947870"
+    -
+      id: "state-championship-soccer-registry"
+      label: "State Championship Soccer Registry"
+      stance: "context_only"
+      summary: "Recruiting registry describes a season-long whole-body PBM soccer protocol with repeated soreness, strength, jump, blood-count, and PSQI endpoints, but no outcomes are available yet. The State Championship Soccer Registry group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:clinicaltrials-gov-nct07224646-2026-04-23"
+    -
+      id: "terminology-standardization"
+      label: "Terminology Standardization"
+      stance: "context_only"
+      summary: "This editorial supports using photobiomodulation therapy terminology rather than older low-level light or laser labels. The Terminology Standardization group currently links one appraisal-backed source with same mechanism scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-25844681"
+    -
+      id: "trained-dynamometry-agility-registry"
+      label: "Trained Dynamometry Agility Registry"
+      stance: "context_only"
+      summary: "Recruiting registry tests acute full-body PBM against placebo in trained men with torque, fatigue, agility, soreness, and perceived recovery outcomes. The Trained Dynamometry Agility Registry group currently links one appraisal-backed source with adjacent variant scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:ensaiosclinicos-rbr-8ksktby-2026-04-23"
+    -
+      id: "transcranial-pbm-boundary"
+      label: "Transcranial PBM Boundary"
+      stance: "context_only"
+      summary: "Meta-analysis found better cognitive performance after transcranial PBM in young healthy adults, but the intervention was focal brain-directed PBM rather than whole-body exposure. The Transcranial PBM Boundary group currently links one appraisal-backed source with same mechanism scope and positive interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-31549906"
+    -
+      id: "uv-tanning-safety-boundary"
+      label: "UV Tanning Safety Boundary"
+      stance: "safety_boundary"
+      summary: "WHO places artificial tanning devices in a UV-risk and public-health-regulation domain rather than a therapeutic PBM domain. USPSTF recommends counseling to reduce ultraviolet exposure and avoid indoor tanning, reinforcing the UV-risk boundary. The UV Tanning Safety Boundary group currently links 2 appraisal-backed sources with general guideline scope and not efficacy evidence interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:uspstf-skin-cancer-prevention-behavioral-counseling-2018-03-20"
+        - "source_artifact:who-artificial-tanning-devices-2017-06-13"
+    -
+      id: "water-polo-postmatch-rct"
+      label: "Water Polo Postmatch RCT"
+      stance: "mixed"
+      summary: "Five-minute full-body PBM after matches did not improve most hormonal, inflammatory, autonomic, strength, or jump recovery measures in young water polo athletes. The Water Polo Postmatch RCT group currently links one appraisal-backed source with adjacent variant scope and no clear advantage interpretation; use the linked appraisals for source-specific caveats."
+      sourceKeys:
+        - "source_artifact:pmid-33332232"
 safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
