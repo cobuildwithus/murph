@@ -20,6 +20,10 @@ import {
   resolveHostedStripeBillingStatusForWrite,
 } from "./stripe-billing-status";
 
+export type HostedStripeBillingFreshnessPolicy =
+  | "strict"
+  | "positive-invoice-entitlement";
+
 export async function prepareHostedMemberStripeBillingWrite(input: {
   canonicalBillingStatus?: HostedBillingStatus | null;
   dispatchContext: HostedStripeDispatchContext;
@@ -48,6 +52,7 @@ export async function writeHostedMemberStripeBillingTx(input: {
   billingStatus: HostedBillingStatus;
   canonicalBillingStatus: HostedBillingStatus | null;
   dispatchContext: HostedStripeDispatchContext;
+  freshnessPolicy?: HostedStripeBillingFreshnessPolicy;
   member: HostedMemberBillingSnapshot;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
@@ -64,9 +69,29 @@ export async function writeHostedMemberStripeBillingTx(input: {
     return null;
   }
 
-  if (isHostedStripeBillingWriteStale(currentMember.billingRef, input.dispatchContext)) {
+  const freshnessPolicy = input.freshnessPolicy ?? "strict";
+  const isStale = isHostedStripeBillingWriteStale(currentMember.billingRef, input.dispatchContext);
+  const allowStalePositiveInvoiceWrite = isStale && shouldAllowStalePositiveInvoiceBillingWrite({
+    billingRef: currentMember.billingRef,
+    billingStatus: input.billingStatus,
+    canonicalBillingStatus: input.canonicalBillingStatus,
+    currentBillingStatus: currentMember.core.billingStatus,
+    dispatchContext: input.dispatchContext,
+    freshnessPolicy,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  });
+
+  if (isStale && !allowStalePositiveInvoiceWrite) {
     return null;
   }
+
+  const billingRefWriteValues = resolveHostedStripeBillingRefWriteValues({
+    billingRef: currentMember.billingRef,
+    preserveCurrentWhenNextMissing: allowStalePositiveInvoiceWrite,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  });
 
   const nextBillingStatus = resolveHostedStripeBillingStatusForWrite({
     billingStatus: input.billingStatus,
@@ -84,9 +109,12 @@ export async function writeHostedMemberStripeBillingTx(input: {
 
   await writeHostedMemberStripeBillingRefTx({
     memberId: currentMember.core.id,
-    stripeEventCreatedAt: input.dispatchContext.eventCreatedAt,
-    stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
+    stripeEventCreatedAt: resolveHostedStripeBillingRefEventCreatedAt({
+      billingRef: currentMember.billingRef,
+      dispatchContext: input.dispatchContext,
+    }),
+    stripeCustomerId: billingRefWriteValues.stripeCustomerId,
+    stripeSubscriptionId: billingRefWriteValues.stripeSubscriptionId,
     tx: input.tx,
   });
 
@@ -175,4 +203,111 @@ function isHostedStripeBillingWriteStale(
   }
 
   return nextStripeEventCreatedAtMs < lastStripeEventCreatedAtMs;
+}
+
+function shouldAllowStalePositiveInvoiceBillingWrite(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  billingStatus: HostedBillingStatus;
+  canonicalBillingStatus: HostedBillingStatus | null;
+  currentBillingStatus: HostedBillingStatus;
+  dispatchContext: Pick<HostedStripeDispatchContext, "sourceType">;
+  freshnessPolicy: HostedStripeBillingFreshnessPolicy;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+}): boolean {
+  if (input.freshnessPolicy !== "positive-invoice-entitlement") {
+    return false;
+  }
+
+  if (input.dispatchContext.sourceType !== "stripe.invoice.paid") {
+    return false;
+  }
+
+  if (
+    input.billingStatus !== HostedBillingStatus.active ||
+    input.canonicalBillingStatus !== HostedBillingStatus.active
+  ) {
+    return false;
+  }
+
+  if (!canOlderPositiveInvoiceWriteCurrentBillingStatus(input.currentBillingStatus)) {
+    return false;
+  }
+
+  return hostedStripeBillingRefValueMatches(input.billingRef?.stripeCustomerId, input.stripeCustomerId) &&
+    hostedStripeBillingRefValueMatches(input.billingRef?.stripeSubscriptionId, input.stripeSubscriptionId);
+}
+
+function canOlderPositiveInvoiceWriteCurrentBillingStatus(
+  billingStatus: HostedBillingStatus,
+): boolean {
+  return billingStatus === HostedBillingStatus.not_started ||
+    billingStatus === HostedBillingStatus.incomplete ||
+    billingStatus === HostedBillingStatus.active;
+}
+
+function hostedStripeBillingRefValueMatches(
+  currentValue: string | null | undefined,
+  nextValue: string | null | undefined,
+): boolean {
+  if (!currentValue || !nextValue) {
+    return true;
+  }
+
+  return currentValue === nextValue;
+}
+
+function resolveHostedStripeBillingRefEventCreatedAt(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt">;
+}): Date {
+  const lastStripeEventCreatedAt = input.billingRef?.lastStripeEventCreatedAt ?? null;
+
+  if (
+    lastStripeEventCreatedAt &&
+    input.dispatchContext.eventCreatedAt.getTime() < lastStripeEventCreatedAt.getTime()
+  ) {
+    return lastStripeEventCreatedAt;
+  }
+
+  return input.dispatchContext.eventCreatedAt;
+}
+
+function resolveHostedStripeBillingRefWriteValues(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  preserveCurrentWhenNextMissing: boolean;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+}): {
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+} {
+  return {
+    stripeCustomerId: resolveHostedStripeBillingRefWriteValue({
+      currentValue: input.billingRef?.stripeCustomerId,
+      nextValue: input.stripeCustomerId,
+      preserveCurrentWhenNextMissing: input.preserveCurrentWhenNextMissing,
+    }),
+    stripeSubscriptionId: resolveHostedStripeBillingRefWriteValue({
+      currentValue: input.billingRef?.stripeSubscriptionId,
+      nextValue: input.stripeSubscriptionId,
+      preserveCurrentWhenNextMissing: input.preserveCurrentWhenNextMissing,
+    }),
+  };
+}
+
+function resolveHostedStripeBillingRefWriteValue(input: {
+  currentValue: string | null | undefined;
+  nextValue: string | null | undefined;
+  preserveCurrentWhenNextMissing: boolean;
+}): string | null | undefined {
+  if (
+    input.preserveCurrentWhenNextMissing &&
+    !input.nextValue &&
+    input.currentValue
+  ) {
+    return input.currentValue;
+  }
+
+  return input.nextValue;
 }

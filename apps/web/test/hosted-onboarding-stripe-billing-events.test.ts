@@ -124,7 +124,38 @@ describe("hosted onboarding stripe billing events", () => {
     });
   });
 
-  it("skips invoice.paid activation side effects when the billing write is stale", async () => {
+  it("marks invoice.paid billing writes as positive entitlement freshness", async () => {
+    await expect(
+      applyStripeInvoicePaid(
+        makeStripeInvoice({
+          id: "in_paid_freshness",
+          subscription: "sub_123",
+        }),
+        {
+          eventCreatedAt: new Date("2026-04-25T05:13:09.000Z"),
+          occurredAt: "2026-04-25T05:13:09.000Z",
+          sourceEventId: "evt_paid_freshness",
+          sourceType: "stripe.invoice.paid",
+        },
+        {} as never,
+        HostedBillingStatus.active,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      createdOrUpdatedRevnetIssuance: false,
+      hostedExecutionEventId: "wake_123",
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      freshnessPolicy: "positive-invoice-entitlement",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    }));
+  });
+
+  it("skips invoice.paid activation side effects when the billing write is not applied", async () => {
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(null);
 
     await expect(

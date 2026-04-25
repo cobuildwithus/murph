@@ -292,6 +292,228 @@ describe("hosted onboarding stripe billing policy", () => {
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   });
 
+  it("lets a positive paid invoice survive newer passive Stripe freshness and preserves the newer marker", async () => {
+    const passiveStripeEventCreatedAt = new Date("2026-04-25T05:13:10.000Z");
+    const invoicePaidStripeEventCreatedAt = new Date("2026-04-25T05:13:09.000Z");
+
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.incomplete,
+        },
+      }))
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.active,
+        },
+      }));
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        dispatchContext: {
+          eventCreatedAt: invoicePaidStripeEventCreatedAt,
+          occurredAt: invoicePaidStripeEventCreatedAt.toISOString(),
+          sourceEventId: "evt_invoice_paid",
+          sourceType: "stripe.invoice.paid",
+        },
+        freshnessPolicy: "positive-invoice-entitlement",
+        member: makeMemberSnapshot({
+          core: {
+            billingStatus: HostedBillingStatus.incomplete,
+          },
+        }),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+        tx: {} as never,
+      }),
+    ).resolves.toEqual(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.active,
+      },
+    }));
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.active,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: undefined,
+    });
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeEventCreatedAt: passiveStripeEventCreatedAt,
+      stripeSubscriptionId: "sub_123",
+      tx: {},
+    });
+  });
+
+  it("keeps stale positive invoice writes blocked when they do not match the current Stripe refs", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: new Date("2026-04-25T05:13:10.000Z"),
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_existing",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.incomplete,
+      },
+    }));
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-25T05:13:09.000Z"),
+          occurredAt: "2026-04-25T05:13:09.000Z",
+          sourceEventId: "evt_invoice_paid_mismatch",
+          sourceType: "stripe.invoice.paid",
+        },
+        freshnessPolicy: "positive-invoice-entitlement",
+        member: makeMemberSnapshot({
+          core: {
+            billingStatus: HostedBillingStatus.incomplete,
+          },
+        }),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_other",
+        tx: {} as never,
+      }),
+    ).resolves.toBeNull();
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  });
+
+  it("does not let older positive invoices override a newer failed-payment billing state", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: new Date("2026-04-25T05:13:10.000Z"),
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.past_due,
+      },
+    }));
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-25T05:13:09.000Z"),
+          occurredAt: "2026-04-25T05:13:09.000Z",
+          sourceEventId: "evt_invoice_paid_after_failure",
+          sourceType: "stripe.invoice.paid",
+        },
+        freshnessPolicy: "positive-invoice-entitlement",
+        member: makeMemberSnapshot({
+          core: {
+            billingStatus: HostedBillingStatus.incomplete,
+          },
+        }),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+        tx: {} as never,
+      }),
+    ).resolves.toBeNull();
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  });
+
+  it("preserves newer Stripe refs when a stale positive invoice is missing an optional ref", async () => {
+    const passiveStripeEventCreatedAt = new Date("2026-04-25T05:13:10.000Z");
+    const invoicePaidStripeEventCreatedAt = new Date("2026-04-25T05:13:09.000Z");
+
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+          memberId: "member_123",
+          stripeCustomerId: "cus_passive",
+          stripeSubscriptionId: "sub_123",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.incomplete,
+        },
+      }))
+      .mockResolvedValueOnce(makeMemberSnapshot({
+        billingRef: {
+          lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+          memberId: "member_123",
+          stripeCustomerId: "cus_passive",
+          stripeSubscriptionId: "sub_123",
+        },
+        core: {
+          billingStatus: HostedBillingStatus.active,
+        },
+      }));
+
+    await expect(
+      writeHostedMemberStripeBillingTx({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        dispatchContext: {
+          eventCreatedAt: invoicePaidStripeEventCreatedAt,
+          occurredAt: invoicePaidStripeEventCreatedAt.toISOString(),
+          sourceEventId: "evt_invoice_paid_missing_customer",
+          sourceType: "stripe.invoice.paid",
+        },
+        freshnessPolicy: "positive-invoice-entitlement",
+        member: makeMemberSnapshot({
+          core: {
+            billingStatus: HostedBillingStatus.incomplete,
+          },
+        }),
+        stripeCustomerId: null,
+        stripeSubscriptionId: "sub_123",
+        tx: {} as never,
+      }),
+    ).resolves.toEqual(makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: passiveStripeEventCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_passive",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.active,
+      },
+    }));
+
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: "cus_passive",
+      stripeEventCreatedAt: passiveStripeEventCreatedAt,
+      stripeSubscriptionId: "sub_123",
+      tx: {},
+    });
+  });
+
   it("still allows same-second Stripe billing writes to proceed because source ids are not monotonic", async () => {
     const freshnessAt = new Date("2026-04-12T01:00:00.000Z");
     let currentBillingStatus = HostedBillingStatus.active;
