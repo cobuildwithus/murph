@@ -27,13 +27,6 @@ const mocks = vi.hoisted(() => {
       privyAppId: "privy-app-id",
       privyVerificationKey: "privy-key",
       publicBaseUrl: "https://join.example.test",
-      revnetChainId: null as number | null,
-      revnetProjectId: null as string | null,
-      revnetRpcUrl: null as string | null,
-      revnetStripeCurrency: null as string | null,
-      revnetTerminalAddress: null as string | null,
-      revnetTreasuryPrivateKey: null as string | null,
-      revnetWeiPerStripeMinorUnit: null as string | null,
       stripeBillingMode: "payment" as const,
       stripePriceIdsByPlan: {
         launch_annual: "price_annual_123",
@@ -92,7 +85,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
+vi.mock("@/src/lib/hosted-onboarding/wallet-address", () => ({
   normalizeHostedWalletAddress: vi.fn(() => null),
 }));
 

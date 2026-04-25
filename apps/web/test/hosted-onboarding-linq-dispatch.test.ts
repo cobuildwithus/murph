@@ -138,7 +138,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
+vi.mock("@/src/lib/hosted-onboarding/wallet-address", () => ({
   normalizeHostedWalletAddress: vi.fn(() => null),
 }));
 

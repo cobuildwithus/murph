@@ -7,9 +7,8 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
-  isHostedOnboardingRevnetEnabled,
   normalizeHostedWalletAddress,
-} from "./revnet";
+} from "./wallet-address";
 
 export function buildHostedMemberPhoneIdentityFields(phoneNumber: string) {
   const maskedPhoneNumberHint = readHostedPhoneHint(phoneNumber);
@@ -84,18 +83,6 @@ export function buildHostedMemberWalletIdentityFields(input: {
     walletCreatedAt: input.existingWalletCreatedAt ?? input.now,
     walletProvider: "privy" as const,
   };
-}
-
-export function assertHostedPrivyWalletAvailableWhenRequired(
-  identity: HostedPrivyIdentity,
-): void {
-  if (!identity.wallet && isHostedOnboardingRevnetEnabled()) {
-    throw hostedOnboardingError({
-      code: "PRIVY_WALLET_REQUIRED",
-      message: "Finish setup before continuing.",
-      httpStatus: 400,
-    });
-  }
 }
 
 export function assertHostedPrivyIdentityMatchesExpectedPhone(input: {

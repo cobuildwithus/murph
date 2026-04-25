@@ -1,6 +1,5 @@
 import {
   HostedBillingStatus,
-  HostedRevnetIssuanceStatus,
   type Prisma,
 } from "@prisma/client";
 import {
@@ -51,81 +50,6 @@ export type HostedMemberActivationResult = {
   hostedExecutionEventId: string | null;
   memberId: string;
 };
-
-export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
-  memberId: string;
-  occurredAt: string;
-  prisma: Prisma.TransactionClient;
-  sourceEventId: string;
-  sourceType: string;
-}): Promise<HostedMemberActivationResult> {
-  const timing = startHostedOnboardingTiming(
-    "hosted-onboarding.member-activation.revnet-confirmed",
-    {
-      sourceType: input.sourceType,
-    },
-  );
-
-  try {
-    const currentMember = await readActivationReadyHostedMemberTx({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      revnetIssuanceStatus: HostedRevnetIssuanceStatus.confirmed,
-      revnetRequired: true,
-    });
-
-    if (!currentMember) {
-      finishHostedOnboardingTiming(timing, "completed", {
-        activated: false,
-      });
-      return buildHostedInactiveMemberActivationResult(input.memberId);
-    }
-
-    await updateHostedMemberCoreState({
-      billingStatus: HostedBillingStatus.active,
-      memberId: currentMember.core.id,
-      prisma: input.prisma,
-    });
-
-    const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
-      member: currentMember,
-      prisma: input.prisma,
-    });
-    const activationWake = buildHostedMemberActivationWakeForMember({
-      emailLinked: resolveHostedMemberActivationEmailLinked(currentMember),
-      member: currentMember,
-      occurredAt: input.occurredAt,
-      sourceEventId: input.sourceEventId,
-      sourceType: input.sourceType,
-    });
-    const welcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
-      activationWake,
-      occurredAt: input.occurredAt,
-      route: linqRoute.welcomeRoute,
-    });
-    const appendedWake = await materializeHostedMemberActivationWakesTx({
-      activationWake,
-      prisma: input.prisma,
-      welcomeWake,
-    });
-
-    finishHostedOnboardingTiming(timing, "completed", {
-      activated: true,
-      dispatchScheduled: true,
-    });
-
-    return {
-      activated: true,
-      hostedExecutionEventId: appendedWake.eventId,
-      memberId: currentMember.core.id,
-    };
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-    });
-    throw error;
-  }
-}
 
 export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
@@ -282,8 +206,6 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
 async function readActivationReadyHostedMemberTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
-  revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
-  revnetRequired?: boolean;
 }): Promise<HostedMemberSnapshot | null> {
   await lockHostedMemberRow(input.prisma, input.memberId);
 
@@ -298,8 +220,6 @@ async function readActivationReadyHostedMemberTx(input: {
 
   const entitlement = deriveHostedEntitlement({
     billingStatus: HostedBillingStatus.active,
-    revnetIssuanceStatus: input.revnetIssuanceStatus,
-    revnetRequired: input.revnetRequired,
     suspendedAt: currentMember.core.suspendedAt,
   });
 

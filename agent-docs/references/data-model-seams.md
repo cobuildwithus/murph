@@ -137,20 +137,20 @@ The shared owner should describe stable read-model extraction from frontmatter, 
 
 ### 9. Keep hosted member identity, routing, and billing slices nested at the onboarding composition seam
 
-**Seam:** `apps/web/src/lib/hosted-onboarding/hosted-member-store.ts`, `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts`, `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts`, `apps/web/src/lib/hosted-onboarding/stripe-revnet-issuance.ts`, `apps/web/src/lib/hosted-onboarding/webhook-transport.ts`, `apps/web/src/lib/hosted-onboarding/stripe-event-reconciliation.ts`
+**Seam:** `apps/web/src/lib/hosted-onboarding/hosted-member-store.ts`, `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts`, `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts`, `apps/web/src/lib/hosted-onboarding/webhook-transport.ts`, `apps/web/src/lib/hosted-onboarding/stripe-event-reconciliation.ts`
 
 The hosted-member privacy split introduced separate identity, routing, and billing-reference tables, but `HostedMemberAggregate` in `hosted-member-store.ts` immediately flattened those slices back into one wide object.
-That recreated the old coupling shape in memory: adding or changing one field on any slice widened the read model used by Stripe, RevNet, and webhook orchestration even when those callers only needed one slice.
+That recreated the old coupling shape in memory: adding or changing one field on any slice widened the read model used by Stripe and webhook orchestration even when those callers only needed one slice.
 
 This patch:
 
 - replaces the flattened `HostedMemberAggregate` with a nested `HostedMemberSnapshot` made of `{ core, identity, routing, billingRef }`
-- updates Stripe billing, RevNet issuance, and webhook orchestration to read through the owning slice instead of through a re-widened helper
+- updates Stripe billing and webhook orchestration to read through the owning slice instead of through a re-widened helper
 - adds one focused activation-dispatch helper in `stripe-billing-policy.ts` so the only real cross-slice composition stays explicit
 - adds a hosted-web test that locks in the non-flattening snapshot shape
 
 **Why this is simpler:** the privacy split now stays visible at the main onboarding composition seam.
-Identity changes no longer imply a billing-shaped type update, routing changes no longer widen RevNet callers, and orchestration code has to name which slice it depends on.
+Identity changes no longer imply a billing-shaped type update, routing changes no longer widen billing callers, and orchestration code has to name which slice it depends on.
 
 **Main refactor risk:** do not respond by adding a second layer of generic selectors that hides the slice ownership again.
 Small task-specific composition helpers are fine, but the shared store surface should keep returning nested slice owners rather than another compatibility aggregate.
@@ -243,7 +243,7 @@ This landing makes `packages/gateway-core/src/contracts.ts` the single owner of 
 
 **Seam:** `apps/web/prisma/schema.prisma`, `apps/web/prisma/migrations/2026040801_hosted_webhook_side_effect_json_normalization/migration.sql`, `apps/web/src/lib/hosted-onboarding/webhook-receipt-codec.ts`
 
-`HostedWebhookReceiptSideEffect` had drifted into a wide sparse row that carried dispatch, Linq, and RevNet payload/result columns side-by-side.
+`HostedWebhookReceiptSideEffect` had drifted into a wide sparse row that carried dispatch and Linq payload/result columns side-by-side.
 That widened the Prisma model and forced the codec to reconstruct a per-kind shape from many nullable columns even though the shared retry/error shell was the only real common owner.
 
 This patch:
@@ -434,7 +434,7 @@ They focus on the next data-model simplifications that still look highest-levera
 
 #### 1. Split hosted Stripe billing policy by responsibility before it becomes the next wide owner
 
-**Seam:** `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts` (`activateHostedMemberFromConfirmedRevnetIssuance`, `activateHostedMemberForPositiveSource`, `updateHostedMemberStripeBillingIfFresh`, `suspendHostedMemberForBillingReversal`, `findMemberForStripeObject`, `resolveStripeCustomerContext`)
+**Seam:** `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts` (`activateHostedMemberForPositiveSource`, `updateHostedMemberStripeBillingIfFresh`, `suspendHostedMemberForBillingReversal`, `findMemberForStripeObject`, `resolveStripeCustomerContext`)
 
 **Current cost:** one file currently owns entitlement transitions, Stripe ref lookup, canonical Stripe refresh, hosted activation dispatch building, managed-user crypto provisioning triggers, and suspension handling. That makes any change to Stripe reconciliation or activation semantics widen the blast radius across multiple responsibilities.
 

@@ -19,7 +19,7 @@ import {
 } from "./shared";
 import {
   normalizeHostedWalletAddress,
-} from "./revnet";
+} from "./wallet-address";
 import { createHostedMember, readHostedMemberCoreState } from "./hosted-member-store";
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
@@ -30,7 +30,6 @@ import {
 } from "./hosted-member-identity-store";
 import {
   assertHostedPrivyIdentityMatchesExpectedPhone,
-  assertHostedPrivyWalletAvailableWhenRequired,
   buildHostedMemberPhoneIdentityFields,
   buildHostedMemberWalletIdentityFields,
   buildHostedPersistedPhoneIdentityFields,
@@ -188,8 +187,6 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   prisma?: PrismaClient;
   now: Date;
 }): Promise<HostedMember> {
-  assertHostedPrivyWalletAvailableWhenRequired(input.identity);
-
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => reconcileHostedPrivyIdentityOnMemberTx({
@@ -207,8 +204,6 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
   now: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMember> {
-  assertHostedPrivyWalletAvailableWhenRequired(input.identity);
-
   const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
     identity: input.identity,
     prisma: input.prisma,
@@ -256,8 +251,6 @@ export async function requireExistingHostedMemberForPrivyIdentityTx(input: {
   now: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMember> {
-  assertHostedPrivyWalletAvailableWhenRequired(input.identity);
-
   const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
     identity: input.identity,
     prisma: input.prisma,
@@ -288,7 +281,6 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   prisma: Prisma.TransactionClient;
   now: Date;
 }): Promise<HostedMember> {
-  assertHostedPrivyWalletAvailableWhenRequired(input.identity);
   await lockHostedMemberRow(input.prisma, input.member.id);
 
   const currentMember = await readHostedMemberCoreState({

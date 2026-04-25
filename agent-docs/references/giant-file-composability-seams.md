@@ -23,23 +23,6 @@ This patch moves the dirty-marker symbols into `apps/cloudflare/src/usage-store/
 
 **Follow-up path:** if the per-user record file grows again, the next safe cut is the record codec/object-key cluster (`parseStoredHostedPendingUsageRecord`, `pendingUsageRecordObjectKey`, `pendingUsageRecordObjectPrefix`) into a record-owned submodule without reintroducing a generic storage helper layer.
 
-### 2. Split submitted RevNet issuance confirmation from Stripe event reconciliation
-
-**Seam:** `apps/web/src/lib/hosted-onboarding/stripe-event-reconciliation.ts`, `apps/web/src/lib/hosted-onboarding/stripe-revnet-reconciliation.ts`, `apps/web/app/api/internal/hosted-onboarding/stripe/cron/route.ts`
-
-`stripe-event-reconciliation.ts` was handling two different cron flows in one file:
-
-- Stripe webhook event claiming, retry, fetch, and event-specific handlers (`claimHostedStripeEvent`, `processClaimedHostedStripeEvent`, `processHostedStripeEventRecord`)
-- onchain RevNet payment confirmation polling (`reconcileSubmittedHostedRevnetIssuances`)
-
-Those paths only meet because the cron route runs both. They have different source systems, different retry semantics, and different read models.
-
-This patch moves `reconcileSubmittedHostedRevnetIssuances(...)` into `stripe-revnet-reconciliation.ts` and has the cron route import it from the new owner module.
-
-**Why this is simpler:** Stripe event queue maintenance stays grouped around Stripe event lifecycle, while RevNet receipt polling now sits with the RevNet-specific activation path it actually drives.
-
-**Follow-up path:** if the hosted billing cron keeps growing, the next safe split is a small cron orchestrator that calls `reconcileDueHostedStripeEvents(...)`, `drainHostedRevnetIssuanceSubmissionQueue(...)`, and `reconcileSubmittedHostedRevnetIssuances(...)` without moving their storage or transport ownership out of the existing modules.
-
 ## Current targeted review findings
 
 ### Worth planning

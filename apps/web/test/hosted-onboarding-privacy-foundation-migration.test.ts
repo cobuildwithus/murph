@@ -244,16 +244,19 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
-  "HostedRevnetIssuance",
-    "HostedIngressEvent",
-    "HostedIngressEventAlias",
-    "HostedIngressPayload",
-    "HostedVaultSyncPayload",
-    "HostedVaultSyncSession",
+  "HostedIngressEvent",
+  "HostedIngressEventAlias",
+  "HostedIngressPayload",
+  "HostedVaultSyncPayload",
+  "HostedVaultSyncSession",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
   it("preserves the reviewed split-table hosted-member baseline with Stripe hardening squashed in", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
     const migrationEntries = readdirSync(new URL("../prisma/migrations/", import.meta.url))
       .filter((entry) => !entry.startsWith("."))
       .sort();
@@ -268,9 +271,17 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const dropRevnetIssuanceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260425010000_drop_revnet_issuance/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
+      "20260425010000_drop_revnet_issuance",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -340,6 +351,10 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_webhook_event"');
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_recipient_binding"');
+    expect(dropRevnetIssuanceMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_revnet_issuance"');
+    expect(dropRevnetIssuanceMigrationSql).toContain(
+      'DROP TYPE IF EXISTS "HostedRevnetIssuanceStatus"',
+    );
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');
     expect(baselineMigrationSql).toContain('"trigger_kind" TEXT');
@@ -379,7 +394,6 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_wake_terminal"');
     expect(baselineMigrationSql).not.toContain('"fetched_cursor_version" BIGINT NOT NULL');
     expect(baselineMigrationSql).not.toContain('"linq_chat_id" TEXT');
-    expect(baselineMigrationSql).not.toContain('"revnet_amount_paid" INTEGER');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "execution_outbox"');
     expect(baselineMigrationSql).not.toContain('"dispatch_state" TEXT NOT NULL DEFAULT \'queued\'');
     expect(baselineMigrationSql).not.toContain(
@@ -407,6 +421,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).not.toContain(
       'ALTER TABLE "hosted_webhook_receipt_side_effect" ADD CONSTRAINT "hosted_webhook_receipt_side_effect_source_event_id_fkey"',
     );
+    expect(schema).not.toContain("model HostedRevnetIssuance");
+    expect(schema).not.toContain("enum HostedRevnetIssuanceStatus");
   });
 
   it("keeps hosted-member models on the reviewed owner-table set", () => {

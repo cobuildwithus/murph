@@ -36,7 +36,6 @@ import {
 } from "./logging";
 import { requireHostedStripeApi } from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
-import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
 const STRIPE_EVENT_MAX_ATTEMPTS = 6;
@@ -50,7 +49,6 @@ const STRIPE_EVENT_RETRY_DELAYS_MS = [
 
 export type HostedStripeEventReconcileResult = {
   activatedMemberId: string | null;
-  createdOrUpdatedRevnetIssuance: boolean;
   eventId: string;
   hostedExecutionEventId: string | null;
   status: "completed" | "failed";
@@ -98,7 +96,6 @@ export async function reconcileDueHostedStripeEvents(input: {
   prisma: PrismaClient;
 }): Promise<string[]> {
   const reconciledEventIds: string[] = [];
-  let shouldDrainRevnetIssuances = false;
   const now = new Date();
   const candidates = await input.prisma.hostedStripeEvent.findMany({
     where: buildDueHostedStripeEventWhere(now),
@@ -126,17 +123,9 @@ export async function reconcileDueHostedStripeEvents(input: {
     }
 
     const result = await processClaimedHostedStripeEvent(claimed, input.prisma);
-    shouldDrainRevnetIssuances ||= result.createdOrUpdatedRevnetIssuance;
     if (result.status === "completed") {
       reconciledEventIds.push(result.eventId);
     }
-  }
-
-  if (shouldDrainRevnetIssuances) {
-    await drainHostedRevnetIssuanceSubmissionQueue({
-      limit: input.limit,
-      prisma: input.prisma,
-    });
   }
 
   return reconciledEventIds;
@@ -208,7 +197,6 @@ async function processHostedStripeEventRecord(
   prisma: Prisma.TransactionClient,
 ): Promise<{
   activatedMemberId: string | null;
-  createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
 }> {
   const payload = event.data.object;
@@ -443,13 +431,11 @@ async function processClaimedHostedStripeEvent(
     });
     finishHostedOnboardingTiming(timing, "completed", {
       activatedMember: Boolean(result.activatedMemberId),
-      createdOrUpdatedRevnetIssuance: result.createdOrUpdatedRevnetIssuance,
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
     });
 
     return {
       activatedMemberId: result.activatedMemberId,
-      createdOrUpdatedRevnetIssuance: result.createdOrUpdatedRevnetIssuance,
       eventId: claimed.eventId,
       hostedExecutionEventId: result.hostedExecutionEventId,
       status: "completed",
@@ -482,7 +468,6 @@ async function processClaimedHostedStripeEvent(
 
     return {
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       eventId: claimed.eventId,
       hostedExecutionEventId: null,
       status: "failed",
@@ -522,29 +507,24 @@ function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWher
 function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
-    createdOrUpdatedRevnetIssuance?: boolean;
     hostedExecutionEventId: string | null;
   },
 ): {
   activatedMemberId: string | null;
-  createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
-    createdOrUpdatedRevnetIssuance: outcome.createdOrUpdatedRevnetIssuance ?? false,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
   };
 }
 
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
-  createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
 } {
   return {
     activatedMemberId: null,
-    createdOrUpdatedRevnetIssuance: false,
     hostedExecutionEventId: null,
   };
 }

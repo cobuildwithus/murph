@@ -9,21 +9,6 @@ import {
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
-const mocks = vi.hoisted(() => ({
-  isHostedOnboardingRevnetEnabled: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/revnet")>(
-    "@/src/lib/hosted-onboarding/revnet",
-  );
-
-  return {
-    ...actual,
-    isHostedOnboardingRevnetEnabled: mocks.isHostedOnboardingRevnetEnabled,
-  };
-});
-
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     contactPrivacyKeyring: {
@@ -225,7 +210,6 @@ describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
   });
 
   it("binds a verified Privy identity onto an invite-bound member", async () => {
@@ -928,37 +912,6 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
-  });
-
-  it("rejects a wallet-less verified identity when RevNet is enabled", async () => {
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
-
-    const prisma = asCompleteHostedPrivyVerificationPrisma({
-      hostedInvite: {
-        create: vi.fn(),
-        findFirst: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
-      },
-      hostedMember: {
-        create: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
-    });
-
-    await expect(
-      completeHostedPrivyVerification({
-        identity: makeIdentity({
-          wallet: null,
-        }),
-        now: NOW,
-        prisma,
-      }),
-    ).rejects.toMatchObject({
-      code: "PRIVY_WALLET_REQUIRED",
-      httpStatus: 400,
-    });
-
-    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
   });
 
   it("marks an already-active invite flow as paid and preserves the paid timestamp", async () => {

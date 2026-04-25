@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaymentFailed: vi.fn(),
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
-  drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   stripe: {
     events: {
@@ -53,17 +52,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     requireHostedStripeApi: () => mocks.stripe,
-  };
-});
-
-vi.mock("@/src/lib/hosted-onboarding/stripe-revnet-issuance", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/stripe-revnet-issuance")
-  >("@/src/lib/hosted-onboarding/stripe-revnet-issuance");
-
-  return {
-    ...actual,
-    drainHostedRevnetIssuanceSubmissionQueue: mocks.drainHostedRevnetIssuanceSubmissionQueue,
   };
 });
 
@@ -129,7 +117,6 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeDisputeUpdated.mockResolvedValue(undefined);
     mocks.applyStripeInvoicePaid.mockResolvedValue({
       activatedMemberId: "member_123",
-      createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: "dispatch_123",
     });
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
@@ -139,7 +126,6 @@ describe("hosted Stripe event reconciliation", () => {
       customerId: null,
     });
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription());
-    mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
   });
 
   it("stores only minimal Stripe receipt state when recording an event", async () => {
@@ -184,7 +170,6 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
-      createdOrUpdatedRevnetIssuance: false,
       eventId: "evt_invoice_paid_123",
       hostedExecutionEventId: "dispatch_123",
       status: "completed",
@@ -234,7 +219,6 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       eventId: event.id,
       hostedExecutionEventId: null,
       status: "completed",
@@ -272,7 +256,6 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       eventId: event.id,
       hostedExecutionEventId: null,
       status: "completed",
@@ -315,7 +298,6 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       eventId: event.id,
       hostedExecutionEventId: null,
       status: "completed",
@@ -354,7 +336,6 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       eventId: event.id,
       hostedExecutionEventId: null,
       status: "completed",
@@ -392,7 +373,6 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     ).resolves.toEqual({
       activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
       eventId: "evt_invoice_paid_123",
       hostedExecutionEventId: null,
       status: "failed",

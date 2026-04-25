@@ -60,7 +60,6 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 
 import {
   activateHostedMemberForPositiveSourceTx,
-  activateHostedMemberFromConfirmedRevnetIssuanceTx,
   buildHostedMemberActivationWelcomeRoute,
 } from "@/src/lib/hosted-onboarding/member-activation";
 
@@ -169,33 +168,6 @@ describe("hosted onboarding member activation", () => {
       }),
       tx: expect.anything(),
     });
-  });
-
-  it("keeps the revnet confirmation path on the same activation owner", async () => {
-    const member = makeMemberSnapshot();
-
-    await expect(
-      activateHostedMemberFromConfirmedRevnetIssuanceTx({
-        memberId: member.core.id,
-        occurredAt: "2026-04-12T00:00:00.000Z",
-        prisma: makeTransactionHarness() as never,
-        sourceEventId: "revnet_evt_123",
-        sourceType: "hosted.revnet.issuance.confirmed",
-      }),
-    ).resolves.toEqual({
-      activated: true,
-      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-      memberId: "member_123",
-    });
-
-    expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
-      member,
-      prisma: expect.anything(),
-    });
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-      }),
-    );
   });
 
   it("passes through a Linq thread-materialization target when web only assigned the home line", async () => {

@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => {
 
   return {
     createPrivyClient,
-    isHostedOnboardingRevnetEnabled: vi.fn(),
     privyUsersSetCustomMetadata,
     PrivyClient,
     runtimeEnv: {
@@ -34,10 +33,6 @@ const mocks = vi.hoisted(() => {
 vi.mock("@privy-io/node", () => ({
   PrivyClient: mocks.PrivyClient,
   verifyIdentityToken: mocks.verifyIdentityToken,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
-  isHostedOnboardingRevnetEnabled: mocks.isHostedOnboardingRevnetEnabled,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -69,7 +64,6 @@ describe("hosted Privy verification", () => {
     delete (globalThis as typeof globalThis & {
       __murphHostedPrivyManagementClient?: unknown;
     }).__murphHostedPrivyManagementClient;
-    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
     mocks.runtimeEnv.privyAppId = "cm_app_123";
     mocks.runtimeEnv.privyAppSecret = "app_secret_123";
     mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
@@ -479,7 +473,7 @@ describe("hosted Privy verification", () => {
     });
   });
 
-  it("allows verified sessions that only include a non-ethereum embedded wallet when RevNet is disabled", async () => {
+  it("allows verified sessions that only include a non-ethereum embedded wallet", async () => {
     mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
       linked_accounts: [
