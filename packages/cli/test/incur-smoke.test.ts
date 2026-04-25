@@ -24,6 +24,8 @@ import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { createVaultCli } from '../src/vault-cli.js'
 import {
   binPath,
+  commandOutputFromError,
+  type CliEnvelope,
   requireData,
   runCli,
   runRawCli,
@@ -59,6 +61,40 @@ async function runBuiltCliFromCwd(
   return stdout.trim()
 }
 
+async function runBuiltJsonCliFromCwd<TData = Record<string, unknown>>(
+  args: string[],
+  options: {
+    cwd: string
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<CliEnvelope<TData>> {
+  try {
+    const stdout = await runBuiltCliFromCwd(withMachineJsonOutput(args), options)
+    return JSON.parse(stdout) as CliEnvelope<TData>
+  } catch (error) {
+    const output = commandOutputFromError(error)
+    if (output !== null) {
+      return JSON.parse(output) as CliEnvelope<TData>
+    }
+
+    throw error
+  }
+}
+
+function withMachineJsonOutput(args: string[]): string[] {
+  const nextArgs = [...args]
+
+  if (!nextArgs.includes('--full-output')) {
+    nextArgs.push('--full-output')
+  }
+
+  if (!nextArgs.includes('--json') && !nextArgs.includes('--format')) {
+    nextArgs.push('--format', 'json')
+  }
+
+  return nextArgs
+}
+
 async function runSourceCliRaw(args: string[]): Promise<string> {
   const cli = createVaultCli()
   const output: string[] = []
@@ -92,7 +128,7 @@ async function runJsonCli<TData>(
   const output: string[] = []
   let exitCode: number | null = null
 
-  await cli.serve([...args, '--format', 'json', '--verbose'], {
+  await cli.serve([...args, '--format', 'json', '--full-output'], {
     env: process.env,
     exit(code) {
       exitCode = code
@@ -131,14 +167,19 @@ test('root help exposes the Incur built-ins', async () => {
   assert.match(help, /--config/u)
   assert.match(help, /--no-config/u)
   assert.match(help, /--schema\s+Show JSON Schema for command/u)
-  assert.match(help, /--verbose\s+Show full output envelope/u)
+  assert.match(help, /--full-output\s+Show full output envelope/u)
   assert.match(help, /--llms, --llms-full\s+Print LLM-readable manifest/u)
 })
 
 test('root config file can provide command option defaults', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-'))
-  const vaultRoot = path.join(tempRoot, 'vault')
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(tempRoot, 'configured-vault')
   const configPath = path.join(tempRoot, 'murph.json')
+  const isolatedEnv = {
+    HOME: homeRoot,
+    VAULT: '',
+  }
 
   try {
     await initializeVault({ vaultRoot })
@@ -160,17 +201,26 @@ test('root config file can provide command option defaults', async () => {
     )
 
     const showResult = requireData(
-      await runCli<{ vault: string }>(['--config', configPath, 'vault', 'show']),
+      await runBuiltJsonCliFromCwd<{ vault: string }>(
+        ['--config', configPath, 'vault', 'show'],
+        {
+          cwd: tempRoot,
+          env: isolatedEnv,
+        },
+      ),
     )
     assert.equal(showResult.vault, vaultRoot)
 
-    const withoutConfig = await runCli([
+    const withoutConfig = await runBuiltJsonCliFromCwd([
       '--config',
       configPath,
       '--no-config',
       'vault',
       'show',
-    ])
+    ], {
+      cwd: tempRoot,
+      env: isolatedEnv,
+    })
     assert.equal(withoutConfig.ok, false)
 
     if (!withoutConfig.ok) {
@@ -1637,7 +1687,7 @@ test('health command schema remains JSON-Schema-safe', async () => {
   assert.deepEqual(schema.options.required, ['vault', 'input'])
 }, INCUR_HELP_TIMEOUT_MS)
 
-test('verbose json exposes the native Incur success envelope', async () => {
+test('full-output json exposes the native Incur success envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
@@ -1774,7 +1824,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
 })
 
-test('goal scaffold exposes a success CTA in the verbose json envelope', async () => {
+test('goal scaffold exposes a success CTA in the full-output json envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-cta-'))
 
   try {
