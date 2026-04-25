@@ -653,8 +653,10 @@ describe("hosted-member-store", () => {
     const findUnique = vi.fn().mockResolvedValue({
       memberId: "member_123",
     });
+    const findMany = vi.fn();
     const prisma = {
       hostedMemberRouting: {
+        findMany,
         findUnique,
       },
     } as never;
@@ -674,6 +676,93 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("looks up an upgraded 32-hex reply-alias lookup key directly", async () => {
+    const findUnique = vi.fn().mockResolvedValue({
+      memberId: "member_123",
+    });
+    const findMany = vi.fn();
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberIdByReplyAliasLookupKey({
+        prisma,
+        replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
+      }),
+    ).resolves.toBe("member_123");
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
+      },
+      select: {
+        memberId: true,
+      },
+    });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("does not use prefix fallback for former 16-hex reply-alias lookup keys", async () => {
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const findMany = vi.fn();
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberIdByReplyAliasLookupKey({
+        prisma,
+        replyAliasLookupKey: "0123456789abcdef",
+      }),
+    ).resolves.toBeNull();
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        replyAliasLookupKey: "0123456789abcdef",
+      },
+      select: {
+        memberId: true,
+      },
+    });
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("does not use prefix fallback for non-matching reply-alias lookup keys", async () => {
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const findMany = vi.fn();
+    const prisma = {
+      hostedMemberRouting: {
+        findMany,
+        findUnique,
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberIdByReplyAliasLookupKey({
+        prisma,
+        replyAliasLookupKey: "not-a-legacy-key",
+      }),
+    ).resolves.toBeNull();
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        replyAliasLookupKey: "not-a-legacy-key",
+      },
+      select: {
+        memberId: true,
+      },
+    });
+    expect(findMany).not.toHaveBeenCalled();
   });
 
   it("upserts the reply-alias lookup key on the routing owner row", async () => {
