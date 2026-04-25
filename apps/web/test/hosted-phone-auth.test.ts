@@ -508,6 +508,35 @@ describe("HostedPhoneAuth", () => {
     }
   });
 
+  it("shows an explicit loading state for saved invite phones while Privy initializes", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      logout: mocks.logout,
+      ready: false,
+    });
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+        phoneHint: "*** 2671",
+      }),
+    );
+
+    try {
+      assert.match(container.textContent ?? "", /\*\*\* 2671/);
+      assert.match(container.textContent ?? "", /Preparing phone verification/);
+      assert.doesNotMatch(container.textContent ?? "", /Text me a code/);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(mocks.sendCode).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("falls back to manual entry when the stored invite phone is unavailable", async () => {
     vi.resetModules();
     vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
@@ -1564,6 +1593,7 @@ function createHostedInvitePhoneAuthControllerHarness(
     handleLogout: vi.fn(),
     handleResendCode: vi.fn(),
     pendingAction: null,
+    privyReady: true,
     handleResetPhoneAuthFlow: vi.fn(),
     resetPhoneAuthFlow: vi.fn(),
     sendVerificationCode: vi.fn(),

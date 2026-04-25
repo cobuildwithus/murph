@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type {
+  HostedInvitePhoneAuthTarget,
+  HostedPrivyCompletionPayload,
+} from "@/src/lib/hosted-onboarding/types";
 import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import { useHostedPhoneAuthController } from "./hosted-phone-auth-controller";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
@@ -17,7 +20,10 @@ import {
   HostedPhoneAuthFlow,
   HostedPhoneAuthScaffold,
 } from "./hosted-phone-auth-views";
-import { HostedInviteMaskedPhoneStep } from "./hosted-phone-auth-step-views";
+import {
+  HostedInviteMaskedPhoneLoadingStep,
+  HostedInviteMaskedPhoneStep,
+} from "./hosted-phone-auth-step-views";
 import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 
 const HOSTED_INVITE_MASKED_PHONE_HINT_PATTERN = /^\*{3}\s+\d{4}$/u;
@@ -30,6 +36,7 @@ interface InvitePhoneCodePayload {
 
 interface HostedInvitePhoneAuthProps {
   inviteCode: string;
+  phoneAuthTarget?: HostedInvitePhoneAuthTarget | null;
   phoneHint?: string | null;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
@@ -37,6 +44,7 @@ interface HostedInvitePhoneAuthProps {
 
 export function HostedInvitePhoneAuth({
   inviteCode,
+  phoneAuthTarget,
   phoneHint,
   onCompleted,
   onSignOut,
@@ -51,12 +59,19 @@ export function HostedInvitePhoneAuth({
       await onSignOut?.();
     },
   });
-  const normalizedPhoneHint = readHostedInvitePhoneHint(phoneHint);
+  const resolvedPhoneAuthTarget = readHostedInvitePhoneAuthTarget({
+    phoneAuthTarget,
+    phoneHint,
+  });
+  const savedPhoneHint = resolvedPhoneAuthTarget.kind === "saved"
+    ? resolvedPhoneAuthTarget.phoneHint
+    : null;
   const showMaskedPhoneHint =
     !manualEntryVisible
     && !controller.sharedFlowProps.activeAttempt
-    && normalizedPhoneHint !== null;
-  const inviteShortcutActive = !manualEntryVisible && normalizedPhoneHint !== null;
+    && savedPhoneHint !== null;
+  const inviteShortcutActive =
+    !manualEntryVisible && savedPhoneHint !== null;
 
   useEffect(() => {
     void flushPendingInvitePhoneCodeMutation(inviteCode);
@@ -64,6 +79,14 @@ export function HostedInvitePhoneAuth({
 
   async function handleInviteSendCode() {
     controller.setErrorMessage(null);
+
+    if (!controller.privyReady) {
+      controller.setErrorMessage(
+        "Phone verification is still loading. Try again in a moment.",
+      );
+      return;
+    }
+
     controller.setPendingAction("send-code");
 
     try {
@@ -137,14 +160,21 @@ export function HostedInvitePhoneAuth({
       onUseDifferentNumber={controller.handleLogout}
     >
       <HostedPrivyCaptcha />
-      {showMaskedPhoneHint ? (
-        <HostedInviteMaskedPhoneStep
-          disabled={controller.flowDisabled}
-          pendingAction={controller.pendingAction}
-          phoneHint={normalizedPhoneHint}
-          onSendCode={handleInviteSendCode}
-          onUseDifferentNumber={handleUseDifferentNumber}
-        />
+      {showMaskedPhoneHint && savedPhoneHint ? (
+        controller.privyReady ? (
+          <HostedInviteMaskedPhoneStep
+            disabled={controller.flowDisabled}
+            pendingAction={controller.pendingAction}
+            phoneHint={savedPhoneHint}
+            onSendCode={handleInviteSendCode}
+            onUseDifferentNumber={handleUseDifferentNumber}
+          />
+        ) : (
+          <HostedInviteMaskedPhoneLoadingStep
+            phoneHint={savedPhoneHint}
+            onUseDifferentNumber={handleUseDifferentNumber}
+          />
+        )
       ) : (
         <HostedPhoneAuthFlow
           {...controller.sharedFlowProps}
@@ -158,6 +188,32 @@ export function HostedInvitePhoneAuth({
       )}
     </HostedPhoneAuthScaffold>
   );
+}
+
+function readHostedInvitePhoneAuthTarget(input: {
+  phoneAuthTarget?: HostedInvitePhoneAuthTarget | null;
+  phoneHint?: string | null;
+}): HostedInvitePhoneAuthTarget {
+  if (input.phoneAuthTarget?.kind === "manual") {
+    return {
+      kind: "manual",
+    };
+  }
+
+  const phoneHint = readHostedInvitePhoneHint(
+    input.phoneAuthTarget?.kind === "saved"
+      ? input.phoneAuthTarget.phoneHint
+      : input.phoneHint,
+  );
+
+  return phoneHint
+    ? {
+        kind: "saved",
+        phoneHint,
+      }
+    : {
+        kind: "manual",
+      };
 }
 
 function readHostedInvitePhoneHint(value: string | null | undefined): string | null {

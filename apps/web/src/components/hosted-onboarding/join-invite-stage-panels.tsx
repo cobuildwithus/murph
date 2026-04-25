@@ -30,6 +30,7 @@ const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 interface JoinInviteVerificationPanelProps {
   awaitingInviteSessionResolution: boolean;
   inviteCode: string;
+  phoneAuthTarget?: NonNullable<HostedInviteStatusPayload["invite"]>["phoneAuthTarget"] | null;
   phoneHint?: string | null;
   statusRefreshErrorMessage: string | null;
   statusRefreshRetryPending: boolean;
@@ -94,6 +95,7 @@ function HostedInviteSignOutButton({
 export function JoinInviteVerificationPanel({
   awaitingInviteSessionResolution,
   inviteCode,
+  phoneAuthTarget,
   phoneHint,
   statusRefreshErrorMessage,
   statusRefreshRetryPending,
@@ -140,6 +142,7 @@ export function JoinInviteVerificationPanel({
     <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
       <HostedInvitePhoneAuth
         inviteCode={inviteCode}
+        phoneAuthTarget={phoneAuthTarget}
         phoneHint={phoneHint}
         onSignOut={async () => {
           await onRefreshStatus();

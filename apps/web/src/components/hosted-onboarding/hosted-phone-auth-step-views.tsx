@@ -1,4 +1,5 @@
 import { useId, type FormEvent } from "react";
+import { LoaderCircleIcon } from "lucide-react";
 
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
@@ -37,17 +38,7 @@ export function HostedInviteMaskedPhoneStep({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <div className="space-y-2">
-        <p className="text-sm font-medium leading-none text-[#2d3436]">
-          Phone number
-        </p>
-        <div className="rounded-xl border border-[#d9cdbb] bg-[#f7f4ee] px-4 py-3">
-          <p className="text-lg font-semibold text-[#2d3436]">{phoneHint}</p>
-        </div>
-        <p className="text-sm text-stone-500">
-          We will text a verification code to this number.
-        </p>
-      </div>
+      <HostedInviteMaskedPhoneSummary phoneHint={phoneHint} />
       <Button
         type="button"
         disabled={disabled}
@@ -64,6 +55,56 @@ export function HostedInviteMaskedPhoneStep({
         onClick={onUseDifferentNumber}
       />
       <HostedAuthLegalNotice />
+    </div>
+  );
+}
+
+export function HostedInviteMaskedPhoneLoadingStep({
+  phoneHint,
+  onUseDifferentNumber,
+}: {
+  phoneHint: string;
+  onUseDifferentNumber: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <HostedInviteMaskedPhoneSummary phoneHint={phoneHint} />
+      <div className="flex items-start gap-3 rounded-xl border border-[#d9cdbb] bg-[#f7f4ee] px-4 py-3 text-sm text-stone-600">
+        <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin" />
+        <div>
+          <p className="font-medium text-[#2d3436]">
+            Preparing phone verification...
+          </p>
+          <p>Keep this tab open for a moment.</p>
+        </div>
+      </div>
+      <HostedUseDifferentNumberButton
+        disabled={false}
+        pendingAction={null}
+        size="sm"
+        onClick={onUseDifferentNumber}
+      />
+      <HostedAuthLegalNotice />
+    </div>
+  );
+}
+
+function HostedInviteMaskedPhoneSummary({
+  phoneHint,
+}: {
+  phoneHint: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium leading-none text-[#2d3436]">
+        Phone number
+      </p>
+      <div className="rounded-xl border border-[#d9cdbb] bg-[#f7f4ee] px-4 py-3">
+        <p className="text-lg font-semibold text-[#2d3436]">{phoneHint}</p>
+      </div>
+      <p className="text-sm text-stone-500">
+        We will text a verification code to this number.
+      </p>
     </div>
   );
 }
