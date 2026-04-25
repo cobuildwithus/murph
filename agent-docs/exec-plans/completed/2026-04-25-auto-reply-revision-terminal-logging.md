@@ -26,7 +26,13 @@ Success criteria:
 
 ## Verification
 
-Pending.
+- PASS: `pnpm --dir packages/assistant-cli exec vitest run test/assistant-ui-logging.test.ts --config vitest.config.ts --no-coverage`
+- PASS: `pnpm --dir packages/assistant-cli typecheck`
+- PASS: `pnpm --dir packages/assistant-cli test`
+- PASS: `pnpm --dir packages/assistant-cli test:coverage`
+- PASS: `git diff --check -- packages/assistant-cli/src/run-terminal-logging.ts packages/assistant-cli/test/assistant-ui-logging.test.ts agent-docs/exec-plans/active/2026-04-25-auto-reply-revision-terminal-logging.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+- PASS: security/privacy review found no identifier, path, message-text, delivery-target, or secret leakage in the safe formatter.
+- PASS: coverage-write review added direct unsafe-details proof for the same revision detail and found no remaining coverage concerns.
 
 ## Notes
 
