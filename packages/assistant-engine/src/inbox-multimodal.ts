@@ -16,12 +16,14 @@ import {
   type RoutingImageEligibility,
 } from './inbox-routing-vision.js'
 import {
+  projectAttachmentEvidenceForModel,
+  type ModelEvidenceSource,
+} from './inbox-evidence-projection.js'
+import {
   type AssistantUserMessageContentPart,
 } from './model-harness.js'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
-
-const DEFAULT_MAX_FRAGMENT_CHARS = 6000
 
 const parserManifestSchema = z.object({
   schema: z.literal('murph.parser-manifest.v1'),
@@ -60,14 +62,26 @@ export async function buildInboxModelAttachmentBundle(input: {
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle> {
   const routingImage = getRoutingImageEligibility(input.attachment)
-  const fragments = [
-    buildMetadataFragment(input.attachment, routingImage),
-    ...buildInlineTextFragments(input.attachment),
-    ...(await buildDerivedTextFragments({
+  const evidenceSources = [
+    ...buildInlineTextSources(input.attachment),
+    ...(await buildDerivedTextSources({
       attachment: input.attachment,
       captureId: input.captureId,
       vaultRoot: input.vaultRoot,
     })),
+  ]
+  const fragments = [
+    buildMetadataFragment(input.attachment, routingImage),
+    ...projectAttachmentEvidenceForModel({
+      attachment: {
+        byteSize: input.attachment.byteSize ?? null,
+        derivedPath: input.attachment.derivedPath ?? null,
+        fileName: input.attachment.fileName ?? null,
+        mime: input.attachment.mime ?? null,
+        storedPath: input.attachment.storedPath ?? null,
+      },
+      sources: evidenceSources,
+    }),
   ]
   const combinedText = fragments
     .map((fragment) => `[${fragment.label}]\n${fragment.text}`)
@@ -248,6 +262,7 @@ function buildMetadataFragment(
     `kind: ${attachment.kind}`,
     `mime: ${attachment.mime ?? 'unknown'}`,
     `fileName: ${attachment.fileName ?? 'unknown'}`,
+    `byteSize: ${attachment.byteSize ?? 'unknown'}`,
     `storedPath: ${attachment.storedPath ?? 'missing'}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
@@ -270,49 +285,39 @@ function buildMetadataFragment(
   }
 }
 
-function buildInlineTextFragments(
+function buildInlineTextSources(
   attachment: InboxShowResult['capture']['attachments'][number],
-) {
-  const fragments: Array<{
-    kind: 'attachment_extracted_text' | 'attachment_transcript'
-    label: string
-    path: string | null
-    text: string
-    truncated: boolean
-  }> = []
+): ModelEvidenceSource[] {
+  const sources: ModelEvidenceSource[] = []
 
   const extracted = normalizeNullableString(attachment.extractedText)
   if (extracted) {
-    const clamped = clampText(extracted, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
+    sources.push({
       kind: 'attachment_extracted_text',
       label: `attachment-${attachment.ordinal}-extracted-text`,
       path: attachment.derivedPath ?? attachment.storedPath ?? null,
-      text: clamped.text,
-      truncated: clamped.truncated,
+      text: extracted,
     })
   }
 
   const transcript = normalizeNullableString(attachment.transcriptText)
   if (transcript) {
-    const clamped = clampText(transcript, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
+    sources.push({
       kind: 'attachment_transcript',
       label: `attachment-${attachment.ordinal}-transcript`,
       path: attachment.derivedPath ?? attachment.storedPath ?? null,
-      text: clamped.text,
-      truncated: clamped.truncated,
+      text: transcript,
     })
   }
 
-  return fragments
+  return sources
 }
 
-async function buildDerivedTextFragments(input: {
+async function buildDerivedTextSources(input: {
   attachment: InboxShowResult['capture']['attachments'][number]
   captureId: string
   vaultRoot: string
-}) {
+}): Promise<ModelEvidenceSource[]> {
   const allowedDerivedPrefixes = buildAllowedDerivedPrefixes(
     input.captureId,
     input.attachment,
@@ -330,13 +335,7 @@ async function buildDerivedTextFragments(input: {
     return []
   }
 
-  const fragments: Array<{
-    kind: 'derived_plain_text' | 'derived_markdown' | 'derived_tables'
-    label: string
-    path: string | null
-    text: string
-    truncated: boolean
-  }> = []
+  const sources: ModelEvidenceSource[] = []
 
   const plainTextPath = normalizeAnchoredVaultRelativePath(
     manifest.paths.plainTextPath,
@@ -346,13 +345,11 @@ async function buildDerivedTextFragments(input: {
     ? await readRelativeTextFile(input.vaultRoot, plainTextPath)
     : null
   if (plainText) {
-    const clamped = clampText(plainText, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
+    sources.push({
       kind: 'derived_plain_text',
       label: 'derived-plain-text',
       path: plainTextPath,
-      text: clamped.text,
-      truncated: clamped.truncated,
+      text: plainText,
     })
   }
 
@@ -364,13 +361,11 @@ async function buildDerivedTextFragments(input: {
     ? await readRelativeTextFile(input.vaultRoot, markdownPath)
     : null
   if (markdown) {
-    const clamped = clampText(markdown, DEFAULT_MAX_FRAGMENT_CHARS)
-    fragments.push({
+    sources.push({
       kind: 'derived_markdown',
       label: 'derived-markdown',
       path: markdownPath,
-      text: clamped.text,
-      truncated: clamped.truncated,
+      text: markdown,
     })
   }
 
@@ -381,18 +376,16 @@ async function buildDerivedTextFragments(input: {
   if (tablesPath) {
     const tables = await readRelativeTextFile(input.vaultRoot, tablesPath)
     if (tables) {
-      const clamped = clampText(tables, DEFAULT_MAX_FRAGMENT_CHARS)
-      fragments.push({
+      sources.push({
         kind: 'derived_tables',
         label: 'derived-tables',
         path: tablesPath,
-        text: clamped.text,
-        truncated: clamped.truncated,
+        text: tables,
       })
     }
   }
 
-  return fragments
+  return sources
 }
 
 async function readPreparedRoutingEvidence(input: {
@@ -582,28 +575,5 @@ async function readRelativeTextFile(
     )
   } catch {
     return null
-  }
-}
-
-function clampText(
-  value: string,
-  limit: number,
-): {
-  text: string
-  truncated: boolean
-} {
-  const normalized = value.trim()
-  if (normalized.length <= limit) {
-    return {
-      text: normalized,
-      truncated: false,
-    }
-  }
-
-  const suffix = `\n\n[truncated ${normalized.length - limit} characters]`
-  const safeLimit = Math.max(0, limit - suffix.length)
-  return {
-    text: `${normalized.slice(0, safeLimit)}${suffix}`,
-    truncated: true,
   }
 }
