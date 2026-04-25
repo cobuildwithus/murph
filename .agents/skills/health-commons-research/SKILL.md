@@ -284,6 +284,8 @@ For inline seams such as charter, synthesis, and QA, `responses/*.md` remains th
 
 Use `thread export` for inline-text seams such as charter, snowball, synthesis, QA, or other no-attachment responses. Use `thread download` only when the assistant actually returned attachment controls.
 
+ChatGPT.com can sometimes answer a Pro research seam with the fast/instant model instead of the intended deep research path. Treat unusually short, generic, missing-artifact, schema-incomplete, or obviously shallow responses as suspect; verify the required artifacts and thread export before accepting them, and recover or rerun the seam when the response does not satisfy its contract.
+
 ### If a run “failed” after send
 
 This is common. A local wrapper can fail after the thread already exists.
