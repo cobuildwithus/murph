@@ -5,7 +5,7 @@ key: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
 slug: "protocols/hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
 title: "Hyperbaric Oxygen Therapy"
 summary: "Track clinician-prescribed systemic chamber HBOT as a high-caution medical intervention, keeping supervised clinical indications separate from mild chambers, topical oxygen, normobaric oxygen, EWOT, and wellness claims."
-status: "draft"
+status: "field-testing"
 quality: "usable"
 aliases:
   - "clinical hyperbaric oxygen therapy"
