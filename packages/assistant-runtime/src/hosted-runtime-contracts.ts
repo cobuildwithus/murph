@@ -13,6 +13,7 @@ export type {
 } from "./hosted-runtime/models.ts";
 export type {
   HostedRuntimeArtifactStore,
+  HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeIssueExportPort,

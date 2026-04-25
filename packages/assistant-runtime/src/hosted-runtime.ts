@@ -50,6 +50,7 @@ import type {
   HostedAssistantRuntimeJobInput,
 } from "./hosted-runtime/models.ts";
 import type {
+  HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimePlatform,
 } from "./hosted-runtime/platform.ts";
 import {
@@ -243,7 +244,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
             hosted: {
               deviceConnectProviders,
               issueDeviceConnectLink: createHostedDeviceConnectLinkIssuer({
-                boundUserId: wake.userId,
+                messagingReturnTarget: resolveHostedDeviceConnectMessagingReturnTarget(wake),
                 platform: runtime.platform,
                 supportedProviders: deviceConnectProviders.map((entry) => entry.provider),
               }),
@@ -302,7 +303,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
 }
 
 function createHostedDeviceConnectLinkIssuer(input: {
-  boundUserId: string;
+  messagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   platform: HostedRuntimePlatform;
   supportedProviders: readonly string[];
 }) {
@@ -327,9 +328,30 @@ function createHostedDeviceConnectLinkIssuer(input: {
     }
 
     return client.createConnectLink({
+      ...(input.messagingReturnTarget
+        ? { messagingReturnTarget: input.messagingReturnTarget }
+        : {}),
       provider: normalizedProvider,
     });
   };
+}
+
+function resolveHostedDeviceConnectMessagingReturnTarget(
+  wake: HostedRuntimeEvent,
+): HostedRuntimeDeviceSyncMessagingReturnTarget | null {
+  if (wake.kind !== "conversation.message") {
+    return null;
+  }
+
+  if (wake.message.channel === "linq") {
+    return "imessage";
+  }
+
+  if (wake.message.channel === "telegram") {
+    return "telegram";
+  }
+
+  return null;
 }
 
 function resolveHostedDeviceConnectProviders(

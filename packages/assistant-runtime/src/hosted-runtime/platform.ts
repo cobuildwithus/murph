@@ -42,12 +42,15 @@ type HostedRuntimeEffectsPortBase = {
 
 export type HostedRuntimeEffectsPort = HostedRuntimeEffectsPortBase;
 
+export type HostedRuntimeDeviceSyncMessagingReturnTarget = "imessage" | "telegram";
+
 export interface HostedRuntimeDeviceSyncPort {
   applyUpdates(input: {
     occurredAt?: string | null;
     updates: HostedExecutionDeviceSyncRuntimeApplyRequest["updates"];
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   createConnectLink(input: {
+    messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
     provider: string;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
   fetchSnapshot(input?: {

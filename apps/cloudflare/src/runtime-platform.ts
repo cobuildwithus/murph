@@ -3,6 +3,7 @@ import {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
+  type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -469,13 +470,23 @@ function createHostedWebDeviceSyncPort(input: {
 
       return parseHostedExecutionDeviceSyncRuntimeApplyResponse(payload);
     },
-    async createConnectLink({ provider }: { provider: string }) {
+    async createConnectLink(runtimeInput: {
+      messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
+      provider: string;
+    }) {
       const payload = await fetchHostedWebControlPlaneJson({
+        ...(runtimeInput.messagingReturnTarget
+          ? {
+              body: {
+                messagingReturnTarget: runtimeInput.messagingReturnTarget,
+              },
+            }
+          : {}),
         boundUserId: input.boundUserId,
-        description: `Hosted device-sync connect link ${provider}`,
+        description: `Hosted device-sync connect link ${runtimeInput.provider}`,
         fetchImpl: input.fetchImpl,
         method: "POST",
-        path: buildHostedExecutionDeviceSyncConnectLinkPath(provider),
+        path: buildHostedExecutionDeviceSyncConnectLinkPath(runtimeInput.provider),
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
