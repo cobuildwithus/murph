@@ -1,6 +1,7 @@
 import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_MESSAGING_ACTIVITY_STOP_PATH,
   HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -16,6 +17,8 @@ import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   decodeRouteParam,
   resolveRunnerOutboundUserCryptoContext,
+  resolveRunnerOutboundUserRunnerStub,
+  requireRunnerOutboundUserStubMethod,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 import { handleRunnerTurnInputRefreshRequest } from "./turn-input.ts";
@@ -56,6 +59,18 @@ export async function handleRunnerResultsRequest(input: {
     });
   }
 
+  if (input.url.pathname === HOSTED_EXECUTION_RUNNER_MESSAGING_ACTIVITY_STOP_PATH) {
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
+    }
+
+    return handleRunnerMessagingActivityStopRequest({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+  }
+
   const messageMatch = /^\/messages\/(?<rawMessageKey>[^/]+)$/u.exec(input.url.pathname);
   if (messageMatch?.groups) {
     if (input.request.method !== "GET") {
@@ -72,6 +87,67 @@ export async function handleRunnerResultsRequest(input: {
   }
 
   return notFound();
+}
+
+async function handleRunnerMessagingActivityStopRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  let runId: string;
+  let reason: string | null;
+  try {
+    const body = await readJsonObject(input.request);
+    runId = readRequiredNonEmptyString(body.runId, "runId");
+    reason = readOptionalNonEmptyString(body.reason, "reason");
+  } catch (error) {
+    if (error instanceof SyntaxError || error instanceof TypeError) {
+      return jsonError(error.message, 400);
+    }
+
+    throw error;
+  }
+
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const stopActiveRunMessagingActivity = requireRunnerOutboundUserStubMethod(
+    stub,
+    "stopActiveRunMessagingActivity",
+  );
+  const result = await stopActiveRunMessagingActivity.call(stub, {
+    ...(reason === null ? {} : { reason }),
+    runId,
+  });
+
+  return json({
+    ok: true,
+    stopped: result.stopped === true,
+  });
+}
+
+function readRequiredNonEmptyString(value: unknown, field: string): string {
+  const normalized = readOptionalNonEmptyString(value, field);
+  if (normalized === null) {
+    throw new TypeError(`Hosted runner messaging activity stop request.${field} must be a non-empty string.`);
+  }
+
+  return normalized;
+}
+
+function readOptionalNonEmptyString(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`Hosted runner messaging activity stop request.${field} must be a string.`);
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new TypeError(`Hosted runner messaging activity stop request.${field} must be a non-empty string.`);
+  }
+
+  return normalized;
 }
 
 async function handleRunnerEmailMessageReadRequest(input: {

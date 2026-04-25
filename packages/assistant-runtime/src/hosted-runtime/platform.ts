@@ -78,12 +78,22 @@ export interface HostedRuntimeTurnInputPort {
   }>;
 }
 
+export interface HostedRuntimeMessagingActivityPort {
+  stopActiveRunMessagingActivity(input: {
+    reason: "before_committed_assistant_delivery";
+    runId: string;
+  }): Promise<{
+    stopped: boolean;
+  }>;
+}
+
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   billingPort?: HostedRuntimeBillingPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  messagingActivityPort?: HostedRuntimeMessagingActivityPort | null;
   turnInputPort?: HostedRuntimeTurnInputPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
 }

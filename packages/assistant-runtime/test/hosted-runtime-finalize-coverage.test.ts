@@ -144,6 +144,9 @@ import {
   completeHostedRunDrainAfterCommit,
   executeHostedRunDrainForCommit,
 } from "../src/hosted-runtime/execution.ts";
+import type {
+  HostedRuntimeMessagingActivityPort,
+} from "../src/hosted-runtime/platform.ts";
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
 const committedBundle = Uint8Array.from([4, 5, 6]);
@@ -182,6 +185,7 @@ function createRuntime(overrides: {
       artifactStore,
       deviceSyncPort: null,
       effectsPort: createHostedRuntimeEffectsPortStub(),
+      messagingActivityPort: null as HostedRuntimeMessagingActivityPort | null,
       usageExportPort: null,
     },
     platformEnv: {},
@@ -677,12 +681,20 @@ describe("assistant-runtime execution coverage", () => {
     ]);
   });
 
-  it("stops executor-owned Linq typing before post-send exports continue", async () => {
+  it("stops runner-owned messaging activity before committed delivery drains", async () => {
     const steps: string[] = [];
     const runtime = createRuntime();
     runtime.forwardedEnv = {
       HOSTED_RUN_MESSAGING_ACTIVITY_OWNER: "executor",
-      LINQ_API_TOKEN: "linq-token",
+    };
+    const stopActiveRunMessagingActivity = vi.fn(async () => {
+      steps.push("activity.stop");
+      return {
+        stopped: true,
+      };
+    });
+    runtime.platform.messagingActivityPort = {
+      stopActiveRunMessagingActivity,
     };
     mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockImplementationOnce(async () => {
       steps.push("drain");
@@ -700,9 +712,6 @@ describe("assistant-runtime execution coverage", () => {
           targetKind: "participant" as const,
         },
       ];
-    });
-    mocks.stopLinqChatTypingIndicator.mockImplementationOnce(async ({ chatId }) => {
-      steps.push(`stop:${chatId}`);
     });
     mocks.exportHostedPendingAssistantUsage.mockImplementationOnce(async () => {
       steps.push("usage");
@@ -731,13 +740,106 @@ describe("assistant-runtime execution coverage", () => {
       },
       restored: createRestored(),
       runtime,
-      wake: buildHostedExecutionLinqConversationMessageWake({
+      wake: buildHostedExecutionRuntimeTimerWake({
         eventId: "evt_delivery_finished_callback",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      }),
+    });
+
+    expect(stopActiveRunMessagingActivity).toHaveBeenCalledWith({
+      reason: "before_committed_assistant_delivery",
+      runId: "run_123",
+    });
+    expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
+    expect(steps).toEqual([
+      "activity.stop",
+      "drain",
+      "usage",
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          stopped: true,
+        }),
+        message:
+          "Hosted run messaging activity stop requested before committed assistant delivery.",
+        phase: "side-effects.draining",
+      }),
+    );
+  });
+
+  it("falls back to direct Linq cleanup when the runner reports no active messaging activity", async () => {
+    const steps: string[] = [];
+    const runtime = createRuntime();
+    runtime.forwardedEnv = {
+      HOSTED_RUN_MESSAGING_ACTIVITY_OWNER: "executor",
+    };
+    const stopActiveRunMessagingActivity = vi.fn(async () => {
+      steps.push("activity.stop");
+      return {
+        stopped: false,
+      };
+    });
+    runtime.platform.messagingActivityPort = {
+      stopActiveRunMessagingActivity,
+    };
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockImplementationOnce(async () => {
+      steps.push("drain");
+      return [
+        {
+          deliveryChannel: "linq",
+          deliveryErrorCode: null,
+          deliveryStatus: "sent",
+          effectFingerprint: hostedDeliveryEffect.fingerprint,
+          effectId: hostedDeliveryEffect.effectId,
+          providerMessageId: "linq_message_123",
+          providerThreadId: "chat_123",
+          retryable: false,
+          target: "chat_123",
+          targetKind: "participant" as const,
+        },
+      ];
+    });
+    mocks.stopLinqChatTypingIndicator.mockImplementationOnce(async () => {
+      steps.push("linq.stop");
+    });
+    mocks.exportHostedPendingAssistantUsage.mockImplementationOnce(async () => {
+      steps.push("usage");
+      return {
+        exported: 1,
+        failed: 0,
+        pending: 0,
+      };
+    });
+
+    await completeHostedRunDrainAfterCommit({
+      run: HOSTED_RUN_CONTEXT,
+      request: {
+        bundle: "committed-bundle",
+        run: HOSTED_RUN_CONTEXT,
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "external_ingress",
+          userId: "member_123",
+          resumeFinalize: true,
+        },
+      },
+      restored: createRestored(),
+      runtime,
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_message_for_cleanup",
         linqMessage: {
           chatId: "chat_123",
           from: "+15551234567",
           isFromMe: false,
-          messageId: "linq_message_123",
+          messageId: "linq_message_789",
           parts: [{ type: "text", value: "hello" }],
         },
         occurredAt: "2026-04-08T00:00:00.000Z",
@@ -746,22 +848,143 @@ describe("assistant-runtime execution coverage", () => {
       }),
     });
 
+    expect(stopActiveRunMessagingActivity).toHaveBeenCalledWith({
+      reason: "before_committed_assistant_delivery",
+      runId: "run_123",
+    });
     expect(mocks.stopLinqChatTypingIndicator).toHaveBeenCalledWith(
       {
         chatId: "chat_123",
       },
       {
-        env: expect.objectContaining({
+        env: {
           HOSTED_RUN_MESSAGING_ACTIVITY_OWNER: "executor",
-          LINQ_API_TOKEN: "linq-token",
-        }),
+        },
       },
     );
     expect(steps).toEqual([
+      "activity.stop",
       "drain",
-      "stop:chat_123",
+      "linq.stop",
       "usage",
     ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          stopped: false,
+        }),
+        message:
+          "Hosted run messaging activity stop requested before committed assistant delivery.",
+        phase: "side-effects.draining",
+      }),
+    );
+  });
+
+  it("falls back to direct Linq cleanup when the runner messaging stop request fails", async () => {
+    const steps: string[] = [];
+    const runtime = createRuntime();
+    runtime.forwardedEnv = {
+      HOSTED_RUN_MESSAGING_ACTIVITY_OWNER: "executor",
+    };
+    const stopActiveRunMessagingActivity = vi.fn(async () => {
+      steps.push("activity.stop");
+      throw new Error("runner stop route unavailable");
+    });
+    runtime.platform.messagingActivityPort = {
+      stopActiveRunMessagingActivity,
+    };
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockImplementationOnce(async () => {
+      steps.push("drain");
+      return [
+        {
+          deliveryChannel: "linq",
+          deliveryErrorCode: null,
+          deliveryStatus: "sent",
+          effectFingerprint: hostedDeliveryEffect.fingerprint,
+          effectId: hostedDeliveryEffect.effectId,
+          providerMessageId: "linq_message_123",
+          providerThreadId: "chat_123",
+          retryable: false,
+          target: "chat_123",
+          targetKind: "participant" as const,
+        },
+      ];
+    });
+    mocks.stopLinqChatTypingIndicator.mockImplementationOnce(async () => {
+      steps.push("linq.stop");
+    });
+    mocks.exportHostedPendingAssistantUsage.mockImplementationOnce(async () => {
+      steps.push("usage");
+      return {
+        exported: 1,
+        failed: 0,
+        pending: 0,
+      };
+    });
+
+    await completeHostedRunDrainAfterCommit({
+      run: HOSTED_RUN_CONTEXT,
+      request: {
+        bundle: "committed-bundle",
+        run: HOSTED_RUN_CONTEXT,
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "external_ingress",
+          userId: "member_123",
+          resumeFinalize: true,
+        },
+      },
+      restored: createRestored(),
+      runtime,
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_message_for_failed_cleanup",
+        linqMessage: {
+          chatId: "chat_123",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "linq_message_890",
+          parts: [{ type: "text", value: "hello" }],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(stopActiveRunMessagingActivity).toHaveBeenCalledWith({
+      reason: "before_committed_assistant_delivery",
+      runId: "run_123",
+    });
+    expect(mocks.stopLinqChatTypingIndicator).toHaveBeenCalledWith(
+      {
+        chatId: "chat_123",
+      },
+      {
+        env: {
+          HOSTED_RUN_MESSAGING_ACTIVITY_OWNER: "executor",
+        },
+      },
+    );
+    expect(steps).toEqual([
+      "activity.stop",
+      "drain",
+      "linq.stop",
+      "usage",
+    ]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        level: "warn",
+        message:
+          "Hosted run messaging activity could not be stopped before committed assistant delivery.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 
   it("returns a final result when best-effort post-commit exports fail", async () => {

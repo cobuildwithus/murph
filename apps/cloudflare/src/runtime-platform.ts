@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
+  HOSTED_EXECUTION_RUNNER_MESSAGING_ACTIVITY_STOP_PATH,
   HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -169,6 +170,23 @@ export function buildHostedExecutionRuntimePlatform(input: {
         const target = readOptionalStringField(payload, "target");
 
         return target ? { target } : undefined;
+      },
+    },
+    messagingActivityPort: {
+      async stopActiveRunMessagingActivity(stopInput) {
+        const payload = await fetchHostedJson({
+          body: stopInput,
+          description: "Hosted run messaging activity stop",
+          fetchImpl,
+          method: "POST",
+          timeoutMs,
+          url: new URL(
+            HOSTED_EXECUTION_RUNNER_MESSAGING_ACTIVITY_STOP_PATH,
+            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
+          ),
+        });
+
+        return parseHostedRuntimeMessagingActivityStopResponse(payload);
       },
     },
     ...(hostedTurnInputRun
@@ -791,6 +809,23 @@ function parseHostedRuntimeTurnInputRefreshResponse(value: unknown) {
         `Hosted turn-input refresh response events[${index}]`,
       )
     ),
+  };
+}
+
+function parseHostedRuntimeMessagingActivityStopResponse(value: unknown): {
+  stopped: boolean;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted messaging activity stop response must be an object.");
+  }
+
+  const stopped = (value as { stopped?: unknown }).stopped;
+  if (typeof stopped !== "boolean") {
+    throw new TypeError("Hosted messaging activity stop response.stopped must be a boolean.");
+  }
+
+  return {
+    stopped,
   };
 }
 
