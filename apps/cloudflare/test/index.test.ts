@@ -13,7 +13,10 @@ import {
   createHostedWebCallbackSignatureHeaders,
 } from "../src/web-callback-auth.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
-import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
+import {
+  hostedArtifactObjectKey,
+  hostedBrowserVaultReplicaObjectKey,
+} from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import type {
@@ -546,6 +549,7 @@ describe("cloudflare worker routes", () => {
   it("returns a stable browser-vault missing-replica code from the browser-vault route", async () => {
     const env = createWorkerEnv();
     await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const replicaRef = await createMissingBrowserVaultReplicaRefForTest(env, "member_123");
 
     const response = await worker.fetch(
       await signControlRequest(new Request(
@@ -553,7 +557,7 @@ describe("cloudflare worker routes", () => {
         {
           body: JSON.stringify({
             browserPublicKeyJwk: createBrowserSessionPublicKeyJwk(),
-            replicaRef: createMissingBrowserVaultReplicaRefForTest(),
+            replicaRef,
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -569,6 +573,40 @@ describe("cloudflare worker routes", () => {
       code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
       error: "Browser vault replica was not found.",
     });
+    expect(env.__bucketStore.getCalls.filter((key) => key.startsWith("users/browser-vault-replicas/"))).toEqual([
+      replicaRef.objectKey,
+    ]);
+  });
+
+  it("rejects browser-vault replica refs outside the bound user's namespace before bucket lookup", async () => {
+    const env = createWorkerEnv();
+    await resolveHostedUserCryptoContextForTest(env, "member_123");
+    await resolveHostedUserCryptoContextForTest(env, "member_456");
+    const foreignReplicaRef = await createMissingBrowserVaultReplicaRefForTest(env, "member_456");
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/browser-vault/session",
+        {
+          body: JSON.stringify({
+            browserPublicKeyJwk: createBrowserSessionPublicKeyJwk(),
+            replicaRef: foreignReplicaRef,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      )),
+      env,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
+      error: "Browser vault replica was not found.",
+    });
+    expect(env.__bucketStore.getCalls.filter((key) => key.startsWith("users/browser-vault-replicas/"))).toEqual([]);
   });
 
   it("accepts run requests by starting a direct background drain", async () => {
@@ -1050,6 +1088,7 @@ function callRunnerOutbound(
 
 function createBucketStore() {
   const values = new Map<string, string>();
+  const getCalls: string[] = [];
 
   return {
     api: {
@@ -1057,6 +1096,7 @@ function createBucketStore() {
         values.delete(key);
       },
       async get(key: string) {
+        getCalls.push(key);
         const value = values.get(key);
 
         if (!value) {
@@ -1077,6 +1117,7 @@ function createBucketStore() {
         values.set(key, value);
       },
     },
+    getCalls,
     keys() {
       return [...values.keys()].sort();
     },
@@ -1106,13 +1147,23 @@ function createBrowserSessionPublicKeyJwk() {
   };
 }
 
-function createMissingBrowserVaultReplicaRefForTest() {
+async function createMissingBrowserVaultReplicaRefForTest(
+  env: WorkerTestEnv,
+  userId: string,
+) {
+  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
+  const dataVersion = "d".repeat(64);
+
   return {
     byteLength: 128,
-    dataVersion: "d".repeat(64),
+    dataVersion,
     generatedAt: "2026-04-20T08:00:00.000Z",
     keyId: "browser-vault-replica:d",
-    objectKey: "users/browser-vault-replicas/missing/replica.json",
+    objectKey: await hostedBrowserVaultReplicaObjectKey({
+      dataVersion,
+      rootKey: crypto.rootKey,
+      userId,
+    }),
     replicaSchema: "murph.browser-vault-replica.v1",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash: "a".repeat(64),

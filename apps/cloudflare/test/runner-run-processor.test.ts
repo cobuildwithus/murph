@@ -2539,6 +2539,7 @@ describe("RunnerRunProcessor.executeRunDrain", () => {
     const replicaStore = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      userId: "user_123",
     });
 
     const existingReplicaRef = await replicaStore.writeBrowserVaultReplica({
@@ -2752,6 +2753,7 @@ describe("RunnerRunProcessor.finalizeRunDrain", () => {
     const replicaStore = createHostedBrowserVaultReplicaStore({
       bucket,
       rootKey,
+      userId: "user_123",
     });
 
     const existingReplicaRef = await replicaStore.writeBrowserVaultReplica({
