@@ -168,9 +168,10 @@ describe("getHostedInviteStatus", () => {
                 signupPhoneCodeSendAttemptId: null,
                 signupPhoneCodeSendAttemptStartedAt: null,
                 signupPhoneCodeSentAt: null,
-                signupPhoneNumber: "+1 (415) 555-2671",
+                signupPhoneNumber: "+1 (202) 555-0123",
                 walletAddress: null,
               }),
+              phoneNumberVerifiedAt: null,
             }),
           }),
         })),
@@ -185,7 +186,7 @@ describe("getHostedInviteStatus", () => {
       }),
     ).resolves.toMatchObject({
       invite: {
-        phonePrefill: "+14155552671",
+        phonePrefill: "+12025550123",
       },
       stage: "verify",
     });
@@ -200,12 +201,12 @@ describe("getHostedInviteStatus", () => {
             identity: createIdentity({
               ...buildHostedMemberIdentityPrivateColumns({
                 memberId: "member_123",
-                phoneNumber: "+14155552671",
+                phoneNumber: "+12025550123",
                 privyUserId: null,
                 signupPhoneCodeSendAttemptId: null,
                 signupPhoneCodeSendAttemptStartedAt: null,
                 signupPhoneCodeSentAt: null,
-                signupPhoneNumber: "+14155552671",
+                signupPhoneNumber: "+12025550123",
                 walletAddress: null,
               }),
             }),
@@ -226,6 +227,90 @@ describe("getHostedInviteStatus", () => {
         phonePrefill: null,
       },
       stage: "active",
+    });
+  });
+
+  it("does not expose a verified phone as a prefill to an unauthenticated invite holder", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity({
+              ...buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: "+12025550123",
+                privyUserId: "did:privy:user_123",
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: null,
+                walletAddress: null,
+              }),
+              phoneNumberVerifiedAt: NOW,
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      invite: {
+        phonePrefill: null,
+      },
+      session: {
+        authenticated: false,
+        matchesInvite: false,
+      },
+      stage: "verify",
+    });
+  });
+
+  it("does not expose a refreshed signup phone once the member phone is verified", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity({
+              ...buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: "+12025550123",
+                privyUserId: "did:privy:user_123",
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: "+12025550123",
+                walletAddress: null,
+              }),
+              phoneNumberVerifiedAt: NOW,
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      invite: {
+        phonePrefill: null,
+      },
+      session: {
+        authenticated: false,
+        matchesInvite: false,
+      },
+      stage: "verify",
     });
   });
 
