@@ -100,6 +100,88 @@ describe("device sync internal connect-link route", () => {
     });
   });
 
+  it("keeps malformed provider parameters classified as invalid requests", async () => {
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/%E0%A4%A/connect-link", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "%E0%A4%A",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+  });
+
+  it("maps callback verification setup failures to a retryable unavailable response", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValue(
+      new TypeError("Callback verification is not configured."),
+    );
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
+        message:
+          "Hosted device connection links are temporarily unavailable. Please try again shortly.",
+        retryable: true,
+      },
+    });
+  });
+
+  it("maps control-plane setup failures to a retryable unavailable response", async () => {
+    mocks.createHostedDeviceSyncControlPlane.mockImplementation(() => {
+      throw new TypeError("Provider configuration is incomplete.");
+    });
+
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://join.example.test/api/internal/device-sync/providers/whoop/connect-link", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          provider: "whoop",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
+        message:
+          "Hosted device connection links are temporarily unavailable. Please try again shortly.",
+        retryable: true,
+      },
+    });
+  });
+
   it("rejects GET requests on the internal connect-link route", async () => {
     const response = await internalDeviceSyncConnectLinkRoute.GET();
 
