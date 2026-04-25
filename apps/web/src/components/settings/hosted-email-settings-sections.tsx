@@ -1,3 +1,7 @@
+"use client";
+
+import { useRef } from "react";
+
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -23,8 +27,8 @@ export function HostedEmailSettingsContent(props: {
   pendingEmailAddress: string | null;
   onChangeEmailAddress: (value: string) => void;
   onOpenDialog: () => void;
-  onResendCode: () => Promise<void>;
-  onSendCode: () => Promise<void>;
+  onResendCode: (emailAddress?: string) => Promise<void>;
+  onSendCode: (emailAddress?: string) => Promise<void>;
   onSyncVerifiedEmail: () => Promise<void>;
 }) {
   const {
@@ -41,6 +45,7 @@ export function HostedEmailSettingsContent(props: {
     onSendCode,
     onSyncVerifiedEmail,
   } = props;
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
 
   return (
     <>
@@ -71,12 +76,18 @@ export function HostedEmailSettingsContent(props: {
             autoComplete="email"
             inputMode="email"
             placeholder="user@example.com"
+            ref={emailInputRef}
             type="email"
             value={emailAddress}
             onChange={(event) => onChangeEmailAddress(event.currentTarget.value)}
             className="h-10 px-3.5 text-sm"
           />
-          <Button type="button" onClick={() => void onSendCode()} disabled={isBusy} className="shrink-0">
+          <Button
+            type="button"
+            onClick={() => void onSendCode(emailInputRef.current?.value ?? emailAddress)}
+            disabled={isBusy}
+            className="shrink-0"
+          >
             {isSyncingEmailRoute
               ? "Syncing..."
               : isSendingCode
@@ -97,7 +108,12 @@ export function HostedEmailSettingsContent(props: {
             <Button type="button" onClick={onOpenDialog} disabled={isBusy} variant="outline">
               Enter code
             </Button>
-            <Button type="button" onClick={() => void onResendCode()} disabled={isBusy} variant="outline">
+            <Button
+              type="button"
+              onClick={() => void onResendCode(emailInputRef.current?.value ?? emailAddress)}
+              disabled={isBusy}
+              variant="outline"
+            >
               {isSendingCode ? "Sending code..." : "Resend code"}
             </Button>
           </AlertDescription>
@@ -118,8 +134,10 @@ export function HostedEmailVerificationDialog(props: {
   onChangeCode: (value: string) => void;
   onOpenChange: (nextOpen: boolean) => void;
   onResendCode: () => Promise<void>;
-  onVerifyCode: () => Promise<void>;
+  onVerifyCode: (code?: string) => Promise<void>;
 }) {
+  const codeInputRef = useRef<HTMLInputElement | null>(null);
+
   return (
     <Dialog open={props.dialogOpen} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md p-6 md:p-7" showCloseButton={!props.isSubmittingCode}>
@@ -141,6 +159,7 @@ export function HostedEmailVerificationDialog(props: {
             autoComplete="one-time-code"
             inputMode="numeric"
             placeholder="123456"
+            ref={codeInputRef}
             value={props.code}
             onChange={(event) => props.onChangeCode(event.currentTarget.value)}
             className="h-10 px-3.5 text-sm"
@@ -151,7 +170,11 @@ export function HostedEmailVerificationDialog(props: {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <Button type="button" onClick={() => void props.onVerifyCode()} disabled={props.isBusy}>
+          <Button
+            type="button"
+            onClick={() => void props.onVerifyCode(codeInputRef.current?.value ?? props.code)}
+            disabled={props.isBusy}
+          >
             {props.isSubmittingCode ? "Verifying..." : "Verify email"}
           </Button>
           <Button type="button" onClick={() => void props.onResendCode()} disabled={props.isBusy} variant="outline">

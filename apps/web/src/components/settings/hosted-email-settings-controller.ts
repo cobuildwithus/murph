@@ -87,37 +87,51 @@ export function useHostedEmailSettingsController(input: {
     }
   }
 
-  async function handleSendCode() {
-    const nextEmailAddress = normalizeEmailAddress(emailAddress);
+  async function handleSendCode(rawEmailAddress?: string) {
+    const nextEmailAddress = normalizeEmailAddress(rawEmailAddress ?? emailAddress);
 
     if (!nextEmailAddress) {
       setErrorMessage("Enter a valid email address before we send a code.");
       return;
     }
 
+    if (nextEmailAddress !== emailAddress) {
+      setEmailAddress(nextEmailAddress);
+    }
+
     await requestCodeForEmail(nextEmailAddress);
   }
 
-  async function handleResendCode() {
-    const nextEmailAddress = normalizeEmailAddress(emailAddress) ?? pendingEmailAddress;
+  async function handleResendCode(rawEmailAddress?: string) {
+    const nextEmailAddress = rawEmailAddress === undefined
+      ? normalizeEmailAddress(emailAddress) ?? pendingEmailAddress
+      : normalizeEmailAddress(rawEmailAddress);
 
     if (!nextEmailAddress) {
       setErrorMessage("Enter a valid email address before we send a code.");
       return;
     }
 
+    if (nextEmailAddress !== emailAddress) {
+      setEmailAddress(nextEmailAddress);
+    }
+
     await requestCodeForEmail(nextEmailAddress);
   }
 
-  async function handleVerifyCode() {
+  async function handleVerifyCode(rawCode?: string) {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const normalizedCode = code.trim();
+    const normalizedCode = typeof rawCode === "string" ? rawCode.trim() : code.trim();
 
     if (!normalizedCode) {
       setErrorMessage("Enter the verification code we emailed you.");
       return;
+    }
+
+    if (normalizedCode !== code) {
+      setCode(normalizedCode);
     }
 
     let verifiedEmailAddress: string | null = null;
