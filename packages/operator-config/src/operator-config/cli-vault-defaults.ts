@@ -34,6 +34,7 @@ export const TOP_LEVEL_COMMANDS_REQUIRING_VAULT = new Set([
   'memory',
   'profile',
   'provider',
+  'query',
   'recipe',
   'protocol',
   'research',
@@ -60,6 +61,14 @@ const NON_EXECUTING_BUILTIN_FLAGS = new Set([
   '--mcp',
   '--schema',
   '--version',
+])
+
+const ROOT_FLAGS_WITHOUT_VALUES = new Set([
+  ...NON_EXECUTING_BUILTIN_FLAGS,
+  '--json',
+  '--no-config',
+  '--token-count',
+  '--verbose',
 ])
 
 const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
@@ -222,6 +231,9 @@ function getCommandPath(args: readonly string[]): string | null {
         if (!token.includes('=')) {
           index += 1
         }
+        continue
+      }
+      if (commandTokens.length === 0 && ROOT_FLAGS_WITHOUT_VALUES.has(token)) {
         continue
       }
 

@@ -8,6 +8,7 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 export const emptyArgsSchema = z.object({})
 export const ROOT_OPTIONS_WITH_VALUES = new Set([
+  '--config',
   '--filter-output',
   '--format',
   '--token-limit',

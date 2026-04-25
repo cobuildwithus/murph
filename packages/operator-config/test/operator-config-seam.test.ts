@@ -263,6 +263,50 @@ test('operator config resolves default vaults and injects them only for eligible
     ['assistant', 'self-target', 'list'],
   )
   assert.deepEqual(
+    applyDefaultVaultToArgs(
+      ['--no-config', 'assistant', 'self-target', 'list', '--format', 'json'],
+      '/tmp/default',
+    ),
+    ['--no-config', 'assistant', 'self-target', 'list', '--format', 'json'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(
+      ['--config', '/tmp/murph-config.json', 'assistant', 'self-target', 'show', '--format', 'json'],
+      '/tmp/default',
+    ),
+    ['--config', '/tmp/murph-config.json', 'assistant', 'self-target', 'show', '--format', 'json'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['--no-config', 'audit', 'list', '--format', 'json'], '/tmp/default'),
+    ['--no-config', 'audit', 'list', '--format', 'json', '--vault', '/tmp/default'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(
+      ['--config=/tmp/murph-config.json', 'audit', 'list', '--format', 'json'],
+      '/tmp/default',
+    ),
+    ['--config=/tmp/murph-config.json', 'audit', 'list', '--format', 'json', '--vault', '/tmp/default'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(
+      ['--config', '/tmp/murph-config.json', 'audit', 'list', '--format', 'json'],
+      '/tmp/default',
+    ),
+    ['--config', '/tmp/murph-config.json', 'audit', 'list', '--format', 'json', '--vault', '/tmp/default'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['query', 'projection', 'status'], '/tmp/default'),
+    ['query', 'projection', 'status', '--vault', '/tmp/default'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['query'], '/tmp/default'),
+    ['query'],
+  )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(['--no-config', 'assistant'], '/tmp/default'),
+    ['--no-config', 'assistant'],
+  )
+  assert.deepEqual(
     applyDefaultVaultToArgs(['assistant'], '/tmp/default'),
     ['assistant'],
   )
