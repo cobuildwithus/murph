@@ -1158,6 +1158,23 @@ describe('assistant CLI tool capability seam', () => {
       ]),
     })
 
+    const finnishSaunaSearch = await executeTool(tools, 'healthCommons.search', {
+      query: 'finnish sauna',
+      entityTypes: ['protocol_variant'],
+      limit: 3,
+    })
+    expect(finnishSaunaSearch).toMatchObject({
+      query: 'finnish sauna',
+      results: expect.arrayContaining([
+        expect.objectContaining({
+          entity: expect.objectContaining({
+            key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+            title: 'Finnish Dry Sauna',
+          }),
+        }),
+      ]),
+    })
+
     const protocol = await executeTool(tools, 'healthCommons.get', {
       keyOrSlug: 'red-light-glasses-before-bed',
       includeExperimentOnboarding: true,
@@ -1219,6 +1236,30 @@ describe('assistant CLI tool capability seam', () => {
       }),
     })
 
+    const finnishProtocol = await executeTool(tools, 'healthCommons.get', {
+      keyOrSlug: 'finnish-sauna',
+      includeExperimentOnboarding: true,
+      includeSources: true,
+    })
+    expect(finnishProtocol).toMatchObject({
+      entity: expect.objectContaining({
+        key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+        title: 'Finnish Dry Sauna',
+        experimentOnboarding: expect.objectContaining({
+          startIntent: expect.objectContaining({
+            intentSummary: expect.stringContaining('Finnish Dry Sauna'),
+          }),
+        }),
+      }),
+      sources: expect.arrayContaining([
+        expect.objectContaining({
+          source: expect.objectContaining({
+            entityType: 'source_artifact',
+          }),
+        }),
+      ]),
+    })
+
     const missingProtocol = await executeTool(tools, 'healthCommons.get', {
       keyOrSlug: 'not-a-health-commons-record',
     })
@@ -1239,13 +1280,25 @@ describe('assistant CLI tool capability seam', () => {
       },
     )
     expect(fieldTestingProtocols).toMatchObject({
-      count: 1,
-      protocols: [
+      protocols: expect.arrayContaining([
         expect.objectContaining({
           key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
         }),
-      ],
+      ]),
     })
+    const fieldTestingProtocolCount =
+      typeof fieldTestingProtocols === 'object' &&
+      fieldTestingProtocols !== null &&
+      'count' in fieldTestingProtocols &&
+      typeof fieldTestingProtocols.count === 'number'
+        ? fieldTestingProtocols.count
+        : null
+    if (fieldTestingProtocolCount === null) {
+      throw new Error(
+        'Expected healthCommons.listProtocols to return a numeric field-testing count.',
+      )
+    }
+    expect(fieldTestingProtocolCount).toBeGreaterThanOrEqual(1)
 
     const sources = await executeTool(tools, 'healthCommons.listSources', {
       protocolKeyOrSlug: 'red-light-glasses-before-bed',

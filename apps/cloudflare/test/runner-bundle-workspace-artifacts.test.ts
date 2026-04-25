@@ -196,7 +196,7 @@ describe("runner bundle runtime artifact staging", () => {
     });
   });
 
-  it("packs the Health Commons generated catalog for hosted runner installs", async () => {
+  it("packs the Health Commons runtime and generated catalog for hosted runner installs", async () => {
     const tarballsDir = await mkdtemp(path.join(tmpdir(), "murph-runner-pack-"));
 
     temporaryDirectories.push(tarballsDir);
@@ -219,6 +219,8 @@ describe("runner bundle runtime artifact staging", () => {
     );
     const entries = stdout.split("\n");
 
+    expect(entries).toContain("package/dist/index.js");
+    expect(entries).toContain("package/dist/runtime.js");
     expect(entries).toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
   });

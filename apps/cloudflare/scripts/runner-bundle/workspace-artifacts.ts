@@ -167,7 +167,7 @@ async function packWorkspacePackage(
 
   if (preflightArgs) {
     await runPnpmCommand(preflightArgs, { cwd: input.repoRoot });
-    await assertHealthCommonsGeneratedCatalog(packageDir);
+    await assertHealthCommonsRuntimePackageFiles(packageDir);
   }
 
   await runNpmCommand(
@@ -188,14 +188,29 @@ async function packWorkspacePackage(
   return path.join(tarballsDir, tarballName);
 }
 
-async function assertHealthCommonsGeneratedCatalog(packageDir: string): Promise<void> {
+async function assertHealthCommonsRuntimePackageFiles(packageDir: string): Promise<void> {
+  await assertReadableHealthCommonsPackageFile(
+    packageDir,
+    path.join("dist", "runtime.js"),
+    "Health Commons runtime entrypoint is missing before package packing; build workspace artifacts before packing.",
+  );
+  await assertReadableHealthCommonsPackageFile(
+    packageDir,
+    path.join("generated", "catalog.json"),
+    "Health Commons generated catalog is missing after generation preflight.",
+  );
+}
+
+async function assertReadableHealthCommonsPackageFile(
+  packageDir: string,
+  relativePath: string,
+  message: string,
+): Promise<void> {
   try {
-    await readFile(path.join(packageDir, "generated", "catalog.json"), "utf8");
+    await readFile(path.join(packageDir, relativePath), "utf8");
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      throw new Error(
-        "Health Commons generated catalog is missing after generation preflight.",
-      );
+      throw new Error(message);
     }
 
     throw error;
