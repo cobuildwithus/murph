@@ -5,6 +5,7 @@ import {
   type HealthCommonsEntityType,
 } from '@murphai/contracts'
 import {
+  HEALTH_COMMONS_PAGE_STATUSES,
   getGeneratedHealthCommonsCatalogReader,
   type HealthCommonsCatalogReader,
   type HealthCommonsCompactEntity,
@@ -31,8 +32,15 @@ const healthCommonsDefaultBodyChars = 1_200
 const healthCommonsMaxBodyChars = 6_000
 const FINNISH_DRY_SAUNA_KEY =
   'protocol_variant:dry-sauna/murph-finnish-standard-3x-week'
+const healthCommonsStatusFilterValues = [
+  ...HEALTH_COMMONS_PAGE_STATUSES,
+  '*',
+  'all',
+  'any',
+] as const
 
 const healthCommonsEntityTypeInputSchema = z.enum(HEALTH_COMMONS_ENTITY_TYPES)
+const healthCommonsStatusFilterSchema = z.enum(healthCommonsStatusFilterValues)
 
 const healthCommonsLimitSchema = z
   .number()
@@ -65,7 +73,7 @@ const healthCommonsGetInputSchema = z.object({
 const healthCommonsListProtocolsInputSchema = z.object({
   query: z.string().trim().min(1).optional(),
   categories: z.array(z.string().trim().min(1)).min(1).optional(),
-  status: z.array(z.string().trim().min(1)).min(1).optional(),
+  status: z.array(healthCommonsStatusFilterSchema).min(1).optional(),
   limit: healthCommonsLimitSchema,
 })
 
@@ -234,15 +242,14 @@ async function getHealthCommonsEntity(input: HealthCommonsGetInput) {
 
 async function listHealthCommonsProtocols(input: HealthCommonsListProtocolsInput) {
   const reader = getGeneratedHealthCommonsCatalogReader()
-  const statuses = new Set(input.status ?? [])
-  const protocols = listHealthCommonsEntities(reader, {
+  const listOptions = {
     categories: input.categories,
-    entityType: 'protocol_variant',
+    limit: normalizeLimit(input.limit),
     query: input.query,
-  })
-    .map((protocol) => reader.compactEntity(protocol))
-    .filter((protocol) => statuses.size === 0 || statuses.has(protocol.status ?? ''))
-    .slice(0, normalizeLimit(input.limit))
+    statuses: input.status,
+  }
+  const normalizedFilters = reader.normalizeListOptions(listOptions)
+  const protocols = reader.listProtocolVariants(listOptions)
 
   return {
     schema: 'murph.health-commons.list-protocols-result.v1',
@@ -250,10 +257,11 @@ async function listHealthCommonsProtocols(input: HealthCommonsListProtocolsInput
     diagnostics: buildHealthCommonsDiagnostics(reader),
     note: healthCommonsPublicCorpusNote,
     filters: {
-      query: input.query ?? null,
-      categories: input.categories ?? [],
-      status: input.status ?? [],
-      limit: normalizeLimit(input.limit),
+      query: normalizedFilters.query,
+      categories: normalizedFilters.categories,
+      status: normalizedFilters.statuses,
+      ignoredWildcards: normalizedFilters.ignoredWildcards,
+      limit: normalizedFilters.limit,
     },
     count: protocols.length,
     protocols: protocols.map((protocol) => decorateCompactEntity(protocol)),
@@ -263,12 +271,17 @@ async function listHealthCommonsProtocols(input: HealthCommonsListProtocolsInput
 async function listHealthCommonsSources(input: HealthCommonsListSourcesInput) {
   const reader = getGeneratedHealthCommonsCatalogReader()
   const protocol = input.protocolKeyOrSlug
-    ? resolveHealthCommonsEntity(input.protocolKeyOrSlug)
+    ? resolveHealthCommonsEntity(input.protocolKeyOrSlug, ['protocol_variant'])
     : null
   if (
     input.protocolKeyOrSlug &&
     (!protocol || protocol.entityType !== 'protocol_variant')
   ) {
+    const normalizedFilters = reader.normalizeListOptions({
+      categories: input.categories,
+      limit: normalizeLimit(input.limit),
+      query: input.query,
+    })
     return {
       schema: 'murph.health-commons.list-sources-result.v1',
       corpus: healthCommonsPublicCorpus,
@@ -276,40 +289,23 @@ async function listHealthCommonsSources(input: HealthCommonsListSourcesInput) {
       note: healthCommonsPublicCorpusNote,
       filters: {
         protocolKeyOrSlug: input.protocolKeyOrSlug,
-        query: input.query ?? null,
-        categories: input.categories ?? [],
-        limit: normalizeLimit(input.limit),
+        query: normalizedFilters.query,
+        categories: normalizedFilters.categories,
+        ignoredWildcards: normalizedFilters.ignoredWildcards,
+        limit: normalizedFilters.limit,
       },
       count: 0,
       sources: [],
     }
   }
-  const normalizedCategories = normalizeCategorySet(input.categories)
-  const searchMatchedSourceKeys =
-    input.query || normalizedCategories.size > 0
-      ? new Set(
-          listHealthCommonsEntities(reader, {
-            categories: input.categories,
-            entityType: 'source_artifact',
-            query: input.query,
-          }).map((entity) => entity.key),
-        )
-      : null
-  const sources = (protocol
-    ? reader.collectSourceKeys({ entity: protocol })
-        .map((key) => reader.findByKey(key))
-        .filter(
-          (source): source is HealthCommonsEntity =>
-            source !== null && source.entityType === 'source_artifact',
-        )
-    : listHealthCommonsEntities(reader, {
-        categories: input.categories,
-        entityType: 'source_artifact',
-        query: input.query,
-      }))
-    .filter((source) => searchMatchedSourceKeys === null || searchMatchedSourceKeys.has(source.key))
-    .map((source) => reader.compactEntity(source))
-    .slice(0, normalizeLimit(input.limit))
+  const listOptions = {
+    candidateKeys: protocol ? reader.collectSourceKeys({ entity: protocol }) : undefined,
+    categories: input.categories,
+    limit: normalizeLimit(input.limit),
+    query: input.query,
+  }
+  const normalizedFilters = reader.normalizeListOptions(listOptions)
+  const sources = reader.listSourceArtifacts(listOptions)
 
   return {
     schema: 'murph.health-commons.list-sources-result.v1',
@@ -318,9 +314,10 @@ async function listHealthCommonsSources(input: HealthCommonsListSourcesInput) {
     note: healthCommonsPublicCorpusNote,
     filters: {
       protocolKeyOrSlug: input.protocolKeyOrSlug ?? null,
-      query: input.query ?? null,
-      categories: input.categories ?? [],
-      limit: normalizeLimit(input.limit),
+      query: normalizedFilters.query,
+      categories: normalizedFilters.categories,
+      ignoredWildcards: normalizedFilters.ignoredWildcards,
+      limit: normalizedFilters.limit,
     },
     count: sources.length,
     sources: sources.map((source) => decorateCompactEntity(source)),
@@ -337,18 +334,21 @@ function buildHealthCommonsDiagnostics(reader: HealthCommonsCatalogReader) {
   }
 }
 
-function resolveHealthCommonsEntity(lookup: string): HealthCommonsEntity | null {
+function resolveHealthCommonsEntity(
+  lookup: string,
+  entityTypes: readonly HealthCommonsEntityType[] = HEALTH_COMMONS_ENTITY_TYPES,
+): HealthCommonsEntity | null {
   const reader = getGeneratedHealthCommonsCatalogReader()
   const trimmed = lookup.trim()
   const direct =
     reader.findByKey(trimmed) ??
     reader.findBySlug(trimmed)
 
-  if (direct) {
+  if (direct && entityTypes.includes(direct.entityType)) {
     return direct
   }
 
-  for (const entityType of HEALTH_COMMONS_ENTITY_TYPES) {
+  for (const entityType of entityTypes) {
     const byRouteId = reader.findByRouteId({
       entityType,
       routeId: trimmed,

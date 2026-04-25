@@ -137,6 +137,10 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(wildcardCategoryProtocolKeys).toContain(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     );
+    expect(reader.listSourceArtifacts({
+      candidateKeys: [],
+      limit: 500,
+    })).toEqual([]);
 
     const spacedCategoryKeys = reader.listProtocolVariants({
       categories: ["passive heat"],
@@ -177,7 +181,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     expect(() => reader.listProtocolVariants({
       statuses: ["active"],
-    })).toThrow(/Unknown Health Commons status filter "active"/u);
+    })).toThrow(/Unknown Health Commons status filter\. Expected one of:/u);
   });
 
   it("resolves compact relations and source context for assistant tools", () => {

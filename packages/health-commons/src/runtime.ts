@@ -13,6 +13,28 @@ import {
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
 
+export const HEALTH_COMMONS_PAGE_STATUSES = [
+  "draft",
+  "field-testing",
+  "reviewed",
+  "deprecated",
+  "community",
+] as const;
+
+export const HEALTH_COMMONS_SOURCE_KINDS = [
+  "journal_article",
+  "review",
+  "guideline",
+  "book",
+  "podcast",
+  "external_protocol",
+  "web_page",
+  "other",
+] as const;
+
+export type HealthCommonsPageStatus = (typeof HEALTH_COMMONS_PAGE_STATUSES)[number];
+export type HealthCommonsSourceKind = (typeof HEALTH_COMMONS_SOURCE_KINDS)[number];
+
 export type HealthCommonsSearchMatchedField =
   | "aliases"
   | "body"
@@ -78,18 +100,33 @@ export interface HealthCommonsCompactEntity {
   title: string;
 }
 
-export interface HealthCommonsCatalogSearchInput {
-  categories?: readonly string[];
+export interface HealthCommonsCatalogSearchInput extends HealthCommonsEntityListOptions {
   entityTypes?: readonly HealthCommonsEntityType[];
-  includeBody?: boolean;
-  limit?: number;
-  query?: string;
 }
 
 export interface HealthCommonsEntityListOptions {
   categories?: readonly string[];
+  candidateKeys?: readonly string[];
+  includeBody?: boolean;
   limit?: number;
   query?: string;
+  sourceKinds?: readonly string[];
+  statuses?: readonly string[];
+}
+
+export interface HealthCommonsIgnoredWildcardFilters {
+  categories: readonly string[];
+  sourceKinds: readonly string[];
+  statuses: readonly string[];
+}
+
+export interface HealthCommonsNormalizedEntityListOptions {
+  categories: readonly string[];
+  ignoredWildcards: HealthCommonsIgnoredWildcardFilters;
+  limit: number;
+  query: string | null;
+  sourceKinds: readonly HealthCommonsSourceKind[];
+  statuses: readonly HealthCommonsPageStatus[];
 }
 
 export interface HealthCommonsCatalogSearchResult {
@@ -174,6 +211,7 @@ export interface HealthCommonsCatalogReader {
   resolveEntityContext(input: HealthCommonsEntityContextInput): HealthCommonsResolvedEntityContext | null;
   resolveRelations(input: HealthCommonsRelationInput): HealthCommonsResolvedRelation[];
   resolveSources(input: HealthCommonsSourceInput): HealthCommonsResolvedSource[];
+  normalizeListOptions(options?: HealthCommonsEntityListOptions): HealthCommonsNormalizedEntityListOptions;
   search(input?: HealthCommonsCatalogSearchInput): HealthCommonsCatalogSearchResult[];
 }
 
@@ -270,25 +308,92 @@ export function createHealthCommonsCatalogReader(
   const compactEntity = (entity: HealthCommonsEntity): HealthCommonsCompactEntity =>
     toCompactEntity(entity, redirectSourcesByTarget.get(entity.key) ?? []);
 
+  const normalizeListOptions = (
+    options: HealthCommonsEntityListOptions = {},
+  ): HealthCommonsNormalizedEntityListOptions => {
+    const normalized = normalizeEntitySelectionInput(options, DEFAULT_LIST_LIMIT);
+    return {
+      categories: normalized.categories,
+      ignoredWildcards: normalized.ignoredWildcards,
+      limit: normalized.limit,
+      query: normalized.query,
+      sourceKinds: normalized.sourceKinds,
+      statuses: normalized.statuses,
+    };
+  };
+
+  const selectCatalogEntities = (
+    input: HealthCommonsCatalogSearchInput & { defaultLimit: number },
+  ): HealthCommonsCatalogSearchResult[] => {
+    const normalized = normalizeEntitySelectionInput(input, input.defaultLimit);
+    const entityTypeSet = input.entityTypes ? new Set(input.entityTypes) : null;
+    const statusSet = new Set<string>(normalized.statuses);
+    const sourceKindSet = new Set<string>(normalized.sourceKinds);
+    const tokens = tokenizeSearchQuery(normalized.query ?? "");
+    const rawCandidates = normalized.candidateKeys === null
+      ? catalog.entities
+      : normalized.candidateKeys
+          .map((key) => findByKey(key))
+          .filter((entity): entity is HealthCommonsEntity => entity !== null);
+    const seenCandidateKeys = new Set<string>();
+    const results: HealthCommonsCatalogSearchResult[] = [];
+
+    for (const entity of rawCandidates) {
+      if (seenCandidateKeys.has(entity.key)) {
+        continue;
+      }
+      seenCandidateKeys.add(entity.key);
+
+      if (entityTypeSet && !entityTypeSet.has(entity.entityType)) {
+        continue;
+      }
+
+      if (statusSet.size > 0 && (!entity.status || !statusSet.has(entity.status))) {
+        continue;
+      }
+
+      if (sourceKindSet.size > 0 && (!entity.source || !sourceKindSet.has(entity.source.kind))) {
+        continue;
+      }
+
+      if (!matchesCategories(entity, normalized.categories)) {
+        continue;
+      }
+
+      const searchScore = scoreEntitySearch(
+        entity,
+        normalized.query ?? "",
+        tokens,
+        input.includeBody === true,
+      );
+      if (normalized.query && searchScore.score <= 0) {
+        continue;
+      }
+
+      results.push({
+        entity: compactEntity(entity),
+        matchedFields: searchScore.matchedFields,
+        score: searchScore.score,
+      });
+    }
+
+    if (normalized.query) {
+      results.sort(compareSearchResults);
+    }
+
+    return results.slice(0, normalized.limit);
+  };
+
   const filterAndCompactList = (
     entityType: HealthCommonsEntityType,
     options: HealthCommonsEntityListOptions = {},
-  ): HealthCommonsCompactEntity[] => {
-    const input: HealthCommonsCatalogSearchInput = {
+  ): HealthCommonsCompactEntity[] =>
+    selectCatalogEntities({
+      ...options,
+      defaultLimit: DEFAULT_LIST_LIMIT,
       entityTypes: [entityType],
-      limit: options.limit ?? DEFAULT_LIST_LIMIT,
-      ...(options.categories ? { categories: options.categories } : {}),
-      ...(options.query ? { query: options.query } : {}),
-    };
-
-    if (input.query || input.categories) {
-      return search(input).map((result) => result.entity);
-    }
-
-    return (entitiesByType.get(entityType) ?? [])
-      .slice(0, normalizeLimit(input.limit, DEFAULT_LIST_LIMIT))
-      .map(compactEntity);
-  };
+      includeBody: options.includeBody ?? true,
+    }).map((result) => result.entity);
 
   const listRelated = (input: {
     entity: HealthCommonsEntity;
@@ -341,37 +446,10 @@ export function createHealthCommonsCatalogReader(
   };
 
   const search = (input: HealthCommonsCatalogSearchInput = {}): HealthCommonsCatalogSearchResult[] => {
-    const limit = normalizeLimit(input.limit, DEFAULT_SEARCH_LIMIT);
-    const entityTypeSet = input.entityTypes ? new Set(input.entityTypes) : null;
-    const categories = (input.categories ?? []).map(normalizeCategory).filter(Boolean);
-    const normalizedQuery = normalizeSearchText(input.query ?? "");
-    const tokens = tokenizeSearchQuery(normalizedQuery);
-
-    const results = catalog.entities.flatMap((entity): HealthCommonsCatalogSearchResult[] => {
-      if (entityTypeSet && !entityTypeSet.has(entity.entityType)) {
-        return [];
-      }
-
-      if (!matchesCategories(entity, categories)) {
-        return [];
-      }
-
-      const searchScore = scoreEntitySearch(entity, normalizedQuery, tokens, input.includeBody === true);
-      if (normalizedQuery && searchScore.score <= 0) {
-        return [];
-      }
-
-      return [
-        {
-          entity: compactEntity(entity),
-          matchedFields: searchScore.matchedFields,
-          score: searchScore.score,
-        },
-      ];
+    return selectCatalogEntities({
+      ...input,
+      defaultLimit: DEFAULT_SEARCH_LIMIT,
     });
-
-    results.sort(compareSearchResults);
-    return results.slice(0, limit);
   };
 
   function resolveRelationEntities(input: {
@@ -458,6 +536,7 @@ export function createHealthCommonsCatalogReader(
     },
     resolveRelations,
     resolveSources,
+    normalizeListOptions,
     search,
   };
 }
@@ -766,6 +845,155 @@ function compareSearchResults(
   return left.entity.key.localeCompare(right.entity.key);
 }
 
+interface HealthCommonsNormalizedEntitySelectionInput extends HealthCommonsNormalizedEntityListOptions {
+  candidateKeys: readonly string[] | null;
+}
+
+const FILTER_WILDCARDS = new Set(["*", "all", "any"]);
+
+function normalizeEntitySelectionInput(
+  input: HealthCommonsEntityListOptions,
+  defaultLimit: number,
+): HealthCommonsNormalizedEntitySelectionInput {
+  const categories = normalizeRepeatableFilter(input.categories, {
+    normalize: normalizeCategory,
+  });
+  const statuses = normalizeClosedRepeatableFilter(input.statuses, {
+    allowedValues: HEALTH_COMMONS_PAGE_STATUSES,
+    fieldLabel: "status",
+    isAllowedValue: isHealthCommonsPageStatus,
+    normalize: normalizeStatusFilterValue,
+  });
+  const sourceKinds = normalizeClosedRepeatableFilter(input.sourceKinds, {
+    allowedValues: HEALTH_COMMONS_SOURCE_KINDS,
+    fieldLabel: "source kind",
+    isAllowedValue: isHealthCommonsSourceKind,
+    normalize: normalizeSourceKindFilterValue,
+  });
+
+  return {
+    candidateKeys: normalizeCandidateKeys(input.candidateKeys),
+    categories: categories.values,
+    ignoredWildcards: {
+      categories: categories.ignoredWildcards,
+      sourceKinds: sourceKinds.ignoredWildcards,
+      statuses: statuses.ignoredWildcards,
+    },
+    limit: normalizeLimit(input.limit, defaultLimit),
+    query: normalizeNullableSearchQuery(input.query),
+    sourceKinds: sourceKinds.values,
+    statuses: statuses.values,
+  };
+}
+
+function normalizeRepeatableFilter(
+  input: readonly string[] | undefined,
+  options: {
+    normalize(value: string): string;
+  },
+): { ignoredWildcards: string[]; values: string[] } {
+  const ignoredWildcards: string[] = [];
+  const values: string[] = [];
+
+  for (const rawValue of input ?? []) {
+    for (const part of rawValue.split(",")) {
+      const normalized = normalizeFilterPart(part, {
+        ignoredWildcards,
+        normalize: options.normalize,
+      });
+      if (normalized && !values.includes(normalized)) {
+        values.push(normalized);
+      }
+    }
+  }
+
+  return {
+    ignoredWildcards,
+    values,
+  };
+}
+
+function normalizeClosedRepeatableFilter<TValue extends string>(
+  input: readonly string[] | undefined,
+  options: {
+    allowedValues: readonly TValue[];
+    fieldLabel: string;
+    isAllowedValue(value: string): value is TValue;
+    normalize(value: string): string;
+  },
+): { ignoredWildcards: string[]; values: TValue[] } {
+  const ignoredWildcards: string[] = [];
+  const values: TValue[] = [];
+
+  for (const rawValue of input ?? []) {
+    for (const part of rawValue.split(",")) {
+      const normalized = normalizeFilterPart(part, {
+        ignoredWildcards,
+        normalize: options.normalize,
+      });
+      if (!normalized) {
+        continue;
+      }
+
+      if (options.isAllowedValue(normalized)) {
+        if (!values.includes(normalized)) {
+          values.push(normalized);
+        }
+        continue;
+      }
+
+      throw new Error(
+        `Unknown Health Commons ${options.fieldLabel} filter. Expected one of: ${options.allowedValues.join(", ")}, or * for all.`,
+      );
+    }
+  }
+
+  return {
+    ignoredWildcards,
+    values,
+  };
+}
+
+function normalizeFilterPart(
+  rawValue: string,
+  options: {
+    ignoredWildcards: string[];
+    normalize(value: string): string;
+  },
+): string | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (FILTER_WILDCARDS.has(normalizeSearchText(trimmed))) {
+    options.ignoredWildcards.push(trimmed);
+    return null;
+  }
+
+  const normalized = options.normalize(trimmed);
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function normalizeCandidateKeys(input: readonly string[] | undefined): string[] | null {
+  if (input === undefined) {
+    return null;
+  }
+
+  const keys = (input ?? []).flatMap((rawValue) =>
+    rawValue
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+
+  return uniqueStrings(keys);
+}
+
 function normalizeLimit(value: number | undefined, defaultValue: number): number {
   if (value === undefined || !Number.isFinite(value)) {
     return defaultValue;
@@ -804,6 +1032,27 @@ function toTrailingSlug(slug: string): string {
 
 function normalizeCategory(value: string): string {
   return normalizeSearchText(value).replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "");
+}
+
+function normalizeNullableSearchQuery(value: string | undefined): string | null {
+  const normalized = normalizeSearchText(value ?? "");
+  return normalized || null;
+}
+
+function normalizeStatusFilterValue(value: string): string {
+  return normalizeSearchText(value).replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "");
+}
+
+function normalizeSourceKindFilterValue(value: string): string {
+  return normalizeSearchText(value).replace(/[^a-z0-9]+/gu, "_").replace(/^_+|_+$/gu, "");
+}
+
+function isHealthCommonsPageStatus(value: string): value is HealthCommonsPageStatus {
+  return HEALTH_COMMONS_PAGE_STATUSES.some((status) => status === value);
+}
+
+function isHealthCommonsSourceKind(value: string): value is HealthCommonsSourceKind {
+  return HEALTH_COMMONS_SOURCE_KINDS.some((kind) => kind === value);
 }
 
 function normalizeSearchText(value: string): string {
