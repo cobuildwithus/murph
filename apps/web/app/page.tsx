@@ -13,10 +13,11 @@ import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { StickyNav } from "./sticky-nav";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = createMurphPageMetadata({
   title: "Murph — Discover what actually makes you healthier",
   description:
     "Your personal health assistant. Connect your data, pick a protocol, see what actually makes you healthier.",
@@ -24,19 +25,15 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   openGraph: {
-    title: "Murph — Discover what actually makes you healthier",
     description:
       "Your personal health assistant. Pick a protocol, run it as a proper experiment, see what actually changed. Expert-backed, measured against your baseline.",
-    siteName: "Murph",
     type: "website",
   },
   twitter: {
-    card: "summary_large_image",
-    title: "Murph — Discover what actually makes you healthier",
     description:
       "Your personal health assistant. Pick a protocol, see what actually makes you healthier. Works with Oura, WHOOP, Garmin, and Strava.",
   },
-};
+});
 
 export default async function HomePage() {
   const { authenticated } = await getHostedPageAuthSnapshot();

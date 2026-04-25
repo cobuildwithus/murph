@@ -1,6 +1,14 @@
+import type { Metadata } from "next";
+
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { ShareLinkShell } from "@/src/components/hosted-share/share-link-shell";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+
+export const metadata: Metadata = createMurphPageMetadata({
+  title: "Murph shared bundle",
+  description: "Review a private Murph share link and import the shared bundle into your hosted account.",
+});
 
 export default async function HostedSharePage(input: {
   params: Promise<{ shareCode: string }>;

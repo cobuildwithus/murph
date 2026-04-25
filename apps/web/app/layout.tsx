@@ -7,6 +7,11 @@ import { HostedPhoneCountryCodeProvider } from "@/src/components/hosted-onboardi
 import { Providers } from "./providers";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import {
+  createMurphPageMetadata,
+  MURPH_DEFAULT_METADATA_DESCRIPTION,
+  MURPH_DEFAULT_METADATA_TITLE,
+} from "@/src/lib/site-metadata";
+import {
   requireHostedPrivyClientAppId,
   resolveHostedPrivyClientId,
 } from "@/src/lib/hosted-onboarding/landing";
@@ -17,14 +22,25 @@ import { dmMono, dmSans, fraunces } from "./font-assets";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 const SUPPORT_EMAIL = "support@withmurph.ai";
+const DEFAULT_METADATA_BASE_URL = "https://www.withmurph.ai";
 
-const metadataBase = resolveMetadataBase();
+const metadataBase = resolveMetadataBase() ?? new URL(DEFAULT_METADATA_BASE_URL);
+const defaultMetadata = createMurphPageMetadata({
+  description: MURPH_DEFAULT_METADATA_DESCRIPTION,
+  openGraph: {
+    type: "website",
+  },
+  title: MURPH_DEFAULT_METADATA_TITLE,
+  twitter: {
+    description:
+      "Your personal health assistant. Pick a protocol, see what actually makes you healthier.",
+  },
+});
 
-export const metadata: Metadata = metadataBase
-  ? {
-      metadataBase,
-    }
-  : {};
+export const metadata: Metadata = {
+  ...defaultMetadata,
+  metadataBase,
+};
 
 export default function RootLayout(input: { children: React.ReactNode }) {
   const privyAppId = requireHostedPrivyClientAppId();

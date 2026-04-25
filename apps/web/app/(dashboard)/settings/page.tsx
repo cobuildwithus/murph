@@ -9,11 +9,12 @@ import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-sett
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
 import { HostedVaultSyncSettings } from "@/src/components/settings/hosted-vault-sync-settings";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = createMurphPageMetadata({
   title: "Settings — Murph",
   description: "Manage your Murph account settings.",
-};
+});
 
 export default async function SettingsPage() {
   const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();

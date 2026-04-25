@@ -10,20 +10,15 @@ import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-export const metadata: Metadata = {
+const JOIN_INVITE_METADATA_DESCRIPTION =
+  "Finish signup, then add a phone number or connect Telegram so Murph can reach you.";
+
+export const metadata: Metadata = createMurphPageMetadata({
   title: "Murph hosted invite",
-  description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
-  openGraph: {
-    title: "Murph hosted invite",
-    description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Murph hosted invite",
-    description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
-  },
-};
+  description: JOIN_INVITE_METADATA_DESCRIPTION,
+});
 
 export default async function JoinInvitePage(input: {
   params: Promise<{ inviteCode: string }>;

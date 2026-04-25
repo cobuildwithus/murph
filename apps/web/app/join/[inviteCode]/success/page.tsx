@@ -1,11 +1,19 @@
+import type { Metadata } from "next";
+
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import {
   buildJoinInvitePreviewStatus,
   parseJoinInvitePreviewStage,
 } from "@/src/components/hosted-onboarding/join-invite-preview";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-shell";
 import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
+
+export const metadata: Metadata = createMurphPageMetadata({
+  title: "Finishing setup — Murph",
+  description: "Finish activating your Murph hosted account after checkout.",
+});
 
 export default async function JoinInviteSuccessPage(input: {
   params: Promise<{ inviteCode: string }>;
