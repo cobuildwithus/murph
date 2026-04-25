@@ -183,6 +183,10 @@ describe("RunnerContainer", () => {
     });
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(containerFetch).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars).toEqual({
+      PORT: "8080",
+    });
+    expect(readAuthorizationHeader(containerFetch.mock.calls[0]?.[1]?.headers)).toBeNull();
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
