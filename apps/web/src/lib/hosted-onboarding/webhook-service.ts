@@ -151,13 +151,45 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
   }
 
   const burstDelaysMs = environment.linqIngressTypingDiagnosticBurstDelaysMs;
+  const burstMode = environment.linqIngressTypingDiagnosticBurstMode;
   const immediateDelaysMs = burstDelaysMs.filter((delayMs) => delayMs === 0);
   const deferredDelaysMs = burstDelaysMs.filter((delayMs) => delayMs > 0);
   const responseReason = input.plan.response.reason ?? null;
   const timeoutMs = environment.linqIngressTypingDiagnosticTimeoutMs;
 
+  if (burstMode === "inline") {
+    const burstTiming = startHostedOnboardingTiming(
+      "hosted-onboarding.webhook.linq.ingress-typing-burst",
+      {
+        burstMode,
+        inlineAttempts: burstDelaysMs.length,
+        responseReason,
+        totalAttempts: burstDelaysMs.length,
+      },
+    );
+
+    await runHostedLinqIngressTypingDiagnosticBurst({
+      attemptOffset: 0,
+      burstMode,
+      chatId,
+      delaysMs: burstDelaysMs,
+      responseReason,
+      signal: input.signal,
+      timeoutMs,
+      totalAttempts: burstDelaysMs.length,
+    });
+
+    finishHostedOnboardingTiming(burstTiming, "completed", {
+      burstMode,
+      deferred: false,
+      responseReason,
+    });
+    return;
+  }
+
   await runHostedLinqIngressTypingDiagnosticBurst({
     attemptOffset: 0,
+    burstMode,
     chatId,
     delaysMs: immediateDelaysMs.length > 0 ? immediateDelaysMs : [0],
     responseReason,
@@ -173,6 +205,7 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
   const burstTiming = startHostedOnboardingTiming(
     "hosted-onboarding.webhook.linq.ingress-typing-burst",
     {
+      burstMode,
       deferredAttempts: deferredDelaysMs.length,
       responseReason,
       totalAttempts: burstDelaysMs.length,
@@ -181,6 +214,7 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
 
   if (!input.defer) {
     finishHostedOnboardingTiming(burstTiming, "skipped", {
+      burstMode,
       deferred: false,
       responseReason,
     });
@@ -191,6 +225,7 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
     await input.defer(async () => {
       await runHostedLinqIngressTypingDiagnosticBurst({
         attemptOffset: immediateDelaysMs.length,
+        burstMode,
         chatId,
         delaysMs: deferredDelaysMs,
         responseReason,
@@ -200,11 +235,13 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
     });
 
     finishHostedOnboardingTiming(burstTiming, "scheduled", {
+      burstMode,
       deferred: true,
       responseReason,
     });
   } catch (error) {
     finishHostedOnboardingTiming(burstTiming, "failed", {
+      burstMode,
       errorName: deriveHostedOnboardingTimingErrorName(error),
       responseReason,
     });
@@ -213,6 +250,7 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
 
 async function runHostedLinqIngressTypingDiagnosticBurst(input: {
   attemptOffset: number;
+  burstMode: string;
   chatId: string;
   delaysMs: readonly number[];
   responseReason: string | null;
@@ -236,6 +274,7 @@ async function runHostedLinqIngressTypingDiagnosticBurst(input: {
       {
         burstAttempt: attempt,
         burstDelayMs: delayMs,
+        burstMode: input.burstMode,
         burstTotal: input.totalAttempts,
         chatIdPresent: true,
         responseReason: input.responseReason,
@@ -253,6 +292,7 @@ async function runHostedLinqIngressTypingDiagnosticBurst(input: {
       finishHostedOnboardingTiming(typingTiming, result.ok ? "started" : "failed", {
         burstAttempt: attempt,
         burstDelayMs: delayMs,
+        burstMode: input.burstMode,
         burstTotal: input.totalAttempts,
         httpStatus: result.status,
         responseReason: input.responseReason,
@@ -262,6 +302,7 @@ async function runHostedLinqIngressTypingDiagnosticBurst(input: {
       finishHostedOnboardingTiming(typingTiming, "failed", {
         burstAttempt: attempt,
         burstDelayMs: delayMs,
+        burstMode: input.burstMode,
         burstTotal: input.totalAttempts,
         errorName: deriveHostedOnboardingTimingErrorName(error),
         responseReason: input.responseReason,
