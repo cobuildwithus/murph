@@ -183,7 +183,7 @@ const sampleCharterResponse = `# Cold plunge charter
 ## SOURCE_EXTRACTION_SCHEMA_V1
 \`\`\`json
 {
-  "fields": ["source metadata", "researchEvidence", "protocolEvidence", "finding IDs", "safety or adverse events"]
+  "fields": ["source metadata", "sourceIdentity", "researchEvidence", "sourceFindings", "standalone evidence_appraisal records", "safety or adverse events"]
 }
 \`\`\`
 
@@ -847,7 +847,10 @@ exit 64
         `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/11-source-ledger-reducer/downloads/CANONICAL_SOURCE_LEDGER_V1.json`,
       );
       expect(sectionPrompt).toContain(
-        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/normalized/ATOMIC_FINDINGS_V1*.json`,
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/normalized/SOURCE_FINDINGS_V1*.json`,
+      );
+      expect(sectionPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/normalized/EVIDENCE_APPRAISALS_V1*.json`,
       );
       expect(sectionPrompt).toContain(
         `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/downloads/*source-page-drafts*.md`,
@@ -894,7 +897,10 @@ exit 64
         `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/responses/2*.md (extract SECTION_CLAIMS_V1 blocks from all section synthesis outputs)`,
       );
       expect(evidenceQaPrompt).toContain(
-        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/downloads/ATOMIC_FINDINGS_V1*.json`,
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/downloads/SOURCE_FINDINGS_V1*.json`,
+      );
+      expect(evidenceQaPrompt).toContain(
+        `${path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep)}/downloads/*/downloads/EVIDENCE_APPRAISALS_V1*.json`,
       );
 
       expect(existsSync(path.join(outDir, "prompts", "33-schema-artifact-qa.template.md"))).toBe(
