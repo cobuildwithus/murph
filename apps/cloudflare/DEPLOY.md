@@ -22,6 +22,7 @@ That rendered surface is then used by:
 The rendered deploy helper path is the canonical rollout contract. The lower-level version helper still exists for recovery work, and the checked-in Wrangler scaffold remains useful for local development, but production deploys should use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints, so applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config/secrets render newer than the bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
+Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace plus the web-owned hosted-run recovery record.
 
 ## One-Time Cloudflare Setup
@@ -281,7 +282,7 @@ That command:
 The normal container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; leave it at `gradual` for ordinary deploys. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and should be reserved for hotfixes where interrupting active runner containers is acceptable.
 
 The GitHub `Deploy Cloudflare Hosted Execution` workflow prepares the same base image with Docker Buildx and the GitHub Actions cache before `wrangler deploy`, so normal production deploys avoid rebuilding the stable native parser stack during the `Deploy Worker` step.
-The workflow also runs `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base` before any deploy. That smoke builds the app image from a prepared runner bundle and executes the hosted runner inside Docker. Because the smoke overlays test entrypoints into `.deploy/runner-bundle/`, the workflow re-runs `deploy:artifacts` afterward and `deploy:worker:apply` rejects any smoke-mutated bundle that reaches the deploy step.
+The workflow also runs `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base` before any deploy. That smoke builds the app image from an isolated `.deploy/runner-smoke-bundle/` copied from the prepared production bundle, overlays test entrypoints into that smoke-only bundle, and executes the hosted runner inside Docker. The production `.deploy/runner-bundle/` is not mutated, so the workflow can deploy the already validated artifacts without a second `deploy:artifacts` pass; `deploy:worker:apply` still rejects any smoke-mutated production bundle that reaches the deploy step.
 
 ## Smoke
 
