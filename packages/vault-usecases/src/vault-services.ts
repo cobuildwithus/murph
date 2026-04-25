@@ -40,6 +40,7 @@ const coreServiceMethodNames = [
   "addCapture",
   "createExperiment",
   "updateExperiment",
+  "applyExperimentOnboarding",
   "checkpointExperiment",
   "stopExperiment",
   "logExperimentSession",

@@ -1,11 +1,11 @@
 {
   "id": "experiment-update",
-  "command": "vault-cli experiment update --vault <path> --input @file.json [--format json|md] [--request-id <id>]",
+  "command": "vault-cli experiment update <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--format json|md] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/experiments/baseline-observation.md",
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/experiment-create",
-  "purpose": "Documents payload-first experiment metadata updates without direct Markdown editing."
+  "purpose": "Documents typed scalar experiment metadata updates without direct Markdown editing."
 }

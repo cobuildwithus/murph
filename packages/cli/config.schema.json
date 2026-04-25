@@ -5974,9 +5974,319 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
+                        "title": {
+                          "description": "Optional human-readable title.",
                           "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
+                          "minLength": 1
+                        },
+                        "hypothesis": {
+                          "description": "Optional experiment hypothesis.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "startedOn": {
+                          "description": "Optional experiment start date.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "status": {
+                          "description": "Optional experiment status.",
+                          "type": "string",
+                          "enum": [
+                            "planned",
+                            "active",
+                            "paused",
+                            "completed",
+                            "abandoned"
+                          ]
+                        },
+                        "body": {
+                          "description": "Optional replacement markdown body.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "tag": {
+                          "description": "Optional tags to store on the experiment. Repeat --tag for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                            "description": "Stable lowercase kebab-case identifier."
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "apply-onboarding": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "status": {
+                          "description": "Optional lifecycle status to set on the experiment.",
+                          "type": "string",
+                          "enum": [
+                            "planned",
+                            "active",
+                            "paused",
+                            "completed",
+                            "abandoned"
+                          ]
+                        },
+                        "protocolKey": {
+                          "description": "Health Commons protocol variant key to store under protocolRef.key.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "pageRevisionId": {
+                          "description": "Protocol page content revision id in sha256:<64 lowercase hex> form.",
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "runSpecRevisionId": {
+                          "description": "Protocol run spec revision id in sha256:<64 lowercase hex> form.",
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "testPlanId": {
+                          "description": "Chosen Health Commons test plan id for this run.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "baselineStart": {
+                          "description": "Canonical baseline window start date.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "baselineEnd": {
+                          "description": "Canonical baseline window end date.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "baselineDays": {
+                          "description": "Baseline length in days; requires baseline-start, baseline-end, or intervention-start.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "interventionStart": {
+                          "description": "Canonical intervention window start date.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "interventionEnd": {
+                          "description": "Canonical intervention window end date.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "interventionDays": {
+                          "description": "Intervention length in days; requires intervention-start, intervention-end, or a baseline window.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "modality": {
+                          "description": "Intervention modality label.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "schedule": {
+                          "description": "Plain-language schedule string for the run plan.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "dose": {
+                          "description": "Plain-language dose string for the run plan.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "sessionsPerWeek": {
+                          "description": "Planned sessions per week for adherence calculations.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "targetSessions": {
+                          "description": "Target session count across the intervention window.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "minimumUsefulSessions": {
+                          "description": "Minimum useful session count for interpreting the run.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "sessionField": {
+                          "description": "Logging session field ids. Repeat --session-field for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "confounderField": {
+                          "description": "Logging confounder field ids. Repeat --confounder-field for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "stopCondition": {
+                          "description": "Stop condition text. Repeat --stop-condition for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "primaryBiomarkerKey": {
+                          "description": "Primary Health Commons biomarker key for the analysis plan.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "secondaryBiomarkerKey": {
+                          "description": "Secondary Health Commons biomarker keys. Repeat --secondary-biomarker-key for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "desiredDirection": {
+                          "description": "Expected direction for the primary biomarker.",
+                          "type": "string",
+                          "enum": [
+                            "increase",
+                            "decrease",
+                            "stabilize"
+                          ]
+                        },
+                        "analysisNote": {
+                          "description": "Analysis plan note. Repeat --analysis-note for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "onboardingCompletedAt": {
+                          "description": "Timestamp when the protocol onboarding capture completed.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "setupAnswer": {
+                          "description": "Setup answer as key=value. Repeat --setup-answer for multiple setup slots.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "safetyCautionLevel": {
+                          "description": "Onboarding safety caution level.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "moderate",
+                            "high",
+                            "unknown"
+                          ]
+                        },
+                        "safetyDisposition": {
+                          "description": "Onboarding safety disposition.",
+                          "type": "string",
+                          "enum": [
+                            "continue_with_caution",
+                            "clinician_guidance_before_unsupervised_start",
+                            "do_not_start_unsupervised"
+                          ]
+                        },
+                        "positiveQuestionId": {
+                          "description": "Positive safety question ids. Repeat --positive-question-id for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "safetyNote": {
+                          "description": "Safety note. Repeat --safety-note for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "contextNote": {
+                          "description": "Context note from onboarding. Repeat --context-note for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "reminderPolicy": {
+                          "description": "Reminder policy id selected during onboarding.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reminderOptionId": {
+                          "description": "Reminder option id selected during onboarding.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "remindersEnabled": {
+                          "description": "Whether assistant reminders are enabled for the run.",
+                          "type": "boolean"
+                        },
+                        "checkInCadence": {
+                          "description": "Assistant check-in cadence for the run.",
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "daily",
+                            "every_3_days",
+                            "weekly"
+                          ]
+                        },
+                        "notificationStyle": {
+                          "description": "Assistant notification style for the run.",
+                          "type": "string",
+                          "enum": [
+                            "skip_by_default",
+                            "send_scheduled_summary"
+                          ]
+                        },
+                        "missedLogFollowup": {
+                          "description": "Assistant follow-up policy for missed logs.",
+                          "type": "string",
+                          "enum": [
+                            "never",
+                            "opt_in_only",
+                            "default_on"
+                          ]
+                        },
+                        "weeklyDigestEnabled": {
+                          "description": "Whether weekly assistant digests are enabled for the run.",
+                          "type": "boolean"
                         }
                       }
                     }

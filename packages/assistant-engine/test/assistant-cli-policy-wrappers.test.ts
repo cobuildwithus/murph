@@ -207,6 +207,47 @@ describe('assistant CLI policy wrappers', () => {
     ])
   })
 
+  it('redacts sensitive experiment onboarding argv values', async () => {
+    const prepared = await prepareAssistantCliExecutionRequest({
+      args: [
+        'experiment',
+        'apply-onboarding',
+        'sauna-daily',
+        '--schedule',
+        'Three evening sauna sessions after work.',
+        '--dose=20 minutes at comfortable heat',
+        '--setup-answer',
+        'session_timing=Evening after training',
+        '--safety-note=No contraindications reported',
+        '--context-note',
+        'Travel next week may affect adherence.',
+        '--status',
+        'active',
+      ],
+      vault: '/tmp/active-vault',
+    })
+
+    expect(prepared.redactedArgv).toEqual([
+      'experiment',
+      'apply-onboarding',
+      'sauna-daily',
+      '--schedule',
+      '<REDACTED_EXPERIMENT_ONBOARDING_VALUE>',
+      '--dose=<REDACTED_EXPERIMENT_ONBOARDING_VALUE>',
+      '--setup-answer',
+      '<REDACTED_EXPERIMENT_ONBOARDING_VALUE>',
+      '--safety-note=<REDACTED_EXPERIMENT_ONBOARDING_VALUE>',
+      '--context-note',
+      '<REDACTED_EXPERIMENT_ONBOARDING_VALUE>',
+      '--status',
+      'active',
+      '--format',
+      'json',
+      '--vault',
+      '<REDACTED_PATH>',
+    ])
+  })
+
   it('still redacts route argv when global flags precede the command path', async () => {
     const prepared = await prepareAssistantCliExecutionRequest({
       args: [
