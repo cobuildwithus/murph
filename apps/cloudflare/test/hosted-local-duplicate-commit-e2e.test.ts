@@ -25,6 +25,18 @@ const invalidBundleActivationWake = buildHostedExecutionMemberActivatedWake({
   },
   occurredAt: new Date().toISOString(),
 });
+const invalidBundleQuarantineUserId = "member_invalid_bundle_quarantine_local_e2e";
+const invalidBundleQuarantineActivationWake = buildHostedExecutionMemberActivatedWake({
+  eventId:
+    `member.activated:stripe.invoice.paid:${invalidBundleQuarantineUserId}:evt_invalid_bundle_quarantine_local_e2e`,
+  memberId: invalidBundleQuarantineUserId,
+  memberChannels: {
+    email: false,
+    linq: true,
+    telegram: false,
+  },
+  occurredAt: new Date().toISOString(),
+});
 const activationWake = buildHostedExecutionMemberActivatedWake({
   eventId: `member.activated:stripe.invoice.paid:${userId}:evt_duplicate_local_e2e`,
   memberId: userId,
@@ -45,6 +57,8 @@ const stabilityActivationWake = buildHostedExecutionMemberActivatedWake({
   },
   occurredAt: new Date().toISOString(),
 });
+const isoTimestampOnlyPattern =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
 
 describe("hosted local duplicate-commit worker-only e2e", () => {
   let workerFixture: HostedLocalTestWorkerFixture | null = null;
@@ -289,6 +303,7 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
         userId: invalidBundleUserId,
       },
       status: {
+        bundleRef: null,
         lastError: "Hosted bundle archive validation failed.",
         lastErrorCode: "bundle_archive_validation_error",
         pendingIngressEventCount: 1,
@@ -307,10 +322,14 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
         && log.redacted.assistantNotificationErrorDetail.includes("HostedBundleArchiveValidationError")
       ),
     );
-    expect(invalidBundleLog.message).not.toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+    expect(invalidBundleLog.message).not.toMatch(isoTimestampOnlyPattern);
     expect(invalidBundleLog.phase).toBe("runtime_failed");
     expect(invalidBundleLog.redacted).toMatchObject({
       errorCode: "bundle_archive_validation_error",
+      errorDetails: {
+        bundleArchiveOperation: "runner-output",
+        operation: "runner-output",
+      },
       errorMessage: "Hosted bundle archive validation failed.",
       reason: "runner_invocation_failed",
     });
@@ -355,6 +374,97 @@ describe("hosted local duplicate-commit worker-only e2e", () => {
       userId: invalidBundleUserId,
     });
   });
+
+  it("quarantines invalid runner-output bundles after the retry limit without committing a snapshot", async () => {
+    const worker = workerFixture;
+    if (worker === null) {
+      throw new Error("Expected the hosted local test worker fixture to be initialized.");
+    }
+
+    await worker.client.postJson("/__test/runner/invocations/clear", {
+      userId: invalidBundleQuarantineUserId,
+    });
+    await worker.client.postJson("/__test/runner/output-bundle-fault", {
+      invocations: 3,
+      userId: invalidBundleQuarantineUserId,
+    });
+
+    const dispatchResult = await worker.client.postJson(
+      "/__test/wake-with-outcome",
+      invalidBundleQuarantineActivationWake,
+    );
+    expect(dispatchResult).toMatchObject({
+      event: {
+        eventId: invalidBundleQuarantineActivationWake.eventId,
+        state: "queued",
+        userId: invalidBundleQuarantineUserId,
+      },
+      status: {
+        bundleRef: null,
+        lastError: "Hosted bundle archive validation failed.",
+        lastErrorCode: "bundle_archive_validation_error",
+        pendingIngressEventCount: 1,
+        userId: invalidBundleQuarantineUserId,
+      },
+    });
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await worker.client.postJson("/__test/alarm", {
+        userId: invalidBundleQuarantineUserId,
+      });
+    }
+
+    const quarantinedStatus = await worker.waitForUserStatus(
+      invalidBundleQuarantineUserId,
+      (status) => status.pendingIngressEventCount === 0,
+    );
+    expect(quarantinedStatus).toMatchObject({
+      bundleRef: null,
+      pendingIngressEventCount: 0,
+      userId: invalidBundleQuarantineUserId,
+    });
+
+    const quarantineLog = await waitForHostedRunLog(
+      worker,
+      invalidBundleQuarantineUserId,
+      (log) => (
+        log.phase === "quarantined"
+        && isRecord(log.redacted)
+        && log.redacted.errorCode === "bundle_archive_validation_error"
+        && log.redacted.reason === "runner_output_invalid_max_attempts"
+      ),
+    );
+    expect(quarantineLog.message).not.toMatch(isoTimestampOnlyPattern);
+    expect(quarantineLog.redacted).toMatchObject({
+      errorCode: "bundle_archive_validation_error",
+      errorDetails: {
+        bundleArchiveOperation: "runner-output",
+        operation: "runner-output",
+      },
+      errorMessage: "Hosted bundle archive validation failed.",
+      reason: "runner_output_invalid_max_attempts",
+    });
+
+    const finalInvocations = await worker.client.getJson(
+      `/__test/runner/invocations?userId=${encodeURIComponent(invalidBundleQuarantineUserId)}`,
+    );
+    expect(finalInvocations).toMatchObject({
+      count: 3,
+      eventIds: [
+        invalidBundleQuarantineActivationWake.eventId,
+        invalidBundleQuarantineActivationWake.eventId,
+        invalidBundleQuarantineActivationWake.eventId,
+      ],
+    });
+
+    await worker.client.postJson("/__test/runner/output-bundle-fault/clear", {
+      userId: invalidBundleQuarantineUserId,
+    });
+    await worker.client.postJson("/__test/runner/invocations/clear", {
+      userId: invalidBundleQuarantineUserId,
+    });
+  });
 });
 
 async function waitForHostedRunLog(
@@ -363,9 +473,11 @@ async function waitForHostedRunLog(
   predicate: (log: Awaited<ReturnType<HostedLocalTestWorkerFixture["getHostedRunLogs"]>>[number]) => boolean,
 ): Promise<Awaited<ReturnType<HostedLocalTestWorkerFixture["getHostedRunLogs"]>>[number]> {
   const startedAt = Date.now();
+  let lastLogs: Awaited<ReturnType<HostedLocalTestWorkerFixture["getHostedRunLogs"]>> = [];
 
   while ((Date.now() - startedAt) < 30_000) {
     const logs = await worker.getHostedRunLogs(userId);
+    lastLogs = logs;
     const log = logs.find(predicate);
     if (log) {
       return log;
@@ -374,7 +486,17 @@ async function waitForHostedRunLog(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error(`Timed out waiting for hosted run log for ${userId}.`);
+  throw new Error(
+    `Timed out waiting for hosted run log for ${userId}. Recent logs: ${
+      JSON.stringify(lastLogs.map((log) => ({
+        errorCode: isRecord(log.redacted) ? log.redacted.errorCode ?? null : null,
+        level: log.level,
+        message: log.message,
+        phase: log.phase,
+        reason: isRecord(log.redacted) ? log.redacted.reason ?? null : null,
+      })))
+    }`,
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

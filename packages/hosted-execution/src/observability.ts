@@ -454,10 +454,26 @@ export function formatHostedExecutionLogMessage(message: string, error?: unknown
   return combinedMessage.length > 0 ? combinedMessage : normalizedMessage;
 }
 
+function isHostedExecutionIsoTimestampOnlyMessage(message: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u
+    .test(message.trim());
+}
+
 export function buildHostedExecutionStructuredLogRecord(
   input: HostedExecutionStructuredLogInput,
 ): HostedExecutionStructuredLogRecord {
   const error = input.error;
+  const level = input.level ?? (error === undefined ? "info" : "error");
+  const errorCode = error === undefined
+    ? (level === "error" ? "runtime_error" : null)
+    : deriveHostedExecutionErrorCode(error);
+  const errorMessage = error === undefined
+    ? (level === "error" ? HOSTED_EXECUTION_ERROR_SUMMARIES.runtime_error : null)
+    : summarizeHostedExecutionError(error);
+  const formattedMessage = formatHostedExecutionLogMessage(input.message, error);
+  const message = level === "error" && isHostedExecutionIsoTimestampOnlyMessage(formattedMessage)
+    ? (errorMessage ?? HOSTED_EXECUTION_ERROR_SUMMARIES.runtime_error)
+    : formattedMessage;
   const errorName = readHostedExecutionSafeErrorName(error);
   const details = mergeHostedExecutionStructuredLogDetails(
     sanitizeHostedExecutionStructuredLogDetails(input.details),
@@ -467,14 +483,14 @@ export function buildHostedExecutionStructuredLogRecord(
     attempt: input.run?.attempt ?? null,
     component: input.component,
     ...(details ? { details } : {}),
-    ...(error === undefined ? {} : {
-      errorCode: deriveHostedExecutionErrorCode(error),
-      errorMessage: summarizeHostedExecutionError(error),
+    ...(errorCode === null || errorMessage === null ? {} : {
+      errorCode,
+      errorMessage,
       ...(errorName ? { errorName } : {}),
     }),
     eventId: input.wake?.eventId ?? input.eventId ?? null,
-    level: input.level ?? (error === undefined ? "info" : "error"),
-    message: formatHostedExecutionLogMessage(input.message, error),
+    level,
+    message,
     phase: input.phase,
     runId: input.run?.runId ?? null,
     schema: "murph.hosted-execution.log.v1",
