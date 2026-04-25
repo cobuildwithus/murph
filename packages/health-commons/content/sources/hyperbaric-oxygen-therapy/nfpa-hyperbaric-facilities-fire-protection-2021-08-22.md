@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "Fire protection for hyperbaric facilities in hospitals"
+  authors: "Brian O'Connor"
+  year: 2021
+  journal: "NFPA Journal"
+  citation: "Brian O'Connor. Fire protection for hyperbaric facilities in hospitals. NFPA Journal. 2021. https://www.nfpa.org/news-blogs-and-articles/nfpa-journal/2021/08/23/nfpa-13-august"
   url: "https://www.nfpa.org/news-blogs-and-articles/nfpa-journal/2021/08/23/nfpa-13-august"
 researchEvidence:
   designKind: "guideline"

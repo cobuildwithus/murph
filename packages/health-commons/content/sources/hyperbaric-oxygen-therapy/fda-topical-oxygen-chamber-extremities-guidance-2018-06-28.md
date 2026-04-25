@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "Topical Oxygen Chamber for Extremities; Class II Special Controls Guidance for Industry and FDA Staff"
+  authors: "U.S. Food and Drug Administration (FDA)"
+  year: 2018
+  journal: "FDA Guidance Document"
+  citation: "U.S. Food and Drug Administration (FDA). Topical Oxygen Chamber for Extremities; Class II Special Controls Guidance for Industry and FDA Staff. FDA Guidance Document. 2018. https://www.fda.gov/medical-devices/guidance-documents-medical-devices-and-radiation-emitting-products/topical-oxygen-chamber-extremities-class-ii-special-controls-guidance-industry-and-fda-staff"
   url: "https://www.fda.gov/medical-devices/guidance-documents-medical-devices-and-radiation-emitting-products/topical-oxygen-chamber-extremities-class-ii-special-controls-guidance-industry-and-fda-staff"
 researchEvidence:
   designKind: "guideline"

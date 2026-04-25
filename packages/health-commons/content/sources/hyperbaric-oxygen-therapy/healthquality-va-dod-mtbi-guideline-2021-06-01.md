@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "VA/DoD Clinical Practice Guideline for the Management and Rehabilitation of Post-Acute Mild Traumatic Brain Injury"
+  authors: "Department of Veterans Affairs; Department of Defense"
+  year: 2021
+  journal: "VA/DoD"
+  citation: "Department of Veterans Affairs; Department of Defense. VA/DoD Clinical Practice Guideline for the Management and Rehabilitation of Post-Acute Mild Traumatic Brain Injury. VA/DoD. 2021. https://www.healthquality.va.gov/guidelines/Rehab/mtbi/VADODmTBICPGFinal508.pdf"
   url: "https://www.healthquality.va.gov/guidelines/Rehab/mtbi/VADODmTBICPGFinal508.pdf"
 researchEvidence:
   designKind: "guideline"

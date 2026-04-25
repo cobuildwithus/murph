@@ -22,6 +22,10 @@ relations:
 source:
   kind: "web_page"
   title: "Hyperbaric Oxygen Therapy for Prodromal Alzheimer's Disease With Cerebrovascular Disease"
+  authors: "ClinicalTrials.gov record"
+  year: 2024
+  journal: "ClinicalTrials.gov"
+  citation: "ClinicalTrials.gov record. Hyperbaric Oxygen Therapy for Prodromal Alzheimer's Disease With Cerebrovascular Disease. ClinicalTrials.gov. 2024. https://clinicaltrials.gov/study/NCT05349318"
   url: "https://clinicaltrials.gov/study/NCT05349318"
 researchEvidence:
   designKind: "randomized_controlled_trial"

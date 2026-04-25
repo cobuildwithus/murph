@@ -22,6 +22,10 @@ relations:
 source:
   kind: "web_page"
   title: "Hyperbaric Oxygen Therapy: Get the Facts"
+  authors: "U.S. Food and Drug Administration"
+  year: 2021
+  journal: "U.S. Food and Drug Administration"
+  citation: "U.S. Food and Drug Administration. Hyperbaric Oxygen Therapy: Get the Facts. U.S. Food and Drug Administration. 2021. https://www.fda.gov/consumers/consumer-updates/hyperbaric-oxygen-therapy-get-facts"
   url: "https://www.fda.gov/consumers/consumer-updates/hyperbaric-oxygen-therapy-get-facts"
 researchEvidence:
   designKind: "other"

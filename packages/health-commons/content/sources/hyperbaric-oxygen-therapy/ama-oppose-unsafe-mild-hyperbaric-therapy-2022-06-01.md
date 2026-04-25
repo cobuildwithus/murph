@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: 'Oppose Unsafe Use of "Mild Hyperbaric Therapy"'
+  authors: "American Medical Association (AMA)"
+  year: 2022
+  journal: "AMA Policy D-270.986"
+  citation: "American Medical Association (AMA). 'Oppose Unsafe Use of \"Mild Hyperbaric Therapy\"'. AMA Policy D-270.986. 2022. https://policysearch.ama-assn.org/policyfinder/detail/D-270.986?uri=%2FAMADoc%2Fdirectives.xml-D-270.986.xml"
   url: "https://policysearch.ama-assn.org/policyfinder/detail/D-270.986?uri=%2FAMADoc%2Fdirectives.xml-D-270.986.xml"
 researchEvidence:
   designKind: "guideline"

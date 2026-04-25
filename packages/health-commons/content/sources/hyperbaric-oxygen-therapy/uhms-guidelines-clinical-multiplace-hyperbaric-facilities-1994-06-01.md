@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "Guidelines for Clinical Multiplace Hyperbaric Facilities"
+  authors: "UHMS Hyperbaric Safety Committee: David Desautels, Wilbur T. Workman, Eric P. Kindwall, Keith Van Meter, James McCarthy"
+  year: 1994
+  journal: "Undersea & Hyperbaric Medical Society"
+  citation: "UHMS Hyperbaric Safety Committee: David Desautels, Wilbur T. Workman, Eric P. Kindwall, Keith Van Meter, James McCarthy. Guidelines for Clinical Multiplace Hyperbaric Facilities. Undersea & Hyperbaric Medical Society. 1994. https://www.uhms.org/images/Safety-Articles/guidelines_for_clinical_mult.pdf"
   url: "https://www.uhms.org/images/Safety-Articles/guidelines_for_clinical_mult.pdf"
 researchEvidence:
   designKind: "guideline"

@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "Follow Instructions for Safe Use of Hyperbaric Oxygen Therapy Devices - Letter to Health Care Providers"
+  authors: "U.S. Food and Drug Administration (FDA)"
+  year: 2025
+  journal: "FDA Letter to Health Care Providers"
+  citation: "U.S. Food and Drug Administration (FDA). Follow Instructions for Safe Use of Hyperbaric Oxygen Therapy Devices - Letter to Health Care Providers. FDA Letter to Health Care Providers. 2025. https://www.fda.gov/medical-devices/letters-health-care-providers/follow-instructions-safe-use-hyperbaric-oxygen-therapy-devices-letter-health-care-providers"
   url: "https://www.fda.gov/medical-devices/letters-health-care-providers/follow-instructions-safe-use-hyperbaric-oxygen-therapy-devices-letter-health-care-providers"
 researchEvidence:
   designKind: "guideline"

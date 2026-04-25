@@ -22,6 +22,10 @@ relations:
 source:
   kind: "guideline"
   title: "Joint position statement on the use of 'mild hyperbaric therapies' in humans"
+  authors: "Blatteau JE, Mirasoglu B, Germonpre P, Kot J, Marroni A, Welslau W"
+  year: 2023
+  journal: "Diving and Hyperbaric Medicine"
+  citation: "Blatteau JE, Mirasoglu B, Germonpre P, Kot J, Marroni A, Welslau W. Joint position statement on the use of 'mild hyperbaric therapies' in humans. Diving and Hyperbaric Medicine. 2023. https://www.eubs.org/wp-content/uploads/2022/12/ECHM-EUBS-Position-Statement-Mild-Hyperbaric-Therapies-20.12.22.pdf"
   url: "https://www.eubs.org/wp-content/uploads/2022/12/ECHM-EUBS-Position-Statement-Mild-Hyperbaric-Therapies-20.12.22.pdf"
 researchEvidence:
   designKind: "guideline"
