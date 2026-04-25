@@ -1,8 +1,8 @@
 import {
-  assertHostedDeployEnvironment,
+  assertHostedDeployEnvironmentAsync,
   parseDeployWorkerFlag,
 } from "./deploy-preflight.js";
 
-assertHostedDeployEnvironment(process.env, {
+await assertHostedDeployEnvironmentAsync(process.env, {
   deployWorker: parseDeployWorkerFlag(process.env.HOSTED_EXECUTION_DEPLOY_WORKER),
 });

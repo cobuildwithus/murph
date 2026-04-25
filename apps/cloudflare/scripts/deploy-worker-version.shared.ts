@@ -56,6 +56,10 @@ export interface HostedWorkerDeploymentDependencies {
     secretsFilePath: string;
     source?: EnvSource;
   }): Promise<void>;
+  validateDeployEnvironment(input: {
+    deployWorker: true;
+    source: EnvSource;
+  }): Promise<void>;
   writeFile(
     target: string,
     content: string,
@@ -91,6 +95,10 @@ export async function runHostedWorkerDeployment(input: {
   const env = input.env ?? process.env;
   const deploymentSettings = resolveHostedWorkerDeploymentSettings(env, () => new Date());
 
+  await input.dependencies.validateDeployEnvironment({
+    deployWorker: true,
+    source: env,
+  });
   await input.dependencies.validatePreparedArtifacts({
     configPath: input.configPath,
     includeSecrets: deploymentSettings.includeSecrets,

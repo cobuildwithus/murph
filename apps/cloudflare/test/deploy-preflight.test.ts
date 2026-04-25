@@ -2,9 +2,35 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertHostedDeployEnvironment,
+  assertHostedDeployEnvironmentAsync,
+  listHostedDeployEnvironmentInvariantErrors,
+  listHostedDeployEnvironmentInvariantErrorsAsync,
   listMissingHostedDeployEnvironment,
   parseDeployWorkerFlag,
 } from "../scripts/deploy-preflight.js";
+
+type EnvSource = Readonly<Record<string, string | undefined>>;
+
+function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
+  return {
+    CF_BUNDLES_BUCKET: "bundles",
+    CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+    CF_PUBLIC_BASE_URL: "https://worker.example.test",
+    CF_WORKER_NAME: "hosted-runner",
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"d\":\"secret\",\"x\":\"public\"}",
+    HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"public\"}",
+    HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
+    HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "ZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMtbG9uZy1leGFtcGxlIQ==",
+    HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"recovery\"}",
+    HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
+    HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
+    HOSTED_WEB_BASE_URL: "https://app.example.test",
+    HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
+    HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
+    HOSTED_WAKE_ENCRYPTION_KEY: "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+    ...overrides,
+  };
+}
 
 describe("deploy preflight helpers", () => {
   it("requires the base deploy environment regardless of deploy mode", () => {
@@ -22,6 +48,7 @@ describe("deploy preflight helpers", () => {
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: true })).toEqual([
       "CF_PUBLIC_BASE_URL",
+      "HOSTED_EXECUTION_DEPLOY_CONTEXT",
       "HOSTED_WEB_BASE_URL",
       "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
       "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
@@ -51,44 +78,18 @@ describe("deploy preflight helpers", () => {
   });
 
   it("requires BRAVE_API_KEY when hosted search is pinned to brave", () => {
-    expect(() => assertHostedDeployEnvironment({
-      CF_BUNDLES_BUCKET: "bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-      CF_PUBLIC_BASE_URL: "https://worker.example.test",
-      CF_WORKER_NAME: "hosted-runner",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"d\":\"secret\",\"x\":\"public\"}",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"public\"}",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "ZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMtbG9uZy1leGFtcGxlIQ==",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"recovery\"}",
-      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
-      HOSTED_WAKE_ENCRYPTION_KEY: "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       MURPH_WEB_SEARCH_PROVIDER: "brave",
-    }, { deployWorker: true })).toThrowError(
+    }), { deployWorker: true })).toThrowError(
       "Missing required GitHub environment variables for deploy workflow: BRAVE_API_KEY",
     );
   });
 
   it("allows brave-hosted search when the matching secret is present", () => {
-    expect(() => assertHostedDeployEnvironment({
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       BRAVE_API_KEY: "brave-secret",
-      CF_BUNDLES_BUCKET: "bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-      CF_PUBLIC_BASE_URL: "https://worker.example.test",
-      CF_WORKER_NAME: "hosted-runner",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"d\":\"secret\",\"x\":\"public\"}",
-      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"public\"}",
-      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "ZW5jcnlwdGlvbi1rZXktMzItYnl0ZXMtbG9uZy1leGFtcGxlIQ==",
-      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "{\"kty\":\"OKP\",\"crv\":\"X25519\",\"x\":\"recovery\"}",
-      HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
-      HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
-      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"public-x\",\"y\":\"public-y\",\"d\":\"private-d\"}",
-      HOSTED_WAKE_ENCRYPTION_KEY: "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
-    }, { deployWorker: true })).not.toThrow();
+    }), { deployWorker: true })).not.toThrow();
   });
 
   it("does not require BRAVE_API_KEY for config-only runs even when hosted search is pinned to brave", () => {
@@ -106,11 +107,145 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "   ",
       CF_PUBLIC_BASE_URL: "   ",
       CF_WORKER_NAME: "hosted-runner",
+      HOSTED_EXECUTION_DEPLOY_CONTEXT: "   ",
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "   ",
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK HOSTED_WAKE_ENCRYPTION_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK HOSTED_WAKE_ENCRYPTION_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
+    );
+  });
+
+  it("allows production deploys only when the hosted web origin matches the explicit production origin", () => {
+    expect(() => assertHostedDeployEnvironment(
+      createRequiredWorkerDeployEnv(),
+      { deployWorker: true },
+    )).not.toThrow();
+  });
+
+  it("requires an explicit production web origin for production worker deploys", () => {
+    expect(listMissingHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
+    }), { deployWorker: true })).toContain("HOSTED_WEB_PRODUCTION_BASE_URL");
+  });
+
+  it("rejects production worker deploys that point at preview or development web origins", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      HOSTED_WEB_BASE_URL: "https://preview.example.test",
+    }), { deployWorker: true })).toThrowError(
+      "production deploys must set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL",
+    );
+  });
+
+  it("rejects preview-shaped hosted web origins even when the expected production URL is misconfigured", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      HOSTED_WEB_BASE_URL: "https://murph-git-main-team.vercel.app",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://murph-git-main-team.vercel.app",
+    }), { deployWorker: true })).toThrowError(
+      "HOSTED_WEB_BASE_URL must not use a preview or development origin",
+    );
+  });
+
+  it("rejects preview-shaped worker and callback origins in production deploys", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      CF_PUBLIC_BASE_URL: "https://worker-git-main-team.workers.dev",
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-preview.example.test/api/device-sync",
+    }), { deployWorker: true })).toEqual(expect.arrayContaining([
+      "CF_PUBLIC_BASE_URL must not use a preview or development origin in production deploys.",
+      "DEVICE_SYNC_PUBLIC_BASE_URL must not use a preview or development origin in production deploys.",
+    ]));
+  });
+
+  it("keeps non-IP hostnames that start like IPv6 private ranges eligible for production", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      HOSTED_WEB_BASE_URL: "https://fd-prod.example.test",
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://fd-prod.example.test",
+    }), { deployWorker: true })).not.toThrow();
+  });
+
+  it.each([
+    ["http worker origin", { CF_PUBLIC_BASE_URL: "http://worker.example.test" }],
+    ["http hosted web origin", { HOSTED_WEB_BASE_URL: "http://app.example.test" }],
+    ["localhost hosted web origin", { HOSTED_WEB_BASE_URL: "https://localhost" }],
+    ["loopback hosted web origin", { HOSTED_WEB_BASE_URL: "https://127.0.0.1" }],
+    ["Docker bridge hosted web origin", { HOSTED_WEB_BASE_URL: "https://host.docker.internal" }],
+    ["private IPv4 hosted web origin", { HOSTED_WEB_BASE_URL: "https://10.1.2.3" }],
+    ["private IPv6 hosted web origin", { HOSTED_WEB_BASE_URL: "https://[fd00::1]" }],
+    ["IPv4-mapped private callback origin", { DEVICE_SYNC_PUBLIC_BASE_URL: "https://[::ffff:10.1.2.3]/api/device-sync" }],
+    ["private device-sync callback origin", { DEVICE_SYNC_PUBLIC_BASE_URL: "https://192.168.1.20/api/device-sync" }],
+  ])("rejects production deploy URLs with %s", (_name, overrides) => {
+    expect(() => assertHostedDeployEnvironment(
+      createRequiredWorkerDeployEnv(overrides),
+      { deployWorker: true },
+    )).toThrowError(/Invalid GitHub environment variables for deploy workflow/u);
+  });
+
+  it("rejects a production worker configured to trust preview or development Vercel OIDC tokens", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
+    }), { deployWorker: true })).toContain(
+      "production deploys must set HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production.",
+    );
+  });
+
+  it("rejects production OIDC environment casing that the worker runtime would reject", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "Production",
+    }), { deployWorker: true })).toContain(
+      "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT must be one of development, preview, or production.",
+    );
+  });
+
+  it("rejects malformed deploy contexts before deployment", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
+      HOSTED_EXECUTION_DEPLOY_CONTEXT: "prod",
+    }), { deployWorker: true })).toEqual([
+      "HOSTED_EXECUTION_DEPLOY_CONTEXT must be one of development, preview, or production.",
+    ]);
+  });
+
+  it("keeps local development worker deploy preflight tolerant of localhost web origins", () => {
+    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
+      CF_PUBLIC_BASE_URL: "http://localhost:8787",
+      HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
+      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
+      HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
+    }), { deployWorker: true })).not.toThrow();
+  });
+
+  it("allows production deploy DNS records only when they resolve to public addresses", async () => {
+    await expect(assertHostedDeployEnvironmentAsync(
+      createRequiredWorkerDeployEnv(),
+      { deployWorker: true },
+      {
+        resolveHostnameAddresses: async () => ["8.8.8.8", "2001:4860:4860::8888"],
+      },
+    )).resolves.toBeUndefined();
+  });
+
+  it("rejects production deploy hostnames that resolve to private-network addresses", async () => {
+    await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+      createRequiredWorkerDeployEnv(),
+      { deployWorker: true },
+      {
+        resolveHostnameAddresses: async (hostname) =>
+          hostname === "app.example.test" ? ["10.1.2.3"] : ["8.8.8.8"],
+      },
+    )).resolves.toContain(
+      "HOSTED_WEB_BASE_URL must not resolve to private-network addresses in production deploys.",
+    );
+  });
+
+  it("rejects production deploy hostnames that resolve to dotted IPv4-mapped private IPv6 addresses", async () => {
+    await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+      createRequiredWorkerDeployEnv(),
+      { deployWorker: true },
+      {
+        resolveHostnameAddresses: async (hostname) =>
+          hostname === "app.example.test" ? ["::ffff:10.1.2.3"] : ["8.8.8.8"],
+      },
+    )).resolves.toContain(
+      "HOSTED_WEB_BASE_URL must not resolve to private-network addresses in production deploys.",
     );
   });
 
