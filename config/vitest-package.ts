@@ -10,6 +10,7 @@ import {
 import { resolveMurphVitestConcurrency } from "./vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "./vitest-timeouts.js";
 import {
+  createVitestAliasesFromTsconfigPaths,
   createVitestWorkspaceRuntimeAliases,
   type WorkspaceSourceEntryRelativePaths,
   resolveWorkspaceSourceEntries,
@@ -53,6 +54,10 @@ export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigIn
         )
       : []),
     ...resolveExtraAliases(packageDir, input.extraAliases),
+    ...createVitestAliasesFromTsconfigPaths({
+      workspaceDir: packageDir,
+      specifierFilter: isWorkspaceSourceSpecifier,
+    }),
   ];
 
   return defineConfig({
@@ -76,6 +81,10 @@ export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigIn
         }),
     },
   });
+}
+
+function isWorkspaceSourceSpecifier(specifier: string): boolean {
+  return specifier === "murph" || specifier.startsWith("@murphai/");
 }
 
 function resolveExtraAliases(
