@@ -160,6 +160,7 @@ type StoredHostedWakeControlState = {
   assistantNextWakeAt: string | null;
   cursor: HostedExecutionCursorState;
   logs: HostedRunLogRecord[];
+  nextRunAttempt: number;
   nextRunId: number;
   nextSeq: number;
   wakes: StoredHostedWakeRecord[];
@@ -706,7 +707,7 @@ export async function acquireTestHostedRun(input: {
       });
   const run: StoredHostedRunRecord = {
     acquiredAt: now,
-    attempt: 1,
+    attempt: state.nextRunAttempt,
     createdAt: now,
     eventCount: wakes.length,
     eventKinds: wakes.map((wake) => wake.kind),
@@ -813,6 +814,11 @@ export async function commitTestHostedRun(input: {
 
   const responseRun = toHostedRunRecord(nextRun);
   state.activeRun = input.body.finalizeRequired ? nextRun : null;
+  state.nextRunAttempt = input.body.finalizeRequired
+    ? state.nextRunAttempt
+    : input.body.failureCode === undefined && input.body.failureClass === undefined
+      ? 1
+      : activeRun.attempt + 1;
   await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
 
   return {
@@ -865,6 +871,7 @@ export async function finalizeTestHostedRun(input: {
   };
 
   state.activeRun = null;
+  state.nextRunAttempt = 1;
   await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
 
   return {
@@ -901,6 +908,7 @@ export async function releaseTestHostedRunFinalize(input: {
   };
 
   state.activeRun = null;
+  state.nextRunAttempt = activeRun.attempt + 1;
   await writeStoredHostedWakeControlState(input.bucket, input.userId, state);
 
   return {
@@ -1003,6 +1011,7 @@ async function readStoredHostedWakeControlState(
         version: "0",
       },
       logs: [],
+      nextRunAttempt: 1,
       nextRunId: 1,
       nextSeq: 0,
       wakes: [],
@@ -1025,6 +1034,9 @@ async function readStoredHostedWakeControlState(
       version: parsed.cursor?.version ?? "0",
     },
     logs: parsed.logs ?? [],
+    nextRunAttempt: typeof parsed.nextRunAttempt === "number" && Number.isFinite(parsed.nextRunAttempt)
+      ? Math.max(1, Math.trunc(parsed.nextRunAttempt))
+      : 1,
     nextRunId: parsed.nextRunId ?? 1,
     nextSeq: parsed.nextSeq ?? 0,
     wakes: parsed.wakes ?? [],

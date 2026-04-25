@@ -18,6 +18,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
   formatHostedExecutionLogMessage,
@@ -943,12 +944,19 @@ export class RunnerRunProcessor {
       userId,
     });
 
-    return invokeHostedExecutionContainerRunner({
-      job,
-      runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
-      timeoutMs: this.dependencies.env.runnerTimeoutMs,
-      userId,
-    });
+    try {
+      return await invokeHostedExecutionContainerRunner({
+        job,
+        runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
+        timeoutMs: this.dependencies.env.runnerTimeoutMs,
+        userId,
+      });
+    } catch (error) {
+      throw normalizeRunnerOutputBundleArchiveValidationError({
+        currentBundleRef,
+        error,
+      });
+    }
   }
 
   private async readRunnerSharePack(input: {
@@ -1222,6 +1230,47 @@ function resolveInvalidAuthoritativeBundleArchiveValidation(input: {
 
 function isInvalidRunnerOutputBundleArchiveValidation(error: unknown): boolean {
   return readHostedBundleArchiveValidationErrorDetails(error)?.operation === "runner-output";
+}
+
+function normalizeRunnerOutputBundleArchiveValidationError(input: {
+  currentBundleRef: HostedExecutionBundleRef | null;
+  error: unknown;
+}): unknown {
+  const error = input.error;
+  if (
+    input.currentBundleRef !== null
+    || readHostedBundleArchiveValidationErrorDetails(error) !== null
+    || (
+      !isHostedBundleArchiveValidationFailure(error)
+      && deriveHostedExecutionErrorCode(error) !== "bundle_archive_validation_error"
+    )
+  ) {
+    return error;
+  }
+
+  if (!(error instanceof Error)) {
+    return error;
+  }
+
+  const annotated = error as Error & {
+    code?: string;
+    details?: Record<string, unknown> | null;
+  };
+  const currentDetails = annotated.details
+    && typeof annotated.details === "object"
+    && !Array.isArray(annotated.details)
+    ? annotated.details
+    : {};
+
+  annotated.code = typeof annotated.code === "string"
+    ? annotated.code
+    : "bundle_archive_validation_error";
+  annotated.details = {
+    ...currentDetails,
+    bundleArchiveOperation: "runner-output",
+    operation: "runner-output",
+  };
+  return annotated;
 }
 
 function hostedRunEventId(runId: string): string {

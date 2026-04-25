@@ -308,6 +308,82 @@ describe("hosted execution observability", () => {
     expect(record.details?.errorProperties).not.toHaveProperty("token");
   });
 
+  it("keeps every error structured log diagnostic and privacy-bounded", () => {
+    const isoOnlyMessage = "2026-04-25T02:26:17.046Z";
+    const error = Object.assign(
+      new Error("Hosted bundle archive is invalid."),
+      {
+        code: "bundle_archive_validation_error",
+        details: {
+          apiKey: "test-redaction-key",
+          authorization: "Basic test-redaction-token",
+          bundleArchiveOperation: "runner-output",
+          operation: "runner-output",
+          token: "secret-token",
+        },
+        name: "HostedBundleArchiveValidationError",
+        operation: "runner-output",
+        refHash: "c".repeat(64),
+      },
+    );
+
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "runner",
+      error,
+      level: "error",
+      message: isoOnlyMessage,
+      phase: "failed",
+      time: "2026-04-25T02:26:18.000Z",
+    });
+    const fallbackRecord = buildHostedExecutionStructuredLogRecord({
+      component: "runner",
+      level: "error",
+      message: isoOnlyMessage,
+      phase: "failed",
+      time: "2026-04-25T02:26:19.000Z",
+    });
+
+    for (const candidate of [record, fallbackRecord]) {
+      expect(candidate).toMatchObject({
+        component: "runner",
+        errorCode: expect.any(String),
+        errorMessage: expect.any(String),
+        level: "error",
+        phase: "failed",
+        schema: "murph.hosted-execution.log.v1",
+      });
+      expect(candidate.message).not.toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u,
+      );
+    }
+
+    expect(record).toMatchObject({
+      errorCode: "bundle_archive_validation_error",
+      errorMessage: "Hosted bundle archive validation failed.",
+      errorName: "HostedBundleArchiveValidationError",
+      message:
+        "2026-04-25T02:26:17.046Z Hosted bundle archive validation failed. Detail: Hosted bundle archive is invalid. Code: bundle_archive_validation_error",
+    });
+    expect(record.details).toMatchObject({
+      apiKey: "[redacted]",
+      authorization: "[redacted]",
+      bundleArchiveOperation: "runner-output",
+      errorProperties: {
+        operation: "runner-output",
+        refHash: "c".repeat(64),
+      },
+      operation: "runner-output",
+      token: "[redacted]",
+    });
+    expect(record.details?.errorProperties).not.toHaveProperty("apiKey");
+    expect(record.details?.errorProperties).not.toHaveProperty("token");
+    expect(fallbackRecord).toMatchObject({
+      errorCode: "runtime_error",
+      errorMessage: "Hosted execution runtime failed.",
+      message: "Hosted execution runtime failed.",
+    });
+  });
+
   it("extracts a privacy-bounded assistant-notification detail subset from annotated errors", () => {
     const error = Object.assign(new Error("provider failed"), {
       cause: Object.assign(new Error("Gateway rejected provider credentials."), {
