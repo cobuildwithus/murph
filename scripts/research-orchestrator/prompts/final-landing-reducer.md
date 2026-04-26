@@ -11,6 +11,11 @@ Inputs:
 Goal:
 Produce the final repo patch and final punchlist.
 
+QA policy:
+- Treat Evidence QA and Safety QA as the single QA pass for this package.
+- Apply their blocker fixes directly in this reducer instead of requesting or waiting for a second QA pass.
+- If the protocol package draft is a repaired page-builder rerun, use the repaired package as current and use the original QA reports as the blocker checklist.
+
 Output:
 1. Final file manifest
 2. Final unified diff
@@ -23,6 +28,7 @@ Output:
 Rules:
 - Apply all blocker fixes.
 - Do not add new unsupported claims while fixing text.
+- Do not request post-repair Evidence QA or Safety QA unless the operator explicitly asks for a second QA pass.
 - Keep all extraction batches traceable through source keys, finding IDs, and appraisal keys.
 - Do not reintroduce `protocolEvidence` or duplicate source pages while applying blocker fixes.
 - Preserve the <=40-source-per-extraction-run guarantee in the work log.
