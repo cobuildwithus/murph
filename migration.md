@@ -18,6 +18,31 @@ The target is not a better `HostedRun`. The target is no executor-facing `Hosted
 
 Cloudflare should feel like a simple remote container that runs the same local runtime with hosted ports. Web should durably accept input and store checkpoints, but it should not decide which messages were executed, which assistant turn is current, which outbox effects are safe, or whether a same-conversation late message should revise the draft.
 
+## Smallest Stable Shape
+
+Keep only these hosted primitives:
+
+```text
+HostedMailboxItem          append-only encrypted input
+HostedMailboxPayload       optional encrypted large payload body
+HostedMailboxLaneCounter   per-user per-lane sequence allocator
+HostedWorkspace            latest encrypted checkpoint pointer plus redacted status projection
+HostedRuntimeLog           bounded redacted observability events
+Durable Object lease       single-user runner coordination
+```
+
+Everything else should be local runtime behavior restored inside the hosted workspace.
+
+Avoid adding primitives that answer these questions outside the runtime:
+
+- Has this message been processed?
+- Which assistant turn owns this message?
+- Is this outbox effect safe to send?
+- Which pending input should revise this reply?
+- Which internal timer is due?
+
+Those answers live in the encrypted workspace checkpoint, not in web or Durable Object state.
+
 ## Success Criteria
 
 - A hosted user message is appended to a durable encrypted mailbox before any runner is required.
@@ -80,6 +105,10 @@ The current hosted path has these correctness owners:
   - run, cursor, run-drain, event-result, cleanup-target contracts
 - `packages/hosted-execution/src/parsers/run-control.ts`
   - run-control parsers
+- `packages/cloudflare-hosted-control/src/**`
+  - web-to-Cloudflare `run` route names
+  - `nudgeUserRun`
+  - run-shaped status/client naming
 - `packages/assistant-runtime/src/hosted-runtime/execution.ts`
   - `executeHostedRunDrainForCommit`
   - `completeHostedRunDrainAfterCommit`
@@ -87,8 +116,18 @@ The current hosted path has these correctness owners:
   - adopted cleanup targets
 - `packages/assistant-runtime/src/hosted-runtime/turn-input.ts`
   - runtime wrapper around web-owned hosted turn-input adoption
+- `packages/assistant-runtime/src/hosted-runtime/platform.ts`
+  - turn-input port
+  - hosted side-effect journal/finalization callbacks
 - `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`
   - committed side-effect phase that mirrors local outbox into a hosted finalize protocol
+- Hosted vault-sync code paths
+  - queued ingress event references
+  - run-summary commit helpers
+- Cloudflare outbound/bootstrap code paths
+  - `runtime_bootstrapped`
+  - `bootstrapUser`
+  - key-store resolution coupled to runner bootstrap state
 
 The hard cut replaces that with mailbox import plus runtime checkpoints.
 
@@ -160,9 +199,7 @@ model HostedMailboxItem {
   userId                  String       @map("user_id")
   lane                    String
   laneSeq                 BigInt       @map("lane_seq")
-  globalSeq               BigInt       @map("global_seq")
-  eventId                 String?      @map("event_id")
-  dedupeKey               String?      @map("dedupe_key")
+  dedupeKey               String       @map("dedupe_key")
   kind                    String
   occurredAt              DateTime     @map("occurred_at")
   payloadSchema           String       @map("payload_schema")
@@ -176,14 +213,40 @@ model HostedMailboxItem {
   payload                 HostedMailboxPayload?
 
   @@unique([userId, lane, laneSeq])
-  @@unique([userId, globalSeq])
   @@unique([userId, dedupeKey])
   @@index([userId, lane, laneSeq])
-  @@index([userId, kind, globalSeq])
+  @@index([userId, kind, createdAt])
   @@index([userId, expiresAt])
   @@map("hosted_mailbox_item")
 }
 ```
+
+### Add `HostedMailboxLaneCounter`
+
+Deleting `HostedExecutionCursor` removes the current sequence allocator. Replace only that allocator role with a small per-lane counter. It is not an execution cursor.
+
+Suggested model:
+
+```prisma
+model HostedMailboxLaneCounter {
+  userId    String       @map("user_id")
+  lane      String
+  nextSeq   BigInt       @default(1) @map("next_seq")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  member    HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, lane])
+  @@map("hosted_mailbox_lane_counter")
+}
+```
+
+Rules:
+
+- Increment the counter in the same database transaction that inserts the mailbox item.
+- Keep one idempotency identity: `dedupeKey`.
+- Duplicate `dedupeKey` is first-wins.
+- If the same `dedupeKey` is retried with a different payload hash or kind, return the existing item, emit a redacted conflict log, and never rewrite the original row.
+- Do not add aliases, replacements, or coalescing rows in web.
 
 ### Replace `HostedIngressPayload` With `HostedMailboxPayload`
 
@@ -217,7 +280,6 @@ model HostedWorkspace {
   nextWakeAt              DateTime?    @map("next_wake_at")
   nextWakeReason          String?      @map("next_wake_reason")
   redactedStatusJson      Json?        @map("redacted_status_json")
-  importedMailboxJson     Json?        @map("imported_mailbox_json")
   checkpointedAt          DateTime?    @map("checkpointed_at")
   createdAt               DateTime     @default(now()) @map("created_at")
   updatedAt               DateTime     @updatedAt @map("updated_at")
@@ -231,8 +293,9 @@ Notes:
 
 - `version` is the workspace CAS fence.
 - `snapshotRef` is an encrypted hosted bundle ref.
-- `importedMailboxJson` is a redacted projection for status only. Runtime mailbox import state remains inside the checkpoint.
+- `redactedStatusJson` may include mailbox imported-through projections for status and GC hints, but runtime mailbox import state remains inside the encrypted checkpoint.
 - `nextWakeAt` is a projection from runtime state, not a web-owned timer event.
+- `browserVaultReplicaRef` is a dashboard projection pointer. It is not runtime correctness state and must not be used to decide mailbox import or assistant execution.
 
 ### Replace `HostedRunLog` With `HostedRuntimeLog`
 
@@ -246,7 +309,7 @@ model HostedRuntimeLog {
   level              String
   component          String
   phase              String
-  message            String
+  eventCode          String       @map("event_code")
   attemptId          String?      @map("attempt_id")
   leaseGeneration    BigInt?      @map("lease_generation")
   workspaceVersion   BigInt?      @map("workspace_version")
@@ -254,7 +317,7 @@ model HostedRuntimeLog {
   mailboxLane        String?      @map("mailbox_lane")
   mailboxSeqStart    BigInt?      @map("mailbox_seq_start")
   mailboxSeqEnd      BigInt?      @map("mailbox_seq_end")
-  outboxIntentId     String?      @map("outbox_intent_id")
+  outboxIntentRef    String?      @map("outbox_intent_ref")
   errorCode          String?      @map("error_code")
   redactedJson       Json?        @map("redacted_json")
   createdAt          DateTime     @default(now()) @map("created_at")
@@ -268,6 +331,14 @@ model HostedRuntimeLog {
 ```
 
 Logs are best-effort observability. Checkpoints and local runtime state are correctness.
+
+Log constraints:
+
+- `eventCode` comes from a small allowlisted enum, for example `mailbox.imported`, `mailbox.retryable_payload_missing`, `checkpoint.cas_conflict`, `outbox.ambiguous`, or `runner.lease_superseded`.
+- `component` and `phase` also come from allowlists.
+- `redactedJson` uses allowlisted keys only.
+- `attemptId`, checkpoint reason, mailbox seqs, and `outboxIntentRef` are correlation fields only. They must never drive retry, delivery, import, or cleanup correctness.
+- Do not store free-form runtime messages in web. Free-form logs have a habit of becoming protocol state and privacy risk.
 
 ## Mailbox Lanes
 
@@ -285,12 +356,14 @@ Rules:
 - `conversation` includes `conversation.message`.
 - `system` includes activation, channel updates, assistant notification requests, device-sync wakes, share acceptance, and vault-sync imports.
 - Each lane has its own strict `laneSeq`.
-- `globalSeq` exists only for debugging/correlation across lanes.
 - Web assigns lane seqs atomically at append time.
 - Runtime imports strict prefixes per lane.
 - A temporary missing payload stops that lane only.
 - A malformed permanent item is quarantined in runtime import state, logged, and the lane advances.
 - Web does not mark mailbox rows running, completed, or quarantined.
+- Do not add a global execution sequence to solve cross-lane dependencies.
+
+Two lanes are enough for the hard cut. If a system input must precede conversation handling, make the runtime importer enforce a product readiness gate, such as "activation imported before conversation import" or "channel route exists before delivery." Do not turn web back into a global executor queue.
 
 Do not keep web coalescing as a mailbox mutation in the first cut. Append all inputs and let the runtime importer collapse stale configuration or channel-update inputs if needed. If coalescing becomes necessary later, implement it as a runtime import reducer, not as row replacement plus aliases in web.
 
@@ -320,7 +393,6 @@ Suggested schema:
       "quarantined": []
     }
   },
-  "eventIds": {},
   "lastRefreshAt": null
 }
 ```
@@ -330,9 +402,10 @@ Rules:
 - Use `packages/runtime-state` versioned JSON helpers.
 - `importedSeq` advances only after durable local import has completed.
 - Runtime checkpoints after any import progress.
-- `eventIds` maps hosted mailbox event ids to local capture/import ids only when useful for idempotency or debug.
-- Quarantine entries contain only event id, lane, lane seq, kind, sanitized error code, and timestamp.
+- Quarantine entries contain only mailbox item id, lane, lane seq, kind, sanitized error code, and timestamp.
 - No plaintext message bodies or provider payloads in this state file.
+- Do not store imported mailbox item mirrors, debug history, or per-item completion state.
+- Do not reuse inbox `source_cursor`; that is connector/projection state, not hosted mailbox import truth.
 
 ## Runtime Platform Contract
 
@@ -351,13 +424,16 @@ interface HostedRuntimePlatform {
     }): Promise<HostedMailboxFetchResult>;
   };
   workspacePort: {
-    checkpoint(input: HostedWorkspaceCheckpointInput): Promise<HostedWorkspaceCheckpointResult>;
+    checkpoint(input: HostedWorkspaceCheckpointRequest): Promise<HostedWorkspaceCheckpointResult>;
   };
   logPort: {
     write(entries: readonly HostedRuntimeLogEntry[]): Promise<void>;
   };
   effectsPort: HostedRuntimeEffectsPort;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  sharePort?: HostedRuntimeSharePort | null;
+  vaultSyncPort?: HostedRuntimeVaultSyncPort | null;
+  rawPayloadPort?: HostedRuntimeRawPayloadPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   billingPort?: HostedRuntimeBillingPort | null;
@@ -366,6 +442,10 @@ interface HostedRuntimePlatform {
 
 The child runtime should not know web routes. It should call semantic ports.
 
+`workspacePort.checkpoint` is a semantic runtime operation, not a bundle API. The runtime asks for a checkpoint with a reason, status projection, and next wake hint. The hosted adapter snapshots the current workspace, writes encrypted objects, performs web CAS, and returns the new workspace version. The runtime should not pass or reason about `snapshotRef`.
+
+Side-input ports are also semantic. Share payloads, vault-sync import payloads, raw email/message payloads, device-sync snapshots, usage export, and issue export should be named by product meaning, not by hosted-run dispatch payloads or Cloudflare storage internals.
+
 If the child must talk over HTTP because it runs in an isolated process, collapse the current multi-host internal proxy into one worker-owned runtime bridge:
 
 ```text
@@ -373,6 +453,8 @@ POST /__internal/runtime-bridge/mailbox/fetch
 POST /__internal/runtime-bridge/workspace/checkpoint
 POST /__internal/runtime-bridge/logs/write
 GET  /__internal/runtime-bridge/payloads/email/:key
+GET  /__internal/runtime-bridge/share/:payloadId
+GET  /__internal/runtime-bridge/vault-sync/:payloadId
 POST /__internal/runtime-bridge/effects/email/send
 POST /__internal/runtime-bridge/device-sync/*
 POST /__internal/runtime-bridge/usage/record
@@ -380,6 +462,14 @@ POST /__internal/runtime-bridge/issues/record
 ```
 
 Keep one short-lived bridge token scoped to user id, lease generation, and attempt id. Do not keep per-run tokens because there are no runs.
+
+The isolated child must not receive web signing credentials, web route names, or the full supervisor env. Production authority should be:
+
+```text
+child runtime -> bridge token -> Cloudflare parent/UserRunner lease -> signed web callback
+```
+
+If local development keeps a fallback direct path, it must not become production default and must be deleted or hard-disabled before deploy.
 
 ## Cloudflare Durable Object Target
 
@@ -393,13 +483,15 @@ CREATE TABLE IF NOT EXISTS runner_meta (
   lease_expires_at TEXT,
   in_flight INTEGER NOT NULL DEFAULT 0,
   heartbeat_at TEXT,
-  last_checkpoint_version TEXT,
   last_error_at TEXT,
   last_error_code TEXT,
   last_run_at TEXT,
-  next_wake_at TEXT
+  next_alarm_at TEXT,
+  pending_nudge INTEGER NOT NULL DEFAULT 0
 );
 ```
+
+`next_alarm_at` is only a local alarm cache. The authoritative next wake projection is `HostedWorkspace.nextWakeAt` in web, because it comes from the latest checkpoint.
 
 Delete:
 
@@ -407,13 +499,15 @@ Delete:
 - `active_run_id`
 - `active_run_attempt`
 - `active_run_started_at`
-- `runtime_bootstrapped` if bootstrap can be inferred from workspace existence, or keep only if activation provisioning still needs a one-time local flag.
+- `runtime_bootstrapped`, after key-store/bootstrap resolution no longer depends on `bootstrapUser`.
 - `last_event_id`
+- committed checkpoint/snapshot pointers
+
+`runtime_bootstrapped` is not a harmless flag today. Unwind the outbound crypto/bootstrap coupling first: key-store resolution should read the encrypted runner secret/key material directly through the runner's narrow authority, not mark bootstrap completion as a side effect of resolving outbound payload helpers.
 
 Durable Object methods should become:
 
 ```text
-bootstrapUser(userId)
 nudge()
 runUntilIdleOrBudget({ reason })
 status()
@@ -439,23 +533,46 @@ Target `runUntilIdleOrBudget`:
 2. If another invocation is in flight, set/sync alarm for now and return accepted.
 3. Begin a new lease generation and mark in_flight = 1.
 4. Fetch latest HostedWorkspace from web.
-5. Read encrypted snapshot ref from workspace.
-6. Restore hosted execution context into a temp workspace.
+5. If no workspace row or snapshot exists, enter the bootstrap/null-snapshot path.
+6. Otherwise restore hosted execution context from the encrypted snapshot ref.
 7. Build hosted runtime platform ports.
 8. Run hosted runtime until idle or budget.
 9. Runtime checkpoints through workspacePort as it progresses.
-10. Record final heartbeat/status and nextWakeAt.
+10. Record heartbeat/error/alarm projection only.
 11. Clear in_flight.
-12. Schedule one DO alarm for nextWakeAt if present.
+12. Fetch latest web workspace status and schedule one DO alarm for nextWakeAt if present.
 ```
 
 Important fencing:
 
 - Every checkpoint includes expected workspace version and lease generation.
 - Web accepts a checkpoint only if the expected workspace version matches.
-- Cloudflare accepts a checkpoint response only if the local lease generation is still current.
+- Cloudflare/UserRunner validates the bridge token and current lease generation before object upload and again before web checkpoint.
 - A stale runner that wakes late may log, but it cannot advance the workspace.
 - On CAS conflict, stop the runner and schedule a retry from the latest checkpoint. Do not merge snapshots.
+- If the child made progress before a CAS conflict, that progress is discarded with the orphaned bundle. Correctness comes from rerunning from the latest accepted checkpoint.
+
+Do not make web a lease owner. Web owns workspace CAS; Cloudflare/UserRunner owns lease fencing.
+
+## Bootstrap And Empty Workspace
+
+Do not special-case activation as a run. Bootstrap is the first workspace checkpoint.
+
+Target flow:
+
+```text
+1. Web creates or upserts HostedWorkspace with version 0 and null snapshotRef.
+2. Web appends `member.activated` to the system mailbox in the same product transaction.
+3. Web nudges Cloudflare best effort.
+4. Cloudflare starts `runUntilIdleOrBudget`.
+5. Runtime restores an empty workspace from the hosted launch spec.
+6. Runtime imports `member.activated`.
+7. Runtime writes the initial vault/operator config/runtime state.
+8. Runtime checkpoints version 0 -> 1.
+9. Later mailbox items run through the same import path.
+```
+
+The only bootstrap-specific code should be local workspace creation when `snapshotRef` is null. Do not add a bootstrap run table, a bootstrap completion event, or a separate activation cursor.
 
 ## Hosted Runtime Algorithm
 
@@ -468,11 +585,12 @@ runHostedWorkspaceUntilIdleOrBudget(input)
 The entrypoint should:
 
 ```text
-1. Restore local workspace from the provided snapshot.
-2. Refresh hosted mailbox for conversation and system lanes.
-3. Import mailbox items into the same local inbox/runtime paths used by local execution.
-4. Checkpoint immediately if any import progressed.
-5. Run due local runtime work:
+1. Restore local workspace from the provided snapshot, or create an empty hosted workspace if snapshotRef is null.
+2. Refresh hosted mailbox for system and conversation lanes.
+3. Import strict prefixes into the same local inbox/runtime paths used by local execution.
+4. Enforce runtime readiness gates during import, such as activation before conversation delivery.
+5. Checkpoint immediately if any import progressed.
+6. Run due local runtime work:
    - activation/bootstrap
    - channel reconciliation
    - conversation auto-reply
@@ -481,12 +599,13 @@ The entrypoint should:
    - share imports
    - vault-sync imports
    - outbox retry/reconciliation
-6. Before delivery, refresh hosted mailbox again.
-7. If new same-conversation captures arrived, checkpoint and throw/use `AssistantTurnRevisionRequiredError`.
-8. Let the existing bounded local revision loop rerun the reply.
-9. Checkpoint before and after external side-effect boundaries.
-10. Export redacted status/logs and nextWakeAt.
-11. Stop when idle or budget exhausted.
+7. Before delivery, refresh hosted mailbox again.
+8. If new same-conversation captures arrived, checkpoint and throw/use `AssistantTurnRevisionRequiredError`.
+9. Let the existing bounded local revision loop rerun the reply.
+10. Before external side effects, checkpoint the outbox intent and `sending` state.
+11. After external side effects, checkpoint receipt, retry, or ambiguous state.
+12. Export redacted status/logs and nextWakeAt.
+13. Stop when idle or budget exhausted.
 ```
 
 Delete or replace:
@@ -525,13 +644,13 @@ Current local primitives already support it:
 - `AssistantTurnRevisionRequiredError` carries newly arrived same-conversation captures.
 - The automation reply loop catches that error and reruns the reply within a bounded revision budget.
 
-Hosted should use those primitives directly.
+Hosted should use those primitives directly, but this is not automatic in the current hosted path. The hosted automation path must inject the mailbox-backed turn-input port on day one; otherwise deleting web peek/adopt removes the only current hosted late-input refresh. Do not rely on the default inbox-backed port being created for hosted execution.
 
 Target hosted refresh:
 
 ```text
 1. The local assistant is about to deliver a draft.
-2. `turnInputPort.refresh({ phase: "before_delivery" })` calls hosted mailbox fetch for the conversation lane after the runtime import watermark.
+2. The hosted before-delivery hook asks the mailbox importer to fetch the conversation lane after the runtime import watermark.
 3. Runtime imports new conversation mailbox items into local inbox/capture state.
 4. Runtime updates `hosted-mailbox.json`.
 5. Runtime checkpoints immediately.
@@ -569,8 +688,10 @@ Use the local assistant outbox as the source of truth:
 ```text
 pending -> sending -> sent
 pending -> sending -> failed
-pending -> sending -> failed_ambiguous
+pending -> sending -> delivery confirmation pending / retry / abandoned
 ```
+
+Use the existing outbox vocabulary in implementation. Ambiguous post-send outcomes should flow through the current receipt/confirmation/retry/reconcile concepts rather than adding a new hosted-only ambiguous status.
 
 Policy:
 
@@ -594,7 +715,7 @@ Migration steps:
 2. Ensure outbox intent creation is checkpointed before dispatch.
 3. Move hosted email/Linq/Telegram provider adapters into runtime `effectsPort` dependencies for `dispatchAssistantOutboxIntent`.
 4. Checkpoint when an intent enters `sending`.
-5. Checkpoint when an intent reaches `sent`, `failed`, or `failed_ambiguous`.
+5. Checkpoint when an intent reaches `sent`, `failed`, confirmation-pending, retry, reconcile, or abandoned state according to the existing local outbox model.
 6. Delete committed assistant delivery effects from the hosted run result path.
 7. Reduce `packages/hosted-execution/src/side-effects.ts` to shared codecs only if a provider adapter still needs them. Otherwise delete it.
 
@@ -607,16 +728,14 @@ A checkpoint is the only hosted commit.
 Checkpoint input:
 
 ```ts
-interface HostedWorkspaceCheckpointInput {
+interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   expectedWorkspaceVersion: string;
   leaseGeneration: string;
-  snapshotRef: HostedExecutionBundleRefState | null;
-  browserVaultReplicaRef?: HostedBrowserVaultReplicaRef | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   redactedStatus?: Record<string, unknown> | null;
-  importedMailbox?: Record<string, unknown> | null;
+  browserVaultProjection?: HostedBrowserVaultProjectionUpdate | null;
   reason:
     | "import"
     | "before_delivery_refresh"
@@ -632,12 +751,13 @@ interface HostedWorkspaceCheckpointInput {
 Checkpoint process:
 
 ```text
-1. Runtime snapshots local workspace to a bundle.
-2. Cloudflare writes bundle/artifacts to R2 using current encryption/keyring.
-3. Runtime bridge calls web checkpoint with expected workspace version.
-4. Web CAS updates `HostedWorkspace.version`, `snapshotRef`, status, nextWakeAt, and imported mailbox projection.
-5. Web returns the new workspace version.
-6. Runtime records the new version for later checkpoints in the same invocation.
+1. Runtime calls `workspacePort.checkpoint` with reason, expected workspace version, next wake, and redacted status.
+2. Hosted adapter snapshots the current local workspace to a bundle.
+3. Cloudflare writes bundle/artifacts to R2 using current encryption/keyring.
+4. Hosted adapter calls web checkpoint with expected workspace version plus the new encrypted snapshot ref.
+5. Web CAS updates `HostedWorkspace.version`, `snapshotRef`, `redactedStatusJson`, `nextWakeAt`, and optional browser-vault projection pointer.
+6. Web returns the new workspace version.
+7. Runtime records the new version for later checkpoints in the same invocation.
 ```
 
 If bundle upload succeeds but web CAS fails:
@@ -661,7 +781,7 @@ Every hosted producer should do this in one transaction with product/control-pla
 1. Validate product/control-plane mutation.
 2. Build canonical hosted mailbox envelope.
 3. Encrypt payload.
-4. Assign `lane` and `laneSeq`.
+4. Allocate `laneSeq` from `HostedMailboxLaneCounter`.
 5. Insert `HostedMailboxItem`.
 6. Commit transaction.
 7. Best-effort nudge Cloudflare.
@@ -683,28 +803,29 @@ Dedupe:
 
 - Use `(userId, dedupeKey)` uniqueness.
 - If duplicate insert is attempted, return the existing item and still nudge best effort.
+- If duplicate payload differs, keep first-wins and write only a redacted conflict event.
 - Do not replace rows for coalescing in the first cut.
 
 Payload storage:
 
 - Keep inline ciphertext for small payloads.
 - Keep payload table/object for large payloads.
-- Raw email/message payloads remain encrypted side inputs with TTL/import GC.
+- Raw email/message payloads are web-owned encrypted side inputs with TTL/import GC.
+- If Cloudflare receives a public email/webhook first, it should act as a transport ingress sidecar that calls web to append the mailbox item. It must not become the runner's correctness store.
 
 ## Raw Payload Cleanup
 
 Delete per-run cleanup targets.
 
-Use one of these simpler policies:
+First-cut policy:
 
-1. Time-based retention:
-   - raw email/message payloads expire after a short retention window.
-   - runtime tolerates missing raw payloads by logging and leaving the lane item unadvanced when the payload is temporarily missing.
-2. Imported-through GC:
-   - runtime status projection says lane seq imported through N.
-   - a web cron deletes raw payloads for mailbox items older than a retention grace and imported through the projected seq.
+1. Do not expire raw payloads before import.
+2. Runtime treats a missing payload as retryable unless web explicitly returns a permanent gone/quarantine code.
+3. Runtime does not advance the lane for retryable missing payloads.
+4. Runtime quarantines and advances only for permanent malformed or permanently unavailable payloads.
+5. Web GC may delete raw payloads only after the redacted imported-through projection is past the item and a retention grace has elapsed.
 
-For the first cut, prefer time-based retention plus imported-through best-effort GC. Do not make cleanup part of execution correctness.
+The imported-through projection is only a GC hint. Runtime import state inside the encrypted checkpoint remains authoritative. If the projection is stale, GC waits longer; it never causes runtime to skip import.
 
 ## Status And Debugging
 
@@ -718,7 +839,6 @@ inFlight
 leaseGeneration
 heartbeatAt
 lastRunAt
-lastCheckpointVersion
 workspaceVersion
 snapshotRef summary
 nextWakeAt
@@ -744,9 +864,9 @@ workspaceVersion
 checkpointVersion
 component
 phase
-message
+eventCode
 mailbox lane/seq range
-outboxIntentId
+outboxIntentRef
 errorCode
 redactedJson
 ```
@@ -779,6 +899,7 @@ Keep:
 Replace:
 
 - `HostedIngressEvent` with `HostedMailboxItem`
+- `HostedExecutionCursor` sequence allocation with `HostedMailboxLaneCounter`
 - `HostedExecutionCursorState` with `HostedWorkspaceState`
 - `HostedRunNudgeResult` with `HostedRunnerNudgeResult`
 - run route builders with mailbox/workspace/log/status route builders
@@ -799,6 +920,23 @@ Delete:
 - `HOSTED_RUN_TRIGGER_KINDS` unless a smaller log-only reason enum is needed
 - `parsers/run-control.ts`
 
+### `packages/cloudflare-hosted-control`
+
+Keep:
+
+- OIDC-authenticated web-to-Cloudflare client boundary.
+- Typed route builders and response parsing.
+
+Replace:
+
+- `run` route naming with `nudge`, `wake`, or `work` naming.
+- `nudgeUserRun` with `nudgeUserRunner`.
+- run-shaped result payloads with accepted/already-running/status summaries.
+
+Delete:
+
+- any `runId`, committed seq, target seq, or drain-result fields from the web-to-Cloudflare client contract.
+
 ### `apps/web`
 
 Keep:
@@ -815,6 +953,7 @@ Replace:
 - `src/lib/hosted-ingress/**` with `src/lib/hosted-mailbox/**`
 - `src/lib/hosted-run/status.ts` with hosted workspace/status/log readers
 - `src/lib/hosted-execution/control.ts` wake client names from run language to runner/mailbox language
+- vault-sync run-summary completion helpers with runtime/product status that does not depend on run commit/finalize.
 
 Delete:
 
@@ -826,6 +965,8 @@ Delete:
 - `app/api/internal/hosted-run/turn-input/peek/route.ts`
 - `app/api/internal/hosted-run/turn-input/adopt/route.ts`
 - run-owned log/status routes after replacements exist
+- `HostedMember` relation fields that point at old cursor/ingress/run/log rows.
+- `HostedVaultSyncSession` queued run/ingress coupling such as queued event ids once mailbox append owns readiness.
 
 Rename or move:
 
@@ -862,10 +1003,11 @@ Replace:
 
 - `HostedUserRunner.drainHostedRuns` with `runUntilIdleOrBudget`
 - `HostedUserRunner.nudgeHostedRun` with `nudge`
-- `RunnerRunProcessor` with a smaller `WorkspaceRunner`
+- `RunnerRunProcessor` with a new `WorkspaceRunner`; do not adapt the old execute/finalize split.
 - `web-control-plane.ts` run clients with workspace/mailbox/log clients
 - `runtime-platform.ts` turn-input port with mailbox/checkpoint/log ports
 - multi-host internal proxy with one runtime bridge where possible
+- direct child web credentials with child-to-bridge-only authority.
 
 Delete:
 
@@ -883,6 +1025,7 @@ Simplify:
 - `src/user-runner/runner-state-schema.ts` to lease/alarm/status fields only.
 - `src/index.ts` internal route names and response payloads from run semantics to runner semantics.
 - `src/runner-container.ts` job input from run-drain request to workspace-run request.
+- local proxy auth so checkpoint-capable bridge calls are validated by the current UserRunner lease, not only by container-token ownership.
 
 ### `packages/assistant-runtime`
 
@@ -900,8 +1043,9 @@ Replace:
 
 - `executeHostedRunDrainForCommit` with `runHostedWorkspaceUntilIdleOrBudget`
 - `completeHostedRunDrainAfterCommit` with ordinary outbox drain/checkpoint stages
-- `createHostedAssistantTurnInputPort` to fetch/import/checkpoint mailbox items
-- `HostedRuntimePlatform.turnInputPort` with `mailboxPort` plus local turn-input wrapper
+- `createHostedAssistantTurnInputPort` with a hosted mailbox importer used by the existing local before-delivery hook
+- `HostedRuntimePlatform.turnInputPort` with semantic `mailboxPort`, `workspacePort`, and `logPort`
+- hosted side-effect journal methods with ordinary runtime outbox checkpoints.
 
 Delete:
 
@@ -927,12 +1071,13 @@ Do not fork assistant semantics for hosted.
 
 ### Phase 0: Freeze The Target Contract
 
-1. Write the new ownership decision into durable docs after implementation starts:
+1. Write the new ownership decision into durable docs at the start of implementation:
    - `ARCHITECTURE.md`
    - `apps/web/README.md`
    - `apps/cloudflare/README.md`
    - `packages/assistant-runtime/README.md`
    - `packages/hosted-execution/README.md`
+   - `packages/cloudflare-hosted-control/README.md` if present, or the package source docs if not.
 2. Mark `agent-docs/references/hosted-run-protocol.md` obsolete or replace it with a hosted mailbox/checkpoint protocol doc.
 3. Add a short glossary:
    - mailbox item
@@ -940,31 +1085,57 @@ Do not fork assistant semantics for hosted.
    - workspace checkpoint
    - lease generation
    - runtime import watermark
-4. Decide the final route names before touching code.
+4. Decide the final route names before touching code:
+   - web mailbox fetch
+   - web workspace read/checkpoint
+   - web runtime log/status
+   - Cloudflare runner nudge/status
+5. Rename the intended Cloudflare command concept from `run` to `nudge`, `wake`, or `work` before new code spreads.
 
 Acceptance:
 
 - Durable docs no longer describe web-owned run acquire/commit/finalize as the future target.
 - The new protocol can be explained without `runId`, `committedSeq`, or `finalizeRequired`.
+- `packages/cloudflare-hosted-control` no longer describes `run` as the durable command concept.
 
-### Phase 1: Add New Shared Contracts
+### Phase 1: Add Shared Contracts And Runtime Ports
+
+This phase creates the seams but does not yet replace web schema or Cloudflare orchestration.
 
 In `packages/hosted-execution`:
 
 1. Add mailbox item contracts.
 2. Add mailbox fetch contracts.
 3. Add workspace state/checkpoint contracts.
-4. Add runtime log contracts.
+4. Add bounded runtime log event contracts.
 5. Add runner nudge/status contracts.
-6. Add parsers for those contracts.
-7. Add route builders for those contracts.
-8. Keep old run contracts temporarily only until call sites are deleted in this branch.
+6. Add semantic side-input contracts for share, vault-sync, raw payload, device-sync, usage, and issues where they still need shared web/Cloudflare parsing.
+7. Add parsers for those contracts.
+8. Add route builders for those contracts.
+9. Keep old run contracts temporarily only until call sites are deleted in this branch.
+
+In `packages/cloudflare-hosted-control`:
+
+1. Add nudge/status route builders.
+2. Replace `nudgeUserRun` naming with runner/wake naming.
+3. Remove committed seq, target seq, run id, and run-drain result fields from the new response types.
+
+In `packages/assistant-runtime`:
+
+1. Add `HostedRuntimePlatform` ports:
+   - `mailboxPort.fetch`
+   - `workspacePort.checkpoint`
+   - `logPort.write`
+   - semantic effect and side-input ports
+2. Keep the port implementation fake/in-memory in tests first.
+3. Do not wire these ports to old run-drain result/finalization types.
 
 Suggested types:
 
 ```text
 HostedMailboxLane = "conversation" | "system"
 HostedMailboxItemRecord
+HostedMailboxLaneCounterState
 HostedMailboxFetchRequest
 HostedMailboxFetchResponse
 HostedWorkspaceRecord
@@ -978,9 +1149,70 @@ HostedRunnerNudgeResult
 Acceptance:
 
 - New parser tests cover malformed payloads and do not allow plaintext fields in log contracts.
+- Log contracts accept event codes and allowlisted fields, not free-form messages.
 - Old and new contracts are not wired together.
+- `packages/cloudflare-hosted-control` can express nudge/status without `runId` or committed seq fields.
+- Runtime test fakes can call `mailbox.fetch`, `workspace.checkpoint`, and `log.write` without web or Cloudflare code.
 
-### Phase 2: Replace Web Schema And Mailbox Store
+### Phase 2: Build Runtime Workspace Runner First
+
+This is the highest-leverage order change from the final review. Prove the runtime-owned behavior before changing web storage or Cloudflare runner code.
+
+In `packages/assistant-runtime`:
+
+1. Add `runHostedWorkspaceUntilIdleOrBudget`.
+2. Add null-snapshot bootstrap support.
+3. Add hosted mailbox import state helpers for `vault/.runtime/operations/assistant/hosted-mailbox.json`.
+4. Add mailbox fetch/import loop with per-lane strict prefixes.
+5. Import conversation mailbox items into the same inbox/capture paths used locally.
+6. Checkpoint immediately after import progress through `workspacePort.checkpoint`.
+7. Do not use inbox `source_cursor` for hosted mailbox progress.
+8. Export imported-through data only as a redacted status/GC projection.
+
+Runtime import routing:
+
+```text
+conversation.message -> local inbox/capture import
+member.activated -> hosted bootstrap into empty workspace
+member.channels.updated -> channel reconciliation
+assistant.notification.requested -> notification work
+device-sync.wake -> device-sync work
+vault.share.accepted -> sharePort fetch + import
+vault.sync.import -> vaultSyncPort fetch + import
+```
+
+Acceptance:
+
+- Package tests prove restore/null workspace, mailbox fetch, import, and checkpoint-after-import with fake ports.
+- Importing the same mailbox fetch twice is idempotent.
+- Runtime advances lane watermarks only after durable local import.
+- Conversation import checkpoints canonical vault changes plus portable assistant runtime state.
+- Malformed mailbox items quarantine in runtime state, not web state.
+- Temporary missing raw payloads do not advance the lane.
+- No code path reads or writes hosted mailbox watermarks through inbox `source_cursor`.
+
+### Phase 3: Wire Hosted Turn Revision And Outbox In Runtime
+
+In `packages/assistant-runtime` and `packages/assistant-engine`:
+
+1. Inject the mailbox-backed turn-input port in hosted automation from day one.
+2. On `before_delivery`, fetch/import/checkpoint new conversation mailbox items after the runtime watermark.
+3. Delegate to the existing local `listNewConversationCaptures` and `AssistantTurnRevisionRequiredError` loop.
+4. Add hosted outbox drain using existing local outbox statuses and receipts.
+5. Checkpoint outbox intent creation before dispatch.
+6. Mark intent `sending` and checkpoint before provider dispatch.
+7. Checkpoint sent, failed, confirmation-pending, retry, reconcile, or abandoned state according to the existing local model.
+8. Remove hosted side-effect journal/finalization methods from the new platform surface.
+
+Acceptance:
+
+- Regression test: first message starts reply, second same-conversation message arrives during tools/model, `before_delivery` imports it, reply is revised before send.
+- Regression test: bounded revision budget defers delivery if new same-conversation input keeps arriving.
+- Crash after outbox intent checkpoint but before provider call retries safely.
+- Crash after provider call but before receipt checkpoint produces confirmation/reconcile behavior, not blind duplicate send.
+- No hosted test asserts web-owned adoption or a hosted-only ambiguous status.
+
+### Phase 4: Replace Web Schema And Mailbox Store
 
 In `apps/web`:
 
@@ -991,87 +1223,42 @@ In `apps/web`:
    - remove run fields from ingress/mailbox
    - add `HostedMailboxItem`
    - add `HostedMailboxPayload`
+   - add `HostedMailboxLaneCounter`
    - add `HostedWorkspace`
    - add `HostedRuntimeLog`
-2. Replace `hosted-ingress` store with `hosted-mailbox` store.
-3. Keep append helpers simple:
+2. Remove old `HostedMember` relation fields pointing at cursor/ingress/run/log rows.
+3. Remove vault-sync queued run/ingress coupling, including queued event ids and run-summary commit helpers.
+4. Replace `hosted-ingress` store with `hosted-mailbox` store.
+5. Keep append helpers simple:
    - assign lane
-   - assign lane seq
-   - assign global seq
+   - allocate lane seq from lane counter
    - encrypt payload
    - insert row
    - return duplicate if dedupe collision
-4. Remove web coalescing/replacement aliases.
-5. Implement signed internal mailbox fetch route.
-6. Implement signed internal workspace read/checkpoint routes.
-7. Implement signed internal runtime log route.
-8. Implement status read path from workspace plus mailbox lag.
-9. Update all hosted producers to append mailbox items instead of hosted ingress events.
-10. Keep best-effort Cloudflare nudge after transaction commit.
+6. Remove web coalescing/replacement aliases.
+7. Implement signed internal mailbox fetch route.
+8. Implement signed internal workspace read/checkpoint routes.
+9. Implement signed internal runtime log route.
+10. Implement status read path from workspace plus mailbox lag.
+11. Update all hosted producers to append mailbox items instead of hosted ingress events.
+12. Keep best-effort Cloudflare nudge after transaction commit.
 
 Acceptance:
 
 - Web tests prove every producer appends exactly one mailbox item in the same transaction as its product mutation.
 - Duplicate dedupe keys return existing mailbox item and do not create a second row.
+- Duplicate dedupe keys with changed payloads never rewrite the first item.
 - Checkpoint CAS rejects wrong expected version.
 - Status computes mailbox lag by lane without reading plaintext payloads.
+- Vault-sync import readiness no longer depends on hosted run commit/finalize summaries.
 - Old hosted-run API route tests are removed, not updated to new internals.
 
-### Phase 3: Implement Runtime Mailbox Import
-
-In `packages/assistant-runtime`:
-
-1. Add hosted mailbox import state file helpers.
-2. Add mailbox fetch/import loop.
-3. Route each mailbox kind to existing runtime behavior:
-   - `conversation.message` imports into inbox/capture state.
-   - `member.activated` performs hosted bootstrap.
-   - `member.channels.updated` reconciles assistant channels.
-   - `assistant.notification.requested` enqueues/runs notification work.
-   - `device-sync.wake` runs device-sync work.
-   - `vault.share.accepted` fetches share payload and imports.
-   - `vault.sync.import` fetches vault-sync payload and imports.
-4. Checkpoint after any mailbox import progress.
-5. On temporary side-input missing, stop advancing that lane and schedule retry.
-6. On malformed permanent input, quarantine in runtime state, log, advance lane.
-7. Export redacted imported lane projection for web status.
-
-Acceptance:
-
-- Importing the same mailbox fetch twice is idempotent.
-- Runtime advances lane watermarks only after durable local import.
-- Malformed mailbox item is quarantined in runtime state and not in web state.
-- Temporary missing raw email payload does not advance the conversation lane.
-- Imported conversation messages appear to local assistant automation exactly like local inbox captures.
-
-### Phase 4: Replace Hosted Turn-Input Refresh
-
-In `packages/assistant-runtime`:
-
-1. Replace hosted turn-input port implementation.
-2. On `before_delivery`, fetch conversation lane after runtime watermark.
-3. Import any new conversation messages.
-4. Checkpoint immediately.
-5. Delegate to `createInboxBackedAssistantTurnInputPort.listNewConversationCaptures`.
-6. Let `AssistantTurnRevisionRequiredError` propagate to the existing local revision loop.
-
-In `apps/cloudflare` and `apps/web`:
-
-1. Delete turn-input peek route.
-2. Delete turn-input adopt route.
-3. Delete runner outbound turn-input handler.
-
-Acceptance:
-
-- Regression test: first message starts reply, second same-conversation message arrives during tools/model, `before_delivery` imports it, reply is revised before send.
-- Regression test: bounded revision budget defers delivery if new same-conversation input keeps arriving.
-- No hosted test asserts web-owned adoption.
-
-### Phase 5: Replace Runner Job Shape
+### Phase 5: Replace Cloudflare Runner Job Shape
 
 In `apps/cloudflare` and `packages/assistant-runtime`:
 
-1. Replace run-drain job input:
+1. Add a new `WorkspaceRunner`; do not adapt `RunnerRunProcessor`.
+2. Replace run-drain job input:
 
 ```text
 HostedWorkspaceRunRequest {
@@ -1079,32 +1266,32 @@ HostedWorkspaceRunRequest {
   userId
   leaseGeneration
   workspaceVersion
-  snapshotRef
   reason
   budget
 }
 ```
 
-2. Replace run result:
+3. Replace run result:
 
 ```text
 HostedWorkspaceRunResult {
   status: "idle" | "budget_exhausted" | "scheduled" | "failed"
-  checkpointVersion
   nextWakeAt
   redactedStatus
 }
 ```
 
-3. Prefer letting checkpoints happen through `workspacePort` during execution.
-4. Final result should not carry the authoritative bundle unless the child cannot checkpoint directly.
-5. Remove run token from child env and replace with runtime bridge token.
+4. Let checkpoints happen through `workspacePort` during execution.
+5. Final result is a status summary only. It is not a commit record.
+6. Remove run token from child env and replace with runtime bridge token.
+7. Remove direct child web signing credentials and web route names.
 
 Acceptance:
 
 - Child can checkpoint after import before model/tool execution.
 - Parent can kill child after checkpoint and next run restores imported state.
 - Stale child cannot checkpoint after lease generation changes.
+- Child has no web callback signing key and no full supervisor env.
 
 ### Phase 6: Simplify Cloudflare Durable Object
 
@@ -1114,7 +1301,8 @@ In `apps/cloudflare`:
 2. Replace `runDrainLock` with a generic invocation lock.
 3. Replace acquire loop with one `runUntilIdleOrBudget`.
 4. Replace alarm behavior:
-   - read `next_wake_at`
+   - read `next_alarm_at` as a local alarm cache
+   - refresh `HostedWorkspace.nextWakeAt` from web when deciding whether to run
    - if due, run once
    - reschedule from latest runtime projection
 5. Replace nudge behavior:
@@ -1122,6 +1310,7 @@ In `apps/cloudflare`:
    - otherwise set alarm to now and optionally start run depending current route behavior
 6. Replace status behavior with DO state plus web workspace status.
 7. Delete committed seq and target seq responses.
+8. Replace `runtime_bootstrapped` only after bootstrap/key-store resolution is independent from `bootstrapUser`.
 
 Acceptance:
 
@@ -1129,19 +1318,20 @@ Acceptance:
 - DO has no event/run attempt columns.
 - DO status still answers whether work is in flight and when the next wake is due.
 - Workerd tests cover alarm/nudge coalescing and stale lease fencing.
+- Key-store/bootstrap resolution works without writing runner bootstrap completion state.
 
 ### Phase 7: Collapse Cloudflare Runtime Bridge
 
 In `apps/cloudflare`:
 
-1. Replace multiple internal worker hostnames where practical with one runtime bridge.
-2. Keep semantic ports in `runtime-platform.ts`.
-3. Keep worker-owned web callback signing in parent only.
-4. Keep child env scrubbed.
-5. Keep per-invocation cache/temp roots.
-6. Keep process-group reaping.
-7. Remove per-run outbound proxy token rotation.
-8. Add per-lease bridge token validation.
+1. Keep semantic ports in `runtime-platform.ts`.
+2. Keep worker-owned web callback signing in parent only.
+3. Keep child env scrubbed.
+4. Keep per-invocation cache/temp roots.
+5. Keep process-group reaping.
+6. Remove per-run outbound proxy token rotation.
+7. Add per-lease bridge token validation through the current UserRunner lease.
+8. Replace multiple internal worker hostnames with one runtime bridge where practical.
 
 Acceptance:
 
@@ -1149,26 +1339,9 @@ Acceptance:
 - Child has no full supervisor env.
 - Bridge token is not present in URLs.
 - Local loopback proxy, if still needed, preserves the same header-token contract.
+- Checkpoint-capable bridge calls are rejected if the lease generation is stale even when the container token is otherwise valid.
 
-### Phase 8: Move Side Effects Fully To Runtime Outbox
-
-In `packages/assistant-runtime` and `packages/assistant-engine`:
-
-1. Delete hosted committed side-effect result path.
-2. Add hosted outbox drain stage.
-3. Inject hosted provider adapters into `dispatchAssistantOutboxIntent`.
-4. Checkpoint before dispatch.
-5. Checkpoint after receipt/failure/ambiguous result.
-6. Preserve usage and issue export as best-effort runtime export ports.
-
-Acceptance:
-
-- Crash after outbox intent checkpoint but before provider call retries safely.
-- Crash after provider call but before receipt checkpoint produces ambiguous/reconcile behavior, not blind duplicate send.
-- Existing assistant-engine outbox retry policy tests remain the source of truth.
-- Hosted tests no longer depend on web `committed_needs_finalize`.
-
-### Phase 9: Delete Old Protocol
+### Phase 8: Delete Old Protocol
 
 Delete old files after all call sites are gone:
 
@@ -1211,8 +1384,9 @@ Acceptance:
 - No production code imports run-control contracts.
 - No route under `/api/internal/hosted-run` remains unless renamed for a non-run purpose.
 - No Cloudflare path calls acquire/commit/finalize.
+- `packages/cloudflare-hosted-control` no longer exposes run-shaped client names or result fields.
 
-### Phase 10: Update Docs And Deploy Surface
+### Phase 9: Update Docs And Deploy Surface
 
 Update:
 
@@ -1223,6 +1397,7 @@ Update:
 - `apps/cloudflare/DEPLOY.md`
 - `packages/assistant-runtime/README.md`
 - `packages/hosted-execution/README.md`
+- `packages/cloudflare-hosted-control` docs/source comments
 - `agent-docs/references/hosted-run-protocol.md` replacement or removal
 - `agent-docs/index.md` if canonical docs are added, removed, moved, or materially repurposed
 
@@ -1235,6 +1410,17 @@ Acceptance:
 - Deploy docs name the new routes/env vars.
 
 ## End-To-End Scenarios To Prove
+
+### 0. First Activation Bootstraps Empty Workspace
+
+```text
+Given HostedWorkspace has version 0 and null snapshotRef
+And system lane contains `member.activated` seq 1
+When Cloudflare runs the workspace
+Then runtime creates the hosted vault/operator runtime state
+And checkpoints version 1
+And no bootstrap run, activation cursor, or web completion row exists
+```
 
 ### 1. Import Survives Timeout
 
@@ -1305,7 +1491,7 @@ Then next run dispatches the same intent by stable idempotency key
 Given assistant began dispatch
 And provider may have accepted the send
 When runner dies before receipt checkpoint
-Then next run marks/reconciles the intent as ambiguous
+Then next run uses the existing receipt/confirmation/reconcile path
 And does not blindly duplicate non-idempotent sends
 ```
 
@@ -1335,6 +1521,49 @@ Given recent mailbox, checkpoints, and logs
 When status is read
 Then response shows inFlight, nextWakeAt, workspaceVersion, mailbox lag, last error, and recent redacted logs
 And it does not expose run ids or plaintext payloads
+```
+
+### 11. Duplicate Producer Retry Is First-Wins
+
+```text
+Given a producer appends a mailbox item with dedupeKey K
+When the producer retries K with the same payload
+Then web returns the existing item
+And no new laneSeq is allocated
+When the producer retries K with a different payload
+Then web still returns the existing item
+And emits only a redacted conflict log
+And never rewrites the original mailbox row
+```
+
+### 12. Hosted Turn-Input Port Is Injected
+
+```text
+Given hosted automation is running
+When the assistant reaches before-delivery refresh
+Then runtime uses the mailbox-backed hosted turn-input port
+And does not call web peek/adopt
+And does not rely on the default local inbox-backed port being auto-created
+```
+
+### 13. Vault-Sync Import Has No Run Coupling
+
+```text
+Given a vault-sync import payload is ready
+When web records product readiness
+Then it appends a `vault.sync.import` mailbox item
+And stores no queued run id, queued ingress event id, or run-summary commit dependency
+And runtime imports through `vaultSyncPort`
+```
+
+### 14. Child Has No Web Credentials
+
+```text
+Given a hosted runner child is launched
+Then the child has only the short-lived bridge token and semantic runtime config
+And has no web signing secret, direct web base URL, or supervisor env
+When the child checkpoints with a stale lease generation
+Then UserRunner rejects the bridge call before web CAS
 ```
 
 ## Verification Plan
@@ -1377,9 +1606,14 @@ Add or update tests for:
 - Web mailbox fetch route auth and redaction.
 - Runtime mailbox import idempotency.
 - Runtime mailbox quarantine.
+- Runtime mailbox state does not use inbox `source_cursor`.
+- Hosted mailbox-backed turn-input injection.
 - Hosted before-delivery late-message revision.
 - Cloudflare stale lease checkpoint rejection.
 - Cloudflare alarm/nudge coalescing.
+- Cloudflare child env contains no web signing credentials.
+- `packages/cloudflare-hosted-control` nudge/status naming and no run-result fields.
+- Vault-sync import readiness without run-summary commit coupling.
 - Outbox crash/retry/ambiguous hosted flows.
 - Status/log privacy.
 
@@ -1443,14 +1677,15 @@ Mitigation:
 Mitigation:
 
 - Keep strict order within `system`.
-- If a specific system input must be ordered against conversation input, make the runtime importer enforce that by checking `globalSeq`.
+- If a specific system input must be ordered against conversation input, make the runtime importer enforce a readiness gate.
+- Activation, channel binding, and payload availability are runtime import prerequisites, not web executor ordering rules.
 - Do not make web a global executor queue again.
 
 ### Risk: Imported-Mailbox Projection Becomes Truth
 
 Mitigation:
 
-- `HostedWorkspace.importedMailboxJson` is status only.
+- Mailbox imported-through data appears only inside `HostedWorkspace.redactedStatusJson`.
 - Runtime state inside the encrypted checkpoint is authoritative.
 - Web must never use the projection to skip runtime import.
 
@@ -1463,6 +1698,17 @@ Mitigation:
 - No run token.
 - No acquire/commit/finalize.
 - No event completion mutations.
+- Bridge auth is scoped to user id, lease generation, and attempt id.
+- Checkpoint-capable calls validate the current UserRunner lease, not only container-token ownership.
+
+### Risk: Runtime Checkpoint Port Becomes Finalization
+
+Mitigation:
+
+- `workspacePort.checkpoint` is a single CAS operation.
+- No prepare, finalize, release, adopted event results, cleanup targets, or checkpoint status rows.
+- Checkpoint returns the new workspace version or fails.
+- CAS or lease conflict stops the runner and retries from web's latest workspace pointer.
 
 ## Hard Decisions
 
@@ -1472,7 +1718,12 @@ Mitigation:
 - Delete prepared/finalize split.
 - Delete per-event running/completed/quarantined state in web.
 - Delete web coalescing aliases for first cut.
+- Delete global execution sequencing.
+- Delete Cloudflare-hosted-control run naming.
+- Delete vault-sync queued run/ingress completion coupling.
+- Delete hosted-only side-effect status vocabulary.
 - Keep mailbox append-only.
+- Keep only per-lane mailbox counters.
 - Keep Cloudflare lease-only.
 - Keep runtime checkpoint as the only commit.
 - Preserve logs/status as redacted projections, not correctness state.
@@ -1483,8 +1734,11 @@ Mitigation:
 - Cloudflare can run a hosted workspace from latest checkpoint to idle/budget without acquiring work from web.
 - Web can append mailbox items and nudge Cloudflare without knowing execution outcome.
 - Runtime can import mailbox items and checkpoint before long-running work.
+- Runtime mailbox watermarks live only in hosted runtime state, not inbox connector cursors.
 - Late same-conversation input before delivery revises the reply.
 - Local outbox semantics are used for hosted delivery.
+- Child runtime has no direct web credentials.
+- Vault-sync import readiness and completion are not tied to hosted run summaries.
 - Docs match the new architecture.
 - `rg` finds no live run-centric protocol symbols outside obsolete migration/history references.
 - Required verification is green or unrelated failures are documented with exact failing targets.
