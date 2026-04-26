@@ -666,7 +666,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     })
   })
 
-  it('emits succeeded tool progress and omits previousResponseId when no resumed session is available', async () => {
+  it('emits succeeded tool progress and drops non-Responses ids when no resumed session is available', async () => {
     providerMocks.generateText.mockResolvedValue({
       text: 'Finished tool work',
       totalUsage: {
@@ -729,7 +729,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       ok: true,
       result: {
         provider: 'openai-compatible',
-        providerSessionId: 'response-openai-2',
+        providerSessionId: null,
         rawEvents: [],
         response: 'Finished tool work',
         stderr: '',
