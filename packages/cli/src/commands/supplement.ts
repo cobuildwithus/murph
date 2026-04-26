@@ -351,7 +351,6 @@ export function registerSupplementCommands(
         })
       },
     },
-    includeLegacyJsonUpsert: false,
   })
 
   supplement.command('import-json', {
