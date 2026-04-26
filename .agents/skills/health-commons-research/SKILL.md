@@ -100,6 +100,7 @@ Important current behavior:
 - `*.send.sh` should only submit and persist the thread URL.
 - `*.harvest.sh` should run `thread wake`, normalize required artifacts, validate them, and recover inline response text only when that seam actually needs a prose file.
 - For independent seams, prefer running harvests in parallel. Do not serialize a whole discovery fanout behind one seam unless the user explicitly wants that.
+- Avoid head-of-line blocking during harvests. If independent seams were sent on one lane and that lane is busy with a long wake, do not leave ready seams queued behind it while other managed lanes are idle. Rebalance ready harvests onto idle lanes with `pnpm research:run --workspace <workspace> --seam <label> --action harvest --lane <idle-lane> --explore-lane`, one active harvest per browser lane, while keeping the already-active wake attached. Do not launch two harvests for the same seam at once.
 
 ## End-To-End Workflow
 
@@ -159,6 +160,7 @@ Harvest guidance:
 - After the discovery shard sends are out, harvest independent shards in parallel where possible.
 - `*.harvest.sh` is the wake/export/download step; it should poll the saved thread URL, export the assistant text snapshot, download any returned attachments, normalize required artifacts, and validate them locally.
 - Do not block all remaining discovery harvests on the slowest single thread. If one shard is still cooking, let the other harvests run.
+- For any independent phase with many seams, including extraction batches, use an idle-lane work queue rather than strict original-lane FIFO. The recorded send lane is the default, but `--explore-lane` is the supported intentional override for harvesting a saved thread from another named profile when that improves parallelism.
 - For a large shard set, batch or parallel harvests are preferred over one-at-a-time polling loops.
 
 Do not leave a long interactive shell attached to the send command. The send path should finish quickly after it records the chat URL.
@@ -352,6 +354,7 @@ Do not let repomix exclude `output-packages/**`.
 ## Operational Rules
 
 - Use the workspace-specific managed browser lanes for research. Before launching a new send or harvest, consider which named browser profiles already have active tabs and pick a lower-load profile when possible (for example `phlebas`, `hercules`, `vonneumann`, or `eragon`) instead of concentrating every seam in one browser.
+- Keep all reasonable lanes busy for independent seams. If three lanes are idle and one lane has a backlog, move not-yet-started harvests to the idle lanes with `--lane <idle-lane> --explore-lane`; this is preferable to waiting for one long-running lane to drain a serial queue.
 - After a seam is fully harvested and its required artifacts are normalized or its final blocker is recorded, close that seam's ChatGPT tab when it is no longer needed. Periodically prune ordinary `chatgpt.com` tabs that are not active research threads, especially bare `chatgpt.com` pages without a `/c/<conversation-id>` URL, so browser lanes do not accumulate stale tabs.
 - Keep launches measured; fast fanout is good, but broken uploads are wasted time.
 - Expect long waits. Let the normal wake loop do its job unless there is concrete evidence the run is wedged.
