@@ -265,19 +265,27 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     const protocols = reader.listProtocolVariants({ limit: 6 });
     expect(protocols.map((protocol) => protocol.key)).toEqual([
+      "protocol_variant:added-sugar-reduction/no-added-sugar-diet",
       "protocol_variant:cold-water-immersion/cold-plunge",
       "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
       "protocol_variant:consistent-wake-time/consistent-wake-time",
       "protocol_variant:creatine-supplementation/creatine-monohydrate",
       "protocol_variant:dry-sauna/bryan-johnson-blueprint",
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     ]);
     expect(Object.keys(protocols[0] ?? {})).not.toContain("body");
-    expect(protocols[5]?.protocol).toMatchObject({
+    expect(protocols[0]?.protocol?.runSpecRevisionId).toEqual(expect.stringMatching(/^sha256:/u));
+    const finnishSauna = reader.findByKey(
+      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    );
+    expect(finnishSauna?.protocol).toMatchObject({
       doseSignature: expect.stringContaining("3x/week"),
-      runSpecRevisionId: expect.stringMatching(/^sha256:/u),
     });
-    expect(protocols[5]?.routeIds).toContain("finnish-sauna");
+    expect(
+      reader.findByRouteId({
+        entityType: "protocol_variant",
+        routeId: "finnish-sauna",
+      })?.key,
+    ).toBe("protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
 
     const saunaSources = reader.listSourceArtifacts({
       categories: ["sauna"],

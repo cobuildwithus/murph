@@ -4,23 +4,33 @@ entityType: biomarker
 key: biomarker:body-weight
 slug: biomarkers/body-weight
 title: Body Weight
-summary: A same-condition scale-weight trend used to interpret creatine-related water, diet, and body-composition context without treating scale change as fat gain by default.
+summary: A same-condition scale-weight trend used as contextual support for nutrition and supplement experiments without treating one direction as universally good.
 status: draft
 quality: usable
+aliases:
+  - morning weight
+  - scale weight
+  - body mass
 categories:
   - body-composition
   - manual-log
+  - nutrition
 relations:
   -
     type: related_protocol
     target: protocol_variant:creatine-supplementation/creatine-monohydrate
+  -
+    type: related_protocol
+    target: protocol_variant:added-sugar-reduction/no-added-sugar-diet
 measurementContexts:
   - creatine_self_experiment
+  - added_sugar_reduction
+  - dietary_behavior_tracking
   - manual_checkin
 unit: kg
 interpretationFrame:
   principle: Compare the same measure under similar conditions across baseline and intervention windows rather than reacting to one unusually good or bad day.
-  caveat: Creatine experiments are easily confounded by training changes, diet changes, hydration shifts, illness, sleep disruption, and other supplements.
+  caveat: Body weight is easily confounded by hydration, sodium, glycogen, menstrual cycle, travel, illness, training changes, diet changes, sleep disruption, and other supplements.
 biomarker:
   shortName: Body Weight
   displayName: Body Weight
@@ -29,7 +39,7 @@ biomarker:
   direction:
     desired: mixed_or_contextual
     label: Context matters more than one direction.
-    nuance: Early increases can reflect water or fat-free-mass changes; diet, sodium, menstrual cycle, glycogen, and hydration can all move the scale.
+    nuance: Lower, stable, or intentionally higher values can all be appropriate depending on baseline status, goals, hydration, glycogen, muscle mass, and nutrition adequacy.
   measurement:
     bestContext: Use the same scale, similar time of day, and similar clothing across baseline and intervention windows.
     howToMeasure:
@@ -46,4 +56,12 @@ biomarker:
       - new_training_volume
 ---
 
-A same-condition scale-weight trend used to interpret creatine-related water, diet, and body-composition context without treating scale change as fat gain by default.
+A same-condition scale-weight trend used as contextual support for nutrition and supplement experiments without treating one direction as universally good.
+
+## Measurement note
+
+Use the same scale, similar time of day, and similar clothing across baseline and intervention windows. Compare weekly averages rather than single readings.
+
+## Interpretation
+
+Body weight is context, not a standalone success signal. In creatine experiments, early increases can reflect water or fat-free-mass changes. In added-sugar-reduction experiments, stable or lower averages may be useful context, but the primary outcome remains added-sugar exposure and adherence rather than weight loss.
