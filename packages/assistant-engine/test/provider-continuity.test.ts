@@ -217,6 +217,15 @@ describe('OpenAI-compatible native resume retention options', () => {
     ).toEqual({
       store: true,
     })
+    expect(
+      resolveOpenAiCompatibleProviderOptions({
+        providerConfig: openAiConfig,
+        resumeProviderSessionId: 'response-openai-2',
+        usesResponsesApi: true,
+      })?.openai,
+    ).toEqual({
+      store: true,
+    })
 
     const zeroDataRetentionConfig = normalizeAssistantProviderConfig({
       model: 'openai/gpt-5',

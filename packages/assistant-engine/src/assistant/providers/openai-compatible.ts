@@ -1008,7 +1008,7 @@ function normalizeOpenAiCompatibleResponsesProviderSessionId(
   value: string | null | undefined,
 ): string | null {
   const normalized = normalizeNullableString(value)
-  return normalized?.startsWith('resp') === true ? normalized : null
+  return normalized?.startsWith('resp_') === true ? normalized : null
 }
 
 function resolveOpenAiCompatibleEffectiveResumeProviderSessionId(input: {
