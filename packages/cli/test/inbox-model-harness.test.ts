@@ -316,8 +316,12 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       true,
     )
     assert.equal(
-      result.bundle.tools.some((tool) => tool.name === 'vault.goal.upsert'),
+      result.bundle.tools.some((tool) => tool.name === 'vault.goal.importJson'),
       true,
+    )
+    assert.equal(
+      result.bundle.tools.some((tool) => tool.name === 'vault.goal.upsert'),
+      false,
     )
     assert.equal(
       result.bundle.tools.some((tool) => tool.name === 'vault.recipe.upsert'),
@@ -1136,7 +1140,7 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   })
   const tools = catalog.listTools()
   const readTextTool = tools.find((tool) => tool.name === 'vault.fs.readText')
-  const goalUpsertTool = tools.find((tool) => tool.name === 'vault.goal.upsert')
+  const goalImportJsonTool = tools.find((tool) => tool.name === 'vault.goal.importJson')
   const shareLinkTool = tools.find((tool) => tool.name === 'vault.share.createLink')
   const toolNames = tools.map((tool) => tool.name).sort()
 
@@ -1159,6 +1163,7 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   assert.equal(catalog.hasTool('vault.food.show'), true)
   assert.equal(catalog.hasTool('vault.food.list'), true)
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
+  assert.equal(catalog.hasTool('vault.goal.upsert'), false)
   assert.equal(catalog.hasTool('vault.share.createLink'), false)
   assert.equal(readTextTool?.provenance.origin, 'native-local-only')
   assert.deepEqual(readTextTool?.provenance.policyWrappers, ['output-redaction'])
@@ -1166,14 +1171,15 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   assert.equal(readTextTool?.mutationSemantics, 'read-only')
   assert.equal(readTextTool?.riskClass, 'low')
   assert.equal(readTextTool?.selectedHostKind, 'native-local')
-  assert.equal(goalUpsertTool?.provenance.origin, 'descriptor-generated')
-  assert.equal(goalUpsertTool?.provenance.generatedFrom, 'healthEntityDescriptors')
-  assert.equal(goalUpsertTool?.backendKind, 'local-service')
-  assert.equal(goalUpsertTool?.mutationSemantics, 'canonical-write')
-  assert.equal(goalUpsertTool?.riskClass, 'high')
-  assert.equal(goalUpsertTool?.preferredHostKind, 'native-local')
+  assert.equal(goalImportJsonTool?.provenance.origin, 'descriptor-generated')
+  assert.equal(goalImportJsonTool?.provenance.generatedFrom, 'healthEntityDescriptors')
+  assert.equal(goalImportJsonTool?.backendKind, 'local-service')
+  assert.equal(goalImportJsonTool?.mutationSemantics, 'canonical-write')
+  assert.equal(goalImportJsonTool?.riskClass, 'high')
+  assert.equal(goalImportJsonTool?.preferredHostKind, 'native-local')
   assert.equal(shareLinkTool, undefined)
-  assert.ok(toolNames.includes('vault.goal.upsert'))
+  assert.ok(toolNames.includes('vault.goal.importJson'))
+  assert.equal(toolNames.includes('vault.goal.upsert'), false)
   assert.ok(toolNames.includes('vault.fs.readText'))
 })
 
@@ -2132,7 +2138,7 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces injected hosted
   }
 })
 
-test('createDefaultAssistantToolCatalog health upserts write payload files and call the goal service with input', async () => {
+test('createDefaultAssistantToolCatalog health import-json tools write payload files and call the goal service with input', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-tools-'))
   let recordedCall:
     | {
@@ -2182,7 +2188,7 @@ test('createDefaultAssistantToolCatalog health upserts write payload files and c
     const results = await catalog.executeCalls({
       calls: [
         {
-          tool: 'vault.goal.upsert',
+          tool: 'vault.goal.importJson',
           input: {
             payload: {
               title: 'Walk daily',

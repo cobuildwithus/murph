@@ -102,7 +102,7 @@ export function registerFamilySaveCommand(family: Cli.Cli) {
         },
       },
     ],
-    hint: "Use family upsert only when importing an advanced JSON payload from @file.json or stdin.",
+    hint: "Use family import-json only when importing an advanced JSON payload from @file.json or stdin.",
     options: withBaseOptions({
       id: z
         .string()
@@ -180,7 +180,10 @@ export function registerFamilyCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const family = createHealthEntityCrudGroup(services, "family");
+  const family = createHealthEntityCrudGroup(services, "family", {
+    jsonImportCommandName: "import-json",
+    registerUpsert: false,
+  });
   registerFamilySaveCommand(family);
   cli.command(family);
 }

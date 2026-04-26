@@ -11,10 +11,10 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
   try {
     await runCli(['init', '--vault', vaultRoot])
 
-    const goalUpsert = await runCli<{
+    const goalImportJson = await runCli<{
       goalId: string
     }>(
-      ['goal', 'upsert', '--input', '-', '--vault', vaultRoot],
+      ['goal', 'import-json', '--input', '-', '--vault', vaultRoot],
       {
         stdin: JSON.stringify({
           title: 'Sleep longer',
@@ -25,8 +25,8 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
       },
     )
 
-    assert.equal(goalUpsert.ok, true)
-    const goalId = requireData(goalUpsert).goalId
+    assert.equal(goalImportJson.ok, true)
+    const goalId = requireData(goalImportJson).goalId
     assert.match(goalId, /^goal_/u)
 
     assert.equal(goalId.length > 0, true)
@@ -188,7 +188,7 @@ test('payload-based commands reject empty stdin with an actionable message', asy
     await runCli(['init', '--vault', vaultRoot])
 
     const result = await runCli(
-      ['goal', 'upsert', '--input', '-', '--vault', vaultRoot],
+      ['goal', 'import-json', '--input', '-', '--vault', vaultRoot],
       { stdin: '' },
     )
 
@@ -207,7 +207,7 @@ test('payload-based commands reject non-object stdin JSON', async () => {
     await runCli(['init', '--vault', vaultRoot])
 
     const result = await runCli(
-      ['goal', 'upsert', '--input', '-', '--vault', vaultRoot],
+      ['goal', 'import-json', '--input', '-', '--vault', vaultRoot],
       { stdin: '[]' },
     )
 

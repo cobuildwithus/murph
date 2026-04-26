@@ -106,7 +106,7 @@ export function registerConditionSaveCommand(condition: Cli.Cli) {
         },
       },
     ],
-    hint: "Use condition upsert only when importing an advanced JSON payload from @file.json or stdin.",
+    hint: "Use condition import-json only when importing an advanced JSON payload from @file.json or stdin.",
     options: withBaseOptions({
       id: z
         .string()
@@ -197,7 +197,10 @@ export function registerConditionCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const condition = createHealthEntityCrudGroup(services, "condition");
+  const condition = createHealthEntityCrudGroup(services, "condition", {
+    jsonImportCommandName: "import-json",
+    registerUpsert: false,
+  });
   registerConditionSaveCommand(condition);
   cli.command(condition);
 }

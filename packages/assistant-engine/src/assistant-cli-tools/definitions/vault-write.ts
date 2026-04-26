@@ -29,6 +29,13 @@ const localDateSchema = z
 const isoTimestampSchema = z.string().min(1)
 const vaultFilePathSchema = z.string().min(1)
 const jsonObjectSchema = z.record(z.string(), z.unknown())
+const healthJsonImportCommandNames = new Set([
+  'allergy',
+  'condition',
+  'family',
+  'genetics',
+  'goal',
+])
 const mealIngredientSchema = z.string().trim().min(1).max(4000)
 const mealIngredientsSchema = z
   .array(mealIngredientSchema)
@@ -79,6 +86,28 @@ function invokeHealthUpsertMethod(
   },
 ): Promise<unknown> {
   return core[methodName](input)
+}
+
+function healthJsonImportToolName(commandName: string) {
+  return healthJsonImportCommandNames.has(commandName)
+    ? `vault.${commandName}.importJson`
+    : `vault.${commandName}.upsert`
+}
+
+function healthJsonImportToolDescription(descriptor: {
+  command: {
+    commandName: string
+    descriptions: {
+      upsert: string
+    }
+  }
+  noun: string
+}) {
+  if (!healthJsonImportCommandNames.has(descriptor.command.commandName)) {
+    return descriptor.command.descriptions.upsert
+  }
+
+  return `Import one ${descriptor.noun} from a JSON payload file or stdin.`
 }
 
 export function createCanonicalVaultWriteToolDefinitions(
@@ -453,7 +482,7 @@ export function createCanonicalVaultWriteToolDefinitions(
           file: await resolveAssistantVaultPath(input.vault, file, 'file path'),
         }),
     }),
-    ...createHealthUpsertToolDefinitions(input),
+    ...createHealthJsonImportToolDefinitions(input),
   ]
 
   if (options.includeStatefulWriteTools ?? true) {
@@ -502,7 +531,7 @@ export function createCanonicalVaultWriteToolDefinitions(
   return tools
 }
 
-export function createHealthUpsertToolDefinitions(
+export function createHealthJsonImportToolDefinitions(
   input: AssistantToolContext,
 ) {
   if (!input.vaultServices) {
@@ -511,10 +540,12 @@ export function createHealthUpsertToolDefinitions(
 
   return healthEntityDescriptors
     .filter(hasHealthCommandDescriptor)
-    .map((descriptor) =>
-      defineDescriptorGeneratedTool({
-        name: `vault.${descriptor.command.commandName}.upsert`,
-        description: `${descriptor.command.descriptions.upsert} The payload should follow the scaffold template for ${descriptor.command.commandName}.`,
+    .map((descriptor) => {
+      const toolName = healthJsonImportToolName(descriptor.command.commandName)
+
+      return defineDescriptorGeneratedTool({
+        name: toolName,
+        description: `${healthJsonImportToolDescription(descriptor)} The payload should follow the scaffold template for ${descriptor.command.commandName}.`,
         inputSchema: z.object({
           payload: jsonObjectSchema,
         }),
@@ -524,19 +555,19 @@ export function createHealthUpsertToolDefinitions(
         execute: ({ payload }): Promise<unknown> =>
           withAssistantPayloadFile(
             input.vault,
-            `vault.${descriptor.command.commandName}.upsert`,
+            toolName,
             payload,
             (inputFile) =>
               invokeHealthUpsertMethod(
                 input.vaultServices!.core,
                 descriptor.core.upsertServiceMethod,
                 {
-                vault: input.vault,
-                requestId: input.requestId ?? null,
-                input: inputFile,
+                  vault: input.vault,
+                  requestId: input.requestId ?? null,
+                  input: inputFile,
                 },
               ),
           ),
-      }, 'healthEntityDescriptors'),
-    )
+      }, 'healthEntityDescriptors')
+    })
 }

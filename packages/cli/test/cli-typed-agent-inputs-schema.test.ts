@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { test } from 'vitest'
 import { createVaultCli } from '../src/vault-cli.js'
 
 const BASE_OPTION_NAMES = new Set(['requestId', 'vault'])
+const healthRegistryJsonHardCutNouns = [
+  'allergy',
+  'condition',
+  'family',
+  'genetics',
+  'goal',
+] as const
 
 interface CommandGuard {
   label: string
@@ -334,13 +342,13 @@ test('explicit JSON fallback commands remain separate from the canonical typed s
   for (const [typedName, jsonName, typedHint] of [
     ['samples add', 'samples import-json', 'stream'],
     ['event note add', 'event import-json', 'note'],
-    ['goal save', 'goal upsert', 'title'],
-    ['condition save', 'condition upsert', 'title'],
-    ['allergy save', 'allergy upsert', 'title'],
+    ['goal save', 'goal import-json', 'title'],
+    ['condition save', 'condition import-json', 'title'],
+    ['allergy save', 'allergy import-json', 'title'],
     ['supplement save', 'supplement import-json', 'title'],
     ['regimen save', 'regimen import-json', 'title'],
-    ['family save', 'family upsert', 'title'],
-    ['genetics save', 'genetics upsert', 'gene'],
+    ['family save', 'family import-json', 'title'],
+    ['genetics save', 'genetics import-json', 'gene'],
   ] as const) {
     assert.equal(commandNames.has(typedName), true)
     assert.equal(commandNames.has(jsonName), true)
@@ -374,7 +382,12 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
   const commandNames = new Set(commands.map((command) => command.name))
 
   const legacyNames = [
+    ['allergy', 'upsert'],
+    ['condition', 'upsert'],
     ['event', 'upsert'],
+    ['family', 'upsert'],
+    ['genetics', 'upsert'],
+    ['goal', 'upsert'],
     ['supplement', 'upsert'],
     ['protocol', 'profile', 'upsert'],
     ['protocol', 'save'],
@@ -395,11 +408,11 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
 test('agent-visible input-file command surfaces stay explicitly reviewed', async () => {
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
-    'allergy upsert',
+    'allergy import-json',
     'automation upsert',
     'blood-test upsert',
     'capture add',
-    'condition upsert',
+    'condition import-json',
     'document edit',
     'event edit',
     'event import-json',
@@ -408,11 +421,11 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'experiment plan',
     'experiment session log-json',
     'experiment start',
-    'family upsert',
+    'family import-json',
     'food edit',
     'food upsert',
-    'genetics upsert',
-    'goal upsert',
+    'genetics import-json',
+    'goal import-json',
     'intervention edit',
     'meal add',
     'meal edit',
@@ -437,6 +450,47 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     .sort()
 
   assert.deepEqual(inputCommands, reviewedInputCommands)
+})
+
+test('health registry import-json hard cut is reflected in generated artifacts and help', async () => {
+  const generatedTypes = await readFile(
+    new URL('../src/incur.generated.ts', import.meta.url),
+    'utf8',
+  )
+  const configSchema = parseJsonObject(
+    await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
+    'config schema',
+  )
+  const rootCommands = requireRecord(
+    requireRecord(
+      requireRecord(configSchema.properties, 'config schema.properties').commands,
+      'config schema.properties.commands',
+    ).properties,
+    'config schema.properties.commands.properties',
+  )
+
+  for (const noun of healthRegistryJsonHardCutNouns) {
+    assert.match(generatedTypes, new RegExp(`'${noun} import-json':`, 'u'))
+    assert.doesNotMatch(generatedTypes, new RegExp(`'${noun} upsert':`, 'u'))
+
+    const nounCommands = requireRecord(
+      requireRecord(
+        requireRecord(rootCommands[noun], `config schema commands.${noun}`).properties,
+        `config schema commands.${noun}.properties`,
+      ).commands,
+      `config schema commands.${noun}.properties.commands`,
+    )
+    const commandProperties = requireRecord(
+      nounCommands.properties,
+      `config schema commands.${noun}.commands.properties`,
+    )
+    assert.equal('import-json' in commandProperties, true)
+    assert.equal('upsert' in commandProperties, false)
+
+    const saveHelp = await runSourceCliRaw([noun, 'save', '--help'])
+    assert.match(saveHelp, new RegExp(`${noun} import-json`, 'u'))
+    assert.doesNotMatch(saveHelp, new RegExp(`${noun} upsert`, 'u'))
+  }
 })
 
 async function runSourceCliRaw(args: readonly string[]): Promise<string> {

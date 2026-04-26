@@ -60,7 +60,7 @@ export { createOutwardSideEffectToolDefinitions } from './definitions/outward-si
 export { createVaultQueryToolDefinitions } from './definitions/vault-query.js'
 export {
   createCanonicalVaultWriteToolDefinitions,
-  createHealthUpsertToolDefinitions,
+  createHealthJsonImportToolDefinitions,
 } from './definitions/vault-write.js'
 export {
   createWebFetchToolDefinitions,

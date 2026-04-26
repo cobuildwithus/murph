@@ -98,7 +98,10 @@ export function registerGoalCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const goal = createHealthEntityCrudGroup(services, "goal");
+  const goal = createHealthEntityCrudGroup(services, "goal", {
+    jsonImportCommandName: "import-json",
+    registerUpsert: false,
+  });
 
   goal.command("save", {
     args: z.object({
@@ -120,7 +123,7 @@ export function registerGoalCommands(
         },
       },
     ],
-    hint: "Use goal upsert only when importing an advanced JSON payload from @file.json or stdin.",
+    hint: "Use goal import-json only when importing an advanced JSON payload from @file.json or stdin.",
     options: withBaseOptions({
       id: z
         .string()

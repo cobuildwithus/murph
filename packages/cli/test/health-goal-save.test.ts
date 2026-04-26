@@ -35,6 +35,11 @@ interface GoalSaveResult {
   created: boolean;
 }
 
+interface RawCliResult {
+  exitCode: number | null;
+  output: string;
+}
+
 function createGoalCli() {
   const cli = Cli.create("vault-cli", {
     description: "goal typed save test cli",
@@ -51,7 +56,7 @@ function createGoalCli() {
 async function runRawInProcessCli(
   cli: Cli.Cli,
   args: string[],
-): Promise<string> {
+): Promise<RawCliResult> {
   const output: string[] = [];
   let exitCode: number | null = null;
 
@@ -65,17 +70,63 @@ async function runRawInProcessCli(
     },
   });
 
-  assert.equal(exitCode, null);
-  return output.join("").trim();
+  return {
+    exitCode,
+    output: output.join("").trim(),
+  };
 }
 
 async function readCommandSchema(
   cli: Cli.Cli,
   commandArgs: string[],
 ): Promise<CommandSchemaEnvelope> {
-  return JSON.parse(
-    await runRawInProcessCli(cli, [...commandArgs, "--schema", "--format", "json"]),
-  ) as CommandSchemaEnvelope;
+  const result = await runRawInProcessCli(cli, [
+    ...commandArgs,
+    "--schema",
+    "--format",
+    "json",
+  ]);
+  assert.equal(result.exitCode, null);
+
+  return JSON.parse(result.output) as CommandSchemaEnvelope;
+}
+
+async function readMissingCommandSchemaExitCode(
+  cli: Cli.Cli,
+  commandArgs: string[],
+): Promise<number | null> {
+  const result = await runRawInProcessCli(cli, [
+    ...commandArgs,
+    "--schema",
+    "--format",
+    "json",
+  ]);
+
+  return result.exitCode;
+}
+
+async function assertCommandSchemaMissing(
+  cli: Cli.Cli,
+  commandArgs: string[],
+): Promise<void> {
+  assert.equal(await readMissingCommandSchemaExitCode(cli, commandArgs), 1);
+}
+
+async function assertJsonImportSchema(
+  cli: Cli.Cli,
+  commandArgs: string[],
+): Promise<void> {
+  const schema = await readCommandSchema(cli, commandArgs);
+  assert.equal("input" in schema.options.properties, true);
+  assert.equal(schema.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(schema.args.required ?? [], []);
+}
+
+async function readGoalSaveHelp(cli: Cli.Cli): Promise<string> {
+  const result = await runRawInProcessCli(cli, ["goal", "save", "--help"]);
+  assert.equal(result.exitCode, null);
+
+  return result.output;
 }
 
 function requireSavedPath(result: GoalSaveResult): string {
@@ -86,7 +137,7 @@ function requireSavedPath(result: GoalSaveResult): string {
   return result.path;
 }
 
-test("goal save schema exposes typed fields while goal upsert remains the JSON fallback", async () => {
+test("goal save schema exposes typed fields while goal import-json remains the JSON fallback", async () => {
   const cli = createGoalCli();
 
   const goalSave = await readCommandSchema(cli, ["goal", "save"]);
@@ -110,10 +161,12 @@ test("goal save schema exposes typed fields while goal upsert remains the JSON f
     assert.equal(field in goalSave.options.properties, true, field);
   }
 
-  const goalJsonFallback = await readCommandSchema(cli, ["goal", "upsert"]);
-  assert.equal("input" in goalJsonFallback.options.properties, true);
-  assert.equal(goalJsonFallback.options.required?.includes("input") ?? false, true);
-  assert.deepEqual(goalJsonFallback.args.required ?? [], []);
+  await assertJsonImportSchema(cli, ["goal", "import-json"]);
+  await assertCommandSchemaMissing(cli, ["goal", "upsert"]);
+
+  const help = await readGoalSaveHelp(cli);
+  assert.match(help, /goal import-json/u);
+  assert.doesNotMatch(help, /goal upsert/u);
 });
 
 test("goal save persists typed fields and repeated relationships", async () => {

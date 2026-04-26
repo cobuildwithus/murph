@@ -64,7 +64,10 @@ export function registerGeneticsCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const genetics = createHealthEntityCrudGroup(services, "genetics");
+  const genetics = createHealthEntityCrudGroup(services, "genetics", {
+    jsonImportCommandName: "import-json",
+    registerUpsert: false,
+  });
 
   genetics.command("save", {
     args: z.object({
@@ -84,7 +87,7 @@ export function registerGeneticsCommands(
         },
       },
     ],
-    hint: "Use genetics upsert only when importing an advanced JSON payload from @file.json or stdin.",
+    hint: "Use genetics import-json only when importing an advanced JSON payload from @file.json or stdin.",
     options: withBaseOptions({
       id: geneticVariantIdSchema
         .optional()

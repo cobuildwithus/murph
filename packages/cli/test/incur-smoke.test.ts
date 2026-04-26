@@ -424,6 +424,22 @@ test('descriptor manifest stays aligned with the live root command topology', as
   assert.deepEqual(actualRootCommands, collectVaultCliDescriptorRootCommandNames())
 })
 
+test('generic health descriptor manifest uses import-json for hard-cut registry imports', () => {
+  for (const commandName of ['goal', 'condition', 'allergy', 'family', 'genetics'] as const) {
+    const descriptor = vaultCliCommandDescriptors.find(
+      (candidate) => candidate.id === `health:${commandName}`,
+    )
+
+    if (!descriptor || !('leafCommands' in descriptor) || !descriptor.leafCommands) {
+      throw new Error(`The ${commandName} health descriptor is missing leaf commands.`)
+    }
+
+    const leafPaths = descriptor.leafCommands.map((leafCommand) => leafCommand.path.join(' '))
+    assert.equal(leafPaths.includes(`${commandName} import-json`), true)
+    assert.equal(leafPaths.includes(`${commandName} upsert`), false)
+  }
+})
+
 test('workout descriptor does not expose the removed workout measurement alias', () => {
   const workoutDescriptor = vaultCliCommandDescriptors.find(
     (descriptor) => descriptor.id === 'workout',
@@ -1546,7 +1562,7 @@ test('wearables day help keeps the date positional and omits the old --date flag
 })
 
 test('health command help surfaces examples and hints through Incur metadata', async () => {
-  const goalUpsertHelp = await runRawCli(['goal', 'upsert', '--help'])
+  const goalImportJsonHelp = await runRawCli(['goal', 'import-json', '--help'])
   const journalLinkHelp = await runRawCli(['journal', 'link', '--help'])
   const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
   const supplementImportJsonHelp = await runRawCli(['supplement', 'import-json', '--help'])
@@ -1556,15 +1572,15 @@ test('health command help surfaces examples and hints through Incur metadata', a
   const regimenStopHelp = await runRawCli(['regimen', 'stop', '--help'])
 
   assert.match(
-    goalUpsertHelp,
-    /vault-cli goal upsert --input @goal\.json --vault \.\/vault/u,
+    goalImportJsonHelp,
+    /vault-cli goal import-json --input @goal\.json --vault \.\/vault/u,
   )
   assert.match(
-    goalUpsertHelp,
+    goalImportJsonHelp,
     /--input accepts @file\.json or - so the CLI can load the structured goal payload from disk or stdin\./u,
   )
   assert.match(
-    goalUpsertHelp,
+    goalImportJsonHelp,
     /Run goal scaffold first if you need the current canonical field shape\./u,
   )
   assert.match(
@@ -1676,7 +1692,7 @@ test('command schema reflects only domain-specific options', async () => {
 
 test('health command schema remains JSON-Schema-safe', async () => {
   const schema = JSON.parse(
-    await runRawCli(['goal', 'upsert', '--schema', '--format', 'json']),
+    await runRawCli(['goal', 'import-json', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1712,7 +1728,7 @@ test('health command metadata exposes Incur-native CTA suggestions', async () =>
     assert.equal(requireData(result).noun, 'goal')
     assert.equal(
       result.meta.cta?.commands.some((command) =>
-        command.command.includes('vault-cli goal upsert'),
+        command.command.includes('vault-cli goal import-json'),
       ),
       true,
     )
@@ -1770,8 +1786,12 @@ test('full llms json manifest remains available for schema-rich commands', async
   }
 
   assert.equal(
-    manifest.commands.some((command) => command.name === 'goal upsert'),
+    manifest.commands.some((command) => command.name === 'goal import-json'),
     true,
+  )
+  assert.equal(
+    manifest.commands.some((command) => command.name === 'goal upsert'),
+    false,
   )
   assert.equal(
     manifest.commands.some((command) => command.name === 'chat'),
@@ -1817,7 +1837,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
   assert.match(
     help,
-    /Edit the emitted payload, save it as goal\.json, then import it with goal upsert --input @goal\.json or pipe it to --input -\./u,
+    /Edit the emitted payload, save it as goal\.json, then import it with goal import-json --input @goal\.json or pipe it to --input -\./u,
   )
   assert.match(
     help,
@@ -1843,7 +1863,7 @@ test('goal scaffold exposes a success CTA in the full-output json envelope', asy
     assert.equal(requireData(scaffoldResult).noun, 'goal')
     assert.deepEqual(scaffoldResult.meta.cta?.commands, [
       {
-        command: 'vault-cli goal upsert --input @goal.json --vault <vault>',
+        command: 'vault-cli goal import-json --input @goal.json --vault <vault>',
         description: 'Apply the edited goal payload.',
       },
     ])
