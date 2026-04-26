@@ -52,10 +52,8 @@ import {
   readHostedBundleArchiveValidationErrorDetails,
 } from "../hosted-bundle-validation.js";
 import {
-  buildHostedRunnerAmbientEnv,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
-  buildHostedRunnerPlatformEnv,
 } from "../runner-env.ts";
 import {
   summarizeHostedRunnerForwardedEnvLogCategories,
@@ -185,15 +183,8 @@ export class RunnerRunProcessor {
   ) {
     this.cleanupService = new RunnerCleanupService({
       bucket: this.dependencies.bucket,
-      clearPendingRunCleanup: (runId) =>
-        this.dependencies.stateStore.clearPendingRunCleanup(runId),
-      readPendingRunCleanup: (runId) =>
-        this.dependencies.stateStore.readPendingRunCleanup(runId),
       readUserCrypto: async (userId) =>
         (await this.dependencies.ensureRunnerStores(userId)).crypto,
-      resolveRunnerRuntimeEnv: (userId) => this.resolveRunnerRuntimeEnv(userId),
-      writePendingRunCleanup: (runId, cleanup) =>
-        this.dependencies.stateStore.writePendingRunCleanup(runId, cleanup),
     });
   }
 
@@ -758,55 +749,11 @@ export class RunnerRunProcessor {
 
   async cleanupTransientWakeDataBestEffortForRunDrain(input: {
     cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
-    assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
     runId?: string | null;
     userId?: string | null;
     wakes: readonly HostedIngressEnvelope[];
   }): Promise<void> {
     await this.cleanupService.cleanupTransientWakeDataBestEffortForRunDrain(input);
-  }
-
-  async persistPendingRunCleanupData(input: {
-    assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
-    cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
-    committedResult?: HostedExecutionRunnerResult | null;
-    runId: string;
-    wakes: readonly HostedIngressEnvelope[];
-  }): Promise<void> {
-    await this.cleanupService.persistPendingRunCleanupData({
-      ...input,
-      committedResult: input.committedResult ?? null,
-    });
-  }
-
-  private async resolveRunnerRuntimeEnv(
-    userId: string | null,
-  ): Promise<Record<string, string>> {
-    const forwardedEnv = buildHostedRunnerAmbientEnv(
-      this.dependencies.runnerRuntimeEnvSource,
-    );
-
-    if (!userId) {
-      return {
-        ...forwardedEnv,
-        ...buildHostedRunnerPlatformEnv(this.dependencies.runnerRuntimeEnvSource),
-      };
-    }
-    const { runnerSecrets: runnerSecretsService } = await this.dependencies.ensureRunnerStores(
-      userId,
-    );
-    const runnerSecrets = await runnerSecretsService.readRunnerSecrets(userId);
-    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
-      configSource: this.dependencies.readRunnerRuntimeConfigSource(),
-      forwardedEnv,
-      runnerSecrets,
-    });
-
-    return {
-      ...(runtimeConfig.forwardedEnv ?? {}),
-      ...(runtimeConfig.userEnv ?? {}),
-      ...(runtimeConfig.platformEnv ?? {}),
-    };
   }
 
   private async invokeRunner(

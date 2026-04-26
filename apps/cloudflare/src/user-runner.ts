@@ -329,10 +329,6 @@ export class HostedUserRunner {
 
       await reconcileTrackedAuthoritativeCursorBestEffort(runFinalizationContext, {
         currentCursor: acquired.cursor,
-        preservePendingCleanupRunId:
-          acquired.resumeFinalize && acquired.run?.status === "finalizing"
-            ? acquired.run.id
-            : null,
         userId,
       });
       committedSeq = acquired.cursor.committedSeq;

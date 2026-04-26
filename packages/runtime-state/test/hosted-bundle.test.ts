@@ -327,6 +327,43 @@ test("hosted bundle archive helpers validate text entries, artifact entries, and
   );
 });
 
+test("hosted bundle archive validates large inline base64 without overflowing the stack", () => {
+  const largeText = "x".repeat(4 * 1024 * 1024);
+  const largeBundle = hostedBundle.serializeHostedBundleArchive({
+    files: [
+      {
+        contentsBase64: Buffer.from(largeText, "utf8").toString("base64"),
+        path: "raw/large-text.txt",
+        root: "vault",
+      },
+    ],
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
+  });
+
+  assert.equal(readHostedBundleTextFile({
+    bytes: largeBundle,
+    expectedKind: "vault",
+    path: "raw/large-text.txt",
+    root: "vault",
+  })?.length, largeText.length);
+
+  assert.throws(
+    () => hostedBundle.serializeHostedBundleArchive({
+      files: [
+        {
+          contentsBase64: `${Buffer.from(largeText, "utf8").toString("base64").slice(0, -1)}?`,
+          path: "raw/large-text.txt",
+          root: "vault",
+        },
+      ],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    }),
+    /Hosted bundle archive contains invalid inline file contents/u,
+  );
+});
+
 test("hosted bundle node helpers cover preserved artifacts, ignored roots, and restore safety checks", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-bundle-node-"));
 
@@ -730,6 +767,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       path.join(assistantRuntimeRoot, "indexes.json"),
       "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
     );
+    await writeFile(
+      path.join(assistantRuntimeRoot, "hosted-provider-cleanup.json"),
+      "{\"schema\":\"murph.hosted-provider-cleanup.v1\",\"linqMessageIds\":[\"linq_message_1\"],\"preparedResult\":{\"eventsHandled\":1,\"summary\":\"prepared\"}}\n",
+    );
     await writeFile(path.join(assistantRuntimeRoot, "outbox", "intent_1.json"), "{\"intent\":\"deliver\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "outbox", ".quarantine", "ignored.json"), "{\"ignored\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "receipts", "turn_1.json"), "{\"receipt\":\"saved\"}\n");
@@ -809,6 +850,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         expected:
           "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
         path: ".runtime/operations/assistant/indexes.json",
+        root: "vault",
+      },
+      {
+        expected:
+          "{\"schema\":\"murph.hosted-provider-cleanup.v1\",\"linqMessageIds\":[\"linq_message_1\"],\"preparedResult\":{\"eventsHandled\":1,\"summary\":\"prepared\"}}\n",
+        path: ".runtime/operations/assistant/hosted-provider-cleanup.json",
         root: "vault",
       },
       { expected: null, path: ".runtime/operations/assistant/status.json", root: "vault" },
@@ -1097,6 +1144,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
     portability: "machine_local",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/indexes.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/hosted-provider-cleanup.json")).toMatchObject({
     classification: "operational",
     portability: "portable",
   });

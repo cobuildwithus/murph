@@ -61,6 +61,12 @@ import { exportHostedPendingAssistantRuntimeIssues } from "./issues.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultReplica } from "./browser-vault.ts";
 import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
+import {
+  drainHostedProviderCleanupAfterCommit,
+  readHostedProviderCleanupPreparedResult,
+  recordHostedProviderCleanupBeforeCommit,
+  type HostedProviderCleanupDrainResult,
+} from "./provider-cleanup.ts";
 
 const HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET = 8;
 
@@ -206,6 +212,30 @@ export async function executeHostedRunDrainForCommit(input: {
     drainState.deviceSyncNextWakeAt,
   );
 
+  const committedResultPayload: HostedExecutionRunnerResult["result"] = {
+    ...(metrics.adoptedCleanupTargets.length === 0
+      ? {}
+      : { adoptedCleanupTargets: metrics.adoptedCleanupTargets }),
+    ...(metrics.adoptedEventResults.length === 0
+      ? {}
+      : { adoptedEventResults: metrics.adoptedEventResults }),
+    eventsHandled: metrics.eventsHandled,
+    nextWakeAt: metrics.nextWakeAt,
+    redactedDetails: buildHostedRunDrainRedactedDetails(metrics),
+    ...(metrics.redactedLogEntries.length === 0
+      ? {}
+      : { redactedLogEntries: metrics.redactedLogEntries }),
+    summary: summarizeHostedRunDrain(runDrain, metrics),
+  };
+  await recordHostedProviderCleanupBeforeCommit({
+    linqMessageIds: collectHostedRunDrainLinqCleanupMessageIds({
+      adoptedCleanupTargets: metrics.adoptedCleanupTargets,
+      runDrain,
+    }),
+    preparedResult: committedResultPayload,
+    vaultRoot: input.restored.vaultRoot,
+  });
+
   const snapshotStartedAtMs = Date.now();
   const committedSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
@@ -263,21 +293,7 @@ export async function executeHostedRunDrainForCommit(input: {
     committedGatewayProjectionSnapshot,
     committedResult: {
       bundle: encodeHostedBundleBase64(committedSnapshot.bundle),
-      result: {
-        ...(metrics.adoptedCleanupTargets.length === 0
-          ? {}
-          : { adoptedCleanupTargets: metrics.adoptedCleanupTargets }),
-        ...(metrics.adoptedEventResults.length === 0
-          ? {}
-          : { adoptedEventResults: metrics.adoptedEventResults }),
-        eventsHandled: metrics.eventsHandled,
-        nextWakeAt: metrics.nextWakeAt,
-        redactedDetails: buildHostedRunDrainRedactedDetails(metrics),
-        ...(metrics.redactedLogEntries.length === 0
-          ? {}
-          : { redactedLogEntries: metrics.redactedLogEntries }),
-        summary: summarizeHostedRunDrain(runDrain, metrics),
-      },
+      result: committedResultPayload,
     },
     committedAssistantDeliveryEffects,
   };
@@ -299,9 +315,12 @@ export async function completeHostedRunDrainAfterCommit(input: {
   const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
     input.restored.vaultRoot,
   );
+  const persistedPreparedResult = await readHostedProviderCleanupPreparedResult(
+    input.restored.vaultRoot,
+  );
   const committedResult = runDrain.committedResult ?? {
     bundle: input.request.bundle,
-    result: {
+    result: persistedPreparedResult ?? {
       eventsHandled: runDrain.events.length,
       summary: "Finalized committed hosted run side effects.",
     },
@@ -423,6 +442,45 @@ function appendHostedRunCleanupTargets(
     target.push(cleanupTarget);
     knownKeys.add(key);
   }
+}
+
+function collectHostedRunDrainLinqCleanupMessageIds(input: {
+  adoptedCleanupTargets: readonly HostedRunCleanupTarget[];
+  runDrain: HostedRuntimeDrainRequest;
+}): string[] {
+  const messageIds = new Set<string>();
+
+  for (const event of input.runDrain.events) {
+    const wake = event.wake;
+    if (wake.kind === "conversation.message" && wake.message.channel === "linq") {
+      messageIds.add(wake.message.linqMessage.messageId);
+    }
+  }
+
+  for (const cleanupTarget of input.adoptedCleanupTargets) {
+    if (cleanupTarget.channel === "linq") {
+      messageIds.add(cleanupTarget.messageId);
+    }
+  }
+
+  return [...messageIds];
+}
+
+function applyHostedProviderCleanupNextWake(input: {
+  cleanupNextWakeAt: string | null;
+  result: HostedExecutionRunnerResult["result"];
+}): HostedExecutionRunnerResult["result"] {
+  if (!input.cleanupNextWakeAt) {
+    return input.result;
+  }
+
+  return {
+    ...input.result,
+    nextWakeAt: earliestHostedWakeAt(
+      input.result.nextWakeAt ?? null,
+      input.cleanupNextWakeAt,
+    ),
+  };
 }
 
 function hostedRunCleanupTargetKey(target: HostedRunCleanupTarget): string {
@@ -737,12 +795,12 @@ async function resolveHostedDeviceSyncWakeAt(input: {
       component: "runtime",
       wake: input.wake,
       error,
-        level: "warn",
-        message:
-          "Hosted runtime could not resolve the preserved device-sync wake after conversation wake handling; continuing without it.",
-        phase: "wake.running",
-        run: input.run ?? null,
-      });
+      level: "warn",
+      message:
+        "Hosted runtime could not resolve the preserved device-sync wake after conversation wake handling; continuing without it.",
+      phase: "wake.running",
+      run: input.run ?? null,
+    });
     return null;
   }
 }
@@ -814,6 +872,17 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     vaultRoot: input.restored.vaultRoot,
     wake: input.wake,
   });
+  const providerCleanupResult = await drainHostedProviderCleanupAfterCommit({
+    assistantDeliveryOutcomes,
+    env: {
+      ...input.runtime.forwardedEnv,
+      ...input.runtime.userEnv,
+      ...input.runtime.platformEnv,
+    },
+    preparedResult: input.committedExecution.committedResult.result,
+    vaultRoot: input.restored.vaultRoot,
+    wake: input.wake,
+  });
   await exportHostedPendingAssistantUsage({
     usageExportPort: input.runtime.platform.usageExportPort,
     vaultRoot: input.restored.vaultRoot,
@@ -872,6 +941,7 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
       assistantDeliveryOutcomeSummary: summarizeHostedAssistantDeliveryOutcomes(
         assistantDeliveryOutcomes,
       ),
+      providerCleanupSummary: summarizeHostedProviderCleanupResult(providerCleanupResult),
       runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
       sideEffectsDrainLatencyMs: Date.now() - sideEffectsStartedAtMs,
     },
@@ -930,7 +1000,10 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
   });
   const finalResult: HostedExecutionRunnerResult = {
     bundle: encodeHostedBundleBase64(finalSnapshot.bundle),
-    result: input.committedExecution.committedResult.result,
+    result: applyHostedProviderCleanupNextWake({
+      cleanupNextWakeAt: providerCleanupResult.nextWakeAt,
+      result: input.committedExecution.committedResult.result,
+    }),
   };
   const browserVaultReplica = await exportHostedBrowserVaultReplica({
     sourceBundleHash: sha256HostedBundleHex(finalSnapshot.bundle),
@@ -1018,4 +1091,18 @@ function summarizeHostedAssistantDeliveryOutcomes(
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, count]) => `${key}=${count}`)
     .join(",");
+}
+
+function summarizeHostedProviderCleanupResult(
+  result: HostedProviderCleanupDrainResult,
+): string {
+  if (result.attemptedLinqMessageCount === 0) {
+    return "none";
+  }
+
+  return [
+    `linq:attempted=${result.attemptedLinqMessageCount}`,
+    `linq:deleted=${result.deletedLinqMessageCount}`,
+    `linq:failed=${result.failedLinqMessageCount}`,
+  ].join(",");
 }

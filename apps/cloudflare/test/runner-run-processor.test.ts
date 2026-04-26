@@ -8,15 +8,12 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedExecutionEmailConversationMessageWake,
-  buildHostedExecutionLinqConversationMessageWake,
-  buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionVaultShareAcceptedWake,
   buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
 import {
   type HostedAssistantDeliveryOutcome,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import * as hostedRuntimeContractsModule from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { createBrowserVaultReplica, createVaultReadModel } from "@murphai/query/browser";
 
 import { createHostedBrowserVaultReplicaStore } from "../src/browser-vault-store.ts";
@@ -82,7 +79,6 @@ function createReplicaPersistenceProcessor(input: {
   bucket: MemoryEncryptedR2Bucket;
   rootKey: Uint8Array;
 }): RunnerRunProcessor {
-  const pendingCleanupByRunId = new Map<string, unknown>();
   return new RunnerRunProcessor({
     applyHostedTransition: vi.fn(),
     bucket: input.bucket as never,
@@ -107,18 +103,9 @@ function createReplicaPersistenceProcessor(input: {
     runnerRuntimeEnvSource: {},
     stateStore: {
       beginRun: vi.fn().mockResolvedValue(undefined),
-      clearPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) => {
-        pendingCleanupByRunId.set(runId, null);
-      }),
       completeRun: vi.fn().mockResolvedValue(undefined),
       failRun: vi.fn(),
-      readPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) =>
-        pendingCleanupByRunId.get(runId) ?? null
-      ),
       recordRunPhase: vi.fn().mockResolvedValue({}),
-      writePendingRunCleanup: vi.fn().mockImplementation(async (runId: string, cleanup: unknown) => {
-        pendingCleanupByRunId.set(runId, cleanup);
-      }),
     },
     runtimeAlarmScheduler: {},
   } as never);
@@ -135,22 +122,12 @@ function createInvokeRunnerProcessor(input: {
 } = {}) {
   const readBundlesForRunner = vi.fn().mockResolvedValue(null);
   const readRunnerSecrets = vi.fn().mockResolvedValue(input.runnerSecrets ?? {});
-  const pendingCleanupByRunId = new Map<string, unknown>();
   const stateStore = {
     beginRun: vi.fn().mockResolvedValue(undefined),
-    clearPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) => {
-      pendingCleanupByRunId.set(runId, null);
-    }),
     completeRun: vi.fn().mockResolvedValue(undefined),
     failRun: vi.fn(),
     readActiveRunLease: vi.fn().mockResolvedValue(null),
-    readPendingRunCleanup: vi.fn().mockImplementation(async (runId: string) =>
-      pendingCleanupByRunId.get(runId) ?? null
-    ),
     recordRunPhase: vi.fn().mockResolvedValue({}),
-    writePendingRunCleanup: vi.fn().mockImplementation(async (runId: string, cleanup: unknown) => {
-      pendingCleanupByRunId.set(runId, cleanup);
-    }),
   };
   const ensureRunnerStores = vi.fn().mockResolvedValue({
     bundleSync: {
@@ -360,60 +337,23 @@ describe("runner wake processor side input hydration", () => {
 });
 
 describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () => {
-  it("deletes transient email data and provider-visible Linq messages without deleting Telegram chat messages", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-        LINQ_API_TOKEN: "linq-token",
-        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
+  it("deletes direct raw email wake data", async () => {
+    const { processor } = createInvokeRunnerProcessor();
     const deleteHostedEmailRawMessage = vi.spyOn(
       hostedEmailModule,
       "deleteHostedEmailRawMessage",
     ).mockResolvedValue(undefined);
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockResolvedValue(undefined);
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
 
     await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
+      cleanupTargets: [
         {
-          deliveryChannel: "linq",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-linq",
-          effectId: "effect-linq",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "linq_outbound_message",
-          providerThreadId: "chat_123",
-          retryable: false,
-          target: "chat_123",
-          targetKind: "thread",
+          channel: "linq",
+          messageId: "linq_adopted_message",
         },
         {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram",
-          effectId: "effect-telegram",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "9002",
-          providerMessageIds: ["9001", "9002"],
-          providerThreadId: null,
-          retryable: false,
-          target: "6001234567",
-          targetKind: "thread",
+          channel: "telegram",
+          messageId: "7007654321",
+          target: "6007654321",
         },
       ],
       runId: "run-cleanup",
@@ -425,413 +365,24 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
           rawMessageKey: "raw_message_key",
           userId: "user_123",
         }),
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
-          userId: "user_123",
-        }),
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
       ],
     });
 
     expect(deleteHostedEmailRawMessage).toHaveBeenCalledTimes(1);
-    expect(deleteHostedLinqMessages).toHaveBeenCalledWith({
-      env: expect.objectContaining({
-        LINQ_API_TOKEN: "linq-token",
-      }),
-      messageIds: ["linq_inbound_message", "linq_outbound_message"],
-    });
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-  });
-
-  it("does not use worker-reachable Telegram platform URLs for cleanup", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      configSource: {
-        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
-        TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-        TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
-      },
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
-      },
-    });
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-telegram-worker-cleanup-env",
+    expect(deleteHostedEmailRawMessage).toHaveBeenCalledWith(expect.objectContaining({
+      rawMessageKey: "raw_message_key",
       userId: "user_123",
-      wakes: [
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
+    }));
   });
 
-  it("does not delete Telegram messages across unrelated chats when only one delivery succeeds", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram-success",
-          effectId: "effect-telegram-success",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "9002",
-          providerMessageIds: ["9001", "9002"],
-          providerThreadId: null,
-          retryable: false,
-          target: "chat-success",
-          targetKind: "thread",
-        },
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
-          deliveryErrorMessage: "chat-failed delivery failed",
-          deliveryStatus: "failed",
-          effectFingerprint: "fingerprint-telegram-failed",
-          effectId: "effect-telegram-failed",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: null,
-          providerThreadId: null,
-          retryable: false,
-          target: "chat-failed",
-          targetKind: "thread",
-        },
-      ],
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake-success",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "700-success",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "hello from success chat",
-            threadId: "chat-success",
-          },
-          userId: "user_123",
-        }),
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake-failed",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "700-failed",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "hello from failed chat",
-            threadId: "chat-failed",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-  });
-
-  it("does not delete a plain-chat Telegram message or an unrelated sent target", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram",
-          effectId: "effect-telegram",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "9001",
-          providerThreadId: null,
-          retryable: false,
-          target: "6007654321",
-          targetKind: "thread",
-        },
-      ],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-  });
-
-  it("keeps cleanup best-effort when one provider delete fails", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-        LINQ_API_TOKEN: "linq-token",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    vi.spyOn(hostedEmailModule, "deleteHostedEmailRawMessage").mockResolvedValue(undefined);
-    vi.spyOn(hostedRuntimeContractsModule, "deleteHostedLinqMessages").mockRejectedValue(
-      new Error("linq cleanup unavailable"),
-    );
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram",
-          effectId: "effect-telegram",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "9001",
-          providerThreadId: null,
-          retryable: false,
-          target: "6001234567",
-          targetKind: "thread",
-        },
-      ],
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
-          userId: "user_123",
-        }),
-      ],
-    })).resolves.toBeUndefined();
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-  });
-
-  it("keeps cleanup best-effort when cleanup env resolution fails", async () => {
-    const { processor, readRunnerSecrets } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-        LINQ_API_TOKEN: "linq-token",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockResolvedValue(undefined);
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-    readRunnerSecrets.mockRejectedValue(new Error("runner env unavailable"));
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "linq",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-linq",
-          effectId: "effect-linq",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "linq_outbound_message",
-          providerThreadId: "chat_123",
-          retryable: false,
-          target: "chat_123",
-          targetKind: "thread",
-        },
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram",
-          effectId: "effect-telegram",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "9001",
-          providerThreadId: null,
-          retryable: false,
-          target: "6001234567",
-          targetKind: "thread",
-        },
-      ],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
-    expect(readRunnerSecrets).toHaveBeenCalledWith("user_123");
-    expect(deleteHostedLinqMessages).not.toHaveBeenCalled();
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-  });
-
-  it("clears legacy Telegram cleanup inputs without deleting provider messages", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-        LINQ_API_TOKEN: "linq-token",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-      writePendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
-      runId: string,
-    ) => Promise<unknown>;
-    const writePendingRunCleanup = stateStore.writePendingRunCleanup as (
-      runId: string,
-      cleanup: unknown,
-    ) => Promise<void>;
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockRejectedValue(new Error("telegram cleanup unavailable"));
-
-    await writePendingRunCleanup("run-cleanup", {
-      emailMessages: [],
-      linqMessageIds: [],
-      required: true,
-      telegramMessages: [
-        {
-          messageId: "7001234567",
-          target: "6001234567",
-        },
-      ],
-    });
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-    expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-cleanup");
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
-  });
-
-  it("persists adopted email and Linq cleanup targets for later finalize cleanup", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-        LINQ_API_TOKEN: "linq-token",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
-      runId: string,
-    ) => Promise<unknown>;
+  it("deletes adopted raw email cleanup targets without persisting provider cleanup sidecars", async () => {
+    const { processor } = createInvokeRunnerProcessor();
     const deleteHostedEmailRawMessage = vi.spyOn(
       hostedEmailModule,
       "deleteHostedEmailRawMessage",
     ).mockResolvedValue(undefined);
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockResolvedValue(undefined);
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
 
-    await processor.persistPendingRunCleanupData({
+    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
       cleanupTargets: [
         {
           channel: "email",
@@ -840,377 +391,14 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
           userId: "user_123",
         },
         {
-          channel: "linq",
-          messageId: "linq_adopted_inbound_message",
-        },
-        {
-          channel: "telegram",
-          messageId: "7007654321",
-          target: "6007654321",
-        },
-      ],
-      runId: "run-adopted-cleanup",
-      wakes: [],
-    });
-
-    await expect(readPendingRunCleanup("run-adopted-cleanup")).resolves.toEqual({
-      emailMessages: [
-        {
-          eventId: "adopted-email-wake",
+          channel: "email",
+          eventId: "adopted-email-wake-duplicate",
           rawMessageKey: "adopted_raw_message_key",
           userId: "user_123",
         },
-      ],
-      linqMessageIds: ["linq_adopted_inbound_message"],
-      required: true,
-      telegramMessages: [],
-    });
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-adopted-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
-    expect(deleteHostedEmailRawMessage).toHaveBeenCalledWith(expect.objectContaining({
-      rawMessageKey: "adopted_raw_message_key",
-      userId: "user_123",
-    }));
-    expect(deleteHostedLinqMessages).toHaveBeenCalledWith(expect.objectContaining({
-      messageIds: ["linq_adopted_inbound_message"],
-    }));
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-    expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-adopted-cleanup");
-  });
-
-  it("does not persist or retry outcome-derived Telegram cleanup inputs", async () => {
-    const { processor, readRunnerSecrets } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
-      runId: string,
-    ) => Promise<unknown>;
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-    readRunnerSecrets.mockRejectedValueOnce(new Error("runner env unavailable"));
-    const assistantDeliveryOutcomes: HostedAssistantDeliveryOutcome[] = [
-      {
-        cleanupMessages: [
-          {
-            messageId: "9001",
-            target: "6007654321:topic:42",
-          },
-        ],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
-        deliveryErrorMessage: "rollback could not be confirmed",
-        deliveryStatus: "failed_ambiguous",
-        effectFingerprint: "fingerprint-telegram",
-        effectId: "effect-telegram",
-        journalMethod: null,
-        journalStatus: null,
-        providerMessageId: "9001",
-        providerMessageIds: ["9001"],
-        providerThreadId: null,
-        retryable: false,
-        target: "6007654321:topic:42",
-        targetKind: "thread",
-      },
-    ];
-
-    await processor.persistPendingRunCleanupData({
-      assistantDeliveryOutcomes,
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes,
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
-    expect(readRunnerSecrets).not.toHaveBeenCalled();
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-    expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-cleanup");
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
-  });
-
-  it("retains only unresolved Linq cleanup inputs when Linq delete fails", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-        LINQ_API_TOKEN: "linq-token",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
-      runId: string,
-    ) => Promise<unknown>;
-    vi.spyOn(hostedEmailModule, "deleteHostedEmailRawMessage").mockResolvedValue(undefined);
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockRejectedValue(new Error("linq cleanup unavailable"));
-    vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.persistPendingRunCleanupData({
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionEmailConversationMessageWake({
-          eventId: "email-wake",
-          identityId: "identity_123",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          rawMessageKey: "raw_message_key",
-          userId: "user_123",
-        }),
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
-          userId: "user_123",
-        }),
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
-    expect(deleteHostedLinqMessages).toHaveBeenCalledWith({
-      env: expect.objectContaining({
-        LINQ_API_TOKEN: "linq-token",
-      }),
-      messageIds: ["linq_inbound_message"],
-    });
-    expect(stateStore.clearPendingRunCleanup).not.toHaveBeenCalled();
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toEqual({
-      emailMessages: [],
-      linqMessageIds: ["linq_inbound_message"],
-      required: true,
-      telegramMessages: [],
-    });
-  });
-
-  it("retains the pending cleanup sidecar when Linq cleanup env resolution fails", async () => {
-    const { processor, readRunnerSecrets } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
-        LINQ_API_TOKEN: "linq-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
-      runId: string,
-    ) => Promise<unknown>;
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockResolvedValue(undefined);
-    readRunnerSecrets.mockRejectedValueOnce(new Error("runner env unavailable"));
-
-    await processor.persistPendingRunCleanupData({
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    })).resolves.toBeUndefined();
-
-    expect(deleteHostedLinqMessages).not.toHaveBeenCalled();
-    expect(stateStore.clearPendingRunCleanup).not.toHaveBeenCalled();
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toEqual({
-      emailMessages: [],
-      linqMessageIds: ["linq_inbound_message"],
-      required: true,
-      telegramMessages: [],
-    });
-  });
-
-  it("reuses persisted wake cleanup data when finalize resumes later", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
-        LINQ_API_TOKEN: "linq-token",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
-      runId: string,
-    ) => Promise<unknown>;
-    const deleteHostedEmailRawMessage = vi.spyOn(
-      hostedEmailModule,
-      "deleteHostedEmailRawMessage",
-    ).mockResolvedValue(undefined);
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockResolvedValue(undefined);
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.persistPendingRunCleanupData({
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionEmailConversationMessageWake({
-          eventId: "email-wake",
-          identityId: "identity_123",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          rawMessageKey: "raw_message_key",
-          userId: "user_123",
-        }),
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
-          userId: "user_123",
-        }),
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
         {
-          deliveryChannel: "linq",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-linq",
-          effectId: "effect-linq",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "linq_outbound_message",
-          providerThreadId: "chat_123",
-          retryable: false,
-          target: "chat_123",
-          targetKind: "thread",
-        },
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram",
-          effectId: "effect-telegram",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "9002",
-          providerMessageIds: ["9001", "9002"],
-          providerThreadId: null,
-          retryable: false,
-          target: "6007654321",
-          targetKind: "thread",
+          channel: "linq",
+          messageId: "linq_adopted_message",
         },
       ],
       runId: "run-cleanup",
@@ -1219,362 +407,31 @@ describe("RunnerRunProcessor.cleanupTransientWakeDataBestEffortForRunDrain", () 
     });
 
     expect(deleteHostedEmailRawMessage).toHaveBeenCalledTimes(1);
-    expect(deleteHostedLinqMessages).toHaveBeenCalledWith({
-      env: expect.objectContaining({
-        LINQ_API_TOKEN: "linq-token",
-      }),
-      messageIds: ["linq_inbound_message", "linq_outbound_message"],
-    });
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-    expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-cleanup");
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
-  });
-
-  it("persists outbound Linq cleanup ids so finalize resume can delete them without in-memory outcomes", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
-        LINQ_API_TOKEN: "linq-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    const readPendingRunCleanup = stateStore.readPendingRunCleanup as (
-      runId: string,
-    ) => Promise<unknown>;
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.persistPendingRunCleanupData({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "linq",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-linq",
-          effectId: "effect-linq",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "linq_outbound_message_2",
-          providerMessageIds: ["linq_outbound_message_1", "linq_outbound_message_2"],
-          providerThreadId: "chat_123",
-          retryable: false,
-          target: "chat_123",
-          targetKind: "thread",
-        },
-      ],
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toEqual({
-      emailMessages: [],
-      linqMessageIds: [
-        "linq_inbound_message",
-        "linq_outbound_message_1",
-        "linq_outbound_message_2",
-      ],
-      required: true,
-      telegramMessages: [],
-    });
-
-    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-cleanup",
+    expect(deleteHostedEmailRawMessage).toHaveBeenCalledWith(expect.objectContaining({
+      rawMessageKey: "adopted_raw_message_key",
       userId: "user_123",
-      wakes: [],
-    });
-
-    expect(deleteHostedLinqMessages).toHaveBeenCalledWith({
-      env: expect.objectContaining({
-        LINQ_API_TOKEN: "linq-token",
-      }),
-      messageIds: [
-        "linq_inbound_message",
-        "linq_outbound_message_1",
-        "linq_outbound_message_2",
-      ],
-    });
-    expect(stateStore.clearPendingRunCleanup).toHaveBeenCalledWith("run-cleanup");
-    await expect(readPendingRunCleanup("run-cleanup")).resolves.toBeNull();
+    }));
   });
 
-  it("ignores persisted Telegram cleanup targets even when delivery reports a migrated alias", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.persistPendingRunCleanupData({
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake-migrate-old",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "700-migrate-old",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "old migrated chat",
-            threadId: "-1001234567890:topic:42",
-          },
-          userId: "user_123",
-        }),
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake-stay-old",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "700-stay-old",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "old incompatible chat",
-            threadId: "-1002222222222:topic:7",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram-migrated",
-          effectId: "effect-telegram-migrated",
-          journalMethod: null,
-          journalStatus: null,
-          cleanupMessages: [
-            {
-              messageId: "9001",
-              target: "-1001234567890:topic:42",
-            },
-            {
-              messageId: "9002",
-              target: "-1009876543210:topic:42",
-            },
-          ],
-          cleanupTargetAliases: ["-1001234567890:topic:42"],
-          providerMessageId: "9002",
-          providerMessageIds: ["9001", "9002"],
-          providerThreadId: null,
-          retryable: false,
-          target: "-1009876543210:topic:42",
-          targetKind: "thread",
-        },
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint-telegram-unrelated",
-          effectId: "effect-telegram-unrelated",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "9010",
-          providerThreadId: null,
-          retryable: false,
-          target: "-1003333333333:topic:99",
-          targetKind: "thread",
-        },
-      ],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    });
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-  });
-
-  it("ignores failed_ambiguous Telegram delivery cleanup metadata", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await processor.persistPendingRunCleanupData({
-      runId: "run-cleanup",
-      wakes: [
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567:topic:42",
-          },
-          userId: "user_123",
-        }),
-      ],
-    });
-
-    await processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "telegram",
-          deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
-          deliveryErrorMessage: "rollback could not be confirmed",
-          deliveryStatus: "failed_ambiguous",
-          effectFingerprint: "fingerprint-telegram",
-          effectId: "effect-telegram",
-          journalMethod: null,
-          journalStatus: null,
-          cleanupMessages: [
-            {
-              messageId: "9001",
-              target: "6001234567:topic:42",
-            },
-            {
-              messageId: "9002",
-              target: "6007654321:topic:42",
-            },
-          ],
-          cleanupTargetAliases: ["6001234567:topic:42"],
-          providerMessageId: "9002",
-          providerMessageIds: ["9001", "9002"],
-          providerThreadId: null,
-          retryable: false,
-          target: "6007654321:topic:42",
-          targetKind: "thread",
-        },
-      ],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [],
-    });
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
-  });
-
-  it("keeps cleanup best-effort when pending cleanup sidecar read fails", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq",
-        LINQ_API_TOKEN: "linq-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-      readPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    stateStore.readPendingRunCleanup.mockRejectedValueOnce(
-      new Error("pending cleanup read unavailable"),
-    );
-    const deleteHostedLinqMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedLinqMessages",
-    ).mockResolvedValue(undefined);
+  it("keeps email cleanup best-effort when a raw message delete fails", async () => {
+    const { processor } = createInvokeRunnerProcessor();
+    vi.spyOn(
+      hostedEmailModule,
+      "deleteHostedEmailRawMessage",
+    ).mockRejectedValue(new Error("raw email cleanup unavailable"));
 
     await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
       runId: "run-cleanup",
-      userId: "user_123",
       wakes: [
-        buildHostedExecutionLinqConversationMessageWake({
-          eventId: "linq-wake",
-          linqMessage: {
-            chatId: "chat_123",
-            from: "+15550001",
-            isFromMe: false,
-            messageId: "linq_inbound_message",
-            parts: [
-              {
-                type: "text",
-                value: "hello",
-              },
-            ],
-          },
+        buildHostedExecutionEmailConversationMessageWake({
+          eventId: "email-wake",
+          identityId: "identity_123",
           occurredAt: "2026-04-20T09:00:00.000Z",
-          phoneLookupKey: "lookup_123",
+          rawMessageKey: "raw_message_key",
           userId: "user_123",
         }),
       ],
     })).resolves.toBeUndefined();
-
-    expect(deleteHostedLinqMessages).toHaveBeenCalledWith({
-      env: expect.objectContaining({
-        LINQ_API_TOKEN: "linq-token",
-      }),
-      messageIds: ["linq_inbound_message"],
-    });
-    expect(stateStore.clearPendingRunCleanup).not.toHaveBeenCalled();
-  });
-
-  it("keeps cleanup best-effort when pending cleanup sidecar clear fails", async () => {
-    const { processor } = createInvokeRunnerProcessor({
-      forwardedEnvSource: {
-        HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
-        TELEGRAM_BOT_TOKEN: "telegram-token",
-      },
-    });
-    const stateStore = Reflect.get(processor, "dependencies").stateStore as {
-      clearPendingRunCleanup: ReturnType<typeof vi.fn>;
-    };
-    stateStore.clearPendingRunCleanup.mockRejectedValueOnce(
-      new Error("pending cleanup clear unavailable"),
-    );
-    const deleteHostedTelegramMessages = vi.spyOn(
-      hostedRuntimeContractsModule,
-      "deleteHostedTelegramMessages",
-    ).mockResolvedValue(undefined);
-
-    await expect(processor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: [],
-      runId: "run-cleanup",
-      userId: "user_123",
-      wakes: [
-        buildHostedExecutionTelegramConversationMessageWake({
-          eventId: "telegram-wake",
-          occurredAt: "2026-04-20T09:00:00.000Z",
-          telegramMessage: {
-            messageId: "7001234567",
-            schema: "murph.hosted-telegram-message.v1",
-            text: "yo",
-            threadId: "6001234567",
-          },
-          userId: "user_123",
-        }),
-      ],
-    })).resolves.toBeUndefined();
-
-    expect(deleteHostedTelegramMessages).not.toHaveBeenCalled();
   });
 });
 
