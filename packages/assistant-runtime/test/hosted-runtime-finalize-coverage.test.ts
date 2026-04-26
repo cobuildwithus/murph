@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   runHostedDeviceSyncWakeLane: vi.fn(),
   runHostedNoopSystemWakeLane: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
+  deleteHostedLinqMessages: vi.fn(),
 }));
 
 vi.mock("@murphai/runtime-state/node", async () => {
@@ -129,6 +130,10 @@ vi.mock("../src/hosted-runtime/browser-vault.ts", () => ({
   exportHostedBrowserVaultReplica: mocks.exportHostedBrowserVaultReplica,
 }));
 
+vi.mock("../src/hosted-runtime/message-cleanup.ts", () => ({
+  deleteHostedLinqMessages: mocks.deleteHostedLinqMessages,
+}));
+
 import {
   completeHostedRunDrainAfterCommit,
   executeHostedRunDrainForCommit,
@@ -161,12 +166,13 @@ const hostedDeliveryEffect = buildHostedAssistantDeliveryEffect({
 
 function createRuntime(overrides: {
   deviceSyncConfig?: ReturnType<typeof createHostedRuntimeResolvedConfig>["deviceSync"];
+  forwardedEnv?: Record<string, string>;
 } = {}) {
   const { artifactStore } = createHostedRuntimeArtifactStoreStub();
 
   return {
     commitTimeoutMs: 45_000,
-    forwardedEnv: {},
+    forwardedEnv: overrides.forwardedEnv ?? {},
     platform: {
       artifactStore,
       deviceSyncPort: null,
@@ -320,6 +326,7 @@ beforeEach(() => {
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
   });
+  mocks.deleteHostedLinqMessages.mockResolvedValue(undefined);
 });
 
 describe("assistant-runtime execution coverage", () => {
@@ -664,6 +671,111 @@ describe("assistant-runtime execution coverage", () => {
         targetKind: "participant",
       },
     ]);
+  });
+
+  it("deletes Linq provider-visible messages inside finalization after side effects", async () => {
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: hostedDeliveryEffect.fingerprint,
+        effectId: hostedDeliveryEffect.effectId,
+        journalMethod: null,
+        journalStatus: null,
+        providerMessageId: "linq_outbound_primary",
+        providerMessageIds: ["linq_outbound_primary", "linq_outbound_extra"],
+        providerThreadId: "chat_linq_123",
+        retryable: false,
+        target: "chat_linq_123",
+        targetKind: "participant" as const,
+      },
+    ]);
+
+    await completeHostedRunDrainAfterCommit({
+      request: {
+        bundle: "committed-bundle",
+        run: HOSTED_RUN_CONTEXT,
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          committedResult: {
+            bundle: "committed-bundle",
+            result: {
+              adoptedCleanupTargets: [
+                {
+                  channel: "linq",
+                  messageId: "linq_adopted_inbound",
+                },
+                {
+                  channel: "telegram",
+                  messageId: "telegram_message_ignored",
+                  target: "telegram_target_ignored",
+                },
+              ],
+              eventsHandled: 1,
+              summary: "Prepared runtime drain with Linq cleanup metadata.",
+            },
+          },
+          events: [
+            {
+              seq: "24",
+              wake: buildHostedExecutionLinqConversationMessageWake({
+                eventId: "evt_linq_message",
+                linqMessage: {
+                  chatId: "chat_linq_123",
+                  from: "+15550000001",
+                  isFromMe: false,
+                  messageId: "linq_inbound_direct",
+                  parts: [{ type: "text", value: "hello" }],
+                },
+                occurredAt: "2026-04-08T00:00:00.000Z",
+                phoneLookupKey: "linq_phone_lookup",
+                userId: "member_123",
+              }),
+              ingressEventId: "wake_24",
+            },
+          ],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          resumeFinalize: true,
+          runId: "run_123",
+          triggerKind: "external_ingress",
+          userId: "member_123",
+        },
+      },
+      restored: createRestored(),
+      runtime: createRuntime({
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-local-test-token",
+        },
+      }),
+      wake: buildHostedExecutionRuntimeTimerWake({
+        eventId: "evt_runtime_timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      }),
+    });
+
+    expect(mocks.deleteHostedLinqMessages).toHaveBeenCalledWith({
+      env: {
+        LINQ_API_TOKEN: "linq-local-test-token",
+      },
+      messageIds: [
+        "linq_inbound_direct",
+        "linq_adopted_inbound",
+        "linq_outbound_primary",
+        "linq_outbound_extra",
+      ],
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runtime deleted Linq provider-visible messages after side effects.",
+        phase: "side-effects.draining",
+      }),
+    );
   });
 
   it("returns a final result when best-effort post-commit exports fail", async () => {

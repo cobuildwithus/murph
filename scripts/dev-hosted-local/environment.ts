@@ -93,6 +93,7 @@ export function mergeCloudflareLocalEnv(input: {
 
   return {
     ...resolvedExisting,
+    ALLOW_LOCAL_INTERNAL_PROXY: "true",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY:
       resolvedExisting.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY?.trim()
       ?? createEnvelopeKey(),

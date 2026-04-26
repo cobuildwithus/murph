@@ -76,11 +76,14 @@ describe("hosted local Linq webhook e2e", () => {
       expectedMethod: "POST",
       expectedPath: typingPath,
     });
+    const observedMessageIdsBeforeReply =
+      requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const inboundMessageId = `msg_webhook_${webhookUserId}`;
     const webhookEvent = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
       eventId: `evt_webhook_${webhookUserId}`,
-      messageId: `msg_webhook_${webhookUserId}`,
+      messageId: inboundMessageId,
       text: "U can call me Rocket Man",
     });
 
@@ -108,6 +111,18 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
     );
+    const outboundReplyMessageId =
+      requireLinqStub().listObservedMessageIds(materializedChatId)[observedMessageIdsBeforeReply] ?? null;
+    expect(outboundReplyMessageId).not.toBeNull();
+    for (const messageId of [inboundMessageId, outboundReplyMessageId!]) {
+      await requireLinqStub().waitForMatchingRequestCount({
+        expectedCount: 1,
+        expectedMethod: "DELETE",
+        expectedPath: `/messages/${encodeURIComponent(messageId)}`,
+        scenario: requireScenario(),
+        userId: webhookUserId,
+      });
+    }
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
@@ -118,17 +133,21 @@ describe("hosted local Linq webhook e2e", () => {
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath } =
       requireActiveLinqMember();
+    const observedMessageIdsBeforeReply =
+      requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
+    const firstInboundMessageId = `msg_webhook_name_${webhookUserId}_rapid`;
     const firstWebhook = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
       eventId: `evt_webhook_name_${webhookUserId}_rapid`,
-      messageId: `msg_webhook_name_${webhookUserId}_rapid`,
+      messageId: firstInboundMessageId,
       text: "U can call me Comet Rider",
     });
+    const secondInboundMessageId = `msg_webhook_goals_${webhookUserId}_rapid`;
     const secondWebhook = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
       eventId: `evt_webhook_goals_${webhookUserId}_rapid`,
-      messageId: `msg_webhook_goals_${webhookUserId}_rapid`,
+      messageId: secondInboundMessageId,
       text: "I want to build more strength, improve endurance, and get fitter overall.",
     });
 
@@ -164,6 +183,18 @@ describe("hosted local Linq webhook e2e", () => {
       HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
     );
     expect(groupedReplyText).not.toContain("Hey, I'm Murph");
+    const outboundReplyMessageId =
+      requireLinqStub().listObservedMessageIds(materializedChatId)[observedMessageIdsBeforeReply] ?? null;
+    expect(outboundReplyMessageId).not.toBeNull();
+    for (const messageId of [firstInboundMessageId, secondInboundMessageId, outboundReplyMessageId!]) {
+      await requireLinqStub().waitForMatchingRequestCount({
+        expectedCount: 1,
+        expectedMethod: "DELETE",
+        expectedPath: `/messages/${encodeURIComponent(messageId)}`,
+        scenario: requireScenario(),
+        userId: webhookUserId,
+      });
+    }
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
