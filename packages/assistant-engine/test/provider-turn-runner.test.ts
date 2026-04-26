@@ -16,8 +16,8 @@ const runnerMocks = vi.hoisted(() => ({
   appendAssistantTurnReceiptEvent: vi.fn(),
   attachRecoveredAssistantSession: vi.fn(),
   buildAssistantActiveExperimentContextBlock: vi.fn(),
-  buildAssistantSystemPrompt: vi.fn(),
-  buildAssistantNotificationDecisionSystemPrompt: vi.fn(),
+  buildAssistantSystemPromptWithCacheMetadata: vi.fn(),
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata: vi.fn(),
   buildAssistantVaultOverviewBlock: vi.fn(),
   createAssistantFoodAutoLogHooks: vi.fn(),
   createAssistantMemoryTurnContextEnv: vi.fn(),
@@ -77,9 +77,10 @@ vi.mock('../src/assistant/execution-context.ts', () => ({
 }))
 
 vi.mock('../src/assistant/system-prompt.ts', () => ({
-  buildAssistantNotificationDecisionSystemPrompt:
-    runnerMocks.buildAssistantNotificationDecisionSystemPrompt,
-  buildAssistantSystemPrompt: runnerMocks.buildAssistantSystemPrompt,
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata:
+    runnerMocks.buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantSystemPromptWithCacheMetadata:
+    runnerMocks.buildAssistantSystemPromptWithCacheMetadata,
 }))
 
 vi.mock('../src/assistant/active-experiment-context.ts', () => ({
@@ -160,10 +161,12 @@ describe('executeProviderTurnWithRecovery', () => {
   const toolCatalog = {
     hasTool: vi.fn<(toolName: string) => boolean>(),
     listTools: vi.fn(),
+    promptCacheToolSchemaHash: vi.fn(),
   }
   const notificationToolCatalog = {
     hasTool: vi.fn<(toolName: string) => boolean>(),
     listTools: vi.fn(),
+    promptCacheToolSchemaHash: vi.fn(),
   }
 
   beforeEach(() => {
@@ -172,25 +175,41 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.appendAssistantTranscriptEntries.mockReset().mockResolvedValue([])
     runnerMocks.appendAssistantTurnReceiptEvent.mockReset().mockResolvedValue(undefined)
     runnerMocks.attachRecoveredAssistantSession.mockReset()
-    runnerMocks.buildAssistantNotificationDecisionSystemPrompt
+    runnerMocks.buildAssistantNotificationDecisionSystemPromptWithCacheMetadata
       .mockReset()
       .mockImplementation((input: {
         channel: string | null
         currentLocalDate: string
         currentTimeZone: string
         vaultOverview?: string | null
-      }) =>
-        `notification:${input.channel ?? 'none'}:${input.currentLocalDate}:${input.currentTimeZone}:${input.vaultOverview ?? 'no-overview'}`,
+      }, cacheInput?: { toolSchemaHash?: string | null }) =>
+        ({
+          cacheMetadata: {
+            dynamicContextStartsAfterStaticCore: 456,
+            stableRouteCapabilityPromptHash: 'notification-stable-route-hash',
+            staticPromptHash: 'notification-static-hash',
+            toolSchemaHash: cacheInput?.toolSchemaHash ?? null,
+          },
+          prompt: `notification:${input.channel ?? 'none'}:${input.currentLocalDate}:${input.currentTimeZone}:${input.vaultOverview ?? 'no-overview'}`,
+        }),
       )
-    runnerMocks.buildAssistantSystemPrompt
+    runnerMocks.buildAssistantSystemPromptWithCacheMetadata
       .mockReset()
       .mockImplementation((input: {
         channel: string | null
         onboardingGuidance: boolean
         assistantCliContract: string | null
         vaultOverview?: string | null
-      }) =>
-        `prompt:${input.channel ?? 'none'}:${input.onboardingGuidance ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
+      }, cacheInput?: { toolSchemaHash?: string | null }) =>
+        ({
+          cacheMetadata: {
+            dynamicContextStartsAfterStaticCore: 123,
+            stableRouteCapabilityPromptHash: 'conversation-stable-route-hash',
+            staticPromptHash: 'conversation-static-hash',
+            toolSchemaHash: cacheInput?.toolSchemaHash ?? null,
+          },
+          prompt: `prompt:${input.channel ?? 'none'}:${input.onboardingGuidance ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
+        }),
       )
     runnerMocks.buildAssistantActiveExperimentContextBlock
       .mockReset()
@@ -220,8 +239,14 @@ describe('executeProviderTurnWithRecovery', () => {
       { name: 'assistant.knowledge.rebuildIndex' },
       { name: 'murph.device.connect' },
     ])
+    toolCatalog.promptCacheToolSchemaHash
+      .mockReset()
+      .mockReturnValue('provider-tool-schema-hash')
     notificationToolCatalog.hasTool.mockReset().mockReturnValue(true)
     notificationToolCatalog.listTools.mockReset().mockReturnValue([])
+    notificationToolCatalog.promptCacheToolSchemaHash
+      .mockReset()
+      .mockReturnValue('notification-tool-schema-hash')
     runnerMocks.createProviderTurnAssistantToolCatalog
       .mockReset()
       .mockReturnValue(toolCatalog)
@@ -382,7 +407,7 @@ describe('executeProviderTurnWithRecovery', () => {
         sessionBinding: session.binding,
       }),
     )
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCliContract: 'cli-bootstrap',
         assistantCommandAccessMode: 'bound-tools',
@@ -401,6 +426,7 @@ describe('executeProviderTurnWithRecovery', () => {
         vaultOverview:
           'Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
       }),
+      expect.anything(),
     )
     expect(runnerMocks.buildAssistantVaultOverviewBlock).toHaveBeenCalledWith(
       '/tmp/test-vault',
@@ -483,13 +509,14 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toMatchObject({
       kind: 'succeeded',
     })
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCommandAccessMode: 'none',
         assistantHealthCommonsAccessMode: 'bound-tools',
         assistantHostedDeviceConnectAvailable: false,
         assistantKnowledgeToolsAvailable: false,
       }),
+      expect.anything(),
     )
   })
 
@@ -526,10 +553,11 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toMatchObject({
       kind: 'succeeded',
     })
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         modelBehaviorProfile: 'gpt5-agentic',
       }),
+      expect.anything(),
     )
   })
 
@@ -617,8 +645,8 @@ describe('executeProviderTurnWithRecovery', () => {
         },
       }),
     )
-    expect(runnerMocks.buildAssistantSystemPrompt).not.toHaveBeenCalled()
-    expect(runnerMocks.buildAssistantNotificationDecisionSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).not.toHaveBeenCalled()
+    expect(runnerMocks.buildAssistantNotificationDecisionSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         activeExperimentContext:
           'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
@@ -633,6 +661,9 @@ describe('executeProviderTurnWithRecovery', () => {
         vaultOverview:
           'Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
       }),
+      {
+        toolSchemaHash: 'notification-tool-schema-hash',
+      },
     )
     expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     expect(runnerMocks.resolveAssistantProviderResumeKey).not.toHaveBeenCalled()
@@ -655,6 +686,12 @@ describe('executeProviderTurnWithRecovery', () => {
           providerModel: 'openai/gpt-5.4',
           providerName: 'vercel-ai-gateway',
           promptProfile: 'notification-decision',
+          previousResponseIdPresent: false,
+          promptCacheDynamicContextStartsAfterStaticCore: 456,
+          promptCacheStableRouteCapabilityPromptHash:
+            'notification-stable-route-hash',
+          promptCacheStaticPromptHash: 'notification-static-hash',
+          promptCacheToolSchemaHash: 'notification-tool-schema-hash',
           schema: 'murph.assistant-provider-request-debug.v1',
           systemPromptHash: expect.any(String),
           systemPromptLength: expect.any(Number),
@@ -667,7 +704,65 @@ describe('executeProviderTurnWithRecovery', () => {
         updates: [
           {
             kind: 'status',
-            text: 'Hosted notification provider request summary captured.',
+            text: 'Hosted provider request summary captured.',
+          },
+        ],
+      }),
+    )
+  })
+
+  it('emits hosted request debug metadata for ordinary conversation turns', async () => {
+    const onTraceEvent = vi.fn()
+    const route = createRoute({
+      routeId: 'route-hosted-conversation-debug',
+    })
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-hosted-debug',
+        response: 'Hosted conversation answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        channel: 'chat',
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            userEnvKeys: [],
+          },
+        },
+        onTraceEvent,
+        prompt: 'Summarize my week.',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: true,
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: createAssistantSession(),
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-hosted-conversation-debug',
+    })
+
+    expect(onTraceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          previousResponseIdPresent: false,
+          promptCacheDynamicContextStartsAfterStaticCore: 123,
+          promptCacheStableRouteCapabilityPromptHash:
+            'conversation-stable-route-hash',
+          promptCacheStaticPromptHash: 'conversation-static-hash',
+          promptCacheToolSchemaHash: 'provider-tool-schema-hash',
+          promptProfile: 'conversation',
+          schema: 'murph.assistant-provider-request-debug.v1',
+          type: 'assistant.provider.request.debug',
+        }),
+        updates: [
+          {
+            kind: 'status',
+            text: 'Hosted provider request summary captured.',
           },
         ],
       }),
@@ -768,6 +863,7 @@ describe('executeProviderTurnWithRecovery', () => {
   })
 
   it('reuses openai response ids without replaying transcript history when bootstrap context is not required', async () => {
+    const onTraceEvent = vi.fn()
     const session = createAssistantSession({
       providerSessionId: 'provider-session-primary',
       resumeRouteId: 'route-primary',
@@ -805,6 +901,13 @@ describe('executeProviderTurnWithRecovery', () => {
 
     const outcome = await executeProviderTurnWithRecovery({
       input: createMessageInput({
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            userEnvKeys: [],
+          },
+        },
+        onTraceEvent,
         prompt: 'Current prompt',
       }),
       plan: createTurnPlan({
@@ -828,7 +931,7 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(runnerMocks.loadVault).toHaveBeenCalledWith({
       vaultRoot: '/tmp/test-vault',
     })
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCliContract: null,
         assistantCommandAccessMode: 'direct-cli',
@@ -842,6 +945,9 @@ describe('executeProviderTurnWithRecovery', () => {
           'Active experiment context for navigation only:\n- Sauna RHR (`sauna-rhr`, exp_test): started 2026-04-01.',
         vaultOverview: null,
       }),
+      {
+        toolSchemaHash: null,
+      },
     )
     expect(runnerMocks.buildAssistantVaultOverviewBlock).not.toHaveBeenCalled()
     expect(runnerMocks.buildAssistantActiveExperimentContextBlock).toHaveBeenCalledWith(
@@ -855,6 +961,21 @@ describe('executeProviderTurnWithRecovery', () => {
         resumeProviderSessionId: 'provider-session-primary',
         sessionContext: undefined,
         systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
+      }),
+    )
+    expect(onTraceEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawEvent: expect.objectContaining({
+          previousResponseIdPresent: true,
+          promptCacheDynamicContextStartsAfterStaticCore: 123,
+          promptCacheStableRouteCapabilityPromptHash:
+            'conversation-stable-route-hash',
+          promptCacheStaticPromptHash: 'conversation-static-hash',
+          promptCacheToolSchemaHash: null,
+          promptProfile: 'conversation',
+          schema: 'murph.assistant-provider-request-debug.v1',
+          type: 'assistant.provider.request.debug',
+        }),
       }),
     )
   })
@@ -887,11 +1008,12 @@ describe('executeProviderTurnWithRecovery', () => {
     })
 
     expect(runnerMocks.buildAssistantActiveExperimentContextBlock).not.toHaveBeenCalled()
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         activeExperimentContext: null,
         allowSensitiveHealthContext: false,
       }),
+      expect.anything(),
     )
   })
 
@@ -1161,10 +1283,11 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toMatchObject({
       kind: 'succeeded',
     })
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         turnTrigger: 'automation-cron',
       }),
+      expect.anything(),
     )
   })
 
@@ -1321,10 +1444,11 @@ describe('executeProviderTurnWithRecovery', () => {
         route,
       },
     })
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         vaultOverview: null,
       }),
+      expect.anything(),
     )
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1367,10 +1491,11 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toMatchObject({
       kind: 'succeeded',
     })
-    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+    expect(runnerMocks.buildAssistantSystemPromptWithCacheMetadata).toHaveBeenCalledWith(
       expect.objectContaining({
         activeExperimentContext: null,
       }),
+      expect.anything(),
     )
   })
 

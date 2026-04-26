@@ -308,7 +308,7 @@ async function executeAssistantProviderAttempt(input: {
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
-    emitHostedNotificationProviderRequestDebugTrace({
+    emitHostedProviderRequestDebugTrace({
       attemptPlan,
       executionPlan,
     })
@@ -503,7 +503,7 @@ function classifyAssistantProviderAttemptFailure(input: {
   return 'retry_next_route'
 }
 
-function emitHostedNotificationProviderRequestDebugTrace(input: {
+function emitHostedProviderRequestDebugTrace(input: {
   attemptPlan: AssistantProviderAttemptPlan
   executionPlan: AssistantProviderTurnExecutionPlan
 }): void {
@@ -512,7 +512,6 @@ function emitHostedNotificationProviderRequestDebugTrace(input: {
 
   if (
     !onTraceEvent ||
-    executionPlan.profile.promptProfile !== 'notification-decision' ||
     executionPlan.executionContext?.hosted == null
   ) {
     return
@@ -521,11 +520,12 @@ function emitHostedNotificationProviderRequestDebugTrace(input: {
   try {
     const providerOptions = attemptPlan.route.providerOptions
     const systemPrompt = attemptPlan.routePlan.systemPrompt ?? null
+    const promptCacheMetadata = attemptPlan.routePlan.promptCacheMetadata
     const conversationMessages = attemptPlan.routePlan.conversationMessages ?? []
     const toolNames = listAssistantToolCatalogNames(executionPlan.toolCatalog)
 
     onTraceEvent({
-      providerSessionId: attemptPlan.routePlan.resumeProviderSessionId,
+      providerSessionId: null,
       rawEvent: {
         schema: 'murph.assistant-provider-request-debug.v1',
         type: 'assistant.provider.request.debug',
@@ -538,6 +538,8 @@ function emitHostedNotificationProviderRequestDebugTrace(input: {
           providerOptions.gatewayOnlyProviders?.length ?? 0,
         gatewayOnlyProviders: providerOptions.gatewayOnlyProviders ?? null,
         nativeResumePolicy: executionPlan.profile.nativeResumePolicy,
+        previousResponseIdPresent:
+          attemptPlan.routePlan.resumeProviderSessionId !== null,
         provider: attemptPlan.route.provider,
         providerExecutionDriver: providerOptions.executionDriver,
         providerModel: providerOptions.model ?? null,
@@ -546,6 +548,14 @@ function emitHostedNotificationProviderRequestDebugTrace(input: {
         routeId: attemptPlan.route.routeId,
         sessionContextPresent: attemptPlan.routePlan.sessionContext != null,
         supportsToolRuntime: attemptPlan.routePlan.supportsToolRuntime,
+        promptCacheDynamicContextStartsAfterStaticCore:
+          promptCacheMetadata?.dynamicContextStartsAfterStaticCore ?? null,
+        promptCacheStableRouteCapabilityPromptHash:
+          promptCacheMetadata?.stableRouteCapabilityPromptHash ?? null,
+        promptCacheStaticPromptHash:
+          promptCacheMetadata?.staticPromptHash ?? null,
+        promptCacheToolSchemaHash:
+          promptCacheMetadata?.toolSchemaHash ?? null,
         systemPromptHash:
           systemPrompt === null ? null : hashAssistantProviderDebugText(systemPrompt),
         systemPromptLength: systemPrompt?.length ?? 0,
@@ -560,7 +570,7 @@ function emitHostedNotificationProviderRequestDebugTrace(input: {
       updates: [
         {
           kind: 'status',
-          text: 'Hosted notification provider request summary captured.',
+          text: 'Hosted provider request summary captured.',
         },
       ],
     })

@@ -519,6 +519,92 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     )
   })
 
+  it('extracts cached input tokens from nested OpenAI Responses usage details', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Nested usage answer',
+      response: {
+        id: 'response-openai-nested-input-details',
+        model: 'gpt-5.4',
+      },
+      usage: {
+        input_tokens: 25,
+        input_tokens_details: {
+          cached_tokens: 9,
+        },
+        output_tokens: 5,
+        total_tokens: 30,
+      },
+    })
+
+    const result = await openAiCompatibleProviderDefinition.executeTurn({
+      env: {
+        OPENAI_API_KEY: 'test-openai-key',
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5.4',
+        providerName: 'OpenAI',
+      }),
+      userPrompt: 'What changed today?',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        usage: {
+          cachedInputTokens: 9,
+          inputTokens: 25,
+        },
+      },
+    })
+  })
+
+  it('extracts cached input tokens from nested Chat Completions prompt details', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Nested chat usage answer',
+      response: {
+        id: 'response-openai-nested-prompt-details',
+        model: 'gpt-5.4',
+      },
+      usage: {
+        completion_tokens: 6,
+        prompt_tokens: 41,
+        prompt_tokens_details: {
+          cached_tokens: 17,
+        },
+        total_tokens: 47,
+      },
+    })
+
+    const result = await openAiCompatibleProviderDefinition.executeTurn({
+      env: {
+        OPENAI_API_KEY: 'test-openai-key',
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5.4',
+        providerName: 'OpenAI',
+      }),
+      userPrompt: 'What changed today?',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        usage: {
+          cachedInputTokens: 17,
+          inputTokens: 41,
+        },
+      },
+    })
+  })
+
   it('falls back fresh when an OpenAI Responses resume id is not a response id', async () => {
     providerMocks.generateText.mockResolvedValue({
       text: 'Fresh answer',

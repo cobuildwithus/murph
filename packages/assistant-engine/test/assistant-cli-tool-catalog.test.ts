@@ -392,6 +392,61 @@ describe('assistant CLI tool catalogs', () => {
     )
   })
 
+  it('keeps prompt-cache tool hashes stable when capability input order changes', () => {
+    const firstCapability = defineAssistantCapabilityTool(
+      {
+        name: 'assistant.cache.first',
+        description: 'First cache test tool.',
+        inputSchema: createEchoSchema(),
+        executionBindings: {
+          'native-local': async ({ value }) => ({ first: value }),
+        },
+      },
+      {
+        generatedFrom: null,
+        localOnly: true,
+        origin: 'hand-authored-helper',
+        policyWrappers: [],
+      },
+      'native-local',
+      'local-service',
+    )
+    const secondCapability = defineAssistantCapabilityTool(
+      {
+        name: 'assistant.cache.second',
+        description: 'Second cache test tool.',
+        inputSchema: createEchoSchema(),
+        executionBindings: {
+          'native-local': async ({ value }) => ({ second: value }),
+        },
+      },
+      {
+        generatedFrom: null,
+        localOnly: true,
+        origin: 'hand-authored-helper',
+        policyWrappers: [],
+      },
+      'native-local',
+      'local-service',
+    )
+
+    const catalogA = createAssistantToolCatalogFromCapabilities(
+      [firstCapability, secondCapability],
+      [new NativeLocalCapabilityHost()],
+    )
+    const catalogB = createAssistantToolCatalogFromCapabilities(
+      [secondCapability, firstCapability],
+      [new NativeLocalCapabilityHost()],
+    )
+
+    expect(catalogB.listTools().map((tool) => tool.name)).toEqual(
+      catalogA.listTools().map((tool) => tool.name),
+    )
+    expect(hashAssistantToolCatalogForPromptCache(catalogB)).toEqual(
+      hashAssistantToolCatalogForPromptCache(catalogA),
+    )
+  })
+
   it('normalizes capability metadata, binds preferred hosts, and emits preview execution results', async () => {
     const cliCapability = defineAssistantCapabilityTool(
       {

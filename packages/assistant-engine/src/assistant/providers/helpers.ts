@@ -463,6 +463,22 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
       'output_tokens',
     ) ??
     readAssistantProviderInteger(rawRecord, 'outputTokens', 'completionTokens')
+  const cachedInputTokens =
+    readAssistantProviderInteger(
+      usageRecord,
+      'cachedInputTokens',
+      'cached_input_tokens',
+    ) ??
+    readAssistantProviderNestedInteger(
+      usageRecord,
+      ['inputTokensDetails', 'input_tokens_details'],
+      ['cachedTokens', 'cached_tokens'],
+    ) ??
+    readAssistantProviderNestedInteger(
+      usageRecord,
+      ['promptTokensDetails', 'prompt_tokens_details'],
+      ['cachedTokens', 'cached_tokens'],
+    )
 
   return {
     apiKeyEnv:
@@ -478,11 +494,7 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
       'cacheWriteTokens',
       'cache_write_tokens',
     ),
-    cachedInputTokens: readAssistantProviderInteger(
-      usageRecord,
-      'cachedInputTokens',
-      'cached_input_tokens',
-    ),
+    cachedInputTokens,
     inputTokens,
     outputTokens,
     providerMetadataJson: providerMetadata ?? null,
@@ -675,6 +687,27 @@ function readAssistantProviderInteger(
     const value = record[key]
 
     if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+      return value
+    }
+  }
+
+  return null
+}
+
+function readAssistantProviderNestedInteger(
+  record: Record<string, unknown> | null | undefined,
+  recordKeys: readonly string[],
+  valueKeys: readonly string[],
+): number | null {
+  if (!record) {
+    return null
+  }
+
+  for (const recordKey of recordKeys) {
+    const nested = readAssistantProviderRecord(record[recordKey])
+    const value = readAssistantProviderInteger(nested, ...valueKeys)
+
+    if (value !== null) {
       return value
     }
   }

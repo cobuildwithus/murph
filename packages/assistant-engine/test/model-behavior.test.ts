@@ -5,8 +5,10 @@ import {
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import {
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptWithCacheMetadata,
+  type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
 
@@ -135,6 +137,23 @@ describe('assistant system prompt cache stability', () => {
     expect(promptA.cacheMetadata.dynamicContextStartsAfterStaticCore).toBeGreaterThan(
       8_000,
     )
+    expect(promptB.cacheMetadata.dynamicContextStartsAfterStaticCore).toBe(
+      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    const stablePrefix = firstNChars(
+      promptA.prompt,
+      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    const dynamicSuffix = promptA.prompt.slice(
+      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+
+    expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
+    expect(stablePrefix).not.toContain('2026-04-15')
+    expect(stablePrefix).not.toContain('Vault overview for user A.')
+    expect(stablePrefix).not.toContain('Active experiment context for user A.')
+    expect(dynamicSuffix).toContain('The user\'s canonical timezone')
+    expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata).toMatchInlineSnapshot(`
       {
         "dynamicContextStartsAfterStaticCore": 20526,
@@ -152,6 +171,70 @@ describe('assistant system prompt cache stability', () => {
     expect(promptB.cacheMetadata.toolSchemaHash).toBe(
       promptA.cacheMetadata.toolSchemaHash,
     )
+  })
+
+  it('keeps the notification decision prefix stable across dynamic turn context', () => {
+    const cacheInput = {
+      toolSchemaHash: 'assistant-notification-tools-test',
+    }
+    const promptA = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        activeExperimentContext: 'Notification active experiment for user A.',
+        allowSensitiveHealthContext: true,
+        channel: 'telegram',
+        currentLocalDate: '2026-04-15',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+        vaultOverview: 'Notification vault overview for user A.',
+      }),
+      cacheInput,
+    )
+    const promptB = buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+      createCommonNotificationPromptInput({
+        activeExperimentContext: 'Notification active experiment for user B.',
+        allowSensitiveHealthContext: false,
+        channel: 'sms',
+        currentLocalDate: '2026-04-16',
+        currentTimeZone: 'America/Los_Angeles',
+        vaultOverview: 'Notification vault overview for user B.',
+      }),
+      cacheInput,
+    )
+
+    expect(promptB.cacheMetadata.staticPromptHash).toBe(
+      promptA.cacheMetadata.staticPromptHash,
+    )
+    expect(promptB.cacheMetadata.stableRouteCapabilityPromptHash).toBe(
+      promptA.cacheMetadata.stableRouteCapabilityPromptHash,
+    )
+    expect(promptB.cacheMetadata.dynamicContextStartsAfterStaticCore).toBe(
+      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    expect(promptB.cacheMetadata.toolSchemaHash).toBe(
+      promptA.cacheMetadata.toolSchemaHash,
+    )
+
+    const stablePrefix = firstNChars(
+      promptA.prompt,
+      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+    expect(stablePrefix).toEqual(
+      firstNChars(
+        promptB.prompt,
+        promptB.cacheMetadata.dynamicContextStartsAfterStaticCore,
+      ),
+    )
+    const dynamicSuffix = promptA.prompt.slice(
+      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
+    )
+
+    expect(stablePrefix).not.toContain('Notification execution rules:')
+    expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
+    expect(stablePrefix).not.toContain('Notification vault overview for user A.')
+    expect(stablePrefix).not.toContain(
+      'Notification active experiment for user A.',
+    )
+    expect(dynamicSuffix).toContain('Notification execution rules:')
+    expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
   })
 })
 
@@ -211,6 +294,25 @@ function createCommonOpenAiPromptInput(
     onboardingGuidance: true,
     modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
+    vaultOverview: null,
+    ...overrides,
+  }
+}
+
+function createCommonNotificationPromptInput(
+  overrides: Partial<AssistantNotificationDecisionSystemPromptInput> = {},
+): AssistantNotificationDecisionSystemPromptInput {
+  return {
+    allowSensitiveHealthContext: true,
+    assistantHealthCommonsAccessMode: 'bound-tools',
+    assistantHostedDeviceConnectAvailable: true,
+    assistantHostedDeviceConnectProviders: [
+      { label: 'Oura', provider: 'oura' },
+      { label: 'WHOOP', provider: 'whoop' },
+    ],
+    channel: 'telegram',
+    currentLocalDate: '2026-04-15',
+    currentTimeZone: 'Asia/Kuala_Lumpur',
     vaultOverview: null,
     ...overrides,
   }

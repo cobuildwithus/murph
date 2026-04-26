@@ -45,6 +45,9 @@ import type {
   AssistantMurphCommandAccessMode,
 } from '../providers/types.js'
 import {
+  hashAssistantToolCatalogForPromptCache,
+} from '../../model-harness.js'
+import {
   prioritizeAssistantRoutesForRichUserMessageContent,
 } from '../rich-content-routing.js'
 import type {
@@ -55,8 +58,9 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
-  buildAssistantNotificationDecisionSystemPrompt,
-  buildAssistantSystemPrompt,
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantSystemPromptWithCacheMetadata,
+  type AssistantPromptCacheMetadata,
   type AssistantHealthCommonsAccessMode,
 } from '../system-prompt.js'
 import { buildAssistantVaultOverviewBlock } from '../vault-overview.js'
@@ -80,6 +84,7 @@ export interface AssistantRouteTurnPlan {
   sessionContext?: {
     binding: AssistantSession['binding']
   }
+  promptCacheMetadata: AssistantPromptCacheMetadata | null
   systemPrompt: string | null
   supportsToolRuntime: boolean
   workingDirectory: string
@@ -369,9 +374,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )
-  const systemPrompt =
+  const toolSchemaHash = supportsToolRuntime
+    ? hashAssistantToolCatalogForPromptCache(input.toolCatalog)
+    : null
+  const systemPromptResult =
     input.profile.promptProfile === 'notification-decision'
-      ? buildAssistantNotificationDecisionSystemPrompt({
+      ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             activeExperimentContext,
             allowSensitiveHealthContext:
               input.sharedPlan.allowSensitiveHealthContext,
@@ -386,8 +394,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
             vaultOverview,
+          }, {
+            toolSchemaHash,
           })
-      : buildAssistantSystemPrompt({
+      : buildAssistantSystemPromptWithCacheMetadata({
             activeExperimentContext,
             assistantCliContract,
             allowSensitiveHealthContext:
@@ -411,7 +421,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
             modelBehaviorProfile,
             turnTrigger: input.input.turnTrigger ?? null,
             vaultOverview,
+          }, {
+            toolSchemaHash,
           })
+  const systemPrompt = systemPromptResult.prompt
 
   return {
     assistantCommandAccessMode,
@@ -433,6 +446,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           binding: input.session.binding,
         }
       : undefined,
+    promptCacheMetadata: systemPromptResult.cacheMetadata,
     workingDirectory,
     systemPrompt,
     supportsToolRuntime,

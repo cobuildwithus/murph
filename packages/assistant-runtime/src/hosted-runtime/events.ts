@@ -9,6 +9,7 @@ import type {
   HostedIngressEnvelope,
   HostedExecutionRunPhase,
   HostedExecutionStructuredLogDetails,
+  HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantContextFingerprintDetails,
@@ -393,14 +394,15 @@ function emitHostedLinqConversationContextLog(
   };
 }
 
-function emitHostedAssistantNotificationProviderTraceLog(input: {
+export function emitHostedAssistantProviderTraceLog(input: {
+  details?: HostedExecutionStructuredLogDetails | null;
   event: unknown;
-  wake: HostedExecutionAssistantNotificationRequestedWake;
+  wake: HostedRuntimeEvent;
 }): HostedExecutionRedactedLogEntry | null {
   const requestDebug = readHostedProviderRequestDebugTrace(input.event);
   if (requestDebug) {
     const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
-      ...buildHostedAssistantNotificationLogDetails(input.wake),
+      ...(input.details ?? {}),
       assistantProviderRequest: buildHostedProviderRequestSummary(requestDebug),
     });
 
@@ -428,7 +430,7 @@ function emitHostedAssistantNotificationProviderTraceLog(input: {
   }
 
   const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
-    ...buildHostedAssistantNotificationLogDetails(input.wake),
+    ...(input.details ?? {}),
     assistantResponsesRequest: buildHostedResponsesRequestSummary(responsesDebug),
   });
 
@@ -512,6 +514,16 @@ function buildHostedProviderRequestSummary(
       readHostedProviderDebugStringArray(debug, "gatewayOnlyProviders"),
     nativeResumePolicy:
       readHostedProviderDebugString(debug, "nativeResumePolicy"),
+    previousResponseIdPresent:
+      readHostedProviderDebugBoolean(debug, "previousResponseIdPresent"),
+    promptCacheDynamicContextStartsAfterStaticCore:
+      readHostedProviderDebugNumber(debug, "promptCacheDynamicContextStartsAfterStaticCore"),
+    promptCacheStableRouteCapabilityPromptHash:
+      readHostedProviderDebugString(debug, "promptCacheStableRouteCapabilityPromptHash"),
+    promptCacheStaticPromptHash:
+      readHostedProviderDebugString(debug, "promptCacheStaticPromptHash"),
+    promptCacheToolSchemaHash:
+      readHostedProviderDebugString(debug, "promptCacheToolSchemaHash"),
     promptProfile: readHostedProviderDebugString(debug, "promptProfile"),
     provider: readHostedProviderDebugString(debug, "provider"),
     providerExecutionDriver:
@@ -656,7 +668,8 @@ function buildAssistantNotificationInput(
       if (contextEntry) {
         recordLogEntry(contextEntry);
       }
-      const entry = emitHostedAssistantNotificationProviderTraceLog({
+      const entry = emitHostedAssistantProviderTraceLog({
+        details: buildHostedAssistantNotificationLogDetails(wake),
         event,
         wake,
       });
