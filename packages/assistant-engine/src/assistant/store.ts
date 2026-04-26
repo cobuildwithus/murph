@@ -9,6 +9,9 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  serializeAssistantProviderSessionOptions,
+} from '@murphai/operator-config/assistant/provider-config'
+import {
   createAssistantBinding,
   type AssistantBindingPatch,
 } from './bindings.js'
@@ -45,7 +48,10 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store/paths.js'
-import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 export {
   redactAssistantDisplayPath,
   resolveAssistantAliasKey,
@@ -82,6 +88,10 @@ export async function resolveAssistantSession(
 ): Promise<ResolvedAssistantSession> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
+    const requestedProviderOptions =
+      resolveAssistantSessionRequestedProviderOptions(input)
+    const requestedContinuityFingerprint =
+      requestedProviderOptions?.continuityFingerprint ?? null
 
     const conversation = conversationRefFromLocator(input)
     const sessionId = normalizeNullableString(input.sessionId ?? conversation.sessionId)
@@ -139,6 +149,7 @@ export async function resolveAssistantSession(
             ...persistenceInput,
             lookupSource: 'conversation-key',
           },
+          expectedContinuityFingerprint: requestedContinuityFingerprint,
           skipIfExpired: true,
           maxSessionAgeMs: input.maxSessionAgeMs,
           now: input.now,
@@ -157,7 +168,7 @@ export async function resolveAssistantSession(
     }
 
     const now = resolveTimestamp(input.now)
-    const providerOptions = normalizeProviderOptions(input)
+    const providerOptions = requestedProviderOptions ?? normalizeProviderOptions(input)
     const target = input.target ?? createAssistantModelTarget(providerOptions)
     if (!target) {
       throw new VaultCliError(
@@ -186,6 +197,49 @@ export async function resolveAssistantSession(
       session: savedSession,
     }
   })
+}
+
+function resolveAssistantSessionRequestedProviderOptions(
+  input: ResolveAssistantSessionInput,
+) {
+  if (input.target) {
+    return serializeAssistantProviderSessionOptions(
+      assistantBackendTargetToProviderConfigInput(input.target),
+    )
+  }
+
+  if (!hasAssistantSessionProviderOverrideInput(input)) {
+    return null
+  }
+
+  return normalizeProviderOptions(input)
+}
+
+const ASSISTANT_SESSION_PROVIDER_OVERRIDE_FIELDS = [
+  'apiKeyEnv',
+  'approvalPolicy',
+  'baseUrl',
+  'codexHome',
+  'gatewayOnlyProviders',
+  'headers',
+  'model',
+  'oss',
+  'presetId',
+  'profile',
+  'provider',
+  'providerName',
+  'reasoningEffort',
+  'sandbox',
+  'webSearch',
+  'zeroDataRetention',
+] as const satisfies readonly (keyof ResolveAssistantSessionInput)[]
+
+function hasAssistantSessionProviderOverrideInput(
+  input: ResolveAssistantSessionInput,
+): boolean {
+  return ASSISTANT_SESSION_PROVIDER_OVERRIDE_FIELDS.some(
+    (field) => field in input,
+  )
 }
 
 export async function listAssistantSessions(

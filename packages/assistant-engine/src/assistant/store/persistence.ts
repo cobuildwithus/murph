@@ -466,6 +466,7 @@ export async function loadAndPersistResolvedSession(input: {
     bindingPatch: AssistantBindingPatch
     lookupSource: 'alias' | 'conversation-key' | 'session-id'
   }
+  expectedContinuityFingerprint?: string | null
   skipIfExpired?: boolean
   maxSessionAgeMs?: number | null
   now?: Date
@@ -480,6 +481,13 @@ export async function loadAndPersistResolvedSession(input: {
   if (
     input.skipIfExpired &&
     isAssistantSessionExpired(existing, input.maxSessionAgeMs, input.now)
+  ) {
+    return null
+  }
+  if (
+    input.expectedContinuityFingerprint &&
+    existing.providerOptions.continuityFingerprint !==
+      input.expectedContinuityFingerprint
   ) {
     return null
   }

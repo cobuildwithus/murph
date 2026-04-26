@@ -659,6 +659,94 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
   assert.equal(listed.length, 2)
 })
 
+test('resolveAssistantSession refreshes conversation-key sessions when provider continuity changes', async () => {
+  const { vaultRoot } = await createAssistantStateVault(
+    'murph-assistant-session-continuity-',
+  )
+
+  const first = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'contact:bob',
+    threadId: 'chat-1',
+    codexHome: '/tmp/codex-old',
+    model: 'gpt-5.4',
+  })
+
+  const refreshed = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'contact:bob',
+    threadId: 'chat-1',
+    codexHome: '/tmp/codex-new',
+    model: 'gpt-5.4',
+  })
+
+  assert.equal(refreshed.created, true)
+  assert.notEqual(refreshed.session.sessionId, first.session.sessionId)
+  assert.equal(refreshed.session.providerOptions.codexHome, '/tmp/codex-new')
+  assert.equal(
+    refreshed.session.binding.conversationKey,
+    first.session.binding.conversationKey,
+  )
+
+  const reused = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'contact:bob',
+    threadId: 'chat-1',
+    codexHome: '/tmp/codex-new',
+    model: 'gpt-5.4',
+  })
+
+  assert.equal(reused.created, false)
+  assert.equal(reused.session.sessionId, refreshed.session.sessionId)
+
+  const explicit = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: first.session.sessionId,
+    codexHome: '/tmp/codex-new',
+    createIfMissing: false,
+  })
+
+  assert.equal(explicit.session.sessionId, first.session.sessionId)
+  assert.equal(explicit.session.providerOptions.codexHome, '/tmp/codex-old')
+
+  const aliasSession = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'telegram:bob',
+    channel: 'telegram',
+    participantId: 'contact:bob',
+    threadId: 'chat-2',
+    codexHome: '/tmp/codex-old',
+    model: 'gpt-5.4',
+  })
+  const aliasResolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'telegram:bob',
+    channel: 'telegram',
+    participantId: 'contact:bob',
+    threadId: 'chat-2',
+    codexHome: '/tmp/codex-new',
+    model: 'gpt-5.4',
+  })
+
+  assert.equal(aliasResolved.session.sessionId, aliasSession.session.sessionId)
+  assert.equal(aliasResolved.session.providerOptions.codexHome, '/tmp/codex-old')
+
+  const noTargetResolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'contact:bob',
+    threadId: 'chat-1',
+    createIfMissing: false,
+  })
+
+  assert.equal(noTargetResolved.created, false)
+  assert.equal(noTargetResolved.session.sessionId, refreshed.session.sessionId)
+  assert.equal(noTargetResolved.session.providerOptions.codexHome, '/tmp/codex-new')
+})
+
 test('resolveAssistantSession merges conversation refs with explicit locator overrides when creating bindings', async () => {
   const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-conversation-ref-')
 
