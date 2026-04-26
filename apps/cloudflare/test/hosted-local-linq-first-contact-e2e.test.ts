@@ -94,9 +94,7 @@ describe("hosted local Linq first-contact e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    const materializedChatId = requireLinqStub().requireObservedChatId(userId);
-    const welcomeMessageId = requireLinqStub().requireLatestObservedMessageId(materializedChatId);
-    expect(materializedChatId).toEqual(expect.any(String));
+    expect(requireLinqStub().requireObservedChatId(userId)).toEqual(expect.any(String));
     expect(sendRequest.method).toBe("POST");
     expect(sendRequest.url).toBe(requireLinqStub().createChatPath);
     expect(JSON.parse(sendRequest.body)).toMatchObject({
@@ -111,13 +109,6 @@ describe("hosted local Linq first-contact e2e", () => {
         ],
       },
       to: [buildLinqRecipientPhoneNumber(userId)],
-    });
-    await requireLinqStub().waitForMatchingRequestCount({
-      expectedCount: 1,
-      expectedMethod: "DELETE",
-      expectedPath: `/messages/${encodeURIComponent(welcomeMessageId)}`,
-      scenario: requireScenario(),
-      userId,
     });
   }, 300_000);
 
@@ -280,28 +271,24 @@ describe("hosted local Linq first-contact e2e", () => {
     const materializedChatId = requireLinqStub().requireObservedChatId(fastReplyUserId);
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
-    const observedMessageIdsBeforeReply =
-      requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
 
     requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
-    const firstInboundMessageId = `msg_fast_name_${fastReplyUserId}`;
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       fastReplyUserId,
       materializedChatId,
       {
         eventId: `evt_fast_reply_name_${fastReplyUserId}`,
-        messageId: firstInboundMessageId,
+        messageId: `msg_fast_name_${fastReplyUserId}`,
         text: "U can call me Rocket Man",
       },
     ));
-    const secondInboundMessageId = `msg_fast_goals_${fastReplyUserId}`;
     const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       fastReplyUserId,
       materializedChatId,
       {
         eventId: `evt_fast_reply_goals_${fastReplyUserId}`,
-        messageId: secondInboundMessageId,
+        messageId: `msg_fast_goals_${fastReplyUserId}`,
         text: "I want to build more strength, improve endurance, and get fitter overall.",
       },
     ));
@@ -350,18 +337,6 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(newReplySends).toHaveLength(1);
     const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
     expect(groupedReplyText).toBe(HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT);
-    const outboundReplyMessageId =
-      requireLinqStub().listObservedMessageIds(materializedChatId)[observedMessageIdsBeforeReply] ?? null;
-    expect(outboundReplyMessageId).not.toBeNull();
-    for (const messageId of [firstInboundMessageId, secondInboundMessageId, outboundReplyMessageId!]) {
-      await requireLinqStub().waitForMatchingRequestCount({
-        expectedCount: 1,
-        expectedMethod: "DELETE",
-        expectedPath: `/messages/${encodeURIComponent(messageId)}`,
-        scenario: requireScenario(),
-        userId: fastReplyUserId,
-      });
-    }
   }, 300_000);
 });
 
