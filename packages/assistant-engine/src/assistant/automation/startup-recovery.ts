@@ -33,6 +33,10 @@ import {
 const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
 const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
 const FAILED_RECEIPT_RECOVERY_RECEIPT_LIMIT = 200
+const TERMINAL_PROVIDER_VALIDATION_FAILURE_PATTERNS = [
+  /\binput\.\d+\.output:\s*Invalid input\b/iu,
+  /\bInvalid\s+'previous_response_id'/iu,
+] as const
 
 export interface RecoverAssistantAutoRepliesInput {
   allowSelfAuthored: boolean
@@ -222,6 +226,9 @@ async function listReceiptRecoveryCandidates(input: {
     if (receipt.status !== 'failed') {
       continue
     }
+    if (hasTerminalProviderValidationFailure(receipt)) {
+      continue
+    }
     const retryAt = readAssistantAutoReplyRetryAt(receipt)
     if (retryAt && Date.parse(retryAt) > nowMs) {
       nextWakeAt = earliestAssistantAutomationWakeAt(nextWakeAt, retryAt)
@@ -250,6 +257,23 @@ async function listReceiptRecoveryCandidates(input: {
     hasMoreDueCandidates,
     nextWakeAt,
   }
+}
+
+function hasTerminalProviderValidationFailure(
+  receipt: AssistantTurnReceipt,
+): boolean {
+  const messages = [
+    receipt.lastError?.message ?? null,
+    ...receipt.timeline.map((event) => event.detail),
+  ]
+
+  return messages.some(
+    (message) =>
+      typeof message === 'string' &&
+      TERMINAL_PROVIDER_VALIDATION_FAILURE_PATTERNS.some((pattern) =>
+        pattern.test(message),
+      ),
+  )
 }
 
 async function loadAutoReplyRecoveryContext(input: {
