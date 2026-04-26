@@ -16,6 +16,7 @@ managed_browser_profile="${managed_browser_profile:-${MURPH_REVIEW_GPT_PROFILE_B
 managed_browser_port="${managed_browser_port:-${MURPH_REVIEW_GPT_PROFILE_PORT:-9442}}"
 
 name_prefix="murph-chatgpt-audit"
+snapshot_attachment_name="murph-review-gpt.repo-snapshot.zip"
 include_tests=0
 include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
