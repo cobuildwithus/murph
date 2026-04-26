@@ -43,6 +43,26 @@ import {
   createHealthUpsertResultSchema,
   registerHealthEntityCrudGroup,
 } from './commands/health-entity-command-registry.js'
+import {
+  allergySaveResultSchema,
+  registerAllergyCommands,
+} from './commands/health-allergy-save.js'
+import {
+  familySaveResultSchema,
+  registerFamilyCommands,
+} from './commands/health-family-save.js'
+import {
+  conditionSaveResultSchema,
+  registerConditionCommands,
+} from './commands/health-condition-save.js'
+import {
+  goalSaveResultSchema,
+  registerGoalCommands,
+} from './commands/health-goal-save.js'
+import {
+  geneticsSaveResultSchema,
+  registerGeneticsCommands,
+} from './commands/health-genetics-save.js'
 import { registerInboxCommands } from './commands/inbox.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
@@ -160,6 +180,7 @@ const genericHealthRootCommandNames = [
   'family',
   'genetics',
 ] as const
+type GenericHealthRootCommandName = typeof genericHealthRootCommandNames[number]
 
 function orderedUniqueStrings<TValue extends string>(
   values: readonly TValue[],
@@ -191,8 +212,11 @@ function requireHealthCommandDescriptor(
 
 function createHealthLeafCommands(
   descriptor: HealthCommandDescriptorEntry,
+  options: {
+    includeUpsert?: boolean
+  } = {},
 ): readonly VaultCliLeafCommandDescriptor[] {
-  return [
+  const leafCommands: VaultCliLeafCommandDescriptor[] = [
     {
       path: [descriptor.command.commandName, 'list'],
       description: descriptor.command.descriptions.list,
@@ -214,14 +238,19 @@ function createHealthLeafCommands(
       hint: descriptor.command.hints?.show,
       output: healthShowResultSchema,
     },
-    {
+  ]
+
+  if (options.includeUpsert !== false) {
+    leafCommands.push({
       path: [descriptor.command.commandName, 'upsert'],
       description: descriptor.command.descriptions.upsert,
       examples: descriptor.command.examples?.upsert,
       hint: descriptor.command.hints?.upsert,
       output: createHealthUpsertResultSchema(descriptor),
-    },
-  ]
+    })
+  }
+
+  return leafCommands
 }
 
 function mergeDirectVaultServiceBindings(
@@ -263,6 +292,7 @@ function buildHealthCommandManifestDescriptor(input: {
   register: DirectBindingCommandDescriptor['register']
   additionalVaultServiceBindings?: DirectVaultServiceBindings
   additionalLeafCommands?: readonly VaultCliLeafCommandDescriptor[]
+  includeUpsert?: boolean
 }): DirectBindingCommandDescriptor {
   const descriptor = requireHealthCommandDescriptor(input.commandName)
 
@@ -271,7 +301,9 @@ function buildHealthCommandManifestDescriptor(input: {
     bindingMode: 'direct',
     rootCommandNames: [input.commandName],
     leafCommands: [
-      ...createHealthLeafCommands(descriptor),
+      ...createHealthLeafCommands(descriptor, {
+        includeUpsert: input.includeUpsert,
+      }),
       ...(input.additionalLeafCommands ?? []),
     ],
     directVaultServiceBindings: mergeDirectVaultServiceBindings(
@@ -295,11 +327,77 @@ const genericHealthCommandDescriptors = genericHealthRootCommandNames.map(
   (commandName) =>
     buildHealthCommandManifestDescriptor({
       commandName,
+      additionalLeafCommands: createTypedHealthSaveLeafCommands(commandName),
       register({ cli, services }) {
-        registerHealthEntityCrudGroup(cli, services, commandName)
+        registerHealthCommands(cli, services, commandName)
       },
     }),
 )
+
+const typedHealthSaveCommands = {
+  goal: {
+    description: 'Create or update one goal from typed command fields.',
+    output: goalSaveResultSchema,
+    register: registerGoalCommands,
+  },
+  condition: {
+    description: 'Create or update one condition from typed command fields.',
+    output: conditionSaveResultSchema,
+    register: registerConditionCommands,
+  },
+  allergy: {
+    description: 'Create or update one allergy from typed command fields.',
+    output: allergySaveResultSchema,
+    register: registerAllergyCommands,
+  },
+  family: {
+    description: 'Create or update one family member from typed command fields.',
+    output: familySaveResultSchema,
+    register: registerFamilyCommands,
+  },
+  genetics: {
+    description: 'Create or update one genetic variant from typed command fields.',
+    output: geneticsSaveResultSchema,
+    register: registerGeneticsCommands,
+  },
+} satisfies Record<
+  Exclude<GenericHealthRootCommandName, 'blood-test'>,
+  {
+    description: string
+    output: z.ZodType<unknown>
+    register(cli: Cli.Cli, services: VaultServices): void
+  }
+>
+
+function createTypedHealthSaveLeafCommands(
+  commandName: GenericHealthRootCommandName,
+): readonly VaultCliLeafCommandDescriptor[] | undefined {
+  if (commandName === 'blood-test') {
+    return undefined
+  }
+
+  const command = typedHealthSaveCommands[commandName]
+  return [
+    {
+      path: [commandName, 'save'],
+      description: command.description,
+      output: command.output,
+    },
+  ]
+}
+
+function registerHealthCommands(
+  cli: Cli.Cli,
+  services: VaultServices,
+  commandName: GenericHealthRootCommandName,
+) {
+  if (commandName === 'blood-test') {
+    registerHealthEntityCrudGroup(cli, services, commandName)
+    return
+  }
+
+  typedHealthSaveCommands[commandName].register(cli, services)
+}
 
 export const vaultCliCommandDescriptors = [
   {
