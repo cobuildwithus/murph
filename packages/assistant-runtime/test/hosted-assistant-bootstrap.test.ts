@@ -361,7 +361,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(resolveAssistantOperatorDefaults(homeDirectory)).resolves.toBeNull();
   });
 
-  it("preserves member-managed hosted config instead of overwriting it from worker env", async () => {
+  it("promotes worker env platform profile over legacy member-managed hosted config", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
     await saveHostedAssistantConfig(
@@ -416,12 +416,12 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     expect(secondResult).toMatchObject({
       configured: true,
       provider: "openai-compatible",
-      seeded: false,
-      source: "saved",
+      seeded: true,
+      source: "hosted-env",
     });
 
     await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toMatchObject({
-      activeProfileId: "saved-default",
+      activeProfileId: "platform-default",
       profiles: [
         {
           id: "saved-default",
@@ -433,6 +433,17 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
             model: "gpt-4.1-mini",
             presetId: "openai",
             providerName: "openai",
+          },
+        },
+        {
+          id: "platform-default",
+          managedBy: "platform",
+          target: {
+            adapter: "openai-compatible",
+            endpoint: "https://openrouter.ai/api/v1",
+            model: "openrouter/meta-llama-3.1-8b-instruct",
+            presetId: "openrouter",
+            providerName: "openrouter",
           },
         },
       ],
