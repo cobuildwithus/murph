@@ -55,9 +55,6 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
-  formatAssistantTranscriptAuditForReplay,
-} from '../transcript-audit.js'
-import {
   buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt,
   type AssistantHealthCommonsAccessMode,
@@ -720,17 +717,5 @@ function toAssistantReplayMessage(entry: {
       content: entry.text,
     }
   }
-  if (entry.kind === 'error' || entry.kind === 'status') {
-    const auditContent = formatAssistantTranscriptAuditForReplay(entry)
-    if (!auditContent) {
-      return null
-    }
-
-    return {
-      role: 'user',
-      content: auditContent,
-    }
-  }
-
   return null
 }
