@@ -1247,6 +1247,131 @@
                     }
                   }
                 },
+                "save": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "id": {
+                          "description": "Optional existing automation id to update.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "slug": {
+                          "description": "Optional stable lowercase kebab-case slug.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "status": {
+                          "description": "Optional automation status.",
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "paused",
+                            "archived"
+                          ]
+                        },
+                        "summary": {
+                          "description": "Optional automation summary.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "tags": {
+                          "description": "Optional automation tags. Repeat --tags for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "continuityPolicy": {
+                          "description": "Optional continuity policy for scheduled assistant context.",
+                          "type": "string",
+                          "enum": [
+                            "fresh",
+                            "preserve"
+                          ]
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Automation instructions to run on the schedule."
+                        },
+                        "scheduleKind": {
+                          "type": "string",
+                          "enum": [
+                            "at",
+                            "every",
+                            "cron",
+                            "dailyLocal"
+                          ],
+                          "description": "Schedule discriminator."
+                        },
+                        "scheduleAt": {
+                          "description": "Required timestamp when --schedule-kind=at.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "scheduleEveryMs": {
+                          "description": "Required positive millisecond interval when --schedule-kind=every.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "scheduleCron": {
+                          "description": "Required cron expression when --schedule-kind=cron.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "scheduleLocalTime": {
+                          "description": "Required HH:MM local time when --schedule-kind=dailyLocal.",
+                          "type": "string",
+                          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                        },
+                        "channel": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Outbound route channel."
+                        },
+                        "deliveryTarget": {
+                          "description": "Optional route delivery target.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "identityId": {
+                          "description": "Optional route identity id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "participantId": {
+                          "description": "Optional route participant id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "threadId": {
+                          "description": "Optional route thread id.",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,
@@ -1316,7 +1441,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -1337,7 +1462,7 @@
                         },
                         "input": {
                           "type": "string",
-                          "description": "Automation payload in @file.json form or - for stdin."
+                          "description": "Advanced automation payload in @file.json form or - for stdin."
                         }
                       }
                     }
@@ -1771,7 +1896,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -4704,7 +4829,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -4977,7 +5102,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -5303,7 +5428,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -11774,7 +11899,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -13156,7 +13281,7 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {

@@ -36,11 +36,11 @@ describe('withAssistantPayloadFile', () => {
 
     const result = await withAssistantPayloadFile(
       vaultRoot,
-      'vault.samples.add',
+      'vault.samples.importJson',
       payload,
       async (stagedInputFile) => {
         inputFile = stagedInputFile
-        expectAssistantPayloadRuntimePath(vaultRoot, stagedInputFile, 'vault-samples-add')
+        expectAssistantPayloadRuntimePath(vaultRoot, stagedInputFile, 'vault-samples-importJson')
         expect(await readFile(stagedInputFile, 'utf8')).toBe(`${JSON.stringify(payload, null, 2)}\n`)
         const stagedFileStat = await stat(stagedInputFile)
         const stagedDirectoryStat = await stat(path.dirname(stagedInputFile))
@@ -70,11 +70,11 @@ describe('withAssistantPayloadFile', () => {
     await expect(
       withAssistantPayloadFile(
         vaultRoot,
-        'vault.provider.upsert',
+        'vault.provider.importJson',
         payload,
         async (stagedInputFile) => {
           inputFile = stagedInputFile
-          expectAssistantPayloadRuntimePath(vaultRoot, stagedInputFile, 'vault-provider-upsert')
+          expectAssistantPayloadRuntimePath(vaultRoot, stagedInputFile, 'vault-provider-importJson')
           throw sentinel
         },
       ),

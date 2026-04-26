@@ -279,7 +279,7 @@ function createFoodSaveCommandConfig(services: VaultServices) {
         },
       },
     ],
-    hint: 'Use food upsert only when importing an advanced JSON payload from @file.json or stdin.',
+    hint: 'Use food import-json only when importing an advanced JSON payload from @file.json or stdin.',
     options: withBaseOptions({
       id: foodIdSchema.optional().describe('Optional existing food id to update.'),
       slug: foodSlugSchema
@@ -499,7 +499,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     scaffold: {
       name: 'scaffold',
       args: z.object({}),
-      description: 'Emit an advanced food JSON payload template for `food upsert`.',
+      description: 'Emit an advanced food JSON payload template for `food import-json`.',
       hint: 'Prefer `food save` for typed create/update. Use this scaffold for bulk import or advanced JSON fallback payloads.',
       output: foodScaffoldResultSchema,
       async run({ options, requestId }) {
@@ -510,8 +510,8 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       },
     },
     upsert: {
-      description: 'Import or bulk upsert one food Markdown record from a JSON payload file or stdin.',
-      hint: 'Prefer `food save` for canonical typed create/update. Keep `food upsert --input` for bulk import and advanced JSON fallback payloads.',
+      description: 'Import or bulk update one food Markdown record from a JSON payload file or stdin.',
+      hint: 'Prefer `food save` for canonical typed create/update. Keep `food import-json --input` for bulk import and advanced JSON fallback payloads.',
       output: foodUpsertResultSchema,
       async run(input) {
         return services.core.upsertFood({
@@ -521,6 +521,8 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
+    jsonImportCommandName: 'import-json',
+    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one food by canonical id or slug.',
       argName: 'id',

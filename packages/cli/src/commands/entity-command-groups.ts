@@ -41,6 +41,7 @@ interface RegistryDocEntityGroupConfig<
   }
   additionalCommands?: readonly AnyFactoryCommandConfig[]
   includeLegacyJsonUpsert?: boolean
+  jsonImportCommandName?: string
 }
 
 interface LedgerEventListCommandContext extends ListCommandContext {
@@ -156,7 +157,12 @@ export function createRegistryDocEntityGroup<
     description: config.description,
     commands: [
       config.scaffold,
-      ...(config.includeLegacyJsonUpsert === false
+      ...(config.jsonImportCommandName === undefined
+        ? config.includeLegacyJsonUpsert === false
+          ? []
+          : [createInputFileFactoryCommand('upsert', config.upsert)]
+        : [createInputFileFactoryCommand(config.jsonImportCommandName, config.upsert)]),
+      ...(config.includeLegacyJsonUpsert === false || config.jsonImportCommandName === undefined
         ? []
         : [createInputFileFactoryCommand('upsert', config.upsert)]),
       createNamedArgFactoryCommand('show', config.show),

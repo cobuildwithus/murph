@@ -85,7 +85,7 @@ async function readSavedDocument(vaultRoot: string, relativePath: string) {
   return parseFrontmatterDocument(await readFile(path.join(vaultRoot, relativePath), "utf8"));
 }
 
-test("scheduled-log save schema exposes typed parity fields while upsert remains JSON fallback", async () => {
+test("scheduled-log save schema exposes typed parity fields while import-json remains JSON fallback", async () => {
   const cli = createScheduledLogCli();
 
   const saveSchema = await readCommandSchema(cli, ["scheduled-log", "save"]);
@@ -145,10 +145,13 @@ test("scheduled-log save schema exposes typed parity fields while upsert remains
     assert.equal(field in saveSchema.options.properties, true, field);
   }
 
-  const upsertSchema = await readCommandSchema(cli, ["scheduled-log", "upsert"]);
-  assert.equal("input" in upsertSchema.options.properties, true);
-  assert.equal(upsertSchema.options.required?.includes("input") ?? false, true);
-  assert.deepEqual(upsertSchema.args.required ?? [], []);
+  const importJsonSchema = await readCommandSchema(cli, ["scheduled-log", "import-json"]);
+  assert.equal("input" in importJsonSchema.options.properties, true);
+  assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(importJsonSchema.args.required ?? [], []);
+  await assert.rejects(async () => {
+    await readCommandSchema(cli, ["scheduled-log", "upsert"]);
+  });
 });
 
 test.sequential("scheduled-log save maps typed fields for every flattened schedule and action variant", async () => {

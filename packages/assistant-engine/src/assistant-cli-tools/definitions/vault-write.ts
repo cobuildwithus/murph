@@ -31,6 +31,7 @@ const vaultFilePathSchema = z.string().min(1)
 const jsonObjectSchema = z.record(z.string(), z.unknown())
 const healthJsonImportCommandNames = new Set([
   'allergy',
+  'blood-test',
   'condition',
   'family',
   'genetics',
@@ -329,9 +330,9 @@ export function createCanonicalVaultWriteToolDefinitions(
         }),
     }),
     defineVaultServiceBackedTool({
-      name: 'vault.provider.upsert',
+      name: 'vault.provider.importJson',
       description:
-        'Upsert one provider record from a JSON payload object.',
+        'Import one provider record from a JSON payload object.',
       inputSchema: z.object({
         payload: jsonObjectSchema,
       }),
@@ -344,7 +345,7 @@ export function createCanonicalVaultWriteToolDefinitions(
       execute: ({ payload }) =>
         withAssistantPayloadFile(
           input.vault,
-          'vault.provider.upsert',
+          'vault.provider.importJson',
           payload,
           (inputFile) =>
             input.vaultServices!.core.upsertProvider({
@@ -355,9 +356,9 @@ export function createCanonicalVaultWriteToolDefinitions(
         ),
     }),
     defineVaultServiceBackedTool({
-      name: 'vault.recipe.upsert',
+      name: 'vault.recipe.importJson',
       description:
-        'Upsert one recipe record from a JSON payload object so the vault can remember dishes, ingredients, and prep notes.',
+        'Import one recipe record from a JSON payload object so the vault can remember dishes, ingredients, and prep notes.',
       inputSchema: z.object({
         payload: jsonObjectSchema,
       }),
@@ -372,7 +373,7 @@ export function createCanonicalVaultWriteToolDefinitions(
       execute: ({ payload }) =>
         withAssistantPayloadFile(
           input.vault,
-          'vault.recipe.upsert',
+          'vault.recipe.importJson',
           payload,
           (inputFile) =>
             input.vaultServices!.core.upsertRecipe({
@@ -383,9 +384,9 @@ export function createCanonicalVaultWriteToolDefinitions(
         ),
     }),
     defineVaultServiceBackedTool({
-      name: 'vault.food.upsert',
+      name: 'vault.food.importJson',
       description:
-        'Upsert one regular food record from a JSON payload object so the vault can remember recurring meals, snacks, bowls, smoothies, and grocery staples.',
+        'Import one regular food record from a JSON payload object so the vault can remember recurring meals, snacks, bowls, smoothies, and grocery staples.',
       inputSchema: z.object({
         payload: jsonObjectSchema,
       }),
@@ -400,7 +401,7 @@ export function createCanonicalVaultWriteToolDefinitions(
       execute: ({ payload }) =>
         withAssistantPayloadFile(
           input.vault,
-          'vault.food.upsert',
+          'vault.food.importJson',
           payload,
           (inputFile) =>
             input.vaultServices!.core.upsertFood({
@@ -411,9 +412,9 @@ export function createCanonicalVaultWriteToolDefinitions(
         ),
     }),
     defineVaultServiceBackedTool({
-      name: 'vault.event.upsert',
+      name: 'vault.event.importJson',
       description:
-        'Upsert one canonical event record from a JSON payload object.',
+        'Import one canonical event record from a JSON payload object.',
       inputSchema: z.object({
         payload: jsonObjectSchema,
       }),
@@ -427,7 +428,7 @@ export function createCanonicalVaultWriteToolDefinitions(
       execute: ({ payload }) =>
         withAssistantPayloadFile(
           input.vault,
-          'vault.event.upsert',
+          'vault.event.importJson',
           payload,
           (inputFile) =>
             input.vaultServices!.core.upsertEvent({
@@ -438,9 +439,9 @@ export function createCanonicalVaultWriteToolDefinitions(
         ),
     }),
     defineVaultServiceBackedTool({
-      name: 'vault.samples.add',
+      name: 'vault.samples.importJson',
       description:
-        'Append one or more sample records from a JSON payload object.',
+        'Import one or more sample records from a JSON payload object.',
       inputSchema: z.object({
         payload: jsonObjectSchema,
       }),
@@ -455,7 +456,7 @@ export function createCanonicalVaultWriteToolDefinitions(
       execute: ({ payload }) =>
         withAssistantPayloadFile(
           input.vault,
-          'vault.samples.add',
+          'vault.samples.importJson',
           payload,
           (inputFile) =>
             input.vaultServices!.core.addSamples({

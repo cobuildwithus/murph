@@ -183,6 +183,7 @@ assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.len
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 8);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.bundles, ["payloadCrud"]);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.additionalCapabilities ?? [], [
+  "save",
   "rename",
   "schedule",
   "unschedule",

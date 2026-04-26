@@ -193,7 +193,7 @@ describe("command capability definitions", () => {
   it("keeps the shared bundle and noun map aligned", () => {
     expect(commandCapabilityBundles.payloadCrud.capabilities).toEqual([
       "scaffold",
-      "upsert",
+      "import-json",
       "show",
       "list",
     ]);
@@ -214,8 +214,8 @@ describe("command capability definitions", () => {
     expect(commandNounCapabilityByNoun.get("food")).toEqual({
       noun: "food",
       bundles: ["payloadCrud"],
-      capabilities: ["scaffold", "upsert", "rename", "schedule", "unschedule", "show", "list"],
-      additionalCapabilities: ["rename", "schedule", "unschedule"],
+      capabilities: ["scaffold", "save", "import-json", "rename", "schedule", "unschedule", "show", "list"],
+      additionalCapabilities: ["save", "rename", "schedule", "unschedule"],
     });
     expect(commandNounCapabilityByNoun.get("vault")).toEqual({
       noun: "vault",
@@ -268,7 +268,8 @@ describe("command capability definitions", () => {
     expect(commandNounCapabilityByNoun.get("blood_test")).toEqual({
       noun: "blood_test",
       bundles: ["payloadCrud"],
-      capabilities: ["scaffold", "upsert", "show", "list"],
+      capabilities: ["scaffold", "save", "import-json", "show", "list"],
+      additionalCapabilities: ["save"],
     });
     expect(commandAliasDefinitions).toEqual([
       {
@@ -373,7 +374,7 @@ describe("command capability definitions", () => {
       "- `intake` exposes `import | show | list | manifest | raw | project`.",
     );
     expect(nounSection).toContain(
-      "- `samples` exposes `add | import-csv | show | list | batch show | batch list`.",
+      "- `samples` exposes `add | import-json | import-csv | show | list | batch show | batch list`.",
     );
     expect(nounSection).toContain("- `vault` exposes `show | stats | repair | update`.");
     expect(nounSection).toContain(

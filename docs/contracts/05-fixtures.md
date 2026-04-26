@@ -19,7 +19,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
   - sample imports returning `lookupIds` plus an `xfm_*` batch id
   - intake import returning an `asmt_*` id and intake project returning deterministic proposal payloads
   - memory, wiki, and preferences reads using the durable split between freeform memory, derived knowledge, and the typed preferences singleton
-  - noun flows for `scaffold`, typed `save`/`add` where available, explicit `import-json` payload fallbacks, remaining `upsert --input` nouns, `show`, `list`, `food schedule`, private `protocol upsert`, and `regimen stop`
+  - noun flows for `scaffold`, typed `save`/`add` where available, explicit `import-json` payload fallbacks, `show`, `list`, `food schedule`, private `protocol import-json`, and `regimen stop`
   - event-ledger writes for `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure`, with blood-test reads staying available through the dedicated projected noun
   - experiment creation idempotence via `created: false`
   - validation issue accumulation for malformed markdown frontmatter

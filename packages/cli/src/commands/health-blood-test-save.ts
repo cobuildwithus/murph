@@ -518,7 +518,10 @@ export function registerBloodTestCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const bloodTest = createHealthEntityCrudGroup(services, "blood-test");
+  const bloodTest = createHealthEntityCrudGroup(services, "blood-test", {
+    jsonImportCommandName: "import-json",
+    registerUpsert: false,
+  });
 
   bloodTest.command("save", {
     args: z.object({
@@ -543,7 +546,7 @@ export function registerBloodTestCommands(
         },
       },
     ],
-    hint: "Use blood-test upsert only when importing an advanced or bulk JSON payload from @file.json or stdin.",
+    hint: "Use blood-test import-json only when importing an advanced or bulk JSON payload from @file.json or stdin.",
     options: withBaseOptions({
       id: z.string().min(1).optional().describe("Optional existing event id to revise."),
       occurredAt: occurredAtOptionSchema

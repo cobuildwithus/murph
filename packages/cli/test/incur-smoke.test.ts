@@ -1253,9 +1253,47 @@ test('deepthink schema stays aligned with research schema', async () => {
   assert.deepEqual(deepthinkSchema.options, researchSchema.options)
 })
 
-test('automation upsert schema exposes the canonical automation payload input', async () => {
-  const schema = JSON.parse(
-    await runRawCli(['automation', 'upsert', '--schema', '--format', 'json']),
+test('automation save schema exposes typed automation fields and a separate JSON import fallback', async () => {
+  const saveSchema = JSON.parse(
+    await runRawCli(['automation', 'save', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('title' in saveSchema.args.properties, true)
+  assert.deepEqual(saveSchema.args.required, ['title'])
+  assert.equal('input' in saveSchema.options.properties, false)
+  for (const field of [
+    'id',
+    'slug',
+    'status',
+    'summary',
+    'tags',
+    'continuityPolicy',
+    'instructions',
+    'scheduleKind',
+    'scheduleAt',
+    'scheduleEveryMs',
+    'scheduleCron',
+    'scheduleLocalTime',
+    'channel',
+    'deliveryTarget',
+    'identityId',
+    'participantId',
+    'threadId',
+  ]) {
+    assert.equal(field in saveSchema.options.properties, true, field)
+  }
+
+  const importJsonSchema = JSON.parse(
+    await runRawCli(['automation', 'import-json', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1263,8 +1301,8 @@ test('automation upsert schema exposes the canonical automation payload input', 
     }
   }
 
-  assert.equal('input' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault', 'input'])
+  assert.equal('input' in importJsonSchema.options.properties, true)
+  assert.deepEqual(importJsonSchema.options.required, ['vault', 'input'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('automation show schema accepts an id-or-slug lookup', async () => {
@@ -1425,11 +1463,14 @@ test('assistant session show schema emits the normalized session output shape', 
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('automation help points operators at canonical automations', async () => {
-  const upsertHelp = await runRawCli(['automation', 'upsert', '--help'])
+  const saveHelp = await runRawCli(['automation', 'save', '--help'])
+  const importJsonHelp = await runRawCli(['automation', 'import-json', '--help'])
   const scaffoldHelp = await runRawCli(['automation', 'scaffold', '--help'])
 
-  assert.match(upsertHelp, /Create or update one automation record from a JSON payload\./u)
-  assert.match(scaffoldHelp, /Emit a canonical automation payload template/u)
+  assert.match(saveHelp, /Create or update one automation from typed command fields\./u)
+  assert.match(saveHelp, /automation import-json/u)
+  assert.match(importJsonHelp, /Import or bulk-edit one automation from an advanced JSON payload\./u)
+  assert.match(scaffoldHelp, /advanced automation JSON payload template/u)
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('food schedule schema exposes the recurring food options', async () => {

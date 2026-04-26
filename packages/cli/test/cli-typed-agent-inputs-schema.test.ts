@@ -6,10 +6,21 @@ import { createVaultCli } from '../src/vault-cli.js'
 const BASE_OPTION_NAMES = new Set(['requestId', 'vault'])
 const healthRegistryJsonHardCutNouns = [
   'allergy',
+  'blood-test',
   'condition',
   'family',
   'genetics',
   'goal',
+] as const
+
+const jsonImportHardCutCommandNames = [
+  ...healthRegistryJsonHardCutNouns,
+  'automation',
+  'food',
+  'protocol',
+  'provider',
+  'recipe',
+  'scheduled-log',
 ] as const
 
 interface CommandGuard {
@@ -226,6 +237,30 @@ const canonicalTypedCommands = [
       'note',
     ],
   },
+  {
+    label: 'automation save',
+    commandNames: ['automation save'],
+    fieldHints: [
+      'title',
+      'id',
+      'slug',
+      'status',
+      'summary',
+      'tags',
+      'continuityPolicy',
+      'instructions',
+      'scheduleKind',
+      'scheduleAt',
+      'scheduleEveryMs',
+      'scheduleCron',
+      'scheduleLocalTime',
+      'channel',
+      'deliveryTarget',
+      'identityId',
+      'participantId',
+      'threadId',
+    ],
+  },
 ] as const satisfies readonly CommandGuard[]
 
 const typedCommandsWithInputFallback = [
@@ -349,6 +384,12 @@ test('explicit JSON fallback commands remain separate from the canonical typed s
     ['regimen save', 'regimen import-json', 'title'],
     ['family save', 'family import-json', 'title'],
     ['genetics save', 'genetics import-json', 'gene'],
+    ['automation save', 'automation import-json', 'title'],
+    ['provider save', 'provider import-json', 'title'],
+    ['food save', 'food import-json', 'title'],
+    ['recipe save', 'recipe import-json', 'title'],
+    ['blood-test save', 'blood-test import-json', 'title'],
+    ['scheduled-log save', 'scheduled-log import-json', 'title'],
   ] as const) {
     assert.equal(commandNames.has(typedName), true)
     assert.equal(commandNames.has(jsonName), true)
@@ -383,15 +424,21 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
 
   const legacyNames = [
     ['allergy', 'upsert'],
+    ['automation', 'upsert'],
+    ['blood-test', 'upsert'],
     ['condition', 'upsert'],
     ['event', 'upsert'],
     ['family', 'upsert'],
+    ['food', 'upsert'],
     ['genetics', 'upsert'],
     ['goal', 'upsert'],
+    ['provider', 'upsert'],
+    ['recipe', 'upsert'],
+    ['scheduled-log', 'upsert'],
     ['supplement', 'upsert'],
     ['protocol', 'profile', 'upsert'],
     ['protocol', 'save'],
-    ['protocol', 'import-json'],
+    ['protocol', 'upsert'],
     ['protocol', 'scaffold'],
     ['protocol', 'stop'],
   ].map((segments) => segments.join(' '))
@@ -409,8 +456,8 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
     'allergy import-json',
-    'automation upsert',
-    'blood-test upsert',
+    'automation import-json',
+    'blood-test import-json',
     'capture add',
     'condition import-json',
     'document edit',
@@ -423,21 +470,21 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'experiment start',
     'family import-json',
     'food edit',
-    'food upsert',
+    'food import-json',
     'genetics import-json',
     'goal import-json',
     'intervention edit',
     'meal add',
     'meal edit',
     'measurement add',
-    'protocol upsert',
+    'protocol import-json',
     'provider edit',
-    'provider upsert',
+    'provider import-json',
     'recipe edit',
     'regimen import-json',
-    'recipe upsert',
+    'recipe import-json',
     'samples import-json',
-    'scheduled-log upsert',
+    'scheduled-log import-json',
     'supplement import-json',
     'workout add',
     'workout edit',
@@ -469,7 +516,7 @@ test('health registry import-json hard cut is reflected in generated artifacts a
     'config schema.properties.commands.properties',
   )
 
-  for (const noun of healthRegistryJsonHardCutNouns) {
+  for (const noun of jsonImportHardCutCommandNames) {
     assert.match(generatedTypes, new RegExp(`'${noun} import-json':`, 'u'))
     assert.doesNotMatch(generatedTypes, new RegExp(`'${noun} upsert':`, 'u'))
 
@@ -487,9 +534,11 @@ test('health registry import-json hard cut is reflected in generated artifacts a
     assert.equal('import-json' in commandProperties, true)
     assert.equal('upsert' in commandProperties, false)
 
-    const saveHelp = await runSourceCliRaw([noun, 'save', '--help'])
-    assert.match(saveHelp, new RegExp(`${noun} import-json`, 'u'))
-    assert.doesNotMatch(saveHelp, new RegExp(`${noun} upsert`, 'u'))
+    if (noun !== 'protocol') {
+      const saveHelp = await runSourceCliRaw([noun, 'save', '--help'])
+      assert.match(saveHelp, new RegExp(`${noun} import-json`, 'u'))
+      assert.doesNotMatch(saveHelp, new RegExp(`${noun} upsert`, 'u'))
+    }
   }
 })
 

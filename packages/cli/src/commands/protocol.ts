@@ -684,9 +684,9 @@ export function registerProtocolCommands(
     description: "Private Health Commons-backed protocol adaptation commands.",
   });
 
-  protocol.command("upsert", {
+  protocol.command("import-json", {
     args: z.object({}),
-    description: "Create or update one private Health Commons-backed protocol adaptation from JSON.",
+    description: "Import one private Health Commons-backed protocol adaptation from JSON.",
     hint: "--input accepts @file.json or - and may contain either full protocol frontmatter or { frontmatter, body }.",
     options: withBaseOptions({
       input: inputFileOptionSchema,

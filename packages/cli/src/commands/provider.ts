@@ -146,7 +146,7 @@ const providerSaveCommand: FactoryCommandConfig<
       },
     },
   ],
-  hint: 'Use provider upsert only when importing an advanced JSON payload from @file.json or stdin.',
+  hint: 'Use provider import-json only when importing an advanced JSON payload from @file.json or stdin.',
   options: providerSaveOptions,
   output: providerUpsertResultSchema,
   async run({ args, options }) {
@@ -180,7 +180,7 @@ export function registerProviderCommands(
     scaffold: {
       name: 'scaffold',
       args: z.object({}),
-      description: 'Emit an advanced JSON provider payload template for `provider upsert`.',
+      description: 'Emit an advanced JSON provider payload template for `provider import-json`.',
       output: providerScaffoldResultSchema,
       async run({ options, requestId }) {
         return services.core.scaffoldProvider({
@@ -191,7 +191,7 @@ export function registerProviderCommands(
     },
     upsert: {
       description: 'Import or bulk-update one provider Markdown record from an advanced JSON payload file or stdin.',
-      hint: 'Use provider save for the canonical typed create/update path; keep provider upsert for advanced JSON imports from @file.json or stdin.',
+      hint: 'Use provider save for the canonical typed create/update path; keep provider import-json for advanced JSON imports from @file.json or stdin.',
       output: providerUpsertResultSchema,
       async run(input) {
         return services.core.upsertProvider({
@@ -201,6 +201,8 @@ export function registerProviderCommands(
         })
       },
     },
+    jsonImportCommandName: 'import-json',
+    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one provider by canonical id or slug.',
       argName: 'id',

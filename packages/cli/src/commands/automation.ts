@@ -5,13 +5,21 @@ import {
   automationRouteSchema,
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
+  automationScheduleKindValues,
   automationStatusValues,
   type AutomationScaffoldPayload,
+  type AutomationSchedule,
+  type AutomationScheduleKind,
 } from "@murphai/contracts";
 import {
   withBaseOptions,
 } from "@murphai/operator-config/command-helpers";
-import { loadJsonInputObject, textInputOptionSchema } from "@murphai/vault-usecases";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  loadJsonInputObject,
+  normalizeRepeatableFlagOption,
+  textInputOptionSchema,
+} from "@murphai/vault-usecases";
 import {
   pathSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
@@ -24,6 +32,15 @@ import {
   showAutomation,
 } from "@murphai/query";
 const automationSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
+
+interface AutomationScheduleOptions {
+  scheduleAt?: string;
+  scheduleCron?: string;
+  scheduleEveryMs?: number;
+  scheduleKind: AutomationScheduleKind;
+  scheduleLocalTime?: string;
+}
 
 export const automationRecordSchema = z
   .object({
@@ -60,7 +77,7 @@ export const automationShowResultSchema = z.object({
   automation: automationRecordSchema.nullable(),
 });
 
-export const automationUpsertResultSchema = z.object({
+export const automationSaveResultSchema = z.object({
   vault: pathSchema,
   automationId: z.string().min(1),
   lookupId: z.string().min(1),
@@ -80,6 +97,53 @@ export function createAutomationScaffoldPayload(): z.infer<
   return automationScaffoldPayloadSchema.parse(scaffoldAutomationPayload());
 }
 
+function invalidAutomationOption(message: string): never {
+  throw new VaultCliError("invalid_option", message);
+}
+
+function requireStringOption(
+  value: string | undefined,
+  optionName: string,
+): string {
+  if (typeof value === "string" && value.length > 0) return value;
+  return invalidAutomationOption(`--${optionName} is required for this automation save mode.`);
+}
+
+function requireNumberOption(
+  value: number | undefined,
+  optionName: string,
+): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return invalidAutomationOption(`--${optionName} is required for this automation save mode.`);
+}
+
+function buildAutomationScheduleFromOptions(
+  options: AutomationScheduleOptions,
+): AutomationSchedule {
+  switch (options.scheduleKind) {
+    case "at":
+      return automationScheduleSchema.parse({
+        kind: "at",
+        at: requireStringOption(options.scheduleAt, "schedule-at"),
+      });
+    case "every":
+      return automationScheduleSchema.parse({
+        kind: "every",
+        everyMs: requireNumberOption(options.scheduleEveryMs, "schedule-every-ms"),
+      });
+    case "cron":
+      return automationScheduleSchema.parse({
+        kind: "cron",
+        expression: requireStringOption(options.scheduleCron, "schedule-cron"),
+      });
+    case "dailyLocal":
+      return automationScheduleSchema.parse({
+        kind: "dailyLocal",
+        localTime: requireStringOption(options.scheduleLocalTime, "schedule-local-time"),
+      });
+  }
+}
+
 export function registerAutomationCommands(cli: Cli.Cli) {
   const automation = Cli.create("automation", {
     description: "Canonical automation registry commands.",
@@ -87,7 +151,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
 
   automation.command("scaffold", {
     args: z.object({}),
-    description: "Emit a canonical automation payload template for `automation upsert`.",
+    description: "Emit an advanced automation JSON payload template for import fallback use.",
     options: withBaseOptions(),
     output: automationScaffoldResultSchema,
     run(context) {
@@ -95,6 +159,137 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         vault: context.options.vault,
         noun: "automation" as const,
         payload: createAutomationScaffoldPayload(),
+      };
+    },
+  });
+
+  automation.command("save", {
+    args: z.object({
+      title: z.string().min(1).max(160).describe("Automation title."),
+    }),
+    description: "Create or update one automation from typed command fields.",
+    examples: [
+      {
+        args: {
+          title: "Daily mobility",
+        },
+        description: "Save a daily automation without a JSON payload.",
+        options: {
+          channel: "telegram",
+          instructions: "Ask about mobility work and summarize the next step.",
+          scheduleKind: "dailyLocal",
+          scheduleLocalTime: "08:30",
+          slug: "daily-mobility",
+          vault: "./vault",
+        },
+      },
+    ],
+    hint: "Use automation import-json only when importing an advanced JSON payload from @file.json or stdin.",
+    options: withBaseOptions({
+      id: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional existing automation id to update."),
+      slug: z
+        .string()
+        .regex(automationSlugPattern)
+        .optional()
+        .describe("Optional stable lowercase kebab-case slug."),
+      status: z.enum(automationStatusValues).optional().describe("Optional automation status."),
+      summary: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe("Optional automation summary."),
+      tags: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Optional automation tags. Repeat --tags for multiple values."),
+      continuityPolicy: z
+        .enum(automationContinuityPolicyValues)
+        .optional()
+        .describe("Optional continuity policy for scheduled assistant context."),
+      instructions: z
+        .string()
+        .min(1)
+        .describe("Automation instructions to run on the schedule."),
+      scheduleKind: z.enum(automationScheduleKindValues).describe("Schedule discriminator."),
+      scheduleAt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Required timestamp when --schedule-kind=at."),
+      scheduleEveryMs: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Required positive millisecond interval when --schedule-kind=every."),
+      scheduleCron: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Required cron expression when --schedule-kind=cron."),
+      scheduleLocalTime: z
+        .string()
+        .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
+        .optional()
+        .describe("Required HH:MM local time when --schedule-kind=dailyLocal."),
+      channel: z.string().min(1).describe("Outbound route channel."),
+      deliveryTarget: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional route delivery target."),
+      identityId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional route identity id."),
+      participantId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional route participant id."),
+      threadId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional route thread id."),
+    }),
+    output: automationSaveResultSchema,
+    async run(context) {
+      const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
+        automationId: context.options.id,
+        continuityPolicy: context.options.continuityPolicy,
+        instructions: context.options.instructions,
+        route: {
+          channel: context.options.channel,
+          deliveryTarget: context.options.deliveryTarget ?? null,
+          identityId: context.options.identityId ?? null,
+          participantId: context.options.participantId ?? null,
+          threadId: context.options.threadId ?? null,
+        },
+        schedule: buildAutomationScheduleFromOptions(context.options),
+        slug: context.options.slug,
+        status: context.options.status,
+        summary: context.options.summary,
+        tags: normalizeRepeatableFlagOption(context.options.tags, "tags"),
+        title: context.args.title,
+      });
+      const result = await upsertAutomation({
+        ...input,
+        vaultRoot: context.options.vault,
+      });
+
+      return {
+        vault: context.options.vault,
+        automationId: result.record.automationId,
+        lookupId: result.record.slug,
+        path: result.record.relativePath,
+        created: result.created,
       };
     },
   });
@@ -150,21 +345,22 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     },
   });
 
-  automation.command("upsert", {
+  automation.command("import-json", {
     args: z.object({}),
-    description: "Create or update one automation record from a JSON payload.",
+    description: "Import or bulk-edit one automation from an advanced JSON payload.",
+    hint: "Prefer automation save for canonical typed create/update usage.",
     options: withBaseOptions({
       input: textInputOptionSchema.describe(
-        "Automation payload in @file.json form or - for stdin.",
+        "Advanced automation payload in @file.json form or - for stdin.",
       ),
     }),
-    output: automationUpsertResultSchema,
+    output: automationSaveResultSchema,
     async run(context) {
       const input = automationScaffoldPayloadSchema.parse(
-        (await loadJsonInputObject(
+        await loadJsonInputObject(
           context.options.input,
           "automation payload",
-        )) as AutomationScaffoldPayload,
+        ),
       );
       const result = await upsertAutomation({
         ...input,

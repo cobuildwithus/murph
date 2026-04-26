@@ -52,9 +52,10 @@ vault-cli memory upsert <text> --vault <path> --section <section>
 vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]
 vault-cli memory forget <memoryId> --vault <path>
 vault-cli automation scaffold --vault <path>
+vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> --channel <channel> [...]
 vault-cli automation show <lookup> --vault <path>
 vault-cli automation list --vault <path> [--status <status> ...] [--text <query>] [--limit <n>]
-vault-cli automation upsert --vault <path> --input @payload.json|-
+vault-cli automation import-json --vault <path> --input @payload.json|-
 vault-cli device provider list --vault <path> [--baseUrl <url>]
 vault-cli device connect <provider> --vault <path> [--baseUrl <url>] [--returnTo <url>] [--open]
 vault-cli device account list --vault <path> [--baseUrl <url>] [--provider <provider>]
@@ -69,18 +70,18 @@ vault-cli commons protocol list [--query <query>] [--category <category>] [--lim
 vault-cli commons protocol show <key-or-slug>
 vault-cli commons source list --protocol <key-or-slug> [--limit <n>]
 vault-cli provider scaffold --vault <path> [--request-id <id>]
-vault-cli provider upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli provider import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli provider show <id> --vault <path> [--request-id <id>]
 vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] [--request-id <id>]
 vault-cli food scaffold --vault <path> [--request-id <id>]
-vault-cli food upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli food import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli food rename <id> --vault <path> --title <title> [--slug <slug>] [--request-id <id>]
 vault-cli food schedule <title> --vault <path> --time <HH:MM> [--note <text>] [--slug <slug>] [--request-id <id>]
 vault-cli food unschedule <id> --vault <path> [--request-id <id>]
 vault-cli food show <id> --vault <path> [--request-id <id>]
 vault-cli food list --vault <path> [--status active|archived] [--limit <n>] [--request-id <id>]
 vault-cli recipe scaffold --vault <path> [--request-id <id>]
-vault-cli recipe upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli recipe import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli recipe show <id> --vault <path> [--request-id <id>]
 vault-cli recipe list --vault <path> [--status draft|saved|archived] [--limit <n>] [--request-id <id>]
 vault-cli event scaffold --vault <path> --kind <kind> [--request-id <id>]
@@ -164,7 +165,7 @@ vault-cli regimen save <title> --vault <path> --kind medication|supplement|thera
 vault-cli regimen stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]
 vault-cli regimen show <id> --vault <path> [--request-id <id>]
 vault-cli regimen list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
-vault-cli protocol upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli protocol import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli protocol show <id> --vault <path> [--request-id <id>]
 vault-cli protocol list --vault <path> [--commons-protocol <key-or-slug>] [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement scaffold --vault <path> [--request-id <id>]
@@ -214,19 +215,19 @@ Read-only vault metadata and audit commands require an initialized vault root an
 
 ```text
 vault-cli <noun> scaffold --vault <path> [--request-id <id>]
-vault-cli <noun> upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli <noun> import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli <noun> show <id|current> --vault <path> [--request-id <id>]
 vault-cli <noun> list --vault <path> [--limit <n>] [--request-id <id>]
 ```
 
-The placeholder grammar above applies to the frozen health nouns listed below when they expose the shared scaffold/upsert/show/list capability bundle.
+The placeholder grammar above applies to the frozen health nouns listed below when they expose the shared scaffold/import-json/show/list capability bundle.
 
 ## Capability Bundles
 
 The command surface is organized around reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared bundle, noun, and top-level alias taxonomy summarized in this section lives in `packages/contracts/src/command-capabilities.ts`.
 
 - `readable`: `show | list`
-- `payloadCrud`: `scaffold | upsert | show | list`
+- `payloadCrud`: `scaffold | import-json | show | list`
 - `artifactImport`: `import | show | list | manifest`
 - `batchInspection`: `batch show | batch list`
 - `lifecycle`: `create | show | list | update | checkpoint | stop`
@@ -241,14 +242,14 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` / `food unschedule` add the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals or clearing that rule explicitly.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
 - `regimen` is the private medication, supplement, therapy, and habit registry noun; it is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
-- `protocol` is the private Health Commons-backed adaptation noun; it exposes explicit reviewed JSON upsert plus readable/list surfaces, while public recipe discovery stays under `commons protocol`.
+- `protocol` is the private Health Commons-backed adaptation noun; it exposes explicit reviewed JSON import plus readable/list surfaces, while public recipe discovery stays under `commons protocol`.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
 - `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
 - `intake` exposes `import | show | list | manifest | raw | project`.
-- `samples` exposes `add | import-csv | show | list | batch show | batch list`.
+- `samples` exposes `add | import-json | import-csv | show | list | batch show | batch list`.
 - `experiment` is a lifecycle noun.
 - `journal` is a date-addressed document noun.
 - `vault` exposes `show | stats | repair | update`.
@@ -257,7 +258,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `inbox` is a runtime-control noun, including attachment inspection, deterministic promotion flows, and audited model-routing helpers.
 - `assistant` is a provider-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
 - `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert`, `update`, or `forget`. Canonical `memoryId` arguments use `mem_<ULID>` ids, while legacy hash-shaped ids remain readable for existing persisted memory comments.
-- `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes the same payload-CRUD shape as other scaffold/upsert/show/list nouns.
+- `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
 - Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
 - Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
 - Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.
@@ -311,7 +312,7 @@ Read surfaces intentionally separate summary from detail:
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
 - Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use the canonical read id rather than a batch id or internal provenance id.
-- `upsert --input @file.json` uses one file argument and does not expose per-field mutation flags in the public grammar.
+- `import-json --input @file.json` uses one file argument and does not expose per-field mutation flags in the public grammar.
 
 ## Lookup Rules
 
@@ -792,7 +793,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `food upsert`, `food schedule|unschedule`, `recipe upsert`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save`, `supplement import-json`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol upsert`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|plan|start|update|checkpoint|checkpoint-json|stop`, `experiment session log|log-json`, `experiment context log|log-json`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, remaining health `<noun> upsert`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
+- `provider save|import-json`, `food save|import-json|schedule|unschedule`, `recipe save|import-json`, `automation save|import-json`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save`, `supplement import-json`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol import-json`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|plan|start|update|checkpoint|checkpoint-json|stop`, `experiment session log|log-json`, `experiment context log|log-json`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> import-json`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

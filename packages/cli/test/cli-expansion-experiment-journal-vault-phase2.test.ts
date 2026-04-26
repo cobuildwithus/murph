@@ -209,13 +209,16 @@ test('experiment plan/start and private protocol schemas expose explicit JSON in
   const experimentStartSchema = JSON.parse(
     await runRawSliceCli(['experiment', 'start', '--schema', '--format', 'json']),
   ) as typeof experimentPlanSchema
-  const protocolUpsertSchema = JSON.parse(
-    await runRawSliceCli(['protocol', 'upsert', '--schema', '--format', 'json']),
+  const protocolImportJsonSchema = JSON.parse(
+    await runRawSliceCli(['protocol', 'import-json', '--schema', '--format', 'json']),
   ) as typeof experimentPlanSchema
+  const protocolHelp = await runRawSliceCli(['protocol', '--help'])
 
   assert.equal('input' in experimentPlanSchema.options.properties, true)
   assert.equal('input' in experimentStartSchema.options.properties, true)
-  assert.equal('input' in protocolUpsertSchema.options.properties, true)
+  assert.equal('input' in protocolImportJsonSchema.options.properties, true)
+  assert.match(protocolHelp, /\bimport-json\b/u)
+  assert.doesNotMatch(protocolHelp, /\bupsert\b/u)
   assert.deepEqual([...(experimentPlanSchema.options.required ?? [])].sort(), [
     'input',
     'vault',
@@ -224,15 +227,15 @@ test('experiment plan/start and private protocol schemas expose explicit JSON in
     'input',
     'vault',
   ])
-  assert.deepEqual([...(protocolUpsertSchema.options.required ?? [])].sort(), [
+  assert.deepEqual([...(protocolImportJsonSchema.options.required ?? [])].sort(), [
     'input',
     'vault',
   ])
   assert.equal('confirmedPlan' in experimentPlanSchema.output.properties, false)
 })
 
-test.sequential('protocol upsert writes a reviewed private protocol payload', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-private-protocol-upsert-'))
+test.sequential('protocol import-json writes a reviewed private protocol payload', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-private-protocol-import-json-'))
   const payloadPath = path.join(vaultRoot, 'protocol.json')
   const pageRevisionId = `sha256:${'c'.repeat(64)}`
   const runSpecRevisionId = `sha256:${'d'.repeat(64)}`
@@ -304,7 +307,7 @@ test.sequential('protocol upsert writes a reviewed private protocol payload', as
       'utf8',
     )
 
-    const upserted = await runSliceCli<{
+    const imported = await runSliceCli<{
       created: boolean
       lookupId: string
       path: string
@@ -313,7 +316,7 @@ test.sequential('protocol upsert writes a reviewed private protocol payload', as
       slug: string
     }>([
       'protocol',
-      'upsert',
+      'import-json',
       '--vault',
       vaultRoot,
       '--input',
@@ -341,12 +344,12 @@ test.sequential('protocol upsert writes a reviewed private protocol payload', as
       vaultRoot,
     ])
 
-    assert.equal(upserted.ok, true)
-    assert.equal(requireData(upserted).created, true)
-    assert.equal(requireData(upserted).slug, 'dry-sauna-evening-2x')
-    assert.equal(requireData(upserted).lookupId, requireData(upserted).protocolId)
-    assert.match(requireData(upserted).path, /^bank\/protocols\//u)
-    assert.match(requireData(upserted).protocolRevisionId, /^sha256:/u)
+    assert.equal(imported.ok, true)
+    assert.equal(requireData(imported).created, true)
+    assert.equal(requireData(imported).slug, 'dry-sauna-evening-2x')
+    assert.equal(requireData(imported).lookupId, requireData(imported).protocolId)
+    assert.match(requireData(imported).path, /^bank\/protocols\//u)
+    assert.match(requireData(imported).protocolRevisionId, /^sha256:/u)
 
     assert.equal(shownPrivateProtocol.ok, true)
     assert.equal(requireData(shownPrivateProtocol).protocol.slug, 'dry-sauna-evening-2x')

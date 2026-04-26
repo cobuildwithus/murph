@@ -137,7 +137,7 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-test("blood-test save schema exposes typed fields while blood-test upsert remains the JSON fallback", async () => {
+test("blood-test save schema exposes typed fields while blood-test import-json remains the JSON fallback", async () => {
   const cli = createBloodTestCli();
 
   const saveSchema = await readCommandSchema(cli, ["blood-test", "save"]);
@@ -169,10 +169,13 @@ test("blood-test save schema exposes typed fields while blood-test upsert remain
     assert.equal(field in saveSchema.options.properties, true, field);
   }
 
-  const upsertSchema = await readCommandSchema(cli, ["blood-test", "upsert"]);
-  assert.equal("input" in upsertSchema.options.properties, true);
-  assert.equal(upsertSchema.options.required?.includes("input") ?? false, true);
-  assert.deepEqual(upsertSchema.args.required ?? [], []);
+  const importJsonSchema = await readCommandSchema(cli, ["blood-test", "import-json"]);
+  assert.equal("input" in importJsonSchema.options.properties, true);
+  assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(importJsonSchema.args.required ?? [], []);
+  await assert.rejects(async () => {
+    await readCommandSchema(cli, ["blood-test", "upsert"]);
+  });
 });
 
 test("blood-test save maps typed fields and can revise a saved event id", async () => {

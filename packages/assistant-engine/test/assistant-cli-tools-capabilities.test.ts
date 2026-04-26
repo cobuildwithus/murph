@@ -775,6 +775,25 @@ describe('assistant CLI tool capability seam', () => {
     expect(writeToolsWithoutState.some((tool) => tool.name === 'vault.protocol.stop')).toBe(false)
 
     const writeTools = createCanonicalVaultWriteToolDefinitions(context)
+    const writeToolNames = writeTools.map((tool) => tool.name)
+    for (const toolName of [
+      'vault.provider.importJson',
+      'vault.recipe.importJson',
+      'vault.food.importJson',
+      'vault.event.importJson',
+      'vault.samples.importJson',
+    ]) {
+      expect(writeToolNames).toContain(toolName)
+    }
+    for (const toolName of [
+      'vault.provider.upsert',
+      'vault.recipe.upsert',
+      'vault.food.upsert',
+      'vault.event.upsert',
+      'vault.samples.add',
+    ]) {
+      expect(writeToolNames).not.toContain(toolName)
+    }
     await executeTool(writeTools, 'vault.document.import', {
       file: 'raw/inbox/captures/cap_123/attachments/1/report.pdf',
       title: 'Report',
@@ -866,19 +885,19 @@ describe('assistant CLI tool capability seam', () => {
       startedOn: '2026-04-08',
       status: 'active',
     })
-    await executeTool(writeTools, 'vault.provider.upsert', {
+    await executeTool(writeTools, 'vault.provider.importJson', {
       payload: { providerId: 'prov_example', title: 'Example Provider' },
     })
-    await executeTool(writeTools, 'vault.recipe.upsert', {
+    await executeTool(writeTools, 'vault.recipe.importJson', {
       payload: { title: 'Sheet Pan Salmon Bowls' },
     })
-    await executeTool(writeTools, 'vault.food.upsert', {
+    await executeTool(writeTools, 'vault.food.importJson', {
       payload: { title: 'Regular Acai Bowl' },
     })
-    await executeTool(writeTools, 'vault.event.upsert', {
+    await executeTool(writeTools, 'vault.event.importJson', {
       payload: { kind: 'note', title: 'Example event' },
     })
-    await executeTool(writeTools, 'vault.samples.add', {
+    await executeTool(writeTools, 'vault.samples.importJson', {
       payload: { stream: 'body_weight', samples: [] },
     })
     await executeTool(writeTools, 'vault.intake.import', {
@@ -899,7 +918,8 @@ describe('assistant CLI tool capability seam', () => {
       expect(healthToolNames).toContain(`vault.${toolRoot}.importJson`)
       expect(healthToolNames).not.toContain(`vault.${toolRoot}.upsert`)
     }
-    expect(healthToolNames).toContain('vault.blood-test.upsert')
+    expect(healthToolNames).toContain('vault.blood-test.importJson')
+    expect(healthToolNames).not.toContain('vault.blood-test.upsert')
     for (const tool of healthTools) {
       await executeBoundTool(tool, {
         payload: tool.inputExample?.payload ?? {
@@ -1021,19 +1041,19 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(nullRequestWriteTools, 'vault.experiment.create', {
       slug: 'null-request-experiment',
     })
-    await executeTool(nullRequestWriteTools, 'vault.provider.upsert', {
+    await executeTool(nullRequestWriteTools, 'vault.provider.importJson', {
       payload: { providerId: 'prov_null' },
     })
-    await executeTool(nullRequestWriteTools, 'vault.recipe.upsert', {
+    await executeTool(nullRequestWriteTools, 'vault.recipe.importJson', {
       payload: { title: 'Null Request Recipe' },
     })
-    await executeTool(nullRequestWriteTools, 'vault.food.upsert', {
+    await executeTool(nullRequestWriteTools, 'vault.food.importJson', {
       payload: { title: 'Null Request Food' },
     })
-    await executeTool(nullRequestWriteTools, 'vault.event.upsert', {
+    await executeTool(nullRequestWriteTools, 'vault.event.importJson', {
       payload: { kind: 'note', title: 'Null Request Event' },
     })
-    await executeTool(nullRequestWriteTools, 'vault.samples.add', {
+    await executeTool(nullRequestWriteTools, 'vault.samples.importJson', {
       payload: { stream: 'body_weight', samples: [] },
     })
     await executeTool(nullRequestWriteTools, 'vault.intake.import', {
@@ -1727,7 +1747,7 @@ describe('assistant CLI execution adapters', () => {
     await expect(
       failingWriteExecutionAdapters.withAssistantPayloadFile(
         vaultRoot,
-        'vault.provider.upsert',
+        'vault.provider.importJson',
         { providerId: 'prov_fail' },
         async () => 'ok',
       ),
@@ -1844,11 +1864,11 @@ describe('assistant CLI execution adapters', () => {
     await expect(
       withAssistantPayloadFile(
         vaultRoot,
-        'vault.provider.upsert / test',
+        'vault.provider.importJson / test',
         { providerId: 'prov_example' },
         async (inputFile) => {
           stagedInputFile = inputFile
-          expect(path.basename(path.dirname(inputFile))).toMatch(/^vault-provider-upsert-test-/u)
+          expect(path.basename(path.dirname(inputFile))).toMatch(/^vault-provider-importJson-test-/u)
           expect(await readFile(inputFile, 'utf8')).toContain('"providerId": "prov_example"')
           return 'ok'
         },

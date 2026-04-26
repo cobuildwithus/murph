@@ -324,12 +324,20 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       false,
     )
     assert.equal(
+      result.bundle.tools.some((tool) => tool.name === 'vault.recipe.importJson'),
+      true,
+    )
+    assert.equal(
       result.bundle.tools.some((tool) => tool.name === 'vault.recipe.upsert'),
+      false,
+    )
+    assert.equal(
+      result.bundle.tools.some((tool) => tool.name === 'vault.food.importJson'),
       true,
     )
     assert.equal(
       result.bundle.tools.some((tool) => tool.name === 'vault.food.upsert'),
-      true,
+      false,
     )
     assert.equal(
       result.bundle.tools.some((tool) => tool.name === 'vault.show'),
@@ -1159,10 +1167,12 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   assert.equal(catalog.hasTool('web.pdf.read'), false)
   assert.equal(catalog.hasTool('vault.recipe.show'), true)
   assert.equal(catalog.hasTool('vault.recipe.list'), true)
-  assert.equal(catalog.hasTool('vault.recipe.upsert'), true)
+  assert.equal(catalog.hasTool('vault.recipe.importJson'), true)
+  assert.equal(catalog.hasTool('vault.recipe.upsert'), false)
   assert.equal(catalog.hasTool('vault.food.show'), true)
   assert.equal(catalog.hasTool('vault.food.list'), true)
-  assert.equal(catalog.hasTool('vault.food.upsert'), true)
+  assert.equal(catalog.hasTool('vault.food.importJson'), true)
+  assert.equal(catalog.hasTool('vault.food.upsert'), false)
   assert.equal(catalog.hasTool('vault.goal.upsert'), false)
   assert.equal(catalog.hasTool('vault.share.createLink'), false)
   assert.equal(readTextTool?.provenance.origin, 'native-local-only')
@@ -1526,7 +1536,7 @@ test('createDefaultAssistantToolCatalog can bind a bounded text-read-only profil
   assert.equal(catalog.hasTool('assistant.selfTarget.list'), false)
   assert.equal(catalog.hasTool('vault.show'), false)
   assert.equal(catalog.hasTool('vault.journal.append'), false)
-  assert.equal(catalog.hasTool('vault.recipe.upsert'), false)
+  assert.equal(catalog.hasTool('vault.recipe.importJson'), false)
   assert.equal(catalog.hasTool('vault.share.createLink'), false)
 })
 
@@ -1560,9 +1570,9 @@ test('createDefaultAssistantToolCatalog lets canonical writes and outward side e
     },
   )
 
-  assert.equal(noWriteCatalog.hasTool('vault.recipe.upsert'), false)
+  assert.equal(noWriteCatalog.hasTool('vault.recipe.importJson'), false)
   assert.equal(noWriteCatalog.hasTool('vault.share.createLink'), false)
-  assert.equal(explicitOverrideCatalog.hasTool('vault.recipe.upsert'), false)
+  assert.equal(explicitOverrideCatalog.hasTool('vault.recipe.importJson'), false)
   assert.equal(explicitOverrideCatalog.hasTool('vault.share.createLink'), false)
 })
 
@@ -1777,7 +1787,7 @@ test('createDefaultAssistantToolCatalog no longer exposes mirrored assistant mem
   }
 })
 
-test('createDefaultAssistantToolCatalog recipe upsert writes payload files and calls the recipe service with inputFile', async () => {
+test('createDefaultAssistantToolCatalog recipe importJson writes payload files and calls the recipe service with inputFile', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-recipe-tools-'))
   let recordedCall:
     | {
@@ -1829,7 +1839,7 @@ test('createDefaultAssistantToolCatalog recipe upsert writes payload files and c
     const results = await catalog.executeCalls({
       calls: [
         {
-          tool: 'vault.recipe.upsert',
+          tool: 'vault.recipe.importJson',
           input: {
             payload: {
               title: 'Sheet Pan Salmon Bowls',
@@ -1859,7 +1869,7 @@ test('createDefaultAssistantToolCatalog recipe upsert writes payload files and c
   }
 })
 
-test('createDefaultAssistantToolCatalog food upsert writes payload files and calls the food service with inputFile', async () => {
+test('createDefaultAssistantToolCatalog food importJson writes payload files and calls the food service with inputFile', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-food-tools-'))
   let recordedCall:
     | {
@@ -1911,7 +1921,7 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
     const results = await catalog.executeCalls({
       calls: [
         {
-          tool: 'vault.food.upsert',
+          tool: 'vault.food.importJson',
           input: {
             payload: {
               title: 'Regular Acai Bowl',

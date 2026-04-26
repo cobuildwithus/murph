@@ -3208,7 +3208,7 @@ cat
     const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       const child = execFile(
         shimPath,
-        ['recipe', 'upsert', '--input', '-'],
+        ['recipe', 'import-json', '--input', '-'],
         {
           encoding: 'utf8',
           env: withoutNodeV8Coverage({

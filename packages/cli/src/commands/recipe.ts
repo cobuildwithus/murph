@@ -193,7 +193,7 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
     scaffold: {
       name: 'scaffold',
       args: z.object({}),
-      description: 'Emit a recipe payload template for `recipe upsert`.',
+      description: 'Emit a recipe payload template for `recipe import-json`.',
       output: recipeScaffoldResultSchema,
       async run({ options, requestId }) {
         return services.core.scaffoldRecipe({
@@ -203,7 +203,7 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
       },
     },
     upsert: {
-      description: 'Import or bulk upsert one recipe from an explicit JSON payload file or stdin.',
+      description: 'Import or bulk update one recipe from an explicit JSON payload file or stdin.',
       hint: 'Use recipe save for the canonical typed command path. Keep --input for advanced JSON import, bulk, or migration flows.',
       output: recipeUpsertResultSchema,
       async run(input) {
@@ -214,6 +214,8 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
+    jsonImportCommandName: 'import-json',
+    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one recipe by canonical id or slug.',
       argName: 'id',
@@ -293,7 +295,7 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
         },
       },
     ],
-    hint: 'Use recipe upsert only when importing an advanced JSON payload from @file.json or stdin.',
+    hint: 'Use recipe import-json only when importing an advanced JSON payload from @file.json or stdin.',
     options: withBaseOptions({
       id: recipeIdSchema
         .optional()
