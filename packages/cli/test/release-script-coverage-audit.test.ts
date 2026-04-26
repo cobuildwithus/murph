@@ -537,6 +537,7 @@ Updated: 2026-04-24
 
     expect(leanReviewConfig).toContain('include_tests=0')
     expect(leanReviewConfig).toContain('include_docs=0')
+    expect(leanReviewConfig).toContain('snapshot_attachment_name="murph-review-gpt.repo-snapshot.zip"')
     expect(leanReviewConfig).toContain('package_script="scripts/package-audit-context.sh"')
     expect(leanReviewConfig).toContain('review_gpt_register_dir_preset "privacy" "privacy.md"')
     expect(fullReviewConfig).toContain('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review-gpt.config.sh"')
