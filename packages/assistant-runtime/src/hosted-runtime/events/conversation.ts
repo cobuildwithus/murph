@@ -14,6 +14,7 @@ import {
 } from "@murphai/inboxd/connectors/hosted-conversation";
 import {
   createParsedInboxPipeline,
+  type PersistedCapture,
   openInboxRuntime,
 } from "@murphai/inboxd";
 import { createConfiguredParserRegistry } from "@murphai/parsers";
@@ -35,6 +36,20 @@ export async function ingestHostedConversationMessageWake(input: {
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
+  const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
+  return result.metrics;
+}
+
+export interface HostedConversationWakeLocalImportResult {
+  capture: PersistedCapture;
+  metrics: HostedConversationWakeMetrics;
+}
+
+export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
+  wake: HostedExecutionConversationMessageWake;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  vaultRoot: string;
+}): Promise<HostedConversationWakeLocalImportResult> {
   const capture = await normalizeHostedConversationMessageWake(input);
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
@@ -55,11 +70,14 @@ export async function ingestHostedConversationMessageWake(input: {
       runtime,
       vaultRoot: input.vaultRoot,
     });
-    await pipeline.processCapture(capture);
+    const persistedCapture = await pipeline.processCapture(capture);
 
     return {
-      nextWakeAt: null,
-      parserProcessed,
+      capture: persistedCapture,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed,
+      },
     };
   } finally {
     if (pipeline) {
