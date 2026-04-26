@@ -1,4 +1,5 @@
 import {
+  normalizeAssistantBackendTarget,
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
@@ -8,12 +9,18 @@ import {
   isAssistantOpenAICompatibleTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
-import { resolveAssistantSession, type ResolveAssistantSessionInput } from './store.js'
+import {
+  resolveAssistantSession,
+  type ResolveAssistantSessionInput,
+  type ResolvedAssistantSession,
+} from './store.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
 import { resolveAssistantExecutionPlan } from './execution-plan.js'
+import { normalizeAssistantExecutionContext } from './execution-context.js'
+import { normalizeAssistantSessionSnapshot } from './provider-state.js'
 
 export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
@@ -192,11 +199,49 @@ export async function resolveAssistantSessionForMessage(input: {
   defaults: AssistantOperatorDefaults | null
   message: AssistantMessageInput
 }) {
-  return resolveAssistantSession(buildResolveAssistantSessionInput(
+  const resolved = await resolveAssistantSession(buildResolveAssistantSessionInput(
     input.message,
     input.defaults,
     input.boundaryDefaultTarget ?? null,
   ))
+  const hostedDefaultTarget =
+    normalizeAssistantExecutionContext(input.message.executionContext).hosted
+      ?.defaultTarget ?? null
+
+  return applyHostedDefaultTargetToResolvedSession(resolved, hostedDefaultTarget)
+}
+
+export function applyHostedDefaultTargetToResolvedSession(
+  resolved: ResolvedAssistantSession,
+  hostedDefaultTarget: AssistantModelTarget | null | undefined,
+): ResolvedAssistantSession {
+  const defaultTarget = normalizeAssistantBackendTarget(hostedDefaultTarget ?? null)
+  if (!defaultTarget) {
+    return resolved
+  }
+
+  const projectedSession = normalizeAssistantSessionSnapshot({
+    ...resolved.session,
+    target: defaultTarget,
+  })
+  const continuityChanged =
+    projectedSession.providerOptions.continuityFingerprint !==
+    resolved.session.providerOptions.continuityFingerprint
+
+  if (!continuityChanged) {
+    return {
+      ...resolved,
+      session: projectedSession,
+    }
+  }
+
+  return {
+    ...resolved,
+    session: normalizeAssistantSessionSnapshot({
+      ...projectedSession,
+      resumeState: null,
+    }),
+  }
 }
 
 export function resolveAssistantSessionTarget(input: {
