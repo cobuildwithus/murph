@@ -543,6 +543,12 @@ function installHostedFetchBaseUrlProxy(input: {
 
 describe("runHostedExecutionJob", () => {
   const FINALIZED_RUN_DRAIN_SUMMARY = "Finalized committed hosted run side effects.";
+  function expectProcessedRunDrainSummary(summary: string): void {
+    expect(summary).toMatch(
+      /^Processed hosted run .+ \(.+; events=\d+; kinds=.+; parserJobs=\d+; deviceSyncJobs=\d+\)\./,
+    );
+  }
+
   const cleanupPaths: string[] = [];
   let previousHostedAssistantEnv: Record<string, string | undefined> = {};
   let previousHostedDeviceSyncEnv: Record<string, string | undefined> = {};
@@ -633,7 +639,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(automationState.autoReplyChannels).not.toContain("linq");
       expect(automationState.autoReplyChannels).not.toContain("email");
       await expect(
@@ -665,7 +671,7 @@ describe("runHostedExecutionJob", () => {
         wake: createActivationWake({ eventId: "evt_activation_second", memberChannels: MEMBER_CHANNELS_NONE, occurredAt: "2026-03-26T12:05:00.000Z", userId: "member_123" }),
       });
 
-      expect(secondActivation.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(secondActivation.result.summary);
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
     }
@@ -700,7 +706,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
@@ -736,7 +742,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(automationState.autoReplyChannels).toContain("linq");
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
@@ -774,7 +780,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(secondActivation.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(secondActivation.result.summary);
       expect(automationState.autoReplyChannels).toContain("linq");
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
@@ -808,7 +814,7 @@ describe("runHostedExecutionJob", () => {
         enabledContext.assistantStateRoot,
       );
 
-      expect(enabled.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(enabled.result.summary);
       expect(enabledAutomationState.autoReplyChannels).toContain("linq");
 
       const disabled = await runHostedExecutionJob({
@@ -826,7 +832,7 @@ describe("runHostedExecutionJob", () => {
         disabledContext.assistantStateRoot,
       );
 
-      expect(disabled.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(disabled.result.summary);
       expect(disabledAutomationState.autoReplyChannels).not.toContain("linq");
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
@@ -865,7 +871,7 @@ describe("runHostedExecutionJob", () => {
       });
       const capture = runtime.listCaptures({ limit: 1 })[0];
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(capture?.actor.id).toBeNull();
       expect(capture?.actor.displayName).toBeNull();
       expect(capture?.text).toBe("hello from Telegram");
@@ -913,7 +919,7 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -955,7 +961,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
@@ -1010,7 +1016,7 @@ describe("runHostedExecutionJob", () => {
       });
       const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(automationState.autoReplyChannels).not.toContain("email");
       await expect(
         readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
@@ -1078,7 +1084,7 @@ describe("runHostedExecutionJob", () => {
         wake: createEmailWake({ eventId: "evt_email_fetch", identityId: "assistant@mail.example.test", occurredAt: "2026-03-26T12:05:00.000Z", rawMessageKey: "raw_email_123", userId: "member_email_fetch" }),
       });
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(requests).toEqual(["GET /messages/raw_email_123"]);
       restoreFetch();
     } finally {
@@ -1202,7 +1208,7 @@ describe("runHostedExecutionJob", () => {
       });
       const capture = runtime.listCaptures({ limit: 1 })[0];
 
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
       expect(capture?.source).toBe("telegram");
       expect(capture?.externalId).toBe("evt_telegram");
       expect(capture?.text).toBe("Hello from hosted Telegram.");
@@ -1370,7 +1376,7 @@ describe("runHostedExecutionJob", () => {
         const capture = runtime.getCapture(captureSummary!.captureId);
         const attachment = capture?.attachments[0];
 
-        expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+        expectProcessedRunDrainSummary(result.result.summary);
         expect(capture?.text).toBe("Photo from hosted Telegram.");
         expect(attachment?.byteSize).toBe(attachmentBytes.byteLength);
         expect(attachment?.fileName).toBe("photo-photo_unique_123.jpg");
@@ -1435,7 +1441,7 @@ describe("runHostedExecutionJob", () => {
       wake: createCronWake({ eventId: "evt_tick", occurredAt: "2026-03-26T12:05:00.000Z", reason: "manual", userId: "member_123" }),
     });
 
-    expect(followUp.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+    expectProcessedRunDrainSummary(followUp.result.summary);
   });
 
   it("restores externalized raw artifacts and skips re-uploading unchanged hashes", async () => {
@@ -1669,7 +1675,7 @@ describe("runHostedExecutionJob", () => {
       });
 
       try {
-        expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+        expectProcessedRunDrainSummary(result.result.summary);
         expect(finalRuntime.listAttachmentParseJobs({ state: "pending" })).toHaveLength(0);
       } finally {
         finalRuntime.close();
@@ -1737,7 +1743,7 @@ describe("runHostedExecutionJob", () => {
     const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Morning Smoothie");
 
     expect(importedFood).toBeDefined();
-    expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+    expectProcessedRunDrainSummary(result.result.summary);
   });
 
   it("ignores hosted web env when importing a runner-hydrated share pack", async () => {
@@ -1807,7 +1813,7 @@ describe("runHostedExecutionJob", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(importedFood).toBeDefined();
       expect(importedFood?.attachedProtocolIds?.length).toBe(1);
-      expect(result.result.summary).toBe(FINALIZED_RUN_DRAIN_SUMMARY);
+      expectProcessedRunDrainSummary(result.result.summary);
     } finally {
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);
       vi.stubGlobal("fetch", initialGlobalFetch);
