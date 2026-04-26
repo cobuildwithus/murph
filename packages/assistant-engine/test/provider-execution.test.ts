@@ -436,10 +436,6 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       maxRetries: 0,
       messages: [
         {
-          content: 'Earlier answer',
-          role: 'assistant',
-        },
-        {
           content: 'What changed today?',
           role: 'user',
         },
@@ -544,6 +540,10 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
           content: 'Earlier question',
           role: 'user',
         },
+        {
+          content: 'Earlier answer',
+          role: 'assistant',
+        },
       ],
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'openai-compatible',
@@ -567,7 +567,8 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
       messages: [
         {
-          content: 'Earlier question',
+          content:
+            'Conversation so far:\nUser:\nEarlier question\n\nAssistant:\nEarlier answer',
           role: 'user',
         },
         {

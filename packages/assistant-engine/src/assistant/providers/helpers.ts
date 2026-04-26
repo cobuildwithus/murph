@@ -8,7 +8,9 @@ import {
 import {
   isAssistantCodexTargetConfig,
   isAssistantOpenAICompatibleTargetConfig,
+  isAssistantResponsesTargetConfig,
   normalizeAssistantHeaders,
+  supportsAssistantNativeResume,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import type {
@@ -159,10 +161,45 @@ function requireAssistantProviderUserPrompt(
   )
 }
 
-function hasAssistantProviderNativeResume(
+function hasAssistantProviderUsableNativeResume(
   input: AssistantProviderTurnExecutionInput,
 ): boolean {
-  return normalizeNullableString(input.resumeProviderSessionId) !== null
+  const resumeProviderSessionId = normalizeNullableString(
+    input.resumeProviderSessionId,
+  )
+  if (!resumeProviderSessionId) {
+    return false
+  }
+
+  if (
+    input.providerConfig.policy.zeroDataRetention === true ||
+    !supportsAssistantNativeResume(input.providerConfig)
+  ) {
+    return false
+  }
+
+  return isAssistantResponsesTargetConfig(input.providerConfig)
+    ? resumeProviderSessionId.startsWith('resp_')
+    : true
+}
+
+export type AssistantProviderHistoryMode =
+  | 'none'
+  | 'structured-messages'
+  | 'text-bootstrap'
+
+export function resolveAssistantProviderHistoryMode(
+  input: AssistantProviderTurnExecutionInput,
+): AssistantProviderHistoryMode {
+  if (hasAssistantProviderUsableNativeResume(input)) {
+    return 'none'
+  }
+
+  if (isAssistantResponsesTargetConfig(input.providerConfig)) {
+    return 'text-bootstrap'
+  }
+
+  return 'structured-messages'
 }
 
 function resolveAssistantProviderContextSections(
@@ -172,7 +209,7 @@ function resolveAssistantProviderContextSections(
     input.sessionContext?.binding
       ? getAssistantBindingContextLines(input.sessionContext.binding)
       : []
-  const continuityContext = hasAssistantProviderNativeResume(input)
+  const continuityContext = hasAssistantProviderUsableNativeResume(input)
     ? null
     : normalizeNullableString(input.continuityContext)
 
@@ -220,7 +257,7 @@ function sanitizeAssistantModelContentParts(
 function resolveAssistantProviderFlatPromptTranscriptSection(
   input: AssistantProviderTurnExecutionInput,
 ): string | null {
-  if (hasAssistantProviderNativeResume(input)) {
+  if (hasAssistantProviderUsableNativeResume(input)) {
     return null
   }
 
@@ -291,7 +328,7 @@ export function resolveAssistantProviderPrompt(
     return explicitPrompt
   }
 
-  const systemPrompt = hasAssistantProviderNativeResume(input)
+  const systemPrompt = hasAssistantProviderUsableNativeResume(input)
     ? null
     : normalizeNullableString(input.systemPrompt)
 
@@ -309,9 +346,7 @@ export function resolveAssistantProviderPrompt(
 export function buildAssistantProviderMessages(
   input: AssistantProviderTurnExecutionInput,
 ): ModelMessage[] {
-  const messages: ModelMessage[] = sanitizeAssistantProviderConversationMessages(
-    input.conversationMessages,
-  )
+  const messages = buildAssistantProviderHistoryMessages(input)
   const userMessageContent = buildAssistantProviderUserMessageContent(input)
   if (userMessageContent) {
     messages.push({
@@ -337,6 +372,31 @@ export function buildAssistantProviderMessages(
     }),
   })
   return messages
+}
+
+function buildAssistantProviderHistoryMessages(
+  input: AssistantProviderTurnExecutionInput,
+): ModelMessage[] {
+  switch (resolveAssistantProviderHistoryMode(input)) {
+    case 'none':
+      return []
+    case 'text-bootstrap': {
+      const transcriptSection =
+        resolveAssistantProviderFlatPromptTranscriptSection(input)
+      return transcriptSection
+        ? [
+            {
+              role: 'user',
+              content: transcriptSection,
+            } satisfies UserModelMessage,
+          ]
+        : []
+    }
+    case 'structured-messages':
+      return sanitizeAssistantProviderConversationMessages(
+        input.conversationMessages,
+      )
+  }
 }
 
 export function mergeCodexConfigOverrides(input: {
