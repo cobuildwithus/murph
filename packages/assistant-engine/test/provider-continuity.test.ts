@@ -7,6 +7,8 @@ import {
   resolveAssistantProviderTurnContinuityPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
+  buildAssistantProviderMessages,
+  resolveAssistantProviderHistoryMode,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.js'
 import {
@@ -186,6 +188,118 @@ describe('flat prompt native resume', () => {
     expect(prompt).toContain('Assistant:\nEarlier assistant turn')
     expect(prompt).toContain('Fresh bootstrap context.')
     expect(prompt).toContain('User message:\nCurrent user turn')
+  })
+})
+
+describe('provider message history modes', () => {
+  const responsesConfig = normalizeAssistantProviderConfig({
+    model: 'gpt-5',
+    presetId: 'openai',
+    provider: 'openai-compatible',
+  })
+
+  it('serializes OpenAI Responses fallback history as text bootstrap context', () => {
+    const input = {
+      conversationMessages: [
+        { role: 'user' as const, content: 'Earlier user turn' },
+        { role: 'assistant' as const, content: 'Earlier assistant turn' },
+      ],
+      providerConfig: responsesConfig,
+      resumeProviderSessionId: null,
+      userPrompt: 'Current user turn',
+      workingDirectory: '/tmp',
+    }
+
+    expect(resolveAssistantProviderHistoryMode(input)).toBe('text-bootstrap')
+    expect(buildAssistantProviderMessages(input)).toEqual([
+      {
+        role: 'user',
+        content:
+          'Conversation so far:\nUser:\nEarlier user turn\n\nAssistant:\nEarlier assistant turn',
+      },
+      {
+        role: 'user',
+        content: 'Current user turn',
+      },
+    ])
+  })
+
+  it('treats non-response OpenAI Responses resume ids as fallback history', () => {
+    const input = {
+      conversationMessages: [
+        { role: 'user' as const, content: 'Earlier user turn' },
+        { role: 'assistant' as const, content: 'Earlier assistant turn' },
+      ],
+      providerConfig: responsesConfig,
+      resumeProviderSessionId: 'gen_gateway_123',
+      userPrompt: 'Current user turn',
+      workingDirectory: '/tmp',
+    }
+
+    expect(resolveAssistantProviderHistoryMode(input)).toBe('text-bootstrap')
+    expect(buildAssistantProviderMessages(input)[0]).toEqual({
+      role: 'user',
+      content:
+        'Conversation so far:\nUser:\nEarlier user turn\n\nAssistant:\nEarlier assistant turn',
+    })
+  })
+
+  it('omits replayed history when OpenAI Responses native resume is active', () => {
+    const input = {
+      conversationMessages: [
+        { role: 'user' as const, content: 'Earlier user turn' },
+        { role: 'assistant' as const, content: 'Earlier assistant turn' },
+      ],
+      providerConfig: responsesConfig,
+      resumeProviderSessionId: 'resp_123',
+      userPrompt: 'Current user turn',
+      workingDirectory: '/tmp',
+    }
+
+    expect(resolveAssistantProviderHistoryMode(input)).toBe('none')
+    expect(buildAssistantProviderMessages(input)).toEqual([
+      {
+        role: 'user',
+        content: 'Current user turn',
+      },
+    ])
+  })
+
+  it('keeps structured replay for generic chat-message providers with stale resume ids', () => {
+    const genericConfig = normalizeAssistantProviderConfig({
+      baseUrl: 'https://example.invalid/v1',
+      model: 'custom-chat-model',
+      provider: 'openai-compatible',
+      providerName: 'Custom provider',
+    })
+    const input = {
+      conversationMessages: [
+        { role: 'user' as const, content: 'Earlier user turn' },
+        { role: 'assistant' as const, content: 'Earlier assistant turn' },
+      ],
+      providerConfig: genericConfig,
+      resumeProviderSessionId: 'stale-session',
+      userPrompt: 'Current user turn',
+      workingDirectory: '/tmp',
+    }
+
+    expect(resolveAssistantProviderHistoryMode(input)).toBe(
+      'structured-messages',
+    )
+    expect(buildAssistantProviderMessages(input)).toEqual([
+      {
+        role: 'user',
+        content: 'Earlier user turn',
+      },
+      {
+        role: 'assistant',
+        content: 'Earlier assistant turn',
+      },
+      {
+        role: 'user',
+        content: 'Current user turn',
+      },
+    ])
   })
 })
 
