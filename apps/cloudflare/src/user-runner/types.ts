@@ -1,6 +1,5 @@
 import type {
   HostedExecutionBundleRef,
-  HostedExecutionRunnerResult,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionUserStatus,
@@ -54,25 +53,6 @@ export interface RunnerStateRecord {
   run: HostedExecutionRunStatus | null;
   timeline: HostedExecutionTimelineEntry[];
   userId: string;
-}
-
-export interface RunnerPendingCleanupEmailRef {
-  eventId: string;
-  rawMessageKey: string;
-  userId: string;
-}
-
-export interface RunnerPendingCleanupTelegramRef {
-  messageId: string;
-  target: string;
-}
-
-export interface RunnerPendingCleanupState {
-  committedResult?: HostedExecutionRunnerResult | null;
-  emailMessages: RunnerPendingCleanupEmailRef[];
-  linqMessageIds: string[];
-  required: boolean;
-  telegramMessages: RunnerPendingCleanupTelegramRef[];
 }
 
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;

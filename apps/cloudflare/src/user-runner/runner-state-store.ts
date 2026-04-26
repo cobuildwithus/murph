@@ -9,9 +9,8 @@ import {
   type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
 import {
-  parseHostedBrowserVaultReplicaRef,
   parseHostedExecutionCursorSnapshotRef,
-  parseHostedExecutionRunnerResult,
+  parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
@@ -26,7 +25,6 @@ import {
 import {
   MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectStateLike,
-  type RunnerPendingCleanupState,
   type RunnerStateRecord,
 } from "./types.js";
 
@@ -44,7 +42,6 @@ export interface RunnerLeaseOwnerInput {
 
 export class RunnerStateStore {
   private cachedBundleRef: HostedExecutionBundleRef | null = null;
-  private readonly volatilePendingCleanupByRunId = new Map<string, RunnerPendingCleanupState | null>();
   private volatileRun: HostedExecutionRunStatus | null = null;
   private volatileTimeline: HostedExecutionTimelineEntry[] = [];
   private userId: string | null = null;
@@ -272,112 +269,6 @@ export class RunnerStateStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async readPendingRunCleanup(
-    runId: string,
-  ): Promise<RunnerPendingCleanupState | null> {
-    try {
-      const normalized = await this.readDurablePendingRunCleanup(runId);
-      if (normalized) {
-        return normalized;
-      }
-    } catch (error) {
-      const fallback = this.volatilePendingCleanupByRunId.get(runId);
-      if (fallback) {
-        emitHostedExecutionStructuredLog({
-          component: "runner",
-          details: {
-            runId,
-          },
-          error,
-          level: "warn",
-          message:
-            "Hosted pending cleanup sidecar read failed; falling back to runner-local cleanup recovery state for this Durable Object instance.",
-          phase: "wake.running",
-          userId: this.tryResolveUserIdSync() ?? "unknown",
-        });
-        return fallback;
-      }
-
-      throw error;
-    }
-
-    return this.volatilePendingCleanupByRunId.get(runId) ?? null;
-  }
-
-  async readPendingRunCleanupRecoveryRunIds(): Promise<string[]> {
-    const value = await this.state.storage.get<unknown>(pendingRunCleanupRunIdsStorageKey());
-    const runIds = normalizePendingRunCleanupRunIds(value);
-
-    if (runIds.length === 0) {
-      await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
-      return [];
-    }
-
-    const retained: string[] = [];
-    for (const runId of runIds) {
-      const cleanup = await this.readDurablePendingRunCleanup(runId);
-      if (cleanup) {
-        retained.push(runId);
-      }
-    }
-
-    if (retained.length > 0) {
-      await this.state.storage.put(pendingRunCleanupRunIdsStorageKey(), retained);
-    } else {
-      await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
-    }
-
-    return retained;
-  }
-
-  async readDurablePendingRunCleanup(
-    runId: string,
-  ): Promise<RunnerPendingCleanupState | null> {
-    const value = await this.state.storage.get<unknown>(pendingRunCleanupStorageKey(runId));
-    const normalized = normalizeRunnerPendingCleanupState(value);
-
-    if (normalized) {
-      this.volatilePendingCleanupByRunId.set(runId, normalized);
-    }
-
-    return normalized;
-  }
-
-  async writePendingRunCleanup(
-    runId: string,
-    cleanup: RunnerPendingCleanupState | null,
-  ): Promise<void> {
-    this.volatilePendingCleanupByRunId.set(runId, cleanup);
-    if (cleanup) {
-      const runIds = await this.readPendingRunCleanupRecoveryRunIds();
-      const nextRunIds = normalizePendingRunCleanupRunIds([
-        ...runIds,
-        runId,
-      ]);
-      await this.state.storage.put(pendingRunCleanupRunIdsStorageKey(), nextRunIds);
-      try {
-        await this.state.storage.put(pendingRunCleanupStorageKey(runId), cleanup);
-      } catch (error) {
-        try {
-          await this.removePendingRunCleanupRecoveryRunId(runId);
-        } catch {
-          // Best-effort rollback only; preserve the original payload write failure.
-        }
-        throw error;
-      }
-      return;
-    }
-
-    await this.state.storage.delete(pendingRunCleanupStorageKey(runId));
-    await this.removePendingRunCleanupRecoveryRunId(runId);
-  }
-
-  async clearPendingRunCleanup(runId: string): Promise<void> {
-    this.volatilePendingCleanupByRunId.delete(runId);
-    await this.state.storage.delete(pendingRunCleanupStorageKey(runId));
-    await this.removePendingRunCleanupRecoveryRunId(runId);
-  }
-
   async readTrackedAuthoritativeCursor(): Promise<{
     browserVaultReplicaRef: HostedExecutionRunTrackedCursor["browserVaultReplicaRef"];
     snapshotRef: HostedExecutionRunTrackedCursor["snapshotRef"];
@@ -415,17 +306,6 @@ export class RunnerStateStore {
     }
 
     await this.state.storage.put(trackedAuthoritativeCursorStorageKey(), cursor);
-  }
-
-  private async removePendingRunCleanupRecoveryRunId(runId: string): Promise<void> {
-    const runIds = await this.readPendingRunCleanupRecoveryRunIds();
-    const retainedRunIds = runIds.filter((candidate) => candidate !== runId);
-
-    if (retainedRunIds.length > 0) {
-      await this.state.storage.put(pendingRunCleanupRunIdsStorageKey(), retainedRunIds);
-    } else {
-      await this.state.storage.delete(pendingRunCleanupRunIdsStorageKey());
-    }
   }
 
   private readStateSync(): RunnerStateRecord {
@@ -668,41 +548,8 @@ function sameHostedExecutionRun(
     && left.startedAt === right.startedAt;
 }
 
-function pendingRunCleanupStorageKey(runId: string): string {
-  return `runner:pending-cleanup:${runId}`;
-}
-
-function pendingRunCleanupRunIdsStorageKey(): string {
-  return "runner:pending-cleanup:run-ids";
-}
-
 function trackedAuthoritativeCursorStorageKey(): string {
   return "runner:tracked-authoritative-cursor";
-}
-
-function normalizePendingRunCleanupRunId(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function normalizePendingRunCleanupRunIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const normalized = new Set<string>();
-  for (const candidate of value) {
-    const runId = normalizePendingRunCleanupRunId(candidate);
-    if (runId) {
-      normalized.add(runId);
-    }
-  }
-
-  return [...normalized];
 }
 
 function normalizeTrackedAuthoritativeCursorState(
@@ -727,91 +574,4 @@ function normalizeTrackedAuthoritativeCursorState(
       "Hosted runner tracked authoritative cursor snapshotRef",
     ),
   };
-}
-
-function normalizeRunnerPendingCleanupState(value: unknown): RunnerPendingCleanupState | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const record = value as {
-    committedResult?: unknown;
-    emailMessages?: unknown;
-    linqMessageIds?: unknown;
-    required?: unknown;
-    telegramMessages?: unknown;
-  };
-  const emailMessages = Array.isArray(record.emailMessages)
-    ? record.emailMessages.flatMap((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return [];
-      }
-
-      const candidate = entry as {
-        eventId?: unknown;
-        rawMessageKey?: unknown;
-        userId?: unknown;
-      };
-      return typeof candidate.eventId === "string"
-        && typeof candidate.rawMessageKey === "string"
-        && typeof candidate.userId === "string"
-        ? [{
-            eventId: candidate.eventId,
-            rawMessageKey: candidate.rawMessageKey,
-            userId: candidate.userId,
-          }]
-        : [];
-    })
-    : [];
-  const linqMessageIds = Array.isArray(record.linqMessageIds)
-    ? record.linqMessageIds.filter((messageId): messageId is string => typeof messageId === "string")
-    : [];
-  const telegramMessages = Array.isArray(record.telegramMessages)
-    ? record.telegramMessages.flatMap((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return [];
-      }
-
-      const candidate = entry as {
-        messageId?: unknown;
-        target?: unknown;
-      };
-      return typeof candidate.messageId === "string" && typeof candidate.target === "string"
-        ? [{
-            messageId: candidate.messageId,
-            target: candidate.target,
-          }]
-        : [];
-    })
-    : [];
-  const required = record.required === true
-    || emailMessages.length > 0
-    || linqMessageIds.length > 0
-    || telegramMessages.length > 0;
-
-  if (!required) {
-    return null;
-  }
-
-  const committedResult = normalizePendingCleanupCommittedResult(record.committedResult);
-
-  return {
-    ...(committedResult ? { committedResult } : {}),
-    emailMessages,
-    linqMessageIds,
-    required,
-    telegramMessages,
-  };
-}
-
-function normalizePendingCleanupCommittedResult(value: unknown): RunnerPendingCleanupState["committedResult"] {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  try {
-    return parseHostedExecutionRunnerResult(value);
-  } catch {
-    return null;
-  }
 }

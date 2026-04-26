@@ -14,15 +14,12 @@ import type {
   HostedRunCleanupTarget,
   HostedRunCommitResponse,
   HostedRunEventResult,
+  HostedRunFinalizeResponse,
   HostedRunRecord,
 } from "@murphai/hosted-execution/contracts";
 import {
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node/hosted-bundle-codec";
-import type {
-  HostedAssistantDeliveryOutcome,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
-
 import { createHostedBrowserVaultReplicaStore } from "../browser-vault-store.js";
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
 import type { HostedExecutionEnvironment } from "../env.js";
@@ -30,8 +27,8 @@ import {
   acquireHostedRunFromWeb,
   commitHostedRunToWeb,
   finalizeHostedRunInWeb,
-  readHostedRunStatusFromWeb,
   releaseHostedRunFinalizeInWeb,
+  readHostedRunStatusFromWeb,
 } from "../web-control-plane.ts";
 import type {
   RunnerRunProcessor,
@@ -64,15 +61,10 @@ type HostedRunFinalizationProcessor = Pick<
   | "cleanupTransientWakeDataBestEffortForRunDrain"
   | "executeRunDrain"
   | "finalizeRunDrain"
-  | "persistPendingRunCleanupData"
 >;
 
 type HostedRunFinalizationStateStore = Pick<
   RunnerStateStore,
-  | "clearPendingRunCleanup"
-  | "readDurablePendingRunCleanup"
-  | "readPendingRunCleanup"
-  | "readPendingRunCleanupRecoveryRunIds"
   | "readTrackedAuthoritativeCursor"
   | "writeTrackedAuthoritativeCursor"
 >;
@@ -233,38 +225,6 @@ export async function prepareAndCommitAcquiredHostedRun(
     run,
     userId: input.userId,
   });
-  if (execution.finalizeRequired) {
-    const persistedCleanup = await persistPendingRunCleanupDataRequired(context, {
-      assistantDeliveryOutcomes: execution.assistantDeliveryOutcomes ?? [],
-      ...(execution.adoptedCleanupTargets && execution.adoptedCleanupTargets.length > 0
-        ? { cleanupTargets: execution.adoptedCleanupTargets }
-        : {}),
-      committedResult: execution.committedResult ?? null,
-      runId: run.id,
-      userId: input.userId,
-      wakes: cleanupWakes,
-    });
-    if (!persistedCleanup) {
-      await cleanupCandidateCursorTransitionBestEffort(context, {
-        candidateBrowserVaultReplicaRef: execution.browserVaultReplicaRef ?? null,
-        candidateSnapshotRef: execution.cursorSnapshotRef,
-        currentCursor: input.acquired.cursor,
-        userId: input.userId,
-      });
-      await clearPendingRunCleanupDataBestEffort(context, {
-        runId: run.id,
-        userId: input.userId,
-      });
-      return failAcquiredHostedRun(context, {
-        acquired: input.acquired,
-        failureCode: "HOSTED_RUN_FINALIZE_CLEANUP_PERSIST_FAILED",
-        run,
-        runToken,
-        userId: input.userId,
-      });
-    }
-  }
-
   context.recordHostedRunBreadcrumb({
     message: "Cloudflare attempted to commit the acquired hosted run.",
     phase: "commit_attempted",
@@ -338,10 +298,6 @@ export async function prepareAndCommitAcquiredHostedRun(
       currentCursor: commit.cursor,
       userId: input.userId,
     });
-    await clearPendingRunCleanupDataBestEffort(context, {
-      runId: run.id,
-      userId: input.userId,
-    });
     return {
       cursor: commit.cursor,
       state: "backpressured",
@@ -408,7 +364,6 @@ export async function prepareAndCommitAcquiredHostedRun(
 
   if (!cleanupCompleted) {
     await context.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: execution.assistantDeliveryOutcomes ?? [],
       ...(execution.adoptedCleanupTargets && execution.adoptedCleanupTargets.length > 0
         ? { cleanupTargets: execution.adoptedCleanupTargets }
         : {}),
@@ -448,64 +403,7 @@ export async function finalizeAcquiredHostedRun(
     };
   }
 
-  let committedResult = input.committedResult ?? null;
-
-  if (input.cleanupWakes === undefined) {
-    let pendingCleanup: Awaited<ReturnType<RunnerStateStore["readPendingRunCleanup"]>>;
-
-    try {
-      pendingCleanup = await context.stateStore.readPendingRunCleanup(run.id);
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "cloudflare.user-runner",
-        details: {
-          runId: run.id,
-        },
-        error,
-        level: "warn",
-        message:
-          "Hosted run finalize resume could not read pending cleanup recovery state; refusing to finalize until recovery data is available.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      await releaseHostedRunFinalizeForRetry(context, {
-        failureCode: "HOSTED_RUN_FINALIZE_CLEANUP_RECOVERY_UNREADABLE",
-        run,
-        runToken,
-        userId: input.userId,
-      });
-      return {
-        cursor: input.acquired.cursor,
-        state: "backpressured",
-      };
-    }
-
-    if (!pendingCleanup?.required) {
-      emitHostedExecutionStructuredLog({
-        component: "cloudflare.user-runner",
-        details: {
-          runId: run.id,
-        },
-        level: "warn",
-        message:
-          "Hosted run finalize resume is missing pending cleanup recovery state; refusing to finalize until recovery data is available.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      await releaseHostedRunFinalizeForRetry(context, {
-        failureCode: "HOSTED_RUN_FINALIZE_CLEANUP_RECOVERY_MISSING",
-        run,
-        runToken,
-        userId: input.userId,
-      });
-      return {
-        cursor: input.acquired.cursor,
-        state: "backpressured",
-      };
-    }
-
-    committedResult = pendingCleanup.committedResult ?? null;
-  }
+  const committedResult = input.committedResult ?? null;
 
   await context.syncRunnerBundleCacheToCursor(input.acquired.cursor.snapshotRef);
   context.recordHostedRunBreadcrumb({
@@ -567,13 +465,11 @@ export async function finalizeAcquiredHostedRun(
     });
 
     if (finalized.finalized) {
-      await context.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
-        ...(input.cleanupTargets && input.cleanupTargets.length > 0
-          ? { cleanupTargets: input.cleanupTargets }
-          : {}),
-        runId: run.id,
+      await cleanupCommittedHostedRunWakeDataBestEffort(context, {
+        cleanupTargets: input.cleanupTargets ?? null,
+        cleanupWakes: input.cleanupWakes ?? [],
+        run,
         userId: input.userId,
-        wakes: input.cleanupWakes ?? [],
       });
     }
 
@@ -598,25 +494,37 @@ export async function finalizeAcquiredHostedRun(
     };
   }
 
-  const finalized = await finalizeHostedRunInWeb({
-    baseUrl: context.hostedWebBaseUrl,
-    body: {
-      browserVaultReplicaRef: execution.browserVaultReplicaRef ?? null,
-      finalSnapshotRef: execution.cursorSnapshotRef,
-      ...(execution.nextRuntimeWakeAt === undefined
-        ? {}
-        : {
-          nextRuntimeWakeAt: execution.nextRuntimeWakeAt ?? null,
-          nextRuntimeWakeReason: execution.nextRuntimeWakeAt ? "runtime" : null,
-        }),
-      redactedSummary: execution.redactedSummary ?? null,
-      runId: run.id,
-      runToken,
-    },
-    boundUserId: input.userId,
-    callbackSigning: context.callbackSigning,
-    timeoutMs: context.webControlTimeoutMs,
-  });
+  let finalized: HostedRunFinalizeResponse;
+  try {
+    finalized = await finalizeHostedRunInWeb({
+      baseUrl: context.hostedWebBaseUrl,
+      body: {
+        browserVaultReplicaRef: execution.browserVaultReplicaRef ?? null,
+        finalSnapshotRef: execution.cursorSnapshotRef,
+        ...(execution.nextRuntimeWakeAt === undefined
+          ? {}
+          : {
+            nextRuntimeWakeAt: execution.nextRuntimeWakeAt ?? null,
+            nextRuntimeWakeReason: execution.nextRuntimeWakeAt ? "runtime" : null,
+          }),
+        redactedSummary: execution.redactedSummary ?? null,
+        runId: run.id,
+        runToken,
+      },
+      boundUserId: input.userId,
+      callbackSigning: context.callbackSigning,
+      timeoutMs: context.webControlTimeoutMs,
+    });
+  } catch (error) {
+    await cleanupCommittedHostedRunWakeDataBestEffort(context, {
+      cleanupTargets: input.cleanupTargets ?? null,
+      cleanupWakes: input.cleanupWakes ?? [],
+      error,
+      run,
+      userId: input.userId,
+    });
+    throw error;
+  }
 
   context.recordHostedRunBreadcrumb({
     level: finalized.finalized ? "info" : "warn",
@@ -646,14 +554,11 @@ export async function finalizeAcquiredHostedRun(
         userId: input.userId,
       });
     }
-    await context.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
-      assistantDeliveryOutcomes: execution.assistantDeliveryOutcomes ?? [],
-      ...(input.cleanupTargets && input.cleanupTargets.length > 0
-        ? { cleanupTargets: input.cleanupTargets }
-        : {}),
-      runId: run.id,
+    await cleanupCommittedHostedRunWakeDataBestEffort(context, {
+      cleanupTargets: input.cleanupTargets ?? null,
+      cleanupWakes: input.cleanupWakes ?? [],
+      run,
       userId: input.userId,
-      wakes: input.cleanupWakes ?? [],
     });
   } else {
     const authoritativeCursorCleanupApplied = await cleanupCommittedCursorTransitionBestEffort(
@@ -682,6 +587,44 @@ export async function finalizeAcquiredHostedRun(
     cursor: finalized.cursor,
     state: finalized.finalized ? "completed" : "backpressured",
   };
+}
+
+async function cleanupCommittedHostedRunWakeDataBestEffort(
+  context: Pick<HostedRunFinalizationContext, "runProcessor">,
+  input: {
+    cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
+    cleanupWakes: readonly HostedIngressEnvelope[];
+    error?: unknown;
+    run: HostedRunRecord;
+    userId: string;
+  },
+): Promise<void> {
+  try {
+    await context.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
+      ...(input.cleanupTargets && input.cleanupTargets.length > 0
+        ? { cleanupTargets: input.cleanupTargets }
+        : {}),
+      runId: input.run.id,
+      userId: input.userId,
+      wakes: input.cleanupWakes,
+    });
+  } catch (cleanupError) {
+    emitHostedExecutionStructuredLog({
+      component: "cloudflare.user-runner",
+      details: {
+        cleanupTargetCount: input.cleanupTargets?.length ?? 0,
+        cleanupWakeCount: input.cleanupWakes.length,
+        finalizeErrorPresent: input.error !== undefined,
+        runId: input.run.id,
+      },
+      error: cleanupError,
+      level: "warn",
+      message:
+        "Cloudflare could not clean up committed hosted wake storage after finalization; continuing because storage cleanup is best-effort.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+  }
 }
 
 export async function cleanupCommittedCursorTransitionBestEffort(
@@ -810,16 +753,11 @@ export async function reconcileTrackedAuthoritativeCursorBestEffort(
   context: Pick<
     HostedRunFinalizationContext,
     | "bucket"
-    | "callbackSigning"
     | "ensureRunnerStores"
-    | "hostedWebBaseUrl"
-    | "webControlTimeoutMs"
-    | "runProcessor"
     | "stateStore"
   >,
   input: {
     currentCursor: HostedExecutionCursorState;
-    preservePendingCleanupRunId?: string | null;
     userId: string;
   },
 ): Promise<boolean> {
@@ -844,11 +782,6 @@ export async function reconcileTrackedAuthoritativeCursorBestEffort(
   }
 
   if (!trackedCursor) {
-    await replayRecoveredPendingRunCleanupBestEffort(context, {
-      preservePendingCleanupRunId: input.preservePendingCleanupRunId ?? null,
-      pruneStaleNonFinalized: false,
-      userId: input.userId,
-    });
     await writeTrackedAuthoritativeCursorBestEffort(context, {
       cursor: input.currentCursor,
       userId: input.userId,
@@ -877,203 +810,11 @@ export async function reconcileTrackedAuthoritativeCursorBestEffort(
     return false;
   }
 
-  const recoveredPendingCleanup = await replayRecoveredPendingRunCleanupBestEffort(context, {
-    preservePendingCleanupRunId: input.preservePendingCleanupRunId ?? null,
-    pruneStaleNonFinalized: authoritativeCursorAdvanced,
-    userId: input.userId,
-  });
-  if (!recoveredPendingCleanup) {
-    return false;
-  }
-
   await writeTrackedAuthoritativeCursorBestEffort(context, {
     cursor: input.currentCursor,
     userId: input.userId,
   });
   return authoritativeCursorAdvanced;
-}
-
-export async function replayRecoveredPendingRunCleanupBestEffort(
-  context: Pick<
-    HostedRunFinalizationContext,
-    | "callbackSigning"
-    | "hostedWebBaseUrl"
-    | "webControlTimeoutMs"
-    | "runProcessor"
-    | "stateStore"
-  >,
-  input: {
-    preservePendingCleanupRunId?: string | null;
-    pruneStaleNonFinalized: boolean;
-    userId: string;
-  },
-): Promise<boolean> {
-  let runIds: string[];
-  try {
-    runIds = await context.stateStore.readPendingRunCleanupRecoveryRunIds();
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "cloudflare.user-runner",
-      error,
-      level: "warn",
-      message:
-        "Hosted runner could not read the durable pending cleanup recovery pointer after an authoritative cursor advance.",
-      phase: "wake.running",
-      userId: input.userId,
-    });
-    return false;
-  }
-
-  if (runIds.length === 0) {
-    return true;
-  }
-
-  let recoveredAll = true;
-  for (const runId of runIds) {
-    if (
-      input.preservePendingCleanupRunId
-      && runId === input.preservePendingCleanupRunId
-    ) {
-      continue;
-    }
-
-    let runStatus: Awaited<ReturnType<typeof readHostedRunStatusFromWeb>>;
-    try {
-      runStatus = await readHostedRunStatusFromWeb({
-        baseUrl: context.hostedWebBaseUrl,
-        body: {
-          runId,
-        },
-        boundUserId: input.userId,
-        callbackSigning: context.callbackSigning,
-        timeoutMs: context.webControlTimeoutMs,
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "cloudflare.user-runner",
-        details: {
-          runId,
-        },
-        error,
-        level: "warn",
-        message:
-          "Hosted runner could not verify whether durable pending cleanup recovery is still authoritative; leaving retry inputs durable.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      recoveredAll = false;
-      continue;
-    }
-
-    if (runStatus.run?.id !== runId || runStatus.run.status !== "finalized") {
-      if (!input.pruneStaleNonFinalized) {
-        continue;
-      }
-      if (
-        runStatus.run?.id === runId
-        && (
-          runStatus.run.status === "committed_needs_finalize"
-          || runStatus.run.status === "finalizing"
-        )
-      ) {
-        continue;
-      }
-      emitHostedExecutionStructuredLog({
-        component: "cloudflare.user-runner",
-        details: {
-          runId,
-          runStatus: runStatus.run?.status ?? null,
-        },
-        level: "warn",
-        message:
-          "Hosted runner found stale durable pending cleanup recovery state for a non-finalized run; clearing it instead of replaying cleanup.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      await clearPendingRunCleanupDataBestEffort(context, {
-        runId,
-        userId: input.userId,
-      });
-      try {
-        const remaining = await context.stateStore.readDurablePendingRunCleanup(runId);
-        if (remaining) {
-          recoveredAll = false;
-        }
-      } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "cloudflare.user-runner",
-          details: {
-            runId,
-          },
-          error,
-          level: "warn",
-          message:
-            "Hosted runner could not confirm that stale durable pending cleanup recovery inputs were cleared.",
-          phase: "wake.running",
-          userId: input.userId,
-        });
-        recoveredAll = false;
-      }
-      continue;
-    }
-
-    try {
-      await context.runProcessor.cleanupTransientWakeDataBestEffortForRunDrain({
-        runId,
-        userId: input.userId,
-        wakes: [],
-      });
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "cloudflare.user-runner",
-        details: {
-          runId,
-        },
-        error,
-        level: "warn",
-        message:
-          "Hosted runner could not replay durable pending cleanup after an authoritative cursor advance.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      recoveredAll = false;
-      continue;
-    }
-
-    try {
-      const remaining = await context.stateStore.readDurablePendingRunCleanup(runId);
-      if (remaining) {
-        emitHostedExecutionStructuredLog({
-          component: "cloudflare.user-runner",
-          details: {
-            runId,
-          },
-          level: "warn",
-          message:
-            "Hosted runner replayed durable pending cleanup after an authoritative cursor advance, but retry inputs remain durable and will be retried.",
-          phase: "wake.running",
-          userId: input.userId,
-        });
-        recoveredAll = false;
-      }
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "cloudflare.user-runner",
-        details: {
-          runId,
-        },
-        error,
-        level: "warn",
-        message:
-          "Hosted runner could not confirm whether durable pending cleanup replay fully cleared its retry inputs.",
-        phase: "wake.running",
-        userId: input.userId,
-      });
-      recoveredAll = false;
-    }
-  }
-
-  return recoveredAll;
 }
 
 export async function writeTrackedAuthoritativeCursorBestEffort(
@@ -1124,71 +865,6 @@ export async function cleanupCandidateCursorTransitionBestEffort(
     previousCursor: candidateCursor,
     userId: input.userId,
   });
-}
-
-export async function persistPendingRunCleanupDataRequired(
-  context: Pick<HostedRunFinalizationContext, "runProcessor">,
-  input: {
-    assistantDeliveryOutcomes?: readonly HostedAssistantDeliveryOutcome[] | null;
-    cleanupTargets?: readonly HostedRunCleanupTarget[] | null;
-    committedResult?: HostedExecutionRunnerResult | null;
-    runId: string;
-    userId: string;
-    wakes: readonly HostedIngressEnvelope[];
-  },
-): Promise<boolean> {
-  try {
-    await context.runProcessor.persistPendingRunCleanupData({
-      assistantDeliveryOutcomes: input.assistantDeliveryOutcomes ?? [],
-      ...(input.cleanupTargets && input.cleanupTargets.length > 0
-        ? { cleanupTargets: input.cleanupTargets }
-        : {}),
-      committedResult: input.committedResult ?? null,
-      runId: input.runId,
-      wakes: input.wakes,
-    });
-    return true;
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "cloudflare.user-runner",
-      details: {
-        cleanupWakeCount: input.wakes.length,
-        runId: input.runId,
-      },
-      error,
-      level: "warn",
-      message:
-        "Hosted run pending cleanup persistence failed; refusing to commit a finalize-required snapshot without durable cleanup recovery state.",
-      phase: "wake.running",
-      userId: input.userId,
-    });
-    return false;
-  }
-}
-
-export async function clearPendingRunCleanupDataBestEffort(
-  context: Pick<HostedRunFinalizationContext, "stateStore">,
-  input: {
-    runId: string;
-    userId: string;
-  },
-): Promise<void> {
-  try {
-    await context.stateStore.clearPendingRunCleanup(input.runId);
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "cloudflare.user-runner",
-      details: {
-        runId: input.runId,
-      },
-      error,
-      level: "warn",
-      message:
-        "Hosted run pending cleanup sidecar clear failed after the run lost commit authority; continuing without cleanup-state pruning.",
-      phase: "wake.running",
-      userId: input.userId,
-    });
-  }
 }
 
 export async function releaseHostedRunFinalizeForRetry(

@@ -90,6 +90,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/failover.json",
     "Assistant provider failover cooldown state that must survive hosted resume.",
   ),
+  definePortableAssistantFile(
+    ".runtime/operations/assistant/hosted-provider-cleanup.json",
+    "Hosted provider-visible cleanup retry state that must move with hosted post-commit finalization.",
+  ),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant/cron",
     "Assistant cron container for portable scheduling and automation continuity descendants.",

@@ -35,9 +35,12 @@ const mocks = vi.hoisted(() => ({
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedBrowserVaultReplica: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
+  drainHostedProviderCleanupAfterCommit: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
+  readHostedProviderCleanupPreparedResult: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
+  recordHostedProviderCleanupBeforeCommit: vi.fn(),
   runHostedAssistantRuntimeTimerLane: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   runHostedNoopSystemWakeLane: vi.fn(),
@@ -127,6 +130,15 @@ vi.mock("../src/hosted-runtime/usage.ts", () => ({
 
 vi.mock("../src/hosted-runtime/browser-vault.ts", () => ({
   exportHostedBrowserVaultReplica: mocks.exportHostedBrowserVaultReplica,
+}));
+
+vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
+  drainHostedProviderCleanupAfterCommit:
+    mocks.drainHostedProviderCleanupAfterCommit,
+  readHostedProviderCleanupPreparedResult:
+    mocks.readHostedProviderCleanupPreparedResult,
+  recordHostedProviderCleanupBeforeCommit:
+    mocks.recordHostedProviderCleanupBeforeCommit,
 }));
 
 import {
@@ -294,11 +306,19 @@ beforeEach(() => {
     failed: 0,
     pending: 0,
   });
+  mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValue({
+    attemptedLinqMessageCount: 0,
+    deletedLinqMessageCount: 0,
+    failedLinqMessageCount: 0,
+    nextWakeAt: null,
+  });
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (executionContext) =>
     executionContext,
   );
   mocks.listHostedBundleArtifacts.mockReturnValue([]);
+  mocks.readHostedProviderCleanupPreparedResult.mockResolvedValue(null);
   mocks.refreshAssistantStatusSnapshot.mockResolvedValue(undefined);
+  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
   mocks.runHostedAssistantRuntimeTimerLane.mockResolvedValue({
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
@@ -404,6 +424,11 @@ describe("assistant-runtime execution coverage", () => {
       expect(close).toHaveBeenCalledTimes(1);
       assert.equal(result.committedResult.result.nextWakeAt, null);
       assert.match(result.committedResult.result.summary, /conversation\.message/u);
+      expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+        linqMessageIds: ["linq_message_123"],
+        preparedResult: result.committedResult.result,
+        vaultRoot: "/tmp/vault-root",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -601,6 +626,50 @@ describe("assistant-runtime execution coverage", () => {
         userId: "member_123",
       }),
     });
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith({
+      assistantDeliveryOutcomes: [
+        {
+          deliveryChannel: "telegram",
+          deliveryErrorCode: null,
+          deliveryStatus: "sent",
+          effectFingerprint: hostedDeliveryEffect.fingerprint,
+          effectId: hostedDeliveryEffect.effectId,
+          providerMessageId: "telegram_message_123",
+          providerThreadId: "thread_123",
+          retryable: false,
+          target: "chat_123",
+          targetKind: "participant",
+        },
+      ],
+      env: {},
+      preparedResult: {
+        eventsHandled: 7,
+        nextWakeAt: "2026-04-08T00:05:00.000Z",
+        redactedDetails: {
+          maintenance: "device-sync",
+        },
+        redactedLogEntries: [
+          {
+            component: "runtime",
+            eventId: "evt_runtime_timer",
+            level: "info",
+            message: "prepared summary log",
+            phase: "commit.recorded",
+            redacted: {
+              lane: "maintenance",
+            },
+          },
+        ],
+        summary: "Prepared runtime drain preserved metadata.",
+      },
+      vaultRoot: "/tmp/vault-root",
+      wake: buildHostedExecutionRuntimeTimerWake({
+        eventId: "evt_runtime_timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      }),
+    });
     expect(mocks.createHostedArtifactUploadSink).toHaveBeenCalledWith({
       artifactStore: expect.any(Object),
       knownArtifactHashes: new Set(["sha_materialized", "sha_preserved"]),
@@ -736,5 +805,49 @@ describe("assistant-runtime execution coverage", () => {
           "Hosted runtime could not export the browser vault replica; returning the final bundle without it.",
       }),
     );
+  });
+
+  it("keeps runtime cleanup retry wake in the final result when provider cleanup fails", async () => {
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 0,
+      failedLinqMessageCount: 1,
+      nextWakeAt: "2026-04-08T00:03:00.000Z",
+    });
+
+    const result = await completeHostedRunDrainAfterCommit({
+      request: {
+        bundle: "committed-bundle",
+        run: HOSTED_RUN_CONTEXT,
+        runDrain: {
+          acquiredAt: "2026-04-08T00:00:00.000Z",
+          committedResult: {
+            bundle: "committed-bundle",
+            result: {
+              eventsHandled: 7,
+              nextWakeAt: "2026-04-08T00:05:00.000Z",
+              summary: "Prepared runtime drain preserved metadata.",
+            },
+          },
+          events: [],
+          inputCommittedSeq: "24",
+          inputCursorVersion: "4",
+          runId: "run_123",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+          resumeFinalize: true,
+        },
+      },
+      restored: createRestored(),
+      runtime: createRuntime(),
+      wake: buildHostedExecutionRuntimeTimerWake({
+        eventId: "evt_runtime_timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      }),
+    });
+
+    assert.equal(result.result.result.nextWakeAt, "2026-04-08T00:03:00.000Z");
   });
 });
