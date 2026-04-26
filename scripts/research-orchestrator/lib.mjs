@@ -692,6 +692,24 @@ for (const artifact of requiredArtifacts) {
     sourcePath = targetPath;
   }
 
+  if (!sourcePath && logicalName === "ARTIFACT_MANIFEST_DRAFT") {
+    const manifestCandidates = rawCandidates.filter((entry) =>
+      entry.fileName.toLowerCase().endsWith("research-artifacts.json"),
+    );
+    if (manifestCandidates.length === 1) {
+      sourcePath = manifestCandidates[0].absolutePath;
+    }
+  }
+
+  if (!sourcePath && logicalName === "PACKAGE_DRAFT_ARCHIVE") {
+    const zipCandidates = rawCandidates.filter((entry) =>
+      entry.fileName.toLowerCase().endsWith(".zip"),
+    );
+    if (zipCandidates.length === 1) {
+      sourcePath = zipCandidates[0].absolutePath;
+    }
+  }
+
   if (!sourcePath && requiredArtifacts.length === 1 && rawCandidates.length === 1) {
     sourcePath = rawCandidates[0].absolutePath;
   }

@@ -276,7 +276,7 @@ export const HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES = [
 export type HealthCommonsBiomarkerCommunityOutcomeState =
   (typeof HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES)[number];
 
-const KEY_PATTERN = "^[a-z_]+:[a-z0-9][a-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$";
+const KEY_PATTERN = "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";

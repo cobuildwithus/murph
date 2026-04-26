@@ -1975,15 +1975,15 @@ if [[ "$#" -ge 4 && "$1" == "exec" && "$2" == "cobuild-review-gpt" && "$3" == "t
   mkdir -p "$output_dir/downloads"
   printf '%s\\n' '# cold plunge protocol draft' >"$output_dir/downloads/cold-plunge.md"
   printf '%s\\n' '# cold water immersion family draft' >"$output_dir/downloads/cold-water-immersion.md"
-  cat >"$output_dir/downloads/research-artifacts.json" <<'JSON'
+  cat >"$output_dir/downloads/cold-water-immersion-research-artifacts.json" <<'JSON'
 {"artifacts":[]}
 JSON
-  printf '%s\\n' 'PK' >"$output_dir/downloads/cold-water-immersion-package-draft.zip"
+  printf '%s\\n' 'PK' >"$output_dir/downloads/health-commons-cold-water-package.zip"
   cat >"$output_dir/thread.json" <<JSON
 {"chatUrl":"$chat_url","assistantSnapshots":[{"text":"Attached the package draft files."}]}
 JSON
   cat >"$output_dir/status.json" <<JSON
-{"chatUrl":"$chat_url","downloadedArtifacts":["$output_dir/downloads/cold-plunge.md","$output_dir/downloads/cold-water-immersion.md","$output_dir/downloads/research-artifacts.json","$output_dir/downloads/cold-water-immersion-package-draft.zip"]}
+{"chatUrl":"$chat_url","downloadedArtifacts":["$output_dir/downloads/cold-plunge.md","$output_dir/downloads/cold-water-immersion.md","$output_dir/downloads/cold-water-immersion-research-artifacts.json","$output_dir/downloads/health-commons-cold-water-package.zip"]}
 JSON
   exit 0
 fi
