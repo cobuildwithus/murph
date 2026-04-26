@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION,
   HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
+  type HealthCommonsExperimentOnboarding,
   type HealthCommonsPageFrontmatter,
 } from "@murphai/contracts";
 
@@ -26,9 +27,47 @@ function createBiomarkerPage(): HealthCommonsSourcePage {
   };
 }
 
+function createMeasurementMethodPage(): HealthCommonsSourcePage {
+  const frontmatter: HealthCommonsPageFrontmatter = {
+    schemaVersion: HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
+    entityType: "measurement_method",
+    key: "measurement_method:cardio/wearable-vo2max-estimate",
+    slug: "measurement-methods/cardio/wearable-vo2max-estimate",
+    title: "Wearable VO2max Estimate",
+    measurementMethod: {
+      tier: "consumer_device",
+      modalities: ["wearable"],
+      measuredBiomarkerKeys: ["biomarker:estimated-vo2max"],
+      outputs: [
+        {
+          outputId: "wearable_vo2max_estimate",
+          label: "Wearable VO2max estimate",
+          valueType: "number",
+          unit: "ml/kg/min",
+          mapsToBiomarkerKey: "biomarker:estimated-vo2max",
+          direction: "higher_is_better",
+        },
+      ],
+      procedure: {
+        summary: "Use the same wearable's cardio fitness estimate.",
+        steps: ["Use the same wearable model and app account across the run."],
+      },
+    },
+  };
+
+  return {
+    body: "A consumer wearable VO2max estimate method.",
+    frontmatter,
+    rawFrontmatter: null,
+    relativePath: "measurement-methods/cardio/wearable-vo2max-estimate.md",
+  };
+}
+
 function createProtocolPage(input: {
+  adaptationPolicy?: HealthCommonsExperimentOnboarding["adaptationPolicy"];
   body?: string;
   confirmationPrompt?: string;
+  measurementPlan?: NonNullable<HealthCommonsPageFrontmatter["measurementPlan"]>;
   testPlanId?: string;
 } = {}): HealthCommonsSourcePage {
   const frontmatter: HealthCommonsPageFrontmatter = {
@@ -62,6 +101,9 @@ function createProtocolPage(input: {
       cautionLevel: "high",
       stopIf: ["Chest pain"],
     },
+    ...(input.measurementPlan === undefined
+      ? {}
+      : { measurementPlan: input.measurementPlan }),
     experimentOnboarding: {
       schemaVersion: HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION,
       startIntent: {
@@ -77,8 +119,15 @@ function createProtocolPage(input: {
           askPolicy: "ask_if_unknown",
           required: true,
           options: ["bike", "rower"],
+          target: {
+            object: "experimentRun",
+            field: "modality",
+          },
         },
       ],
+      ...(input.adaptationPolicy === undefined
+        ? {}
+        : { adaptationPolicy: input.adaptationPolicy }),
       planDefaults: {
         testPlanId: input.testPlanId ?? "wearable-cardio-fitness-49d",
         baselineDays: 7,
@@ -105,15 +154,21 @@ function createProtocolPage(input: {
 }
 
 function createContentSet(input: {
+  adaptationPolicy?: HealthCommonsExperimentOnboarding["adaptationPolicy"];
   body?: string;
   confirmationPrompt?: string;
+  measurementPlan?: NonNullable<HealthCommonsPageFrontmatter["measurementPlan"]>;
   testPlanId?: string;
 } = {}): HealthCommonsContentSet {
   return {
     artifactManifests: [],
     changes: [],
     evidenceAppraisals: [],
-    pages: [createBiomarkerPage(), createProtocolPage(input)],
+    pages: [
+      createBiomarkerPage(),
+      ...(input.measurementPlan === undefined ? [] : [createMeasurementMethodPage()]),
+      createProtocolPage(input),
+    ],
     redirects: [],
   };
 }
@@ -169,6 +224,104 @@ describe("buildHealthCommonsCatalogFromContent", () => {
     expect(secondRevision).not.toEqual(firstRevision);
   });
 
+  it("changes runSpecRevisionId without changing recipeHash when adaptation policy changes", () => {
+    const createAdaptationPolicy = (
+      guidance: string,
+    ): NonNullable<HealthCommonsExperimentOnboarding["adaptationPolicy"]> => ({
+      fields: [
+        {
+          id: "modality",
+          label: "Modality",
+          target: {
+            object: "protocol",
+            field: "effectiveSpec.modality",
+          },
+          sourceSlotIds: ["modality"],
+          requiredForRunSpec: true,
+          protocolReusable: true,
+          guidance,
+        },
+      ],
+      reusableSetup: {
+        enabled: true,
+        target: {
+          object: "protocol",
+          field: "setupSnapshot",
+        },
+        sourceSlotIds: ["modality"],
+      },
+    });
+    const firstCatalog = buildHealthCommonsCatalogFromContent(
+      createContentSet({
+        adaptationPolicy: createAdaptationPolicy(
+          "Use the profile only when the modality still matches.",
+        ),
+      }),
+    );
+    const secondCatalog = buildHealthCommonsCatalogFromContent(
+      createContentSet({
+        adaptationPolicy: createAdaptationPolicy(
+          "Use the profile only when modality and schedule still match.",
+        ),
+      }),
+    );
+
+    const firstRevision = firstCatalog.entities.find(
+      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    )?.revision;
+    const secondRevision = secondCatalog.entities.find(
+      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    )?.revision;
+
+    expect(firstRevision?.runSpecRevisionId).toBeTruthy();
+    expect(secondRevision?.runSpecRevisionId).toBeTruthy();
+    expect(secondRevision?.runSpecRevisionId).not.toEqual(firstRevision?.runSpecRevisionId);
+    expect(firstRevision?.recipeHash).toBeTruthy();
+    expect(secondRevision?.recipeHash).toEqual(firstRevision?.recipeHash);
+  });
+
+  it("changes runSpecRevisionId without changing recipeHash when measurement plan changes", () => {
+    const createMeasurementPlan = (
+      label: string,
+    ): NonNullable<HealthCommonsPageFrontmatter["measurementPlan"]> => ({
+      schemaVersion: "murph.commons.measurement-plan.v1",
+      defaultPathId: "wearable-vo2max",
+      paths: [
+        {
+          pathId: "wearable-vo2max",
+          label,
+          tier: "consumer_device",
+          required: true,
+          methodKeys: ["measurement_method:cardio/wearable-vo2max-estimate"],
+          outcomeKeys: ["biomarker:estimated-vo2max"],
+        },
+      ],
+    });
+    const firstCatalog = buildHealthCommonsCatalogFromContent(
+      createContentSet({
+        measurementPlan: createMeasurementPlan("Default wearable VO2max estimate"),
+      }),
+    );
+    const secondCatalog = buildHealthCommonsCatalogFromContent(
+      createContentSet({
+        measurementPlan: createMeasurementPlan("Default same-device wearable VO2max estimate"),
+      }),
+    );
+
+    const firstRevision = firstCatalog.entities.find(
+      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    )?.revision;
+    const secondRevision = secondCatalog.entities.find(
+      (entity) => entity.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    )?.revision;
+
+    expect(firstRevision?.runSpecRevisionId).toBeTruthy();
+    expect(secondRevision?.runSpecRevisionId).toBeTruthy();
+    expect(secondRevision?.runSpecRevisionId).not.toEqual(firstRevision?.runSpecRevisionId);
+    expect(firstRevision?.recipeHash).toBeTruthy();
+    expect(secondRevision?.recipeHash).toEqual(firstRevision?.recipeHash);
+  });
+
   it("rejects onboarding testPlan ids that are missing from the protocol", () => {
     expect(() =>
       buildHealthCommonsCatalogFromContent(
@@ -177,5 +330,73 @@ describe("buildHealthCommonsCatalogFromContent", () => {
         }),
       ),
     ).toThrow(/planDefaults\.testPlanId points to missing test plan missing-test-plan/);
+  });
+
+  it("rejects adaptation policy references that do not resolve inside the protocol page", () => {
+    const validAdaptationPolicy: NonNullable<HealthCommonsExperimentOnboarding["adaptationPolicy"]> = {
+      fields: [
+        {
+          id: "modality",
+          label: "Modality",
+          target: {
+            object: "protocol",
+            field: "effectiveSpec.modality",
+          },
+          sourceSlotIds: ["modality"],
+        },
+      ],
+      measurementPlan: {
+        testPlanId: "wearable-cardio-fitness-49d",
+        requiredSignals: ["biomarker:estimated-vo2max"],
+      },
+      reusableSetup: {
+        enabled: true,
+        sourceSlotIds: ["modality"],
+      },
+    };
+
+    expect(() =>
+      buildHealthCommonsCatalogFromContent(
+        createContentSet({
+          adaptationPolicy: {
+            ...validAdaptationPolicy,
+            fields: [
+              {
+                ...validAdaptationPolicy.fields[0],
+                sourceSlotIds: ["missing_slot"],
+              },
+            ],
+          },
+        }),
+      ),
+    ).toThrow(/sourceSlotIds points to missing setup slot missing_slot/);
+
+    expect(() =>
+      buildHealthCommonsCatalogFromContent(
+        createContentSet({
+          adaptationPolicy: {
+            ...validAdaptationPolicy,
+            measurementPlan: {
+              ...validAdaptationPolicy.measurementPlan,
+              testPlanId: "missing-test-plan",
+            },
+          },
+        }),
+      ),
+    ).toThrow(/adaptationPolicy\.measurementPlan\.testPlanId points to missing test plan missing-test-plan/);
+
+    expect(() =>
+      buildHealthCommonsCatalogFromContent(
+        createContentSet({
+          adaptationPolicy: {
+            ...validAdaptationPolicy,
+            measurementPlan: {
+              ...validAdaptationPolicy.measurementPlan,
+              requiredSignals: ["biomarker:missing"],
+            },
+          },
+        }),
+      ),
+    ).toThrow(/adaptationPolicy\.measurementPlan\.requiredSignals points to missing health commons target biomarker:missing/);
   });
 });

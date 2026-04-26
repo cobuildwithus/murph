@@ -6,7 +6,7 @@ import { test as baseTest, vi } from 'vitest'
 import {
   initializeVault,
   upsertFood,
-  upsertProtocolItem,
+  upsertRegimen,
 } from '@murphai/core'
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import { writeAssistantChatResultArtifacts } from '@murphai/assistant-engine/assistant/automation/artifacts'
@@ -1948,7 +1948,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
 
   try {
     await initializeVault({ vaultRoot })
-    const creatine = await upsertProtocolItem({
+    const creatine = await upsertRegimen({
       vaultRoot,
       title: 'Creatine monohydrate',
       kind: 'supplement',
@@ -1960,7 +1960,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
       vaultRoot,
       title: 'Morning Smoothie',
       kind: 'smoothie',
-      attachedProtocolIds: [creatine.record.entity.protocolId],
+      attachedRegimenIds: [creatine.record.entity.regimenId],
     })
 
     const catalog = createDefaultAssistantToolCatalog(
@@ -1994,7 +1994,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
           tool: 'vault.share.createLink',
           input: {
             foods: [{ slug: 'morning-smoothie' }],
-            includeAttachedProtocols: true,
+            includeAttachedRegimens: true,
             logMeal: {
               food: { slug: 'morning-smoothie' },
             },
@@ -2012,12 +2012,12 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
     )
     assert.equal(
       ((recordedRequest?.pack as {
-        entities?: Array<{ kind: string; payload?: { attachedProtocolRefs?: string[] } }>
+        entities?: Array<{ kind: string; payload?: { attachedRegimenRefs?: string[] } }>
       })?.entities ?? []).some(
         (entity) =>
           entity.kind === 'food'
-          && Array.isArray(entity.payload?.attachedProtocolRefs)
-          && entity.payload.attachedProtocolRefs.length === 1,
+          && Array.isArray(entity.payload?.attachedRegimenRefs)
+          && entity.payload.attachedRegimenRefs.length === 1,
       ),
       true,
     )

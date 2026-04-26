@@ -16,9 +16,9 @@ import {
   createDirectEventBackedEntityEditCommandDefinition,
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
-const protocolIdSchema = z
+const regimenIdSchema = z
   .string()
-  .regex(/^prot_[0-9A-Za-z]+$/u, 'Expected a canonical protocol id in prot_* form.')
+  .regex(/^reg_[0-9A-Za-z]+$/u, 'Expected a canonical regimen id in reg_* form.')
 const interventionLookupSchema = z
   .string()
   .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical intervention event id in evt_* form.')
@@ -55,14 +55,14 @@ export function registerInterventionCommands(
         },
       },
       {
-        description: 'Capture an HBOT clinic session and link it to a protocol.',
+        description: 'Capture an HBOT clinic session and link it to a regimen.',
         args: {
           text: 'HBOT session at the clinic.',
         },
         options: {
           vault: './vault',
           duration: 60,
-          protocolId: 'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
+          regimenId: 'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
         },
       },
     ],
@@ -86,10 +86,10 @@ export function registerInterventionCommands(
         .describe(
           'Optional intervention type override such as "sauna" or "hbot".',
         ),
-      protocolId: protocolIdSchema
+      regimenId: regimenIdSchema
         .optional()
         .describe(
-          'Optional protocol id to relate this intervention session back to one active therapy or habit.',
+          'Optional regimen id to relate this intervention session back to one active therapy or habit.',
         ),
       occurredAt: occurredAtOptionSchema
         .optional()
@@ -108,9 +108,9 @@ export function registerInterventionCommands(
         durationMinutes: options.duration,
         interventionType:
           typeof options.type === 'string' ? options.type : undefined,
-        protocolId:
-          typeof options.protocolId === 'string'
-            ? options.protocolId
+        regimenId:
+          typeof options.regimenId === 'string'
+            ? options.regimenId
             : undefined,
         occurredAt: await normalizeOccurredAtOption({
           vault: options.vault,

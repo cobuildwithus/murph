@@ -23,188 +23,277 @@
       "minLength": 1,
       "maxLength": 160
     },
-    "kind": {
-      "type": "string",
-      "enum": [
-        "medication",
-        "supplement",
-        "therapy",
-        "habit"
-      ]
-    },
     "status": {
       "type": "string",
       "enum": [
-        "active",
-        "paused",
-        "completed",
-        "stopped"
+        "available",
+        "archived"
       ]
     },
-    "startedOn": {
-      "type": "string",
-      "format": "date"
+    "commonsProtocolRef": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+        },
+        "pageRevisionId": {
+          "type": "string",
+          "pattern": "^sha256:.*"
+        },
+        "runSpecRevisionId": {
+          "type": "string",
+          "pattern": "^sha256:.*"
+        },
+        "testPlanId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "key",
+        "pageRevisionId",
+        "runSpecRevisionId"
+      ],
+      "additionalProperties": false
     },
-    "stoppedOn": {
-      "type": "string",
-      "format": "date"
+    "lineage": {
+      "type": "object",
+      "properties": {
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "health_commons_protocol",
+            "protocol"
+          ]
+        },
+        "parentProtocolRef": {
+          "type": "object",
+          "properties": {
+            "protocolId": {
+              "type": "string",
+              "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "protocolRevisionId": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "effectiveSpecHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "protocolId",
+            "protocolRevisionId",
+            "effectiveSpecHash"
+          ],
+          "additionalProperties": false
+        },
+        "notes": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "required": [
+        "sourceKind"
+      ],
+      "additionalProperties": false
     },
-    "substance": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 160
-    },
-    "dose": {
-      "type": "number",
-      "minimum": 0
-    },
-    "unit": {
-      "type": "string",
-      "pattern": "^[A-Za-z0-9._/%-]+$"
-    },
-    "schedule": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 160
-    },
-    "brand": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 160
-    },
-    "manufacturer": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 160
-    },
-    "servingSize": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 160
-    },
-    "ingredients": {
+    "diff": {
+      "maxItems": 100,
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "compound": {
+          "path": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 160
+            "maxLength": 240
           },
-          "label": {
+          "op": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 160
+            "enum": [
+              "add",
+              "remove",
+              "replace"
+            ]
           },
-          "amount": {
-            "type": "number",
-            "minimum": 0
+          "before": {
+            "$ref": "#/$defs/__schema0"
           },
-          "unit": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9._/%-]+$"
+          "after": {
+            "$ref": "#/$defs/__schema0"
           },
-          "active": {
-            "type": "boolean"
-          },
-          "note": {
+          "reason": {
             "type": "string",
             "minLength": 1,
             "maxLength": 4000
           }
         },
         "required": [
-          "compound"
+          "path",
+          "op"
         ],
         "additionalProperties": false
       }
     },
-    "relatedGoalIds": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
-      },
-      "uniqueItems": true
-    },
-    "relatedConditionIds": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^cond_[0-9A-HJKMNP-TV-Z]{26}$"
-      },
-      "uniqueItems": true
-    },
-    "relatedProtocolIds": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
-      },
-      "uniqueItems": true
-    },
-    "links": {
-      "type": "array",
-      "items": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "supports_goal"
-              },
-              "targetId": {
-                "type": "string",
-                "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
+    "effectiveSpec": {
+      "type": "object",
+      "properties": {
+        "doseSignature": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "modality": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "frequency": {
+          "type": "object",
+          "properties": {
+            "sessionsPerDay": {
+              "type": "number",
+              "minimum": 0
             },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
+            "sessionsPerWeek": {
+              "type": "number",
+              "minimum": 0
+            }
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "addresses_condition"
-              },
-              "targetId": {
-                "type": "string",
-                "pattern": "^cond_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
+          "additionalProperties": false
+        },
+        "durationMinutes": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number",
+              "minimum": 0
             },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
+            "max": {
+              "type": "number",
+              "minimum": 0
+            },
+            "target": {
+              "type": "number",
+              "minimum": 0
+            }
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "const": "related_protocol"
-              },
-              "targetId": {
-                "type": "string",
-                "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
-              }
+          "additionalProperties": false
+        },
+        "temperatureC": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number"
             },
-            "required": [
-              "type",
-              "targetId"
-            ],
-            "additionalProperties": false
+            "max": {
+              "type": "number"
+            },
+            "target": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "targetSessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minimumUsefulSessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "instructions": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
           }
-        ]
+        },
+        "stopConditions": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "notes": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
       },
-      "uniqueItems": true
+      "required": [
+        "doseSignature"
+      ],
+      "additionalProperties": false
+    },
+    "personalization": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "constraints": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "preferences": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "rationale": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "notes": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "effectiveSpecHash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "protocolRevisionId": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
     }
   },
   "required": [
@@ -213,11 +302,47 @@
     "protocolId",
     "slug",
     "title",
-    "kind",
     "status",
-    "startedOn"
+    "commonsProtocolRef",
+    "lineage",
+    "diff",
+    "effectiveSpec",
+    "personalization",
+    "effectiveSpecHash",
+    "protocolRevisionId"
   ],
   "additionalProperties": false,
   "$id": "@murphai/contracts/frontmatter-protocol.schema.json",
-  "title": "Murph Protocol Frontmatter"
+  "title": "Murph Protocol Frontmatter",
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

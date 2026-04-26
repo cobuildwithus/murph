@@ -397,6 +397,7 @@ test('root help lists the simple health CRUD command groups', async () => {
     'food',
     'recipe',
     'supplement',
+    'regimen',
     'protocol',
     'blood-test',
     'family',
@@ -1548,11 +1549,11 @@ test('health command help surfaces examples and hints through Incur metadata', a
   const goalUpsertHelp = await runRawCli(['goal', 'upsert', '--help'])
   const journalLinkHelp = await runRawCli(['journal', 'link', '--help'])
   const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
-  const supplementUpsertHelp = await runRawCli(['supplement', 'upsert', '--help'])
+  const supplementImportJsonHelp = await runRawCli(['supplement', 'import-json', '--help'])
   const supplementStopHelp = await runRawCli(['supplement', 'stop', '--help'])
   const supplementRenameHelp = await runRawCli(['supplement', 'rename', '--help'])
   const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
-  const protocolStopHelp = await runRawCli(['protocol', 'stop', '--help'])
+  const regimenStopHelp = await runRawCli(['regimen', 'stop', '--help'])
 
   assert.match(
     goalUpsertHelp,
@@ -1579,7 +1580,7 @@ test('health command help surfaces examples and hints through Incur metadata', a
     /The previous food title is kept as an alias automatically so older operator language still resolves in the saved record\./u,
   )
   assert.match(
-    supplementUpsertHelp,
+    supplementImportJsonHelp,
     /--input accepts @file\.json or - so the CLI can load a supplement payload with product metadata and ingredients\./u,
   )
   assert.match(
@@ -1600,8 +1601,8 @@ test('health command help surfaces examples and hints through Incur metadata', a
     /The compound ledger defaults to active supplements so overlapping ingredients sum into a single canonical row\./u,
   )
   assert.match(
-    protocolStopHelp,
-    /Use the canonical protocol id so the stop event is attached to the existing registry record\./u,
+    regimenStopHelp,
+    /Use the canonical regimen id so the stop event is attached to the existing registry record\./u,
   )
 }, INCUR_HELP_TIMEOUT_MS)
 
@@ -1816,7 +1817,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
   assert.match(
     help,
-    /Edit the emitted payload, save it as goal\.json, then pass it back with --input @goal\.json or pipe it to --input -\./u,
+    /Edit the emitted payload, save it as goal\.json, then import it with goal upsert --input @goal\.json or pipe it to --input -\./u,
   )
   assert.match(
     help,

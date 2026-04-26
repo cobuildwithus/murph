@@ -71,7 +71,7 @@ async function getGroupCommandRun<Context>(
   return command.run as (context: Context) => Promise<unknown>
 }
 
-test('supplement commands exercise scaffold, upsert, read, compound, rename, and stop paths in-process', async () => {
+test('supplement commands exercise scaffold, import-json, read, compound, rename, and stop paths in-process', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-cli-supplement-coverage-',
   )
@@ -133,11 +133,11 @@ test('supplement commands exercise scaffold, upsert, read, compound, rename, and
     created: boolean
     lookupId: string
     path: string
-    protocolId: string
+    regimenId: string
     vault: string
   }>(cli, [
     'supplement',
-    'upsert',
+    'import-json',
     '--input',
     `@${payloadPath}`,
     '--vault',
@@ -214,7 +214,7 @@ test('supplement commands exercise scaffold, upsert, read, compound, rename, and
   assert.equal(requireData(listedDefault.envelope).filters.limit, 50)
 
   const stopped = await runInProcessJsonCli<{
-    protocolId: string
+    regimenId: string
     lookupId: string
     stoppedOn: string | null
     status: string
@@ -231,7 +231,7 @@ test('supplement commands exercise scaffold, upsert, read, compound, rename, and
   assert.equal(requireData(stopped.envelope).status, 'stopped')
 
   const renamed = await runInProcessJsonCli<{
-    protocolId: string
+    regimenId: string
     lookupId: string
     path?: string
     created: boolean

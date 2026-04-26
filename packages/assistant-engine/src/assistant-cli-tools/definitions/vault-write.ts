@@ -477,22 +477,22 @@ export function createCanonicalVaultWriteToolDefinitions(
           }),
       }),
       defineVaultServiceBackedTool({
-        name: 'vault.protocol.stop',
+        name: 'vault.regimen.stop',
         description:
-          'Stop an existing protocol while preserving its canonical id.',
+          'Stop an existing regimen while preserving its canonical id.',
         inputSchema: z.object({
-          protocolId: z.string().min(1),
+          regimenId: z.string().min(1),
           stoppedOn: localDateSchema.optional(),
         }),
         inputExample: {
-          protocolId: 'prot_example',
+          regimenId: 'reg_example',
           stoppedOn: '2026-03-13',
         },
-        execute: ({ protocolId, stoppedOn }) =>
-          input.vaultServices!.core.stopProtocol({
+        execute: ({ regimenId, stoppedOn }) =>
+          input.vaultServices!.core.stopRegimen({
             vault: input.vault,
             requestId: input.requestId ?? null,
-            protocolId,
+            regimenId,
             stoppedOn,
           }),
       }),

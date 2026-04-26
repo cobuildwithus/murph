@@ -23,6 +23,15 @@ describe("health commons catalog", () => {
     );
     expect(saunaProtocol).toMatchObject({
       experimentOnboarding: {
+        adaptationPolicy: {
+          measurementPlan: {
+            requiredSignals: ["biomarker:resting-heart-rate"],
+            testPlanId: "rhr-21d",
+          },
+          reusableSetup: {
+            enabled: true,
+          },
+        },
         assistantPolicy: {
           missedLogFollowup: "opt_in_only",
         },
@@ -35,9 +44,18 @@ describe("health commons catalog", () => {
         },
       },
     });
+    expect(
+      saunaProtocol?.experimentOnboarding?.setupSlots?.find((slot) => slot.id === "sauna_access"),
+    ).toMatchObject({
+      id: "sauna_access",
+      target: {
+        object: "experimentRun",
+        field: "saunaAccess",
+      },
+    });
     expect(saunaProtocol?.revision.pageRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(saunaProtocol?.revision.runSpecRevisionId).toBe(
-      "sha256:99ccf2b48a613677bbb2a58101a97526d385cd9eaedcb8ac0076d8ef57edd996",
+      "sha256:81b1501a47e2bd38b0207b9ad8c88fe99f43c180f8553b49ee8f97f5daa19de9",
     );
     expect(saunaProtocol?.revision.recipeHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
     const protocolRelationTargets = saunaProtocol?.relations?.map((relation) => relation.target) ?? [];
@@ -68,7 +86,7 @@ describe("health commons catalog", () => {
       },
       revision: {
         runSpecRevisionId:
-          "sha256:d0c97230a4778a71af198962b62631a66538db0ffade803aed94f6ced907f622",
+          "sha256:902fe245b3dd316be97381ac0bf6b95adff85edebae8908a4323db1887638fb4",
       },
     });
 

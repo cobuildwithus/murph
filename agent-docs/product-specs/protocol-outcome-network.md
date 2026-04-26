@@ -71,7 +71,7 @@ Outcome cards and cohort summaries should use confidence language such as `low`,
 
 ## Protocol Revision And Fork Rules
 
-- Every outcome card and contribution must stay tied to `protocolRef.key`, `pageRevisionId`, `runSpecRevisionId`, and the selected `testPlanId` when available.
+- Every outcome card and contribution must stay tied to `commonsProtocolRef.key`, `pageRevisionId`, `runSpecRevisionId`, and the selected `testPlanId` when available; private `protocolRef` is an optional adaptation pointer, not the public comparison key.
 - If a protocol changes in a way that affects the runnable behavior, the network object must change with it through a new `runSpecRevisionId`.
 - Community forks should be expressed as structured diffs with changed fields such as frequency, modality, duration, timing, or dose rather than as unstructured free-form posts.
 

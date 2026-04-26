@@ -188,7 +188,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      "Use `commons protocol show` after a hit when you need the exact public protocol variant and revision ids. Use `protocol` for private vault protocols.",
+      "Use `commons protocol show` after a hit when you need the exact public protocol variant and revision ids. Use top-level `protocol` only for saved private adaptations.",
     output: commonsSearchResultSchema,
     async run({ args, options }) {
       const reader = getGeneratedHealthCommonsCatalogReader();

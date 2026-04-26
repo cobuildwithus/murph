@@ -1155,9 +1155,9 @@ describe("record service seams", () => {
       title: "20-minute red light sauna",
       interventionType: "red-light-sauna",
       durationMinutes: 20,
-      protocolId: null,
       note: "20 minute red light sauna session",
     });
+    expect("protocolId" in addedIntervention).toBe(false);
     const editedIntervention = await intervention.editInterventionRecord({
       vault: "./vault",
       lookup: "evt_1",
@@ -1437,6 +1437,7 @@ describe("record service seams", () => {
             status: "active",
             title: "Focus Sprint",
           },
+          commonsProtocolRef: null,
           metricResults: [],
           protocolRef: null,
           windows: {

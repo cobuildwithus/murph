@@ -1,5 +1,6 @@
 import {
   healthEntityDefinitionByKind,
+  jsonObjectSchema,
   safeParseContract,
   type JsonObject,
 } from "@murphai/contracts";
@@ -17,9 +18,11 @@ import type {
 import type {
   CoreRuntimeModule,
   CoreWriteServices,
+  PrivateProtocolSummaryResult,
   QueryRuntimeModule,
   QueryServices,
-  StopProtocolInput,
+  StopRegimenInput,
+  StopSupplementInput,
 } from "./types.js";
 import {
   healthRegistryFamilies,
@@ -49,6 +52,32 @@ type ExplicitHealthQueryServiceMethodName = Extract<
   string
 >;
 type HealthScaffoldKind = RegistryDocFamilyKind | "blood_test";
+type RegistryCoreServiceMethodName =
+  | "scaffoldGoal"
+  | "upsertGoal"
+  | "scaffoldCondition"
+  | "upsertCondition"
+  | "scaffoldAllergy"
+  | "upsertAllergy"
+  | "scaffoldRegimen"
+  | "upsertRegimen"
+  | "scaffoldFamilyMember"
+  | "upsertFamilyMember"
+  | "scaffoldGeneticVariant"
+  | "upsertGeneticVariant";
+type RegistryQueryServiceMethodName =
+  | "showGoal"
+  | "listGoals"
+  | "showCondition"
+  | "listConditions"
+  | "showAllergy"
+  | "listAllergies"
+  | "showRegimen"
+  | "listRegimens"
+  | "showFamilyMember"
+  | "listFamilyMembers"
+  | "showGeneticVariant"
+  | "listGeneticVariants";
 
 interface RegistryDocFamilyConfig<TIdField extends string> {
   idField: TIdField;
@@ -105,7 +134,7 @@ const SUPPLEMENT_SCAFFOLD_PAYLOAD = Object.freeze({
 
 const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
   "id",
-  "protocolId",
+  "regimenId",
   "slug",
   "title",
   "markdown",
@@ -115,7 +144,18 @@ const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
   "attributes",
 ]);
 
-const SUPPLEMENT_ID_PATTERN = /^prot_[0-9A-Za-z]+$/u;
+const REGIMEN_ID_PATTERN = /^reg_[0-9A-Za-z]+$/u;
+const REGIMEN_ENTITY_OMIT_KEYS = new Set([
+  "id",
+  "regimenId",
+  "slug",
+  "title",
+  "markdown",
+  "body",
+  "relativePath",
+  "path",
+  "attributes",
+]);
 
 function parseRegistryPayloadWithSharedSchema(
   kind: RegistryDocFamilyKind,
@@ -269,8 +309,38 @@ function stringArray(value: unknown) {
     : [];
 }
 
-function toKeyedRecord(value: object): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value))
+function stripUndefinedJsonFields(value: unknown): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => stripUndefinedJsonFields(entry))
+      .filter((entry) => entry !== undefined);
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, entry]) => [key, stripUndefinedJsonFields(entry)] as const)
+        .filter(([, entry]) => entry !== undefined),
+    );
+  }
+
+  return value;
+}
+
+function toKeyedRecord(value: object): JsonObject {
+  const result = safeParseContract(
+    jsonObjectSchema,
+    stripUndefinedJsonFields(value),
+  );
+  if (!result.success) {
+    throw new VaultCliError("contract_invalid", "Expected a JSON-compatible object.", {
+      issues: result.errors,
+    });
+  }
+
+  return result.data;
 }
 
 function requireScaffoldTemplate(
@@ -316,7 +386,7 @@ function toRegistryDocReadEntity(
   const entity = readRegistryRecordEntity(record);
   const document = readRegistryRecordDocument(record);
 
-  if (config.kind === "protocol") {
+  if (config.kind === "regimen") {
     const protocolKind = firstNonEmptyString(entity, ["kind"]);
     if (protocolKind) {
       data.kind = protocolKind;
@@ -345,7 +415,7 @@ function toRegistryDocListEntity(
   const entity = readRegistryRecordEntity(record)
   const document = readRegistryRecordDocument(record)
 
-  if (config.kind === "protocol") {
+  if (config.kind === "regimen") {
     const protocolKind = firstNonEmptyString(entity, ["kind"])
     if (protocolKind) {
       data.kind = protocolKind
@@ -496,7 +566,7 @@ function toSupplementReadEntity(record: object) {
   const data = toSupplementEntityData(record);
   const id =
     firstRawString(rawRecord, ["id"]) ??
-    firstRawString(rawRecord, ["protocolId"]) ??
+    firstRawString(rawRecord, ["regimenId"]) ??
     "";
 
   return {
@@ -519,7 +589,7 @@ function toSupplementListEntity(record: object) {
   const data = toSupplementEntityData(record)
   const id =
     firstRawString(rawRecord, ["id"]) ??
-    firstRawString(rawRecord, ["protocolId"]) ??
+    firstRawString(rawRecord, ["regimenId"]) ??
     ""
 
   return toListEntity({
@@ -534,6 +604,80 @@ function toSupplementListEntity(record: object) {
       data,
     }),
   })
+}
+
+function toRegimenEntityData(record: object) {
+  const rawRecord = readRegistryRecordEntity(record);
+  const data = Object.fromEntries(
+    Object.entries(rawRecord).filter(
+      ([key, value]) =>
+        !REGIMEN_ENTITY_OMIT_KEYS.has(key) && value !== undefined,
+    ),
+  );
+  const regimenId = firstRawString(rawRecord, ["regimenId", "id"]);
+  if (regimenId) {
+    data.regimenId = regimenId;
+  }
+  return data;
+}
+
+function toRegimenReadEntity(record: object) {
+  const rawRecord = readRegistryRecordEntity(record);
+  const rawDocument = readRegistryRecordDocument(record);
+  const data = toRegimenEntityData(record);
+  const id =
+    firstRawString(rawRecord, ["id"]) ??
+    firstRawString(rawRecord, ["regimenId"]) ??
+    "";
+
+  return {
+    id,
+    kind: "regimen" as const,
+    title: firstRawString(rawRecord, ["title"]),
+    occurredAt: firstRawString(rawRecord, ["startedOn"]),
+    path: firstRawString(rawDocument, ["relativePath", "path"]),
+    markdown: firstRawString(rawDocument, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+    }),
+  };
+}
+
+function toRegimenListEntity(record: object) {
+  const entity = toRegimenReadEntity(record);
+  return toListEntity(entity);
+}
+
+function toPrivateProtocolSummary(
+  summary: object,
+): PrivateProtocolSummaryResult["protocol"] {
+  const record = toKeyedRecord(summary);
+  const commonsProtocolRef = Reflect.get(summary, "commonsProtocolRef");
+  const effectiveSpec = Reflect.get(summary, "effectiveSpec");
+  const id = firstRawString(record, ["id"]) ?? "";
+
+  return {
+    id,
+    protocolId: id,
+    slug: firstRawString(record, ["slug"]),
+    title: firstRawString(record, ["title"]) ?? id,
+    status: firstRawString(record, ["status"]),
+    commonsProtocolRef:
+      typeof commonsProtocolRef === "object" && commonsProtocolRef !== null && !Array.isArray(commonsProtocolRef)
+        ? toKeyedRecord(commonsProtocolRef)
+        : null,
+    effectiveSpec:
+      typeof effectiveSpec === "object" && effectiveSpec !== null && !Array.isArray(effectiveSpec)
+        ? toKeyedRecord(effectiveSpec)
+        : null,
+    effectiveSpecHash: firstRawString(record, ["effectiveSpecHash"]),
+    protocolRevisionId: firstRawString(record, ["protocolRevisionId"]),
+    updatedAt: firstRawString(record, ["updatedAt"]),
+    path: firstRawString(record, ["path"]) ?? "",
+    tags: stringArray(Reflect.get(summary, "tags")),
+    summary: firstRawString(record, ["summary"]),
+  };
 }
 
 async function renameSupplementRecord(
@@ -555,10 +699,10 @@ async function renameSupplementRecord(
   const { core } = await loadRuntime();
 
   try {
-    const isProtocolId = SUPPLEMENT_ID_PATTERN.test(lookup);
-    const existing = await core.readProtocolItem({
+    const isRegimenId = REGIMEN_ID_PATTERN.test(lookup);
+    const existing = await core.readRegimen({
       vaultRoot: input.vault,
-      ...(isProtocolId ? { protocolId: lookup } : { slug: lookup }),
+      ...(isRegimenId ? { regimenId: lookup } : { slug: lookup }),
       group: "supplement",
     });
 
@@ -566,9 +710,9 @@ async function renameSupplementRecord(
       throw new VaultCliError("not_found", `No supplement found for "${input.lookup}".`);
     }
 
-    const result = await core.upsertProtocolItem({
+    const result = await core.upsertRegimen({
       vaultRoot: input.vault,
-      protocolId: existing.entity.protocolId,
+      regimenId: existing.entity.regimenId,
       ...(slug ? { slug } : {}),
       allowSlugRename: true,
       title,
@@ -591,24 +735,24 @@ async function renameSupplementRecord(
 
     return {
       vault: input.vault,
-      protocolId: String(result.record.entity.protocolId),
-      lookupId: String(result.record.entity.protocolId),
+      regimenId: String(result.record.entity.regimenId),
+      lookupId: String(result.record.entity.regimenId),
       path: recordPath(result.record),
       created: Boolean(result.created),
     };
   } catch (error) {
     throw toVaultCliError(error, {
-      VAULT_PROTOCOL_MISSING: {
+      VAULT_REGIMEN_MISSING: {
         code: "not_found",
         message: `No supplement found for "${input.lookup}".`,
       },
       VAULT_INVALID_INPUT: {
         code: "contract_invalid",
       },
-      VAULT_INVALID_PROTOCOL: {
+      VAULT_INVALID_REGIMEN: {
         code: "contract_invalid",
       },
-      VAULT_PROTOCOL_CONFLICT: {
+      VAULT_REGIMEN_CONFLICT: {
         code: "conflict",
       },
     });
@@ -617,17 +761,18 @@ async function renameSupplementRecord(
 
 function createRegistryDocCoreServices(
   loadRuntime: () => Promise<{ core: CoreRuntimeModule }>,
-) {
-  const services: Record<string, unknown> = {};
+): Pick<CoreWriteServices, RegistryCoreServiceMethodName> {
+  const services: Partial<Pick<CoreWriteServices, RegistryCoreServiceMethodName>> = {};
+  const dynamicServices = services as Record<string, unknown>;
 
   for (const config of registryDocFamilyConfigs) {
-    services[config.scaffoldServiceMethod] = async (input: CommandContext) => ({
+    dynamicServices[config.scaffoldServiceMethod] = async (input: CommandContext) => ({
       vault: input.vault,
       noun: config.kind,
       payload: requireScaffoldTemplate(config.kind),
     });
 
-    services[config.upsertServiceMethod] = async (input: JsonFileInput) => {
+    dynamicServices[config.upsertServiceMethod] = async (input: JsonFileInput) => {
       const payload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(payload);
       const parsedPayload = config.parsePayload ? config.parsePayload(payload) : payload;
@@ -648,16 +793,17 @@ function createRegistryDocCoreServices(
     };
   }
 
-  return services;
+  return services as Pick<CoreWriteServices, RegistryCoreServiceMethodName>;
 }
 
 function createRegistryDocQueryServices(
   loadRuntime: () => Promise<{ query: QueryRuntimeModule }>,
-) {
-  const services: Record<string, unknown> = {};
+): Pick<QueryServices, RegistryQueryServiceMethodName> {
+  const services: Partial<Pick<QueryServices, RegistryQueryServiceMethodName>> = {};
+  const dynamicServices = services as Record<string, unknown>;
 
   for (const config of registryDocFamilyConfigs) {
-    services[config.showServiceMethod] = async (input: EntityLookupInput) => {
+    dynamicServices[config.showServiceMethod] = async (input: EntityLookupInput) => {
       const { query } = await loadRuntime();
       const record = await config.show(query, input.vault, input.id);
 
@@ -668,7 +814,7 @@ function createRegistryDocQueryServices(
       );
     };
 
-    services[config.listServiceMethod] = async (input: HealthListInput) => {
+    dynamicServices[config.listServiceMethod] = async (input: HealthListInput) => {
       const { query } = await loadRuntime();
       const records = await config.list(query, input.vault, {
         limit: input.limit,
@@ -686,7 +832,7 @@ function createRegistryDocQueryServices(
     };
   }
 
-  return services;
+  return services as Pick<QueryServices, RegistryQueryServiceMethodName>;
 }
 
 export function createExplicitHealthCoreServices(
@@ -723,16 +869,42 @@ export function createExplicitHealthCoreServices(
       const payload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(payload);
       const { core } = await loadRuntime();
-      const result = await core.upsertProtocolItem({
+      const result = await core.upsertRegimen({
         ...payload,
         kind: payload.kind ?? "supplement",
         vaultRoot: input.vault,
       });
+      const regimenId = String(result.record.entity.regimenId);
 
       return {
         vault: input.vault,
-        protocolId: String(result.record.entity.protocolId),
-        lookupId: String(result.record.entity.protocolId),
+        regimenId,
+        lookupId: regimenId,
+        path: recordPath(result.record),
+        created: Boolean(result.created),
+      };
+    },
+    async scaffoldRegimen(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: "regimen" as const,
+        payload: requireScaffoldTemplate("regimen"),
+      };
+    },
+    async upsertRegimen(input: CommandContext & { input: string }) {
+      const payload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(payload);
+      const { core } = await loadRuntime();
+      const result = await core.upsertRegimen({
+        ...payload,
+        vaultRoot: input.vault,
+      });
+      const regimenId = String(result.record.entity.regimenId);
+
+      return {
+        vault: input.vault,
+        regimenId,
+        lookupId: regimenId,
         path: recordPath(result.record),
         created: Boolean(result.created),
       };
@@ -746,34 +918,60 @@ export function createExplicitHealthCoreServices(
     ) {
       return renameSupplementRecord(loadRuntime, input);
     },
-    async stopProtocol(input: StopProtocolInput) {
+    async upsertPrivateProtocol(input) {
       const { core } = await loadRuntime();
-      const result = await core.stopProtocolItem({
+      const result = await core.upsertProtocol({
         vaultRoot: input.vault,
         protocolId: input.protocolId,
-        stoppedOn: input.stoppedOn,
+        slug: input.slug,
+        allowSlugRename: input.allowSlugRename,
+        title: input.title,
+        frontmatter: input.frontmatter,
+        body: input.body,
       });
+      const protocolId = String(result.record.entity.protocolId);
 
       return {
         vault: input.vault,
-        protocolId: String(result.record.entity.protocolId),
-        lookupId: String(result.record.entity.protocolId),
+        protocolId,
+        lookupId: protocolId,
+        slug: String(result.record.entity.slug),
+        path: String(result.record.document.relativePath),
+        protocolRevisionId: String(result.record.entity.protocolRevisionId),
+        effectiveSpecHash: String(result.record.entity.effectiveSpecHash),
+        created: result.created,
+      };
+    },
+    async stopRegimen(input: StopRegimenInput) {
+      const { core } = await loadRuntime();
+      const result = await core.stopRegimen({
+        vaultRoot: input.vault,
+        regimenId: input.regimenId,
+        stoppedOn: input.stoppedOn,
+      });
+      const regimenId = String(result.record.entity.regimenId);
+
+      return {
+        vault: input.vault,
+        regimenId,
+        lookupId: regimenId,
         stoppedOn: result.record.entity.stoppedOn ?? null,
         status: String(result.record.entity.status),
       };
     },
-    async stopSupplement(input: StopProtocolInput) {
+    async stopSupplement(input: StopSupplementInput) {
       const { core } = await loadRuntime();
-      const result = await core.stopProtocolItem({
+      const result = await core.stopRegimen({
         vaultRoot: input.vault,
-        protocolId: input.protocolId,
+        regimenId: input.regimenId,
         stoppedOn: input.stoppedOn,
       });
+      const regimenId = String(result.record.entity.regimenId);
 
       return {
         vault: input.vault,
-        protocolId: String(result.record.entity.protocolId),
-        lookupId: String(result.record.entity.protocolId),
+        regimenId,
+        lookupId: regimenId,
         stoppedOn: result.record.entity.stoppedOn ?? null,
         status: String(result.record.entity.status),
       };
@@ -786,8 +984,8 @@ export function createExplicitHealthCoreServices(
     | "upsertCondition"
     | "scaffoldAllergy"
     | "upsertAllergy"
-    | "scaffoldProtocol"
-    | "upsertProtocol"
+    | "scaffoldRegimen"
+    | "upsertRegimen"
     | "scaffoldBloodTest"
     | "upsertBloodTest"
     | "scaffoldFamilyMember"
@@ -797,7 +995,8 @@ export function createExplicitHealthCoreServices(
     | "scaffoldSupplement"
     | "upsertSupplement"
     | "renameSupplement"
-    | "stopProtocol"
+    | "upsertPrivateProtocol"
+    | "stopRegimen"
     | "stopSupplement"
   >;
 }
@@ -835,6 +1034,66 @@ export function createExplicitHealthQueryServices(
       );
     },
     ...createRegistryDocQueryServices(loadRuntime),
+    async showRegimen(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showRegimen(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toRegimenReadEntity(record) : null,
+        `No regimen found for "${input.id}".`,
+      );
+    },
+    async listRegimens(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listRegimens(input.vault, {
+        limit: input.limit,
+        status: input.status,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          limit: input.limit ?? 50,
+          status: input.status,
+        },
+        records.map((record) => toRegimenListEntity(record)),
+      );
+    },
+    async showPrivateProtocol(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const vault = await query.readVault(input.vault);
+      const summary = query.getProtocolSummary(vault, input.id);
+      if (!summary) {
+        throw new VaultCliError("not_found", `No protocol found for "${input.id}".`);
+      }
+
+      return {
+        vault: input.vault,
+        protocol: toPrivateProtocolSummary(summary),
+      };
+    },
+    async listPrivateProtocols(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const vault = await query.readVault(input.vault);
+      const summaries = query
+        .listProtocolSummaries(vault, {
+          statuses: input.status ? [input.status] : undefined,
+        })
+        .slice(0, input.limit ?? 50)
+        .map((summary) => toPrivateProtocolSummary(summary));
+
+      return {
+        vault: input.vault,
+        filters: {
+          limit: input.limit ?? 50,
+          ...(input.status ? { status: input.status } : {}),
+        },
+        protocols: summaries,
+        count: summaries.length,
+        nextCursor: null,
+      };
+    },
     async showBloodTest(input: EntityLookupInput) {
       const { query } = await loadRuntime();
       const record = await query.showBloodTest(input.vault, input.id);
@@ -959,8 +1218,10 @@ export function createExplicitHealthQueryServices(
     | "listConditions"
     | "showAllergy"
     | "listAllergies"
-    | "showProtocol"
-    | "listProtocols"
+    | "showRegimen"
+    | "listRegimens"
+    | "showPrivateProtocol"
+    | "listPrivateProtocols"
     | "showBloodTest"
     | "listBloodTests"
     | "showFamilyMember"

@@ -33,10 +33,10 @@ import {
   upsertGoal,
   upsertGeneticVariant,
   upsertProvider,
-  upsertProtocolItem,
+  upsertRegimen,
   upsertRecipe,
   upsertWorkoutFormat,
-  stopProtocolItem,
+  stopRegimen,
   VAULT_LAYOUT,
   VaultError,
 } from "../src/index.ts";
@@ -362,7 +362,7 @@ test("public mutation wrappers cover the thin lock-routing exports", async () =>
       exercises: [],
     },
   });
-  const protocol = await upsertProtocolItem({
+  const regimen = await upsertRegimen({
     vaultRoot,
     title: "Magnesium glycinate",
     kind: "supplement",
@@ -372,9 +372,9 @@ test("public mutation wrappers cover the thin lock-routing exports", async () =>
     unit: "mg",
     schedule: "nightly",
   });
-  const stoppedProtocol = await stopProtocolItem({
+  const stoppedRegimen = await stopRegimen({
     vaultRoot,
-    protocolId: protocol.record.entity.protocolId,
+    regimenId: regimen.record.entity.regimenId,
     stoppedOn: "2026-03-20",
   });
   const deletedProvider = await deleteProvider({
@@ -398,7 +398,7 @@ test("public mutation wrappers cover the thin lock-routing exports", async () =>
   assert.equal(historyEvent.record.kind, "encounter");
   assert.equal(bloodTest.record.kind, "test");
   assert.equal(workoutFormat.record.title, "Upper Body A");
-  assert.equal(stoppedProtocol.record.entity.status, "stopped");
+  assert.equal(stoppedRegimen.record.entity.status, "stopped");
   assert.equal(deletedProvider.deleted, true);
   assert.equal(deletedRecipe.deleted, true);
   assert.equal(deletedFood.deleted, true);

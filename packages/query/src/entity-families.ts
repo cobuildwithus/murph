@@ -15,6 +15,7 @@ export const ALL_QUERY_ENTITY_FAMILIES = [
   "journal",
   "protocol",
   "provider",
+  "regimen",
   "recipe",
   "sample",
   "workout_format",

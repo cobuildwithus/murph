@@ -395,7 +395,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown_or_stale
       required: true
       question: What time do you usually wake up on days you would do the morning-light session?
-      writePath: runPlan.usualWakeTime
+      target:
+        object: experimentRun
+        field: usualWakeTime
     -
       id: target_morning_window
       label: Target morning window
@@ -409,7 +411,9 @@ experimentOnboarding:
         - first_60_minutes
         - before_10am
         - later_morning_backup
-      writePath: runPlan.targetMorningWindow
+      target:
+        object: experimentRun
+        field: targetMorningWindow
     -
       id: target_minutes
       label: Target minutes
@@ -426,7 +430,9 @@ experimentOnboarding:
           - 15
           - 20
           - 30
-      writePath: runPlan.targetMinutes
+      target:
+        object: experimentRun
+        field: targetMinutes
     -
       id: outdoor_location
       label: Outdoor location
@@ -435,7 +441,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: true
       question: Where would you usually do it safely: porch, balcony, courtyard, park path, commute stop, or somewhere else?
-      writePath: runPlan.outdoorLocation
+      target:
+        object: experimentRun
+        field: outdoorLocation
     -
       id: backup_policy
       label: Backup policy
@@ -449,7 +457,9 @@ experimentOnboarding:
         - open_shade_short_session
         - window_light_logged_as_backup
         - reschedule_later_morning
-      writePath: runPlan.backupPolicy
+      target:
+        object: experimentRun
+        field: backupPolicy
     -
       id: reminder_policy
       label: Reminder policy
@@ -462,7 +472,9 @@ experimentOnboarding:
         - none
         - morning_reminder
         - morning_reminder_plus_same_day_missing_log_check
-      writePath: assistantSupport.reminderPolicy
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: sleep-quality-timing-28d
     baselineDays: 7

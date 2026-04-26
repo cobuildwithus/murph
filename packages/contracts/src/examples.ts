@@ -21,6 +21,7 @@ import type {
   ProviderFrontmatter,
   RecipeFrontmatter,
   ProtocolFrontmatter,
+  RegimenFrontmatter,
   WorkoutFormatFrontmatter,
   SampleRecord,
   VaultMetadata,
@@ -46,6 +47,7 @@ type HealthFrontmatterExamples = {
   geneticVariant: GeneticVariantFrontmatter;
   goal: GoalFrontmatter;
   protocol: ProtocolFrontmatter;
+  regimen: RegimenFrontmatter;
 };
 
 export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<VaultMetadata>({
@@ -510,14 +512,14 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     title: "20-minute sauna",
     note: "20 min sauna after lifting.",
     links: [
-      { type: "related_to", targetId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1" },
+      { type: "related_to", targetId: "reg_01JNV422Y2M5ZBV64ZP4N1DRB1" },
       { type: "related_to", targetId: "exp_01JNV4458HYPP53JDQCBP1QJFM" },
     ],
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
     experimentSlug: "magnesium-sleep",
     interventionType: "sauna",
     durationMinutes: 20,
-    protocolId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    regimenId: "reg_01JNV422Y2M5ZBV64ZP4N1DRB1",
     timing: "evening",
     temperatureC: 88,
     afterExercise: true,
@@ -752,13 +754,35 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     startedOn: "2026-03-12",
     hypothesis: "Evening magnesium reduces time to fall asleep.",
     tags: ["sleep", "supplement"],
-    protocolRef: {
+    commonsProtocolRef: {
       key: "protocol_variant:magnesium/sleep-onset",
       pageRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
       runSpecRevisionId: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
       testPlanId: "sleep-onset-21d",
     },
+    protocolRef: {
+      protocolId: "prot_01JNV447V6K3SW1Q9NJ7XVQZ7P",
+      protocolRevisionId: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      effectiveSpecHash: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    },
+    effectiveProtocolSnapshot: {
+      effectiveSpecHash: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      doseSignature: "Magnesium glycinate 200 mg nightly",
+      modality: "supplement",
+      frequency: {
+        sessionsPerDay: 1,
+      },
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+      stopConditions: ["Stop if nausea is moderate or worse for more than two nights."],
+    },
     runPlan: {
+      baseline: {
+        mode: "prospective",
+        source: "manual_measurements",
+        start: "2026-03-12",
+        end: "2026-03-18",
+      },
       baselineStart: "2026-03-12",
       baselineEnd: "2026-03-18",
       interventionStart: "2026-03-19",
@@ -1003,7 +1027,7 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     severity: "moderate",
     bodySites: [],
     relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-    relatedProtocolIds: ["prot_01JNV447V6K3SW1Q9NJ7XVQZ7P"],
+    relatedRegimenIds: ["reg_01JNV447V6K3SW1Q9NJ7XVQZ7P"],
     note: "Self-reported difficulty falling asleep at least four nights per week.",
   },
   allergy: {
@@ -1020,10 +1044,10 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
     note: "Historical reaction reported during intake.",
   },
-  protocol: {
-    schemaVersion: "murph.frontmatter.protocol.v1",
-    docType: "protocol",
-    protocolId: "prot_01JNV447V6K3SW1Q9NJ7XVQZ7P",
+  regimen: {
+    schemaVersion: "murph.frontmatter.regimen.v1",
+    docType: "regimen",
+    regimenId: "reg_01JNV447V6K3SW1Q9NJ7XVQZ7P",
     slug: "magnesium-glycinate",
     title: "Magnesium glycinate",
     kind: "supplement",
@@ -1052,6 +1076,56 @@ export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples
     ],
     relatedGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
     relatedConditionIds: ["cond_01JNV43NDX1N7BX08NQ19MJ4DK"],
+  },
+  protocol: {
+    schemaVersion: "murph.frontmatter.protocol.v1",
+    docType: "protocol",
+    protocolId: "prot_01JNV447V6K3SW1Q9NJ7XVQZ7P",
+    slug: "magnesium-glycinate-sleep",
+    title: "Magnesium glycinate for sleep onset",
+    status: "available",
+    commonsProtocolRef: {
+      key: "protocol_variant:magnesium/sleep-onset",
+      pageRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      runSpecRevisionId: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      testPlanId: "sleep-onset-21d",
+    },
+    lineage: {
+      sourceKind: "health_commons_protocol",
+      notes: ["Adapted from the public sleep-onset protocol variant for a reusable private run plan."],
+    },
+    diff: [
+      {
+        path: "/doseSignature",
+        op: "replace",
+        before: "Magnesium 200 mg nightly",
+        after: "Magnesium glycinate 200 mg nightly",
+        reason: "Use the saved supplement form already tolerated by the user.",
+      },
+    ],
+    effectiveSpec: {
+      doseSignature: "Magnesium glycinate 200 mg nightly",
+      modality: "supplement",
+      frequency: {
+        sessionsPerDay: 1,
+      },
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+      instructions: ["Take the evening dose 60 minutes before bed."],
+      stopConditions: ["Stop if nausea is moderate or worse for more than two nights."],
+    },
+    personalization: {
+      target: "sleep onset",
+      constraints: {
+        avoidLateReminders: true,
+      },
+      preferences: {
+        reminderWindow: "21:30-22:30",
+      },
+      rationale: ["Matches the existing bedtime window and saved supplement choice."],
+    },
+    effectiveSpecHash: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    protocolRevisionId: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
   },
   familyMember: {
     schemaVersion: "murph.frontmatter.family-member.v1",
@@ -1157,12 +1231,31 @@ hypothesis: Evening magnesium reduces time to fall asleep.
 tags:
   - sleep
   - supplement
-protocolRef:
+commonsProtocolRef:
   key: protocol_variant:magnesium/sleep-onset
   pageRevisionId: sha256:1111111111111111111111111111111111111111111111111111111111111111
   runSpecRevisionId: sha256:2222222222222222222222222222222222222222222222222222222222222222
   testPlanId: sleep-onset-21d
+protocolRef:
+  protocolId: prot_01JNV447V6K3SW1Q9NJ7XVQZ7P
+  protocolRevisionId: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  effectiveSpecHash: sha256:4444444444444444444444444444444444444444444444444444444444444444
+effectiveProtocolSnapshot:
+  effectiveSpecHash: sha256:4444444444444444444444444444444444444444444444444444444444444444
+  doseSignature: Magnesium glycinate 200 mg nightly
+  modality: supplement
+  frequency:
+    sessionsPerDay: 1
+  targetSessions: 14
+  minimumUsefulSessions: 10
+  stopConditions:
+    - Stop if nausea is moderate or worse for more than two nights.
 runPlan:
+  baseline:
+    mode: prospective
+    source: manual_measurements
+    start: 2026-03-12
+    end: 2026-03-18
   baselineStart: 2026-03-12
   baselineEnd: 2026-03-18
   interventionStart: 2026-03-19

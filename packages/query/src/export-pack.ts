@@ -386,7 +386,7 @@ function renderAssistantContext(input: QuestionPack): string {
     pushRegistrySection(lines, "Goals", context.health.goals);
     pushRegistrySection(lines, "Conditions", context.health.conditions);
     pushRegistrySection(lines, "Allergies", context.health.allergies);
-    pushRegistrySection(lines, "Protocols", context.health.protocols);
+    pushRegistrySection(lines, "Regimens", context.health.regimens);
     pushRegistrySection(lines, "Family", context.health.familyMembers);
     pushRegistrySection(lines, "Genetics", context.health.geneticVariants);
   }
@@ -475,13 +475,13 @@ function buildPromptQuestions(input: {
 
   if (health.assessments.length > 0) {
     questions.push(
-      "Which intake-assessment answers appear most relevant to the current goals, conditions, or protocols?",
+      "Which intake-assessment answers appear most relevant to the current goals, conditions, or regimens?",
     );
   }
 
   if (countHealthBankPages(health) > 0) {
     questions.push(
-      "Which durable goals, conditions, protocols, family history, or genetics context should shape interpretation of the other records?",
+      "Which durable goals, conditions, regimens, family history, or genetics context should shape interpretation of the other records?",
     );
   }
 
@@ -566,7 +566,7 @@ function countHealthBankPages(health: ExportPackHealthContext): number {
     health.goals.length +
     health.conditions.length +
     health.allergies.length +
-    health.protocols.length +
+    health.regimens.length +
     health.familyMembers.length +
     health.geneticVariants.length
   );

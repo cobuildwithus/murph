@@ -63,7 +63,7 @@ function buildBody(record: ConditionEntity): string {
     [
       listSection("Body Sites", record.bodySites),
       listSection("Related Goals", relations.relatedGoalIds),
-      listSection("Related Protocols", relations.relatedProtocolIds),
+      listSection("Related Regimens", relations.relatedRegimenIds),
       section("Note", record.note ?? "- none"),
     ],
   );
@@ -90,7 +90,7 @@ function parseConditionFrontmatter(
 function normalizeConditionLinkType(value: string): ConditionLinkType | null {
   switch (value) {
     case "related_goal":
-    case "related_protocol":
+    case "related_regimen":
       return value;
     default:
       return null;
@@ -100,7 +100,7 @@ function normalizeConditionLinkType(value: string): ConditionLinkType | null {
 function compareConditionLinks(left: ConditionLink, right: ConditionLink): number {
   const order: Record<ConditionLinkType, number> = {
     related_goal: 0,
-    related_protocol: 1,
+    related_regimen: 1,
   };
 
   return order[left.type] - order[right.type] || left.targetId.localeCompare(right.targetId);
@@ -108,12 +108,12 @@ function compareConditionLinks(left: ConditionLink, right: ConditionLink): numbe
 
 function buildConditionLinksFromFields(input: {
   relatedGoalIds?: string[];
-  relatedProtocolIds?: string[];
+  relatedRegimenIds?: string[];
 }): ConditionLink[] {
   return [
     ...(input.relatedGoalIds ?? []).map((targetId) => ({ type: "related_goal", targetId }) satisfies ConditionLink),
-    ...(input.relatedProtocolIds ?? []).map((targetId) => ({
-      type: "related_protocol",
+    ...(input.relatedRegimenIds ?? []).map((targetId) => ({
+      type: "related_regimen",
       targetId,
     }) satisfies ConditionLink),
   ];
@@ -148,17 +148,17 @@ function parseConditionLinks(attributes: FrontmatterObject): ConditionLink[] {
 
 function conditionRelationsFromLinks(
   links: readonly ConditionLink[],
-): Pick<ConditionEntity, "relatedGoalIds" | "relatedProtocolIds" | "links"> {
+): Pick<ConditionEntity, "relatedGoalIds" | "relatedRegimenIds" | "links"> {
   const relatedGoalIds = links
     .filter((link) => link.type === "related_goal")
     .map((link) => link.targetId);
-  const relatedProtocolIds = links
-    .filter((link) => link.type === "related_protocol")
+  const relatedRegimenIds = links
+    .filter((link) => link.type === "related_regimen")
     .map((link) => link.targetId);
 
   return {
     relatedGoalIds: relatedGoalIds.length > 0 ? relatedGoalIds : undefined,
-    relatedProtocolIds: relatedProtocolIds.length > 0 ? relatedProtocolIds : undefined,
+    relatedRegimenIds: relatedRegimenIds.length > 0 ? relatedRegimenIds : undefined,
     links: [...links],
   };
 }
@@ -166,14 +166,14 @@ function conditionRelationsFromLinks(
 function canonicalizeConditionRelations(input: {
   links?: readonly ConditionLink[];
   relatedGoalIds?: string[];
-  relatedProtocolIds?: string[];
-}): Pick<ConditionEntity, "relatedGoalIds" | "relatedProtocolIds" | "links"> {
+  relatedRegimenIds?: string[];
+}): Pick<ConditionEntity, "relatedGoalIds" | "relatedRegimenIds" | "links"> {
   const links = normalizeConditionLinks(
     input.links !== undefined
       ? [...input.links]
       : buildConditionLinksFromFields({
           relatedGoalIds: input.relatedGoalIds,
-          relatedProtocolIds: input.relatedProtocolIds,
+          relatedRegimenIds: input.relatedRegimenIds,
         }),
   );
 
@@ -213,7 +213,7 @@ function parseConditionRecord(
     severity: optionalEnum(parsed.severity, CONDITION_SEVERITIES, "severity"),
     bodySites: validateSortedStringList(parsed.bodySites, "bodySites", "bodySite", 16, 120),
     relatedGoalIds: relations.relatedGoalIds,
-    relatedProtocolIds: relations.relatedProtocolIds,
+    relatedRegimenIds: relations.relatedRegimenIds,
     note: optionalString(parsed.note, "note", 4000),
     links: relations.links,
   }) as ConditionEntity;
@@ -243,7 +243,7 @@ function buildAttributes(record: ConditionEntity): FrontmatterObject {
     severity: record.severity,
     bodySites: record.bodySites,
     relatedGoalIds: relations.relatedGoalIds,
-    relatedProtocolIds: relations.relatedProtocolIds,
+    relatedRegimenIds: relations.relatedRegimenIds,
     links: frontmatterLinkObjects(relations.links),
     note: record.note,
   }) as FrontmatterObject;
@@ -316,19 +316,19 @@ export async function upsertCondition(
         existingEntity?.relatedGoalIds,
         (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
       );
-      const relatedProtocolIds = resolveOptionalUpsertValue(
-        input.relatedProtocolIds,
-        existingEntity?.relatedProtocolIds,
-        (value) => normalizeRecordIdList(value, "relatedProtocolIds", "prot"),
+      const relatedRegimenIds = resolveOptionalUpsertValue(
+        input.relatedRegimenIds,
+        existingEntity?.relatedRegimenIds,
+        (value) => normalizeRecordIdList(value, "relatedRegimenIds", "reg"),
       );
       const usesRelationInputs =
         input.links !== undefined ||
         input.relatedGoalIds !== undefined ||
-        input.relatedProtocolIds !== undefined;
+        input.relatedRegimenIds !== undefined;
       const relations = canonicalizeConditionRelations({
         links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingEntity?.links,
         relatedGoalIds,
-        relatedProtocolIds,
+        relatedRegimenIds,
       });
       const entity = validateConditionTimeline(
         stripUndefined({
@@ -361,7 +361,7 @@ export async function upsertCondition(
             validateSortedStringList(value, "bodySites", "bodySite", 16, 120),
           ),
           relatedGoalIds: relations.relatedGoalIds,
-          relatedProtocolIds: relations.relatedProtocolIds,
+          relatedRegimenIds: relations.relatedRegimenIds,
           note: resolveOptionalUpsertValue(input.note, existingEntity?.note, (value) =>
             optionalString(value, "note", 4000),
           ),

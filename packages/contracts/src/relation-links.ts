@@ -43,7 +43,7 @@ function createRelationLinkSchema(
 
 const goalIdPattern = idPattern(ID_PREFIXES.goal);
 const conditionIdPattern = idPattern(ID_PREFIXES.condition);
-const protocolIdPattern = idPattern(ID_PREFIXES.protocol);
+const regimenIdPattern = idPattern(ID_PREFIXES.regimen);
 const experimentIdPattern = idPattern(ID_PREFIXES.experiment);
 const variantIdPattern = idPattern(ID_PREFIXES.variant);
 const familyMemberIdPattern = idPattern(ID_PREFIXES.family);
@@ -64,8 +64,8 @@ export type CanonicalRelationLinkType = (typeof CANONICAL_RELATION_LINK_TYPES)[n
 
 export const foodRelationLinkSchema = createRelationLinkSchema([
   {
-    type: "related_protocol",
-    targetPattern: protocolIdPattern,
+    type: "related_regimen",
+    targetPattern: regimenIdPattern,
   },
 ]);
 
@@ -101,8 +101,8 @@ export const conditionRelationLinkSchema = createRelationLinkSchema([
     targetPattern: goalIdPattern,
   },
   {
-    type: "related_protocol",
-    targetPattern: protocolIdPattern,
+    type: "related_regimen",
+    targetPattern: regimenIdPattern,
   },
 ]);
 
@@ -113,7 +113,7 @@ export const allergyRelationLinkSchema = createRelationLinkSchema([
   },
 ]);
 
-export const protocolRelationLinkSchema = createRelationLinkSchema([
+export const regimenRelationLinkSchema = createRelationLinkSchema([
   {
     type: "supports_goal",
     targetPattern: goalIdPattern,
@@ -123,8 +123,8 @@ export const protocolRelationLinkSchema = createRelationLinkSchema([
     targetPattern: conditionIdPattern,
   },
   {
-    type: "related_protocol",
-    targetPattern: protocolIdPattern,
+    type: "related_regimen",
+    targetPattern: regimenIdPattern,
   },
 ]);
 

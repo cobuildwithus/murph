@@ -58,6 +58,7 @@ function createEmptyQueryVaultReadModel(vaultRoot: string): QueryVaultReadModel 
     conditions: [],
     allergies: [],
     protocols: [],
+    regimens: [],
     familyMembers: [],
     geneticVariants: [],
     foods: [],

@@ -157,18 +157,26 @@ function summarizeRawCoverage(rawMealManifestCount: number): string | null {
 }
 
 function summarizeBankCoverage(vault: VaultReadModel): string | null {
-  const protocolCount = vault.protocols.length
-  const supplementCount = countSupplementProtocols(vault)
+  const regimenCount = vault.regimens.length
+  const supplementCount = countSupplementRegimens(vault)
+  const privateProtocolCount = vault.protocols.length
+  const parts: string[] = []
 
-  if (protocolCount === 0) {
-    return null
+  if (regimenCount > 0) {
+    parts.push(
+      supplementCount === 0
+        ? summarizeCount(regimenCount, 'regimen record')
+        : `${summarizeCount(regimenCount, 'regimen record')}, including ${summarizeCount(supplementCount, 'supplement')}`,
+    )
   }
 
-  if (supplementCount === 0) {
-    return `- Bank coverage includes ${summarizeCount(protocolCount, 'protocol record')}.`
+  if (privateProtocolCount > 0) {
+    parts.push(summarizeCount(privateProtocolCount, 'private protocol'))
   }
 
-  return `- Bank coverage includes ${summarizeCount(protocolCount, 'protocol record')}, including ${summarizeCount(supplementCount, 'supplement')}.`
+  return parts.length > 0
+    ? `- Bank coverage includes ${joinWithAnd(parts)}.`
+    : null
 }
 
 function summarizeOtherSources(input: {
@@ -201,8 +209,8 @@ function countEventKinds(vault: VaultReadModel): ReadonlyMap<string, number> {
   return counts
 }
 
-function countSupplementProtocols(vault: VaultReadModel): number {
-  return vault.protocols.filter((record) => {
+function countSupplementRegimens(vault: VaultReadModel): number {
+  return vault.regimens.filter((record) => {
     const kind = record.attributes.kind
     return typeof kind === 'string' && kind.trim().toLowerCase() === 'supplement'
   }).length

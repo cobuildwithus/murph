@@ -20,6 +20,7 @@ const HOSTED_BROWSER_VAULT_ENTITY_FAMILIES = new Set<CanonicalEntityFamily>([
   "goal",
   "journal",
   "protocol",
+  "regimen",
   "sample",
 ]);
 const HOSTED_BROWSER_VAULT_BODY_PREVIEW_LIMIT = 280;
@@ -64,7 +65,8 @@ function projectHostedBrowserVaultEntity(entity: CanonicalEntity): CanonicalEnti
     entity.family === "family" ||
     entity.family === "genetics" ||
     entity.family === "goal" ||
-    entity.family === "protocol"
+    entity.family === "protocol" ||
+    entity.family === "regimen"
   ) {
     return {
       ...entity,

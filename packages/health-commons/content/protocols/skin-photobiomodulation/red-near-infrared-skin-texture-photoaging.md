@@ -501,7 +501,9 @@ experimentOnboarding:
       askPolicy: "always"
       required: true
       question: "What exact LED mask/device model would you use?"
-      writePath: "experiment.setup.deviceModel"
+      target:
+        object: protocol
+        field: personalization.setup.deviceModel
     -
       id: "red_nir_mode"
       label: "Red/NIR mode"
@@ -510,7 +512,9 @@ experimentOnboarding:
       askPolicy: "always"
       required: true
       question: "Which red/NIR wrinkle or texture mode will you use, and what wavelengths does the device report?"
-      writePath: "experiment.setup.mode"
+      target:
+        object: protocol
+        field: personalization.setup.mode
     -
       id: "treatment_area"
       label: "Treatment area"
@@ -523,7 +527,9 @@ experimentOnboarding:
         - "periocular_crows_feet"
         - "split_face"
       question: "Which region will you treat and score?"
-      writePath: "experiment.setup.treatmentArea"
+      target:
+        object: protocol
+        field: personalization.setup.treatmentArea
     -
       id: "session_duration_minutes"
       label: "Session duration"
@@ -536,7 +542,9 @@ experimentOnboarding:
         min: 1
         max: 10
       question: "What session length does the selected red/NIR mode use? This starter caps sessions at 10 minutes; if the device label requires longer use, do not activate this starter without a device-specific fork."
-      writePath: "experiment.plan.sessionDurationMinutes"
+      target:
+        object: experimentRun
+        field: sessionDurationMinutes
     -
       id: "sessions_per_week"
       label: "Sessions per week"
@@ -549,7 +557,9 @@ experimentOnboarding:
         min: 1
         max: 5
       question: "How many sessions per week will you do? This starter caps frequency at 5 sessions/week; more frequent use requires a separate device-specific fork."
-      writePath: "experiment.plan.sessionsPerWeek"
+      target:
+        object: experimentRun
+        field: sessionsPerWeek
     -
       id: "eye_protection_plan"
       label: "Eye protection plan"
@@ -558,7 +568,9 @@ experimentOnboarding:
       askPolicy: "always"
       required: true
       question: "What eye inserts, shields, or goggles will you use every session?"
-      writePath: "experiment.setup.eyeProtection"
+      target:
+        object: protocol
+        field: personalization.setup.eyeProtection
     -
       id: "baseline_photo_plan"
       label: "Baseline photo workflow"
@@ -567,7 +579,9 @@ experimentOnboarding:
       askPolicy: "always"
       required: true
       question: "What workflow and private/local storage plan will you use to keep camera, lighting, distance, expression, and makeup/sunscreen rules identical for baseline and follow-up photos without uploading or sharing identifiable originals unless you intentionally import them?"
-      writePath: "experiment.measurement.photoWorkflow"
+      target:
+        object: analysisPlan
+        field: measurement.photoWorkflow
     -
       id: "skincare_stability"
       label: "Skincare stability"
@@ -576,7 +590,9 @@ experimentOnboarding:
       askPolicy: "ask_if_unknown"
       required: true
       question: "Which skincare products, actives, procedures, and sun-exposure habits will you keep stable during the run?"
-      writePath: "experiment.confounders.skincare"
+      target:
+        object: onboardingCapture
+        field: confounders.skincare
     -
       id: "session_log_path"
       label: "Session log path"
@@ -585,7 +601,9 @@ experimentOnboarding:
       askPolicy: "always"
       required: true
       question: "Where will sessions, symptoms, eye protection, and photo checkpoints be logged?"
-      writePath: "experiment.logging.path"
+      target:
+        object: experimentRun
+        field: logging.path
     -
       id: "reminder_policy"
       label: "Reminder preference"
@@ -594,7 +612,9 @@ experimentOnboarding:
       askPolicy: "ask_at_confirmation"
       required: false
       question: "Would you like opt-in session reminders or only a weekly summary?"
-      writePath: "experiment.support.reminders"
+      target:
+        object: assistantSupport
+        field: reminders
   planDefaults:
     testPlanId: "skin-photo-56d"
     baselineDays: 14

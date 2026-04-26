@@ -103,11 +103,11 @@ beforeEach(() => {
   mocks.buildHostedSharePageData.mockResolvedValue({
     share: {
       preview: {
-        kinds: ["protocol"],
+        kinds: ["regimen"],
         counts: {
           foods: 0,
-          protocols: 1,
           recipes: 0,
+          regimens: 1,
           total: 1,
         },
         logMealAfterImport: false,

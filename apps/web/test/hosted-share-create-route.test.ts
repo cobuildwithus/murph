@@ -49,11 +49,11 @@ describe("hosted share create route", () => {
           createdAt: "2026-04-05T00:00:00.000Z",
           entities: [
             {
-              kind: "protocol",
+              kind: "regimen",
               payload: {
-                title: "Shared protocol",
+                title: "Shared regimen",
               },
-              ref: "protocol:shared",
+              ref: "regimen:shared",
             },
           ],
           schemaVersion: "murph.share-pack.v1",
@@ -73,13 +73,13 @@ describe("hosted share create route", () => {
         createdAt: "2026-04-05T00:00:00.000Z",
         entities: [
           {
-            kind: "protocol",
+            kind: "regimen",
             payload: {
               kind: "supplement",
               status: "active",
-              title: "Shared protocol",
+              title: "Shared regimen",
             },
-            ref: "protocol:shared",
+            ref: "regimen:shared",
           },
         ],
         schemaVersion: "murph.share-pack.v1",

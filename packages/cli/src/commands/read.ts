@@ -72,9 +72,9 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
           },
         },
         {
-          description: 'List active protocols with a smaller page size.',
+          description: 'List active regimens with a smaller page size.',
           options: {
-            recordType: ['protocol'],
+            recordType: ['regimen'],
             status: 'active',
             limit: 10,
             vault: './vault',

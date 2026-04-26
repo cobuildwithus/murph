@@ -343,7 +343,7 @@ export const interventionAddResultSchema = z.object({
   title: z.string().min(1),
   interventionType: z.string().min(1),
   durationMinutes: z.number().int().positive().nullable(),
-  protocolId: z.string().min(1).nullable(),
+  regimenId: z.string().min(1).nullable(),
   note: z.string().min(1),
 })
 

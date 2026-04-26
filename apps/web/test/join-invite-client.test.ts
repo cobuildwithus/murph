@@ -563,8 +563,8 @@ test("activating invite state explains when vault and assistant setup is still r
         kinds: ["food"],
         counts: {
           foods: 1,
-          protocols: 0,
           recipes: 0,
+          regimens: 0,
           total: 1,
         },
         logMealAfterImport: false,
@@ -596,8 +596,8 @@ test("invite share preview renders the generic bundle copy from the tiny summary
         kinds: ["food", "recipe"],
         counts: {
           foods: 1,
-          protocols: 0,
           recipes: 1,
+          regimens: 0,
           total: 2,
         },
         logMealAfterImport: true,
@@ -821,8 +821,8 @@ function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePage
         kinds: ["food"],
         counts: {
           foods: 1,
-          protocols: 0,
           recipes: 0,
+          regimens: 0,
           total: 1,
         },
         logMealAfterImport: false,

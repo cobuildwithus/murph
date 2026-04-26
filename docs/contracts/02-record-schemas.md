@@ -27,7 +27,8 @@ Legacy `bank/memory.md` comment metadata may still contain historical `mem_<16 l
 | goal | `goal` | goal Markdown record id |
 | condition | `cond` | condition Markdown record id |
 | allergy | `alg` | allergy Markdown record id |
-| protocol | `prot` | protocol Markdown record id |
+| regimen | `reg` | private medication, supplement, therapy, or habit registry id |
+| protocol | `prot` | private Health Commons-backed protocol adaptation id |
 | family member | `fam` | family-member Markdown record id |
 | genetic variant | `var` | genetic-variant Markdown record id |
 
@@ -81,7 +82,7 @@ Blood tests do not define a separate canonical record family. `blood-test` remai
 
 `activity_session` also carries a required nested `workout` payload as the canonical structured workout/session detail. Top-level `activityType`, `durationMinutes`, and optional `distanceKm` stay as query-friendly summaries, while exercises, sets, loads, session notes, source ids, and workout media descriptors live under `workout`.
 
-`intervention_session` may also include optional `durationMinutes` when the session length is known and optional `protocolId` when the intervention should stay linked back to one therapy or habit protocol.
+`intervention_session` may also include optional `durationMinutes` when the session length is known and optional `regimenId` when the intervention should stay linked back to one private therapy or habit regimen.
 
 ## Sample Streams
 
@@ -104,7 +105,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Journal day frontmatter:
   `schemaVersion`, `docType`, `dayKey`, `eventIds`, `sampleStreams`
 - Experiment frontmatter:
-  `schemaVersion`, `docType`, `experimentId`, `slug`, `status`, `title`, `startedOn`
+  `schemaVersion`, `docType`, `experimentId`, `slug`, `status`, `title`, `startedOn`, `commonsProtocolRef`, optional private `protocolRef`, optional `effectiveProtocolSnapshot`, and optional `runPlan.baseline` with `mode: prospective | retrospective | omitted`. Protocol-backed experiments require the public `commonsProtocolRef` plus the effective snapshot; private `protocolRef` is present only when the run uses a saved private adaptation.
 - Provider frontmatter:
   `schemaVersion`, `docType`, `providerId`, `slug`, `title`, `status`, `specialty`, `organization`
 - Food frontmatter:
@@ -120,8 +121,10 @@ Sample records may also carry optional `externalRef` provenance with the same sh
   `schemaVersion`, `docType`, `conditionId`, `slug`, `clinicalStatus`, `title`
 - Allergy frontmatter:
   `schemaVersion`, `docType`, `allergyId`, `slug`, `substance`, `status`
+- Regimen frontmatter:
+  `schemaVersion`, `docType`, `regimenId`, `slug`, `status`, `title`, `kind`, `startedOn`
 - Protocol frontmatter:
-  `schemaVersion`, `docType`, `protocolId`, `slug`, `status`, `title`, `startedOn`
+  `schemaVersion`, `docType`, `protocolId`, `slug`, `title`, `status`, `commonsProtocolRef`, `lineage`, `diff`, `effectiveSpec`, `personalization`, `effectiveSpecHash`, `protocolRevisionId`
 - Family-member frontmatter:
   `schemaVersion`, `docType`, `familyMemberId`, `slug`, `relationship`, `title`
 - Genetic-variant frontmatter:
@@ -144,6 +147,7 @@ Health artifact filenames are reserved here. They do not become valid generated 
 - `frontmatter-goal.schema.json`
 - `frontmatter-condition.schema.json`
 - `frontmatter-allergy.schema.json`
+- `frontmatter-regimen.schema.json`
 - `frontmatter-protocol.schema.json`
 - `frontmatter-family-member.schema.json`
 - `frontmatter-genetic-variant.schema.json`

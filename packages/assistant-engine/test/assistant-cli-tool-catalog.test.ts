@@ -569,7 +569,7 @@ function createVaultServicesStub(): VaultServices {
       upsertEvent: async () => ({ eventId: 'event-1' }),
       addSamples: async () => ({ sampleCount: 1 }),
       projectAssessment: async () => ({ projected: true }),
-      stopProtocol: async () => ({ protocolId: 'prot-1' }),
+      stopRegimen: async () => ({ regimenId: 'reg_1' }),
     },
     importers: {
       importAssessmentResponse: async () => ({ assessmentId: 'assessment-1' }),

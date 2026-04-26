@@ -93,8 +93,8 @@ function buildPack(): SharePack {
     createdAt: "2026-03-26T12:00:00.000Z",
     entities: [
       {
-        kind: "protocol",
-        ref: "protocol:creatine",
+        kind: "regimen",
+        ref: "regimen:creatine",
         payload: {
           title: "Creatine monohydrate",
           kind: "supplement",
@@ -110,7 +110,7 @@ function buildPack(): SharePack {
           title: "Morning Smoothie",
           status: "active",
           kind: "smoothie",
-          attachedProtocolRefs: ["protocol:creatine"],
+          attachedRegimenRefs: ["regimen:creatine"],
         },
       },
     ],
@@ -186,8 +186,8 @@ describe("hosted share service", () => {
       kinds: [],
       counts: {
         foods: 0,
-        protocols: 0,
         recipes: 0,
+        regimens: 0,
         total: 0,
       },
       logMealAfterImport: false,
@@ -195,8 +195,8 @@ describe("hosted share service", () => {
       kinds: [],
       counts: {
         foods: 0,
-        protocols: 0,
         recipes: 0,
+        regimens: 0,
         total: 0,
       },
       logMealAfterImport: false,
@@ -218,11 +218,11 @@ describe("hosted share service", () => {
     expect(result.url).toBe(result.joinUrl);
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]?.previewJson).toEqual({
-      kinds: ["food", "protocol"],
+      kinds: ["food", "regimen"],
       counts: {
         foods: 1,
-        protocols: 1,
         recipes: 0,
+        regimens: 1,
         total: 2,
       },
       logMealAfterImport: true,
@@ -333,8 +333,8 @@ describe("hosted share service", () => {
       kinds: [],
       counts: {
         foods: 0,
-        protocols: 0,
         recipes: 0,
+        regimens: 0,
         total: 0,
       },
       logMealAfterImport: false,
@@ -356,11 +356,11 @@ describe("hosted share service", () => {
 
     expect(pageData.stage).toBe("signin");
     expect(pageData.share?.preview).toEqual({
-      kinds: ["food", "protocol"],
+      kinds: ["food", "regimen"],
       counts: {
         foods: 1,
-        protocols: 1,
         recipes: 0,
+        regimens: 1,
         total: 2,
       },
       logMealAfterImport: true,

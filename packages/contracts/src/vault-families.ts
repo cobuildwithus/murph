@@ -9,8 +9,8 @@ import {
   foodBankEntityDefinition,
   geneticsBankEntityDefinition,
   goalBankEntityDefinition,
-  protocolBankEntityDefinition,
   providerBankEntityDefinition,
+  regimenBankEntityDefinition,
   recipeBankEntityDefinition,
   workoutFormatBankEntityDefinition,
 } from "./bank-entities.ts";
@@ -31,6 +31,7 @@ import {
   experimentFrontmatterSchema,
   inboxCaptureRecordSchema,
   journalDayFrontmatterSchema,
+  protocolFrontmatterSchema,
   sampleRecordSchema,
   vaultMetadataSchema,
 } from "./zod.ts";
@@ -46,6 +47,7 @@ export const CORE_DOCUMENT_RELATIVE_PATH = "CORE.md" as const;
 export const AUTOMATIONS_DIRECTORY = "bank/automations" as const;
 export const SCHEDULED_LOGS_DIRECTORY = "bank/scheduled-logs" as const;
 export const EXPERIMENTS_DIRECTORY = "bank/experiments" as const;
+export const PROTOCOLS_DIRECTORY = "bank/protocols" as const;
 export const HEALTH_LIBRARY_DIRECTORY = "bank/library" as const;
 export const JOURNAL_DIRECTORY = "journal" as const;
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments" as const;
@@ -76,11 +78,12 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   automations: "automations",
   scheduledLogs: "scheduledLogs",
   experiments: "experiments",
+  protocols: "protocols",
   journal: "journal",
   goals: "goals",
   conditions: "conditions",
   allergies: "allergies",
-  protocols: "protocols",
+  regimens: "regimens",
   familyMembers: "familyMembers",
   geneticVariants: "geneticVariants",
   foods: "foods",
@@ -296,6 +299,22 @@ const vaultFamilyDescriptors = [
     },
   },
   {
+    id: VAULT_FAMILY_IDS.protocols,
+    description: "Private Health Commons-backed protocol markdown documents.",
+    owner: "core",
+    storageKind: "markdown-directory",
+    naming: "slug",
+    directory: PROTOCOLS_DIRECTORY,
+    fileExtension: ".md",
+    querySource: "markdown-root",
+    requiredDirectory: false,
+    validation: {
+      kind: "frontmatter",
+      issueCode: "FRONTMATTER_INVALID",
+      schema: protocolFrontmatterSchema,
+    },
+  },
+  {
     id: VAULT_FAMILY_IDS.journal,
     description: "Dated journal markdown documents.",
     owner: "core",
@@ -356,18 +375,18 @@ const vaultFamilyDescriptors = [
     },
   },
   {
-    id: VAULT_FAMILY_IDS.protocols,
-    description: "Protocol registry markdown documents.",
+    id: VAULT_FAMILY_IDS.regimens,
+    description: "Regimen registry markdown documents.",
     owner: "core",
     storageKind: "markdown-directory",
     naming: "slug",
-    directory: protocolBankEntityDefinition.registry.directory,
+    directory: regimenBankEntityDefinition.registry.directory,
     fileExtension: ".md",
     querySource: "markdown-root",
     validation: {
       kind: "frontmatter",
       issueCode: "FRONTMATTER_INVALID",
-      schema: protocolBankEntityDefinition.registry.frontmatterSchema!,
+      schema: regimenBankEntityDefinition.registry.frontmatterSchema!,
     },
   },
   {
@@ -864,6 +883,7 @@ export const VAULT_LAYOUT = Object.freeze({
   allergiesDirectory: allergyBankEntityDefinition.registry.directory,
   conditionsDirectory: conditionBankEntityDefinition.registry.directory,
   experimentsDirectory: EXPERIMENTS_DIRECTORY,
+  protocolsDirectory: PROTOCOLS_DIRECTORY,
   familyDirectory: familyBankEntityDefinition.registry.directory,
   foodsDirectory: foodBankEntityDefinition.registry.directory,
   geneticsDirectory: geneticsBankEntityDefinition.registry.directory,
@@ -872,7 +892,7 @@ export const VAULT_LAYOUT = Object.freeze({
   providersDirectory: providerBankEntityDefinition.registry.directory,
   recipesDirectory: recipeBankEntityDefinition.registry.directory,
   workoutFormatsDirectory: workoutFormatBankEntityDefinition.registry.directory,
-  protocolsDirectory: protocolBankEntityDefinition.registry.directory,
+  regimensDirectory: regimenBankEntityDefinition.registry.directory,
   ledgerDirectory: LEDGER_DIRECTORY,
   assessmentLedgerDirectory: ASSESSMENT_LEDGER_DIRECTORY,
   eventLedgerDirectory: EVENT_LEDGER_DIRECTORY,

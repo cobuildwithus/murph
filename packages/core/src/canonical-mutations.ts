@@ -1,4 +1,4 @@
-import type { JournalDayFrontmatter } from "@murphai/contracts";
+import type { FrontmatterObject, JournalDayFrontmatter } from "@murphai/contracts";
 import {
   journalDayFrontmatterSchema,
   safeParseContract,
@@ -23,6 +23,15 @@ interface InboxPromotionCaptureAttachment {
   originalPath?: string | null;
   storedPath?: string | null;
   fileName?: string | null;
+}
+
+function frontmatterObjectFromRecord(value: unknown): FrontmatterObject {
+  const cloned = JSON.parse(JSON.stringify(value));
+  if (typeof cloned !== "object" || cloned === null || Array.isArray(cloned)) {
+    throw new VaultError("FRONTMATTER_INVALID", "Frontmatter failed object serialization.");
+  }
+
+  return cloned as FrontmatterObject;
 }
 
 interface InboxPromotionCapture {
@@ -333,7 +342,7 @@ export async function promoteInboxExperimentNote(
     spec: EXPERIMENT_PROMOTION_MARKDOWN_SPEC,
   });
   const nextDocument = stringifyFrontmatterDocument({
-    attributes: document.attributes,
+    attributes: frontmatterObjectFromRecord(document.attributes),
     body: bodyUpdate.body,
   });
 

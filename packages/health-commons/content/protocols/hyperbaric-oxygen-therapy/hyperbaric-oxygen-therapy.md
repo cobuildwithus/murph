@@ -671,7 +671,9 @@ experimentOnboarding:
       askPolicy: "ask_if_unknown"
       required: true
       question: "What indication or care-plan reason did the treating clinician give for HBOT?"
-      writePath: "runPlan.clinicalIndication"
+      target:
+        object: experimentRun
+        field: clinicalIndication
     -
       id: "prescribed_schedule"
       label: "Prescribed schedule"
@@ -680,7 +682,9 @@ experimentOnboarding:
       askPolicy: "ask_if_unknown"
       required: true
       question: "What pressure, session length, frequency, air-break plan, and total number of sessions were prescribed?"
-      writePath: "runPlan.prescribedSchedule"
+      target:
+        object: experimentRun
+        field: prescribedSchedule
     -
       id: "facility_supervision"
       label: "Facility supervision"
@@ -689,7 +693,9 @@ experimentOnboarding:
       askPolicy: "ask_if_unknown"
       required: true
       question: "Will every session be delivered in a medically supervised chamber facility with staff monitoring?"
-      writePath: "onboarding.answers.facilitySupervision"
+      target:
+        object: onboardingCapture
+        field: answers.facilitySupervision
     -
       id: "chamber_type"
       label: "Chamber type"
@@ -702,7 +708,9 @@ experimentOnboarding:
         - "monoplace"
         - "multiplace"
         - "unknown"
-      writePath: "runPlan.chamberType"
+      target:
+        object: experimentRun
+        field: chamberType
     -
       id: "session_log_reminder_policy"
       label: "Session log reminder policy"
@@ -715,7 +723,9 @@ experimentOnboarding:
         - "none"
         - "post_session_log"
         - "post_session_plus_same_day_missing_log_check"
-      writePath: "assistantSupport.reminderPolicy"
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: "clinician-supervised-hbot-tolerance-49d"
     baselineDays: 7

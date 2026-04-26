@@ -277,19 +277,19 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     }),
   ];
 
-  const protocols = [
+  const regimens = [
     createEntity(
-      "prot_alpha",
-      "protocol",
+      "reg_alpha",
+      "regimen",
       "supplement",
-      "bank/protocols/supplements/magnesium-glycinate.md",
+      "bank/regimens/supplements/magnesium-glycinate.md",
       {
-        lookupIds: ["prot_alpha", "magnesium-glycinate"],
+        lookupIds: ["reg_alpha", "magnesium-glycinate"],
         title: "Magnesium glycinate",
         status: "active",
-        body: "# Magnesium glycinate\n\nProtocol body.",
+        body: "# Magnesium glycinate\n\nRegimen body.",
         attributes: {
-          protocolId: "prot_alpha",
+          regimenId: "reg_alpha",
           slug: "magnesium-glycinate",
           title: "Magnesium glycinate",
           status: "active",
@@ -337,8 +337,8 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     ],
     ["bank/allergies/penicillin.md", "---\nallergyId: alg_alpha\nslug: penicillin\n---\n# Penicillin\n"],
     [
-      "bank/protocols/supplements/magnesium-glycinate.md",
-      "---\nprotocolId: prot_alpha\nslug: magnesium-glycinate\n---\n# Magnesium glycinate\n",
+      "bank/regimens/supplements/magnesium-glycinate.md",
+      "---\nregimenId: reg_alpha\nslug: magnesium-glycinate\n---\n# Magnesium glycinate\n",
     ],
     ["bank/family/mother.md", "---\nfamilyMemberId: fam_alpha\nslug: mother\n---\n# Mother\n"],
     [
@@ -352,7 +352,7 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     goals,
     conditions,
     allergies,
-    protocols,
+    regimens,
     familyMembers,
     geneticVariants,
     foods: [],
@@ -365,7 +365,7 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
       ...goals,
       ...conditions,
       ...allergies,
-      ...protocols,
+      ...regimens,
       ...familyMembers,
       ...geneticVariants,
     ].sort((left, right) => left.entityId.localeCompare(right.entityId)),
@@ -425,7 +425,7 @@ test("export pack health strips transient fields, sorts deterministically, and r
   assert.equal(healthRead.health.goals[0]?.slug, "improve-sleep");
   assert.equal(healthRead.health.conditions[0]?.slug, "cond_alpha");
   assert.equal(healthRead.health.allergies[0]?.slug, "penicillin");
-  assert.equal(healthRead.health.protocols[0]?.slug, "magnesium-glycinate");
+  assert.equal(healthRead.health.regimens[0]?.slug, "magnesium-glycinate");
   assert.equal(healthRead.health.familyMembers[0]?.slug, "mother");
   assert.equal(healthRead.health.geneticVariants[0]?.slug, "mthfr-c677t");
   assert.deepEqual(healthRead.failures, collection.failures);

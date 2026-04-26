@@ -204,6 +204,9 @@ experimentOnboarding:
           - total_vitamin_d_from_all_sources_unknown
           - active_safety_screen_positive_without_clinician_guidance
         onInvalid: do_not_create_ordinary_protocol; route_to_clinician_guidance_or_separate_variant
+      target:
+        object: onboardingCapture
+        field: setupAnswers.dailyDoseIu
     -
       id: product_name
       label: Product name
@@ -212,6 +215,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: false
       question: Which D3 product will you use?
+      target:
+        object: onboardingCapture
+        field: setupAnswers.productName
     -
       id: dose_time
       label: Dose time
@@ -220,6 +226,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: false
       question: What time of day will you usually take it?
+      target:
+        object: onboardingCapture
+        field: setupAnswers.doseTime
     -
       id: baseline_25ohd_known
       label: Baseline 25(OH)D known
@@ -228,6 +237,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: Do you have a baseline 25(OH)D result or plan to get one?
+      target:
+        object: onboardingCapture
+        field: setupAnswers.baseline25ohdKnown
     -
       id: retest_plan
       label: Follow-up lab plan
@@ -240,6 +252,9 @@ experimentOnboarding:
         - eight_weeks
         - twelve_weeks
         - no_lab_planned_yet
+      target:
+        object: onboardingCapture
+        field: setupAnswers.retestPlan
     -
       id: current_supplement_stack
       label: Current D/calcium supplements
@@ -248,6 +263,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: List other vitamin D, calcium, multivitamin, or prescription products you take.
+      target:
+        object: onboardingCapture
+        field: setupAnswers.currentSupplementStack
   planDefaults:
     testPlanId: 25ohd-lab-feedback-91d
     baselineDays: 7

@@ -322,7 +322,9 @@ experimentOnboarding:
         - gym_or_spa_plunge
         - shared_or_unreliable_access
         - no_regular_access
-      writePath: runPlan.coldPlungeAccess
+      target:
+        object: experimentRun
+        field: coldPlungeAccess
     -
       id: thermometer_confidence
       label: Water-temperature confidence
@@ -336,7 +338,9 @@ experimentOnboarding:
         - usually_measured
         - rough_estimate_only
         - unknown
-      writePath: runPlan.waterTemperatureMode
+      target:
+        object: experimentRun
+        field: waterTemperatureMode
     -
       id: cold_experience_level
       label: Recent cold-exposure experience
@@ -350,7 +354,9 @@ experimentOnboarding:
         - some_recent_and_tolerated
         - regular_but_mixed
         - regular_and_well_tolerated
-      writePath: onboarding.answers.coldExperienceLevel
+      target:
+        object: onboardingCapture
+        field: answers.coldExperienceLevel
     -
       id: session_timing
       label: Session timing
@@ -362,7 +368,9 @@ experimentOnboarding:
       constraints:
         sessionsPerWeek: 3
         avoidBackToBackWhenPossible: true
-      writePath: runPlan.schedule
+      target:
+        object: experimentRun
+        field: schedule
     -
       id: exercise_pairing_policy
       label: Exercise pairing
@@ -375,7 +383,9 @@ experimentOnboarding:
         - mostly_standalone
         - mostly_post_exercise
         - mixed_contexts
-      writePath: runPlan.sessionContext
+      target:
+        object: experimentRun
+        field: sessionContext
     -
       id: blood_pressure_tracking
       label: Morning blood pressure tracking
@@ -388,7 +398,9 @@ experimentOnboarding:
         - validated_home_cuff_available
         - cuff_available_but_inconsistent
         - no_home_cuff
-      writePath: tracking.morningBloodPressureMode
+      target:
+        object: analysisPlan
+        field: morningBloodPressureMode
     -
       id: reminder_policy
       label: Reminder policy
@@ -401,7 +413,9 @@ experimentOnboarding:
         - none
         - pre_session
         - pre_session_plus_next_morning_check
-      writePath: assistantSupport.reminderPolicy
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: cold-plunge-21d
     baselineDays: 7

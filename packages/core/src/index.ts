@@ -97,7 +97,7 @@ export {
   promoteInboxJournal,
   repairVault,
   stopExperiment,
-  stopProtocolItem,
+  stopRegimen,
   unlinkJournalEventIds,
   unlinkJournalStreams,
   updateWorkoutUnitPreferences,
@@ -112,9 +112,10 @@ export {
   upsertFamilyMember,
   upsertGeneticVariant,
   upsertGoal,
+  upsertProtocol,
+  upsertRegimen,
   upsertRecipe,
   upsertWorkoutFormat,
-  upsertProtocolItem,
   validateVault,
 } from "./public-mutations.ts";
 export {
@@ -124,6 +125,26 @@ export {
 export type {
   WorkoutFormatRecord,
 } from "./bank/types.ts";
+export {
+  listRegimens,
+  readRegimen,
+} from "./bank/regimens.ts";
+export {
+  listProtocols,
+  readProtocol,
+  PROTOCOL_DOC_TYPE,
+  PROTOCOL_ID_PREFIX,
+  PROTOCOL_SCHEMA_VERSION,
+  PROTOCOLS_DIRECTORY,
+} from "./protocols.ts";
+export type {
+  ProtocolDocument,
+  ProtocolFrontmatter,
+  ProtocolRecord,
+  ReadProtocolInput,
+  UpsertProtocolInput,
+  UpsertProtocolResult,
+} from "./protocols.ts";
 export type {
   ApplyCanonicalWriteBatchInput,
   ApplyCanonicalWriteBatchResult,

@@ -18,7 +18,7 @@ import {
   listProviders,
   listRecipes,
   listWorkoutFormats,
-  listProtocolItems,
+  listRegimens,
   readAllergy,
   readCondition,
   readFood,
@@ -26,8 +26,8 @@ import {
   readProvider,
   readRecipe,
   readWorkoutFormat,
-  readProtocolItem,
-  stopProtocolItem,
+  readRegimen,
+  stopRegimen,
   upsertAllergy,
   upsertCondition,
   upsertFood,
@@ -35,7 +35,7 @@ import {
   upsertProvider,
   upsertRecipe,
   upsertWorkoutFormat,
-  upsertProtocolItem,
+  upsertRegimen,
 } from "../src/bank/index.ts";
 
 type AuditLikeRecord = {
@@ -1171,7 +1171,7 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.match(foodMarkdown, /## Ingredients/u);
   assert.match(foodMarkdown, /## Nutrition per serving/u);
   assert.match(foodMarkdown, /Auto-log daily/u);
-  assert.doesNotMatch(foodMarkdown, /^attachedProtocolRefs:/mu);
+  assert.doesNotMatch(foodMarkdown, /^attachedRegimenRefs:/mu);
 
   await assert.rejects(
     () =>
@@ -1617,7 +1617,7 @@ test("conditions and allergies are stored as deterministic markdown registry pag
       startAt: "2026-03-01",
     },
   });
-  const protocol = await upsertProtocolItem({
+  const regimen = await upsertRegimen({
     vaultRoot,
     title: "Magnesium glycinate",
     kind: "supplement",
@@ -1635,7 +1635,7 @@ test("conditions and allergies are stored as deterministic markdown registry pag
     assertedOn: "2024-05-01",
     bodySites: ["head"],
     relatedGoalIds: [goal.record.entity.goalId],
-    relatedProtocolIds: [protocol.record.entity.protocolId],
+    relatedRegimenIds: [regimen.record.entity.regimenId],
     note: "Likely worsened by sleep disruption.",
   });
   const allergy = await upsertAllergy({
@@ -1688,8 +1688,8 @@ test("conditions and allergies are stored as deterministic markdown registry pag
       targetId: goal.record.entity.goalId,
     },
     {
-      type: "related_protocol",
-      targetId: protocol.record.entity.protocolId,
+      type: "related_regimen",
+      targetId: regimen.record.entity.regimenId,
     },
   ]);
   assert.deepEqual(readAllergyRecord.entity.relatedConditionIds, [condition.record.entity.conditionId]);
@@ -1699,18 +1699,18 @@ test("conditions and allergies are stored as deterministic markdown registry pag
       targetId: condition.record.entity.conditionId,
     },
   ]);
-  assert.match(readConditionRecord.document.markdown, /## Related Protocols/);
+  assert.match(readConditionRecord.document.markdown, /## Related Regimens/);
   assert.match(readAllergyRecord.document.markdown, /## Related Conditions/);
   assert.deepEqual(patchedCondition.record.entity.relatedGoalIds, [goal.record.entity.goalId]);
-  assert.deepEqual(patchedCondition.record.entity.relatedProtocolIds, [protocol.record.entity.protocolId]);
+  assert.deepEqual(patchedCondition.record.entity.relatedRegimenIds, [regimen.record.entity.regimenId]);
   assert.deepEqual(patchedCondition.record.entity.links, [
     {
       type: "related_goal",
       targetId: goal.record.entity.goalId,
     },
     {
-      type: "related_protocol",
-      targetId: protocol.record.entity.protocolId,
+      type: "related_regimen",
+      targetId: regimen.record.entity.regimenId,
     },
   ]);
   assert.equal(patchedCondition.record.entity.note, "Likely worsened by sleep disruption.");
@@ -1756,7 +1756,7 @@ test("condition and allergy updates clear normalized relations without leaving s
       startAt: "2026-03-01",
     },
   });
-  const protocol = await upsertProtocolItem({
+  const regimen = await upsertRegimen({
     vaultRoot,
     title: "Magnesium glycinate",
     kind: "supplement",
@@ -1770,7 +1770,7 @@ test("condition and allergy updates clear normalized relations without leaving s
     vaultRoot,
     title: "Migraine",
     relatedGoalIds: [goal.record.entity.goalId],
-    relatedProtocolIds: [protocol.record.entity.protocolId],
+    relatedRegimenIds: [regimen.record.entity.regimenId],
     note: "Likely worsened by sleep disruption.",
   });
   const allergy = await upsertAllergy({
@@ -1785,7 +1785,7 @@ test("condition and allergy updates clear normalized relations without leaving s
     vaultRoot,
     conditionId: condition.record.entity.conditionId,
     relatedGoalIds: [],
-    relatedProtocolIds: [],
+    relatedRegimenIds: [],
   });
   const clearedAllergy = await upsertAllergy({
     vaultRoot,
@@ -1804,12 +1804,12 @@ test("condition and allergy updates clear normalized relations without leaving s
   assert.equal(clearedCondition.created, false);
   assert.equal(clearedAllergy.created, false);
   assert.equal(readConditionRecord.entity.relatedGoalIds, undefined);
-  assert.equal(readConditionRecord.entity.relatedProtocolIds, undefined);
+  assert.equal(readConditionRecord.entity.relatedRegimenIds, undefined);
   assert.deepEqual(readConditionRecord.entity.links, []);
   assert.match(readConditionRecord.document.markdown, /## Related Goals[\s\S]*- none/);
-  assert.match(readConditionRecord.document.markdown, /## Related Protocols[\s\S]*- none/);
+  assert.match(readConditionRecord.document.markdown, /## Related Regimens[\s\S]*- none/);
   assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(goal.record.entity.goalId));
-  assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(protocol.record.entity.protocolId));
+  assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(regimen.record.entity.regimenId));
   assert.equal(readAllergyRecord.entity.relatedConditionIds, undefined);
   assert.deepEqual(readAllergyRecord.entity.links, []);
   assert.match(readAllergyRecord.document.markdown, /## Related Conditions[\s\S]*- none/);
@@ -1997,18 +1997,18 @@ test("conditions and allergies normalize repeated relations and enforce timeline
       startAt: "2026-03-02",
     },
   });
-  const protocolA = await upsertProtocolItem({
+  const regimenA = await upsertRegimen({
     vaultRoot,
-    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S6A",
-    title: "Protocol A",
+    regimenId: "reg_01JNYB6M9A6W4K2N8P3Q7R5S6A",
+    title: "Regimen A",
     kind: "supplement",
     status: "active",
     startedOn: "2026-03-03",
   });
-  const protocolB = await upsertProtocolItem({
+  const regimenB = await upsertRegimen({
     vaultRoot,
-    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S6B",
-    title: "Protocol B",
+    regimenId: "reg_01JNYB6M9A6W4K2N8P3Q7R5S6B",
+    title: "Regimen B",
     kind: "supplement",
     status: "active",
     startedOn: "2026-03-04",
@@ -2023,10 +2023,10 @@ test("conditions and allergies normalize repeated relations and enforce timeline
     assertedOn: "2026-03-01",
     resolvedOn: "2026-03-10",
     relatedGoalIds: [goalB.record.entity.goalId, goalA.record.entity.goalId, goalA.record.entity.goalId],
-    relatedProtocolIds: [
-      protocolB.record.entity.protocolId,
-      protocolA.record.entity.protocolId,
-      protocolA.record.entity.protocolId,
+    relatedRegimenIds: [
+      regimenB.record.entity.regimenId,
+      regimenA.record.entity.regimenId,
+      regimenA.record.entity.regimenId,
     ],
     note: "Likely worsened by sleep disruption.",
   });
@@ -2058,9 +2058,9 @@ test("conditions and allergies normalize repeated relations and enforce timeline
     goalA.record.entity.goalId,
     goalB.record.entity.goalId,
   ]);
-  assert.deepEqual(conditionRead.entity.relatedProtocolIds, [
-    protocolA.record.entity.protocolId,
-    protocolB.record.entity.protocolId,
+  assert.deepEqual(conditionRead.entity.relatedRegimenIds, [
+    regimenA.record.entity.regimenId,
+    regimenB.record.entity.regimenId,
   ]);
   assert.deepEqual(conditionRead.entity.links, [
     {
@@ -2072,12 +2072,12 @@ test("conditions and allergies normalize repeated relations and enforce timeline
       targetId: goalB.record.entity.goalId,
     },
     {
-      type: "related_protocol",
-      targetId: protocolA.record.entity.protocolId,
+      type: "related_regimen",
+      targetId: regimenA.record.entity.regimenId,
     },
     {
-      type: "related_protocol",
-      targetId: protocolB.record.entity.protocolId,
+      type: "related_regimen",
+      targetId: regimenB.record.entity.regimenId,
     },
   ]);
   assert.deepEqual(allergyRead.entity.relatedConditionIds, [condition.record.entity.conditionId]);
@@ -2088,7 +2088,7 @@ test("conditions and allergies normalize repeated relations and enforce timeline
     },
   ]);
   assert.match(conditionRead.document.markdown, /## Related Goals/);
-  assert.match(conditionRead.document.markdown, /## Related Protocols/);
+  assert.match(conditionRead.document.markdown, /## Related Regimens/);
   assert.match(allergyRead.document.markdown, /## Related Conditions/);
 
   const extraCondition = await upsertCondition({
@@ -2167,8 +2167,8 @@ test("conditions and allergies normalize repeated relations and enforce timeline
   );
 });
 
-test("protocols support medication and supplement groups plus stop handling", async () => {
-  const vaultRoot = await makeTempDirectory("murph-protocols");
+test("regimens support medication and supplement groups plus stop handling", async () => {
+  const vaultRoot = await makeTempDirectory("murph-regimens");
   await initializeVault({ vaultRoot });
   const goal = await upsertGoal({
     vaultRoot,
@@ -2183,7 +2183,7 @@ test("protocols support medication and supplement groups plus stop handling", as
     clinicalStatus: "active",
   });
 
-  const medication = await upsertProtocolItem({
+  const medication = await upsertRegimen({
     vaultRoot,
     title: "Metformin XR",
     kind: "medication",
@@ -2194,7 +2194,7 @@ test("protocols support medication and supplement groups plus stop handling", as
     unit: "mg",
     schedule: "with dinner",
   });
-  const supplement = await upsertProtocolItem({
+  const supplement = await upsertRegimen({
     vaultRoot,
     title: "Fish oil",
     kind: "supplement",
@@ -2224,31 +2224,31 @@ test("protocols support medication and supplement groups plus stop handling", as
     relatedGoalIds: [goal.record.entity.goalId],
     relatedConditionIds: [condition.record.entity.conditionId],
   });
-  const stopped = await stopProtocolItem({
+  const stopped = await stopRegimen({
     vaultRoot,
-    protocolId: medication.record.entity.protocolId,
+    regimenId: medication.record.entity.regimenId,
     stoppedOn: "2026-03-20",
   });
 
-  const listed = await listProtocolItems(vaultRoot);
-  const readMedication = await readProtocolItem({
+  const listed = await listRegimens(vaultRoot);
+  const readMedication = await readRegimen({
     vaultRoot,
-    protocolId: medication.record.entity.protocolId,
+    regimenId: medication.record.entity.regimenId,
   });
-  const readSupplement = await readProtocolItem({
+  const readSupplement = await readRegimen({
     vaultRoot,
     slug: supplement.record.entity.slug,
     group: "supplement",
   });
-  const protocolMarkdown = await fs.readFile(
+  const regimenMarkdown = await fs.readFile(
     path.join(vaultRoot, supplement.record.document.relativePath),
     "utf8",
   );
-  const patchedSupplement = await upsertProtocolItem({
+  const patchedSupplement = await upsertRegimen({
     vaultRoot,
-    protocolId: supplement.record.entity.protocolId,
+    regimenId: supplement.record.entity.regimenId,
   });
-  const protocolAuditRecords = await readJsonlRecords({
+  const regimenAuditRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: patchedSupplement.auditPath,
   });
@@ -2256,7 +2256,7 @@ test("protocols support medication and supplement groups plus stop handling", as
     vaultRoot,
     relativePath: stopped.auditPath,
   });
-  const protocolOperations = await Promise.all(
+  const regimenOperations = await Promise.all(
     (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
       readStoredWriteOperation(vaultRoot, relativePath),
     ),
@@ -2307,7 +2307,7 @@ test("protocols support medication and supplement groups plus stop handling", as
     { type: "supports_goal", targetId: goal.record.entity.goalId },
     { type: "addresses_condition", targetId: condition.record.entity.conditionId },
   ]);
-  assert.match(stopped.record.document.relativePath, /^bank\/protocols\/medication\//);
+  assert.match(stopped.record.document.relativePath, /^bank\/regimens\/medication\//);
   assert.match(readMedication.document.markdown, /Stopped on: 2026-03-20/);
   assert.match(readSupplement.document.markdown, /## Product/);
   assert.match(readSupplement.document.markdown, /Brand: Nordic Naturals/);
@@ -2315,25 +2315,25 @@ test("protocols support medication and supplement groups plus stop handling", as
   assert.match(readSupplement.document.markdown, /## Ingredients/);
   assert.match(readSupplement.document.markdown, /EPA — 600 mg/);
   assert.match(readSupplement.document.markdown, /DHA — 400 mg/);
-  assert.doesNotMatch(protocolMarkdown, /^group:/mu);
-  assert.deepEqual(selectAuditMetadata(protocolAuditRecords, "protocol_upsert"), [
-    { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "create" },
-    { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "create" },
-    { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "update" },
+  assert.doesNotMatch(regimenMarkdown, /^group:/mu);
+  assert.deepEqual(selectAuditMetadata(regimenAuditRecords, "regimen_upsert"), [
+    { action: "regimen_upsert", commandName: "core.upsertRegimen", op: "create" },
+    { action: "regimen_upsert", commandName: "core.upsertRegimen", op: "create" },
+    { action: "regimen_upsert", commandName: "core.upsertRegimen", op: "update" },
   ]);
-  assert.deepEqual(selectAuditMetadata(stopAuditRecords, "protocol_stop"), [
-    { action: "protocol_stop", commandName: "core.stopProtocolItem", op: "update" },
+  assert.deepEqual(selectAuditMetadata(stopAuditRecords, "regimen_stop"), [
+    { action: "regimen_stop", commandName: "core.stopRegimen", op: "update" },
   ]);
-  assert.equal(protocolOperations.filter((operation) => operation.operationType === "protocol_upsert").length, 3);
-  assert.equal(protocolOperations.filter((operation) => operation.operationType === "protocol_stop").length, 1);
-  assert.ok(protocolOperations.every((operation) => operation.status === "committed"));
+  assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_upsert").length, 3);
+  assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_stop").length, 1);
+  assert.ok(regimenOperations.every((operation) => operation.status === "committed"));
 });
 
-test("protocol reads reject conflicting protocolId and slug selectors", async () => {
-  const vaultRoot = await makeTempDirectory("murph-protocol-read-conflict");
+test("regimen reads reject conflicting regimenId and slug selectors", async () => {
+  const vaultRoot = await makeTempDirectory("murph-regimen-read-conflict");
   await initializeVault({ vaultRoot });
 
-  const medication = await upsertProtocolItem({
+  const medication = await upsertRegimen({
     vaultRoot,
     title: "Magnesium glycinate medication",
     slug: "magnesium-glycinate",
@@ -2341,7 +2341,7 @@ test("protocol reads reject conflicting protocolId and slug selectors", async ()
     status: "active",
     startedOn: "2026-02-01",
   });
-  const supplement = await upsertProtocolItem({
+  const supplement = await upsertRegimen({
     vaultRoot,
     title: "Magnesium glycinate supplement",
     slug: "magnesium-glycinate-supplement",
@@ -2352,23 +2352,23 @@ test("protocol reads reject conflicting protocolId and slug selectors", async ()
 
   await assert.rejects(
     () =>
-      readProtocolItem({
+      readRegimen({
         vaultRoot,
-        protocolId: supplement.record.entity.protocolId,
+        regimenId: supplement.record.entity.regimenId,
         slug: medication.record.entity.slug,
       }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_PROTOCOL_CONFLICT" &&
-      error.message === "protocolId and slug resolve to different protocol records.",
+      error.code === "VAULT_REGIMEN_CONFLICT" &&
+      error.message === "regimenId and slug resolve to different regimen records.",
   );
 });
 
-test("protocol reads reject ambiguous slugs across groups unless group is supplied", async () => {
-  const vaultRoot = await makeTempDirectory("murph-protocol-read-ambiguous-slug");
+test("regimen reads reject ambiguous slugs across groups unless group is supplied", async () => {
+  const vaultRoot = await makeTempDirectory("murph-regimen-read-ambiguous-slug");
   await initializeVault({ vaultRoot });
 
-  await upsertProtocolItem({
+  await upsertRegimen({
     vaultRoot,
     title: "Electrolyte support medication",
     slug: "electrolyte-support",
@@ -2377,7 +2377,7 @@ test("protocol reads reject ambiguous slugs across groups unless group is suppli
     status: "active",
     startedOn: "2026-02-01",
   });
-  const supplement = await upsertProtocolItem({
+  const supplement = await upsertRegimen({
     vaultRoot,
     title: "Electrolyte support supplement",
     slug: "electrolyte-support",
@@ -2389,31 +2389,31 @@ test("protocol reads reject ambiguous slugs across groups unless group is suppli
 
   await assert.rejects(
     () =>
-      readProtocolItem({
+      readRegimen({
         vaultRoot,
         slug: "electrolyte-support",
       }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_PROTOCOL_CONFLICT" &&
-      error.message === "slug resolves to multiple protocol records; include group.",
+      error.code === "VAULT_REGIMEN_CONFLICT" &&
+      error.message === "slug resolves to multiple regimen records; include group.",
   );
 
-  const readSupplement = await readProtocolItem({
+  const readSupplement = await readRegimen({
     vaultRoot,
     slug: "electrolyte-support",
     group: "supplement",
   });
 
-  assert.equal(readSupplement.entity.protocolId, supplement.record.entity.protocolId);
+  assert.equal(readSupplement.entity.regimenId, supplement.record.entity.regimenId);
   assert.equal(readSupplement.entity.group, "supplement");
 });
 
-test("protocol upserts reject ambiguous slugs across groups unless protocolId or group is supplied", async () => {
-  const vaultRoot = await makeTempDirectory("murph-protocol-upsert-ambiguous-slug");
+test("regimen upserts reject ambiguous slugs across groups unless regimenId or group is supplied", async () => {
+  const vaultRoot = await makeTempDirectory("murph-regimen-upsert-ambiguous-slug");
   await initializeVault({ vaultRoot });
 
-  await upsertProtocolItem({
+  await upsertRegimen({
     vaultRoot,
     title: "Vitamin D medication",
     slug: "vitamin-d",
@@ -2422,7 +2422,7 @@ test("protocol upserts reject ambiguous slugs across groups unless protocolId or
     status: "active",
     startedOn: "2026-02-01",
   });
-  await upsertProtocolItem({
+  await upsertRegimen({
     vaultRoot,
     title: "Vitamin D supplement",
     slug: "vitamin-d",
@@ -2434,19 +2434,19 @@ test("protocol upserts reject ambiguous slugs across groups unless protocolId or
 
   await assert.rejects(
     () =>
-      upsertProtocolItem({
+      upsertRegimen({
         vaultRoot,
         slug: "vitamin-d",
       }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_PROTOCOL_CONFLICT" &&
-      error.message === "slug resolves to multiple protocol records; include group or protocolId.",
+      error.code === "VAULT_REGIMEN_CONFLICT" &&
+      error.message === "slug resolves to multiple regimen records; include group or regimenId.",
   );
 });
 
-test("protocols normalize repeated relations, support ingredient edge cases, and reject bad timing", async () => {
-  const vaultRoot = await makeTempDirectory("murph-protocol-normalization");
+test("regimens normalize repeated relations, support ingredient edge cases, and reject bad timing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-regimen-normalization");
   await initializeVault({ vaultRoot });
 
   const goalA = await upsertGoal({
@@ -2477,18 +2477,18 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
     title: "Condition B",
     clinicalStatus: "active",
   });
-  const peerProtocol = await upsertProtocolItem({
+  const peerRegimen = await upsertRegimen({
     vaultRoot,
-    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S7A",
-    title: "Peer protocol",
+    regimenId: "reg_01JNYB6M9A6W4K2N8P3Q7R5S7A",
+    title: "Peer regimen",
     kind: "supplement",
     status: "active",
     startedOn: "2026-03-03",
   });
 
-  const created = await upsertProtocolItem({
+  const created = await upsertRegimen({
     vaultRoot,
-    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S7B",
+    regimenId: "reg_01JNYB6M9A6W4K2N8P3Q7R5S7B",
     title: "Recovery stack",
     slug: "recovery-stack",
     kind: "supplement",
@@ -2526,25 +2526,25 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
       conditionA.record.entity.conditionId,
       conditionA.record.entity.conditionId,
     ],
-    relatedProtocolIds: [
-      peerProtocol.record.entity.protocolId,
-      peerProtocol.record.entity.protocolId,
+    relatedRegimenIds: [
+      peerRegimen.record.entity.regimenId,
+      peerRegimen.record.entity.regimenId,
     ],
   });
-  const read = await readProtocolItem({
+  const read = await readRegimen({
     vaultRoot,
-    protocolId: created.record.entity.protocolId,
+    regimenId: created.record.entity.regimenId,
   });
-  const cleared = await upsertProtocolItem({
+  const cleared = await upsertRegimen({
     vaultRoot,
-    protocolId: created.record.entity.protocolId,
+    regimenId: created.record.entity.regimenId,
     relatedGoalIds: [],
     relatedConditionIds: [],
-    relatedProtocolIds: [],
+    relatedRegimenIds: [],
   });
-  const clearedRead = await readProtocolItem({
+  const clearedRead = await readRegimen({
     vaultRoot,
-    protocolId: created.record.entity.protocolId,
+    regimenId: created.record.entity.regimenId,
   });
 
   assert.deepEqual(created.record.entity.relatedGoalIds, [
@@ -2555,7 +2555,7 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
     conditionA.record.entity.conditionId,
     conditionB.record.entity.conditionId,
   ]);
-  assert.deepEqual(created.record.entity.relatedProtocolIds, [peerProtocol.record.entity.protocolId]);
+  assert.deepEqual(created.record.entity.relatedRegimenIds, [peerRegimen.record.entity.regimenId]);
   assert.deepEqual(read.entity.links, [
     {
       type: "supports_goal",
@@ -2574,8 +2574,8 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
       targetId: conditionB.record.entity.conditionId,
     },
     {
-      type: "related_protocol",
-      targetId: peerProtocol.record.entity.protocolId,
+      type: "related_regimen",
+      targetId: peerRegimen.record.entity.regimenId,
     },
   ]);
   assert.match(read.document.markdown, /EPA — amount not specified/);
@@ -2583,19 +2583,19 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
   assert.match(read.document.markdown, /Creatine — 5 g/);
   assert.match(read.document.markdown, /## Related Goals/);
   assert.match(read.document.markdown, /## Related Conditions/);
-  assert.match(read.document.markdown, /## Related Protocols/);
+  assert.match(read.document.markdown, /## Related Regimens/);
   assert.equal(cleared.created, false);
   assert.deepEqual(clearedRead.entity.relatedGoalIds, undefined);
   assert.deepEqual(clearedRead.entity.relatedConditionIds, undefined);
-  assert.deepEqual(clearedRead.entity.relatedProtocolIds, undefined);
+  assert.deepEqual(clearedRead.entity.relatedRegimenIds, undefined);
   assert.deepEqual(clearedRead.entity.links, []);
   assert.match(clearedRead.document.markdown, /## Related Goals[\s\S]*- none/);
   assert.match(clearedRead.document.markdown, /## Related Conditions[\s\S]*- none/);
-  assert.match(clearedRead.document.markdown, /## Related Protocols[\s\S]*- none/);
+  assert.match(clearedRead.document.markdown, /## Related Regimens[\s\S]*- none/);
 
   await assert.rejects(
     () =>
-      upsertProtocolItem({
+      upsertRegimen({
         vaultRoot,
         title: "Missing startedOn",
         kind: "supplement",
@@ -2609,7 +2609,7 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
 
   await assert.rejects(
     () =>
-      upsertProtocolItem({
+      upsertRegimen({
         vaultRoot,
         title: "Backwards stop",
         kind: "supplement",
@@ -2624,7 +2624,7 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
 
   await assert.rejects(
     () =>
-      upsertProtocolItem({
+      upsertRegimen({
         vaultRoot,
         title: "Stopped while active",
         kind: "supplement",
@@ -2640,7 +2640,7 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
 
   await assert.rejects(
     () =>
-      upsertProtocolItem({
+      upsertRegimen({
         vaultRoot,
         title: "Stopped without date",
         kind: "supplement",
@@ -2654,20 +2654,20 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
   );
 
   await fs.writeFile(
-    path.join(vaultRoot, "bank/protocols/legacy-protocol.md"),
+    path.join(vaultRoot, "bank/regimens/supplement/legacy-regimen.md"),
     [
       "---",
-      "schemaVersion: murph.frontmatter.protocol.v1",
-      "docType: protocol",
-      "protocolId: prot_01JNYB6M9A6W4K2N8P3Q7R5S7C",
-      "slug: legacy-protocol",
-      "title: Legacy protocol",
+      "schemaVersion: murph.frontmatter.regimen.v1",
+      "docType: regimen",
+      "regimenId: prot_01JNYB6M9A6W4K2N8P3Q7R5S7C",
+      "slug: legacy-regimen",
+      "title: Legacy regimen",
       "kind: supplement",
       "status: active",
       "startedOn: 2026-03-05",
       "---",
       "",
-      "# Legacy protocol",
+      "# Legacy regimen",
       "",
     ].join("\n"),
     "utf8",
@@ -2675,13 +2675,13 @@ test("protocols normalize repeated relations, support ingredient edge cases, and
 
   await assert.rejects(
     () =>
-      readProtocolItem({
+      readRegimen({
         vaultRoot,
-        slug: "legacy-protocol",
+        slug: "legacy-regimen",
       }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_INVALID_PROTOCOL" &&
-      error.message === "Protocol path is missing a group directory.",
+      error.code === "VAULT_INVALID_REGIMEN" &&
+      error.message === "regimenId must match reg_<ULID>.",
   );
 });

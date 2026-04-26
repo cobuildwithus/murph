@@ -248,7 +248,7 @@ describe("helper barrel exports", () => {
           topGoalIds: ["goal_1"],
           relatedGoalIds: ["goal_2"],
           relatedConditionIds: ["condition_1"],
-          relatedProtocolIds: ["protocol_1"],
+          relatedRegimenIds: ["reg_1"],
           relatedExperimentIds: ["exp_1"],
           sourceFamilyMemberIds: ["family_1"],
           relatedVariantIds: ["variant_1"],
@@ -275,9 +275,9 @@ describe("helper barrel exports", () => {
         queryable: isQueryableRecordId("condition_1"),
       },
       {
-        id: "protocol_1",
-        kind: inferEntityKind("protocol_1"),
-        queryable: isQueryableRecordId("protocol_1"),
+        id: "reg_1",
+        kind: inferEntityKind("reg_1"),
+        queryable: isQueryableRecordId("reg_1"),
       },
       { id: "exp_1", kind: inferEntityKind("exp_1"), queryable: isQueryableRecordId("exp_1") },
       {

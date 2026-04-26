@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { healthEntityDefinitions, protocolRegistryEntityDefinition } from "@murphai/contracts";
+import { healthEntityDefinitions, regimenRegistryEntityDefinition } from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
@@ -35,11 +35,11 @@ test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold 
 test("generic CLI lookup inference stays anchored to shared aliases and prefixes", () => {
   const goalDescriptor = findHealthDescriptorForLookup("goal_01JSHAREDLOOKUP000000000001");
   const goalKind = inferHealthEntityKind("goal_01JSHAREDLOOKUP000000000001");
-  const protocolDescriptor = findHealthDescriptorForLookup("prot_01JSHAREDLOOKUP000000000001");
+  const regimenDescriptor = findHealthDescriptorForLookup("reg_01JSHAREDLOOKUP000000000001");
 
   assert.equal(goalDescriptor?.kind, "goal");
   assert.equal(goalKind, "goal");
-  assert.equal(protocolDescriptor?.kind, "protocol");
+  assert.equal(regimenDescriptor?.kind, "regimen");
 });
 
 test("assessment list capabilities only advertise supported date-range filtering", () => {
@@ -49,9 +49,9 @@ test("assessment list capabilities only advertise supported date-range filtering
   assert.deepEqual(descriptor?.query?.genericListFilterCapabilities, ["date-range"]);
 });
 
-test("protocol CLI descriptor reuses CLI-owned registry command and runtime metadata", () => {
-  const descriptor = healthEntityDescriptorByKind.get("protocol");
-  const command = getHealthRegistryCommandMetadata("protocol");
+test("regimen CLI descriptor reuses CLI-owned registry command and runtime metadata", () => {
+  const descriptor = healthEntityDescriptorByKind.get("regimen");
+  const command = getHealthRegistryCommandMetadata("regimen");
 
   assert.ok(descriptor?.command);
   assert.ok(descriptor?.core);
@@ -66,7 +66,7 @@ test("protocol CLI descriptor reuses CLI-owned registry command and runtime meta
   assert.equal(descriptor?.query?.runtimeShowMethod, command.runtimeShowMethod);
   assert.equal(descriptor?.query?.showServiceMethod, command.showServiceMethod);
   assert.equal(descriptor?.query?.listServiceMethod, command.listServiceMethod);
-  assert.equal(descriptor?.core?.resultIdField, protocolRegistryEntityDefinition.registry.idField);
+  assert.equal(descriptor?.core?.resultIdField, regimenRegistryEntityDefinition.registry.idField);
 });
 
 test("registry command metadata derives spaced method stems and status labels from shared nouns", () => {
@@ -81,9 +81,9 @@ test("registry command metadata derives spaced method stems and status labels fr
   assert.equal(genetics.listStatusDescription, "Optional genetic-variant status to filter by.");
 });
 
-test("explicit health services reuse shared protocol metadata and nested registry envelopes", async () => {
+test("explicit health services reuse shared regimen metadata and nested registry envelopes", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "protocol.json");
+  const payloadPath = path.join(vaultRoot, "regimen.json");
   const runtimeCalls: Array<Record<string, unknown>> = [];
 
   try {
@@ -97,16 +97,16 @@ test("explicit health services reuse shared protocol metadata and nested registr
 
     const coreServices = createExplicitHealthCoreServices(async () => ({
       core: {
-        async upsertProtocolItem(input: Record<string, unknown>) {
+        async upsertRegimen(input: Record<string, unknown>) {
           runtimeCalls.push(input);
 
           return {
             record: {
               entity: {
-                protocolId: "prot_01JSHAREDMETADATA000000000001",
+                regimenId: "reg_01JSHAREDMETADATA000000000001",
               },
               document: {
-                relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
+                relativePath: "bank/regimens/supplement/sleep/magnesium-glycinate.md",
               },
             },
             created: true,
@@ -116,10 +116,10 @@ test("explicit health services reuse shared protocol metadata and nested registr
     }));
     const queryServices = createExplicitHealthQueryServices(async () => ({
       query: {
-        async showProtocol() {
+        async showRegimen() {
           return {
             entity: {
-              protocolId: "prot_01JSHAREDMETADATA000000000001",
+              regimenId: "reg_01JSHAREDMETADATA000000000001",
               title: "Magnesium glycinate",
               kind: "supplement",
               status: "active",
@@ -128,7 +128,7 @@ test("explicit health services reuse shared protocol metadata and nested registr
               ingredients: [],
             },
             document: {
-              relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
+              relativePath: "bank/regimens/supplement/sleep/magnesium-glycinate.md",
               markdown: "# Magnesium glycinate",
               body: "# Magnesium glycinate",
             },
@@ -137,7 +137,7 @@ test("explicit health services reuse shared protocol metadata and nested registr
         async showSupplement() {
           return {
             entity: {
-              protocolId: "prot_01JSHAREDMETADATA000000000001",
+              regimenId: "reg_01JSHAREDMETADATA000000000001",
               title: "Magnesium glycinate",
               kind: "supplement",
               status: "active",
@@ -146,7 +146,7 @@ test("explicit health services reuse shared protocol metadata and nested registr
               ingredients: [],
             },
             document: {
-              relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
+              relativePath: "bank/regimens/supplement/sleep/magnesium-glycinate.md",
               markdown: "# Magnesium glycinate",
               body: "# Magnesium glycinate",
             },
@@ -155,18 +155,18 @@ test("explicit health services reuse shared protocol metadata and nested registr
       } as never,
     }));
 
-    const upsertResult = await coreServices.upsertProtocol({
+    const upsertResult = await coreServices.upsertRegimen({
       input: payloadPath,
       requestId: null,
       vault: vaultRoot,
     });
-    const protocolResult = await queryServices.showProtocol({
-      id: "prot_01JSHAREDMETADATA000000000001",
+    const regimenResult = await queryServices.showRegimen({
+      id: "reg_01JSHAREDMETADATA000000000001",
       requestId: null,
       vault: vaultRoot,
     });
     const supplementResult = await queryServices.showSupplement({
-      id: "prot_01JSHAREDMETADATA000000000001",
+      id: "reg_01JSHAREDMETADATA000000000001",
       requestId: null,
       vault: vaultRoot,
     });
@@ -174,21 +174,21 @@ test("explicit health services reuse shared protocol metadata and nested registr
     assert.equal(runtimeCalls.length, 1);
     assert.equal(runtimeCalls[0]?.vaultRoot, vaultRoot);
     assert.equal(runtimeCalls[0]?.title, "Magnesium glycinate");
-    assert.equal(upsertResult.protocolId, "prot_01JSHAREDMETADATA000000000001");
+    assert.equal(upsertResult.regimenId, "reg_01JSHAREDMETADATA000000000001");
     assert.equal(
-      protocolResult.entity.id,
-      "prot_01JSHAREDMETADATA000000000001",
+      regimenResult.entity.id,
+      "reg_01JSHAREDMETADATA000000000001",
     );
-    assert.equal(protocolResult.entity.data.brand, "Thorne");
+    assert.equal(regimenResult.entity.data.brand, "Thorne");
     assert.equal(
       supplementResult.entity.id,
-      "prot_01JSHAREDMETADATA000000000001",
+      "reg_01JSHAREDMETADATA000000000001",
     );
     assert.equal(supplementResult.entity.kind, "supplement");
     assert.equal(supplementResult.entity.data.brand, "Thorne");
     assert.equal(
       supplementResult.entity.path,
-      "bank/protocols/supplements/sleep/magnesium-glycinate.md",
+      "bank/regimens/supplement/sleep/magnesium-glycinate.md",
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

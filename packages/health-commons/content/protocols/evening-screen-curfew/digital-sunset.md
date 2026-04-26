@@ -606,7 +606,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown_or_stale
     required: true
     question: What bedtime should the screen cutoff be anchored to?
-    writePath: runPlan.bedtimeAnchor
+    target:
+      object: experimentRun
+      field: bedtimeAnchor
   -
     id: curfew_window
     label: Curfew window
@@ -622,7 +624,9 @@ experimentOnboarding:
     constraints:
       minimumMinutes: 30
       largerWindowMinutes: 60
-    writePath: runPlan.curfewWindow
+    target:
+      object: experimentRun
+      field: curfewWindow
   -
     id: target_screen_pattern
     label: Target screen pattern
@@ -637,7 +641,9 @@ experimentOnboarding:
     - work_or_messages
     - streaming_or_gaming
     - mixed_use
-    writePath: runPlan.targetScreenPattern
+    target:
+      object: experimentRun
+      field: targetScreenPattern
   -
     id: phone_location
     label: Phone location
@@ -650,7 +656,9 @@ experimentOnboarding:
     - out_of_bed
     - outside_bedroom
     - call_only_or_vip_mode
-    writePath: runPlan.phoneLocation
+    target:
+      object: experimentRun
+      field: phoneLocation
   -
     id: necessary_exceptions
     label: Necessary exceptions
@@ -659,7 +667,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: Any work, caregiving, medical, emergency, accessibility, or safety contacts that must remain reachable?
-    writePath: runPlan.necessaryExceptions
+    target:
+      object: experimentRun
+      field: necessaryExceptions
   -
     id: replacement_activity
     label: Replacement activity
@@ -676,7 +686,9 @@ experimentOnboarding:
     - quiet_conversation
     - audio_started_before_cutoff
     - other_non_screen_activity
-    writePath: runPlan.replacementActivity
+    target:
+      object: experimentRun
+      field: replacementActivity
   -
     id: measurement_mode
     label: Measurement mode
@@ -689,7 +701,9 @@ experimentOnboarding:
     - subjective_log_only
     - wearable_plus_subjective
     - wearable_subjective_phone_log_optional
-    writePath: runPlan.measurementMode
+    target:
+      object: experimentRun
+      field: measurementMode
   -
     id: reminder_policy
     label: Reminder policy
@@ -702,7 +716,9 @@ experimentOnboarding:
     - none
     - pre_curfew
     - pre_curfew_plus_next_morning_missing_log_check
-    writePath: assistantSupport.reminderPolicy
+    target:
+      object: assistantSupport
+      field: reminderPolicy
   planDefaults:
     testPlanId: digital-sunset-sol-21d
     baselineDays: 7

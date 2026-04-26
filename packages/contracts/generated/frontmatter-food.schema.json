@@ -155,12 +155,12 @@
       "minLength": 1,
       "maxLength": 4000
     },
-    "attachedProtocolIds": {
+    "attachedRegimenIds": {
       "maxItems": 32,
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
+        "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
     },
@@ -171,11 +171,11 @@
         "properties": {
           "type": {
             "type": "string",
-            "const": "related_protocol"
+            "const": "related_regimen"
           },
           "targetId": {
             "type": "string",
-            "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
+            "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
           }
         },
         "required": [

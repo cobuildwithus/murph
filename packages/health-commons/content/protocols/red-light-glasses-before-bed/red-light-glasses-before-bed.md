@@ -295,7 +295,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: true
       question: Do you already have amber, red, or brown blue-light-filtering glasses you can wear before bed?
-      writePath: onboarding.answers.glasses_available
+      target:
+        object: onboardingCapture
+        field: answers.glassesAvailable
     -
       id: lens_filter_confidence
       label: Lens filter confidence
@@ -308,7 +310,9 @@ experimentOnboarding:
         - published_specs
         - visibly_dark
         - unsure
-      writePath: runPlan.lensFilterConfidence
+      target:
+        object: experimentRun
+        field: lensFilterConfidence
     -
       id: wear_window
       label: Wear window before bed
@@ -324,7 +328,9 @@ experimentOnboarding:
       constraints:
         targetMinutes: 90
         preferredMinutes: 120
-      writePath: runPlan.wearWindow
+      target:
+        object: experimentRun
+        field: wearWindow
     -
       id: bedtime_anchor
       label: Bedtime anchor
@@ -333,7 +339,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown_or_stale
       required: true
       question: What bedtime should Murph anchor the glasses reminder to?
-      writePath: runPlan.bedtimeAnchor
+      target:
+        object: experimentRun
+        field: bedtimeAnchor
     -
       id: evening_light_stability
       label: Evening light stability
@@ -345,7 +353,9 @@ experimentOnboarding:
       options:
         - keep_existing_habits_stable
         - also_reduce_screens_or_room_light
-      writePath: runPlan.eveningLightPolicy
+      target:
+        object: experimentRun
+        field: eveningLightPolicy
     -
       id: reminder_policy
       label: Reminder policy
@@ -358,7 +368,9 @@ experimentOnboarding:
         - none
         - pre_window
         - pre_window_plus_next_morning_missing_log_check
-      writePath: assistantSupport.reminderPolicy
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: sol-proxy-21d
     baselineDays: 7

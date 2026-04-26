@@ -1,6 +1,12 @@
 type QueryRecordData = Record<string, unknown>;
 
-type QueryRecordType = "audit" | "core" | "event" | "experiment" | "journal" | "sample";
+type QueryRecordType =
+  | "audit"
+  | "core"
+  | "event"
+  | "experiment"
+  | "journal"
+  | "sample";
 
 export interface VaultRecordIdentity {
   displayId: string;
@@ -76,6 +82,12 @@ export const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
     family: "provider",
     entityKind: "provider",
     prefix: "prov_",
+    queryable: true,
+  },
+  {
+    family: "protocol",
+    entityKind: "protocol",
+    prefix: "prot_",
     queryable: true,
   },
   {

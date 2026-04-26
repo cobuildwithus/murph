@@ -222,12 +222,12 @@ export function registerSearchCommands(
         },
       },
       {
-        description: 'Search only assessment, event, and protocol records for insulin sensitivity mentions.',
+        description: 'Search only assessment, event, and regimen records for insulin sensitivity mentions.',
         args: {
           query: 'insulin sensitivity',
         },
         options: {
-          recordType: ['assessment', 'event', 'protocol'],
+          recordType: ['assessment', 'event', 'regimen'],
           vault: './vault',
         },
       },

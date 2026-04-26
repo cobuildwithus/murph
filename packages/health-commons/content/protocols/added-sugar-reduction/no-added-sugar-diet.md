@@ -579,7 +579,9 @@ experimentOnboarding:
     options:
     - label_defined_added_sugars
     - stricter_free_sugar_boundary
-    writePath: runPlan.boundaryRule
+    target:
+      object: experimentRun
+      field: boundaryRule
   -
     id: baseline_logging_method
     label: Baseline logging method
@@ -593,7 +595,9 @@ experimentOnboarding:
     - food_log_estimates
     - photo_log_plus_notes
     - nutrition_app
-    writePath: runPlan.loggingMethod
+    target:
+      object: experimentRun
+      field: loggingMethod
   -
     id: top_added_sugar_sources
     label: Top added-sugar sources
@@ -602,7 +606,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: 'What are your top recurring added-sugar sources right now: drinks, desserts, breakfast foods, sauces, snacks, restaurant foods, or something else?'
-    writePath: onboarding.answers.topAddedSugarSources
+    target:
+      object: onboardingCapture
+      field: answers.topAddedSugarSources
   -
     id: replacement_plan
     label: Replacement plan
@@ -611,7 +617,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: What will you use instead for the main sources you listed, and do you want to allow low/no-calorie sweeteners as a logged transition tool?
-    writePath: runPlan.replacementPlan
+    target:
+      object: experimentRun
+      field: replacementPlan
   -
     id: daily_log_time
     label: Daily log time
@@ -620,7 +628,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: What time of day should Murph expect your quick food-and-symptom log?
-    writePath: assistantSupport.dailyLogTime
+    target:
+      object: assistantSupport
+      field: dailyLogTime
   -
     id: reminder_policy
     label: Reminder policy
@@ -634,7 +644,9 @@ experimentOnboarding:
     - daily_log
     - weekly_digest
     - daily_log_plus_weekly_digest
-    writePath: assistantSupport.reminderPolicy
+    target:
+      object: assistantSupport
+      field: reminderPolicy
   planDefaults:
     testPlanId: added-sugar-intake-28d
     baselineDays: 7

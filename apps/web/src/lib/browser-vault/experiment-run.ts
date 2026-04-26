@@ -1,5 +1,5 @@
 import {
-  experimentProtocolRefSchema,
+  commonsProtocolRefSchema,
   experimentRunPlanSchema,
   safeParseContract,
 } from "@murphai/contracts";
@@ -154,15 +154,16 @@ function mergeTrackedExperimentMetadata(
     return entry;
   }
 
-  const protocolRef = parseTrackedExperimentProtocolRef(entity) ?? entry.protocolRef;
+  const commonsProtocolRef =
+    parseTrackedExperimentCommonsProtocolRef(entity) ?? entry.commonsProtocolRef;
   const runPlan = parseTrackedExperimentRunPlan(entity) ?? entry.runPlan;
-  if (protocolRef === entry.protocolRef && runPlan === entry.runPlan) {
+  if (commonsProtocolRef === entry.commonsProtocolRef && runPlan === entry.runPlan) {
     return entry;
   }
 
   return {
     ...entry,
-    protocolRef,
+    commonsProtocolRef,
     runPlan,
   };
 }
@@ -194,15 +195,15 @@ function listTrackedExperimentLookupValues(entry: OverviewExperiment): string[] 
   return [
     entry.id,
     entry.slug,
-    entry.protocolRef?.key,
-    entry.protocolRef?.key?.replace(/^protocol_variant:/u, ""),
+    entry.commonsProtocolRef?.key,
+    entry.commonsProtocolRef?.key?.replace(/^protocol_variant:/u, ""),
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
-function parseTrackedExperimentProtocolRef(
+function parseTrackedExperimentCommonsProtocolRef(
   entity: BrowserVaultEntity,
-): OverviewExperiment["protocolRef"] | null {
-  const result = safeParseContract(experimentProtocolRefSchema, entity.attributes.protocolRef);
+): OverviewExperiment["commonsProtocolRef"] | null {
+  const result = safeParseContract(commonsProtocolRefSchema, entity.attributes.commonsProtocolRef);
   return result.success ? result.data : null;
 }
 

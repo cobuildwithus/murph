@@ -149,11 +149,29 @@ test("browser vault replica creation projects safe fields, filters excluded fami
           date: "2026-04-20",
           experimentSlug: "steady-sleep",
           frontmatter: {
-            protocolRef: {
+            effectiveProtocolSnapshot: {
+              effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+              doseSignature: "Two short sauna sessions weekly",
+              modality: "sauna",
+              frequency: {
+                sessionsPerWeek: 2,
+              },
+              durationMinutes: {
+                target: 12,
+              },
+              targetSessions: 6,
+              minimumUsefulSessions: 4,
+            },
+            commonsProtocolRef: {
               key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
               pageRevisionId: "sha256:page-revision",
               runSpecRevisionId: "sha256:run-spec-revision",
               testPlanId: "rhr-21d",
+            },
+            protocolRef: {
+              protocolId: "prot_01K72NVW6Z4QK8VYAVX7GT7S4B",
+              protocolRevisionId: `sha256:${"3".repeat(64)}`,
+              effectiveSpecHash: `sha256:${"4".repeat(64)}`,
             },
             category: "sleep",
             group: ["baseline", { phase: "week-1" }],
@@ -293,11 +311,29 @@ test("browser vault replica creation projects safe fields, filters excluded fami
   assert.equal(replica.entities.some((entity) => entity.id === "food_excluded"), false);
   assert.equal(experiment?.bodyPreview?.endsWith("…"), true);
   assert.deepEqual(experiment?.attributes.group, ["baseline", { phase: "week-1" }]);
-  assert.deepEqual(experiment?.attributes.protocolRef, {
+  assert.deepEqual(experiment?.attributes.commonsProtocolRef, {
     key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
     pageRevisionId: "sha256:page-revision",
     runSpecRevisionId: "sha256:run-spec-revision",
     testPlanId: "rhr-21d",
+  });
+  assert.deepEqual(experiment?.attributes.protocolRef, {
+    protocolId: "prot_01K72NVW6Z4QK8VYAVX7GT7S4B",
+    protocolRevisionId: `sha256:${"3".repeat(64)}`,
+    effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+  });
+  assert.deepEqual(experiment?.attributes.effectiveProtocolSnapshot, {
+    effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+    doseSignature: "Two short sauna sessions weekly",
+    modality: "sauna",
+    frequency: {
+      sessionsPerWeek: 2,
+    },
+    durationMinutes: {
+      target: 12,
+    },
+    targetSessions: 6,
+    minimumUsefulSessions: 4,
   });
   assert.deepEqual(experiment?.attributes.runPlan, {
     baselineStart: "2026-04-15",

@@ -64,6 +64,10 @@ vault-cli device account disconnect <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device daemon status --vault <path> [--baseUrl <url>]
 vault-cli device daemon start --vault <path> [--baseUrl <url>]
 vault-cli device daemon stop --vault <path> [--baseUrl <url>]
+vault-cli commons search <query> [--limit <n>]
+vault-cli commons protocol list [--query <query>] [--category <category>] [--limit <n>]
+vault-cli commons protocol show <key-or-slug>
+vault-cli commons source list --protocol <key-or-slug> [--limit <n>]
 vault-cli provider scaffold --vault <path> [--request-id <id>]
 vault-cli provider upsert --vault <path> --input @file.json [--request-id <id>]
 vault-cli provider show <id> --vault <path> [--request-id <id>]
@@ -80,7 +84,16 @@ vault-cli recipe upsert --vault <path> --input @file.json [--request-id <id>]
 vault-cli recipe show <id> --vault <path> [--request-id <id>]
 vault-cli recipe list --vault <path> [--status draft|saved|archived] [--limit <n>] [--request-id <id>]
 vault-cli event scaffold --vault <path> --kind <kind> [--request-id <id>]
-vault-cli event upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli event import-json --vault <path> --input @file.json [--request-id <id>]
+vault-cli event note add --vault <path> --note <text> [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event symptom add --vault <path> --symptom <name> --severity <0-10> [--body-region <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event observation add --vault <path> --metric <slug> --value <number> --unit <unit> [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event medication-intake add --vault <path> --medication-name <name> --dose <number> --unit <unit> [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event supplement-intake add --vault <path> --supplement-name <name> --dose <number> --unit <unit> [--title <title>] [--occurred-at <ts>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event encounter add --vault <path> --encounter-type <type> --occurred-at <ts> [--location <text>] [--provider-id <providerId>] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event procedure add --vault <path> --procedure <name> --occurred-at <ts> [--status planned|completed|cancelled] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event adverse-effect add --vault <path> --substance <text> --effect <text> --occurred-at <ts> [--severity mild|moderate|severe] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
+vault-cli event exposure add --vault <path> --exposure-type <type> --substance <text> --occurred-at <ts> [--duration <text>] [--title <title>] [--source <source>] [--note <text>] [--tag <tag> ...] [--request-id <id>]
 vault-cli event edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli event show <id> --vault <path> [--request-id <id>]
 vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>] [--tag <tag> ...] [--experiment <slug>] [--limit <n>] [--request-id <id>]
@@ -99,22 +112,30 @@ vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>
 vault-cli workout format show <name> --vault <path> [--request-id <id>]
 vault-cli workout format list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli workout format log <name> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
-vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--protocol-id <protocolId>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
+vault-cli intervention add <text> --vault <path> [--duration <minutes>] [--type <type>] [--regimen-id <regimenId>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli intervention edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli meal manifest <id> --vault <path> [--request-id <id>]
-vault-cli samples add --vault <path> --input @file.json [--request-id <id>]
+vault-cli samples add --vault <path> --stream <stream> --unit <unit> --recorded-at <ts> [--value <number>] [--source <source>] [--quality <quality>] [--stage <stage>] [--start-at <ts>] [--end-at <ts>] [--duration-minutes <n>] [--source-path <path>] [--batch-source-file-name <name>] [--batch-preset-id <id>] [--batch-delimiter <char>] [--batch-timestamp-column <name>] [--batch-value-column <name>] [--batch-metadata-columns <name> ...] [--request-id <id>]
+vault-cli samples import-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
 vault-cli samples show <id> --vault <path> [--request-id <id>]
 vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--request-id <id>]
 vault-cli samples batch show <id> --vault <path> [--request-id <id>]
 vault-cli samples batch list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli experiment create <slug> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--request-id <id>]
+vault-cli experiment plan --vault <path> --input @file.json [--request-id <id>]
+vault-cli experiment start --vault <path> --input @file.json [--request-id <id>]
 vault-cli experiment show <id> --vault <path> [--request-id <id>]
 vault-cli experiment list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli experiment update <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--request-id <id>]
 vault-cli experiment apply-onboarding <id> --vault <path> [--protocol-key protocol_variant:<key>] [--page-revision-id sha256:<64-hex>] [--run-spec-revision-id sha256:<64-hex>] [--test-plan-id <id>] [--baseline-days <n>] [--intervention-days <n>] [--intervention-start <date>] [--schedule <text>] [--dose <text>] [--session-field <id> ...] [--setup-answer <id=value> ...] [--reminder-policy <id>] [--missed-log-followup <policy>] [--request-id <id>]
-vault-cli experiment checkpoint --vault <path> --input @file.json [--request-id <id>]
+vault-cli experiment checkpoint <lookup> --vault <path> [--occurred-at <ts>] [--title <title>] [--note <text>] [--request-id <id>]
+vault-cli experiment checkpoint-json --vault <path> --input @file.json [--request-id <id>]
 vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note "..."] [--request-id <id>]
+vault-cli experiment session log <lookup> --vault <path> [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--intervention-type <type>] [--status completed|partial|missed|skipped] [--session-status completed|partial|missed|skipped] [--duration-minutes <n>] [--protocol-id <id>] [--timing <text>] [--temperature-c <number>] [--after-exercise] [--symptoms <text> ...] [--confounders <text> ...] [--confounder <key=value> ...] [--request-id <id>]
+vault-cli experiment session log-json <id> --vault <path> --input @file.json [--request-id <id>]
+vault-cli experiment context log <lookup> --vault <path> [--kind experiment_context|note|supplement_intake] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>] [--context-type <slug>] [--severity info|potential_confounder|safety|blocking] [--tag <tag> ...] [--supplement-name <name>] [--dose <number>] [--unit <unit>] [--request-id <id>]
+vault-cli experiment context log-json <id> --vault <path> --input @file.json [--request-id <id>]
 vault-cli journal ensure <date> --vault <path> [--request-id <id>]
 vault-cli journal show <date> --vault <path> [--request-id <id>]
 vault-cli journal list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
@@ -138,13 +159,21 @@ vault-cli intake list --vault <path> [--from <date>] [--to <date>] [--limit <n>]
 vault-cli intake manifest <id> --vault <path> [--request-id <id>]
 vault-cli intake raw <id> --vault <path> [--request-id <id>]
 vault-cli intake project <id> --vault <path> [--request-id <id>]
-vault-cli protocol stop <protocolId> --vault <path> [--stopped-on <date>] [--request-id <id>]
+vault-cli regimen import-json --vault <path> --input @file.json [--request-id <id>]
+vault-cli regimen save <title> --vault <path> --kind medication|supplement|therapy|habit [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--substance <text>] [--dose <number>] [--unit <unit>] [--group <text>] [--ingredient-compound <text>] [--ingredient-label <text>] [--ingredient-amount <number>] [--ingredient-unit <unit>] [--ingredient-active] [--ingredient-note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]
+vault-cli regimen stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]
+vault-cli regimen show <id> --vault <path> [--request-id <id>]
+vault-cli regimen list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
+vault-cli protocol upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli protocol show <id> --vault <path> [--request-id <id>]
+vault-cli protocol list --vault <path> [--commons-protocol <key-or-slug>] [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement scaffold --vault <path> [--request-id <id>]
-vault-cli supplement upsert --vault <path> --input @file.json [--request-id <id>]
+vault-cli supplement import-json --vault <path> --input @file.json [--request-id <id>]
+vault-cli supplement save <title> --vault <path> [--id <regimenId>] [--slug <slug>] [--status <status>] [--started-on <date>] [--stopped-on <date>] [--schedule <text>] [--group <text>] [--substance <text>] [--dose <number>] [--dose-unit <unit>] [--brand <text>] [--manufacturer <text>] [--serving-size <text>] [--compound <text>] [--ingredient-label <text>] [--amount <number>] [--unit <unit>] [--ingredient-active] [--note <text>] [--related-goal-id <id> ...] [--related-condition-id <id> ...] [--related-regimen-id <id> ...] [--request-id <id>]
 vault-cli supplement rename <id> --vault <path> --title <title> [--slug <slug>] [--request-id <id>]
 vault-cli supplement show <id> --vault <path> [--request-id <id>]
 vault-cli supplement list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
-vault-cli supplement stop <protocolId> --vault <path> [--stopped-on <date>] [--request-id <id>]
+vault-cli supplement stop <regimenId> --vault <path> [--stopped-on <date>] [--request-id <id>]
 vault-cli supplement compound list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
 vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--request-id <id>]
@@ -211,9 +240,10 @@ The command surface is organized around reusable capability bundles, not a paylo
 - `goal`, `condition`, `allergy`, `family`, `genetics`, `blood-test`, `provider`, `food`, and `event` are payload-CRUD nouns.
 - `food` is a payload-CRUD noun backed by `bank/foods/*.md` for recurring meals, grocery staples, smoothies, and remembered restaurant orders, and `food schedule` / `food unschedule` add the thinnest first-class recurring-food layer by pairing a remembered food with a daily note-only meal auto-log rule backed by assistant runtime automation internals or clearing that rule explicitly.
 - `recipe` is also a payload-CRUD noun backed by `bank/recipes/*.md`.
-- `protocol` is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
+- `regimen` is the private medication, supplement, therapy, and habit registry noun; it is primarily payload CRUD and also exposes `stop` as an id-preserving lifecycle helper.
+- `protocol` is the private Health Commons-backed adaptation noun; it exposes explicit reviewed JSON upsert plus readable/list surfaces, while public recipe discovery stays under `commons protocol`.
 - `blood-test` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "test"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
-- `supplement` is a protocol-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
+- `supplement` is a regimen-backed payload-CRUD noun for branded supplement products and also exposes `stop` plus a derived `compound` ledger that rolls overlapping active ingredients into canonical compound rows.
 - `document` exposes `import | edit | show | list | manifest`, and `meal` exposes `add | edit | show | list | manifest`.
 - `workout` is a quick-capture noun layered on top of canonical `activity_session` events; `workout format` adds only a thin saved-defaults layer under `bank/workout-formats/*.md` and still feeds the same canonical event path rather than introducing a competing workout subsystem.
 - `intervention` is a quick-capture noun layered on top of canonical `intervention_session` events; it intentionally does not introduce a separate intervention record family or follow-up read grammar.
@@ -237,7 +267,7 @@ The command surface is organized around reusable capability bundles, not a paylo
 
 These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 
-Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
+Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
 
 Frozen health nouns remain:
 
@@ -246,6 +276,7 @@ Frozen health nouns remain:
 - `allergy`
 - `food`
 - `supplement`
+- `regimen`
 - `protocol`
 - `family`
 - `genetics`
@@ -482,12 +513,12 @@ Saved workout formats are vault-local Markdown docs only. They store a reusable 
   "title": "20-minute sauna",
   "interventionType": "sauna",
   "durationMinutes": 20,
-  "protocolId": "prot_123",
+  "regimenId": "reg_123",
   "note": "20 min sauna after lifting."
 }
 ```
 
-The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `intervention_session` event plus one inferred or explicit `interventionType`, optional `durationMinutes`, and an optional `protocolId` link back to one therapy or habit protocol when the session should stay attached to a longer-running plan.
+The freeform note is preserved verbatim in `note`. The structured fields stay intentionally small: one canonical `intervention_session` event plus one inferred or explicit `interventionType`, optional `durationMinutes`, and an optional `regimenId` link back to one therapy or habit regimen when the session should stay attached to a longer-running plan.
 
 ### `samples import-csv`
 
@@ -761,7 +792,7 @@ The five-file pack shape stays stable; health extensions enrich `manifest.json`,
 ## Boundary Rules
 
 - `init`, `validate`, `meal add`, `document import`, `samples import-csv`, and `intake import` delegate to `packages/core` or `packages/importers` write paths that preserve immutable raw evidence and append-only ledgers.
-- `provider upsert`, `food upsert`, `food schedule|unschedule`, `recipe upsert`, `event upsert`, `samples add`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|update|checkpoint|stop`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, health `<noun> upsert`, `protocol stop`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
+- `provider upsert`, `food upsert`, `food schedule|unschedule`, `recipe upsert`, typed `event * add`, `event import-json`, `samples add`, `samples import-json`, `supplement save`, `supplement import-json`, `regimen save`, `regimen import-json`, `regimen stop`, `protocol upsert`, `workout add`, `workout format save|show|list|log`, `intervention add`, `experiment create|plan|start|update|checkpoint|checkpoint-json|stop`, `experiment session log|log-json`, `experiment context log|log-json`, `journal ensure|append|link|unlink`, `vault repair|update`, `intake project`, health `<noun> scaffold`, remaining health `<noun> upsert`, and `supplement stop` all delegate to `packages/core` exports or to CLI-local helpers built only on top of `packages/core` frontmatter/jsonl primitives, importer entrypoints, canonical write locks, and assistant runtime automation state.
 - `show`, `list`, `search query`, `query projection status|rebuild`, `timeline`, `document/meal/samples/intake/export` follow-up reads, `audit show|list|tail`, and `vault show|stats` delegate to the read model plus immutable-manifest inspection helpers.
 - `inbox` bootstrap/setup, capture review, attachment parse, and promote commands delegate to `packages/inboxd`, `packages/parsers`, and shared `packages/core` primitives without directly writing arbitrary vault files from the CLI layer.
 - Contract validation errors normalize to the shared codes in `docs/contracts/04-error-codes.md`.

@@ -1137,7 +1137,9 @@ experimentOnboarding:
       options:
         - no_load_3_5g_daily
         - optional_loading_then_maintenance
-      writePath: protocol.creatine.dosePath
+      target:
+        object: protocol
+        field: creatine.dosePath
     -
       id: maintenance_dose_g
       label: Maintenance dose in grams
@@ -1150,7 +1152,9 @@ experimentOnboarding:
         min: 3
         max: 5
         unit: g/day
-      writePath: protocol.creatine.maintenanceDoseG
+      target:
+        object: protocol
+        field: creatine.maintenanceDoseG
     -
       id: daily_time
       label: Daily dosing time
@@ -1159,7 +1163,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: false
       question: What repeatable time of day should this attach to?
-      writePath: protocol.creatine.dailyTime
+      target:
+        object: protocol
+        field: creatine.dailyTime
     -
       id: product_type
       label: Product type
@@ -1173,7 +1179,9 @@ experimentOnboarding:
         - monohydrate_in_blend
         - other_creatine_form
         - not_yet_chosen
-      writePath: protocol.creatine.productType
+      target:
+        object: protocol
+        field: creatine.productType
     -
       id: training_endpoint
       label: Training endpoint
@@ -1182,7 +1190,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: 'Which repeatable training outcome should Murph track: a lift, reps at a load, total tonnage, sprint/repeated power, or tolerance only?'
-      writePath: protocol.creatine.trainingEndpoint
+      target:
+        object: protocol
+        field: creatine.trainingEndpoint
   planDefaults:
     testPlanId: strength-and-tolerance-49d
     baselineDays: 7

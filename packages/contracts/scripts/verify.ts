@@ -40,6 +40,7 @@ import {
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
   protocolFrontmatterSchema,
+  regimenFrontmatterSchema,
   safeParseContract,
   sampleRecordSchema,
   VAULT_FAMILY_DESCRIPTORS,
@@ -138,6 +139,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-protocol",
   "frontmatter-memory",
   "frontmatter-provider",
+  "frontmatter-regimen",
   "frontmatter-recipe",
   "frontmatter-scheduled-log",
   "frontmatter-workout-format",
@@ -275,6 +277,11 @@ assertNoErrors("goal frontmatter object", exampleHealthFrontmatterObjects.goal, 
 assertNoErrors("condition frontmatter object", exampleHealthFrontmatterObjects.condition, conditionFrontmatterSchema);
 assertNoErrors("allergy frontmatter object", exampleHealthFrontmatterObjects.allergy, allergyFrontmatterSchema);
 assertNoErrors("protocol frontmatter object", exampleHealthFrontmatterObjects.protocol, protocolFrontmatterSchema);
+assertNoErrors(
+  "regimen frontmatter object",
+  exampleHealthFrontmatterObjects.regimen,
+  regimenFrontmatterSchema,
+);
 assertNoErrors("family-member frontmatter object", exampleHealthFrontmatterObjects.familyMember, familyMemberFrontmatterSchema);
 assertNoErrors("genetic-variant frontmatter object", exampleHealthFrontmatterObjects.geneticVariant, geneticVariantFrontmatterSchema);
 assertHasErrors(

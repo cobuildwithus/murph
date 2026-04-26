@@ -19,7 +19,6 @@ import type {
   ProjectAssessmentInput,
   QueryEntity,
   QueryServices,
-  StopProtocolInput,
   VaultServices,
   WearablePublicValue,
 } from "./types.js"
@@ -86,16 +85,21 @@ import {
   applyExperimentOnboardingRecord,
   analyzeExperimentOutcomeRecord,
   appendJournalText,
+  checkpointExperimentRecord,
   checkpointExperimentRecordFromInput,
+  logExperimentContextRecord,
   logExperimentContextRecordFromInput,
+  logExperimentSessionRecord,
   logExperimentSessionRecordFromInput,
   listExperimentRecords,
   listJournalRecords,
+  planExperimentRecord,
   showExperimentProgress,
   showExperimentRecord,
   showJournalRecord,
   showVaultStats as showVaultStatsUseCase,
   showVaultSummary as showVaultSummaryUseCase,
+  startExperimentFromPlanRecord,
   stopExperimentRecord,
   updateExperimentRecord,
   updateVaultSummary,
@@ -274,6 +278,16 @@ function createIntegratedCoreServices(
     }) {
       return createExperimentRecord(input)
     },
+    async planExperiment(input: CommandContext & {
+      inputFile: string
+    }) {
+      return planExperimentRecord(input)
+    },
+    async startExperiment(input: CommandContext & {
+      inputFile: string
+    }) {
+      return startExperimentFromPlanRecord(input)
+    },
     async updateExperiment(input) {
       return updateExperimentRecord({
         ...input,
@@ -283,7 +297,10 @@ function createIntegratedCoreServices(
     async applyExperimentOnboarding(input) {
       return applyExperimentOnboardingRecord(input)
     },
-    async checkpointExperiment(input: CommandContext & {
+    async checkpointExperiment(input) {
+      return checkpointExperimentRecord(input)
+    },
+    async checkpointExperimentJson(input: CommandContext & {
       inputFile: string
     }) {
       return checkpointExperimentRecordFromInput(input)
@@ -295,13 +312,19 @@ function createIntegratedCoreServices(
     }) {
       return stopExperimentRecord(input)
     },
-    async logExperimentSession(input: CommandContext & {
+    async logExperimentSession(input) {
+      return logExperimentSessionRecord(input)
+    },
+    async logExperimentSessionJson(input: CommandContext & {
       lookup: string
       inputFile: string
     }) {
       return logExperimentSessionRecordFromInput(input)
     },
-    async logExperimentContext(input: CommandContext & {
+    async logExperimentContext(input) {
+      return logExperimentContextRecord(input)
+    },
+    async logExperimentContextJson(input: CommandContext & {
       lookup: string
       inputFile: string
     }) {

@@ -137,9 +137,9 @@ describe('assistant system prompt cache stability', () => {
     )
     expect(promptA.cacheMetadata).toMatchInlineSnapshot(`
       {
-        "dynamicContextStartsAfterStaticCore": 20223,
-        "stableRouteCapabilityPromptHash": "c00c846c2478896f0944d4fd5af03e4315ab28556cf40e6c735b0ac61ca7a449",
-        "staticPromptHash": "5dd4f1ef6de26ffc3f0391306214797aa549a413b2de2109378279b3dd98f928",
+        "dynamicContextStartsAfterStaticCore": 20526,
+        "stableRouteCapabilityPromptHash": "05855168435be53bd844fb343affa0211e2ff92a3762dd95cecd26725c56daec",
+        "staticPromptHash": "ee411cd5984a0ea4bd72a58d31446957eb38b809346373bcf9632d381e5802fc",
         "toolSchemaHash": "assistant-tool-schema-common-openai-test",
       }
     `)

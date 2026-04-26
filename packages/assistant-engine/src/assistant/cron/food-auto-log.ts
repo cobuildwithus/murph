@@ -10,7 +10,7 @@ import { loadImporterRuntime } from '@murphai/vault-usecases/runtime'
 
 interface FoodAutoLogRecord {
   foodId: string
-  attachedProtocolIds?: string[]
+  attachedRegimenIds?: string[]
   aliases?: string[]
   slug?: string
   brand?: string
@@ -64,7 +64,7 @@ interface FoodAutoLogCoreRuntime {
     ingredients?: string[]
     tags?: string[]
     note?: string
-    attachedProtocolIds?: string[]
+    attachedRegimenIds?: string[]
     autoLogDaily?: {
       time: string
     } | null
@@ -145,7 +145,7 @@ export async function clearCanonicalFoodAutoLogSchedule(
     ingredients: existing.ingredients,
     tags: existing.tags,
     note: existing.note,
-    attachedProtocolIds: existing.attachedProtocolIds,
+    attachedRegimenIds: existing.attachedRegimenIds,
     autoLogDaily: null,
   })
 }

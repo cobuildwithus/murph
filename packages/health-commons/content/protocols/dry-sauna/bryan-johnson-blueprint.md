@@ -268,7 +268,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: true
       question: Do you have access to a low-humidity dry sauna for this test?
-      writePath: onboarding.answers.sauna_available
+      target:
+        object: onboardingCapture
+        field: answers.saunaAvailable
     -
       id: run_variant
       label: Run variant
@@ -285,7 +287,9 @@ experimentOnboarding:
         sourceRoutineSessionsPerWeek: 7
         conservativeSessionsPerWeekMin: 3
         conservativeSessionsPerWeekMax: 5
-      writePath: runPlan.variant
+      target:
+        object: experimentRun
+        field: variant
     -
       id: sauna_temperature_range
       label: Sauna temperature range
@@ -301,7 +305,9 @@ experimentOnboarding:
       constraints:
         sourceTargetTemperatureC: 93
         sourceTargetTemperatureF: 200
-      writePath: runPlan.temperatureRange
+      target:
+        object: experimentRun
+        field: temperatureRange
     -
       id: heat_adaptation
       label: Heat adaptation
@@ -314,7 +320,9 @@ experimentOnboarding:
         - already_regular_sauna
         - occasional_sauna
         - new_to_sauna_or_heat_sensitive
-      writePath: onboarding.answers.heat_adaptation
+      target:
+        object: onboardingCapture
+        field: answers.heatAdaptation
     -
       id: workout_pairing
       label: Workout pairing
@@ -327,7 +335,9 @@ experimentOnboarding:
         - morning_after_workout
         - different_time_after_workout
         - no_workout_pairing
-      writePath: runPlan.workoutPairing
+      target:
+        object: experimentRun
+        field: workoutPairing
     -
       id: weekly_schedule
       label: Weekly schedule
@@ -340,7 +350,9 @@ experimentOnboarding:
         sourceRoutineSessionsPerWeek: 7
         minimumUsefulSessions: 7
         targetSessions: 14
-      writePath: runPlan.schedule
+      target:
+        object: experimentRun
+        field: schedule
     -
       id: hydration_plan
       label: Hydration plan
@@ -353,7 +365,9 @@ experimentOnboarding:
         - water_plus_electrolytes_or_minerals
         - water_only
         - no_plan_yet
-      writePath: runPlan.hydrationPlan
+      target:
+        object: experimentRun
+        field: hydrationPlan
     -
       id: cooling_tactic_policy
       label: Cooling tactics
@@ -369,7 +383,9 @@ experimentOnboarding:
         - source_specific_cooling_tactics
       constraints:
         note: Face or neck cooling may change the thermal-dose curve; groin cooling is a source-specific fertility guardrail, not proven protection.
-      writePath: runPlan.coolingTactics
+      target:
+        object: experimentRun
+        field: coolingTactics
     -
       id: measurement_support
       label: Measurement support
@@ -382,7 +398,9 @@ experimentOnboarding:
         - wearable_plus_optional_bp_or_hr
         - wearable_only
         - manual_or_subjective_only
-      writePath: runPlan.measurementSupport
+      target:
+        object: experimentRun
+        field: measurementSupport
     -
       id: reminder_policy
       label: Reminder policy
@@ -395,7 +413,9 @@ experimentOnboarding:
         - none
         - pre_session
         - pre_session_plus_same_day_missing_log_check
-      writePath: assistantSupport.reminderPolicy
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: source-attributed-rhr-hrv-21d
     baselineDays: 7

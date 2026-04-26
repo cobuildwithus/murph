@@ -280,6 +280,7 @@ const KEY_PATTERN = "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
+const TARGET_FIELD_PATTERN = "^[A-Za-z][A-Za-z0-9]*(?:\\.[A-Za-z][A-Za-z0-9]*)*$";
 
 export const healthCommonsEntityTypeSchema = z.enum(HEALTH_COMMONS_ENTITY_TYPES);
 export const healthCommonsKeySchema = z.string().regex(new RegExp(KEY_PATTERN, "u"));
@@ -660,6 +661,7 @@ export const healthCommonsProtocolSpecSchema = z
     interventionSessionsMinimum: z.number().int().nonnegative().optional(),
     interventionSessionsTarget: z.number().int().nonnegative().optional(),
     steps: z.array(longStringSchema).optional(),
+    safetyNotes: z.array(longStringSchema).optional(),
     tips: z.array(longStringSchema).optional(),
     keepInMind: z.array(longStringSchema).optional(),
     logFields: z.array(shortStringSchema).optional(),
@@ -716,6 +718,30 @@ export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_VALUE_TYPES = [
 
 export type HealthCommonsExperimentOnboardingValueType =
   (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_VALUE_TYPES)[number];
+
+export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SETUP_TARGET_OBJECTS = [
+  "protocol",
+  "experimentRun",
+  "onboardingCapture",
+  "assistantSupport",
+  "analysisPlan",
+] as const;
+
+export type HealthCommonsExperimentOnboardingSetupTargetObject =
+  (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SETUP_TARGET_OBJECTS)[number];
+
+const RESERVED_SETUP_TARGET_FIELD_PREFIXES = [
+  "protocol",
+  "run",
+  "runPlan",
+  "onboarding",
+  "assistantSupport",
+  "analysisPlan",
+  "tracking",
+  "experiment",
+] as const;
+
+const RESERVED_TARGET_FIELD_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
 
 export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS = [
   "continue_with_caution",
@@ -815,6 +841,34 @@ export type HealthCommonsExperimentOnboardingSafetyScreen = z.infer<
   typeof healthCommonsExperimentOnboardingSafetyScreenSchema
 >;
 
+const experimentOnboardingSetupTargetFieldSchema = shortStringSchema
+  .regex(new RegExp(TARGET_FIELD_PATTERN, "u"), "Target field must be a safe dot path.")
+  .superRefine(addReservedDotPathSegmentIssues);
+
+export const healthCommonsExperimentOnboardingSetupTargetSchema = z
+  .object({
+    object: z.enum(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SETUP_TARGET_OBJECTS),
+    field: experimentOnboardingSetupTargetFieldSchema,
+  })
+  .strict()
+  .superRefine((target, context) => {
+    const firstSegment = target.field.split(".")[0];
+    if (
+      firstSegment &&
+      (RESERVED_SETUP_TARGET_FIELD_PREFIXES as readonly string[]).includes(firstSegment)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Target field must be relative to ${target.object}; omit legacy prefix ${firstSegment}.`,
+        path: ["field"],
+      });
+    }
+  });
+
+export type HealthCommonsExperimentOnboardingSetupTarget = z.infer<
+  typeof healthCommonsExperimentOnboardingSetupTargetSchema
+>;
+
 export const healthCommonsExperimentOnboardingSetupSlotSchema = z
   .object({
     id: experimentOnboardingIdSchema,
@@ -826,7 +880,7 @@ export const healthCommonsExperimentOnboardingSetupSlotSchema = z
     question: longStringSchema.optional(),
     options: z.array(experimentOnboardingIdSchema).optional(),
     constraints: experimentOnboardingUnknownRecordSchema.optional(),
-    writePath: shortStringSchema.optional(),
+    target: healthCommonsExperimentOnboardingSetupTargetSchema,
   })
   .strict()
   .superRefine((slot, context) => {
@@ -887,12 +941,68 @@ export type HealthCommonsExperimentOnboardingAssistantPolicy = z.infer<
   typeof healthCommonsExperimentOnboardingAssistantPolicySchema
 >;
 
+export const healthCommonsExperimentOnboardingAdaptationFieldSchema = z
+  .object({
+    id: experimentOnboardingIdSchema,
+    label: shortStringSchema,
+    target: healthCommonsExperimentOnboardingSetupTargetSchema,
+    sourceSlotIds: z.array(experimentOnboardingIdSchema).optional(),
+    requiredForRunSpec: z.boolean().optional(),
+    protocolReusable: z.boolean().optional(),
+    guidance: longStringSchema.optional(),
+  })
+  .strict();
+
+export type HealthCommonsExperimentOnboardingAdaptationField = z.infer<
+  typeof healthCommonsExperimentOnboardingAdaptationFieldSchema
+>;
+
+export const healthCommonsExperimentOnboardingAdaptationMeasurementPlanSchema = z
+  .object({
+    testPlanId: healthCommonsStableIdSchema.optional(),
+    requiredSignals: z.array(healthCommonsKeySchema).optional(),
+    optionalSignals: z.array(healthCommonsKeySchema).optional(),
+    notes: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsExperimentOnboardingAdaptationMeasurementPlan = z.infer<
+  typeof healthCommonsExperimentOnboardingAdaptationMeasurementPlanSchema
+>;
+
+export const healthCommonsExperimentOnboardingAdaptationReusableSetupSchema = z
+  .object({
+    enabled: z.boolean(),
+    target: healthCommonsExperimentOnboardingSetupTargetSchema.optional(),
+    sourceSlotIds: z.array(experimentOnboardingIdSchema).optional(),
+    notes: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsExperimentOnboardingAdaptationReusableSetup = z.infer<
+  typeof healthCommonsExperimentOnboardingAdaptationReusableSetupSchema
+>;
+
+export const healthCommonsExperimentOnboardingAdaptationPolicySchema = z
+  .object({
+    fields: z.array(healthCommonsExperimentOnboardingAdaptationFieldSchema).min(1),
+    measurementPlan: healthCommonsExperimentOnboardingAdaptationMeasurementPlanSchema.optional(),
+    reusableSetup: healthCommonsExperimentOnboardingAdaptationReusableSetupSchema.optional(),
+    notes: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsExperimentOnboardingAdaptationPolicy = z.infer<
+  typeof healthCommonsExperimentOnboardingAdaptationPolicySchema
+>;
+
 export const healthCommonsExperimentOnboardingSchema = z
   .object({
     schemaVersion: z.literal(HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION),
     startIntent: healthCommonsExperimentStartIntentSchema,
     contextReview: healthCommonsExperimentOnboardingContextReviewSchema.optional(),
     safetyScreen: healthCommonsExperimentOnboardingSafetyScreenSchema.optional(),
+    adaptationPolicy: healthCommonsExperimentOnboardingAdaptationPolicySchema.optional(),
     setupSlots: z.array(healthCommonsExperimentOnboardingSetupSlotSchema).optional(),
     planDefaults: healthCommonsExperimentOnboardingPlanDefaultsSchema.optional(),
     logging: healthCommonsExperimentOnboardingLoggingSchema.optional(),
@@ -908,12 +1018,28 @@ export const healthCommonsExperimentOnboardingSchema = z
       "safetyScreen",
       "mustAsk",
     ]);
+    addDuplicateIdIssues(context, onboarding.adaptationPolicy?.fields ?? [], [
+      "adaptationPolicy",
+      "fields",
+    ]);
     addDuplicateIdIssues(context, onboarding.setupSlots ?? [], ["setupSlots"]);
   });
 
 export type HealthCommonsExperimentOnboarding = z.infer<
   typeof healthCommonsExperimentOnboardingSchema
 >;
+
+
+function addReservedDotPathSegmentIssues(field: string, context: z.RefinementCtx): void {
+  for (const segment of field.split(".")) {
+    if (RESERVED_TARGET_FIELD_SEGMENTS.has(segment)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Target field segment ${segment} is reserved.`,
+      });
+    }
+  }
+}
 
 function addDuplicateIdIssues(
   context: z.RefinementCtx,

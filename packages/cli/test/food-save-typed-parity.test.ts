@@ -248,8 +248,7 @@ test('food save writes its temporary payload file with 0o600 permissions', async
     assert.ok(payloadWriteCall)
 
     const options = payloadWriteCall[2]
-    assert.equal(typeof options, 'object')
-    assert.ok(options !== null)
+    assert.ok(typeof options === 'object' && options !== null)
     assert.equal(Reflect.get(options, 'mode'), 0o600)
   } finally {
     await rm(parentRoot, {

@@ -26,9 +26,10 @@ import { deleteProvider as deleteProviderInternal, upsertProvider as upsertProvi
 import { deleteRecipe as deleteRecipeInternal, upsertRecipe as upsertRecipeInternal } from "./bank/recipes.ts";
 import { upsertWorkoutFormat as upsertWorkoutFormatInternal } from "./bank/workout-formats.ts";
 import {
-  stopProtocolItem as stopProtocolItemInternal,
-  upsertProtocolItem as upsertProtocolItemInternal,
-} from "./bank/protocols.ts";
+  stopRegimen as stopRegimenInternal,
+  upsertRegimen as upsertRegimenInternal,
+} from "./bank/regimens.ts";
+import { upsertProtocol as upsertProtocolInternal } from "./protocols.ts";
 import { upsertFamilyMember as upsertFamilyMemberInternal } from "./family/api.ts";
 import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics/api.ts";
 import {
@@ -635,14 +636,20 @@ export async function upsertWorkoutFormat(
   return withCanonicalInputWriteLock(input, upsertWorkoutFormatInternal);
 }
 
-export async function upsertProtocolItem(
-  input: Parameters<typeof upsertProtocolItemInternal>[0],
-): ReturnType<typeof upsertProtocolItemInternal> {
-  return withCanonicalInputWriteLock(input, upsertProtocolItemInternal);
+export async function upsertRegimen(
+  input: Parameters<typeof upsertRegimenInternal>[0],
+): ReturnType<typeof upsertRegimenInternal> {
+  return withCanonicalInputWriteLock(input, upsertRegimenInternal);
 }
 
-export async function stopProtocolItem(
-  input: Parameters<typeof stopProtocolItemInternal>[0],
-): ReturnType<typeof stopProtocolItemInternal> {
-  return withCanonicalInputWriteLock(input, stopProtocolItemInternal);
+export async function stopRegimen(
+  input: Parameters<typeof stopRegimenInternal>[0],
+): ReturnType<typeof stopRegimenInternal> {
+  return withCanonicalInputWriteLock(input, stopRegimenInternal);
+}
+
+export async function upsertProtocol(
+  input: Parameters<typeof upsertProtocolInternal>[0],
+): ReturnType<typeof upsertProtocolInternal> {
+  return withCanonicalInputWriteLock(input, upsertProtocolInternal);
 }

@@ -39,7 +39,7 @@ const healthRegistryCommandMetadataByKind = {
   goal: buildHealthRegistryCommandMetadata("goal"),
   condition: buildHealthRegistryCommandMetadata("condition"),
   allergy: buildHealthRegistryCommandMetadata("allergy"),
-  protocol: buildHealthRegistryCommandMetadata("protocol"),
+  regimen: buildHealthRegistryCommandMetadata("regimen"),
   family: buildHealthRegistryCommandMetadata("family"),
   genetics: buildHealthRegistryCommandMetadata("genetics"),
 } as const satisfies Record<HealthRegistryCommandKind, HealthRegistryCommandMetadata>;

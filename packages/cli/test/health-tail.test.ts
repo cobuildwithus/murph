@@ -1376,9 +1376,9 @@ test("genetics upsert validates payloads through the shared schema and preserves
   }
 });
 
-test("protocol commands keep noun-specific and generic reads aligned", async () => {
+test("regimen commands keep noun-specific and generic reads aligned", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "protocol.json");
+  const payloadPath = path.join(vaultRoot, "regimen.json");
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -1397,16 +1397,16 @@ test("protocol commands keep noun-specific and generic reads aligned", async () 
     );
 
     const upsertResult = await runCli<{
-      protocolId: string;
+      regimenId: string;
     }>([
-      "protocol",
-      "upsert",
+      "regimen",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
       vaultRoot,
     ]);
-    const protocolId = requireData(upsertResult).protocolId;
+    const regimenId = requireData(upsertResult).regimenId;
 
     const nounShow = await runCli<{
       entity: {
@@ -1415,9 +1415,9 @@ test("protocol commands keep noun-specific and generic reads aligned", async () 
         data: Record<string, unknown>;
       };
     }>([
-      "protocol",
+      "regimen",
       "show",
-      protocolId,
+      regimenId,
       "--vault",
       vaultRoot,
     ]);
@@ -1429,7 +1429,7 @@ test("protocol commands keep noun-specific and generic reads aligned", async () 
         data: Record<string, unknown>;
       }>;
     }>([
-      "protocol",
+      "regimen",
       "list",
       "--vault",
       vaultRoot,
@@ -1441,7 +1441,7 @@ test("protocol commands keep noun-specific and generic reads aligned", async () 
       };
     }>([
       "show",
-      protocolId,
+      regimenId,
       "--vault",
       vaultRoot,
     ]);
@@ -1450,18 +1450,18 @@ test("protocol commands keep noun-specific and generic reads aligned", async () 
     assert.equal(nounShow.ok, true);
     assert.equal(nounList.ok, true);
     assert.equal(genericShow.ok, true);
-    assert.equal(requireData(nounShow).entity.id, protocolId);
-    assert.equal(requireData(nounShow).entity.kind, "protocol");
+    assert.equal(requireData(nounShow).entity.id, regimenId);
+    assert.equal(requireData(nounShow).entity.kind, "regimen");
     assert.equal(requireData(nounShow).entity.data.kind, "medication");
     assert.equal(requireData(nounShow).entity.data.group, "medication");
     assert.equal(requireData(nounList).count, 1);
     assert.deepEqual(
       requireData(nounList).items.map((item) => item.id),
-      [protocolId],
+      [regimenId],
     );
     assert.equal(requireData(nounList).items[0]?.data.kind, "medication");
-    assert.equal(requireData(genericShow).entity.id, protocolId);
-    assert.equal(requireData(genericShow).entity.kind, "protocol");
+    assert.equal(requireData(genericShow).entity.id, regimenId);
+    assert.equal(requireData(genericShow).entity.kind, "regimen");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1877,28 +1877,28 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
       vaultRoot,
     ]);
     const primaryUpsert = await runCli<{
-      protocolId: string;
+      regimenId: string;
     }>([
       "supplement",
-      "upsert",
+      "import-json",
       "--input",
       `@${primaryPayloadPath}`,
       "--vault",
       vaultRoot,
     ]);
     const secondaryUpsert = await runCli<{
-      protocolId: string;
+      regimenId: string;
     }>([
       "supplement",
-      "upsert",
+      "import-json",
       "--input",
       `@${secondaryPayloadPath}`,
       "--vault",
       vaultRoot,
     ]);
 
-    const primarySupplementId = requireData(primaryUpsert).protocolId;
-    const secondarySupplementId = requireData(secondaryUpsert).protocolId;
+    const primarySupplementId = requireData(primaryUpsert).regimenId;
+    const secondarySupplementId = requireData(secondaryUpsert).regimenId;
 
     const showResult = await runCli<{
       entity: {
@@ -1968,7 +1968,7 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
       vaultRoot,
     ]);
     const stopResult = await runCli<{
-      protocolId: string;
+      regimenId: string;
       status: string;
       stoppedOn: string | null;
     }>([
@@ -2051,7 +2051,7 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
     assert.equal(requireData(compoundShowResult).compound.sources[1]?.brand, "LivOn Labs");
 
     assert.equal(stopResult.ok, true);
-    assert.equal(requireData(stopResult).protocolId, primarySupplementId);
+    assert.equal(requireData(stopResult).regimenId, primarySupplementId);
     assert.equal(requireData(stopResult).status, "stopped");
     assert.equal(requireData(stopResult).stoppedOn, "2026-03-20");
 
@@ -2110,11 +2110,11 @@ test("supplement rename moves the product record to the new slug while preservin
     );
 
     const created = await runCli<{
-      protocolId: string;
+      regimenId: string;
       path?: string;
     }>([
       "supplement",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
@@ -2124,13 +2124,13 @@ test("supplement rename moves the product record to the new slug while preservin
     assert.equal(created.ok, true);
 
     const renamed = await runCli<{
-      protocolId: string;
+      regimenId: string;
       path?: string;
       created: boolean;
     }>([
       "supplement",
       "rename",
-      requireData(created).protocolId,
+      requireData(created).regimenId,
       "--title",
       "Morning Protein Drink",
       "--vault",
@@ -2138,7 +2138,7 @@ test("supplement rename moves the product record to the new slug while preservin
     ]);
 
     assert.equal(renamed.ok, true);
-    assert.equal(requireData(renamed).protocolId, requireData(created).protocolId);
+    assert.equal(requireData(renamed).regimenId, requireData(created).regimenId);
     assert.equal(requireData(renamed).created, false);
     assert.match(requireData(renamed).path ?? "", /morning-protein-drink\.md$/u);
 
@@ -2167,7 +2167,7 @@ test("supplement rename moves the product record to the new slug while preservin
     ]);
 
     assert.equal(showResult.ok, true);
-    assert.equal(requireData(showResult).entity.id, requireData(created).protocolId);
+    assert.equal(requireData(showResult).entity.id, requireData(created).regimenId);
     assert.equal(requireData(showResult).entity.title, "Morning Protein Drink");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

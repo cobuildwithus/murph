@@ -114,6 +114,8 @@ test("overview helpers normalize journal and experiment summaries", () => {
     {
       analysisPlan: null,
       assistantSupport: null,
+      commonsProtocolRef: null,
+      effectiveProtocolSnapshot: null,
       id: "exp_active",
       onboarding: null,
       outcome: null,
@@ -130,6 +132,8 @@ test("overview helpers normalize journal and experiment summaries", () => {
     {
       analysisPlan: null,
       assistantSupport: null,
+      commonsProtocolRef: null,
+      effectiveProtocolSnapshot: null,
       id: "exp_archived",
       onboarding: null,
       outcome: null,
@@ -246,6 +250,78 @@ test("overview helpers handle empty inputs, limit coercion, truncation, and sund
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("overview experiment summaries preserve private protocol refs and effective snapshots", () => {
+  const effectiveSpecHash = `sha256:${"4".repeat(64)}`;
+  const protocolRef = {
+    protocolId: "prot_01K72NVW6Z4QK8VYAVX7GT7S4B",
+    protocolRevisionId: `sha256:${"3".repeat(64)}`,
+    effectiveSpecHash,
+  };
+  const effectiveProtocolSnapshot = {
+    effectiveSpecHash,
+    doseSignature: "Two short sauna sessions weekly",
+    modality: "sauna",
+    frequency: {
+      sessionsPerWeek: 2,
+    },
+    durationMinutes: {
+      target: 12,
+    },
+    targetSessions: 6,
+    minimumUsefulSessions: 4,
+  };
+  const commonsProtocolRef = {
+    key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    pageRevisionId: "sha256:page-revision",
+    runSpecRevisionId: "sha256:run-spec-revision",
+    testPlanId: "rhr-21d",
+  };
+  const runPlan = {
+    baseline: {
+      mode: "retrospective",
+      source: "wearable_history",
+      start: "2026-04-01",
+      end: "2026-04-07",
+    },
+    baselineStart: "2026-04-01",
+    baselineEnd: "2026-04-07",
+    interventionStart: "2026-04-08",
+    interventionEnd: "2026-04-21",
+  };
+  const vault = createVaultReadModel({
+    vaultRoot: "/tmp/query-overview-protocol-ref",
+    entities: [
+      createEntity("experiment", "exp_01K72NVW6Z4QK8VYAVX7GT7S4C", {
+        occurredAt: "2026-04-08T10:00:00.000Z",
+        date: "2026-04-01",
+        title: "Private protocol-backed sauna",
+        status: "active",
+        experimentSlug: "protocol-backed-sauna",
+        attributes: {
+          schemaVersion: "murph.frontmatter.experiment.v1",
+          docType: "experiment",
+          experimentId: "exp_01K72NVW6Z4QK8VYAVX7GT7S4C",
+          slug: "protocol-backed-sauna",
+          status: "active",
+          title: "Private protocol-backed sauna",
+          startedOn: "2026-04-01",
+          commonsProtocolRef,
+          protocolRef,
+          effectiveProtocolSnapshot,
+          runPlan,
+        },
+      }),
+    ],
+  });
+
+  const [summary] = summarizeOverviewExperiments(vault, 1);
+
+  assert.deepEqual(summary?.commonsProtocolRef, commonsProtocolRef);
+  assert.deepEqual(summary?.effectiveProtocolSnapshot, effectiveProtocolSnapshot);
+  assert.deepEqual(summary?.protocolRef, protocolRef);
+  assert.deepEqual(summary?.runPlan, runPlan);
 });
 
 test("readVaultSourceTolerant keeps sparse vault layouts but hard-cuts legacy relation and file aliases", async () => {

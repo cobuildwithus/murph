@@ -1,4 +1,5 @@
 import {
+  EVENT_SOURCES,
   EXPERIMENT_STATUSES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
@@ -11,6 +12,7 @@ import {
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
@@ -30,6 +32,7 @@ import { commonListLimitOptionSchema } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
+const eventSourceOptionSchema = z.enum(EVENT_SOURCES)
 const experimentSignalDirectionSchema = z.enum(['increase', 'decrease', 'stabilize'])
 const experimentCheckInCadenceSchema = z.enum(['none', 'daily', 'every_3_days', 'weekly'])
 const experimentNotificationStyleSchema = z.enum([
@@ -55,9 +58,136 @@ const sha256RevisionOptionSchema = z
 const experimentLookupArgSchema = z.object({
   id: z.string().min(1).describe('Experiment id or slug to resolve.'),
 })
+const experimentJournalLookupArgSchema = z.object({
+  lookup: z.string().min(1).describe('Experiment id or slug to resolve.'),
+})
+const experimentSessionStatusSchema = z.enum([
+  'completed',
+  'partial',
+  'missed',
+  'skipped',
+])
+const experimentContextKindSchema = z.enum([
+  'experiment_context',
+  'note',
+  'supplement_intake',
+])
+const experimentContextSeveritySchema = z.enum([
+  'info',
+  'potential_confounder',
+  'safety',
+  'blocking',
+])
 
 const repeatableTextOptionSchema = (description: string) =>
   z.array(z.string().min(1)).optional().describe(description)
+
+type ExperimentSessionConfounderValue = string | number | boolean | null
+type ExperimentSessionConfounderMap = Record<
+  string,
+  ExperimentSessionConfounderValue
+>
+
+function resolveExperimentSessionStatus(input: {
+  sessionStatus?: z.infer<typeof experimentSessionStatusSchema>
+  status?: z.infer<typeof experimentSessionStatusSchema>
+}) {
+  if (
+    input.status !== undefined &&
+    input.sessionStatus !== undefined &&
+    input.status !== input.sessionStatus
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--status and --session-status must match when both are provided.',
+    )
+  }
+
+  return input.sessionStatus ?? input.status
+}
+
+function parseExperimentSessionConfounderEntries(
+  value: readonly string[] | undefined,
+): ExperimentSessionConfounderMap | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  const confounders: ExperimentSessionConfounderMap = {}
+
+  for (const entry of value) {
+    const separatorIndex = entry.indexOf('=')
+
+    if (separatorIndex < 0) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--confounder entries must use key=value form.',
+      )
+    }
+
+    const key = entry.slice(0, separatorIndex).trim()
+    const rawValue = entry.slice(separatorIndex + 1).trim()
+
+    if (!key) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--confounder entries must include a non-empty key before "=".',
+      )
+    }
+
+    if (!rawValue) {
+      throw new VaultCliError(
+        'invalid_option',
+        `--confounder ${key}= must include a non-empty value.`,
+      )
+    }
+
+    confounders[key] = coerceExperimentSessionConfounderValue(rawValue)
+  }
+
+  return Object.keys(confounders).length > 0 ? confounders : undefined
+}
+
+function coerceExperimentSessionConfounderValue(
+  value: string,
+): ExperimentSessionConfounderValue {
+  if (value === 'true') {
+    return true
+  }
+
+  if (value === 'false') {
+    return false
+  }
+
+  if (value === 'null') {
+    return null
+  }
+
+  const numericValue = looksLikeNumberLiteral(value) ? Number(value) : undefined
+  if (numericValue !== undefined && Number.isFinite(numericValue)) {
+    return numericValue
+  }
+
+  return value
+}
+
+function looksLikeNumberLiteral(value: string): boolean {
+  return /^[+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:e[+-]?\d+)?$/iu.test(value)
+}
+
+function resolveExperimentSessionConfounders(input: {
+  list?: string[]
+  map?: ExperimentSessionConfounderMap
+}) {
+  if (input.list !== undefined && input.map !== undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Use either repeatable --confounders list entries or repeatable --confounder key=value map entries, not both.',
+    )
+  }
+
+  return input.map ?? input.list
+}
 
 function normalizeSetupAnswerOptions(value: readonly string[] | undefined) {
   if (!Array.isArray(value)) {
@@ -136,6 +266,44 @@ const experimentOutcomeResultSchema = z.object({
   updatedExperiment: z.boolean().optional(),
 })
 
+const experimentPlanSummarySchema = z.object({
+  planId: z.string().min(1).nullable(),
+  materialAdaptation: z.boolean(),
+  needsPrivateProtocol: z.boolean(),
+  reasons: z.array(z.string().min(1)),
+  operations: z.array(z.string().min(1)),
+})
+
+const experimentPlanResultSchema = z.object({
+  vault: pathSchema,
+  plan: experimentPlanSummarySchema,
+})
+
+const experimentStartResultSchema = z.object({
+  vault: pathSchema,
+  plan: experimentPlanSummarySchema,
+  protocol: z
+    .object({
+      protocolId: z.string().min(1),
+      slug: slugSchema,
+      title: z.string().min(1),
+      protocolRevisionId: z.string().min(1),
+      effectiveSpecHash: z.string().min(1),
+      path: pathSchema,
+      created: z.boolean(),
+    })
+    .nullable(),
+  experiment: z.object({
+    experimentId: z.string().min(1),
+    lookupId: z.string().min(1),
+    slug: slugSchema,
+    experimentPath: pathSchema,
+    status: experimentStatusSchema,
+    created: z.boolean(),
+    updated: z.boolean(),
+  }),
+})
+
 export function registerExperimentCommands(
   cli: Cli.Cli,
   services: VaultServices,
@@ -165,6 +333,45 @@ export function registerExperimentCommands(
         hypothesis: typeof options.hypothesis === 'string' ? options.hypothesis : undefined,
         startedOn: typeof options.startedOn === 'string' ? options.startedOn : undefined,
         status: typeof options.status === 'string' ? options.status : undefined,
+      })
+    },
+  })
+
+  experiment.command('plan', {
+    description:
+      'Validate an experiment start plan without writing vault records.',
+    args: z.object({}),
+    options: withBaseOptions({
+      input: inputFileOptionSchema,
+    }),
+    output: experimentPlanResultSchema,
+    async run({ options }) {
+      const result = await services.core.planExperiment({
+        vault: String(options.vault ?? ''),
+        requestId: requestIdFromOptions(options),
+        inputFile: normalizeInputFileOption(String(options.input ?? '')),
+      })
+
+      return {
+        vault: result.vault,
+        plan: result.plan,
+      }
+    },
+  })
+
+  experiment.command('start', {
+    description:
+      'Start a confirmed experiment plan, creating or reusing a private protocol when requested.',
+    args: z.object({}),
+    options: withBaseOptions({
+      input: inputFileOptionSchema,
+    }),
+    output: experimentStartResultSchema,
+    async run({ options }) {
+      return services.core.startExperiment({
+        vault: String(options.vault ?? ''),
+        requestId: requestIdFromOptions(options),
+        inputFile: normalizeInputFileOption(String(options.input ?? '')),
       })
     },
   })
@@ -243,7 +450,7 @@ export function registerExperimentCommands(
         .string()
         .min(1)
         .optional()
-        .describe('Health Commons protocol variant key to store under protocolRef.key.'),
+        .describe('Health Commons protocol variant key to store under commonsProtocolRef.key.'),
       pageRevisionId: sha256RevisionOptionSchema
         .optional()
         .describe('Protocol page content revision id in sha256:<64 lowercase hex> form.'),
@@ -448,14 +655,44 @@ export function registerExperimentCommands(
   })
 
   experiment.command('checkpoint', {
-    description: 'Append one experiment checkpoint event from a JSON payload file or stdin.',
+    description: 'Append one experiment checkpoint event using typed fields.',
+    args: experimentJournalLookupArgSchema,
+    options: withBaseOptions({
+      occurredAt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional checkpoint timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      title: z.string().min(1).optional().describe('Optional checkpoint title.'),
+      note: z.string().min(1).optional().describe('Optional checkpoint note.'),
+    }),
+    output: experimentLifecycleResultSchema,
+    async run({ args, options }) {
+      return services.core.checkpointExperiment({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        lookup: args.lookup,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+        }),
+        title: options.title,
+        note: options.note,
+      })
+    },
+  })
+
+  experiment.command('checkpoint-json', {
+    description:
+      'Advanced JSON import escape hatch for appending one experiment checkpoint event from a payload file or stdin.',
     args: z.object({}),
     options: withBaseOptions({
       input: inputFileOptionSchema,
     }),
     output: experimentLifecycleResultSchema,
     async run({ options }) {
-      return services.core.checkpointExperiment({
+      return services.core.checkpointExperimentJson({
         vault: String(options.vault ?? ''),
         requestId: requestIdFromOptions(options),
         inputFile: normalizeInputFileOption(String(options.input ?? '')),
@@ -512,14 +749,109 @@ export function registerExperimentCommands(
   })
 
   session.command('log', {
-    description: 'Log one structured intervention session for an experiment from a JSON payload file or stdin.',
+    description: 'Log one structured intervention session for an experiment using typed fields.',
+    args: experimentJournalLookupArgSchema,
+    options: withBaseOptions({
+      occurredAt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional session timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceOptionSchema
+        .optional()
+        .describe('Optional event source for the session.'),
+      title: z.string().min(1).optional().describe('Optional session title.'),
+      note: z.string().optional().describe('Optional session note.'),
+      interventionType: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Intervention type, inferred from the experiment run plan when omitted.'),
+      status: experimentSessionStatusSchema
+        .optional()
+        .describe('Optional shorthand session status.'),
+      sessionStatus: experimentSessionStatusSchema
+        .optional()
+        .describe('Optional canonical session status.'),
+      durationMinutes: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('Session duration in minutes.'),
+      protocolId: z.string().min(1).optional().describe('Optional linked protocol id.'),
+      timing: z.string().min(1).max(120).optional().describe('Optional timing label.'),
+      temperatureC: z
+        .number()
+        .min(0)
+        .max(200)
+        .optional()
+        .describe('Optional session temperature in degrees Celsius.'),
+      afterExercise: z
+        .boolean()
+        .optional()
+        .describe('Whether the session occurred after exercise.'),
+      symptoms: z
+        .array(z.string().min(1).max(160))
+        .optional()
+        .describe('Observed symptoms. Repeat --symptoms for multiple values.'),
+      confounders: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Potential confounders. Repeat --confounders for multiple values.'),
+      confounder: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          'Potential confounder map entry in key=value form. Repeat --confounder for multiple entries.',
+        ),
+    }),
+    output: experimentSessionLogResultSchema,
+    async run({ args, options }) {
+      const sessionStatus = resolveExperimentSessionStatus({
+        status: options.status,
+        sessionStatus: options.sessionStatus,
+      })
+      const confounders = resolveExperimentSessionConfounders({
+        list: normalizeRepeatableFlagOption(options.confounders, 'confounders'),
+        map: parseExperimentSessionConfounderEntries(options.confounder),
+      })
+
+      return services.core.logExperimentSession({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        lookup: args.lookup,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+        }),
+        source: options.source,
+        title: options.title,
+        note: options.note,
+        interventionType: options.interventionType,
+        sessionStatus,
+        durationMinutes: options.durationMinutes,
+        protocolId: options.protocolId,
+        timing: options.timing,
+        temperatureC: options.temperatureC,
+        afterExercise: options.afterExercise,
+        symptoms: normalizeRepeatableFlagOption(options.symptoms, 'symptoms'),
+        confounders,
+      })
+    },
+  })
+
+  session.command('log-json', {
+    description:
+      'Advanced JSON import escape hatch for logging one structured intervention session from a payload file or stdin.',
     args: experimentLookupArgSchema,
     options: withBaseOptions({
       input: inputFileOptionSchema,
     }),
     output: experimentSessionLogResultSchema,
     async run({ args, options }) {
-      return services.core.logExperimentSession({
+      return services.core.logExperimentSessionJson({
         vault: String(options.vault ?? ''),
         requestId: requestIdFromOptions(options),
         lookup: args.id,
@@ -533,14 +865,85 @@ export function registerExperimentCommands(
   })
 
   context.command('log', {
-    description: 'Log one experiment-linked context record from a JSON payload file or stdin.',
+    description: 'Log one experiment-linked context, note, or supplement-intake record using typed fields.',
+    args: experimentJournalLookupArgSchema,
+    options: withBaseOptions({
+      kind: experimentContextKindSchema
+        .optional()
+        .describe('Context record kind. Inferred from supplied fields when omitted.'),
+      occurredAt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional context timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceOptionSchema
+        .optional()
+        .describe('Optional event source for the context record.'),
+      title: z.string().min(1).optional().describe('Optional context record title.'),
+      note: z.string().optional().describe('Optional context note.'),
+      contextType: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Experiment context type, such as travel or illness.'),
+      severity: experimentContextSeveritySchema
+        .optional()
+        .describe('Experiment context severity.'),
+      tag: z
+        .array(slugSchema)
+        .optional()
+        .describe('Optional tags to store on the context event. Repeat --tag for multiple values.'),
+      supplementName: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Supplement name for supplement-intake context records.'),
+      dose: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe('Supplement dose for supplement-intake context records.'),
+      unit: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Supplement dose unit for supplement-intake context records.'),
+    }),
+    output: experimentContextLogResultSchema,
+    async run({ args, options }) {
+      return services.core.logExperimentContext({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        lookup: args.lookup,
+        kind: options.kind,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+        }),
+        source: options.source,
+        title: options.title,
+        note: options.note,
+        contextType: options.contextType,
+        severity: options.severity,
+        tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
+        supplementName: options.supplementName,
+        dose: options.dose,
+        unit: options.unit,
+      })
+    },
+  })
+
+  context.command('log-json', {
+    description:
+      'Advanced JSON import escape hatch for logging one experiment-linked context record from a payload file or stdin.',
     args: experimentLookupArgSchema,
     options: withBaseOptions({
       input: inputFileOptionSchema,
     }),
     output: experimentContextLogResultSchema,
     async run({ args, options }) {
-      return services.core.logExperimentContext({
+      return services.core.logExperimentContextJson({
         vault: String(options.vault ?? ''),
         requestId: requestIdFromOptions(options),
         lookup: args.id,

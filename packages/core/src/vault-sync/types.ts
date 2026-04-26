@@ -29,7 +29,7 @@ export interface VaultSyncImportManifestFile {
 }
 
 export interface VaultSyncImportManifestExcludedFile {
-  path: string;
+  count: number;
   reason: string;
 }
 

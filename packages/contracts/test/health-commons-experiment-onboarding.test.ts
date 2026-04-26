@@ -5,6 +5,18 @@ import {
   healthCommonsExperimentOnboardingSchema,
 } from "../src/health-commons.ts";
 
+type SetupTargetObject =
+  | "protocol"
+  | "experimentRun"
+  | "onboardingCapture"
+  | "assistantSupport"
+  | "analysisPlan";
+
+interface SetupTarget {
+  object: SetupTargetObject;
+  field: string;
+}
+
 interface TestOnboarding {
   schemaVersion: string;
   startIntent: {
@@ -26,7 +38,31 @@ interface TestOnboarding {
     askPolicy: "ask_if_unknown";
     required: boolean;
     options?: string[];
+    target: SetupTarget;
   }>;
+  adaptationPolicy?: {
+    fields: Array<{
+      id: string;
+      label: string;
+      target: SetupTarget;
+      sourceSlotIds?: string[];
+      requiredForRunSpec?: boolean;
+      protocolReusable?: boolean;
+      guidance?: string;
+    }>;
+    measurementPlan?: {
+      testPlanId?: string;
+      requiredSignals?: string[];
+      optionalSignals?: string[];
+      notes?: string[];
+    };
+    reusableSetup?: {
+      enabled: boolean;
+      target?: SetupTarget;
+      sourceSlotIds?: string[];
+      notes?: string[];
+    };
+  };
   logging: {
     sessionFields: string[];
   };
@@ -61,8 +97,51 @@ function createBaseOnboarding(): TestOnboarding {
         askPolicy: "ask_if_unknown",
         required: true,
         options: ["bike", "rower"],
+        target: {
+          object: "experimentRun",
+          field: "modality",
+        },
       },
     ],
+    adaptationPolicy: {
+      fields: [
+        {
+          id: "modality",
+          label: "Modality",
+          target: {
+            object: "protocol",
+            field: "effectiveSpec.modality",
+          },
+          sourceSlotIds: ["modality"],
+          requiredForRunSpec: true,
+          protocolReusable: true,
+          guidance: "Store the selected modality on the reusable protocol and run snapshot.",
+        },
+        {
+          id: "measurement_plan",
+          label: "Measurement plan",
+          target: {
+            object: "analysisPlan",
+            field: "testPlanId",
+          },
+          requiredForRunSpec: true,
+        },
+      ],
+      measurementPlan: {
+        testPlanId: "wearable-cardio-fitness-49d",
+        requiredSignals: ["biomarker:estimated-vo2max"],
+        notes: ["Keep the same measurement plan for protocol-derived runs."],
+      },
+      reusableSetup: {
+        enabled: true,
+        target: {
+          object: "protocol",
+          field: "setupSnapshot",
+        },
+        sourceSlotIds: ["modality"],
+        notes: ["Reuse the protocol only when the modality still matches."],
+      },
+    },
     logging: {
       sessionFields: ["modality"],
     },
@@ -80,6 +159,34 @@ describe("healthCommonsExperimentOnboardingSchema", () => {
     expect(parsed.contextReview?.vaultChecks?.[0]?.readHints).toEqual([
       "experiment list --status active --format json",
     ]);
+    expect(parsed.setupSlots?.[0]?.target).toEqual({
+      object: "experimentRun",
+      field: "modality",
+    });
+    expect(parsed.adaptationPolicy?.fields.map((field) => field.id)).toEqual([
+      "modality",
+      "measurement_plan",
+    ]);
+    expect(parsed.adaptationPolicy?.measurementPlan?.requiredSignals).toEqual([
+      "biomarker:estimated-vo2max",
+    ]);
+    expect(parsed.adaptationPolicy?.reusableSetup?.target).toEqual({
+      object: "protocol",
+      field: "setupSnapshot",
+    });
+  });
+
+  it("rejects setup slots without typed targets", () => {
+    const base = createBaseOnboarding();
+    const { target: _target, ...slotWithoutTarget } = base.setupSlots[0];
+    const onboarding = {
+      ...base,
+      setupSlots: [slotWithoutTarget],
+    };
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
+      /target/u,
+    );
   });
 
   it("rejects duplicate setup slot ids", () => {
@@ -98,15 +205,84 @@ describe("healthCommonsExperimentOnboardingSchema", () => {
 
   it("requires enum setup slots to declare options", () => {
     const onboarding = createBaseOnboarding();
+    const slotWithoutOptions = { ...onboarding.setupSlots[0] };
+    delete slotWithoutOptions.options;
     onboarding.setupSlots = [
-      {
-        ...onboarding.setupSlots[0],
-        options: undefined,
-      },
+      slotWithoutOptions,
     ];
 
     expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
       /Enum setup slots must declare options/,
+    );
+  });
+
+  it("rejects unknown typed setup slot target objects", () => {
+    const base = createBaseOnboarding();
+    const onboarding = {
+      ...base,
+      setupSlots: [
+        {
+          ...base.setupSlots[0],
+          target: {
+            object: "privateProfile",
+            field: "effectiveSpec.modality",
+          },
+        },
+      ],
+    };
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
+      /Invalid option/u,
+    );
+  });
+
+  it("rejects unsafe setup slot target fields", () => {
+    const base = createBaseOnboarding();
+    const onboarding = {
+      ...base,
+      setupSlots: [
+        {
+          ...base.setupSlots[0],
+          target: {
+            object: "experimentRun",
+            field: "constructor",
+          },
+        },
+      ],
+    };
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
+      /reserved/u,
+    );
+  });
+
+  it("rejects typed target fields that include object prefixes", () => {
+    const base = createBaseOnboarding();
+    const baseAdaptationPolicy = base.adaptationPolicy;
+    const baseAdaptationField = baseAdaptationPolicy?.fields[0];
+    if (!baseAdaptationPolicy || !baseAdaptationField) {
+      throw new Error("Base onboarding must include an adaptation policy field.");
+    }
+    const onboarding = {
+      ...base,
+      adaptationPolicy: {
+        ...baseAdaptationPolicy,
+        fields: [
+          {
+            ...baseAdaptationField,
+            id: "timing_context",
+            label: "Timing context",
+            target: {
+              object: "experimentRun",
+              field: "runPlan.timingContext",
+            },
+          },
+        ],
+      },
+    };
+
+    expect(() => healthCommonsExperimentOnboardingSchema.parse(onboarding)).toThrow(
+      /relative/u,
     );
   });
 });

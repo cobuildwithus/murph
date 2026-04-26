@@ -25,9 +25,10 @@ function createCoreRuntimeStub() {
     addMeal: vi.fn(async () => undefined),
     createExperiment: vi.fn(async () => undefined),
     ensureJournalDay: vi.fn(async () => undefined),
+    stopRegimen: vi.fn(async () => undefined),
+    upsertProtocol: vi.fn(async () => undefined),
     readAssessmentResponse: vi.fn(async () => null),
     projectAssessmentResponse: vi.fn(async () => null),
-    stopProtocolItem: vi.fn(async () => undefined),
     ...createAsyncFunctionRecord(healthCoreRuntimeMethodNames),
   };
 }

@@ -183,6 +183,7 @@ export function buildTypedEventRecord(
           interventionType: draft.interventionType,
           durationMinutes: draft.durationMinutes,
           protocolId: draft.protocolId,
+          regimenId: draft.regimenId,
           sessionStatus: draft.sessionStatus,
           temperatureC: draft.temperatureC,
           timing: draft.timing,

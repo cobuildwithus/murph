@@ -51,7 +51,7 @@ export interface ExportPackHealthContext {
   goals: ExportPackBankPage[];
   conditions: ExportPackBankPage[];
   allergies: ExportPackBankPage[];
-  protocols: ExportPackBankPage[];
+  regimens: ExportPackBankPage[];
   familyMembers: ExportPackBankPage[];
   geneticVariants: ExportPackBankPage[];
 }

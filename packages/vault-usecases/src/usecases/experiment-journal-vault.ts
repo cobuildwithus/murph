@@ -7,15 +7,18 @@ import {
   eventSourceSchema,
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
+  effectiveProtocolSnapshotSchema,
   experimentOutcomeSchema,
   experimentFrontmatterSchema,
   experimentOnboardingCaptureSchema,
   experimentOnboardingSafetySchema,
-  experimentProtocolRefSchema,
+  commonsProtocolRefSchema,
   experimentRunLoggingSchema,
   experimentRunPlanSchema,
   healthCommonsKeySchema,
   healthCommonsStableIdSchema,
+  jsonObjectSchema,
+  protocolRefSchema,
   safeParseContract,
   type JsonValue,
 } from '@murphai/contracts'
@@ -98,7 +101,9 @@ interface ExperimentJournalVaultCoreRuntime {
     status?: ExperimentStatusValue
     body?: string
     tags?: string[]
+    commonsProtocolRef?: z.infer<typeof experimentFrontmatterSchema>['commonsProtocolRef'] | null
     protocolRef?: z.infer<typeof experimentFrontmatterSchema>['protocolRef'] | null
+    effectiveProtocolSnapshot?: z.infer<typeof experimentFrontmatterSchema>['effectiveProtocolSnapshot'] | null
     runPlan?: z.infer<typeof experimentFrontmatterSchema>['runPlan'] | null
     analysisPlan?: z.infer<typeof experimentFrontmatterSchema>['analysisPlan'] | null
     onboarding?: z.infer<typeof experimentFrontmatterSchema>['onboarding'] | null
@@ -111,6 +116,39 @@ interface ExperimentJournalVaultCoreRuntime {
     relativePath: string
     status: ExperimentStatusValue
     updated: true
+  }>
+  upsertProtocol(input: {
+    vaultRoot: string
+    protocolId?: string
+    slug?: string
+    allowSlugRename?: boolean
+    title?: string
+    frontmatter?: JsonObject
+    body?: string
+  }): Promise<{
+    created: boolean
+    record: {
+      entity: {
+        protocolId: string
+        slug: string
+        title: string
+        effectiveSpecHash: string
+        protocolRevisionId: string
+        effectiveSpec: {
+          doseSignature: string
+          modality?: string
+          frequency?: z.infer<typeof effectiveProtocolSnapshotSchema>['frequency']
+          durationMinutes?: z.infer<typeof effectiveProtocolSnapshotSchema>['durationMinutes']
+          temperatureC?: z.infer<typeof effectiveProtocolSnapshotSchema>['temperatureC']
+          targetSessions?: number
+          minimumUsefulSessions?: number
+          stopConditions?: string[]
+        }
+      }
+      document: {
+        relativePath: string
+      }
+    }
   }>
   checkpointExperiment(input: {
     vaultRoot: string
@@ -205,7 +243,7 @@ const experimentNotificationStyleSchema = z.enum([
   'send_scheduled_summary',
 ])
 type ExperimentFrontmatterValue = z.infer<typeof experimentFrontmatterSchema>
-type ExperimentProtocolRefValue = z.infer<typeof experimentProtocolRefSchema>
+type CommonsProtocolRefValue = z.infer<typeof commonsProtocolRefSchema>
 type ExperimentRunLoggingValue = z.infer<typeof experimentRunLoggingSchema>
 type ExperimentRunPlanValue = z.infer<typeof experimentRunPlanSchema>
 type ExperimentAnalysisPlanValue = z.infer<typeof experimentAnalysisPlanSchema>
@@ -267,6 +305,102 @@ export interface ApplyExperimentOnboardingRecordInput {
   missedLogFollowup?: (typeof HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES)[number]
   weeklyDigestEnabled?: boolean
 }
+
+const privateProtocolPlanInputSchema = z
+  .object({
+    protocolId: z.string().min(1).optional(),
+    slug: slugSchema.optional(),
+    title: z.string().min(1).optional(),
+    body: z.string().optional(),
+    frontmatter: jsonObjectSchema.optional(),
+  })
+  .strict()
+
+const privateProtocolRefInputSchema = protocolRefSchema
+
+const experimentPlanDecisionSchema = z
+  .object({
+    materialAdaptation: z.boolean().optional(),
+    needsPrivateProtocol: z.boolean().optional(),
+    reasons: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+
+const experimentPlanPayloadSchema = z
+  .object({
+    schemaVersion: z.literal('murph.experiment-plan.v1').optional(),
+    planId: z.string().min(1).optional(),
+    experiment: z
+      .object({
+        slug: slugSchema,
+        title: z.string().min(1).optional(),
+        hypothesis: z.string().min(1).optional(),
+        startedOn: localDateSchema.optional(),
+        status: experimentStatusSchema.optional(),
+        body: z.string().optional(),
+      })
+      .strict(),
+    commonsProtocolRef: commonsProtocolRefSchema,
+    protocol: privateProtocolPlanInputSchema.optional(),
+    protocolRef: privateProtocolRefInputSchema.optional(),
+    effectiveProtocolSnapshot: effectiveProtocolSnapshotSchema.optional(),
+    runPlan: experimentRunPlanSchema.optional(),
+    analysisPlan: experimentAnalysisPlanSchema.optional(),
+    onboarding: experimentOnboardingCaptureSchema.optional(),
+    assistantSupport: experimentAssistantSupportSchema.optional(),
+    decision: experimentPlanDecisionSchema.optional(),
+  })
+  .strict()
+  .superRefine((payload, context) => {
+    if (payload.protocol !== undefined && payload.protocolRef !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Use protocol to create/reuse a private protocol or protocolRef to reuse an existing private protocol, not both.',
+        path: ['protocolRef'],
+      })
+    }
+
+    if (payload.protocolRef !== undefined && payload.effectiveProtocolSnapshot === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Existing protocolRef plans require effectiveProtocolSnapshot.',
+        path: ['effectiveProtocolSnapshot'],
+      })
+    }
+
+    if (
+      payload.protocolRef !== undefined &&
+      payload.effectiveProtocolSnapshot !== undefined &&
+      payload.protocolRef.effectiveSpecHash !== payload.effectiveProtocolSnapshot.effectiveSpecHash
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'protocolRef.effectiveSpecHash must match effectiveProtocolSnapshot.effectiveSpecHash.',
+        path: ['effectiveProtocolSnapshot', 'effectiveSpecHash'],
+      })
+    }
+
+    if (
+      payload.protocol === undefined &&
+      payload.protocolRef === undefined &&
+      payload.effectiveProtocolSnapshot === undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Experiment plans without a private protocol payload require effectiveProtocolSnapshot.',
+        path: ['effectiveProtocolSnapshot'],
+      })
+    }
+  })
+
+type ExperimentPlanPayload = z.infer<typeof experimentPlanPayloadSchema>
+
+export interface PlanExperimentRecordInput {
+  vault: string
+  inputFile: string
+}
+
+export interface StartExperimentFromPlanInput extends PlanExperimentRecordInput {}
 const experimentCheckpointPayloadSchema = experimentSelectorPayloadSchema.extend({
   occurredAt: isoTimestampSchema.optional(),
   title: z.string().min(1).optional(),
@@ -332,6 +466,15 @@ const experimentContextPayloadSchema = z.union([
     tags: z.array(slugSchema).optional(),
   }),
 ])
+type ExperimentContextPayload = z.infer<typeof experimentContextPayloadSchema>
+type ExperimentContextLogKind = 'experiment_context' | 'note' | 'supplement_intake'
+type ExperimentContextSeverity = 'info' | 'potential_confounder' | 'safety' | 'blocking'
+type ExperimentContextOptionKey =
+  | 'contextType'
+  | 'dose'
+  | 'severity'
+  | 'supplementName'
+  | 'unit'
 const JOURNAL_LINK_RUNTIME_ACTIONS: Record<
   JournalLinkKind,
   Record<JournalLinkOperation, JournalLinkRuntimeAction>
@@ -374,6 +517,191 @@ export async function createExperimentRecord(input: {
   }
 }
 
+function privateProtocolFrontmatterTitle(
+  frontmatter: Record<string, unknown> | undefined,
+): string | undefined {
+  const title = frontmatter?.title
+  return typeof title === 'string' && title.trim().length > 0 ? title.trim() : undefined
+}
+
+function buildEffectiveProtocolSnapshotFromPrivateProtocol(
+  profile: Awaited<ReturnType<ExperimentJournalVaultCoreRuntime['upsertProtocol']>>['record']['entity'],
+): z.infer<typeof effectiveProtocolSnapshotSchema> {
+  return effectiveProtocolSnapshotSchema.parse(compactObject({
+    effectiveSpecHash: profile.effectiveSpecHash,
+    doseSignature: profile.effectiveSpec.doseSignature,
+    modality: profile.effectiveSpec.modality,
+    frequency: profile.effectiveSpec.frequency,
+    durationMinutes: profile.effectiveSpec.durationMinutes,
+    temperatureC: profile.effectiveSpec.temperatureC,
+    targetSessions: profile.effectiveSpec.targetSessions,
+    minimumUsefulSessions: profile.effectiveSpec.minimumUsefulSessions,
+    stopConditions: profile.effectiveSpec.stopConditions,
+  }))
+}
+
+async function readExperimentPlanPayload(inputFile: string): Promise<ExperimentPlanPayload> {
+  return experimentPlanPayloadSchema.parse(
+    await readJsonPayload(inputFile, 'experiment plan payload'),
+  )
+}
+
+function describeExperimentPlan(payload: ExperimentPlanPayload) {
+  const needsPrivateProtocol =
+    payload.decision?.needsPrivateProtocol ??
+    (payload.protocol !== undefined || payload.protocolRef !== undefined)
+
+  return {
+    planId: payload.planId ?? null,
+    materialAdaptation: payload.decision?.materialAdaptation ?? needsPrivateProtocol,
+    needsPrivateProtocol,
+    reasons: payload.decision?.reasons ?? [],
+    operations: [
+      ...(payload.protocol ? ['protocol_upsert'] : []),
+      'experiment_create',
+      'experiment_update',
+    ],
+  }
+}
+
+function toCurrentProtocolRef(
+  ref: z.infer<typeof privateProtocolRefInputSchema> | undefined,
+): z.infer<typeof protocolRefSchema> | undefined {
+  return ref
+    ? protocolRefSchema.parse(ref)
+    : undefined
+}
+
+export async function planExperimentRecord(input: PlanExperimentRecordInput) {
+  const payload = await readExperimentPlanPayload(input.inputFile)
+
+  return {
+    vault: input.vault,
+    plan: describeExperimentPlan(payload),
+  }
+}
+
+export async function startExperimentFromPlanRecord(input: StartExperimentFromPlanInput) {
+  const payload = await readExperimentPlanPayload(input.inputFile)
+  const core = await loadExperimentJournalVaultCoreRuntime()
+  let protocol: {
+    protocolId: string
+    slug: string
+    title: string
+    protocolRevisionId: string
+    effectiveSpecHash: string
+    path: string
+    created: boolean
+  } | null = null
+  let privateProtocolRef = payload.protocolRef
+  let effectiveProtocolSnapshot = payload.effectiveProtocolSnapshot
+
+  if (payload.protocol) {
+    const result = await core.upsertProtocol({
+      vaultRoot: input.vault,
+      protocolId: payload.protocol.protocolId,
+      slug: payload.protocol.slug,
+      allowSlugRename:
+        payload.protocol.protocolId !== undefined &&
+        payload.protocol.slug !== undefined,
+      title:
+        payload.protocol.title ??
+        privateProtocolFrontmatterTitle(payload.protocol.frontmatter),
+      frontmatter: payload.protocol.frontmatter as JsonObject | undefined,
+      body: payload.protocol.body,
+    })
+    const entity = result.record.entity
+    privateProtocolRef = {
+      protocolId: entity.protocolId,
+      protocolRevisionId: entity.protocolRevisionId,
+      effectiveSpecHash: entity.effectiveSpecHash,
+    }
+    effectiveProtocolSnapshot =
+      payload.effectiveProtocolSnapshot ??
+      buildEffectiveProtocolSnapshotFromPrivateProtocol(entity)
+    protocol = {
+      protocolId: entity.protocolId,
+      slug: entity.slug,
+      title: entity.title,
+      protocolRevisionId: entity.protocolRevisionId,
+      effectiveSpecHash: entity.effectiveSpecHash,
+      path: result.record.document.relativePath,
+      created: result.created,
+    }
+  }
+
+  if (privateProtocolRef !== undefined && effectiveProtocolSnapshot === undefined) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Private protocol-backed experiment plans require effectiveProtocolSnapshot.',
+    )
+  }
+
+  const protocolRef = toCurrentProtocolRef(privateProtocolRef)
+
+  const preflight = safeParseContract(experimentFrontmatterSchema, compactObject({
+    schemaVersion: 'murph.frontmatter.experiment.v1',
+    docType: 'experiment',
+    experimentId: 'exp_01K72NVW6Z4QK8VYAVX7GT7S4B',
+    slug: payload.experiment.slug,
+    status: payload.experiment.status ?? 'active',
+    title: payload.experiment.title ?? payload.experiment.slug,
+    startedOn: payload.experiment.startedOn ?? '2026-01-01',
+    hypothesis: payload.experiment.hypothesis,
+    commonsProtocolRef: payload.commonsProtocolRef,
+    protocolRef,
+    effectiveProtocolSnapshot,
+    runPlan: payload.runPlan,
+    analysisPlan: payload.analysisPlan,
+    onboarding: payload.onboarding,
+    assistantSupport: payload.assistantSupport,
+  }))
+
+  if (!preflight.success) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Experiment plan does not produce valid experiment frontmatter.',
+      { errors: preflight.errors },
+    )
+  }
+
+  const created = await core.createExperiment({
+    vaultRoot: input.vault,
+    slug: payload.experiment.slug,
+    title: payload.experiment.title ?? payload.experiment.slug,
+    hypothesis: payload.experiment.hypothesis,
+    startedOn: payload.experiment.startedOn,
+    status: payload.experiment.status ?? 'active',
+  })
+  const updated = await core.updateExperiment({
+    vaultRoot: input.vault,
+    relativePath: created.experiment.relativePath,
+    body: payload.experiment.body,
+    commonsProtocolRef: payload.commonsProtocolRef,
+    protocolRef,
+    effectiveProtocolSnapshot,
+    runPlan: payload.runPlan,
+    analysisPlan: payload.analysisPlan,
+    onboarding: payload.onboarding,
+    assistantSupport: payload.assistantSupport,
+  })
+
+  return {
+    vault: input.vault,
+    plan: describeExperimentPlan(payload),
+    protocol,
+    experiment: {
+      experimentId: updated.experimentId,
+      lookupId: updated.experimentId,
+      slug: updated.slug,
+      experimentPath: updated.relativePath,
+      status: updated.status,
+      created: created.created ?? true,
+      updated: updated.updated,
+    },
+  }
+}
+
 export async function applyExperimentOnboardingRecord(
   input: ApplyExperimentOnboardingRecordInput,
 ) {
@@ -386,9 +714,9 @@ export async function applyExperimentOnboardingRecord(
 
   const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const frontmatter = requireExperimentFrontmatter(experiment)
-  const protocolRef = buildProtocolRefForOnboardingApply(
+  const commonsProtocolRef = buildCommonsProtocolRefForOnboardingApply(
     input,
-    frontmatter.protocolRef,
+    frontmatter.commonsProtocolRef,
   )
   const runPlan = buildRunPlanForOnboardingApply(input, frontmatter.runPlan)
   const analysisPlan = buildAnalysisPlanForOnboardingApply(
@@ -405,8 +733,18 @@ export async function applyExperimentOnboardingRecord(
   )
 
   if (
+    commonsProtocolRef !== undefined &&
+    frontmatter.effectiveProtocolSnapshot === undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Applying a Health Commons protocol reference requires an effectiveProtocolSnapshot; use experiment plan/start for protocol-backed runs.',
+    )
+  }
+
+  if (
     input.status === undefined &&
-    protocolRef === undefined &&
+    commonsProtocolRef === undefined &&
     runPlan === undefined &&
     analysisPlan === undefined &&
     onboarding === undefined &&
@@ -422,7 +760,7 @@ export async function applyExperimentOnboardingRecord(
     vault: input.vault,
     lookup: input.lookup,
     status: input.status,
-    protocolRef,
+    commonsProtocolRef,
     runPlan,
     analysisPlan,
     onboarding,
@@ -439,7 +777,9 @@ export async function updateExperimentRecord(input: {
   status?: ExperimentStatusValue
   body?: string
   tags?: string[]
+  commonsProtocolRef?: z.infer<typeof experimentFrontmatterSchema>['commonsProtocolRef'] | null
   protocolRef?: z.infer<typeof experimentFrontmatterSchema>['protocolRef'] | null
+  effectiveProtocolSnapshot?: z.infer<typeof experimentFrontmatterSchema>['effectiveProtocolSnapshot'] | null
   runPlan?: z.infer<typeof experimentFrontmatterSchema>['runPlan'] | null
   analysisPlan?: z.infer<typeof experimentFrontmatterSchema>['analysisPlan'] | null
   onboarding?: z.infer<typeof experimentFrontmatterSchema>['onboarding'] | null
@@ -459,7 +799,9 @@ export async function updateExperimentRecord(input: {
       status: input.status,
       body: input.body,
       tags: input.tags,
+      commonsProtocolRef: input.commonsProtocolRef,
       protocolRef: input.protocolRef,
+      effectiveProtocolSnapshot: input.effectiveProtocolSnapshot,
       runPlan: input.runPlan,
       analysisPlan: input.analysisPlan,
       onboarding: input.onboarding,
@@ -606,7 +948,7 @@ export async function logExperimentSessionRecord(input: {
   const interventionType =
     slugifyExperimentValue(input.interventionType) ??
     slugifyExperimentValue(frontmatter.runPlan?.modality) ??
-    inferExperimentInterventionType(frontmatter.protocolRef?.key)
+    inferExperimentInterventionType(frontmatter.commonsProtocolRef?.key)
 
   if (!interventionType) {
     throw new VaultCliError(
@@ -663,7 +1005,7 @@ export async function logExperimentContextRecordFromInput(input: {
     await readJsonPayload(input.inputFile, 'experiment context payload'),
   )
 
-  return logExperimentContextRecord({
+  return logExperimentContextPayloadRecord({
     vault: input.vault,
     lookup: input.lookup,
     payload,
@@ -673,7 +1015,29 @@ export async function logExperimentContextRecordFromInput(input: {
 export async function logExperimentContextRecord(input: {
   vault: string
   lookup: string
-  payload: z.infer<typeof experimentContextPayloadSchema>
+  kind?: ExperimentContextLogKind
+  occurredAt?: string
+  source?: z.infer<typeof eventSourceSchema>
+  title?: string
+  note?: string
+  contextType?: string
+  severity?: ExperimentContextSeverity
+  tags?: string[]
+  supplementName?: string
+  dose?: number
+  unit?: string
+}) {
+  return logExperimentContextPayloadRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    payload: buildExperimentContextPayload(input),
+  })
+}
+
+async function logExperimentContextPayloadRecord(input: {
+  vault: string
+  lookup: string
+  payload: ExperimentContextPayload
 }) {
   const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const frontmatter = requireExperimentFrontmatter(experiment)
@@ -749,6 +1113,145 @@ export async function logExperimentContextRecord(input: {
     created: event.created,
     kind: 'kind' in payload ? payload.kind : 'experiment_context',
   }
+}
+
+function buildExperimentContextPayload(input: {
+  kind?: ExperimentContextLogKind
+  occurredAt?: string
+  source?: z.infer<typeof eventSourceSchema>
+  title?: string
+  note?: string
+  contextType?: string
+  severity?: ExperimentContextSeverity
+  tags?: string[]
+  supplementName?: string
+  dose?: number
+  unit?: string
+}): ExperimentContextPayload {
+  const kind = resolveExperimentContextLogKind(input)
+  validateExperimentContextOptions(kind, input)
+  const common = {
+    occurredAt: input.occurredAt,
+    source: input.source,
+    title: input.title,
+    note: input.note,
+    tags: input.tags,
+  }
+
+  switch (kind) {
+    case 'experiment_context':
+      return experimentContextPayloadSchema.parse({
+        kind,
+        ...common,
+        contextType: input.contextType,
+        severity: input.severity,
+      })
+    case 'note':
+      return experimentContextPayloadSchema.parse({
+        kind,
+        ...common,
+      })
+    case 'supplement_intake':
+      return experimentContextPayloadSchema.parse({
+        kind,
+        ...common,
+        supplementName: input.supplementName,
+        dose: input.dose,
+        unit: input.unit,
+      })
+  }
+}
+
+function validateExperimentContextOptions(
+  kind: ExperimentContextLogKind,
+  input: {
+    contextType?: string
+    dose?: number
+    severity?: ExperimentContextSeverity
+    supplementName?: string
+    unit?: string
+  },
+) {
+  switch (kind) {
+    case 'experiment_context':
+      rejectExperimentContextOptions(kind, input, ['supplementName', 'dose', 'unit'])
+      if (input.contextType === undefined) {
+        throw new VaultCliError(
+          'invalid_option',
+          '--context-type is required for experiment context records.',
+        )
+      }
+      return
+    case 'note':
+      rejectExperimentContextOptions(kind, input, [
+        'contextType',
+        'severity',
+        'supplementName',
+        'dose',
+        'unit',
+      ])
+      return
+    case 'supplement_intake':
+      rejectExperimentContextOptions(kind, input, ['contextType', 'severity'])
+      return
+  }
+}
+
+function rejectExperimentContextOptions(
+  kind: ExperimentContextLogKind,
+  input: {
+    contextType?: string
+    dose?: number
+    severity?: ExperimentContextSeverity
+    supplementName?: string
+    unit?: string
+  },
+  optionKeys: ExperimentContextOptionKey[],
+) {
+  const optionNames: Record<ExperimentContextOptionKey, string> = {
+    contextType: '--context-type',
+    dose: '--dose',
+    severity: '--severity',
+    supplementName: '--supplement-name',
+    unit: '--unit',
+  }
+  const supplied = optionKeys
+    .filter((key) => input[key] !== undefined)
+    .map((key) => optionNames[key])
+
+  if (supplied.length > 0) {
+    throw new VaultCliError(
+      'invalid_option',
+      `${supplied.join(', ')} ${supplied.length === 1 ? 'is' : 'are'} not valid for experiment context kind "${kind}".`,
+    )
+  }
+}
+
+function resolveExperimentContextLogKind(input: {
+  kind?: ExperimentContextLogKind
+  contextType?: string
+  severity?: ExperimentContextSeverity
+  supplementName?: string
+  dose?: number
+  unit?: string
+}): ExperimentContextLogKind {
+  if (input.kind) {
+    return input.kind
+  }
+
+  if (
+    typeof input.supplementName === 'string' ||
+    typeof input.dose === 'number' ||
+    typeof input.unit === 'string'
+  ) {
+    return 'supplement_intake'
+  }
+
+  if (typeof input.contextType === 'string' || typeof input.severity === 'string') {
+    return 'experiment_context'
+  }
+
+  return 'note'
 }
 
 export async function showExperimentProgress(input: {
@@ -1338,10 +1841,10 @@ function hasExperimentOnboardingApplyPatch(input: ApplyExperimentOnboardingRecor
   return false
 }
 
-function buildProtocolRefForOnboardingApply(
+function buildCommonsProtocolRefForOnboardingApply(
   input: ApplyExperimentOnboardingRecordInput,
-  existing: ExperimentFrontmatterValue['protocolRef'],
-): ExperimentProtocolRefValue | undefined {
+  existing: ExperimentFrontmatterValue['commonsProtocolRef'],
+): CommonsProtocolRefValue | undefined {
   const touched =
     input.protocolKey !== undefined ||
     input.pageRevisionId !== undefined ||
@@ -1376,7 +1879,7 @@ function buildProtocolRefForOnboardingApply(
     )
   }
 
-  return experimentProtocolRefSchema.parse(
+  return commonsProtocolRefSchema.parse(
     compactObject({
       key,
       pageRevisionId,

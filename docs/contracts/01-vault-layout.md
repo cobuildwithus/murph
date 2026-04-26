@@ -17,7 +17,8 @@ Status: frozen current contract plus health extension fence
   bank/goals/<slug>.md
   bank/conditions/<slug>.md
   bank/allergies/<slug>.md
-  bank/protocols/<group>/<slug>.md
+  bank/regimens/<group>/<slug>.md
+  bank/protocols/<slug>.md
   bank/family/<slug>.md
   bank/genetics/<slug>.md
   bank/foods/<slug>.md
@@ -95,7 +96,8 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - `bank/library/**/*.md` is the stable health reference layer for reusable entities such as biomarkers, domains, protocol variants, and source artifacts. It is durable reference context, not the user-specific synthesized wiki.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
 - `bank/workout-formats` stores reusable workout templates plus summary defaults such as activity type, duration, distance, and saved routine text; `workout format log` still writes the canonical `activity_session` event and does not create a separate workout record family.
-- `bank/protocols/**/*.md` allows nested protocol group folders, but every path segment must remain slug-safe ASCII.
+- `bank/regimens/**/*.md` stores the private medication, supplement, therapy, and habit registry. Nested regimen group folders are allowed, but every path segment must remain slug-safe ASCII.
+- `bank/protocols/*.md` stores private reusable adaptations of Health Commons protocols. Public Health Commons recipes remain under the separate `commons protocol` lookup surface and are not copied into the private vault by default.
 - `derived/knowledge/index.md` is the content-oriented entrypoint into the personal compiled wiki.
 - `derived/knowledge/log.md` is the append-only chronological log of derived knowledge writes.
 - `derived/knowledge/pages/*.md` stores the non-canonical assistant-authored personal wiki pages; these pages may optionally link back to stable `bank/library` entities through `librarySlugs` frontmatter.

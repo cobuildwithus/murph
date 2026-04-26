@@ -910,11 +910,11 @@ test("supplement queries aggregate active compounds and support flexible lookup 
 
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/vitamin-c.md",
+    "bank/regimens/supplements/vitamin-c.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_vitamin_c",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_vitamin_c",
       "slug: vitamin-c",
       "title: Vitamin C",
       "status: active",
@@ -933,11 +933,11 @@ test("supplement queries aggregate active compounds and support flexible lookup 
   );
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/vitamin-c-powder.md",
+    "bank/regimens/supplements/vitamin-c-powder.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_vitamin_c_powder",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_vitamin_c_powder",
       "slug: vitamin-c-powder",
       "title: Vitamin C Powder",
       "status: active",
@@ -955,11 +955,11 @@ test("supplement queries aggregate active compounds and support flexible lookup 
   );
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/symbols.md",
+    "bank/regimens/supplements/symbols.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_symbols",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_symbols",
       "slug: symbols",
       "title: Symbols",
       "status: active",
@@ -977,11 +977,11 @@ test("supplement queries aggregate active compounds and support flexible lookup 
   );
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/legacy-magnesium.md",
+    "bank/regimens/supplements/legacy-magnesium.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_legacy_magnesium",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_legacy_magnesium",
       "slug: legacy-magnesium",
       "title: Legacy Magnesium",
       "status: stopped",
@@ -999,27 +999,27 @@ test("supplement queries aggregate active compounds and support flexible lookup 
   );
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/manual.md",
+    "bank/regimens/manual.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_manual",
-      "slug: manual-protocol",
-      "title: Manual Protocol",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_manual",
+      "slug: manual-regimen",
+      "title: Manual Regimen",
       "status: active",
-      "kind: protocol",
+      "kind: habit",
       "---",
-      "# Manual Protocol",
+      "# Manual Regimen",
       "",
     ].join("\n"),
   );
 
   assert.deepEqual(
     (await listSupplements(vaultRoot)).map((record) => record.entity.id),
-    ["prot_legacy_magnesium", "prot_symbols", "prot_vitamin_c", "prot_vitamin_c_powder"],
+    ["reg_legacy_magnesium", "reg_symbols", "reg_vitamin_c", "reg_vitamin_c_powder"],
   );
-  assert.equal((await readSupplement(vaultRoot, "prot_manual")) ?? null, null);
-  assert.equal((await showSupplement(vaultRoot, " vitamin c "))?.entity.id, "prot_vitamin_c");
+  assert.equal((await readSupplement(vaultRoot, "reg_manual")) ?? null, null);
+  assert.equal((await showSupplement(vaultRoot, " vitamin c "))?.entity.id, "reg_vitamin_c");
 
   const activeCompounds = await listSupplementCompounds(vaultRoot, { text: "vitamin" });
   assert.equal(activeCompounds.length, 1);
@@ -1035,10 +1035,10 @@ test("supplement queries aggregate active compounds and support flexible lookup 
       },
     ],
     supplementCount: 2,
-    supplementIds: ["prot_vitamin_c", "prot_vitamin_c_powder"],
+    supplementIds: ["reg_vitamin_c", "reg_vitamin_c_powder"],
     sources: [
       {
-        supplementId: "prot_vitamin_c",
+        supplementId: "reg_vitamin_c",
         supplementSlug: "vitamin-c",
         supplementTitle: "Vitamin C",
         brand: "Example Brand",
@@ -1050,7 +1050,7 @@ test("supplement queries aggregate active compounds and support flexible lookup 
         note: null,
       },
       {
-        supplementId: "prot_vitamin_c_powder",
+        supplementId: "reg_vitamin_c_powder",
         supplementSlug: "vitamin-c-powder",
         supplementTitle: "Vitamin C Powder",
         brand: null,
@@ -1239,13 +1239,13 @@ test("export pack, overview, and timeline cover health prompts and fallback rend
   assert.equal(pack.packId, "health-focus");
   assert.equal(
     pack.questionPack.questions.includes(
-      "Which intake-assessment answers appear most relevant to the current goals, conditions, or protocols?",
+      "Which intake-assessment answers appear most relevant to the current goals, conditions, or regimens?",
     ),
     true,
   );
   assert.equal(
     pack.questionPack.questions.includes(
-      "Which durable goals, conditions, protocols, family history, or genetics context should shape interpretation of the other records?",
+      "Which durable goals, conditions, regimens, family history, or genetics context should shape interpretation of the other records?",
     ),
     true,
   );

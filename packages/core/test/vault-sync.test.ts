@@ -195,11 +195,14 @@ describe("vault sync import packs", () => {
     await expect(readFile(path.join(restored.vaultRoot, unsupportedAutomationText), "utf8"))
       .rejects.toThrow();
     expect(pack.manifest.files.some((file) => file.path === eventLedger)).toBe(true);
-    expect(pack.manifest.excluded.some((file) => file.path.startsWith(".runtime/"))).toBe(true);
+    expect(pack.manifest.excluded.some(
+      (entry) => entry.reason === "local_or_rebuildable_state" && entry.count >= 2,
+    )).toBe(true);
     expect(pack.manifest.excluded).toContainEqual({
-      path: unsupportedAutomationText,
+      count: 1,
       reason: "not_canonical_sync_input",
     });
+    expect(JSON.stringify(pack.manifest.excluded)).not.toContain(unsupportedAutomationText);
   });
 
   it("reads a verified import manifest from a restored import pack", async () => {

@@ -24,6 +24,8 @@ export interface OverviewJournalEntry {
 export interface OverviewExperiment {
   analysisPlan: ExperimentFrontmatter["analysisPlan"] | null;
   assistantSupport: ExperimentFrontmatter["assistantSupport"] | null;
+  commonsProtocolRef: ExperimentFrontmatter["commonsProtocolRef"] | null;
+  effectiveProtocolSnapshot: ExperimentFrontmatter["effectiveProtocolSnapshot"] | null;
   id: string;
   onboarding: ExperimentFrontmatter["onboarding"] | null;
   outcome: ExperimentFrontmatter["outcome"] | null;
@@ -70,7 +72,7 @@ export function buildOverviewMetrics(vault: VaultReadModel): OverviewMetric[] {
     vault.goals.length +
     vault.conditions.length +
     vault.allergies.length +
-    vault.protocols.length +
+    vault.regimens.length +
     vault.familyMembers.length +
     vault.geneticVariants.length;
 
@@ -265,34 +267,41 @@ export function summarizeOverviewExperiments(
     ...sortedExperiments.filter((entry) => !isActiveOverviewExperimentStatus(entry.status)),
   ];
 
-  return prioritizedExperiments.slice(0, normalizeLimit(limit, 6)).map((entry) => ({
-    analysisPlan: readExperimentFrontmatterField(entry, "analysisPlan"),
-    assistantSupport: readExperimentFrontmatterField(entry, "assistantSupport"),
-    id: entry.entityId,
-    onboarding: readExperimentFrontmatterField(entry, "onboarding"),
-    outcome: readExperimentFrontmatterField(entry, "outcome"),
-    outcomeRef: readExperimentFrontmatterField(entry, "outcomeRef"),
-    protocolRef: readExperimentFrontmatterField(entry, "protocolRef"),
-    runPlan: readExperimentFrontmatterField(entry, "runPlan"),
-    slug: entry.experimentSlug,
-    startedOn: entry.date ?? extractDate(entry.occurredAt),
-    status: entry.status ?? null,
-    summary: summarizeText(entry.body),
-    tags: compactStrings(entry.tags),
-    title: entry.title ?? entry.entityId,
-  }));
+  return prioritizedExperiments.slice(0, normalizeLimit(limit, 6)).map((entry) => {
+    const frontmatter = readExperimentFrontmatter(entry);
+
+    return {
+      analysisPlan: frontmatter?.analysisPlan ?? null,
+      assistantSupport: frontmatter?.assistantSupport ?? null,
+      commonsProtocolRef: frontmatter?.commonsProtocolRef ?? null,
+      effectiveProtocolSnapshot: frontmatter?.effectiveProtocolSnapshot ?? null,
+      id: entry.entityId,
+      onboarding: frontmatter?.onboarding ?? null,
+      outcome: frontmatter?.outcome ?? null,
+      outcomeRef: frontmatter?.outcomeRef ?? null,
+      protocolRef: frontmatter?.protocolRef ?? null,
+      runPlan: frontmatter?.runPlan ?? null,
+      slug: entry.experimentSlug,
+      startedOn: entry.date ?? extractDate(entry.occurredAt),
+      status: entry.status ?? null,
+      summary: summarizeText(entry.body),
+      tags: compactStrings(entry.tags),
+      title: entry.title ?? entry.entityId,
+    };
+  });
 }
 
-function readExperimentFrontmatterField<TKey extends keyof ExperimentFrontmatter>(
+type QueryOverviewExperimentFrontmatter = ExperimentFrontmatter;
+
+function readExperimentFrontmatter(
   entry: VaultReadModel["experiments"][number],
-  key: TKey,
-): ExperimentFrontmatter[TKey] | null {
+): QueryOverviewExperimentFrontmatter | null {
   const result = safeParseContract(experimentFrontmatterSchema, entry.attributes);
   if (!result.success) {
     return null;
   }
 
-  return result.data[key] ?? null;
+  return result.data;
 }
 
 function summarizeText(value: string | null): string | null {

@@ -18,7 +18,7 @@ import {
   geneticVariantUpsertPayloadSchema,
   goalUpsertPatchPayloadSchema,
   goalUpsertPayloadSchema,
-  protocolUpsertPayloadSchema,
+  regimenUpsertPayloadSchema,
 } from "./shares.ts";
 import {
   allergyFrontmatterSchema,
@@ -26,7 +26,7 @@ import {
   familyMemberFrontmatterSchema,
   geneticVariantFrontmatterSchema,
   goalFrontmatterSchema,
-  protocolFrontmatterSchema,
+  regimenFrontmatterSchema,
 } from "./zod.ts";
 
 export type HealthEntityKind =
@@ -34,7 +34,7 @@ export type HealthEntityKind =
   | "goal"
   | "condition"
   | "allergy"
-  | "protocol"
+  | "regimen"
   | "blood_test"
   | "family"
   | "genetics";
@@ -309,7 +309,7 @@ const checkedHealthEntityDefinitions = [
             severity: helpers.firstString(attributes, ["severity"]),
             bodySites: helpers.firstStringArray(attributes, ["bodySites"]),
             relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
-            relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds"]),
+            relatedRegimenIds: helpers.firstStringArray(attributes, ["relatedRegimenIds"]),
             note: helpers.firstString(attributes, ["note"]),
           };
         },
@@ -322,8 +322,8 @@ const checkedHealthEntityDefinitions = [
           cardinality: "many",
         },
         {
-          type: "related_protocol",
-          keys: ["relatedProtocolIds"],
+          type: "related_regimen",
+          keys: ["relatedRegimenIds"],
           cardinality: "many",
         },
       ],
@@ -373,11 +373,11 @@ const checkedHealthEntityDefinitions = [
     },
   }),
   defineRegistryEntity({
-    kind: "protocol",
-    listKinds: ["protocol"],
-    noun: "protocol",
-    plural: "protocols",
-    prefixes: [`${ID_PREFIXES.protocol}_`],
+    kind: "regimen",
+    listKinds: ["regimen"],
+    noun: "regimen",
+    plural: "regimens",
+    prefixes: [`${ID_PREFIXES.regimen}_`],
     scaffoldTemplate: {
       title: "Magnesium glycinate",
       kind: "supplement",
@@ -387,11 +387,11 @@ const checkedHealthEntityDefinitions = [
     },
     registry: {
       command: {
-        runtimeMethodName: "upsertProtocolItem",
+        runtimeMethodName: "upsertRegimen",
       },
-      frontmatterSchema: protocolFrontmatterSchema,
-      directory: "bank/protocols",
-      idField: "protocolId",
+      frontmatterSchema: regimenFrontmatterSchema,
+      directory: "bank/regimens",
+      idField: "regimenId",
       projection: {
         transform({ attributes, helpers, relativePath }) {
           return {
@@ -408,14 +408,14 @@ const checkedHealthEntityDefinitions = [
             ingredients: projectSupplementIngredients(attributes.ingredients),
             relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
             relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
-            relatedProtocolIds: helpers.firstStringArray(attributes, ["relatedProtocolIds"]),
+            relatedRegimenIds: helpers.firstStringArray(attributes, ["relatedRegimenIds"]),
             group:
               helpers.firstString(attributes, ["group"])
-              ?? deriveProtocolGroupFromRelativePath(relativePath),
+              ?? deriveRegimenGroupFromRelativePath(relativePath),
           };
         },
       },
-      upsertPayloadSchema: protocolUpsertPayloadSchema,
+      upsertPayloadSchema: regimenUpsertPayloadSchema,
       relationKeys: [
         {
           type: "supports_goal",
@@ -428,8 +428,8 @@ const checkedHealthEntityDefinitions = [
           cardinality: "many",
         },
         {
-          type: "related_protocol",
-          keys: ["relatedProtocolIds"],
+          type: "related_regimen",
+          keys: ["relatedRegimenIds"],
           cardinality: "many",
         },
       ],
@@ -550,7 +550,7 @@ export const healthEntityDefinitions: readonly HealthEntityDefinition[] =
 
 export type HealthEntityRegistryKind = Extract<
   HealthEntityKind,
-  "goal" | "condition" | "allergy" | "protocol" | "family" | "genetics"
+  "goal" | "condition" | "allergy" | "regimen" | "family" | "genetics"
 >;
 
 export type HealthEntityDefinitionWithRegistry = HealthEntityDefinition & {
@@ -643,9 +643,9 @@ export function getHealthEntityRegistryCommandMetadata(
   };
 }
 
-export function deriveProtocolGroupFromRelativePath(
+export function deriveRegimenGroupFromRelativePath(
   relativePath: string,
-  rootDirectory = "bank/protocols",
+  rootDirectory = "bank/regimens",
 ): string | null {
   const normalizedRelativePath = normalizeHealthEntityRelativePath(relativePath);
   const normalizedRootDirectory = normalizeHealthEntityRelativePath(rootDirectory);
@@ -698,6 +698,6 @@ function toCommandIdExample(noun: string): string {
 export const goalRegistryEntityDefinition = requireHealthEntityRegistryDefinition("goal");
 export const conditionRegistryEntityDefinition = requireHealthEntityRegistryDefinition("condition");
 export const allergyRegistryEntityDefinition = requireHealthEntityRegistryDefinition("allergy");
-export const protocolRegistryEntityDefinition = requireHealthEntityRegistryDefinition("protocol");
+export const regimenRegistryEntityDefinition = requireHealthEntityRegistryDefinition("regimen");
 export const familyRegistryEntityDefinition = requireHealthEntityRegistryDefinition("family");
 export const geneticsRegistryEntityDefinition = requireHealthEntityRegistryDefinition("genetics");

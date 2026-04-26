@@ -87,10 +87,12 @@ interface HealthCrudConfig<
   hints?: CrudHints
   listFilterCapabilities?: readonly HealthCrudListFilterCapability[]
   listStatusDescription?: string
+  jsonImportCommandName?: string
   noun: string
   outputs: CrudOutputs<TScaffold, TUpsert, TShow, TList>
   payloadFile: string
   pluralNoun: string
+  registerUpsert?: boolean
   services: CrudServices<TScaffold, TUpsert, TShow, TList>
   showId: {
     description: string
@@ -109,7 +111,7 @@ interface HealthCrudGroupConfig<
   description: string
 }
 
-type MethodName<TService, TInput> = {
+export type HealthCommandServiceMethodName<TService, TInput> = {
   [TKey in keyof TService]: TService[TKey] extends ServiceMethod<TInput, unknown>
     ? TKey
     : never
@@ -134,6 +136,7 @@ interface CrudServiceMethodNames<
 
 interface CrudPresentationContext {
   groupName: string
+  jsonImportCommandName?: string
   noun: string
   payloadFile: string
   pluralNoun: string
@@ -200,7 +203,8 @@ const defaultHintsByCommand: Partial<
     return 'Use --limit to cap results.'
   },
   scaffold(config) {
-    return `Edit the emitted payload, save it as ${config.payloadFile}, then pass it back with --input @${config.payloadFile} or pipe it to --input -. The scaffold output is the current canonical field shape for this command.`
+    const importCommand = `${config.groupName} ${config.jsonImportCommandName ?? 'upsert'}`
+    return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold output is the current canonical field shape for this command.`
   },
   upsert(config) {
     return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} scaffold first if you need the current canonical field shape.`
@@ -234,7 +238,7 @@ function hintFor<
 function bindServiceMethod<
   TService extends object,
   TInput,
-  TMethodName extends MethodName<TService, TInput>,
+  TMethodName extends HealthCommandServiceMethodName<TService, TInput>,
 >(
   service: TService,
   methodName: TMethodName,
@@ -249,10 +253,10 @@ function bindServiceMethod<
 export function bindHealthCrudServices<
   TCore extends object,
   TQuery extends object,
-  TScaffoldName extends MethodName<TCore, CommandContext>,
-  TUpsertName extends MethodName<TCore, UpsertCommandContext>,
-  TShowName extends MethodName<TQuery, ShowCommandContext>,
-  TListName extends MethodName<TQuery, ListCommandContext>,
+  TScaffoldName extends HealthCommandServiceMethodName<TCore, CommandContext>,
+  TUpsertName extends HealthCommandServiceMethodName<TCore, UpsertCommandContext>,
+  TShowName extends HealthCommandServiceMethodName<TQuery, ShowCommandContext>,
+  TListName extends HealthCommandServiceMethodName<TQuery, ListCommandContext>,
 >(
   services: {
     core: TCore
@@ -304,12 +308,12 @@ export function createHealthCrudGroup<
 function createCrudScaffoldCta(
   config: Pick<
     HealthCrudConfig<unknown, object, unknown, unknown>,
-    'groupName' | 'noun' | 'payloadFile'
+    'groupName' | 'jsonImportCommandName' | 'noun' | 'payloadFile'
   >,
 ) {
   return suggestedCommandsCta([
     {
-      command: `${config.groupName} upsert`,
+      command: `${config.groupName} ${config.jsonImportCommandName ?? 'upsert'}`,
       description: `Apply the edited ${config.noun} payload.`,
       options: {
         input: `@${config.payloadFile}`,
@@ -372,27 +376,29 @@ export function registerHealthCrudCommands<
     },
   })
 
-  config.group.command('upsert', {
-    args: emptyArgsSchema,
-    description: config.descriptions.upsert,
-    examples: examplesFor(config, 'upsert'),
-    hint: hintFor(config, 'upsert'),
-    options: withBaseOptions({
-      input: inputFileOptionSchema,
-    }),
-    output: config.outputs.upsert,
-    async run(context) {
-      const result = await config.services.upsert({
-        input: normalizeInputFileOption(context.options.input),
-        requestId: requestIdFromOptions(context.options),
-        vault: context.options.vault,
-      })
+  if (config.registerUpsert !== false) {
+    config.group.command('upsert', {
+      args: emptyArgsSchema,
+      description: config.descriptions.upsert,
+      examples: examplesFor(config, 'upsert'),
+      hint: hintFor(config, 'upsert'),
+      options: withBaseOptions({
+        input: inputFileOptionSchema,
+      }),
+      output: config.outputs.upsert,
+      async run(context) {
+        const result = await config.services.upsert({
+          input: normalizeInputFileOption(context.options.input),
+          requestId: requestIdFromOptions(context.options),
+          vault: context.options.vault,
+        })
 
-      return context.ok(result, {
-        cta: createCrudUpsertCta(config, result),
-      })
-    },
-  })
+        return context.ok(result, {
+          cta: createCrudUpsertCta(config, result),
+        })
+      },
+    })
+  }
 
   config.group.command('show', {
     args: z.object({

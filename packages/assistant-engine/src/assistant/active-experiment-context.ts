@@ -1,9 +1,9 @@
 import {
   experimentFrontmatterSchema,
   safeParseContract,
+  type CommonsProtocolRef,
   type ExperimentAssistantSupport,
   type ExperimentFrontmatter,
-  type ExperimentProtocolRef,
   type ExperimentRunPlan,
 } from '@murphai/contracts'
 import { readVault, type CanonicalEntity } from '@murphai/query'
@@ -86,7 +86,7 @@ function compareActiveExperiments(
 function renderActiveExperimentLine(experiment: ExperimentFrontmatter): string {
   const details = [
     `started ${experiment.startedOn}`,
-    renderProtocolRef(experiment.protocolRef),
+    renderCommonsProtocolRef(experiment.commonsProtocolRef),
     renderRunPlan(experiment.runPlan),
     renderAssistantSupport(experiment.assistantSupport),
   ].filter((value): value is string => Boolean(value))
@@ -94,8 +94,8 @@ function renderActiveExperimentLine(experiment: ExperimentFrontmatter): string {
   return `- ${renderPromptField(experiment.title)} (\`${experiment.slug}\`, ${experiment.experimentId}): ${details.join('; ')}.`
 }
 
-function renderProtocolRef(
-  protocolRef: ExperimentProtocolRef | undefined,
+function renderCommonsProtocolRef(
+  protocolRef: CommonsProtocolRef | undefined,
 ): string | null {
   if (!protocolRef) {
     return null

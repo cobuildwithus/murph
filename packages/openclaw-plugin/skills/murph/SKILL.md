@@ -58,8 +58,8 @@ For source-attributed external protocols, keep the source routine separate from 
 
 Useful commands:
 
-- `vault-cli protocol show <protocol id or slug> --format json` so you can read `protocol`, `safety`, `testPlans`, `experimentOnboarding`, and `revision.{pageRevisionId,runSpecRevisionId}` before asking setup questions.
-- `vault-cli protocol list --format json` when the user names a category or approximate protocol rather than one exact page.
+- `vault-cli commons protocol show <protocol key or slug> --format json` so you can read `protocol`, `safety`, `testPlans`, `experimentOnboarding`, and `revision.{pageRevisionId,runSpecRevisionId}` before asking setup questions.
+- `vault-cli commons protocol list --format json` when the user names a category or approximate protocol rather than one exact page.
 - `vault-cli experiment list --status active --format json` before starting, so Murph can preserve the one-meaningful-experiment default.
 - `vault-cli memory show --format json` for current saved context.
 - `vault-cli search query "<protocol-relevant context>" --format json` for conditions, medications, prior symptoms, injuries, recent workouts, or previous experiment notes.
@@ -71,7 +71,7 @@ Useful commands:
 - `vault-cli experiment outcome analyze <id> --format json` when the user wants a run review, end-of-run interpretation, or a worth-repeating judgment.
 - `vault-cli experiment outcome write <id> --format json` when the deterministic outcome is ready, the user wants it persisted, and the experiment record should link to the saved outcome artifact.
 - `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --started-on <YYYY-MM-DD> --status active` only after the user confirms a simple run plan.
-- `vault-cli experiment apply-onboarding <id> ...` when the run needs richer `protocolRef`, `runPlan`, `onboarding`, or `assistantSupport` fields; inspect `vault-cli experiment apply-onboarding --schema --format json` before choosing flags.
+- `vault-cli experiment apply-onboarding <id> ...` when the run needs richer `commonsProtocolRef`, optional private `protocolRef`, `runPlan`, `onboarding`, or `assistantSupport` fields; inspect `vault-cli experiment apply-onboarding --schema --format json` before choosing flags.
 - `vault-cli automation scaffold --format json` followed by `vault-cli automation upsert --input -` only after the user opts into reminders or check-ins.
 
 Flow:

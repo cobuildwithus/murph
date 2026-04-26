@@ -14,7 +14,7 @@ import {
   upsertAutomation,
   upsertCondition,
   upsertGoal,
-  upsertProtocolItem,
+  upsertRegimen,
 } from '@murphai/core'
 
 import { buildAssistantVaultOverviewBlock } from '../src/assistant/vault-overview.ts'
@@ -110,7 +110,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     title: 'Penicillin allergy',
     vaultRoot,
   })
-  await upsertProtocolItem({
+  await upsertRegimen({
     vaultRoot,
     title: 'Magnesium glycinate',
     kind: 'supplement',
@@ -237,7 +237,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
   )
   expect(overview).not.toContain('Raw meal import coverage includes')
   expect(overview).toContain(
-    'Bank coverage includes 1 protocol record, including 1 supplement.',
+    'Bank coverage includes 1 regimen record, including 1 supplement.',
   )
   expect(overview).toContain(
     'Other source roots present: 1 research note, raw inbox evidence, and derived inbox artifacts.',

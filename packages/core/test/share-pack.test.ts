@@ -11,10 +11,10 @@ import {
   importSharePackIntoVault,
   initializeVault,
   readFood,
-  readProtocolItem,
+  readRegimen,
   readRecipe,
   upsertFood,
-  upsertProtocolItem,
+  upsertRegimen,
   upsertRecipe,
 } from "../src/index.ts";
 
@@ -22,14 +22,14 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
-test("share packs export one food with attached supplement protocols and import the full bundle", async () => {
+test("share packs export one food with attached supplement regimens and import the full bundle", async () => {
   const sourceVault = await makeTempDirectory("murph-share-pack-source");
   const destinationVault = await makeTempDirectory("murph-share-pack-destination");
 
   await initializeVault({ vaultRoot: sourceVault });
   await initializeVault({ vaultRoot: destinationVault });
 
-  const creatine = await upsertProtocolItem({
+  const creatine = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Creatine monohydrate",
     kind: "supplement",
@@ -37,7 +37,7 @@ test("share packs export one food with attached supplement protocols and import 
     startedOn: "2026-03-01",
     schedule: "daily",
   });
-  const collagen = await upsertProtocolItem({
+  const collagen = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Collagen peptides",
     kind: "supplement",
@@ -45,7 +45,7 @@ test("share packs export one food with attached supplement protocols and import 
     startedOn: "2026-03-01",
     schedule: "daily",
   });
-  const fiber = await upsertProtocolItem({
+  const fiber = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Inulin fiber",
     kind: "supplement",
@@ -59,10 +59,10 @@ test("share packs export one food with attached supplement protocols and import 
     kind: "smoothie",
     serving: "1 smoothie",
     ingredients: ["banana", "blueberries", "protein powder"],
-    attachedProtocolIds: [
-      creatine.record.entity.protocolId,
-      collagen.record.entity.protocolId,
-      fiber.record.entity.protocolId,
+    attachedRegimenIds: [
+      creatine.record.entity.regimenId,
+      collagen.record.entity.regimenId,
+      fiber.record.entity.regimenId,
     ],
     autoLogDaily: {
       time: "08:00",
@@ -72,7 +72,7 @@ test("share packs export one food with attached supplement protocols and import 
   const pack = await buildSharePackFromVault({
     vaultRoot: sourceVault,
     foods: [{ id: smoothie.record.foodId }],
-    includeAttachedProtocols: true,
+    includeAttachedRegimens: true,
     logMeal: {
       food: {
         id: smoothie.record.foodId,
@@ -86,9 +86,9 @@ test("share packs export one food with attached supplement protocols and import 
   assert.equal(exportedFood?.payload.title, "Morning Smoothie");
   assert.equal(exportedFood?.payload.autoLogDaily?.time, "08:00");
   assert.deepEqual(
-    [...(exportedFood?.payload.attachedProtocolRefs ?? [])].sort(),
+    [...(exportedFood?.payload.attachedRegimenRefs ?? [])].sort(),
     pack.entities
-      .filter((entity) => entity.kind === "protocol")
+      .filter((entity) => entity.kind === "regimen")
       .map((entity) => entity.ref)
       .sort(),
   );
@@ -98,8 +98,8 @@ test("share packs export one food with attached supplement protocols and import 
     vaultRoot: destinationVault,
     pack,
   });
-  assert.equal(imported.protocols.length, 3);
-  assert.ok(imported.protocols.every((record) => typeof record.protocolId === "string"));
+  assert.equal(imported.regimens.length, 3);
+  assert.ok(imported.regimens.every((record) => typeof record.regimenId === "string"));
   assert.equal(imported.foods.length, 1);
   assert.ok(imported.meal);
 
@@ -109,7 +109,7 @@ test("share packs export one food with attached supplement protocols and import 
   });
   assert.equal(importedFood.title, "Morning Smoothie");
   assert.equal(importedFood.autoLogDaily?.time, "08:00");
-  assert.equal(importedFood.attachedProtocolIds?.length, 3);
+  assert.equal(importedFood.attachedRegimenIds?.length, 3);
 });
 
 test("share packs dedupe repeated recipe selections and fall back to the first entity title when no explicit title is provided", async () => {
@@ -153,14 +153,14 @@ test("share packs dedupe repeated recipe selections and fall back to the first e
   assert.equal(importedRecipe.title, "Sheet Pan Salmon Bowls");
 });
 
-test("share packs dedupe explicitly selected protocols that are also attached to exported foods", async () => {
+test("share packs dedupe explicitly selected regimens that are also attached to exported foods", async () => {
   const sourceVault = await makeTempDirectory("murph-share-pack-dedupe-source");
   const destinationVault = await makeTempDirectory("murph-share-pack-dedupe-destination");
 
   await initializeVault({ vaultRoot: sourceVault });
   await initializeVault({ vaultRoot: destinationVault });
 
-  const creatine = await upsertProtocolItem({
+  const creatine = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Creatine monohydrate",
     kind: "supplement",
@@ -174,21 +174,21 @@ test("share packs dedupe explicitly selected protocols that are also attached to
     kind: "smoothie",
     serving: "1 smoothie",
     ingredients: ["banana", "creatine"],
-    attachedProtocolIds: [creatine.record.entity.protocolId],
+    attachedRegimenIds: [creatine.record.entity.regimenId],
   });
 
   const pack = await buildSharePackFromVault({
     vaultRoot: sourceVault,
     foods: [{ id: smoothie.record.foodId }],
-    protocols: [{ id: creatine.record.entity.protocolId }],
+    regimens: [{ id: creatine.record.entity.regimenId }],
   });
 
-  const exportedProtocolEntities = pack.entities.filter((entity) => entity.kind === "protocol");
+  const exportedRegimenEntities = pack.entities.filter((entity) => entity.kind === "regimen");
   const exportedFood = pack.entities.find((entity) => entity.kind === "food");
 
-  assert.equal(exportedProtocolEntities.length, 1);
+  assert.equal(exportedRegimenEntities.length, 1);
   assert.equal(pack.entities.length, 2);
-  assert.deepEqual(exportedFood?.payload.attachedProtocolRefs, exportedProtocolEntities.map((entity) => entity.ref));
+  assert.deepEqual(exportedFood?.payload.attachedRegimenRefs, exportedRegimenEntities.map((entity) => entity.ref));
 
   const imported = await importSharePackIntoVault({
     vaultRoot: destinationVault,
@@ -200,19 +200,19 @@ test("share packs dedupe explicitly selected protocols that are also attached to
     foodId: imported.foods[0]?.foodId,
   });
 
-  assert.equal(imported.protocols.length, 1);
+  assert.equal(imported.regimens.length, 1);
   assert.equal(imported.foods.length, 1);
-  assert.equal(importedFood.attachedProtocolIds?.length, 1);
+  assert.equal(importedFood.attachedRegimenIds?.length, 1);
 });
 
-test("share packs can omit attached protocols while normalizing meal follow-up fields", async () => {
+test("share packs can omit attached regimens while normalizing meal follow-up fields", async () => {
   const sourceVault = await makeTempDirectory("murph-share-pack-meal-source");
   const destinationVault = await makeTempDirectory("murph-share-pack-meal-destination");
 
   await initializeVault({ vaultRoot: sourceVault });
   await initializeVault({ vaultRoot: destinationVault });
 
-  const protocol = await upsertProtocolItem({
+  const regimen = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Collagen peptides",
     kind: "supplement",
@@ -226,14 +226,14 @@ test("share packs can omit attached protocols while normalizing meal follow-up f
     kind: "smoothie",
     serving: "1 smoothie",
     ingredients: ["banana", "collagen"],
-    attachedProtocolIds: [protocol.record.entity.protocolId],
+    attachedRegimenIds: [regimen.record.entity.regimenId],
   });
 
   const pack = await buildSharePackFromVault({
     vaultRoot: sourceVault,
     foods: [{ id: food.record.foodId }],
-    protocols: [{ id: protocol.record.entity.protocolId }],
-    includeAttachedProtocols: false,
+    regimens: [{ id: regimen.record.entity.regimenId }],
+    includeAttachedRegimens: false,
     logMeal: {
       food: { id: food.record.foodId },
       note: "  Keep this meal  ",
@@ -241,11 +241,11 @@ test("share packs can omit attached protocols while normalizing meal follow-up f
     },
   });
 
-  const exportedProtocolEntities = pack.entities.filter((entity) => entity.kind === "protocol");
+  const exportedRegimenEntities = pack.entities.filter((entity) => entity.kind === "regimen");
   const exportedFood = pack.entities.find((entity) => entity.kind === "food");
 
-  assert.equal(exportedProtocolEntities.length, 1);
-  assert.equal(exportedFood?.payload.attachedProtocolRefs, undefined);
+  assert.equal(exportedRegimenEntities.length, 1);
+  assert.equal(exportedFood?.payload.attachedRegimenRefs, undefined);
   assert.deepEqual(pack.afterImport?.logMeal, {
     foodRef: exportedFood?.ref,
     note: "Keep this meal",
@@ -258,19 +258,19 @@ test("share packs can omit attached protocols while normalizing meal follow-up f
   });
 
   assert.equal(imported.foods.length, 1);
-  assert.equal(imported.foods[0]?.attachedProtocolIds?.length, 1);
+  assert.equal(imported.foods[0]?.attachedRegimenIds?.length, 1);
   assert.equal(imported.meal?.event.note, "Shared meal: Morning Smoothie\n\nKeep this meal");
   assert.equal(imported.meal?.event.occurredAt, "2026-03-26T12:34:56.000Z");
 });
 
-test("share packs preserve empty-link exports, normalize related protocol links, and accept Date and string meal timestamps", async () => {
+test("share packs preserve empty-link exports, normalize related regimen links, and accept Date and string meal timestamps", async () => {
   const sourceVault = await makeTempDirectory("murph-share-pack-link-source");
   const destinationVault = await makeTempDirectory("murph-share-pack-link-destination");
 
   await initializeVault({ vaultRoot: sourceVault });
   await initializeVault({ vaultRoot: destinationVault });
 
-  const standaloneProtocol = await upsertProtocolItem({
+  const standaloneRegimen = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Magnesium glycinate",
     kind: "supplement",
@@ -278,14 +278,14 @@ test("share packs preserve empty-link exports, normalize related protocol links,
     startedOn: "2026-03-01",
     schedule: "daily",
   });
-  const linkedProtocol = await upsertProtocolItem({
+  const linkedRegimen = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Sleep support stack",
     kind: "supplement",
     group: "supplement",
     startedOn: "2026-03-01",
     schedule: "daily",
-    relatedProtocolIds: [standaloneProtocol.record.entity.protocolId],
+    relatedRegimenIds: [standaloneRegimen.record.entity.regimenId],
   });
   const recipe = await upsertRecipe({
     vaultRoot: sourceVault,
@@ -305,9 +305,9 @@ test("share packs preserve empty-link exports, normalize related protocol links,
   const pack = await buildSharePackFromVault({
     vaultRoot: sourceVault,
     title: "  Standalone share pack  ",
-    protocols: [
-      { id: standaloneProtocol.record.entity.protocolId },
-      { id: linkedProtocol.record.entity.protocolId },
+    regimens: [
+      { id: standaloneRegimen.record.entity.regimenId },
+      { id: linkedRegimen.record.entity.regimenId },
     ],
     recipes: [{ id: recipe.record.recipeId }],
     foods: [{ id: food.record.foodId }],
@@ -318,26 +318,26 @@ test("share packs preserve empty-link exports, normalize related protocol links,
     },
   });
 
-  const exportedStandaloneProtocol = pack.entities.find(
-    (entity) => entity.kind === "protocol" && entity.payload.title === "Magnesium glycinate",
+  const exportedStandaloneRegimen = pack.entities.find(
+    (entity) => entity.kind === "regimen" && entity.payload.title === "Magnesium glycinate",
   );
-  const exportedLinkedProtocol = pack.entities.find(
-    (entity) => entity.kind === "protocol" && entity.payload.title === "Sleep support stack",
+  const exportedLinkedRegimen = pack.entities.find(
+    (entity) => entity.kind === "regimen" && entity.payload.title === "Sleep support stack",
   );
   const exportedRecipe = pack.entities.find((entity) => entity.kind === "recipe");
   const exportedFood = pack.entities.find((entity) => entity.kind === "food");
 
   assert.equal(pack.title, "Standalone share pack");
-  assert.equal(exportedStandaloneProtocol?.payload.links, undefined);
-  assert.deepEqual(exportedLinkedProtocol?.payload.links, [
+  assert.equal(exportedStandaloneRegimen?.payload.links, undefined);
+  assert.deepEqual(exportedLinkedRegimen?.payload.links, [
     {
-      type: "related_protocol",
-      targetId: standaloneProtocol.record.entity.protocolId,
+      type: "related_regimen",
+      targetId: standaloneRegimen.record.entity.regimenId,
     },
   ]);
   assert.equal(exportedRecipe?.payload.links, undefined);
   assert.equal(exportedFood?.payload.links, undefined);
-  assert.equal(exportedFood?.payload.attachedProtocolRefs, undefined);
+  assert.equal(exportedFood?.payload.attachedRegimenRefs, undefined);
   assert.deepEqual(pack.afterImport?.logMeal, {
     foodRef: exportedFood?.ref,
     occurredAt: "2026-03-26T12:34:56.000Z",
@@ -359,20 +359,20 @@ test("share packs preserve empty-link exports, normalize related protocol links,
     pack,
   });
 
-  assert.equal(imported.protocols.length, 2);
+  assert.equal(imported.regimens.length, 2);
   assert.equal(imported.recipes.length, 1);
   assert.equal(imported.foods.length, 1);
   assert.equal(imported.meal?.event.note, "Shared meal: Simple Recovery Bowl");
   assert.equal(imported.meal?.event.occurredAt, "2026-03-26T12:34:56.000Z");
 
-  const linkedProtocolPack = assertContract(sharePackSchema, {
+  const linkedRegimenPack = assertContract(sharePackSchema, {
     schemaVersion: "murph.share-pack.v1",
-    title: "Protocol relation pack",
+    title: "Regimen relation pack",
     createdAt: "2026-03-26T12:34:56.000Z",
     entities: [
       {
-        kind: "protocol",
-        ref: "protocol:supplement:sleep-support-stack",
+        kind: "regimen",
+        ref: "regimen:supplement:sleep-support-stack",
         payload: {
           title: "Sleep support stack",
           kind: "supplement",
@@ -409,22 +409,22 @@ test("share packs preserve empty-link exports, normalize related protocol links,
     },
   }, "share pack");
 
-  const importedLinkedProtocolPack = await importSharePackIntoVault({
+  const importedLinkedRegimenPack = await importSharePackIntoVault({
     vaultRoot: destinationVault,
-    pack: linkedProtocolPack,
+    pack: linkedRegimenPack,
   });
 
-  assert.equal(importedLinkedProtocolPack.protocols.length, 1);
-  assert.equal(importedLinkedProtocolPack.foods.length, 1);
-  assert.equal(importedLinkedProtocolPack.meal?.event.note, "Shared meal: Recovery sidecar");
-  assert.equal(importedLinkedProtocolPack.meal?.event.occurredAt, "2026-03-26T12:34:56.000Z");
+  assert.equal(importedLinkedRegimenPack.regimens.length, 1);
+  assert.equal(importedLinkedRegimenPack.foods.length, 1);
+  assert.equal(importedLinkedRegimenPack.meal?.event.note, "Shared meal: Recovery sidecar");
+  assert.equal(importedLinkedRegimenPack.meal?.event.occurredAt, "2026-03-26T12:34:56.000Z");
 
-  const importedLinkedProtocol = await readProtocolItem({
+  const importedLinkedRegimen = await readRegimen({
     vaultRoot: destinationVault,
-    protocolId: importedLinkedProtocolPack.protocols[0]?.protocolId,
+    regimenId: importedLinkedRegimenPack.regimens[0]?.regimenId,
   });
 
-  assert.deepEqual(importedLinkedProtocol.entity.links, [
+  assert.deepEqual(importedLinkedRegimen.entity.links, [
     {
       type: "supports_goal",
       targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
@@ -434,10 +434,10 @@ test("share packs preserve empty-link exports, normalize related protocol links,
       targetId: "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
     },
   ]);
-  assert.deepEqual(importedLinkedProtocol.entity.relatedGoalIds, [
+  assert.deepEqual(importedLinkedRegimen.entity.relatedGoalIds, [
     "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
   ]);
-  assert.deepEqual(importedLinkedProtocol.entity.relatedConditionIds, [
+  assert.deepEqual(importedLinkedRegimen.entity.relatedConditionIds, [
     "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
   ]);
 });
@@ -455,7 +455,7 @@ test("share packs reject attached refs and post-import meal refs that point at t
           payload: {
             title: "Morning Smoothie",
             status: "active",
-            attachedProtocolRefs: ["food:powder"],
+            attachedRegimenRefs: ["food:powder"],
           },
         },
         {
@@ -473,7 +473,7 @@ test("share packs reject attached refs and post-import meal refs that point at t
         },
       },
     }, "share pack"),
-    /Food entity refs must target protocol share entities/u,
+    /Food entity refs must target regimen share entities/u,
   );
 
   assert.throws(
@@ -483,8 +483,8 @@ test("share packs reject attached refs and post-import meal refs that point at t
       createdAt: "2026-03-26T12:00:00.000Z",
       entities: [
         {
-          kind: "protocol",
-          ref: "protocol:creatine",
+          kind: "regimen",
+          ref: "regimen:creatine",
           payload: {
             title: "Creatine monohydrate",
             kind: "supplement",
@@ -496,7 +496,7 @@ test("share packs reject attached refs and post-import meal refs that point at t
       ],
       afterImport: {
         logMeal: {
-          foodRef: "protocol:creatine",
+          foodRef: "regimen:creatine",
         },
       },
     }, "share pack"),
@@ -515,11 +515,11 @@ test("share packs reject empty exports without any titled entity", async () => {
   );
 });
 
-test("share packs reuse bank payload projections for protocol, recipe, and food exports", async () => {
+test("share packs reuse bank payload projections for regimen, recipe, and food exports", async () => {
   const vaultRoot = await makeTempDirectory("murph-share-pack-payloads");
   await initializeVault({ vaultRoot });
 
-  const protocol = await upsertProtocolItem({
+  const regimen = await upsertRegimen({
     vaultRoot,
     title: "Fish Oil",
     slug: "fish-oil",
@@ -583,22 +583,22 @@ test("share packs reuse bank payload projections for protocol, recipe, and food 
     autoLogDaily: {
       time: "12:30",
     },
-    attachedProtocolIds: [protocol.record.entity.protocolId],
+    attachedRegimenIds: [regimen.record.entity.regimenId],
   });
 
   const pack = await buildSharePackFromVault({
     vaultRoot,
     foods: [{ id: food.record.foodId }],
-    protocols: [{ id: protocol.record.entity.protocolId }],
+    regimens: [{ id: regimen.record.entity.regimenId }],
     recipes: [{ id: recipe.record.recipeId }],
-    includeAttachedProtocols: true,
+    includeAttachedRegimens: true,
   });
 
-  const exportedProtocol = pack.entities.find((entity) => entity.kind === "protocol");
+  const exportedRegimen = pack.entities.find((entity) => entity.kind === "regimen");
   const exportedRecipe = pack.entities.find((entity) => entity.kind === "recipe");
   const exportedFood = pack.entities.find((entity) => entity.kind === "food");
 
-  assert.deepEqual(exportedProtocol?.payload, {
+  assert.deepEqual(exportedRegimen?.payload, {
     slug: "fish-oil",
     title: "Fish Oil",
     kind: "supplement",
@@ -678,14 +678,14 @@ test("share packs reuse bank payload projections for protocol, recipe, and food 
     note: "Usually add lemon.",
     links: [
       {
-        type: "related_protocol",
-        targetId: protocol.record.entity.protocolId,
+        type: "related_regimen",
+        targetId: regimen.record.entity.regimenId,
       },
     ],
     autoLogDaily: {
       time: "12:30",
     },
-    attachedProtocolRefs: exportedProtocol ? [exportedProtocol.ref] : [],
+    attachedRegimenRefs: exportedRegimen ? [exportedRegimen.ref] : [],
   });
 });
 
@@ -696,7 +696,7 @@ test("share pack imports create fresh destination records instead of overwriting
   await initializeVault({ vaultRoot: sourceVault });
   await initializeVault({ vaultRoot: destinationVault });
 
-  const sourceProtocol = await upsertProtocolItem({
+  const sourceRegimen = await upsertRegimen({
     vaultRoot: sourceVault,
     title: "Creatine monohydrate",
     kind: "supplement",
@@ -710,7 +710,7 @@ test("share pack imports create fresh destination records instead of overwriting
     kind: "smoothie",
     serving: "1 smoothie",
     ingredients: ["banana", "creatine"],
-    attachedProtocolIds: [sourceProtocol.record.entity.protocolId],
+    attachedRegimenIds: [sourceRegimen.record.entity.regimenId],
   });
   const sourceRecipe = await upsertRecipe({
     vaultRoot: sourceVault,
@@ -723,11 +723,11 @@ test("share pack imports create fresh destination records instead of overwriting
   const pack = await buildSharePackFromVault({
     vaultRoot: sourceVault,
     foods: [{ id: sourceFood.record.foodId }],
-    protocols: [{ id: sourceProtocol.record.entity.protocolId }],
+    regimens: [{ id: sourceRegimen.record.entity.regimenId }],
     recipes: [{ id: sourceRecipe.record.recipeId }],
   });
 
-  const existingProtocol = await upsertProtocolItem({
+  const existingRegimen = await upsertRegimen({
     vaultRoot: destinationVault,
     title: "Creatine monohydrate",
     kind: "supplement",
@@ -754,7 +754,7 @@ test("share pack imports create fresh destination records instead of overwriting
     pack,
   });
 
-  assert.notEqual(imported.protocols[0]?.protocolId, existingProtocol.record.entity.protocolId);
+  assert.notEqual(imported.regimens[0]?.regimenId, existingRegimen.record.entity.regimenId);
   assert.notEqual(imported.foods[0]?.foodId, existingFood.record.foodId);
   assert.notEqual(imported.recipes[0]?.recipeId, existingRecipe.record.recipeId);
 
@@ -764,7 +764,7 @@ test("share pack imports create fresh destination records instead of overwriting
   });
   assert.equal(preservedFood.kind, "drink");
   assert.deepEqual(preservedFood.ingredients, ["water"]);
-  assert.equal(preservedFood.attachedProtocolIds, undefined);
+  assert.equal(preservedFood.attachedRegimenIds, undefined);
 
   const importedFood = await readFood({
     vaultRoot: destinationVault,
@@ -772,5 +772,5 @@ test("share pack imports create fresh destination records instead of overwriting
   });
   assert.equal(importedFood.kind, "smoothie");
   assert.deepEqual(importedFood.ingredients, ["banana", "creatine"]);
-  assert.equal(importedFood.attachedProtocolIds?.length, 1);
+  assert.equal(importedFood.attachedRegimenIds?.length, 1);
 });

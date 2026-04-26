@@ -9,6 +9,7 @@ export type CanonicalRecordClass = "bank" | "ledger" | "sample" | "snapshot";
 
 export type CanonicalEntityFamily =
   | BankEntityKind
+  | "protocol"
   | "assessment"
   | "audit"
   | "core"
@@ -61,6 +62,7 @@ export function resolveCanonicalRecordClass(
     case "goal":
     case "protocol":
     case "provider":
+    case "regimen":
     case "recipe":
     case "workout_format":
       return "bank";

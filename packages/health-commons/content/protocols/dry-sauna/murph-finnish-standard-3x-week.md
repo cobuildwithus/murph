@@ -481,6 +481,125 @@ experimentOnboarding:
     notes:
       - A positive or uncertain safety answer is not a diagnosis; it means Murph should not set this up as an unsupervised sauna run without clinician guidance, a lower-heat alternative, or postponement.
       - Do not coach the user through concerning heat symptoms. Have them exit, cool down safely, and seek appropriate care if symptoms are severe or do not resolve.
+  adaptationPolicy:
+    fields:
+      -
+        id: modality
+        label: Sauna modality
+        target:
+          object: protocol
+          field: effectiveSpec.modality
+        sourceSlotIds:
+          - sauna_access
+          - sauna_modality_match
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: Reuse a private protocol only when the available sauna is a traditional dry sauna rather than infrared, steam, or mixed hot-cold exposure.
+      -
+        id: frequency_sessions_per_week
+        label: Weekly frequency
+        target:
+          object: protocol
+          field: effectiveSpec.frequency.sessionsPerWeek
+        sourceSlotIds:
+          - session_timing
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: The default is 3 sessions per week; private protocol adaptations should keep the weekly frequency explicit instead of hiding it in free-text notes.
+      -
+        id: duration_minutes
+        label: Session duration
+        target:
+          object: protocol
+          field: effectiveSpec.durationMinutes
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: Keep the target session duration explicit, with the first session allowed to be conservative and early exits logged rather than treated as failure.
+      -
+        id: temperature_c
+        label: Temperature
+        target:
+          object: protocol
+          field: effectiveSpec.temperatureC
+        sourceSlotIds:
+          - sauna_modality_match
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: Keep the dry-sauna temperature range explicit because lowering the heat, using infrared, or using steam changes the runnable recipe.
+      -
+        id: timing_context
+        label: Timing context
+        target:
+          object: experimentRun
+          field: timingContext
+        sourceSlotIds:
+          - session_timing
+          - standalone_context
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: Store planned time windows and whether sessions are stand-alone, post-exercise, or mixed so later runs do not blur context.
+      -
+        id: adherence_targets
+        label: Adherence targets
+        target:
+          object: analysisPlan
+          field: adherenceTargets
+        sourceSlotIds:
+          - session_timing
+        requiredForRunSpec: true
+        protocolReusable: false
+        guidance: Preserve the 6-session target and 4-session minimum useful dose for the 14-day intervention window.
+      -
+        id: measurement_plan
+        label: Measurement plan
+        target:
+          object: analysisPlan
+          field: measurementPlan
+        sourceSlotIds:
+          - blood_pressure_tracking
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: Resting heart rate remains the required primary signal; morning blood pressure and wearable recovery or sleep markers are optional context.
+      -
+        id: reusable_setup
+        label: Reusable setup
+        target:
+          object: protocol
+          field: setupSnapshot
+        sourceSlotIds:
+          - sauna_access
+          - sauna_modality_match
+          - session_timing
+          - standalone_context
+          - blood_pressure_tracking
+        requiredForRunSpec: true
+        protocolReusable: true
+        guidance: Save reusable access, modality, timing, context, and measurement choices on a private protocol, then snapshot the effective protocol when each experiment run starts.
+    measurementPlan:
+      testPlanId: rhr-21d
+      requiredSignals:
+        - biomarker:resting-heart-rate
+      optionalSignals:
+        - biomarker:morning-blood-pressure
+        - biomarker:hrv-rmssd
+        - biomarker:sleep-efficiency
+        - biomarker:deep-sleep-minutes
+      notes:
+        - Use the same baseline and intervention windows as the selected test plan.
+        - Treat blood pressure as optional unless the user already has a consistent home-cuff routine.
+    reusableSetup:
+      enabled: true
+      target:
+        object: protocol
+        field: setupSnapshot
+      sourceSlotIds:
+        - sauna_access
+        - sauna_modality_match
+        - session_timing
+        - standalone_context
+        - blood_pressure_tracking
+      notes:
+        - Reuse the setup only when the dry-sauna modality, planned frequency, session context, and measurement plan still match the user's current situation.
   setupSlots:
     -
       id: sauna_access
@@ -496,7 +615,9 @@ experimentOnboarding:
         - public_dry_sauna
         - infrared_or_steam_only
         - no_regular_access
-      writePath: runPlan.saunaAccess
+      target:
+        object: experimentRun
+        field: saunaAccess
     -
       id: sauna_modality_match
       label: Modality match
@@ -505,7 +626,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: true
       question: "Can you keep this to a dry sauna around 80-100 C rather than infrared, steam, cold plunge, or mixed hot-cold sessions?"
-      writePath: runPlan.modalityMatch
+      target:
+        object: experimentRun
+        field: modalityMatch
     -
       id: usual_sauna_tolerance
       label: Usual sauna tolerance
@@ -519,7 +642,9 @@ experimentOnboarding:
         - recent_but_not_well_tolerated
         - not_recent
         - unsure
-      writePath: onboarding.answers.usualSaunaTolerance
+      target:
+        object: onboardingCapture
+        field: answers.usualSaunaTolerance
     -
       id: session_timing
       label: Session timing
@@ -531,7 +656,9 @@ experimentOnboarding:
       constraints:
         sessionsPerWeek: 3
         avoidBackToBackWhenPossible: true
-      writePath: runPlan.schedule
+      target:
+        object: experimentRun
+        field: schedule
     -
       id: standalone_context
       label: Session context
@@ -544,7 +671,9 @@ experimentOnboarding:
         - mostly_standalone
         - mostly_post_exercise
         - mixed_contexts
-      writePath: runPlan.sessionContext
+      target:
+        object: experimentRun
+        field: sessionContext
     -
       id: blood_pressure_tracking
       label: Morning blood pressure
@@ -557,7 +686,9 @@ experimentOnboarding:
         - validated_home_cuff_available
         - cuff_available_but_inconsistent
         - no_home_cuff
-      writePath: tracking.morningBloodPressureMode
+      target:
+        object: analysisPlan
+        field: morningBloodPressureMode
     -
       id: reminder_policy
       label: Reminder policy
@@ -570,7 +701,9 @@ experimentOnboarding:
         - none
         - pre_session
         - pre_session_plus_same_day_missing_log_check
-      writePath: assistantSupport.reminderPolicy
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: rhr-21d
     baselineDays: 7
