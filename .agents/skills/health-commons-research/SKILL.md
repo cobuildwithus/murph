@@ -41,10 +41,17 @@ The current repo flow is:
 9. run extraction batches
 10. run section synthesis seams
 11. run page builder
-12. run evidence QA and safety QA
+12. run evidence QA and safety QA once
 13. run final landing reducer
 
 The scaffold currently automates the early phases best. Later phases may still require the agent to materialize concrete prompt files and command wrappers from templates already present in the workspace.
+
+QA policy:
+
+- Run one Evidence QA pass and one Safety QA pass after the page-builder package.
+- If QA blocks landing, do not create a second QA pass just to confirm repairs.
+- Repair missing or shallow upstream seams when needed, rebuild the package when needed, then send the original QA findings plus the repaired package to the final landing reducer.
+- The final landing reducer owns applying QA blocker fixes and producing any remaining punchlist; it should not require post-repair `31b`/`32b` QA seams unless the user explicitly asks for another QA pass.
 
 When a later seam is still template-only:
 
