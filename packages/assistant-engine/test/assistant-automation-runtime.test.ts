@@ -3988,6 +3988,69 @@ describe('assistant auto-reply receipt recovery', () => {
     }
   })
 
+  it('skips receipt recovery for terminal provider request validation failures', async () => {
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        turnId: 'turn-invalid-tool-output',
+        primaryCaptureId: 'capture-invalid-tool-output',
+        captureIds: ['capture-invalid-tool-output'],
+        lastError: {
+          code: 'ASSISTANT_PROVIDER_FAILED',
+          message: 'input.3.output: Invalid input',
+        },
+      }),
+      createTurnReceipt({
+        turnId: 'turn-invalid-previous-response',
+        primaryCaptureId: 'capture-invalid-previous-response',
+        captureIds: ['capture-invalid-previous-response'],
+        lastError: {
+          code: 'ASSISTANT_PROVIDER_FAILED',
+          message: 'assistant provider failed',
+        },
+        timeline: [
+          {
+            at: '2026-04-08T00:00:00.000Z',
+            kind: 'turn.started',
+            detail: null,
+            metadata: {
+              autoReplyCaptureId: 'capture-invalid-previous-response',
+              autoReplyCaptureIds: 'capture-invalid-previous-response',
+            },
+          },
+          {
+            at: '2026-04-08T00:00:05.000Z',
+            kind: 'turn.completed',
+            detail: "Invalid 'previous_response_id': expected a Responses id",
+            metadata: {},
+          },
+        ],
+      }),
+    ])
+    const recovery = await vi.importActual<
+      typeof import('../src/assistant/automation/startup-recovery.ts')
+    >('../src/assistant/automation/startup-recovery.ts')
+
+    const result = await recovery.recoverAssistantAutoReplies({
+      allowSelfAuthored: false,
+      autoReply: createAutoReplyEntries(['telegram'], {
+        captureId: 'capture-invalid-previous-response',
+        occurredAt: '2026-04-08T00:00:00.000Z',
+      }),
+      inboxServices: createInboxServices(),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toEqual({
+      considered: 0,
+      failed: 0,
+      nextWakeAt: null,
+      progressed: false,
+      replied: 0,
+      skipped: 0,
+    })
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+  })
+
   it('skips receipt recovery for ambiguous delivery failures', async () => {
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
