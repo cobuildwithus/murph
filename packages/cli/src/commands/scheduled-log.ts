@@ -1,12 +1,21 @@
 import { Cli, z } from "incur";
 
 import {
+  NUTRITION_CONFIDENCE_LEVELS,
+  NUTRITION_PROVENANCE_SOURCES,
+  scheduleIntentKindValues,
   scheduleIntentSchema,
   scheduledLogActionSchema,
   scheduledLogScaffoldPayloadSchema,
   scheduledLogStatusValues,
+  workoutSessionSchema,
+  type MeasurementEntry,
+  type MealNutrition,
+  type ScheduleIntent,
+  type ScheduledLogAction,
   type ScheduledLogScaffoldPayload,
   type ScheduledLogStatus,
+  type WorkoutSession,
 } from "@murphai/contracts";
 import {
   buildScheduledLogMarkdownPreview,
@@ -19,10 +28,24 @@ import {
   showScheduledLog,
 } from "@murphai/query";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
-import { pathSchema } from "@murphai/operator-config/vault-cli-contracts";
-import { loadJsonInputObject, textInputOptionSchema } from "@murphai/vault-usecases";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  isoTimestampSchema,
+  pathSchema,
+} from "@murphai/operator-config/vault-cli-contracts";
+import {
+  loadJsonInputObject,
+  normalizeRepeatableFlagOption,
+  textInputOptionSchema,
+} from "@murphai/vault-usecases";
 
 const scheduledLogSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const scheduledLogActionKindValues = [
+  "meal.add",
+  "activity_session.add",
+  "intervention_session.add",
+  "measurement.add",
+] as const;
 
 export const scheduledLogRecordSchema = z
   .object({
@@ -84,6 +107,570 @@ export function createScheduledLogScaffoldPayload(): ScheduledLogScaffoldPayload
   return scheduledLogScaffoldPayloadSchema.parse(scaffoldScheduledLogPayload());
 }
 
+function invalidScheduledLogOption(message: string): never {
+  throw new VaultCliError("invalid_option", message);
+}
+
+function requireStringOption(value: string | undefined, optionName: string): string {
+  if (typeof value === "string" && value.length > 0) return value;
+  return invalidScheduledLogOption(`--${optionName} is required for this scheduled-log save mode.`);
+}
+
+function requireNumberOption(value: number | undefined, optionName: string): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return invalidScheduledLogOption(`--${optionName} is required for this scheduled-log save mode.`);
+}
+
+function parseQualifierValue(rawValue: string): string | number | boolean {
+  const trimmed = rawValue.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+
+  const numeric = Number(trimmed);
+  if (trimmed.length > 0 && Number.isFinite(numeric)) return numeric;
+
+  return trimmed;
+}
+
+function parseCompactFields(spec: string, optionName: string): Map<string, string> {
+  const fields = new Map<string, string>();
+
+  for (const rawPart of spec.split(";")) {
+    const part = rawPart.trim();
+    if (part.length === 0) continue;
+
+    const separatorIndex = part.indexOf("=");
+    const key = part.slice(0, separatorIndex).trim();
+    const value = part.slice(separatorIndex + 1).trim();
+
+    if (
+      separatorIndex <= 0 ||
+      key.length === 0 ||
+      value.length === 0
+    ) {
+      invalidScheduledLogOption(`Each --${optionName} entry must use key=value fields.`);
+    }
+
+    if (fields.has(key)) {
+      invalidScheduledLogOption(`Duplicate --${optionName} field "${key}".`);
+    }
+    fields.set(key, value);
+  }
+
+  return fields;
+}
+
+function requireCompactString(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): string {
+  const value = fields.get(key);
+  if (value === undefined) {
+    invalidScheduledLogOption(`--${optionName} requires ${key}=...`);
+  }
+  return value;
+}
+
+function compactNumber(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): number | undefined {
+  const rawValue = fields.get(key);
+  if (rawValue === undefined) return undefined;
+
+  const value = Number(rawValue);
+  if (!Number.isFinite(value)) {
+    invalidScheduledLogOption(`--${optionName} field ${key} must be a finite number.`);
+  }
+  return value;
+}
+
+function compactInteger(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): number | undefined {
+  const value = compactNumber(fields, key, optionName);
+  if (value !== undefined && !Number.isInteger(value)) {
+    invalidScheduledLogOption(`--${optionName} field ${key} must be an integer.`);
+  }
+  return value;
+}
+
+function requireCompactInteger(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): number {
+  const value = compactInteger(fields, key, optionName);
+  if (value === undefined) {
+    invalidScheduledLogOption(`--${optionName} requires ${key}=...`);
+  }
+  return value;
+}
+
+function parseMeasurementNoteEntries(
+  value: readonly string[] | undefined,
+  measurementCount: number,
+): Map<number, string> {
+  const entries = normalizeRepeatableFlagOption(value, "measurement-note");
+  const notes = new Map<number, string>();
+  if (!entries) return notes;
+
+  for (const entry of entries) {
+    if (measurementCount === 1 && !/^\d+:/u.test(entry)) {
+      notes.set(0, entry);
+      continue;
+    }
+
+    const separatorIndex = entry.indexOf(":");
+    const oneBasedIndex = Number(entry.slice(0, separatorIndex));
+    const note = entry.slice(separatorIndex + 1).trim();
+    if (
+      separatorIndex <= 0 ||
+      !Number.isInteger(oneBasedIndex) ||
+      oneBasedIndex < 1 ||
+      oneBasedIndex > measurementCount ||
+      note.length === 0
+    ) {
+      invalidScheduledLogOption(
+        "Each --measurement-note entry must use N:note form when multiple measurements are provided.",
+      );
+    }
+    notes.set(oneBasedIndex - 1, note);
+  }
+
+  return notes;
+}
+
+function parseMeasurementQualifierEntries(
+  value: readonly string[] | undefined,
+  measurementCount: number,
+): Array<Record<string, string | number | boolean>> {
+  const entries = normalizeRepeatableFlagOption(value, "measurement-qualifier");
+  const qualifiers = Array.from(
+    { length: measurementCount },
+    (): Record<string, string | number | boolean> => ({}),
+  );
+  if (!entries) return qualifiers;
+
+  for (const entry of entries) {
+    const targetSeparatorIndex = measurementCount === 1 ? -1 : entry.indexOf(":");
+    const targetIndex =
+      targetSeparatorIndex === -1 ? 0 : Number(entry.slice(0, targetSeparatorIndex)) - 1;
+    const pair = targetSeparatorIndex === -1 ? entry : entry.slice(targetSeparatorIndex + 1);
+    const pairSeparatorIndex = pair.indexOf("=");
+    const key = pair.slice(0, pairSeparatorIndex).trim();
+    const rawValue = pair.slice(pairSeparatorIndex + 1).trim();
+
+    if (
+      !Number.isInteger(targetIndex) ||
+      targetIndex < 0 ||
+      targetIndex >= measurementCount ||
+      pairSeparatorIndex <= 0 ||
+      pairSeparatorIndex === pair.length - 1 ||
+      key.length === 0 ||
+      rawValue.length === 0
+    ) {
+      invalidScheduledLogOption(
+        "Each --measurement-qualifier entry must use key=value form for one measurement or N:key=value form for multiple measurements.",
+      );
+    }
+
+    const targetQualifiers = qualifiers[targetIndex];
+    if (!targetQualifiers) {
+      invalidScheduledLogOption(
+        "Each --measurement-qualifier entry must use key=value form for one measurement or N:key=value form for multiple measurements.",
+      );
+    }
+    targetQualifiers[key] = parseQualifierValue(rawValue);
+  }
+
+  return qualifiers;
+}
+
+function buildScheduleIntentFromOptions(options: {
+  scheduleAt?: string;
+  scheduleCron?: string;
+  scheduleEveryMs?: number;
+  scheduleKind: (typeof scheduleIntentKindValues)[number];
+  scheduleLocalTime?: string;
+}): ScheduleIntent {
+  switch (options.scheduleKind) {
+    case "at":
+      return scheduleIntentSchema.parse({
+        kind: "at",
+        at: requireStringOption(options.scheduleAt, "schedule-at"),
+      });
+    case "every":
+      return scheduleIntentSchema.parse({
+        kind: "every",
+        everyMs: requireNumberOption(options.scheduleEveryMs, "schedule-every-ms"),
+      });
+    case "cron":
+      return scheduleIntentSchema.parse({
+        kind: "cron",
+        expression: requireStringOption(options.scheduleCron, "schedule-cron"),
+      });
+    case "dailyLocal":
+      return scheduleIntentSchema.parse({
+        kind: "dailyLocal",
+        localTime: requireStringOption(options.scheduleLocalTime, "schedule-local-time"),
+      });
+  }
+}
+
+function buildMealNutritionFromOptions(options: {
+  nutritionCalories?: number;
+  nutritionCarbsGrams?: number;
+  nutritionConfidence?: (typeof NUTRITION_CONFIDENCE_LEVELS)[number];
+  nutritionFatGrams?: number;
+  nutritionFiberGrams?: number;
+  nutritionProteinGrams?: number;
+  nutritionSource?: (typeof NUTRITION_PROVENANCE_SOURCES)[number];
+  nutritionSourceDetail?: string;
+}): MealNutrition | undefined {
+  const totals: NonNullable<MealNutrition["totals"]> = {};
+  if (options.nutritionCalories !== undefined) totals.calories = options.nutritionCalories;
+  if (options.nutritionProteinGrams !== undefined) totals.proteinGrams = options.nutritionProteinGrams;
+  if (options.nutritionCarbsGrams !== undefined) totals.carbsGrams = options.nutritionCarbsGrams;
+  if (options.nutritionFatGrams !== undefined) totals.fatGrams = options.nutritionFatGrams;
+  if (options.nutritionFiberGrams !== undefined) totals.fiberGrams = options.nutritionFiberGrams;
+
+  const hasTotals = Object.keys(totals).length > 0;
+  const hasProvenance =
+    options.nutritionSource !== undefined ||
+    options.nutritionConfidence !== undefined ||
+    options.nutritionSourceDetail !== undefined;
+  if (!hasTotals && !hasProvenance) return undefined;
+  if (hasProvenance && options.nutritionSource === undefined) {
+    invalidScheduledLogOption(
+      "--nutrition-source is required when nutrition provenance fields are provided.",
+    );
+  }
+
+  const nutrition: MealNutrition = {};
+  if (hasTotals) nutrition.totals = totals;
+  if (options.nutritionSource !== undefined) {
+    nutrition.provenance = {
+      source: options.nutritionSource,
+      ...(options.nutritionConfidence ? { confidence: options.nutritionConfidence } : {}),
+      ...(options.nutritionSourceDetail ? { sourceDetail: options.nutritionSourceDetail } : {}),
+    };
+  }
+  return nutrition;
+}
+
+function buildMeasurementsFromOptions(options: {
+  measurementMetric?: string[];
+  measurementNote?: string[];
+  measurementQualifier?: string[];
+  measurementUnit?: string[];
+  measurementValue?: number[];
+}): MeasurementEntry[] {
+  const metrics = normalizeRepeatableFlagOption(options.measurementMetric, "measurement-metric");
+  const units = normalizeRepeatableFlagOption(options.measurementUnit, "measurement-unit");
+  const values = options.measurementValue;
+  const count = metrics?.length ?? 0;
+
+  if (!metrics || !units || !values || count === 0) {
+    invalidScheduledLogOption(
+      "measurement.add scheduled logs require repeated --measurement-metric, --measurement-value, and --measurement-unit fields.",
+    );
+  }
+
+  if (values.length !== count || units.length !== count) {
+    invalidScheduledLogOption(
+      "Repeated --measurement-metric, --measurement-value, and --measurement-unit fields must have the same count.",
+    );
+  }
+
+  const notes = parseMeasurementNoteEntries(options.measurementNote, count);
+  const qualifiers = parseMeasurementQualifierEntries(options.measurementQualifier, count);
+
+  return metrics.map((metric, index) => {
+    const qualifierEntry = qualifiers[index] ?? {};
+    const note = notes.get(index);
+    return {
+      metric,
+      value: values[index] ?? 0,
+      unit: units[index] ?? "",
+      ...(Object.keys(qualifierEntry).length > 0 ? { qualifiers: qualifierEntry } : {}),
+      ...(note !== undefined ? { note } : {}),
+    };
+  });
+}
+
+interface WorkoutExerciseDraft {
+  groupId?: string;
+  mode?: string;
+  name: string;
+  note?: string;
+  order: number;
+  sets: Array<Record<string, unknown>>;
+  sourceExerciseId?: string;
+  unitOverride?: string;
+}
+
+interface WorkoutOptions {
+  workoutEndedAt?: string;
+  workoutExercise?: string[];
+  workoutMedia?: string[];
+  workoutRoutineId?: string;
+  workoutRoutineName?: string;
+  workoutSessionNote?: string;
+  workoutSet?: string[];
+  workoutSourceApp?: string;
+  workoutSourceWorkoutId?: string;
+  workoutStartedAt?: string;
+}
+
+const workoutOptionKeys = [
+  "workoutSourceApp",
+  "workoutSourceWorkoutId",
+  "workoutStartedAt",
+  "workoutEndedAt",
+  "workoutRoutineId",
+  "workoutRoutineName",
+  "workoutSessionNote",
+  "workoutMedia",
+  "workoutExercise",
+  "workoutSet",
+] as const satisfies ReadonlyArray<keyof WorkoutOptions>;
+
+function parseWorkoutMediaEntry(entry: string): Record<string, unknown> {
+  const fields = parseCompactFields(entry, "workout-media");
+  return {
+    kind: requireCompactString(fields, "kind", "workout-media"),
+    relativePath: requireCompactString(fields, "relativePath", "workout-media"),
+    ...(fields.has("mediaType") ? { mediaType: fields.get("mediaType") } : {}),
+    ...(fields.has("caption") ? { caption: fields.get("caption") } : {}),
+  };
+}
+
+function parseWorkoutExerciseEntry(entry: string): WorkoutExerciseDraft {
+  const fields = parseCompactFields(entry, "workout-exercise");
+  return {
+    name: requireCompactString(fields, "name", "workout-exercise"),
+    order: requireCompactInteger(fields, "order", "workout-exercise"),
+    sets: [],
+    ...(fields.has("sourceExerciseId")
+      ? { sourceExerciseId: fields.get("sourceExerciseId") }
+      : {}),
+    ...(fields.has("groupId") ? { groupId: fields.get("groupId") } : {}),
+    ...(fields.has("mode") ? { mode: fields.get("mode") } : {}),
+    ...(fields.has("unitOverride") ? { unitOverride: fields.get("unitOverride") } : {}),
+    ...(fields.has("note") ? { note: fields.get("note") } : {}),
+  };
+}
+
+function parseWorkoutSetEntry(entry: string): {
+  exerciseOrder: number;
+  set: Record<string, unknown>;
+} {
+  const fields = parseCompactFields(entry, "workout-set");
+  const exerciseOrder = requireCompactInteger(fields, "exercise", "workout-set");
+  const set: Record<string, unknown> = {
+    order: requireCompactInteger(fields, "order", "workout-set"),
+  };
+
+  for (const key of [
+    "type",
+    "weightUnit",
+  ]) {
+    if (fields.has(key)) {
+      set[key] = fields.get(key);
+    }
+  }
+
+  for (const key of [
+    "reps",
+    "weight",
+    "durationSeconds",
+    "distanceMeters",
+    "rpe",
+    "bodyweightKg",
+    "assistanceKg",
+    "addedWeightKg",
+  ]) {
+    const value = compactNumber(fields, key, "workout-set");
+    if (value !== undefined) {
+      set[key] = value;
+    }
+  }
+
+  return {
+    exerciseOrder,
+    set,
+  };
+}
+
+function hasWorkoutOptions(options: WorkoutOptions): boolean {
+  return workoutOptionKeys.some((key) => options[key] !== undefined);
+}
+
+function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | undefined {
+  if (!hasWorkoutOptions(options)) {
+    return undefined;
+  }
+
+  const workout: Record<string, unknown> = {
+    exercises: [],
+  };
+
+  if (options.workoutSourceApp !== undefined) workout.sourceApp = options.workoutSourceApp;
+  if (options.workoutSourceWorkoutId !== undefined) {
+    workout.sourceWorkoutId = options.workoutSourceWorkoutId;
+  }
+  if (options.workoutStartedAt !== undefined) workout.startedAt = options.workoutStartedAt;
+  if (options.workoutEndedAt !== undefined) workout.endedAt = options.workoutEndedAt;
+  if (options.workoutRoutineId !== undefined) workout.routineId = options.workoutRoutineId;
+  if (options.workoutRoutineName !== undefined) workout.routineName = options.workoutRoutineName;
+  if (options.workoutSessionNote !== undefined) workout.sessionNote = options.workoutSessionNote;
+
+  const mediaEntries = normalizeRepeatableFlagOption(options.workoutMedia, "workout-media");
+  if (mediaEntries) {
+    workout.media = mediaEntries.map(parseWorkoutMediaEntry);
+  }
+
+  const exercisesByOrder = new Map<number, WorkoutExerciseDraft>();
+  const exerciseEntries = normalizeRepeatableFlagOption(
+    options.workoutExercise,
+    "workout-exercise",
+  );
+  for (const exercise of exerciseEntries?.map(parseWorkoutExerciseEntry) ?? []) {
+    if (exercisesByOrder.has(exercise.order)) {
+      invalidScheduledLogOption(
+        `Duplicate --workout-exercise order ${exercise.order}.`,
+      );
+    }
+    exercisesByOrder.set(exercise.order, exercise);
+  }
+
+  const setEntries = normalizeRepeatableFlagOption(options.workoutSet, "workout-set");
+  for (const { exerciseOrder, set } of setEntries?.map(parseWorkoutSetEntry) ?? []) {
+    const exercise = exercisesByOrder.get(exerciseOrder);
+    if (!exercise) {
+      invalidScheduledLogOption(
+        `--workout-set references exercise ${exerciseOrder}, but no matching --workout-exercise was provided.`,
+      );
+    }
+    exercise.sets.push(set);
+  }
+
+  workout.exercises = [...exercisesByOrder.values()].sort(
+    (left, right) => left.order - right.order,
+  );
+
+  const parsed = workoutSessionSchema.safeParse(workout);
+  if (!parsed.success) {
+    throw new VaultCliError("invalid_option", "Invalid workout template fields.", {
+      issues: parsed.error.issues,
+    });
+  }
+
+  return parsed.data;
+}
+
+function buildScheduledLogActionFromOptions(options: {
+  actionKind: (typeof scheduledLogActionKindValues)[number];
+  actionNote?: string;
+  actionTag?: string[];
+  actionTitle?: string;
+  activityType?: string;
+  distanceKm?: number;
+  durationMinutes?: number;
+  foodId?: string;
+  ingredient?: string[];
+  interventionType?: string;
+  measurementMetric?: string[];
+  measurementNote?: string[];
+  measurementQualifier?: string[];
+  measurementUnit?: string[];
+  measurementValue?: number[];
+  nutritionCalories?: number;
+  nutritionCarbsGrams?: number;
+  nutritionConfidence?: (typeof NUTRITION_CONFIDENCE_LEVELS)[number];
+  nutritionFatGrams?: number;
+  nutritionFiberGrams?: number;
+  nutritionProteinGrams?: number;
+  nutritionSource?: (typeof NUTRITION_PROVENANCE_SOURCES)[number];
+  nutritionSourceDetail?: string;
+  protocolId?: string;
+  workoutEndedAt?: string;
+  workoutExercise?: string[];
+  workoutMedia?: string[];
+  workoutRoutineId?: string;
+  workoutRoutineName?: string;
+  workoutSessionNote?: string;
+  workoutSet?: string[];
+  workoutSourceApp?: string;
+  workoutSourceWorkoutId?: string;
+  workoutStartedAt?: string;
+}): ScheduledLogAction {
+  const actionTags = normalizeRepeatableFlagOption(options.actionTag, "action-tag");
+  const commonFields = actionTags ? { tags: actionTags } : {};
+  const workout = buildWorkoutFromOptions(options);
+
+  if (workout && options.actionKind !== "activity_session.add") {
+    invalidScheduledLogOption(
+      "Workout template fields are only valid with --action-kind=activity_session.add.",
+    );
+  }
+
+  switch (options.actionKind) {
+    case "meal.add": {
+      const ingredients = normalizeRepeatableFlagOption(options.ingredient, "ingredient");
+      const nutrition = buildMealNutritionFromOptions(options);
+      return scheduledLogActionSchema.parse({
+        kind: "meal.add",
+        ...commonFields,
+        ...(options.foodId ? { foodId: options.foodId } : {}),
+        ...(options.actionNote ? { note: options.actionNote } : {}),
+        ...(ingredients ? { ingredients } : {}),
+        ...(nutrition ? { nutrition } : {}),
+      });
+    }
+    case "activity_session.add":
+      return scheduledLogActionSchema.parse({
+        kind: "activity_session.add",
+        ...commonFields,
+        title: requireStringOption(options.actionTitle, "action-title"),
+        activityType: requireStringOption(options.activityType, "activity-type"),
+        durationMinutes: requireNumberOption(options.durationMinutes, "duration-minutes"),
+        ...(options.distanceKm !== undefined ? { distanceKm: options.distanceKm } : {}),
+        ...(options.actionNote ? { note: options.actionNote } : {}),
+        ...(workout ? { workout } : {}),
+      });
+    case "intervention_session.add":
+      return scheduledLogActionSchema.parse({
+        kind: "intervention_session.add",
+        ...commonFields,
+        title: requireStringOption(options.actionTitle, "action-title"),
+        interventionType: requireStringOption(options.interventionType, "intervention-type"),
+        ...(options.durationMinutes !== undefined
+          ? { durationMinutes: options.durationMinutes }
+          : {}),
+        ...(options.protocolId ? { protocolId: options.protocolId } : {}),
+        ...(options.actionNote ? { note: options.actionNote } : {}),
+      });
+    case "measurement.add":
+      return scheduledLogActionSchema.parse({
+        kind: "measurement.add",
+        ...commonFields,
+        ...(options.actionTitle ? { title: options.actionTitle } : {}),
+        ...(options.actionNote ? { note: options.actionNote } : {}),
+        measurements: buildMeasurementsFromOptions(options),
+      });
+  }
+}
+
+function defaultScheduledLogBody(title: string, summary: string | undefined): string {
+  return summary ?? `Auto-log ${title}.`;
+}
+
 export function registerScheduledLogCommands(cli: Cli.Cli) {
   const scheduledLog = Cli.create("scheduled-log", {
     description: "Canonical scheduled auto-log registry commands.",
@@ -91,7 +678,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
 
   scheduledLog.command("scaffold", {
     args: z.object({}),
-    description: "Emit a scheduled-log payload template for `scheduled-log upsert`.",
+    description: "Emit an advanced scheduled-log JSON payload template for import fallback use.",
     options: withBaseOptions(),
     output: scheduledLogScaffoldResultSchema,
     run(context) {
@@ -101,6 +688,247 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
         noun: "scheduled-log" as const,
         payload,
         markdown: buildScheduledLogMarkdownPreview(payload),
+      };
+    },
+  });
+
+  scheduledLog.command("save", {
+    args: z.object({
+      title: z.string().min(1).max(160).describe("Scheduled log title."),
+    }),
+    description: "Create or update one scheduled log from typed command fields.",
+    examples: [
+      {
+        args: {
+          title: "Daily sauna",
+        },
+        description: "Save a daily scheduled intervention log without a JSON payload.",
+        options: {
+          actionKind: "intervention_session.add",
+          actionTitle: "Sauna",
+          durationMinutes: 20,
+          interventionType: "sauna",
+          scheduleKind: "dailyLocal",
+          scheduleLocalTime: "18:00",
+          vault: "./vault",
+        },
+      },
+    ],
+    hint: "Use scheduled-log upsert only for advanced JSON imports or bulk edits.",
+    options: withBaseOptions({
+      id: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Optional existing scheduled log id to update."),
+      slug: z
+        .string()
+        .regex(scheduledLogSlugPattern)
+        .optional()
+        .describe("Optional stable lowercase kebab-case slug."),
+      status: z.enum(scheduledLogStatusValues).optional().describe("Optional scheduled log status."),
+      scheduleKind: z.enum(scheduleIntentKindValues).describe("Schedule discriminator."),
+      scheduleAt: z
+        .string()
+        .min(1)
+        .max(64)
+        .optional()
+        .describe("Required when --schedule-kind=at."),
+      scheduleEveryMs: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Required positive millisecond interval when --schedule-kind=every."),
+      scheduleCron: z
+        .string()
+        .min(1)
+        .max(400)
+        .optional()
+        .describe("Required cron expression when --schedule-kind=cron."),
+      scheduleLocalTime: z
+        .string()
+        .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u, "Expected a 24-hour HH:MM time.")
+        .optional()
+        .describe("Required HH:MM local time when --schedule-kind=dailyLocal."),
+      actionKind: z.enum(scheduledLogActionKindValues).describe("Action discriminator."),
+      actionTitle: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe("Action title for activity, intervention, or measurement actions."),
+      actionNote: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe("Optional action note."),
+      actionTag: z
+        .array(z.string().regex(scheduledLogSlugPattern))
+        .optional()
+        .describe("Optional action-local tag. Repeat --action-tag for multiple values."),
+      foodId: z
+        .string()
+        .min(1)
+        .max(80)
+        .optional()
+        .describe("Optional meal.add food id."),
+      ingredient: z
+        .array(z.string().min(1).max(4000))
+        .optional()
+        .describe("Optional meal.add ingredient. Repeat --ingredient for multiple values."),
+      nutritionCalories: z.number().nonnegative().optional().describe("Optional meal calorie total."),
+      nutritionProteinGrams: z.number().nonnegative().optional().describe("Optional meal protein grams."),
+      nutritionCarbsGrams: z.number().nonnegative().optional().describe("Optional meal carbohydrate grams."),
+      nutritionFatGrams: z.number().nonnegative().optional().describe("Optional meal fat grams."),
+      nutritionFiberGrams: z.number().nonnegative().optional().describe("Optional meal fiber grams."),
+      nutritionSource: z
+        .enum(NUTRITION_PROVENANCE_SOURCES)
+        .optional()
+        .describe("Optional meal nutrition provenance source."),
+      nutritionConfidence: z
+        .enum(NUTRITION_CONFIDENCE_LEVELS)
+        .optional()
+        .describe("Optional meal nutrition provenance confidence."),
+      nutritionSourceDetail: z
+        .string()
+        .min(1)
+        .max(240)
+        .optional()
+        .describe("Optional meal nutrition provenance detail."),
+      activityType: z
+        .string()
+        .regex(scheduledLogSlugPattern)
+        .optional()
+        .describe("Required activity type slug when --action-kind=activity_session.add."),
+      interventionType: z
+        .string()
+        .regex(scheduledLogSlugPattern)
+        .optional()
+        .describe("Required intervention type slug when --action-kind=intervention_session.add."),
+      durationMinutes: z
+        .number()
+        .int()
+        .positive()
+        .max(24 * 60)
+        .optional()
+        .describe("Action duration minutes for activity or intervention actions."),
+      distanceKm: z
+        .number()
+        .positive()
+        .max(1000)
+        .optional()
+        .describe("Optional activity distance in kilometers."),
+      protocolId: z
+        .string()
+        .min(1)
+        .max(80)
+        .optional()
+        .describe("Optional intervention protocol id."),
+      workoutSourceApp: z
+        .string()
+        .regex(scheduledLogSlugPattern)
+        .optional()
+        .describe("Optional workout template source app slug."),
+      workoutSourceWorkoutId: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Optional source workout id for the workout template."),
+      workoutStartedAt: isoTimestampSchema
+        .optional()
+        .describe("Optional workout template started-at timestamp."),
+      workoutEndedAt: isoTimestampSchema
+        .optional()
+        .describe("Optional workout template ended-at timestamp."),
+      workoutRoutineId: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Optional workout routine id."),
+      workoutRoutineName: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe("Optional workout routine name."),
+      workoutSessionNote: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe("Optional workout session note."),
+      workoutMedia: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Workout media as kind=...;relativePath=... with optional mediaType/caption. Repeat --workout-media for multiple entries."),
+      workoutExercise: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Repeat --workout-exercise for multiple exercises."),
+      workoutSet: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Repeat --workout-set for multiple sets."),
+      measurementMetric: z
+        .array(z.string().regex(scheduledLogSlugPattern))
+        .optional()
+        .describe("Measurement metric slug. Repeat with value/unit for multiple measurements."),
+      measurementValue: z
+        .array(z.coerce.number())
+        .optional()
+        .describe("Measurement numeric value. Repeat with metric/unit for multiple measurements."),
+      measurementUnit: z
+        .array(z.string().min(1).max(64))
+        .optional()
+        .describe("Measurement unit. Repeat with metric/value for multiple measurements."),
+      measurementQualifier: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Measurement qualifier as key=value, or N:key=value for multiple measurements."),
+      measurementNote: z
+        .array(z.string().min(1).max(4000))
+        .optional()
+        .describe("Measurement note, or N:note for multiple measurements."),
+      summary: z
+        .string()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Optional scheduled log summary."),
+      tag: z
+        .array(z.string().regex(scheduledLogSlugPattern))
+        .optional()
+        .describe("Optional top-level scheduled log tag. Repeat --tag for multiple values."),
+      body: z.string().max(40_000).optional().describe("Optional markdown body."),
+    }),
+    output: scheduledLogUpsertResultSchema,
+    async run(context) {
+      const input = scheduledLogScaffoldPayloadSchema.parse({
+        scheduledLogId: context.options.id,
+        slug: context.options.slug,
+        title: context.args.title,
+        status: context.options.status,
+        schedule: buildScheduleIntentFromOptions(context.options),
+        action: buildScheduledLogActionFromOptions(context.options),
+        summary: context.options.summary,
+        tags: normalizeRepeatableFlagOption(context.options.tag, "tag"),
+        body: context.options.body ?? defaultScheduledLogBody(context.args.title, context.options.summary),
+      });
+      const result = await upsertScheduledLog({
+        ...input,
+        vaultRoot: context.options.vault,
+      });
+
+      return {
+        vault: context.options.vault,
+        scheduledLogId: result.record.scheduledLogId,
+        lookupId: result.record.slug,
+        path: result.record.relativePath,
+        created: result.created,
       };
     },
   });
@@ -158,10 +986,11 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
 
   scheduledLog.command("upsert", {
     args: z.object({}),
-    description: "Create or update one scheduled log from a JSON payload.",
+    description: "Import or bulk-edit one scheduled log from an advanced JSON payload.",
+    hint: "Prefer scheduled-log save for canonical typed create/update usage.",
     options: withBaseOptions({
       input: textInputOptionSchema.describe(
-        "Scheduled-log payload in @file.json form or - for stdin.",
+        "Advanced scheduled-log payload in @file.json form or - for stdin.",
       ),
     }),
     output: scheduledLogUpsertResultSchema,

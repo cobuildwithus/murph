@@ -5,17 +5,45 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
 import {
   deleteProviderRecord,
   editProviderRecord,
+  upsertProviderRecord,
+  type ProviderPayload,
 } from '@murphai/vault-usecases/records'
 import { registerRegistryDocEntityGroup } from './entity-command-groups.js'
+import { type FactoryCommandConfig } from './command-factory-primitives.js'
 import {
   createEntityDeleteCommandConfig,
   createEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
 
+const providerIdSchema = z
+  .string()
+  .regex(
+    /^prov_[0-9A-HJKMNP-TV-Z]{26}$/u,
+    'Expected a provider id like prov_01JNV422Y2M5ZBV64ZP4N1DRB1.',
+  )
+const providerSlugSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
 const providerStatusSchema = z.string().min(1)
+const providerTitleSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .describe('Provider title or name.')
+const providerTextSchema = (max: number, label: string) =>
+  z.string().min(1).max(max).optional().describe(label)
+const providerBodySchema = z
+  .string()
+  .optional()
+  .describe('Optional Markdown body for the provider document.')
+const providerAliasOptionSchema = z
+  .array(z.string().min(1).max(160))
+  .optional()
+  .describe('Optional alias for lookup and search. Repeat --alias for multiple values.')
 
 const providerScaffoldResultSchema = z.object({
   vault: pathSchema,
@@ -42,6 +70,106 @@ const providerListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
+function buildProviderSavePayload(input: {
+  alias?: string[]
+  body?: string
+  id?: string
+  location?: string
+  note?: string
+  organization?: string
+  phone?: string
+  slug?: string
+  specialty?: string
+  status?: string
+  title: string
+  website?: string
+}): ProviderPayload {
+  const aliases = normalizeRepeatableFlagOption(input.alias, 'alias')
+
+  return {
+    ...(input.id ? { providerId: input.id } : {}),
+    ...(input.slug ? { slug: input.slug } : {}),
+    title: input.title,
+    status: input.status ?? 'active',
+    ...(input.specialty ? { specialty: input.specialty } : {}),
+    ...(input.organization ? { organization: input.organization } : {}),
+    ...(input.location ? { location: input.location } : {}),
+    ...(input.website ? { website: input.website } : {}),
+    ...(input.phone ? { phone: input.phone } : {}),
+    ...(input.note ? { note: input.note } : {}),
+    ...(aliases ? { aliases } : {}),
+    ...(input.body !== undefined ? { body: input.body } : {}),
+  }
+}
+
+const providerSaveOptions = {
+  id: providerIdSchema
+    .optional()
+    .describe('Optional existing provider id to update.'),
+  slug: providerSlugSchema
+    .optional()
+    .describe('Optional stable lowercase kebab-case slug.'),
+  status: providerStatusSchema
+    .max(64)
+    .optional()
+    .describe('Optional provider status. Defaults to active.'),
+  specialty: providerTextSchema(160, 'Optional provider specialty.'),
+  organization: providerTextSchema(160, 'Optional provider organization.'),
+  location: providerTextSchema(160, 'Optional provider location.'),
+  website: providerTextSchema(240, 'Optional provider website.'),
+  phone: providerTextSchema(64, 'Optional provider phone label or number.'),
+  note: providerTextSchema(4000, 'Optional provider note.'),
+  alias: providerAliasOptionSchema,
+  body: providerBodySchema,
+}
+
+const providerSaveCommand: FactoryCommandConfig<
+  z.infer<typeof providerUpsertResultSchema>,
+  { title: typeof providerTitleSchema },
+  typeof providerSaveOptions
+> = {
+  name: 'save',
+  args: z.object({
+    title: providerTitleSchema,
+  }),
+  description: 'Create or update one provider from typed command fields.',
+  examples: [
+    {
+      args: {
+        title: 'Labcorp',
+      },
+      description: 'Save a provider without a JSON payload file.',
+      options: {
+        specialty: 'lab',
+        status: 'active',
+        vault: './vault',
+      },
+    },
+  ],
+  hint: 'Use provider upsert only when importing an advanced JSON payload from @file.json or stdin.',
+  options: providerSaveOptions,
+  output: providerUpsertResultSchema,
+  async run({ args, options }) {
+    return upsertProviderRecord({
+      vault: options.vault,
+      payload: buildProviderSavePayload({
+        alias: options.alias,
+        body: options.body,
+        id: options.id,
+        location: options.location,
+        note: options.note,
+        organization: options.organization,
+        phone: options.phone,
+        slug: options.slug,
+        specialty: options.specialty,
+        status: options.status,
+        title: args.title,
+        website: options.website,
+      }),
+    })
+  },
+}
+
 export function registerProviderCommands(
   cli: Cli.Cli,
   services: VaultServices,
@@ -52,7 +180,7 @@ export function registerProviderCommands(
     scaffold: {
       name: 'scaffold',
       args: z.object({}),
-      description: 'Emit a provider payload template for `provider upsert`.',
+      description: 'Emit an advanced JSON provider payload template for `provider upsert`.',
       output: providerScaffoldResultSchema,
       async run({ options, requestId }) {
         return services.core.scaffoldProvider({
@@ -62,7 +190,8 @@ export function registerProviderCommands(
       },
     },
     upsert: {
-      description: 'Create or update one provider Markdown record from a JSON payload file or stdin.',
+      description: 'Import or bulk-update one provider Markdown record from an advanced JSON payload file or stdin.',
+      hint: 'Use provider save for the canonical typed create/update path; keep provider upsert for advanced JSON imports from @file.json or stdin.',
       output: providerUpsertResultSchema,
       async run(input) {
         return services.core.upsertProvider({
@@ -99,6 +228,7 @@ export function registerProviderCommands(
       },
     },
     additionalCommands: [
+      providerSaveCommand,
       createEntityEditCommandConfig({
         arg: {
           name: 'id',
