@@ -83,7 +83,7 @@ async function readCommandSchema(
 test('provider save schema exposes every raw provider payload field as typed input', async () => {
   const cli = createProviderCli()
   const saveSchema = await readCommandSchema(cli, ['provider', 'save'])
-  const upsertSchema = await readCommandSchema(cli, ['provider', 'upsert'])
+  const importJsonSchema = await readCommandSchema(cli, ['provider', 'import-json'])
 
   assert.deepEqual(saveSchema.args.required, ['title'])
   assert.equal('title' in saveSchema.args.properties, true)
@@ -106,7 +106,7 @@ test('provider save schema exposes every raw provider payload field as typed inp
     assert.equal(field in saveSchema.options.properties, true, field)
   }
 
-  assert.equal('input' in upsertSchema.options.properties, true)
+  assert.equal('input' in importJsonSchema.options.properties, true)
 })
 
 test('provider save creates and updates provider records from typed fields', async () => {

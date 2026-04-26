@@ -103,7 +103,7 @@ import {
   scheduledLogScaffoldResultSchema,
   scheduledLogShowResultSchema,
   scheduledLogStatusResultSchema,
-  scheduledLogUpsertResultSchema,
+  scheduledLogWriteResultSchema,
 } from './commands/scheduled-log.js'
 import { registerSyncCommands, syncPushResultSchema } from './commands/sync.js'
 import { registerSupplementCommands } from './commands/supplement.js'
@@ -194,6 +194,7 @@ type GenericHealthRootCommandName = typeof genericHealthRootCommandNames[number]
 type HealthJsonInputCommandName = 'import-json' | 'upsert'
 const healthJsonImportRootCommandNames = new Set<GenericHealthRootCommandName>([
   'allergy',
+  'blood-test',
   'condition',
   'family',
   'genetics',
@@ -481,7 +482,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['scheduled-log', 'save'],
         description: 'Create or update one scheduled log from typed command fields.',
-        output: scheduledLogUpsertResultSchema,
+        output: scheduledLogWriteResultSchema,
       },
       {
         path: ['scheduled-log', 'show'],
@@ -494,10 +495,10 @@ export const vaultCliCommandDescriptors = [
         output: scheduledLogListResultSchema,
       },
       {
-        path: ['scheduled-log', 'upsert'],
+        path: ['scheduled-log', 'import-json'],
         description: 'Import or bulk-edit one scheduled log from an advanced JSON payload.',
         hint: 'Prefer scheduled-log save for canonical typed create/update usage.',
-        output: scheduledLogUpsertResultSchema,
+        output: scheduledLogWriteResultSchema,
       },
       {
         path: ['scheduled-log', 'pause'],
@@ -869,7 +870,7 @@ export const vaultCliCommandDescriptors = [
         description: 'List provider records with an optional status filter.',
       },
       {
-        path: ['provider', 'upsert'],
+        path: ['provider', 'import-json'],
         description: 'Import or bulk-edit one provider Markdown record from a JSON payload file or stdin.',
         hint: 'Prefer provider save for canonical typed create/update usage.',
       },
@@ -912,7 +913,7 @@ export const vaultCliCommandDescriptors = [
         description: 'List recipe records with an optional status filter.',
       },
       {
-        path: ['recipe', 'upsert'],
+        path: ['recipe', 'import-json'],
         description: 'Import or bulk-edit one recipe Markdown record from a JSON payload file or stdin.',
         hint: 'Prefer recipe save for canonical typed create/update usage.',
       },
@@ -955,7 +956,7 @@ export const vaultCliCommandDescriptors = [
         description: 'Show one food by canonical id or slug.',
       },
       {
-        path: ['food', 'upsert'],
+        path: ['food', 'import-json'],
         description: 'Import or bulk-edit one food Markdown record from a JSON payload file or stdin.',
         hint: 'Prefer food save for canonical typed create/update usage.',
       },
@@ -1536,8 +1537,8 @@ export const vaultCliCommandDescriptors = [
         description: 'Stop one regimen while preserving its canonical id.',
       },
       {
-        path: ['protocol', 'upsert'],
-        description: 'Create or update one private Health Commons-backed protocol adaptation from JSON.',
+        path: ['protocol', 'import-json'],
+        description: 'Import one private Health Commons-backed protocol adaptation from JSON.',
       },
       {
         path: ['protocol', 'list'],

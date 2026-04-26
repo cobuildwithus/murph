@@ -88,7 +88,7 @@ async function listRecipeFiles(vaultRoot: string): Promise<string[]> {
   }
 }
 
-test('recipe save schema exposes typed parity fields while upsert remains the JSON fallback', async () => {
+test('recipe save schema exposes typed parity fields while import-json remains the JSON fallback', async () => {
   const cli = createRecipeCli()
   const schema = await readCommandSchema(cli, ['recipe', 'save'])
 
@@ -118,7 +118,7 @@ test('recipe save schema exposes typed parity fields while upsert remains the JS
     assert.equal(field in schema.options.properties, true, field)
   }
 
-  const jsonFallback = await readCommandSchema(cli, ['recipe', 'upsert'])
+  const jsonFallback = await readCommandSchema(cli, ['recipe', 'import-json'])
   assert.equal('input' in jsonFallback.options.properties, true)
   assert.equal(jsonFallback.options.required?.includes('input') ?? false, true)
   assert.deepEqual(jsonFallback.args.required ?? [], [])

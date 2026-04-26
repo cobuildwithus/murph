@@ -13,6 +13,64 @@ import {
 } from "../src/commands/automation.js";
 import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
 
+interface CommandSchemaEnvelope {
+  args: {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  options: {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+async function runRawInProcessCli(cli: Cli.Cli, args: string[]): Promise<string> {
+  const output: string[] = [];
+  let exitCode: number | null = null;
+
+  await cli.serve(args, {
+    env: process.env,
+    exit(code) {
+      exitCode = code;
+    },
+    stdout(chunk) {
+      output.push(chunk);
+    },
+  });
+
+  assert.equal(exitCode, null);
+  return output.join("").trim();
+}
+
+async function readCommandSchema(
+  cli: Cli.Cli,
+  commandArgs: string[],
+): Promise<CommandSchemaEnvelope> {
+  return JSON.parse(
+    await runRawInProcessCli(cli, [...commandArgs, "--schema", "--format", "json"]),
+  ) as CommandSchemaEnvelope;
+}
+
+function hasCommandMap(value: unknown): value is { commands: Map<string, unknown> } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "commands" in value &&
+    value.commands instanceof Map
+  );
+}
+
+function requireAutomationCommandNames(cli: Cli.Cli): string[] {
+  const commands = Cli.toCommands.get(cli);
+  const automation = commands?.get("automation");
+
+  if (!hasCommandMap(automation)) {
+    throw new Error("Expected automation command group to be registered.");
+  }
+
+  return [...automation.commands.keys()].map((name) => `automation ${name}`);
+}
+
 test("automation scaffold payload uses the canonical default shape", () => {
   const payload = createAutomationScaffoldPayload();
 
@@ -157,7 +215,52 @@ test("automation scaffold command returns the canonical scaffold envelope", asyn
   });
 });
 
-test("automation commands round-trip upsert, show, and list through the registered CLI", async () => {
+test("automation save schema exposes typed fields while automation import-json is the JSON fallback", async () => {
+  const cli = Cli.create("vault-cli", {
+    description: "automation test cli",
+    version: "0.0.0-test",
+  });
+  registerAutomationCommands(cli);
+
+  const automationCommandNames = requireAutomationCommandNames(cli);
+  assert.equal(automationCommandNames.includes("automation save"), true);
+  assert.equal(automationCommandNames.includes("automation import-json"), true);
+  assert.equal(automationCommandNames.includes("automation upsert"), false);
+
+  const saveSchema = await readCommandSchema(cli, ["automation", "save"]);
+  assert.deepEqual(saveSchema.args.required, ["title"]);
+  assert.equal("input" in saveSchema.options.properties, false);
+  assert.equal(saveSchema.options.required?.includes("input") ?? false, false);
+
+  for (const field of [
+    "id",
+    "slug",
+    "status",
+    "summary",
+    "tags",
+    "continuityPolicy",
+    "instructions",
+    "scheduleKind",
+    "scheduleAt",
+    "scheduleEveryMs",
+    "scheduleCron",
+    "scheduleLocalTime",
+    "channel",
+    "deliveryTarget",
+    "identityId",
+    "participantId",
+    "threadId",
+  ]) {
+    assert.equal(field in saveSchema.options.properties, true, field);
+  }
+
+  const importJsonSchema = await readCommandSchema(cli, ["automation", "import-json"]);
+  assert.equal("input" in importJsonSchema.options.properties, true);
+  assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(importJsonSchema.args.required ?? [], []);
+});
+
+test("automation commands round-trip save, import-json, show, and list through the registered CLI", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-cli-");
 
   try {
@@ -175,9 +278,8 @@ test("automation commands round-trip upsert, show, and list through the register
       instructions: "Check mobility work.",
     };
     const payloadPath = path.join(parentRoot, "automation.json");
-    await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 
-    const upserted = await runInProcessJsonCli<{
+    const saved = await runInProcessJsonCli<{
       automationId: string;
       created: boolean;
       lookupId: string;
@@ -185,28 +287,104 @@ test("automation commands round-trip upsert, show, and list through the register
       vault: string;
     }>(cli, [
       "automation",
-      "upsert",
+      "save",
+      payload.title,
+      "--slug",
+      payload.slug,
+      "--summary",
+      payload.summary,
+      "--instructions",
+      payload.instructions,
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "agentmail:daily",
+      "--identity-id",
+      "identity_daily",
+      "--participant-id",
+      "participant_daily",
+      "--thread-id",
+      "thread_daily",
+      "--tags",
+      "assistant",
+      "--tags",
+      "scheduled",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const savedData = saved.envelope.data;
+    if (savedData === undefined) {
+      throw new Error("Expected automation save data.");
+    }
+
+    assert.equal(savedData.created, true);
+    assert.equal(savedData.lookupId, payload.slug);
+
+    const importedPayload = {
+      ...payload,
+      title: "Weekly planning",
+      slug: "weekly-planning",
+      schedule: {
+        kind: "cron",
+        expression: "0 9 * * 1",
+      },
+      route: {
+        channel: "email",
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+    };
+    await writeFile(payloadPath, `${JSON.stringify(importedPayload, null, 2)}\n`, "utf8");
+
+    const imported = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+      path: string;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(upserted.exitCode, null);
-    assert.equal(upserted.envelope.ok, true);
+    assert.equal(imported.exitCode, null);
+    assert.equal(imported.envelope.ok, true);
 
-    const upsertedData = upserted.envelope.data;
-    if (upsertedData === undefined) {
-      throw new Error("Expected automation upsert data.");
+    const importedData = imported.envelope.data;
+    if (importedData === undefined) {
+      throw new Error("Expected automation import-json data.");
     }
 
-    assert.equal(upsertedData.created, true);
-    assert.equal(upsertedData.lookupId, payload.slug);
+    assert.equal(importedData.created, true);
+    assert.equal(importedData.lookupId, importedPayload.slug);
 
     const shown = await runInProcessJsonCli<{
       automation: {
         automationId: string;
         slug: string;
         title: string;
+        route: {
+          deliveryTarget: string | null;
+          identityId: string | null;
+          participantId: string | null;
+          threadId: string | null;
+        };
+        schedule: {
+          kind: string;
+          localTime?: string;
+        };
       } | null;
       vault: string;
     }>(cli, [
@@ -224,9 +402,15 @@ test("automation commands round-trip upsert, show, and list through the register
       throw new Error("Expected automation show data.");
     }
 
-    assert.equal(shownData.automation.automationId, upsertedData.automationId);
+    assert.equal(shownData.automation.automationId, savedData.automationId);
     assert.equal(shownData.automation.slug, payload.slug);
     assert.equal(shownData.automation.title, payload.title);
+    assert.equal(shownData.automation.schedule.kind, "dailyLocal");
+    assert.equal(shownData.automation.schedule.localTime, "08:30");
+    assert.equal(shownData.automation.route.deliveryTarget, "agentmail:daily");
+    assert.equal(shownData.automation.route.identityId, "identity_daily");
+    assert.equal(shownData.automation.route.participantId, "participant_daily");
+    assert.equal(shownData.automation.route.threadId, "thread_daily");
 
     const listed = await runInProcessJsonCli<{
       count: number;
@@ -256,10 +440,61 @@ test("automation commands round-trip upsert, show, and list through the register
       throw new Error("Expected automation list data.");
     }
 
-    assert.equal(listedData.count, 1);
+    assert.equal(listedData.count, 2);
     assert.equal(listedData.filters.limit, 10);
-    assert.deepEqual(listedData.items.map((item) => item.slug), [payload.slug]);
-    assert.equal(listedData.items[0]?.automationId, upsertedData.automationId);
+    assert.deepEqual(listedData.items.map((item) => item.slug), [
+      payload.slug,
+      importedPayload.slug,
+    ]);
+    assert.equal(listedData.items[0]?.automationId, savedData.automationId);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("automation save maps each flattened schedule discriminator", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-schedules-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const schedules = [
+      ["at", "one-shot-check", ["--schedule-at", "2026-04-26T08:00:00.000Z"]],
+      ["every", "hourly-check", ["--schedule-every-ms", "3600000"]],
+      ["cron", "weekly-check", ["--schedule-cron", "0 9 * * 1"]],
+      ["dailyLocal", "daily-check", ["--schedule-local-time", "08:30"]],
+    ] as const;
+
+    for (const [kind, slug, scheduleArgs] of schedules) {
+      const saved = await runInProcessJsonCli<{
+        automationId: string;
+        lookupId: string;
+      }>(cli, [
+        "automation",
+        "save",
+        slug,
+        "--slug",
+        slug,
+        "--instructions",
+        `Run ${slug}.`,
+        "--schedule-kind",
+        kind,
+        ...scheduleArgs,
+        "--channel",
+        "telegram",
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(saved.exitCode, null);
+      assert.equal(saved.envelope.ok, true);
+      assert.equal(saved.envelope.data?.lookupId, slug);
+    }
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

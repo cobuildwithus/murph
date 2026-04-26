@@ -31,12 +31,12 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
 
     assert.equal(goalId.length > 0, true)
 
-    const bloodTestUpsert = await runCli<{
+    const bloodTestImportJson = await runCli<{
       eventId: string
       lookupId: string
       ledgerFile: string
     }>(
-      ['blood-test', 'upsert', '--input', '-', '--vault', vaultRoot],
+      ['blood-test', 'import-json', '--input', '-', '--vault', vaultRoot],
       {
         stdin: JSON.stringify({
           occurredAt: '2026-03-12T14:00:00.000Z',
@@ -61,22 +61,55 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
       },
     )
 
-    assert.equal(bloodTestUpsert.ok, true)
-    assert.match(requireData(bloodTestUpsert).eventId, /^evt_/u)
+    assert.equal(bloodTestImportJson.ok, true)
+    assert.match(requireData(bloodTestImportJson).eventId, /^evt_/u)
     assert.equal(
-      requireData(bloodTestUpsert).lookupId,
-      requireData(bloodTestUpsert).eventId,
+      requireData(bloodTestImportJson).lookupId,
+      requireData(bloodTestImportJson).eventId,
     )
     assert.equal(
-      requireData(bloodTestUpsert).ledgerFile,
+      requireData(bloodTestImportJson).ledgerFile,
       'ledger/events/2026/2026-03.jsonl',
     )
 
-    const providerUpsert = await runCli<{
+    const scheduledLogImportJson = await runCli<{
+      scheduledLogId: string
+      lookupId: string
+      path: string
+    }>(
+      ['scheduled-log', 'import-json', '--input', '-', '--vault', vaultRoot],
+      {
+        stdin: JSON.stringify({
+          title: 'Daily sauna',
+          slug: 'daily-sauna',
+          status: 'active',
+          schedule: { kind: 'dailyLocal', localTime: '18:00' },
+          action: {
+            kind: 'intervention_session.add',
+            title: 'Sauna',
+            interventionType: 'sauna',
+            durationMinutes: 20,
+          },
+          summary: 'Auto-log a daily sauna session.',
+          tags: ['scheduled', 'sauna'],
+          body: 'Writes a derived sauna session at the scheduled local time.',
+        }),
+      },
+    )
+
+    assert.equal(scheduledLogImportJson.ok, true)
+    assert.match(requireData(scheduledLogImportJson).scheduledLogId, /^slog_/u)
+    assert.equal(requireData(scheduledLogImportJson).lookupId, 'daily-sauna')
+    assert.equal(
+      requireData(scheduledLogImportJson).path,
+      'bank/scheduled-logs/daily-sauna.md',
+    )
+
+    const providerImportJson = await runCli<{
       providerId: string
       path: string
     }>(
-      ['provider', 'upsert', '--input', '-', '--vault', vaultRoot],
+      ['provider', 'import-json', '--input', '-', '--vault', vaultRoot],
       {
         stdin: JSON.stringify({
           title: 'Sleep Clinic',
@@ -86,8 +119,8 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
       },
     )
 
-    assert.equal(providerUpsert.ok, true)
-    assert.match(requireData(providerUpsert).providerId, /^prov_/u)
+    assert.equal(providerImportJson.ok, true)
+    assert.match(requireData(providerImportJson).providerId, /^prov_/u)
 
     const eventUpsert = await runCli<{
       eventId: string

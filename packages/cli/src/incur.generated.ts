@@ -25,15 +25,16 @@ declare module 'incur' {
       'audit list': { args: {}; options: { vault: string; requestId?: string; action?: string; actor?: string; status?: string; from?: string; to?: string; sort: "asc" | "desc"; limit: number } }
       'audit show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'audit tail': { args: {}; options: { vault: string; requestId?: string; limit: number } }
+      'automation import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'automation list': { args: {}; options: { vault: string; requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
+      'automation save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; summary?: string; tags?: string[]; continuityPolicy?: "fresh" | "preserve"; instructions: string; scheduleKind: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; channel: string; deliveryTarget?: string; identityId?: string; participantId?: string; threadId?: string } }
       'automation scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'automation show': { args: { lookup: string }; options: { vault: string; requestId?: string } }
-      'automation upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'blood-test import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { vault: string; requestId?: string; status?: string; from?: string; to?: string; limit: number } }
       'blood-test save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; note?: string; tag?: string[]; link?: string[]; rawRef?: string[]; testName: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; specimenType?: string; labName?: string; labPanelId?: string; collectedAt?: string; reportedAt?: string; fastingStatus?: "fasting" | "non_fasting" | "unknown"; result: string[] } }
       'blood-test scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'blood-test show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'blood-test upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'capture add': { args: {}; options: { vault: string; requestId?: string; input?: string; media?: string[]; label?: string; bodySite?: string; collection?: string; tag?: string[]; relatedId?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; timeZone?: string } }
       'capture list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; tag?: string[]; limit: number; label?: string; bodySite?: string; collection?: string } }
       'capture manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
@@ -110,6 +111,7 @@ declare module 'incur' {
       'family show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
+      'food import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'food list': { args: {}; options: { vault: string; requestId?: string; status?: "active" | "archived"; limit: number } }
       'food rename': { args: { lookup: string }; options: { vault: string; requestId?: string; title: string; slug?: string } }
       'food save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "archived"; summary?: string; kind?: string; brand?: string; vendor?: string; location?: string; serving?: string; calories?: number; proteinGrams?: number; carbsGrams?: number; fatGrams?: number; fiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string; alias?: string[]; ingredient?: string[]; tag?: string[]; note?: string; autoLogDailyTime?: string; attachedRegimenId?: string[]; linkRelatedRegimenId?: string[] } }
@@ -117,7 +119,6 @@ declare module 'incur' {
       'food schedule': { args: { title: string }; options: { vault: string; requestId?: string; time: string; note?: string; slug?: string } }
       'food show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food unschedule': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'food upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'genetics import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'genetics list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'genetics save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; gene: string; zygosity?: "heterozygous" | "homozygous" | "compound_heterozygous" | "unknown"; significance?: "pathogenic" | "likely_pathogenic" | "risk_factor" | "vus" | "benign" | "unknown"; inheritance?: string; sourceFamilyMemberId?: string[]; note?: string } }
@@ -198,25 +199,25 @@ declare module 'incur' {
       'memory update': { args: { memoryId: string; text: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { vault: string; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex" | "openai-compatible"; providerPreset?: "openai" | "vercel-ai-gateway" | "openrouter" | "venice" | "deepseek" | "groq" | "together" | "fireworks" | "cerebras" | "xai" | "huggingface" | "nvidia" | "ollama" | "lm-studio" | "vllm" | "litellm" | "custom"; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; zeroDataRetention?: boolean; codexCommand?: string; profile?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
+      'protocol import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'protocol list': { args: {}; options: { vault: string; requestId?: string; status?: string; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'protocol upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'provider delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'provider edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
+      'provider import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'provider list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'provider save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: string; specialty?: string; organization?: string; location?: string; website?: string; phone?: string; note?: string; alias?: string[]; body?: string } }
       'provider scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'provider upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'query projection rebuild': { args: {}; options: { vault: string; requestId?: string } }
       'query projection status': { args: {}; options: { vault: string; requestId?: string } }
       'recipe delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'recipe edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
+      'recipe import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'recipe list': { args: {}; options: { vault: string; requestId?: string; status?: "draft" | "saved" | "archived"; limit: number } }
       'recipe save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "draft" | "saved" | "archived"; summary?: string; cuisine?: string; dishType?: string; source?: string; servings?: number; prepTimeMinutes?: number; cookTimeMinutes?: number; totalTimeMinutes?: number; tag?: string[]; ingredient?: string[]; step?: string[]; relatedGoalId?: string[]; relatedConditionId?: string[]; link?: string[] } }
       'recipe scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'recipe show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'recipe upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'regimen import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'regimen list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'regimen save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
@@ -234,13 +235,13 @@ declare module 'incur' {
       'samples list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'scheduled-log archive': { args: { lookup: string }; options: { vault: string; requestId?: string } }
+      'scheduled-log import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'scheduled-log list': { args: {}; options: { vault: string; requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
       'scheduled-log pause': { args: { lookup: string }; options: { vault: string; requestId?: string } }
       'scheduled-log resume': { args: { lookup: string }; options: { vault: string; requestId?: string } }
       'scheduled-log save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; scheduleKind: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; actionKind: "meal.add" | "activity_session.add" | "intervention_session.add" | "measurement.add"; actionTitle?: string; actionNote?: string; actionTag?: string[]; foodId?: string; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string; activityType?: string; interventionType?: string; durationMinutes?: number; distanceKm?: number; protocolId?: string; workoutSourceApp?: string; workoutSourceWorkoutId?: string; workoutStartedAt?: string; workoutEndedAt?: string; workoutRoutineId?: string; workoutRoutineName?: string; workoutSessionNote?: string; workoutMedia?: string[]; workoutExercise?: string[]; workoutSet?: string[]; measurementMetric?: string[]; measurementValue?: number[]; measurementUnit?: string[]; measurementQualifier?: string[]; measurementNote?: string[]; summary?: string; tag?: string[]; body?: string } }
       'scheduled-log scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'scheduled-log show': { args: { lookup: string }; options: { vault: string; requestId?: string } }
-      'scheduled-log upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'search query': { args: { query?: string }; options: { vault: string; requestId?: string; text?: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'status': { args: {}; options: { vault: string; requestId?: string; session?: string; limit: number } }

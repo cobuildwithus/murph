@@ -1499,20 +1499,20 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
       "utf8",
     );
 
-    const upsertResult = await runCli<{
+    const importJsonResult = await runCli<{
       eventId: string;
       lookupId: string;
       ledgerFile: string;
       created: boolean;
     }>([
       "blood-test",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
       vaultRoot,
     ]);
-    const eventId = requireData(upsertResult).eventId;
+    const eventId = requireData(importJsonResult).eventId;
     const nounShow = await runCli<{
       entity: {
         id: string;
@@ -1539,12 +1539,12 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
       vaultRoot,
     ]);
 
-    assert.equal(upsertResult.ok, true);
+    assert.equal(importJsonResult.ok, true);
     assert.match(eventId, /^evt_/u);
-    assert.equal(requireData(upsertResult).lookupId, eventId);
-    assert.equal(requireData(upsertResult).created, true);
+    assert.equal(requireData(importJsonResult).lookupId, eventId);
+    assert.equal(requireData(importJsonResult).created, true);
     assert.equal(
-      requireData(upsertResult).ledgerFile,
+      requireData(importJsonResult).ledgerFile,
       "ledger/events/2026/2026-03.jsonl",
     );
     assert.equal(nounShow.ok, true);
@@ -1594,7 +1594,7 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
 
     await runCli([
       "blood-test",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",

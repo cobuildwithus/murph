@@ -81,7 +81,7 @@ export const scheduledLogShowResultSchema = z.object({
   scheduledLog: scheduledLogRecordSchema.nullable(),
 });
 
-export const scheduledLogUpsertResultSchema = z.object({
+export const scheduledLogWriteResultSchema = z.object({
   vault: pathSchema,
   scheduledLogId: z.string().min(1),
   lookupId: z.string().min(1),
@@ -714,7 +714,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
         },
       },
     ],
-    hint: "Use scheduled-log upsert only for advanced JSON imports or bulk edits.",
+    hint: "Use scheduled-log import-json only for advanced JSON imports or bulk edits.",
     options: withBaseOptions({
       id: z
         .string()
@@ -905,7 +905,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
         .describe("Optional top-level scheduled log tag. Repeat --tag for multiple values."),
       body: z.string().max(40_000).optional().describe("Optional markdown body."),
     }),
-    output: scheduledLogUpsertResultSchema,
+    output: scheduledLogWriteResultSchema,
     async run(context) {
       const input = scheduledLogScaffoldPayloadSchema.parse({
         scheduledLogId: context.options.id,
@@ -984,7 +984,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
     },
   });
 
-  scheduledLog.command("upsert", {
+  scheduledLog.command("import-json", {
     args: z.object({}),
     description: "Import or bulk-edit one scheduled log from an advanced JSON payload.",
     hint: "Prefer scheduled-log save for canonical typed create/update usage.",
@@ -993,7 +993,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
         "Advanced scheduled-log payload in @file.json form or - for stdin.",
       ),
     }),
-    output: scheduledLogUpsertResultSchema,
+    output: scheduledLogWriteResultSchema,
     async run(context) {
       const rawInput = await loadJsonInputObject(
         context.options.input,

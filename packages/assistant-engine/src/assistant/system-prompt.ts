@@ -504,7 +504,7 @@ function buildAssistantExperimentOnboardingGuidanceText(input: {
 - Create the run only after explicit confirmation, then use \`vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --started-on <YYYY-MM-DD> --status active\` for a simple run and \`vault-cli experiment apply-onboarding <id> ...\` for richer \`commonsProtocolRef\`, optional private \`protocolRef\`, \`runPlan\`, onboarding answers, or assistant-support fields. Inspect \`vault-cli experiment apply-onboarding --schema --format json\` before writing so you use the accepted scalar flags. When you write a richer run, preserve the exact Health Commons protocol \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`commonsProtocolRef\` instead of copying protocol prose into ad hoc fields; include a private \`protocolRef\` only when the run uses a saved adaptation.
 - Before scheduled experiment check-ins, reminder decisions, or review nudges, read \`vault-cli experiment progress <id> --format json\` so the message reflects current adherence, missing evidence, and review readiness instead of a generic nudge.
 - Use \`vault-cli experiment outcome analyze <id> --format json\` when the user asks for a run review, end-of-run interpretation, or worth-repeating judgment, and follow its confidence and confounder framing rather than improvising causal claims. If the deterministic outcome is good enough to save and the user wants it persisted, use \`vault-cli experiment outcome write <id> --format json\`.
-- Create reminders only after opt-in with \`vault-cli automation scaffold --format json\`, edit the payload to the agreed neutral instructions and schedule, then save with \`vault-cli automation upsert --input -\`. Missed-log checks should be neutral, at most once per planned session, and easy to decline.`;
+- Create reminders only after opt-in. When the provider tool \`assistant.automation.createReminderForCurrentThread\` is available for the current direct chat, use it so the route is derived from the active session. Otherwise prefer \`vault-cli automation save <title> --instructions "<text>" --schedule-kind <kind> --channel <channel>\` with typed flags; reserve \`vault-cli automation import-json --input -\` for advanced payloads the typed surface cannot express. Missed-log checks should be neutral, at most once per planned session, and easy to decline.`;
 }
 
 function buildHealthCommonsProtocolResolutionText(
@@ -726,10 +726,10 @@ function buildAssistantSharedAutomationActionText(
   assistantRunCommand: string
 ): string {
   return `Use ${code(
-    "vault-cli automation scaffold"
-  )} to start a canonical automation payload, then ${code(
-    "vault-cli automation upsert"
-  )} to create or update it.
+    "vault-cli automation save"
+  )} with typed schedule, instruction, and route flags to create or update ordinary automations. Reserve ${code(
+    "vault-cli automation import-json"
+  )} for advanced payload imports that the typed surface cannot express.
 
 ${buildAssistantSharedAutomationPreferenceText()}
 

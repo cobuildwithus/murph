@@ -72,7 +72,7 @@ Useful commands:
 - `vault-cli experiment outcome write <id> --format json` when the deterministic outcome is ready, the user wants it persisted, and the experiment record should link to the saved outcome artifact.
 - `vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --started-on <YYYY-MM-DD> --status active` only after the user confirms a simple run plan.
 - `vault-cli experiment apply-onboarding <id> ...` when the run needs richer `commonsProtocolRef`, optional private `protocolRef`, `runPlan`, `onboarding`, or `assistantSupport` fields; inspect `vault-cli experiment apply-onboarding --schema --format json` before choosing flags.
-- `vault-cli automation scaffold --format json` followed by `vault-cli automation upsert --input -` only after the user opts into reminders or check-ins.
+- Prefer `vault-cli automation save` with typed schedule, instruction, and route flags after the user opts into reminders or check-ins. Use `automation import-json --input -` only for advanced payloads the typed surface cannot express.
 
 Flow:
 

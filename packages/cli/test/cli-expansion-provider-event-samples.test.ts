@@ -87,21 +87,21 @@ async function runSliceCliRaw(args: string[]) {
 
 test('provider, food, recipe, event, and samples schemas expose the new noun entrypoints', async () => {
   const providerSchema = JSON.parse(
-    await runSliceCliRaw(['provider', 'upsert', '--schema']),
+    await runSliceCliRaw(['provider', 'import-json', '--schema']),
   ) as {
     options: {
       properties: Record<string, unknown>
     }
   }
   const foodSchema = JSON.parse(
-    await runSliceCliRaw(['food', 'upsert', '--schema']),
+    await runSliceCliRaw(['food', 'import-json', '--schema']),
   ) as {
     options: {
       properties: Record<string, unknown>
     }
   }
   const recipeSchema = JSON.parse(
-    await runSliceCliRaw(['recipe', 'upsert', '--schema']),
+    await runSliceCliRaw(['recipe', 'import-json', '--schema']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -351,7 +351,7 @@ test('generic read and semantic summary help surfaces explain when to use them',
 })
 
 test.sequential(
-  'recipe scaffold/upsert/show/list work through the slice commands',
+  'recipe scaffold/import-json/show/list work through the slice commands',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-recipe-'))
     const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
@@ -404,7 +404,7 @@ test.sequential(
         created: boolean
       }>([
         'recipe',
-        'upsert',
+        'import-json',
         '--input',
         `@${recipePayloadPath}`,
         '--vault',
@@ -412,7 +412,7 @@ test.sequential(
       ])
 
       assert.equal(recipeUpsert.ok, true, JSON.stringify(recipeUpsert))
-      assert.equal(recipeUpsert.meta?.command, 'recipe upsert')
+      assert.equal(recipeUpsert.meta?.command, 'recipe import-json')
       assert.match(requireData(recipeUpsert).recipeId, /^rcp_/u)
       assert.equal(
         requireData(recipeUpsert).path,
@@ -508,7 +508,7 @@ test.sequential(
 )
 
 test.sequential(
-  'food scaffold/upsert/show/list work through the slice commands',
+  'food scaffold/import-json/show/list work through the slice commands',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-'))
     const foodPayloadPath = path.join(vaultRoot, 'food.json')
@@ -587,7 +587,7 @@ test.sequential(
         created: boolean
       }>([
         'food',
-        'upsert',
+        'import-json',
         '--input',
         `@${foodPayloadPath}`,
         '--vault',
@@ -595,7 +595,7 @@ test.sequential(
       ])
 
       assert.equal(foodUpsert.ok, true, JSON.stringify(foodUpsert))
-      assert.equal(foodUpsert.meta?.command, 'food upsert')
+      assert.equal(foodUpsert.meta?.command, 'food import-json')
       assert.match(requireData(foodUpsert).foodId, /^food_/u)
       assert.equal(requireData(foodUpsert).path, 'bank/foods/regular-acai-bowl.md')
       assert.equal(requireData(foodUpsert).created, true)
@@ -907,7 +907,7 @@ test.sequential(
         path: string
       }>([
         'food',
-        'upsert',
+        'import-json',
         '--input',
         `@${foodPayloadPath}`,
         '--vault',
@@ -953,7 +953,7 @@ test.sequential(
 )
 
 test.sequential(
-  'provider upsert/show/list, event import-json/show/list, and samples add work through the slice commands',
+  'provider import-json/show/list, event import-json/show/list, and samples add work through the slice commands',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-'))
     const providerPayloadPath = path.join(vaultRoot, 'provider.json')
@@ -987,7 +987,7 @@ test.sequential(
         created: boolean
       }>([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${providerPayloadPath}`,
         '--vault',
@@ -995,7 +995,7 @@ test.sequential(
       ])
 
       assert.equal(providerUpsert.ok, true, JSON.stringify(providerUpsert))
-      assert.equal(providerUpsert.meta?.command, 'provider upsert')
+      assert.equal(providerUpsert.meta?.command, 'provider import-json')
       assert.match(requireData(providerUpsert).providerId, /^prov_/u)
       assert.equal(requireData(providerUpsert).path, 'bank/providers/labcorp.md')
       assert.equal(requireData(providerUpsert).created, true)
@@ -1327,7 +1327,7 @@ test.sequential(
 )
 
 test.sequential(
-  'provider upsert rejects slug collisions against another provider id',
+  'provider import-json rejects slug collisions against another provider id',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-collision-'))
     const alphaPayloadPath = path.join(vaultRoot, 'provider-alpha.json')
@@ -1360,7 +1360,7 @@ test.sequential(
 
       const alpha = await runSliceCli<{ providerId: string }>([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${alphaPayloadPath}`,
         '--vault',
@@ -1368,7 +1368,7 @@ test.sequential(
       ])
       const beta = await runSliceCli<{ providerId: string }>([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${betaPayloadPath}`,
         '--vault',
@@ -1392,7 +1392,7 @@ test.sequential(
 
       const collision = await runSliceCli([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${collisionPayloadPath}`,
         '--vault',
@@ -1426,7 +1426,7 @@ test.sequential(
 )
 
 test.sequential(
-  'provider upsert renames the provider document when the same provider id moves to a new slug',
+  'provider import-json renames the provider document when the same provider id moves to a new slug',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-rename-'))
     const initialPayloadPath = path.join(vaultRoot, 'provider-initial.json')
@@ -1448,7 +1448,7 @@ test.sequential(
 
       const created = await runSliceCli<{ providerId: string; path: string }>([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${initialPayloadPath}`,
         '--vault',
@@ -1471,7 +1471,7 @@ test.sequential(
 
       const renamed = await runSliceCli<{ path: string; created: boolean }>([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${renamedPayloadPath}`,
         '--vault',
@@ -1531,7 +1531,7 @@ test.sequential(
 
       const foodCreated = await runSliceCli<{ foodId: string }>([
         'food',
-        'upsert',
+        'import-json',
         '--input',
         `@${foodPayloadPath}`,
         '--vault',
@@ -1539,7 +1539,7 @@ test.sequential(
       ])
       const recipeCreated = await runSliceCli<{ recipeId: string }>([
         'recipe',
-        'upsert',
+        'import-json',
         '--input',
         `@${recipePayloadPath}`,
         '--vault',
@@ -1638,7 +1638,7 @@ test.sequential(
 
       const foodCreated = await runSliceCli<{ foodId: string }>([
         'food',
-        'upsert',
+        'import-json',
         '--input',
         `@${foodPayloadPath}`,
         '--vault',
@@ -1646,7 +1646,7 @@ test.sequential(
       ])
       const recipeCreated = await runSliceCli<{ recipeId: string }>([
         'recipe',
-        'upsert',
+        'import-json',
         '--input',
         `@${recipePayloadPath}`,
         '--vault',
@@ -1821,7 +1821,7 @@ test.sequential(
 
       const foodCreated = await runSliceCli<{ foodId: string }>([
         'food',
-        'upsert',
+        'import-json',
         '--input',
         `@${foodPayloadPath}`,
         '--vault',
@@ -1829,7 +1829,7 @@ test.sequential(
       ])
       const recipeCreated = await runSliceCli<{ recipeId: string }>([
         'recipe',
-        'upsert',
+        'import-json',
         '--input',
         `@${recipePayloadPath}`,
         '--vault',
@@ -1977,7 +1977,7 @@ test.sequential(
 
       const created = await runSliceCli<{ providerId: string; path: string }>([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${providerPayloadPath}`,
         '--vault',
@@ -2136,7 +2136,7 @@ test.sequential(
 
       const providerUpsert = await runSliceCli<{ providerId: string }>([
         'provider',
-        'upsert',
+        'import-json',
         '--input',
         `@${providerPayloadPath}`,
         '--vault',
@@ -2144,7 +2144,7 @@ test.sequential(
       ])
       const foodUpsert = await runSliceCli<{ foodId: string }>([
         'food',
-        'upsert',
+        'import-json',
         '--input',
         `@${foodPayloadPath}`,
         '--vault',
@@ -2152,7 +2152,7 @@ test.sequential(
       ])
       const recipeUpsert = await runSliceCli<{ recipeId: string }>([
         'recipe',
-        'upsert',
+        'import-json',
         '--input',
         `@${recipePayloadPath}`,
         '--vault',

@@ -156,8 +156,8 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata).toMatchInlineSnapshot(`
       {
-        "dynamicContextStartsAfterStaticCore": 20526,
-        "stableRouteCapabilityPromptHash": "05855168435be53bd844fb343affa0211e2ff92a3762dd95cecd26725c56daec",
+        "dynamicContextStartsAfterStaticCore": 20874,
+        "stableRouteCapabilityPromptHash": "7af2c2042259d7f99f1af7d0dc1fa6eb58a16439a0168927812b3e673ef1dc84",
         "staticPromptHash": "ee411cd5984a0ea4bd72a58d31446957eb38b809346373bcf9632d381e5802fc",
         "toolSchemaHash": "assistant-tool-schema-common-openai-test",
       }

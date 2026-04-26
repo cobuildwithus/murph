@@ -4,7 +4,9 @@ export type CommandCapability =
   | "show"
   | "list"
   | "scaffold"
+  | "save"
   | "upsert"
+  | "import-json"
   | "import"
   | "import-csv"
   | "manifest"
@@ -85,9 +87,9 @@ const checkedCommandCapabilityBundles = {
     summary: "Readable follow-up surface for direct noun lookups and filtered listing.",
   },
   payloadCrud: {
-    capabilities: ["scaffold", "upsert", "show", "list"],
-    docSurface: "scaffold | upsert | show | list",
-    summary: "Payload-driven CRUD surface for canonical noun records.",
+    capabilities: ["scaffold", "import-json", "show", "list"],
+    docSurface: "scaffold | import-json | show | list",
+    summary: "Explicit JSON import fallback plus readable follow-up surface for canonical noun records.",
   },
   artifactImport: {
     capabilities: ["import", "show", "list", "manifest"],
@@ -203,72 +205,81 @@ export interface CommandAliasDefinition {
 const checkedCommandNounCapabilities = [
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "goal",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "condition",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "allergy",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list", "stop"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list", "stop"],
     noun: "regimen",
-    additionalCapabilities: ["stop"],
+    additionalCapabilities: ["save", "stop"],
   },
   {
-    bundles: ["payloadCrud"],
-    capabilities: ["upsert", "show", "list"],
+    bundles: ["readable"],
+    capabilities: ["import-json", "show", "list"],
     noun: "protocol",
+    additionalCapabilities: ["import-json"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "blood_test",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "family",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "genetics",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "rename", "schedule", "unschedule", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "rename", "schedule", "unschedule", "show", "list"],
     noun: "food",
-    additionalCapabilities: ["rename", "schedule", "unschedule"],
+    additionalCapabilities: ["save", "rename", "schedule", "unschedule"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list", "stop", "compound-list", "compound-show"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list", "stop", "compound-list", "compound-show"],
     noun: "supplement",
-    additionalCapabilities: ["stop", "compound-list", "compound-show"],
+    additionalCapabilities: ["save", "stop", "compound-list", "compound-show"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "provider",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "show", "list"],
+    capabilities: ["scaffold", "save", "import-json", "show", "list"],
     noun: "recipe",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "upsert", "edit", "show", "list"],
+    capabilities: ["scaffold", "add", "import-json", "edit", "show", "list"],
     noun: "event",
-    additionalCapabilities: ["edit"],
+    additionalCapabilities: ["add", "edit"],
   },
   {
     bundles: ["artifactImport"],
@@ -302,9 +313,9 @@ const checkedCommandNounCapabilities = [
   },
   {
     bundles: ["artifactImport", "batchInspection"],
-    capabilities: ["add", "import-csv", "show", "list", "batch-show", "batch-list"],
+    capabilities: ["add", "import-json", "import-csv", "show", "list", "batch-show", "batch-list"],
     noun: "samples",
-    additionalCapabilities: ["add", "import-csv"],
+    additionalCapabilities: ["add", "import-json", "import-csv"],
   },
   {
     bundles: ["lifecycle"],
@@ -370,8 +381,9 @@ const checkedCommandNounCapabilities = [
   },
   {
     bundles: ["payloadCrud"],
-    capabilities: ["scaffold", "show", "list", "upsert"],
+    capabilities: ["scaffold", "save", "show", "list", "import-json"],
     noun: "automation",
+    additionalCapabilities: ["save"],
   },
   {
     bundles: ["deviceControl"],

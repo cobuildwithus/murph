@@ -133,7 +133,7 @@ test('food save schema exposes typed parity fields without requiring raw input',
   }
 })
 
-test('food save payload builder maps every raw food upsert payload field', () => {
+test('food save payload builder maps every raw food import-json payload field', () => {
   const payload = buildFoodSavePayload({
     alias: ['usual acai bowl'],
     attachedRegimenId: ['reg_01234567890123456789012345'],
