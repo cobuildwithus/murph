@@ -1,9 +1,17 @@
+import path from 'node:path'
 import { Cli, z } from 'incur'
-import { eventSourceSchema } from '@murphai/contracts'
+import {
+  eventSourceSchema,
+  type WorkoutFormatUpsertPayload,
+  type WorkoutSession,
+  workoutFormatUpsertPayloadSchema,
+  workoutSessionSchema,
+} from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
+  normalizeRepeatableFlagOption,
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -58,6 +66,355 @@ import {
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
+const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
+
+interface WorkoutAddExerciseDraft {
+  groupId?: string
+  mode?: string
+  name: string
+  note?: string
+  order: number
+  sets: Array<Record<string, unknown>>
+  sourceExerciseId?: string
+  unitOverride?: string
+}
+
+interface WorkoutAddTypedOptions {
+  note?: string
+  workoutEndedAt?: string
+  workoutExercise?: string[]
+  workoutMedia?: string[]
+  workoutRoutineId?: string
+  workoutRoutineName?: string
+  workoutSessionNote?: string
+  workoutSet?: string[]
+  workoutSourceApp?: string
+  workoutSourceWorkoutId?: string
+  workoutStartedAt?: string
+}
+
+const workoutAddSessionOptionKeys = [
+  'workoutSourceApp',
+  'workoutSourceWorkoutId',
+  'workoutStartedAt',
+  'workoutEndedAt',
+  'workoutRoutineId',
+  'workoutRoutineName',
+  'workoutSessionNote',
+  'workoutMedia',
+  'workoutExercise',
+  'workoutSet',
+] as const satisfies ReadonlyArray<keyof WorkoutAddTypedOptions>
+
+const workoutAddMediaFields = new Set([
+  'kind',
+  'relativePath',
+  'mediaType',
+  'caption',
+])
+
+const workoutAddExerciseFields = new Set([
+  'name',
+  'order',
+  'sourceExerciseId',
+  'groupId',
+  'mode',
+  'unitOverride',
+  'note',
+])
+
+const workoutAddSetFields = new Set([
+  'exercise',
+  'order',
+  'type',
+  'weightUnit',
+  'reps',
+  'weight',
+  'durationSeconds',
+  'distanceMeters',
+  'rpe',
+  'bodyweightKg',
+  'assistanceKg',
+  'addedWeightKg',
+])
+
+function invalidWorkoutAddOption(message: string): never {
+  throw new VaultCliError('invalid_option', message)
+}
+
+function parseCompactWorkoutFields(spec: string, optionName: string): Map<string, string> {
+  const fields = new Map<string, string>()
+
+  for (const rawPart of spec.split(';')) {
+    const part = rawPart.trim()
+    if (part.length === 0) continue
+
+    const separatorIndex = part.indexOf('=')
+    const key = part.slice(0, separatorIndex).trim()
+    const value = part.slice(separatorIndex + 1).trim()
+
+    if (
+      separatorIndex <= 0
+      || key.length === 0
+      || value.length === 0
+    ) {
+      invalidWorkoutAddOption(`Each --${optionName} entry must use key=value fields.`)
+    }
+
+    if (fields.has(key)) {
+      invalidWorkoutAddOption(`Duplicate --${optionName} field "${key}".`)
+    }
+    fields.set(key, value)
+  }
+
+  return fields
+}
+
+function rejectUnknownCompactWorkoutFields(
+  fields: ReadonlyMap<string, string>,
+  supportedFields: ReadonlySet<string>,
+  optionName: string,
+) {
+  for (const key of fields.keys()) {
+    if (!supportedFields.has(key)) {
+      invalidWorkoutAddOption(`Unsupported --${optionName} field "${key}".`)
+    }
+  }
+}
+
+function requireCompactWorkoutString(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): string {
+  const value = fields.get(key)
+  if (value === undefined) {
+    invalidWorkoutAddOption(`--${optionName} requires ${key}=...`)
+  }
+  return value
+}
+
+function compactWorkoutNumber(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): number | undefined {
+  const rawValue = fields.get(key)
+  if (rawValue === undefined) return undefined
+
+  const value = Number(rawValue)
+  if (!Number.isFinite(value)) {
+    invalidWorkoutAddOption(`--${optionName} field ${key} must be a finite number.`)
+  }
+  return value
+}
+
+function compactWorkoutInteger(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): number | undefined {
+  const value = compactWorkoutNumber(fields, key, optionName)
+  if (value !== undefined && !Number.isInteger(value)) {
+    invalidWorkoutAddOption(`--${optionName} field ${key} must be an integer.`)
+  }
+  return value
+}
+
+function requireCompactWorkoutInteger(
+  fields: ReadonlyMap<string, string>,
+  key: string,
+  optionName: string,
+): number {
+  const value = compactWorkoutInteger(fields, key, optionName)
+  if (value === undefined) {
+    invalidWorkoutAddOption(`--${optionName} requires ${key}=...`)
+  }
+  return value
+}
+
+function normalizeWorkoutMediaRelativePath(relativePath: string): string {
+  const candidate = relativePath.trim().replace(/\\/gu, '/')
+  const normalized = path.posix.normalize(candidate)
+
+  if (
+    candidate.length === 0 ||
+    candidate !== normalized ||
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.startsWith('../') ||
+    normalized.includes('/../') ||
+    path.posix.isAbsolute(normalized) ||
+    /^[A-Za-z]:/u.test(normalized) ||
+    !normalized.startsWith('raw/workouts/')
+  ) {
+    invalidWorkoutAddOption(
+      '--workout-media relativePath must be a normalized raw/workouts/** vault-relative path.',
+    )
+  }
+
+  return normalized
+}
+
+function parseWorkoutAddMediaEntry(entry: string): Record<string, unknown> {
+  const fields = parseCompactWorkoutFields(entry, 'workout-media')
+  rejectUnknownCompactWorkoutFields(fields, workoutAddMediaFields, 'workout-media')
+  return {
+    kind: requireCompactWorkoutString(fields, 'kind', 'workout-media'),
+    relativePath: normalizeWorkoutMediaRelativePath(
+      requireCompactWorkoutString(fields, 'relativePath', 'workout-media'),
+    ),
+    ...(fields.has('mediaType') ? { mediaType: fields.get('mediaType') } : {}),
+    ...(fields.has('caption') ? { caption: fields.get('caption') } : {}),
+  }
+}
+
+function parseWorkoutAddExerciseEntry(entry: string): WorkoutAddExerciseDraft {
+  const fields = parseCompactWorkoutFields(entry, 'workout-exercise')
+  rejectUnknownCompactWorkoutFields(fields, workoutAddExerciseFields, 'workout-exercise')
+  return {
+    name: requireCompactWorkoutString(fields, 'name', 'workout-exercise'),
+    order: requireCompactWorkoutInteger(fields, 'order', 'workout-exercise'),
+    sets: [],
+    ...(fields.has('sourceExerciseId')
+      ? { sourceExerciseId: fields.get('sourceExerciseId') }
+      : {}),
+    ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
+    ...(fields.has('mode') ? { mode: fields.get('mode') } : {}),
+    ...(fields.has('unitOverride') ? { unitOverride: fields.get('unitOverride') } : {}),
+    ...(fields.has('note') ? { note: fields.get('note') } : {}),
+  }
+}
+
+function parseWorkoutAddSetEntry(entry: string): {
+  exerciseOrder: number
+  set: Record<string, unknown>
+} {
+  const fields = parseCompactWorkoutFields(entry, 'workout-set')
+  rejectUnknownCompactWorkoutFields(fields, workoutAddSetFields, 'workout-set')
+  const exerciseOrder = requireCompactWorkoutInteger(fields, 'exercise', 'workout-set')
+  const set: Record<string, unknown> = {
+    order: requireCompactWorkoutInteger(fields, 'order', 'workout-set'),
+  }
+
+  for (const key of ['type', 'weightUnit']) {
+    if (fields.has(key)) {
+      set[key] = fields.get(key)
+    }
+  }
+
+  for (const key of [
+    'reps',
+    'weight',
+    'durationSeconds',
+    'distanceMeters',
+    'rpe',
+    'bodyweightKg',
+    'assistanceKg',
+    'addedWeightKg',
+  ]) {
+    const value = compactWorkoutNumber(fields, key, 'workout-set')
+    if (value !== undefined) {
+      set[key] = value
+    }
+  }
+
+  return {
+    exerciseOrder,
+    set,
+  }
+}
+
+function hasWorkoutSessionOptions(options: WorkoutAddTypedOptions): boolean {
+  return workoutAddSessionOptionKeys.some((key) => options[key] !== undefined)
+}
+
+function rejectWorkoutAddInputWithTypedSessionOptions(
+  options: WorkoutAddTypedOptions & { input?: unknown },
+) {
+  if (options.input === undefined) {
+    return
+  }
+
+  const unsupportedOptions = workoutAddSessionOptionKeys
+    .filter((key) => options[key] !== undefined)
+    .map((key) => `--${key.replace(/[A-Z]/gu, (match) => `-${match.toLowerCase()}`)}`)
+
+  if (unsupportedOptions.length > 0) {
+    invalidWorkoutAddOption(
+      `workout add cannot combine --input with ${unsupportedOptions.join(', ')}. Put those fields in the structured input payload or omit --input.`,
+    )
+  }
+}
+
+function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutSession | undefined {
+  if (!hasWorkoutSessionOptions(options)) {
+    return undefined
+  }
+
+  const workout: Record<string, unknown> = {
+    exercises: [],
+  }
+
+  if (options.workoutSourceApp !== undefined) workout.sourceApp = options.workoutSourceApp
+  if (options.workoutSourceWorkoutId !== undefined) {
+    workout.sourceWorkoutId = options.workoutSourceWorkoutId
+  }
+  if (options.workoutStartedAt !== undefined) workout.startedAt = options.workoutStartedAt
+  if (options.workoutEndedAt !== undefined) workout.endedAt = options.workoutEndedAt
+  if (options.workoutRoutineId !== undefined) workout.routineId = options.workoutRoutineId
+  if (options.workoutRoutineName !== undefined) workout.routineName = options.workoutRoutineName
+  if (options.workoutSessionNote !== undefined) workout.sessionNote = options.workoutSessionNote
+
+  const mediaEntries = normalizeRepeatableFlagOption(options.workoutMedia, 'workout-media')
+  if (mediaEntries) {
+    workout.media = mediaEntries.map(parseWorkoutAddMediaEntry)
+  }
+
+  const exercisesByOrder = new Map<number, WorkoutAddExerciseDraft>()
+  const exerciseEntries = normalizeRepeatableFlagOption(
+    options.workoutExercise,
+    'workout-exercise',
+  )
+  for (const exercise of exerciseEntries?.map(parseWorkoutAddExerciseEntry) ?? []) {
+    if (exercisesByOrder.has(exercise.order)) {
+      invalidWorkoutAddOption(`Duplicate --workout-exercise order ${exercise.order}.`)
+    }
+    exercisesByOrder.set(exercise.order, exercise)
+  }
+
+  const setEntries = normalizeRepeatableFlagOption(options.workoutSet, 'workout-set')
+  for (const { exerciseOrder, set } of setEntries?.map(parseWorkoutAddSetEntry) ?? []) {
+    const exercise = exercisesByOrder.get(exerciseOrder)
+    if (!exercise) {
+      invalidWorkoutAddOption(
+        `--workout-set references exercise ${exerciseOrder}, but no matching --workout-exercise was provided.`,
+      )
+    }
+    exercise.sets.push(set)
+  }
+
+  workout.exercises = [...exercisesByOrder.values()].sort(
+    (left, right) => left.order - right.order,
+  )
+
+  const parsed = workoutSessionSchema.safeParse(workout)
+  if (!parsed.success) {
+    throw new VaultCliError('invalid_option', 'Invalid workout session fields.', {
+      issues: parsed.error.issues,
+    })
+  }
+
+  return parsed.data
+}
+
+function resolveWorkoutAddText(argsText: string | undefined, optionNote: string | undefined): string | undefined {
+  if (argsText !== undefined && optionNote !== undefined) {
+    invalidWorkoutAddOption('Pass either positional workout text or --note, not both.')
+  }
+  return argsText ?? optionNote
+}
+
 export function registerWorkoutCommands(
   cli: Cli.Cli,
   _services: VaultServices,
@@ -69,7 +426,7 @@ export function registerWorkoutCommands(
 
   workout.command('add', {
     description:
-      'Record one workout either from a freeform note or from a structured JSON payload.',
+      'Record one workout from typed fields, freeform text, or an advanced structured JSON payload.',
     args: z.object({
       text: z
         .string()
@@ -98,13 +455,37 @@ export function registerWorkoutCommands(
           vault: './vault',
         },
       },
+      {
+        description: 'Capture a structured strength workout through typed flags.',
+        args: {},
+        options: {
+          vault: './vault',
+          note: 'Garage strength session.',
+          duration: 45,
+          type: 'strength-training',
+          workoutExercise: ['order=1;name=Bench press;mode=weight_reps'],
+          workoutSet: ['exercise=1;order=1;type=normal;reps=5;weight=185;weightUnit=lb'],
+        },
+      },
     ],
     hint:
-      'Use freeform text for lightweight logging, or omit the positional text and pass --input @workout.json to store a rich nested workout payload with exercises, sets, notes, grouping, and source metadata.',
+      'Use typed flags for one workout record. Keep --input @workout.json for bulk/import payloads or advanced nested fields outside the typed surface.',
     options: withBaseOptions({
       input: inputFileOptionSchema
         .optional()
-        .describe('Optional structured workout payload in @file.json form or - for stdin.'),
+        .describe('Optional advanced structured workout payload in @file.json form or - for stdin.'),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional workout note when omitting positional text.'),
+      title: z
+        .string()
+        .min(1)
+        .max(240)
+        .optional()
+        .describe('Optional explicit workout title.'),
       duration: z
         .number()
         .int()
@@ -140,16 +521,67 @@ export function registerWorkoutCommands(
         .array(pathSchema)
         .optional()
         .describe('Optional workout photo or video file paths to copy into raw/workouts/** and attach to the workout event.'),
+      workoutSourceApp: z
+        .string()
+        .regex(workoutSlugPattern)
+        .optional()
+        .describe('Optional workout-session source app slug.'),
+      workoutSourceWorkoutId: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe('Optional source workout id for the workout session.'),
+      workoutStartedAt: isoTimestampSchema
+        .optional()
+        .describe('Optional workout started-at timestamp.'),
+      workoutEndedAt: isoTimestampSchema
+        .optional()
+        .describe('Optional workout ended-at timestamp.'),
+      workoutRoutineId: z
+        .string()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe('Optional workout routine id.'),
+      workoutRoutineName: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Optional workout routine name.'),
+      workoutSessionNote: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional nested workout session note.'),
+      workoutMedia: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Stored workout media as kind=...;relativePath=... with optional mediaType/caption. Repeat --workout-media for multiple entries. Use --media for local file staging.'),
+      workoutExercise: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Repeat --workout-exercise for multiple exercises.'),
+      workoutSet: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Repeat --workout-set for multiple sets.'),
     }),
     output: workoutAddResultSchema,
     async run({ args, options }) {
+      const text = resolveWorkoutAddText(args.text, options.note)
+      rejectWorkoutAddInputWithTypedSessionOptions(options)
+      const inputFile =
+        typeof options.input === 'string'
+          ? normalizeInputFileOption(options.input)
+          : undefined
+      const workout = buildWorkoutFromTypedOptions(options)
       return addWorkoutRecord({
         vault: options.vault,
-        text: typeof args.text === 'string' ? args.text : undefined,
-        inputFile:
-          typeof options.input === 'string'
-            ? normalizeInputFileOption(options.input)
-            : undefined,
+        text,
+        inputFile,
         durationMinutes: options.duration,
         activityType:
           typeof options.type === 'string' ? options.type : undefined,
@@ -157,6 +589,7 @@ export function registerWorkoutCommands(
           typeof options.distanceKm === 'number'
             ? options.distanceKm
             : undefined,
+        title: typeof options.title === 'string' ? options.title : undefined,
         occurredAt: await normalizeOccurredAtOption({
           vault: options.vault,
           occurredAt:
@@ -168,6 +601,7 @@ export function registerWorkoutCommands(
         mediaPaths: Array.isArray(options.media)
           ? options.media.filter((entry): entry is string => typeof entry === 'string')
           : undefined,
+        workout,
       })
     },
   })
@@ -371,6 +805,306 @@ export function registerWorkoutCommands(
     },
   })
 
+  interface WorkoutFormatExerciseDraft {
+    groupId?: string
+    mode?: string
+    name: string
+    note?: string
+    order: number
+    plannedSets: Array<Record<string, unknown>>
+    unitOverride?: string
+  }
+
+  interface WorkoutFormatTypedOptions {
+    workoutFormatId?: string
+    slug?: string
+    status?: 'active' | 'archived'
+    summary?: string
+    tag?: string[]
+    note?: string
+    templateText?: string
+    routineNote?: string
+    exercise?: string[]
+    setTemplate?: string[]
+    duration?: number
+    type?: string
+    distanceKm?: number
+  }
+
+  const workoutFormatPayloadOptionKeys = [
+    'workoutFormatId',
+    'slug',
+    'status',
+    'summary',
+    'tag',
+    'note',
+    'templateText',
+    'routineNote',
+    'exercise',
+    'setTemplate',
+  ] as const satisfies ReadonlyArray<keyof WorkoutFormatTypedOptions>
+
+  const workoutFormatExerciseFields = new Set([
+    'order',
+    'name',
+    'groupId',
+    'mode',
+    'unitOverride',
+    'note',
+  ])
+
+  const workoutFormatSetTemplateFields = new Set([
+    'exercise',
+    'order',
+    'type',
+    'targetReps',
+    'reps',
+    'targetWeight',
+    'weight',
+    'targetWeightUnit',
+    'weightUnit',
+    'targetDurationSeconds',
+    'durationSeconds',
+    'targetDistanceMeters',
+    'distanceMeters',
+    'targetRpe',
+    'rpe',
+  ])
+
+  function invalidWorkoutFormatOption(message: string): never {
+    throw new VaultCliError('invalid_option', message)
+  }
+
+  function rejectUnknownWorkoutFormatFields(
+    fields: ReadonlyMap<string, string>,
+    supportedFields: ReadonlySet<string>,
+    optionName: string,
+  ) {
+    try {
+      rejectUnknownCompactWorkoutFields(fields, supportedFields, optionName)
+    } catch (error) {
+      if (error instanceof VaultCliError) {
+        invalidWorkoutFormatOption(error.message)
+      }
+      throw error
+    }
+  }
+
+  function parseWorkoutFormatExerciseEntry(entry: string): WorkoutFormatExerciseDraft {
+    const fields = parseCompactWorkoutFields(entry, 'exercise')
+    rejectUnknownWorkoutFormatFields(fields, workoutFormatExerciseFields, 'exercise')
+    return {
+      name: requireCompactWorkoutString(fields, 'name', 'exercise'),
+      order: requireCompactWorkoutInteger(fields, 'order', 'exercise'),
+      plannedSets: [],
+      ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
+      ...(fields.has('mode') ? { mode: fields.get('mode') } : {}),
+      ...(fields.has('unitOverride') ? { unitOverride: fields.get('unitOverride') } : {}),
+      ...(fields.has('note') ? { note: fields.get('note') } : {}),
+    }
+  }
+
+  function readWorkoutFormatSetNumber(
+    fields: ReadonlyMap<string, string>,
+    primaryKey: string,
+    fallbackKey: string,
+    optionName: string,
+  ): number | undefined {
+    return compactWorkoutNumber(fields, primaryKey, optionName)
+      ?? compactWorkoutNumber(fields, fallbackKey, optionName)
+  }
+
+  function parseWorkoutFormatSetTemplateEntry(entry: string): {
+    exerciseOrder: number
+    set: Record<string, unknown>
+  } {
+    const fields = parseCompactWorkoutFields(entry, 'set-template')
+    rejectUnknownWorkoutFormatFields(
+      fields,
+      workoutFormatSetTemplateFields,
+      'set-template',
+    )
+    const exerciseOrder = requireCompactWorkoutInteger(fields, 'exercise', 'set-template')
+    const set: Record<string, unknown> = {
+      order: requireCompactWorkoutInteger(fields, 'order', 'set-template'),
+    }
+
+    if (fields.has('type')) set.type = fields.get('type')
+    if (fields.has('targetWeightUnit')) {
+      set.targetWeightUnit = fields.get('targetWeightUnit')
+    } else if (fields.has('weightUnit')) {
+      set.targetWeightUnit = fields.get('weightUnit')
+    }
+
+    const targetReps = readWorkoutFormatSetNumber(fields, 'targetReps', 'reps', 'set-template')
+    if (targetReps !== undefined) {
+      if (!Number.isInteger(targetReps)) {
+        invalidWorkoutFormatOption('--set-template field targetReps must be an integer.')
+      }
+      set.targetReps = targetReps
+    }
+
+    const targetDurationSeconds = readWorkoutFormatSetNumber(
+      fields,
+      'targetDurationSeconds',
+      'durationSeconds',
+      'set-template',
+    )
+    if (targetDurationSeconds !== undefined) {
+      if (!Number.isInteger(targetDurationSeconds)) {
+        invalidWorkoutFormatOption('--set-template field targetDurationSeconds must be an integer.')
+      }
+      set.targetDurationSeconds = targetDurationSeconds
+    }
+
+    for (const [outputKey, primaryKey, fallbackKey] of [
+      ['targetWeight', 'targetWeight', 'weight'],
+      ['targetDistanceMeters', 'targetDistanceMeters', 'distanceMeters'],
+      ['targetRpe', 'targetRpe', 'rpe'],
+    ] as const) {
+      const value = readWorkoutFormatSetNumber(fields, primaryKey, fallbackKey, 'set-template')
+      if (value !== undefined) {
+        set[outputKey] = value
+      }
+    }
+
+    return {
+      exerciseOrder,
+      set,
+    }
+  }
+
+  function hasWorkoutFormatTypedPayloadOptions(input: {
+    options: WorkoutFormatTypedOptions
+    text?: string
+  }): boolean {
+    const { options } = input
+    if (workoutFormatPayloadOptionKeys.some((key) => options[key] !== undefined)) {
+      return true
+    }
+
+    return input.text === undefined
+      && (options.duration !== undefined
+        || options.type !== undefined
+        || options.distanceKm !== undefined)
+  }
+
+  function rejectWorkoutFormatTypedOptionsWithInput(options: WorkoutFormatTypedOptions) {
+    const unsupportedOptions: string[] = []
+    for (const key of workoutFormatPayloadOptionKeys) {
+      const value = options[key]
+      if (Array.isArray(value) ? value.length > 0 : value !== undefined) {
+        unsupportedOptions.push(`--${key.replace(/[A-Z]/gu, (match) => `-${match.toLowerCase()}`)}`)
+      }
+    }
+
+    if (options.duration !== undefined) unsupportedOptions.push('--duration')
+    if (options.type !== undefined) unsupportedOptions.push('--type')
+    if (options.distanceKm !== undefined) unsupportedOptions.push('--distance-km')
+
+    if (unsupportedOptions.length > 0) {
+      invalidWorkoutFormatOption(
+        `workout format save cannot combine --input with ${unsupportedOptions.join(', ')}. Put those fields in the structured input payload or omit --input.`,
+      )
+    }
+  }
+
+  function formatWorkoutFormatSchemaIssues(
+    issues: readonly { path: PropertyKey[]; message: string }[],
+  ): string {
+    return issues
+      .map((issue) => {
+        const path = issue.path.length > 0 ? issue.path.join('.') : 'value'
+        return `${path}: ${issue.message}`
+      })
+      .join('; ')
+  }
+
+  function buildWorkoutFormatPayloadFromOptions(input: {
+    name?: string
+    text?: string
+    options: WorkoutFormatTypedOptions
+  }): WorkoutFormatUpsertPayload | undefined {
+    if (!hasWorkoutFormatTypedPayloadOptions({
+      options: input.options,
+      text: input.text,
+    })) {
+      return undefined
+    }
+
+    if (!input.name) {
+      invalidWorkoutFormatOption(
+        'Workout format name is required when typed workout-format fields are provided.',
+      )
+    }
+
+    if (input.text !== undefined && input.options.templateText !== undefined) {
+      invalidWorkoutFormatOption(
+        'Pass either positional workout text or --template-text, not both.',
+      )
+    }
+
+    const exercisesByOrder = new Map<number, WorkoutFormatExerciseDraft>()
+    const exerciseEntries = normalizeRepeatableFlagOption(input.options.exercise, 'exercise')
+    for (const exercise of exerciseEntries?.map(parseWorkoutFormatExerciseEntry) ?? []) {
+      if (exercisesByOrder.has(exercise.order)) {
+        invalidWorkoutFormatOption(`Duplicate --exercise order ${exercise.order}.`)
+      }
+      exercisesByOrder.set(exercise.order, exercise)
+    }
+
+    const setTemplateEntries = normalizeRepeatableFlagOption(
+      input.options.setTemplate,
+      'set-template',
+    )
+    for (const { exerciseOrder, set } of setTemplateEntries?.map(parseWorkoutFormatSetTemplateEntry) ?? []) {
+      const exercise = exercisesByOrder.get(exerciseOrder)
+      if (!exercise) {
+        invalidWorkoutFormatOption(
+          `--set-template references exercise ${exerciseOrder}, but no matching --exercise was provided.`,
+        )
+      }
+      exercise.plannedSets.push(set)
+    }
+
+    const tags = normalizeRepeatableFlagOption(input.options.tag, 'tag')
+    const candidate = {
+      ...(input.options.workoutFormatId ? { workoutFormatId: input.options.workoutFormatId } : {}),
+      ...(input.options.slug ? { slug: input.options.slug } : {}),
+      title: input.name,
+      status: input.options.status ?? 'active',
+      ...(input.options.summary ? { summary: input.options.summary } : {}),
+      activityType: input.options.type ?? 'strength-training',
+      ...(typeof input.options.duration === 'number'
+        ? { durationMinutes: input.options.duration }
+        : {}),
+      ...(typeof input.options.distanceKm === 'number'
+        ? { distanceKm: input.options.distanceKm }
+        : {}),
+      template: {
+        ...(input.options.routineNote ? { routineNote: input.options.routineNote } : {}),
+        exercises: [...exercisesByOrder.values()].sort(
+          (left, right) => left.order - right.order,
+        ),
+      },
+      ...(tags ? { tags } : {}),
+      ...(input.options.note ? { note: input.options.note } : {}),
+      ...(input.options.templateText ?? input.text
+        ? { templateText: input.options.templateText ?? input.text }
+        : {}),
+    }
+
+    const parsed = workoutFormatUpsertPayloadSchema.safeParse(candidate)
+    if (!parsed.success) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Workout format typed fields are invalid. ${formatWorkoutFormatSchemaIssues(parsed.error.issues)}`,
+      )
+    }
+
+    return parsed.data
+  }
+
   const format = Cli.create('format', {
     description:
       'Saved workout-format defaults that store structured routine templates in bank/workout-formats.',
@@ -419,6 +1153,56 @@ export function registerWorkoutCommands(
       input: inputFileOptionSchema
         .optional()
         .describe('Optional structured workout format payload in @file.json form or - for stdin.'),
+      workoutFormatId: z
+        .string()
+        .regex(/^wfmt_[0-9A-Za-z]+$/u)
+        .optional()
+        .describe('Optional stable workout-format id such as wfmt_<ULID>.'),
+      slug: z
+        .string()
+        .regex(workoutSlugPattern)
+        .optional()
+        .describe('Optional saved workout-format slug. Defaults from the name.'),
+      status: z
+        .enum(['active', 'archived'])
+        .optional()
+        .describe('Saved workout-format status.'),
+      summary: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional short description for the saved workout format.'),
+      tag: z
+        .array(z.string().regex(workoutSlugPattern))
+        .optional()
+        .describe('Optional workout-format tag slug. Repeat --tag for multiple tags.'),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional persistent note about the saved workout format.'),
+      templateText: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional saved workout text stored with the routine template.'),
+      routineNote: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional routine note copied into logged sessions from this format.'),
+      exercise: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Routine exercise as order=...;name=... with optional groupId/mode/unitOverride/note. Repeat --exercise for multiple exercises.'),
+      setTemplate: z
+        .array(z.string().min(1))
+        .optional()
+        .describe('Planned set as exercise=...;order=... plus optional type/targetReps/targetWeight/targetWeightUnit/targetDurationSeconds/targetDistanceMeters/targetRpe. Repeat --set-template for multiple sets.'),
       duration: z
         .number()
         .int()
@@ -451,6 +1235,16 @@ export function registerWorkoutCommands(
           : undefined
       const name = typeof args.name === 'string' ? args.name : undefined
       const text = typeof args.text === 'string' ? args.text : undefined
+      if (inputFile) {
+        rejectWorkoutFormatTypedOptionsWithInput(options)
+      }
+      const payload = inputFile
+        ? undefined
+        : buildWorkoutFormatPayloadFromOptions({
+            name,
+            text,
+            options,
+          })
 
       if (!inputFile) {
         if (!name) {
@@ -460,10 +1254,10 @@ export function registerWorkoutCommands(
           )
         }
 
-        if (!text) {
+        if (!text && !payload) {
           throw new VaultCliError(
             'contract_invalid',
-            'Workout format text is required when --input is not provided.',
+            'Workout format text is required when --input is not provided unless typed routine template fields are provided.',
           )
         }
       }
@@ -472,6 +1266,7 @@ export function registerWorkoutCommands(
         vault: options.vault,
         name,
         text,
+        payload,
         inputFile,
         durationMinutes: options.duration,
         activityType:

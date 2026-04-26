@@ -40,6 +40,7 @@ interface RegistryDocEntityGroupConfig<
     run(input: ListCommandContext): Promise<TList>
   }
   additionalCommands?: readonly AnyFactoryCommandConfig[]
+  includeLegacyJsonUpsert?: boolean
 }
 
 interface LedgerEventListCommandContext extends ListCommandContext {
@@ -76,6 +77,7 @@ interface LedgerEventEntityGroupConfig<
     run(input: LedgerEventListCommandContext): Promise<TList>
   }
   additionalCommands?: readonly AnyFactoryCommandConfig[]
+  includeLegacyJsonUpsert?: boolean
 }
 
 interface ArtifactListOptionNames {
@@ -154,7 +156,9 @@ export function createRegistryDocEntityGroup<
     description: config.description,
     commands: [
       config.scaffold,
-      createInputFileFactoryCommand('upsert', config.upsert),
+      ...(config.includeLegacyJsonUpsert === false
+        ? []
+        : [createInputFileFactoryCommand('upsert', config.upsert)]),
       createNamedArgFactoryCommand('show', config.show),
       createCommonListCommand({
         description: config.list.description,
@@ -218,7 +222,14 @@ export function createLedgerEventEntityGroup<
           })
         },
       },
-      createInputFileFactoryCommand('upsert', config.upsert),
+      createInputFileFactoryCommand('import-json', {
+        ...config.upsert,
+        description:
+          config.upsert.description.replace(/^Append one canonical event/u, 'Import one canonical event'),
+      }),
+      ...(config.includeLegacyJsonUpsert === false
+        ? []
+        : [createInputFileFactoryCommand('upsert', config.upsert)]),
       createNamedArgFactoryCommand('show', config.show),
       createCommonListCommand({
         description: config.list.description,

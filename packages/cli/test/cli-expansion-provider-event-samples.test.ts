@@ -115,8 +115,16 @@ test('provider, food, recipe, event, and samples schemas expose the new noun ent
       required?: string[]
     }
   }
-  const samplesSchema = JSON.parse(
+  const samplesAddSchema = JSON.parse(
     await runSliceCliRaw(['samples', 'add', '--schema']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+  const samplesImportJsonSchema = JSON.parse(
+    await runSliceCliRaw(['samples', 'import-json', '--schema']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -128,7 +136,18 @@ test('provider, food, recipe, event, and samples schemas expose the new noun ent
   assert.equal('input' in recipeSchema.options.properties, true)
   assert.equal('kind' in eventSchema.options.properties, true)
   assert.deepEqual(eventSchema.options.required, ['vault', 'kind'])
-  assert.equal('input' in samplesSchema.options.properties, true)
+  assert.equal('input' in samplesAddSchema.options.properties, false)
+  assert.equal('stream' in samplesAddSchema.options.properties, true)
+  assert.equal('recordedAt' in samplesAddSchema.options.properties, true)
+  assert.equal('value' in samplesAddSchema.options.properties, true)
+  assert.equal('stage' in samplesAddSchema.options.properties, true)
+  assert.deepEqual(samplesAddSchema.options.required, [
+    'vault',
+    'stream',
+    'unit',
+    'recordedAt',
+  ])
+  assert.equal('input' in samplesImportJsonSchema.options.properties, true)
 })
 
 test('provider, food, recipe, and event edit/delete schemas expose shared record mutation options', async () => {
@@ -934,7 +953,7 @@ test.sequential(
 )
 
 test.sequential(
-  'provider upsert/show/list, event upsert/show/list, and samples add work through the slice commands',
+  'provider upsert/show/list, event import-json/show/list, and samples add work through the slice commands',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-'))
     const providerPayloadPath = path.join(vaultRoot, 'provider.json')
@@ -1074,7 +1093,7 @@ test.sequential(
         ledgerFile: string
       }>([
         'event',
-        'upsert',
+        'import-json',
         '--input',
         `@${eventPayloadPath}`,
         '--vault',
@@ -1082,7 +1101,7 @@ test.sequential(
       ])
 
       assert.equal(eventUpsert.ok, true)
-      assert.equal(eventUpsert.meta?.command, 'event upsert')
+      assert.equal(eventUpsert.meta?.command, 'event import-json')
       assert.match(requireData(eventUpsert).eventId, /^evt_/u)
       assert.match(requireData(eventUpsert).ledgerFile, /^ledger\/events\//u)
 
@@ -1177,27 +1196,6 @@ test.sequential(
         /repeat the flag instead|comma-delimited values are not supported/iu,
       )
 
-      await writeFile(
-        samplesPayloadPath,
-        JSON.stringify({
-          stream: 'heart_rate',
-          unit: 'bpm',
-          source: 'manual',
-          quality: 'raw',
-          samples: [
-            {
-              recordedAt: '2026-03-12T08:00:00.000Z',
-              value: 61,
-            },
-            {
-              recordedAt: '2026-03-12T08:01:00.000Z',
-              value: 63,
-            },
-          ],
-        }),
-        'utf8',
-      )
-
       const samplesAdd = await runSliceCli<{
         stream: string
         source: string
@@ -1208,8 +1206,18 @@ test.sequential(
       }>([
         'samples',
         'add',
-        '--input',
-        `@${samplesPayloadPath}`,
+        '--stream',
+        'heart_rate',
+        '--unit',
+        'bpm',
+        '--recorded-at',
+        '2026-03-12T08:00:00.000Z',
+        '--value',
+        '61',
+        '--source',
+        'manual',
+        '--quality',
+        'raw',
         '--vault',
         vaultRoot,
       ])
@@ -1219,9 +1227,43 @@ test.sequential(
       assert.equal(requireData(samplesAdd).stream, 'heart_rate')
       assert.equal(requireData(samplesAdd).source, 'manual')
       assert.equal(requireData(samplesAdd).quality, 'raw')
-      assert.equal(requireData(samplesAdd).addedCount, 2)
-      assert.equal(requireData(samplesAdd).lookupIds.length, 2)
+      assert.equal(requireData(samplesAdd).addedCount, 1)
+      assert.equal(requireData(samplesAdd).lookupIds.length, 1)
       assert.equal(requireData(samplesAdd).ledgerFiles.length, 1)
+
+      await writeFile(
+        samplesPayloadPath,
+        JSON.stringify({
+          stream: 'heart_rate',
+          unit: 'bpm',
+          source: 'manual',
+          quality: 'raw',
+          samples: [
+            {
+              recordedAt: '2026-03-12T08:01:00.000Z',
+              value: 63,
+            },
+          ],
+        }),
+        'utf8',
+      )
+
+      const samplesImportJson = await runSliceCli<{
+        addedCount: number
+        lookupIds: string[]
+      }>([
+        'samples',
+        'import-json',
+        '--input',
+        `@${samplesPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(samplesImportJson.ok, true)
+      assert.equal(samplesImportJson.meta?.command, 'samples import-json')
+      assert.equal(requireData(samplesImportJson).addedCount, 1)
+      assert.equal(requireData(samplesImportJson).lookupIds.length, 1)
 
       const sampleShow = await runSliceCli<{
         entity: {
@@ -2118,7 +2160,7 @@ test.sequential(
       ])
       const eventUpsert = await runSliceCli<{ eventId: string }>([
         'event',
-        'upsert',
+        'import-json',
         '--input',
         `@${eventPayloadPath}`,
         '--vault',
@@ -2328,7 +2370,7 @@ test.sequential(
 
       const eventUpsert = await runSliceCli<{ eventId: string }>([
         'event',
-        'upsert',
+        'import-json',
         '--input',
         `@${eventPayloadPath}`,
         '--vault',

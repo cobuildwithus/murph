@@ -1,8 +1,15 @@
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { generateIncurConfigSchema, configSchemaPath, packageDir } from './incur-config-schema.js'
+import {
+  configSchemaPath,
+  generateIncurArtifacts,
+  incurGeneratedTypesPath,
+  packageDir,
+} from './incur-config-schema.js'
 
-const generatedConfigSchema = await generateIncurConfigSchema()
-await writeFile(configSchemaPath, generatedConfigSchema)
+const generatedArtifacts = await generateIncurArtifacts()
+await writeFile(configSchemaPath, generatedArtifacts.configSchema)
+await writeFile(incurGeneratedTypesPath, generatedArtifacts.types)
 
 console.log(path.relative(packageDir, configSchemaPath))
+console.log(path.relative(packageDir, incurGeneratedTypesPath))

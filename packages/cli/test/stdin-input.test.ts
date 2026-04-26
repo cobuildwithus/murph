@@ -5,7 +5,7 @@ import path from 'node:path'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
-test('payload-based commands accept stdin via --input -', async () => {
+test('explicit JSON import commands accept stdin via --input -', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
   try {
@@ -93,7 +93,7 @@ test('payload-based commands accept stdin via --input -', async () => {
       eventId: string
       ledgerFile: string
     }>(
-      ['event', 'upsert', '--input', '-', '--vault', vaultRoot],
+      ['event', 'import-json', '--input', '-', '--vault', vaultRoot],
       {
         stdin: JSON.stringify({
           kind: 'note',
@@ -112,7 +112,7 @@ test('payload-based commands accept stdin via --input -', async () => {
       addedCount: number
       lookupIds: string[]
     }>(
-      ['samples', 'add', '--input', '-', '--vault', vaultRoot],
+      ['samples', 'import-json', '--input', '-', '--vault', vaultRoot],
       {
         stdin: JSON.stringify({
           stream: 'heart_rate',
@@ -139,7 +139,9 @@ test('payload-based commands accept stdin via --input -', async () => {
       'create',
       'sleep-reset',
       '--title',
-      'Sleep Reset',
+      'Sleep Reset Sprint',
+      '--hypothesis',
+      'Earlier light exposure will improve sleep onset.',
       '--vault',
       vaultRoot,
     ])
@@ -149,32 +151,11 @@ test('payload-based commands accept stdin via --input -', async () => {
     const experimentId = requireData(createdExperiment).experimentId
     const experimentPath = requireData(createdExperiment).experimentPath
 
-    const experimentUpdate = await runCli<{
-      experimentId: string
-      experimentPath: string
-      updated: boolean
-    }>(
-      ['experiment', 'update', '--input', '-', '--vault', vaultRoot],
-      {
-        stdin: JSON.stringify({
-          lookup: experimentId,
-          title: 'Sleep Reset Sprint',
-          hypothesis: 'Earlier light exposure will improve sleep onset.',
-          status: 'active',
-          body: '# Sleep Reset Sprint\n\nTrack morning light and evening screens.\n',
-          tags: ['sleep-reset', 'light'],
-        }),
-      },
-    )
-
-    assert.equal(experimentUpdate.ok, true)
-    assert.equal(requireData(experimentUpdate).updated, true)
-
     const experimentCheckpoint = await runCli<{
       eventId: string
       experimentId: string
     }>(
-      ['experiment', 'checkpoint', '--input', '-', '--vault', vaultRoot],
+      ['experiment', 'checkpoint-json', '--input', '-', '--vault', vaultRoot],
       {
         stdin: JSON.stringify({
           lookup: experimentId,

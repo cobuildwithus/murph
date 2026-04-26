@@ -1,5 +1,7 @@
 import { Cli, z } from 'incur'
 import {
+  NUTRITION_CONFIDENCE_LEVELS,
+  NUTRITION_PROVENANCE_SOURCES,
   type EventSource,
   type MealNutrition,
   eventSourceSchema,
@@ -17,6 +19,7 @@ import {
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
+  normalizeRepeatableFlagOption,
 } from '@murphai/vault-usecases'
 import {
   deleteMealRecord,
@@ -41,6 +44,22 @@ const mealIngredientsSchema = z
   .array(z.string().trim().min(1).max(4000))
   .max(100)
   .optional()
+const nutritionProvenanceSourceSchema = z.enum(NUTRITION_PROVENANCE_SOURCES)
+const nutritionConfidenceLevelSchema = z.enum(NUTRITION_CONFIDENCE_LEVELS)
+
+type MealNutritionProvenanceSource = z.infer<typeof nutritionProvenanceSourceSchema>
+type MealNutritionConfidenceLevel = z.infer<typeof nutritionConfidenceLevelSchema>
+
+interface MealAddTypedNutritionOptions {
+  nutritionCalories?: number
+  nutritionProteinGrams?: number
+  nutritionCarbsGrams?: number
+  nutritionFatGrams?: number
+  nutritionFiberGrams?: number
+  nutritionSource?: MealNutritionProvenanceSource
+  nutritionConfidence?: MealNutritionConfidenceLevel
+  nutritionSourceDetail?: string
+}
 
 const mealInputPayloadSchema = z
   .object({
@@ -97,6 +116,111 @@ function hasMeaningfulMealNutrition(nutrition: MealNutrition | undefined): boole
   )
 }
 
+function stringArrayOption(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+
+  if (!value.every((entry): entry is string => typeof entry === 'string')) {
+    return undefined
+  }
+
+  return value
+}
+
+function numberOption(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined
+}
+
+function stringOption(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function nutritionSourceOption(
+  value: unknown,
+): MealNutritionProvenanceSource | undefined {
+  return typeof value === 'string'
+    ? nutritionProvenanceSourceSchema.parse(value)
+    : undefined
+}
+
+function nutritionConfidenceOption(
+  value: unknown,
+): MealNutritionConfidenceLevel | undefined {
+  return typeof value === 'string'
+    ? nutritionConfidenceLevelSchema.parse(value)
+    : undefined
+}
+
+function buildMealNutritionFromOptions(
+  payloadNutrition: MealNutrition | undefined,
+  options: MealAddTypedNutritionOptions,
+): MealNutrition | undefined {
+  const totals: NonNullable<MealNutrition['totals']> = {
+    ...(payloadNutrition?.totals ?? {}),
+  }
+  if (options.nutritionCalories !== undefined) {
+    totals.calories = options.nutritionCalories
+  }
+  if (options.nutritionProteinGrams !== undefined) {
+    totals.proteinGrams = options.nutritionProteinGrams
+  }
+  if (options.nutritionCarbsGrams !== undefined) {
+    totals.carbsGrams = options.nutritionCarbsGrams
+  }
+  if (options.nutritionFatGrams !== undefined) {
+    totals.fatGrams = options.nutritionFatGrams
+  }
+  if (options.nutritionFiberGrams !== undefined) {
+    totals.fiberGrams = options.nutritionFiberGrams
+  }
+
+  const provenanceSource =
+    options.nutritionSource ?? payloadNutrition?.provenance?.source
+  const provenanceConfidence =
+    options.nutritionConfidence ?? payloadNutrition?.provenance?.confidence
+  const provenanceSourceDetail =
+    options.nutritionSourceDetail ?? payloadNutrition?.provenance?.sourceDetail
+  const typedProvenanceProvided =
+    options.nutritionSource !== undefined ||
+    options.nutritionConfidence !== undefined ||
+    options.nutritionSourceDetail !== undefined
+  const hasTotals = Object.values(totals).some((value) => value !== undefined)
+  const hasProvenance =
+    provenanceSource !== undefined ||
+    provenanceConfidence !== undefined ||
+    provenanceSourceDetail !== undefined
+
+  if (typedProvenanceProvided && provenanceSource === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--nutrition-source is required when nutrition provenance options are provided.',
+    )
+  }
+
+  if (!hasTotals && !hasProvenance) {
+    return payloadNutrition
+  }
+
+  const nutrition: MealNutrition = {}
+  if (hasTotals) {
+    nutrition.totals = totals
+  }
+  if (hasProvenance && provenanceSource !== undefined) {
+    nutrition.provenance = {
+      source: provenanceSource,
+      ...(provenanceConfidence !== undefined
+        ? { confidence: provenanceConfidence }
+        : {}),
+      ...(provenanceSourceDetail !== undefined
+        ? { sourceDetail: provenanceSourceDetail }
+        : {}),
+    }
+  }
+
+  return mealNutritionSchema.parse(nutrition)
+}
+
 async function loadStructuredMealPayload(inputFile: string): Promise<StructuredMealPayload> {
   const payload = await loadJsonInputObject(inputFile, 'meal payload')
   const parsed = mealInputPayloadSchema.safeParse(payload)
@@ -138,7 +262,7 @@ function assertMealAddHasContent(input: {
 
   throw new VaultCliError(
     'invalid_option',
-    'Meal capture requires --photo, --audio, --note, or a structured --input payload with ingredients and/or nutrition.',
+    'Meal capture requires --photo, --audio, --note, --ingredient, nutrition options, or a structured --input payload with ingredients and/or nutrition.',
   )
 }
 
@@ -179,7 +303,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
     primaryAction: {
       name: 'add',
       description:
-        'Record one meal from simple media/text flags or a structured JSON payload.',
+        'Record one meal from typed media, ingredient, nutrition, and text fields, with JSON input reserved for advanced imports.',
       examples: [
         {
           description: 'Capture a simple meal note with one optional photo.',
@@ -191,16 +315,22 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           },
         },
         {
-          description: 'Store a structured meal payload from disk.',
+          description: 'Capture a meal with typed ingredients and nutrition.',
           args: {},
           options: {
-            input: '@meal.json',
+            ingredient: ['rolled oats', 'blueberries'],
+            nutritionCalories: 390,
+            nutritionProteinGrams: 15,
+            nutritionCarbsGrams: 56,
+            nutritionFatGrams: 11,
+            nutritionFiberGrams: 12,
+            nutritionSource: 'estimated',
             vault: './vault',
           },
         },
       ],
       hint:
-        'Keep using --photo, --audio, and --note for lightweight logs, or pass --input @meal.json when you need source, ingredients, and nutrition in one payload. Explicit flags override payload fields.',
+        'Keep using typed flags for ordinary single-meal logs. Use --input @meal.json or --input - when importing a structured payload; explicit flags override payload fields.',
       args: z.object({}),
       options: {
         input: inputFileOptionSchema
@@ -226,6 +356,46 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         source: eventSourceSchema
           .optional()
           .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+        ingredient: mealIngredientsSchema
+          .describe('Optional repeatable meal ingredient. Repeat --ingredient for each item.'),
+        nutritionCalories: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe('Optional meal calorie total.'),
+        nutritionProteinGrams: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe('Optional meal protein grams.'),
+        nutritionCarbsGrams: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe('Optional meal carbohydrate grams.'),
+        nutritionFatGrams: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe('Optional meal fat grams.'),
+        nutritionFiberGrams: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe('Optional meal fiber grams.'),
+        nutritionSource: nutritionProvenanceSourceSchema
+          .optional()
+          .describe('Optional meal nutrition provenance source.'),
+        nutritionConfidence: nutritionConfidenceLevelSchema
+          .optional()
+          .describe('Optional meal nutrition provenance confidence. Requires --nutrition-source.'),
+        nutritionSourceDetail: z
+          .string()
+          .trim()
+          .min(1)
+          .max(240)
+          .optional()
+          .describe('Optional meal nutrition provenance detail. Requires --nutrition-source.'),
       },
       output: mealAddResultSchema,
       async run({ options }) {
@@ -248,8 +418,23 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           typeof options.source === 'string'
             ? eventSourceSchema.parse(options.source)
             : payload?.source
-        const ingredients = payload?.ingredients
-        const nutrition = payload?.nutrition
+        const typedIngredients = normalizeRepeatableFlagOption(
+          stringArrayOption(options.ingredient),
+          'ingredient',
+        )
+        const ingredients = typedIngredients ?? payload?.ingredients
+        const nutrition = buildMealNutritionFromOptions(payload?.nutrition, {
+          nutritionCalories: numberOption(options.nutritionCalories),
+          nutritionProteinGrams: numberOption(options.nutritionProteinGrams),
+          nutritionCarbsGrams: numberOption(options.nutritionCarbsGrams),
+          nutritionFatGrams: numberOption(options.nutritionFatGrams),
+          nutritionFiberGrams: numberOption(options.nutritionFiberGrams),
+          nutritionSource: nutritionSourceOption(options.nutritionSource),
+          nutritionConfidence: nutritionConfidenceOption(
+            options.nutritionConfidence,
+          ),
+          nutritionSourceDetail: stringOption(options.nutritionSourceDetail),
+        })
 
         assertMealAddHasContent({
           photo: photoPath,
