@@ -83,12 +83,12 @@ export function createHealthCommonsCatalogReader(
       const keyCandidate = `${entityType}:${normalizedRouteId}`;
       const byKey = findByKey(keyCandidate);
       if (byKey) {
-        return byKey;
+        return byKey.entityType === entityType ? byKey : null;
       }
 
       const bySlug = this.findBySlug(normalizedRouteId);
       if (bySlug) {
-        return bySlug;
+        return bySlug.entityType === entityType ? bySlug : null;
       }
 
       const byTrailingSlug = (entitiesByTrailingSlug.get(normalizedRouteId) ?? []).filter(

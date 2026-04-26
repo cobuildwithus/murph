@@ -88,6 +88,38 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   for (const page of content.pages) {
     for (const relation of page.frontmatter.relations ?? []) {
       assertTargetExists(keys, relation.target, `${page.frontmatter.key} relation ${relation.type}`);
+      if (
+        relation.type === "primary_biomarker"
+        || relation.type === "secondary_biomarker"
+        || relation.type === "safety_outcome"
+      ) {
+        assertTargetEntityType(
+          pagesByKey,
+          relation.target,
+          "biomarker",
+          `${page.frontmatter.key} relation ${relation.type}`,
+        );
+      }
+      if (
+        relation.type === "default_measurement_method"
+        || relation.type === "optional_measurement_method"
+        || relation.type === "measurement_upgrade"
+      ) {
+        assertTargetEntityType(
+          pagesByKey,
+          relation.target,
+          "measurement_method",
+          `${page.frontmatter.key} relation ${relation.type}`,
+        );
+      }
+      if (relation.type === "measures" && page.frontmatter.entityType === "measurement_method") {
+        assertTargetEntityType(
+          pagesByKey,
+          relation.target,
+          "biomarker",
+          `${page.frontmatter.key} relation measures`,
+        );
+      }
     }
     for (const option of page.frontmatter.options ?? []) {
       assertTargetExists(keys, option.key, `${page.frontmatter.key} disambiguation option`);
@@ -119,8 +151,79 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
     }
     for (const plan of page.frontmatter.testPlans ?? []) {
       assertTargetExists(keys, plan.primaryBiomarkerKey, `${page.frontmatter.key} test plan ${plan.planId}`);
+      assertTargetEntityType(
+        pagesByKey,
+        plan.primaryBiomarkerKey,
+        "biomarker",
+        `${page.frontmatter.key} test plan ${plan.planId} primaryBiomarkerKey`,
+      );
       for (const biomarkerKey of plan.secondaryBiomarkerKeys ?? []) {
         assertTargetExists(keys, biomarkerKey, `${page.frontmatter.key} test plan ${plan.planId}`);
+        assertTargetEntityType(
+          pagesByKey,
+          biomarkerKey,
+          "biomarker",
+          `${page.frontmatter.key} test plan ${plan.planId} secondaryBiomarkerKeys`,
+        );
+      }
+      for (const safetyOutcomeKey of plan.safetyOutcomeKeys ?? []) {
+        assertTargetExists(keys, safetyOutcomeKey, `${page.frontmatter.key} test plan ${plan.planId}`);
+        assertTargetEntityType(
+          pagesByKey,
+          safetyOutcomeKey,
+          "biomarker",
+          `${page.frontmatter.key} test plan ${plan.planId} safetyOutcomeKeys`,
+        );
+      }
+    }
+    for (const measuredBiomarkerKey of page.frontmatter.measurementMethod?.measuredBiomarkerKeys ?? []) {
+      assertTargetExists(keys, measuredBiomarkerKey, `${page.frontmatter.key} measurementMethod.measuredBiomarkerKeys`);
+      assertTargetEntityType(
+        pagesByKey,
+        measuredBiomarkerKey,
+        "biomarker",
+        `${page.frontmatter.key} measurementMethod.measuredBiomarkerKeys`,
+      );
+    }
+    for (const output of page.frontmatter.measurementMethod?.outputs ?? []) {
+      if (!output.mapsToBiomarkerKey) {
+        continue;
+      }
+      assertTargetExists(keys, output.mapsToBiomarkerKey, `${page.frontmatter.key} measurementMethod output ${output.outputId}`);
+      assertTargetEntityType(
+        pagesByKey,
+        output.mapsToBiomarkerKey,
+        "biomarker",
+        `${page.frontmatter.key} measurementMethod output ${output.outputId}`,
+      );
+    }
+    for (const path of page.frontmatter.measurementPlan?.paths ?? []) {
+      for (const methodKey of path.methodKeys) {
+        assertTargetExists(keys, methodKey, `${page.frontmatter.key} measurementPlan path ${path.pathId} methodKeys`);
+        assertTargetEntityType(
+          pagesByKey,
+          methodKey,
+          "measurement_method",
+          `${page.frontmatter.key} measurementPlan path ${path.pathId} methodKeys`,
+        );
+      }
+      for (const outcomeKey of path.outcomeKeys ?? []) {
+        assertTargetExists(keys, outcomeKey, `${page.frontmatter.key} measurementPlan path ${path.pathId} outcomeKeys`);
+        assertTargetEntityType(
+          pagesByKey,
+          outcomeKey,
+          "biomarker",
+          `${page.frontmatter.key} measurementPlan path ${path.pathId} outcomeKeys`,
+        );
+      }
+      for (const safetyOutcomeKey of path.safetyOutcomeKeys ?? []) {
+        assertTargetExists(keys, safetyOutcomeKey, `${page.frontmatter.key} measurementPlan path ${path.pathId} safetyOutcomeKeys`);
+        assertTargetEntityType(
+          pagesByKey,
+          safetyOutcomeKey,
+          "biomarker",
+          `${page.frontmatter.key} measurementPlan path ${path.pathId} safetyOutcomeKeys`,
+        );
       }
     }
     const onboardingTestPlanId = page.frontmatter.experimentOnboarding?.planDefaults?.testPlanId;
@@ -286,6 +389,9 @@ function computeRevision(frontmatter: HealthCommonsPageFrontmatter, body: string
     protocol: frontmatter.protocol ?? null,
     safety: frontmatter.safety ?? null,
     testPlans: frontmatter.testPlans ?? [],
+    ...(frontmatter.measurementPlan === undefined
+      ? {}
+      : { measurementPlan: frontmatter.measurementPlan }),
     ...(frontmatter.experimentOnboarding === undefined
       ? {}
       : { experimentOnboarding: frontmatter.experimentOnboarding }),

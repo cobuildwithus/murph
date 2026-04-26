@@ -30,6 +30,7 @@ const commonsEntitySummarySchema = z.object({
   key: z.string().min(1),
   slug: z.string().min(1),
   entityType: z.enum(commonsEntityTypeValues),
+  entityTypeLabel: z.string().min(1),
   title: z.string().min(1),
   summary: z.string().min(1).nullable(),
   status: z.string().min(1).nullable(),
@@ -76,8 +77,29 @@ export const commonsProtocolShowResultSchema = z.object({
     body: z.string(),
     experimentOnboarding: z.unknown().nullable(),
     lineage: z.unknown().nullable(),
+    measurementPlan: z.unknown().nullable(),
     protocol: z.unknown().nullable(),
     safety: z.unknown().nullable(),
+    testPlans: z.array(z.unknown()),
+    whyItWorks: z.array(z.string().min(1)),
+  }),
+});
+
+export const commonsGetResultSchema = z.object({
+  catalogHash: z.string().min(1),
+  lookup: z.string().min(1),
+  entity: commonsEntitySummarySchema.extend({
+    aliases: z.array(z.string().min(1)),
+    attribution: z.unknown().nullable(),
+    biomarker: z.unknown().nullable(),
+    body: z.string(),
+    experimentOnboarding: z.unknown().nullable(),
+    lineage: z.unknown().nullable(),
+    measurementMethod: z.unknown().nullable(),
+    measurementPlan: z.unknown().nullable(),
+    protocol: z.unknown().nullable(),
+    safety: z.unknown().nullable(),
+    source: z.unknown().nullable(),
     testPlans: z.array(z.unknown()),
     whyItWorks: z.array(z.string().min(1)),
   }),
@@ -107,7 +129,6 @@ export const commonsSourceListResultSchema = z.object({
   sources: z.array(sourceSummarySchema),
 });
 
-type CommonsEntityType = (typeof commonsEntityTypeValues)[number];
 type SourceArtifactEntity = HealthCommonsCatalogEntity & {
   entityType: typeof sourceEntityType;
   source: NonNullable<HealthCommonsCatalogEntity["source"]>;
@@ -116,7 +137,7 @@ type SourceArtifactEntity = HealthCommonsCatalogEntity & {
 export function registerCommonsCommands(cli: Cli.Cli) {
   const commons = Cli.create("commons", {
     description:
-      "Read-only Health Commons commands for public protocol variants, source pages, and catalog search.",
+      "Read-only Health Commons commands for public protocols, biomarkers, sources, measurement methods, and catalog search.",
   });
 
   commons.command("search", {
@@ -201,6 +222,67 @@ export function registerCommonsCommands(cli: Cli.Cli) {
             score: Math.max(1, Math.round(hit.score)),
           };
         }),
+      };
+    },
+  });
+
+  commons.command("get", {
+    description:
+      "Show one public Health Commons entity by key, slug, or route id, including measurement-method and protocol measurement-plan fields when present.",
+    args: z.object({
+      key: z
+        .string()
+        .min(1)
+        .describe("Health Commons key, slug, or route id."),
+    }),
+    options: z.object({
+      type: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          `Optional Health Commons entity type disambiguator: ${commonsEntityTypeValues.join(", ")}.`,
+        ),
+    }),
+    examples: [
+      {
+        description: "Show a public protocol by route id.",
+        args: {
+          key: "finnish-sauna",
+        },
+      },
+      {
+        description: "Show a public measurement method by route id.",
+        args: {
+          key: "standardized-photo-score-workflow",
+        },
+        options: {
+          type: "measurement_method",
+        },
+      },
+    ],
+    hint:
+      "Measurement methods are separate Health Commons entities; do not treat them as biomarkers or outcome pages.",
+    output: commonsGetResultSchema,
+    async run({ args, options }) {
+      const reader = getGeneratedHealthCommonsCatalogReader();
+      const entityTypes = options.type ? normalizeEntityTypes([options.type]) : undefined;
+      const entity = findCommonsEntity(reader, args.key, entityTypes);
+
+      if (!entity) {
+        const typeSuffix = entityTypes && entityTypes.length > 0
+          ? ` with type ${entityTypes.join(", ")}`
+          : "";
+        throw new VaultCliError(
+          "commons_entity_not_found",
+          `No public Health Commons entity matched "${args.key}"${typeSuffix}.`,
+        );
+      }
+
+      return {
+        catalogHash: reader.catalogHash,
+        lookup: args.key,
+        entity: toEntityDetail(entity),
       };
     },
   });
@@ -295,7 +377,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     output: commonsProtocolShowResultSchema,
     async run({ args }) {
       const reader = getGeneratedHealthCommonsCatalogReader();
-      const entity = findCommonsEntity(reader, args.key);
+      const entity = findCommonsEntity(reader, args.key, [protocolEntityType]);
 
       if (!entity || !isProtocolEntity(entity)) {
         throw new VaultCliError(
@@ -314,6 +396,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
           body: entity.body,
           experimentOnboarding: entity.experimentOnboarding ?? null,
           lineage: entity.lineage ?? null,
+          measurementPlan: entity.measurementPlan ?? null,
           protocol: entity.protocol ?? null,
           safety: entity.safety ?? null,
           testPlans: entity.testPlans ?? [],
@@ -585,6 +668,7 @@ function toEntitySummary(entity: HealthCommonsCatalogEntity) {
     key: entity.key,
     slug: entity.slug,
     entityType: entity.entityType,
+    entityTypeLabel: describeCommonsEntityType(entity.entityType),
     title: entity.title,
     summary: entity.summary ?? null,
     status: entity.status ?? null,
@@ -595,6 +679,28 @@ function toEntitySummary(entity: HealthCommonsCatalogEntity) {
       recipeHash: entity.revision.recipeHash ?? null,
       runSpecRevisionId: entity.revision.runSpecRevisionId ?? null,
     },
+  };
+}
+
+function toEntityDetail(entity: HealthCommonsCatalogEntity) {
+  return {
+    ...toEntitySummary(entity),
+    aliases: entity.aliases ?? [],
+    attribution: entity.attribution ?? null,
+    biomarker: entity.biomarker ?? null,
+    body: entity.body,
+    experimentOnboarding: entity.experimentOnboarding ?? null,
+    lineage: entity.lineage ?? null,
+    measurementMethod: entity.measurementMethod ?? null,
+    measurementPlan:
+      entity.entityType === protocolEntityType
+        ? entity.measurementPlan ?? null
+        : null,
+    protocol: entity.protocol ?? null,
+    safety: entity.safety ?? null,
+    source: entity.source ?? null,
+    testPlans: entity.testPlans ?? [],
+    whyItWorks: entity.whyItWorks ?? [],
   };
 }
 
@@ -612,23 +718,29 @@ function toSourceSummary(entity: SourceArtifactEntity) {
   };
 }
 
-function queryMatchedCatalogEntities(
-  reader: HealthCommonsCatalogReader,
-  input: {
-    entityType: CommonsEntityType;
-    query?: string;
-  },
-): HealthCommonsCatalogEntity[] {
-  if (!input.query) {
-    return reader.listByEntityType(input.entityType);
+function describeCommonsEntityType(entityType: HealthCommonsEntityType): string {
+  switch (entityType) {
+    case "mission":
+      return "mission";
+    case "domain":
+      return "domain";
+    case "biomarker":
+      return "biomarker";
+    case "measurement_method":
+      return "measurement method";
+    case "goal_template":
+      return "goal template";
+    case "experiment_family":
+      return "experiment family";
+    case "protocol_variant":
+      return "protocol";
+    case "source_person":
+      return "source person";
+    case "source_artifact":
+      return "source";
+    case "disambiguation":
+      return "disambiguation";
   }
 
-  return reader
-    .search({
-      entityTypes: [input.entityType],
-      includeBody: true,
-      limit: 500,
-      query: input.query,
-    })
-    .map((hit) => requireCatalogEntity(reader, hit.entity.key));
+  return "entity";
 }

@@ -1,0 +1,242 @@
+import type {
+  HealthCommonsMeasurementMethod,
+  HealthCommonsMeasurementMethodBurden,
+  HealthCommonsMeasurementMethodFidelity,
+  HealthCommonsMeasurementMethodInterpretation,
+  HealthCommonsMeasurementMethodOutput,
+  HealthCommonsMeasurementMethodPrivacy,
+  HealthCommonsMeasurementMethodProcedure,
+  HealthCommonsMeasurementMethodTier,
+} from "@murphai/contracts";
+
+import {
+  healthCommonsCatalog,
+  type HealthCommonsCatalogReader,
+  type HealthCommonsEntity,
+} from "./catalog";
+
+const STATUS_LABELS: Record<string, string> = {
+  community: "Community",
+  deprecated: "Deprecated",
+  draft: "Draft",
+  "field-testing": "Field testing",
+  reviewed: "Reviewed",
+};
+
+const QUALITY_LABELS: Record<string, string> = {
+  excellent: "Excellent",
+  reviewed: "Reviewed",
+  stub: "Stub",
+  usable: "Usable",
+};
+
+export interface MeasurementMethodOutputModel {
+  direction?: HealthCommonsMeasurementMethodOutput["direction"];
+  label: string;
+  mapsToLabel?: string;
+  notes: string[];
+  unit?: string;
+  valueType: HealthCommonsMeasurementMethodOutput["valueType"];
+}
+
+export interface MeasurementMethodRelatedBiomarkerModel {
+  key: string;
+  title: string;
+}
+
+export interface MeasurementMethodPageModel {
+  aliases: string[];
+  body: string;
+  burden?: HealthCommonsMeasurementMethodBurden;
+  catalogHash: string;
+  categories: string[];
+  confounders: string[];
+  fidelity?: HealthCommonsMeasurementMethodFidelity;
+  interpretation?: HealthCommonsMeasurementMethodInterpretation;
+  key: string;
+  modalities: string[];
+  outputs: MeasurementMethodOutputModel[];
+  pageRevisionId: string;
+  privacy?: HealthCommonsMeasurementMethodPrivacy;
+  procedure: HealthCommonsMeasurementMethodProcedure;
+  qualityLabel: string;
+  relatedBiomarkers: MeasurementMethodRelatedBiomarkerModel[];
+  routeId: string;
+  shortName: string;
+  slug: string;
+  statusLabel: string;
+  summary: string;
+  tier: HealthCommonsMeasurementMethodTier;
+  title: string;
+}
+
+export function listHealthCommonsMeasurementMethodRoutes(
+  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+): string[] {
+  return catalog
+    .listByEntityType("measurement_method")
+    .filter(isPublishedMeasurementMethod)
+    .map((entity) => toMeasurementMethodRouteId(entity))
+    .sort();
+}
+
+export function resolveHealthCommonsMeasurementMethodDetail(
+  measurementMethodId: string,
+  catalog: HealthCommonsCatalogReader = healthCommonsCatalog,
+): MeasurementMethodPageModel | null {
+  const routeId = normalizeRouteId(measurementMethodId);
+  const method = catalog.findByRouteId({
+    entityType: "measurement_method",
+    routeId,
+  });
+
+  if (!isPublishedMeasurementMethod(method)) {
+    return null;
+  }
+
+  if (toMeasurementMethodRouteId(method) !== routeId) {
+    return null;
+  }
+
+  return toMeasurementMethodPageModel(method, catalog);
+}
+
+export function isPublishedMeasurementMethod(
+  entity: HealthCommonsEntity | null,
+): entity is HealthCommonsEntity & {
+  entityType: "measurement_method";
+  measurementMethod: HealthCommonsMeasurementMethod;
+} {
+  return entity?.entityType === "measurement_method"
+    && entity.status !== "deprecated"
+    && entity.measurementMethod !== undefined;
+}
+
+export function toMeasurementMethodRouteId(entity: HealthCommonsEntity): string {
+  return entity.slug.split("/").at(-1) ?? entity.slug;
+}
+
+function toMeasurementMethodPageModel(
+  entity: HealthCommonsEntity & {
+    entityType: "measurement_method";
+    measurementMethod: HealthCommonsMeasurementMethod;
+  },
+  catalog: HealthCommonsCatalogReader,
+): MeasurementMethodPageModel {
+  const method = entity.measurementMethod;
+
+  return {
+    aliases: entity.aliases ?? [],
+    body: entity.body,
+    ...(method.burden ? { burden: method.burden } : {}),
+    catalogHash: catalog.catalogHash,
+    categories: entity.categories ?? [],
+    confounders: method.confounders ?? [],
+    ...(method.fidelity ? { fidelity: method.fidelity } : {}),
+    ...(method.interpretation ? { interpretation: method.interpretation } : {}),
+    key: entity.key,
+    modalities: method.modalities.map(formatWords),
+    outputs: method.outputs.map((output) => toMeasurementMethodOutput(output, catalog)),
+    pageRevisionId: entity.revision.pageRevisionId,
+    ...(method.privacy ? { privacy: method.privacy } : {}),
+    procedure: method.procedure,
+    qualityLabel: formatQualityLabel(entity.quality),
+    relatedBiomarkers: resolveRelatedBiomarkers(method, catalog),
+    routeId: toMeasurementMethodRouteId(entity),
+    shortName: method.shortName ?? method.displayName ?? entity.aliases?.[0] ?? entity.title,
+    slug: entity.slug,
+    statusLabel: formatStatusLabel(entity.status),
+    summary: entity.summary ?? summarizeBody(entity.body),
+    tier: method.tier,
+    title: method.displayName ?? entity.title,
+  };
+}
+
+function toMeasurementMethodOutput(
+  output: HealthCommonsMeasurementMethodOutput,
+  catalog: HealthCommonsCatalogReader,
+): MeasurementMethodOutputModel {
+  return {
+    ...(output.direction ? { direction: output.direction } : {}),
+    label: output.label,
+    ...(output.mapsToBiomarkerKey
+      ? {
+          mapsToLabel: resolveBiomarkerTitle(output.mapsToBiomarkerKey, catalog),
+        }
+      : {}),
+    notes: output.notes ?? [],
+    ...(output.unit ? { unit: output.unit } : {}),
+    valueType: output.valueType,
+  };
+}
+
+function resolveRelatedBiomarkers(
+  method: HealthCommonsMeasurementMethod,
+  catalog: HealthCommonsCatalogReader,
+): MeasurementMethodRelatedBiomarkerModel[] {
+  const keys = uniqueStrings([
+    ...(method.measuredBiomarkerKeys ?? []),
+    ...method.outputs.flatMap((output) =>
+      output.mapsToBiomarkerKey ? [output.mapsToBiomarkerKey] : []
+    ),
+  ]);
+
+  return keys.map((key) => {
+    const entity = catalog.findByKey(key);
+
+    if (entity?.entityType !== "biomarker") {
+      throw new Error(
+        `Measurement method biomarker key ${key} did not resolve to a biomarker.`,
+      );
+    }
+
+    return { key: entity.key, title: entity.title };
+  });
+}
+
+function resolveBiomarkerTitle(
+  key: string,
+  catalog: HealthCommonsCatalogReader,
+): string {
+  const entity = catalog.findByKey(key);
+
+  if (entity?.entityType !== "biomarker") {
+    throw new Error(
+      `Measurement method output mapping ${key} did not resolve to a biomarker.`,
+    );
+  }
+
+  return entity.title;
+}
+
+function formatStatusLabel(status: string | undefined): string {
+  return status ? STATUS_LABELS[status] ?? formatWords(status) : "Draft";
+}
+
+function formatQualityLabel(quality: string | undefined): string {
+  return quality ? QUALITY_LABELS[quality] ?? formatWords(quality) : "Usable";
+}
+
+function formatWords(value: string): string {
+  return value
+    .split(/[-_\s/]+/u)
+    .filter((part) => part.length > 0)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function normalizeRouteId(value: string): string {
+  return decodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "");
+}
+
+function summarizeBody(body: string): string {
+  const firstParagraph = body.split(/\n\s*\n/u).find((paragraph) =>
+    paragraph.trim().length > 0
+  );
+
+  return firstParagraph?.replace(/\s+/gu, " ").trim() ?? "Measurement method.";
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}

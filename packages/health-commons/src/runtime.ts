@@ -6,6 +6,8 @@ import {
   type HealthCommonsCatalogEntity,
   type HealthCommonsEntityType,
   type HealthCommonsEvidenceAppraisal,
+  type HealthCommonsMeasurementMethod,
+  type HealthCommonsMeasurementPlan,
   type HealthCommonsProtocolSpec,
   type HealthCommonsRelation,
   type HealthCommonsRelationType,
@@ -41,6 +43,8 @@ export type HealthCommonsSearchMatchedField =
   | "categories"
   | "claims"
   | "key"
+  | "measurement_method"
+  | "measurement_plan"
   | "protocol"
   | "slug"
   | "source"
@@ -82,12 +86,18 @@ export interface HealthCommonsCompactResearchEvidence {
   populationLabel: string | null;
 }
 
+export type HealthCommonsCompactMeasurementMethod = HealthCommonsMeasurementMethod;
+
+export type HealthCommonsCompactMeasurementPlan = HealthCommonsMeasurementPlan;
+
 export interface HealthCommonsCompactEntity {
   aliases: readonly string[];
   categories: readonly string[];
   entityType: HealthCommonsEntityType;
   evidence: HealthCommonsCompactResearchEvidence | null;
   key: string;
+  measurementMethod: HealthCommonsCompactMeasurementMethod | null;
+  measurementPlan: HealthCommonsCompactMeasurementPlan | null;
   protocol: HealthCommonsCompactProtocol | null;
   quality: string | null;
   revision: HealthCommonsEntity["revision"];
@@ -201,6 +211,7 @@ export interface HealthCommonsCatalogReader {
   }): HealthCommonsEntity | null;
   findBySlug(slug: string): HealthCommonsEntity | null;
   listByEntityType(entityType: HealthCommonsEntityType): HealthCommonsEntity[];
+  listMeasurementMethods(options?: HealthCommonsEntityListOptions): HealthCommonsCompactEntity[];
   listProtocolVariants(options?: HealthCommonsEntityListOptions): HealthCommonsCompactEntity[];
   listRelated(input: {
     entity: HealthCommonsEntity;
@@ -490,7 +501,7 @@ export function createHealthCommonsCatalogReader(
       const keyCandidate = `${entityType}:${normalizedRouteId}`;
       const byKey = findByKey(keyCandidate);
       if (byKey) {
-        return byKey;
+        return byKey.entityType === entityType ? byKey : null;
       }
 
       const bySlug = findBySlug(normalizedRouteId);
@@ -507,6 +518,9 @@ export function createHealthCommonsCatalogReader(
     findBySlug,
     listByEntityType(entityType: HealthCommonsEntityType) {
       return entitiesByType.get(entityType)?.slice() ?? [];
+    },
+    listMeasurementMethods(options) {
+      return filterAndCompactList("measurement_method", options);
     },
     listProtocolVariants(options) {
       return filterAndCompactList("protocol_variant", options);
@@ -635,6 +649,8 @@ function toCompactEntity(
         }
       : null,
     key: entity.key,
+    measurementMethod: toCompactMeasurementMethod(entity),
+    measurementPlan: toCompactMeasurementPlan(entity),
     protocol: entity.protocol
       ? {
           cautionLevel: entity.safety?.cautionLevel ?? null,
@@ -671,12 +687,90 @@ function toCompactEntity(
 }
 
 function toRouteIds(entity: HealthCommonsEntity, redirectSources: readonly string[]): string[] {
+  const sameTypeRedirectSources = redirectSources.filter(
+    (redirectSource) => entityTypePrefix(redirectSource) === entity.entityType,
+  );
   return uniqueStrings([
     toTrailingSlug(entity.slug),
     entity.slug,
     stripEntityTypePrefix(entity.key),
-    ...redirectSources.map(stripEntityTypePrefix),
+    ...sameTypeRedirectSources.map(stripEntityTypePrefix),
   ]);
+}
+
+function toCompactMeasurementMethod(
+  entity: HealthCommonsEntity,
+): HealthCommonsCompactMeasurementMethod | null {
+  const measurementMethod = entity.measurementMethod;
+  if (!measurementMethod) {
+    return null;
+  }
+
+  return {
+    ...measurementMethod,
+    burden: measurementMethod.burden ? { ...measurementMethod.burden } : undefined,
+    confounders: measurementMethod.confounders ? [...measurementMethod.confounders] : undefined,
+    fidelity: measurementMethod.fidelity
+      ? {
+          ...measurementMethod.fidelity,
+          calibration: measurementMethod.fidelity.calibration
+            ? [...measurementMethod.fidelity.calibration]
+            : undefined,
+          minimumRequirements: measurementMethod.fidelity.minimumRequirements
+            ? [...measurementMethod.fidelity.minimumRequirements]
+            : undefined,
+          repeatabilityRisks: measurementMethod.fidelity.repeatabilityRisks
+            ? [...measurementMethod.fidelity.repeatabilityRisks]
+            : undefined,
+        }
+      : undefined,
+    interpretation: measurementMethod.interpretation
+      ? { ...measurementMethod.interpretation }
+      : undefined,
+    measuredBiomarkerKeys: measurementMethod.measuredBiomarkerKeys
+      ? [...measurementMethod.measuredBiomarkerKeys]
+      : undefined,
+    modalities: [...measurementMethod.modalities],
+    outputs: measurementMethod.outputs.map((output) => ({
+      ...output,
+      notes: output.notes ? [...output.notes] : undefined,
+    })),
+    privacy: measurementMethod.privacy
+      ? {
+          ...measurementMethod.privacy,
+          notes: measurementMethod.privacy.notes ? [...measurementMethod.privacy.notes] : undefined,
+        }
+      : undefined,
+    procedure: {
+      ...measurementMethod.procedure,
+      materials: measurementMethod.procedure.materials
+        ? [...measurementMethod.procedure.materials]
+        : undefined,
+      schedule: measurementMethod.procedure.schedule
+        ? [...measurementMethod.procedure.schedule]
+        : undefined,
+      steps: [...measurementMethod.procedure.steps],
+    },
+  };
+}
+
+function toCompactMeasurementPlan(
+  entity: HealthCommonsEntity,
+): HealthCommonsCompactMeasurementPlan | null {
+  if (!entity.measurementPlan) {
+    return null;
+  }
+
+  return {
+    ...entity.measurementPlan,
+    paths: entity.measurementPlan.paths.map((path) => ({
+      ...path,
+      methodKeys: [...path.methodKeys],
+      notes: path.notes ? [...path.notes] : undefined,
+      outcomeKeys: path.outcomeKeys ? [...path.outcomeKeys] : undefined,
+      safetyOutcomeKeys: path.safetyOutcomeKeys ? [...path.safetyOutcomeKeys] : undefined,
+    })),
+  };
 }
 
 function matchesCategories(
@@ -750,6 +844,22 @@ function buildSearchFields(
     });
   }
 
+  const measurementMethod = toCompactMeasurementMethod(entity);
+  if (measurementMethod) {
+    fields.push({
+      field: "measurement_method",
+      value: collectSearchableUnknownValues(measurementMethod).join(" "),
+    });
+  }
+
+  const measurementPlan = toCompactMeasurementPlan(entity);
+  if (measurementPlan) {
+    fields.push({
+      field: "measurement_plan",
+      value: collectSearchableUnknownValues(measurementPlan).join(" "),
+    });
+  }
+
   if (entity.source) {
     fields.push({
       field: "source",
@@ -820,6 +930,8 @@ function searchFieldWeight(field: HealthCommonsSearchMatchedField): number {
       return 8;
     case "summary":
     case "protocol":
+    case "measurement_method":
+    case "measurement_plan":
     case "source":
       return 5;
     case "claims":
@@ -1026,6 +1138,12 @@ function stripEntityTypePrefix(key: string): string {
   return stripRevision(key).replace(/^[a-z_]+:/u, "");
 }
 
+function entityTypePrefix(key: string): string | null {
+  const baseKey = stripRevision(key);
+  const separatorIndex = baseKey.indexOf(":");
+  return separatorIndex > 0 ? baseKey.slice(0, separatorIndex) : null;
+}
+
 function toTrailingSlug(slug: string): string {
   return slug.split("/").at(-1) ?? slug;
 }
@@ -1069,6 +1187,48 @@ function tokenizeSearchQuery(normalizedQuery: string): string[] {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.filter(isNonEmptyString))];
+}
+
+function collectSearchableUnknownValues(value: unknown): string[] {
+  const values: string[] = [];
+  appendSearchableUnknownValues(value, values, 0);
+  return values;
+}
+
+function appendSearchableUnknownValues(value: unknown, values: string[], depth: number): void {
+  if (depth > 4) {
+    return;
+  }
+
+  if (typeof value === "string") {
+    values.push(value);
+    return;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    values.push(String(value));
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      appendSearchableUnknownValues(item, values, depth + 1);
+    }
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    values.push(key);
+    appendSearchableUnknownValues(nestedValue, values, depth + 1);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isNonEmptyString(value: string | null | undefined): value is string {

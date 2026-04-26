@@ -115,6 +115,8 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('vault-cli experiment apply-onboarding <id>')
     expect(prompt).toContain('vault-cli experiment apply-onboarding --schema --format json')
     expect(prompt).toContain('accepted scalar flags')
+    expect(prompt).toContain('set up the default/required measurement path first')
+    expect(prompt).toContain('Do not ask detailed ROI, color, texture, photo, or imaging fields by default')
     expect(prompt).not.toContain('scaffold and update the experiment record')
   })
 })

@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 
-import type { Experiment, ExperimentSignal } from "@/src/types/experiments";
+import type {
+  Experiment,
+  ExperimentMeasurementPath,
+  ExperimentSignal,
+} from "@/src/types/experiments";
 import { ExpectedSignalCard } from "./expected-signal-card";
 import { ExperimentProgress } from "./experiment-progress";
 import { ExpertCard } from "./expert-card";
@@ -14,6 +19,7 @@ interface ProtocolTabProps {
 export function ProtocolTab({ experiment }: ProtocolTabProps) {
   const {
     expectedSignals,
+    measurementPaths,
     protocolFacts,
     protocol,
     protocolTips,
@@ -60,6 +66,10 @@ export function ProtocolTab({ experiment }: ProtocolTabProps) {
           </div>
           <ExpectedSignalContextPills signals={contextSignals} />
         </section>
+      )}
+
+      {measurementPaths.length > 0 && (
+        <MeasurementPathsSection paths={measurementPaths} />
       )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
@@ -296,6 +306,177 @@ function ResearchLandscapeReadout({
       />
     </div>
   );
+}
+
+function MeasurementPathsSection({
+  paths,
+}: {
+  paths: readonly ExperimentMeasurementPath[];
+}) {
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex max-w-3xl flex-col gap-1.5">
+        <SectionLabel>Measurement paths</SectionLabel>
+        <h2 className="font-serif text-2xl/8 font-semibold text-foreground">
+          How this can be measured
+        </h2>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {paths.map((path) => (
+          <MeasurementPathCard key={path.pathId} path={path} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MeasurementPathCard({ path }: { path: ExperimentMeasurementPath }) {
+  const privacyNotes = getMeasurementPathPrivacyNotes(path);
+
+  return (
+    <article className="flex min-h-full flex-col gap-4 rounded-xl border border-secondary/25 bg-card/90 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1.5">
+          <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+            {formatMeasurementTierLabel(path.tier)}
+          </span>
+          <h3 className="text-sm/5 font-semibold text-foreground">
+            {path.label}
+          </h3>
+        </div>
+        <span className="shrink-0 rounded-full border border-border/70 bg-background/50 px-2.5 py-1 font-mono text-[10px]/3 uppercase tracking-[0.08em] text-muted-foreground">
+          {formatMeasurementPathBadge(path)}
+        </span>
+      </div>
+
+      {path.outcomeLabels.length > 0 && (
+        <p className="text-[13px]/5 text-muted-foreground">
+          Measures {formatList(path.outcomeLabels)}.
+        </p>
+      )}
+
+      {path.methods.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+            Method
+          </span>
+          <div className="flex flex-col gap-2">
+            {path.methods.map((method) => (
+              <div key={method.key} className="flex flex-col gap-1">
+                {method.href ? (
+                  <Link
+                    href={method.href}
+                    className="text-[13px]/5 font-semibold text-foreground underline-offset-4 hover:underline"
+                  >
+                    {method.shortName}
+                  </Link>
+                ) : (
+                  <span className="text-[13px]/5 font-semibold text-foreground">
+                    {method.shortName}
+                  </span>
+                )}
+                {method.modalities.length > 0 && (
+                  <span className="text-xs/4 text-muted-foreground">
+                    {formatList(method.modalities)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {path.safetyOutcomeLabels.length > 0 && (
+        <p className="text-xs/4 text-muted-foreground">
+          Safety context: {formatList(path.safetyOutcomeLabels)}.
+        </p>
+      )}
+
+      {privacyNotes.length > 0 && (
+        <div className="rounded-lg border border-border/70 bg-background/35 p-3">
+          <span className="font-mono text-[10px]/3 uppercase tracking-[0.08em] text-chart-5">
+            Photo privacy
+          </span>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {privacyNotes.map((note) => (
+              <li key={note} className="text-xs/4 text-muted-foreground">
+                {note}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {path.notes.length > 0 && (
+        <ul className="mt-auto flex flex-col gap-2 border-t border-border/60 pt-3">
+          {path.notes.slice(0, 2).map((note) => (
+            <li key={note} className="flex gap-2 text-xs/4 text-muted-foreground">
+              <span
+                aria-hidden="true"
+                className="mt-1.5 size-1.5 shrink-0 rounded-full bg-secondary"
+              />
+              <span>{note}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
+  );
+}
+
+function getMeasurementPathPrivacyNotes(path: ExperimentMeasurementPath): string[] {
+  const hasIdentifiableImages = path.methods.some((method) =>
+    method.privacy?.containsIdentifiableImages
+  );
+  const localOnlyRecommended = path.methods.some((method) =>
+    method.privacy?.localOnlyRecommended
+  );
+  return uniqueStrings([
+    hasIdentifiableImages ? "May include identifiable face or skin images." : null,
+    localOnlyRecommended
+      ? "Keep originals local and private unless you intentionally import or share them."
+      : null,
+    ...path.methods.flatMap((method) => method.privacy?.notes ?? []),
+  ]).slice(0, 4);
+}
+
+function formatMeasurementTierLabel(
+  tier: ExperimentMeasurementPath["tier"],
+): string {
+  switch (tier) {
+    case "default_home":
+      return "Default home";
+    case "optional_home":
+      return "Optional home";
+    case "consumer_device":
+      return "Consumer device";
+    case "clinic":
+      return "Clinic upgrade";
+    case "research":
+      return "Research";
+    case "reference":
+      return "Reference";
+  }
+}
+
+function formatMeasurementPathBadge(path: ExperimentMeasurementPath): string {
+  if (path.isDefault) {
+    return "Default";
+  }
+
+  return path.required ? "Required" : "Optional";
+}
+
+function formatList(values: readonly string[]): string {
+  if (values.length <= 2) {
+    return values.join(" and ");
+  }
+
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
+}
+
+function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 function ResearchReadoutCard({ label, text }: { label: string; text: string }) {

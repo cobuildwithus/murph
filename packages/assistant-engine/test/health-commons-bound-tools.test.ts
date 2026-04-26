@@ -30,7 +30,9 @@ describe('Health Commons bound assistant tools', () => {
     expect(JSON.stringify(searchResult)).toContain(FINNISH_DRY_SAUNA_KEY)
     expect(searchResult).toMatchObject({
       diagnostics: {
+        biomarkerCount: expect.any(Number),
         finnishDrySaunaPresent: 'Finnish Dry Sauna',
+        measurementMethodCount: expect.any(Number),
         protocolVariantCount: expect.any(Number),
         sourceArtifactCount: expect.any(Number),
       },
@@ -45,7 +47,9 @@ describe('Health Commons bound assistant tools', () => {
     expect(JSON.stringify(protocolResult)).toContain(FINNISH_DRY_SAUNA_KEY)
     expect(protocolResult).toMatchObject({
       diagnostics: {
+        biomarkerCount: expect.any(Number),
         finnishDrySaunaPresent: 'Finnish Dry Sauna',
+        measurementMethodCount: expect.any(Number),
         protocolVariantCount: expect.any(Number),
         sourceArtifactCount: expect.any(Number),
       },
@@ -113,6 +117,68 @@ describe('Health Commons bound assistant tools', () => {
     )
   })
 
+  it('keeps measurement methods separate from biomarkers in search and get shapes', async () => {
+    const tools = createHealthCommonsToolDefinitions()
+
+    const measurementMethodSearch = await executeTool(
+      tools,
+      'healthCommons.search',
+      {
+        entityTypes: ['measurement_method'],
+        limit: 5,
+        query: 'standardized photo',
+      },
+    )
+    expect(measurementMethodSearch).toMatchObject({
+      diagnostics: {
+        measurementMethodCount: expect.any(Number),
+      },
+      query: 'standardized photo',
+      results: expect.any(Array),
+    })
+    const searchResults = (
+      measurementMethodSearch as {
+        results: Array<{
+          entity: { entityType: string; entityTypeLabel: string; key: string }
+        }>
+      }
+    ).results
+    expect(
+      searchResults.every(
+        (result) =>
+          result.entity.entityType === 'measurement_method' &&
+          result.entity.entityTypeLabel === 'measurement method',
+      ),
+    ).toBe(true)
+    const firstMeasurementMethod = searchResults[0]
+    if (firstMeasurementMethod) {
+      const measurementMethod = await executeTool(tools, 'healthCommons.get', {
+        keyOrSlug: firstMeasurementMethod.entity.key,
+      })
+      expect(measurementMethod).toMatchObject({
+        entity: expect.objectContaining({
+          entityType: 'measurement_method',
+          entityTypeLabel: 'measurement method',
+          measurementMethod: expect.any(Object),
+          measurementPlan: null,
+        }),
+      })
+    }
+
+    const protocol = await executeTool(tools, 'healthCommons.get', {
+      keyOrSlug: FINNISH_DRY_SAUNA_KEY,
+      includeExperimentOnboarding: true,
+    })
+    expect(protocol).toMatchObject({
+      entity: expect.objectContaining({
+        entityType: 'protocol_variant',
+        entityTypeLabel: 'protocol',
+        measurementMethod: null,
+      }),
+    })
+    expect(protocol).toHaveProperty(['entity', 'measurementPlan'])
+  })
+
   it('rejects unknown non-wildcard protocol statuses instead of returning empty results', async () => {
     const tools = createHealthCommonsToolDefinitions()
 
@@ -141,8 +207,10 @@ async function executeTool(
 function expectHealthCommonsDiagnostics(result: unknown): void {
   expect(result).toMatchObject({
     diagnostics: {
+      biomarkerCount: expect.any(Number),
       catalogHash: expect.stringMatching(/^sha256:/u),
       finnishDrySaunaPresent: 'Finnish Dry Sauna',
+      measurementMethodCount: expect.any(Number),
       protocolVariantCount: expect.any(Number),
       sourceArtifactCount: expect.any(Number),
     },

@@ -98,7 +98,7 @@ export function createHealthCommonsToolDefinitions() {
     defineHealthCommonsTool({
       name: 'healthCommons.search',
       description:
-        'Search the public Health Commons source-backed reference corpus for protocols, biomarkers, sources, and related pages. Use this first for health improvement, protocol, and experiment discovery; these are not private vault protocol records.',
+        'Search the public Health Commons source-backed reference corpus for protocols, biomarkers, sources, measurement methods, and related pages. Use this first for health improvement, protocol, measurement-path, and experiment discovery; these are not private vault protocol records.',
       inputSchema: healthCommonsSearchInputSchema,
       inputExample: {
         query: 'sleep protocol',
@@ -109,7 +109,7 @@ export function createHealthCommonsToolDefinitions() {
     defineHealthCommonsTool({
       name: 'healthCommons.get',
       description:
-        'Get one public Health Commons entity by key, slug, or route id. Use this after search/list results when you need the exact source-backed protocol page, onboarding block, revision ids, relations, or sources.',
+        'Get one public Health Commons entity by key, slug, or route id. Use this after search/list results when you need the exact source-backed protocol page, biomarker, source, measurement method, onboarding block, revision ids, relations, or sources.',
       inputSchema: healthCommonsGetInputSchema,
       inputExample: {
         keyOrSlug: 'protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed',
@@ -121,7 +121,7 @@ export function createHealthCommonsToolDefinitions() {
     defineHealthCommonsTool({
       name: 'healthCommons.listProtocols',
       description:
-        'List public Health Commons protocol_variant records. Use this for protocol browsing before creating or adapting a private user experiment plan.',
+        'List public Health Commons protocol_variant records. Use this for protocol browsing before creating or adapting a private user experiment plan; measurement methods are separate Health Commons entities, not biomarkers or outcomes.',
       inputSchema: healthCommonsListProtocolsInputSchema,
       inputExample: {
         query: 'sauna',
@@ -224,6 +224,11 @@ async function getHealthCommonsEntity(input: HealthCommonsGetInput) {
         input.includeExperimentOnboarding === false
           ? null
           : entity.experimentOnboarding ?? null,
+      measurementMethod: entity.measurementMethod ?? null,
+      measurementPlan:
+        entity.entityType === 'protocol_variant'
+          ? entity.measurementPlan ?? null
+          : null,
     },
     relations: includeRelations
       ? reader.resolveRelations({ entity, limit: 12 }).map((relation) => ({
@@ -327,6 +332,8 @@ async function listHealthCommonsSources(input: HealthCommonsListSourcesInput) {
 function buildHealthCommonsDiagnostics(reader: HealthCommonsCatalogReader) {
   return {
     catalogHash: reader.catalogHash,
+    biomarkerCount: reader.listByEntityType('biomarker').length,
+    measurementMethodCount: reader.listByEntityType('measurement_method').length,
     protocolVariantCount: reader.listByEntityType('protocol_variant').length,
     sourceArtifactCount: reader.listByEntityType('source_artifact').length,
     finnishDrySaunaPresent:
@@ -371,45 +378,41 @@ function decorateCompactEntity(
 
   return {
     ...entity,
+    entityTypeLabel: describeHealthCommonsEntityType(entity.entityType),
     hasExperimentOnboarding: Boolean(resolvedFullEntity?.experimentOnboarding),
     sourceCount: reader.collectSourceKeys({ entity: resolvedFullEntity }).length,
   }
 }
 
-function normalizeCategorySet(
-  categories: readonly string[] | undefined,
-): ReadonlySet<string> {
-  return new Set((categories ?? []).map((category) => category.trim()).filter(Boolean))
+function describeHealthCommonsEntityType(entityType: HealthCommonsEntityType): string {
+  switch (entityType) {
+    case 'mission':
+      return 'mission'
+    case 'domain':
+      return 'domain'
+    case 'biomarker':
+      return 'biomarker'
+    case 'measurement_method':
+      return 'measurement method'
+    case 'goal_template':
+      return 'goal template'
+    case 'experiment_family':
+      return 'experiment family'
+    case 'protocol_variant':
+      return 'protocol'
+    case 'source_person':
+      return 'source person'
+    case 'source_artifact':
+      return 'source'
+    case 'disambiguation':
+      return 'disambiguation'
+  }
+
+  return 'entity'
 }
 
 function normalizeLimit(value: number | undefined): number {
   return Math.min(value ?? healthCommonsDefaultLimit, healthCommonsMaxLimit)
-}
-
-function listHealthCommonsEntities(
-  reader: HealthCommonsCatalogReader,
-  input: {
-    categories?: readonly string[]
-    entityType: HealthCommonsEntityType
-    query?: string
-  },
-): HealthCommonsEntity[] {
-  if (input.query || (input.categories?.length ?? 0) > 0) {
-    return reader
-      .search({
-        categories: input.categories,
-        entityTypes: [input.entityType],
-        limit: 500,
-        query: input.query,
-      })
-      .map((result) => reader.findByKey(result.entity.key))
-      .filter(
-        (entity): entity is HealthCommonsEntity =>
-          entity !== null && entity.entityType === input.entityType,
-      )
-  }
-
-  return reader.listByEntityType(input.entityType)
 }
 
 function truncateText(text: string, maxChars: number) {

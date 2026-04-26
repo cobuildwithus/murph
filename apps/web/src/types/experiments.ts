@@ -1,4 +1,7 @@
-import type { HealthCommonsExperimentOnboarding } from "@murphai/contracts";
+import type {
+  HealthCommonsExperimentOnboarding,
+  HealthCommonsMeasurementMethodTier,
+} from "@murphai/contracts";
 
 export type ExperimentStatus = "active" | "paused" | "finished" | "stopped" | "upcoming";
 
@@ -112,6 +115,35 @@ export interface ExperimentProtocolFact {
   detail?: string;
 }
 
+export interface ExperimentMeasurementMethodReference {
+  href?: string;
+  key: string;
+  modalities: string[];
+  privacy?: {
+    containsIdentifiableImages?: boolean;
+    localOnlyRecommended?: boolean;
+    notes: string[];
+  };
+  routeId?: string;
+  shortName: string;
+  summary?: string;
+  tier: HealthCommonsMeasurementMethodTier;
+  title: string;
+}
+
+export interface ExperimentMeasurementPath {
+  isDefault: boolean;
+  label: string;
+  methodKeys: string[];
+  methods: ExperimentMeasurementMethodReference[];
+  notes: string[];
+  outcomeLabels: string[];
+  pathId: string;
+  required: boolean;
+  safetyOutcomeLabels: string[];
+  tier: HealthCommonsMeasurementMethodTier;
+}
+
 export interface ExperimentResearchStat {
   label: string;
   value: string | number;
@@ -174,6 +206,7 @@ export interface ExperimentProtocol {
   evidenceLabel: string;
   description: string;
   expectedSignals: ExperimentSignal[];
+  measurementPaths: ExperimentMeasurementPath[];
   protocolFacts: ExperimentProtocolFact[];
   protocol: ExperimentProtocolStep[];
   protocolTips: string[];
