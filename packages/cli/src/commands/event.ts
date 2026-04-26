@@ -317,6 +317,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
+    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one canonical event by event id.',
       argName: 'id',

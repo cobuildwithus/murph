@@ -34,7 +34,7 @@ declare module 'incur' {
       'blood-test scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'blood-test show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'blood-test upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
-      'capture add': { args: {}; options: { vault: string; requestId?: string; input?: string; media?: string[]; label?: string; bodySite?: string; collection?: string; tag?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
+      'capture add': { args: {}; options: { vault: string; requestId?: string; input?: string; media?: string[]; label?: string; bodySite?: string; collection?: string; tag?: string[]; relatedId?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; timeZone?: string } }
       'capture list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; tag?: string[]; limit: number; label?: string; bodySite?: string; collection?: string } }
       'capture manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'capture show': { args: { id: string }; options: { vault: string; requestId?: string } }
@@ -182,14 +182,14 @@ declare module 'incur' {
       'knowledge show': { args: { slug: string }; options: { vault: string; requestId?: string } }
       'knowledge upsert': { args: {}; options: { vault: string; requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }
       'list': { args: {}; options: { vault: string; requestId?: string; recordType?: string[]; kind?: string; status?: string; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
-      'meal add': { args: {}; options: { vault: string; requestId?: string; input?: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
+      'meal add': { args: {}; options: { vault: string; requestId?: string; input?: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string } }
       'meal delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'meal list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'meal manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal totals': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
-      'measurement add': { args: {}; options: { vault: string; requestId?: string; input?: string; metric?: string; value?: number; unit?: string; qualifier?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
+      'measurement add': { args: {}; options: { vault: string; requestId?: string; input?: string; metric?: string[]; value?: number[]; unit?: string[]; qualifier?: string[]; measurementNote?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; tag?: string[]; timeZone?: string } }
       'measurement list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'measurement manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'measurement show': { args: { id: string }; options: { vault: string; requestId?: string } }
@@ -271,12 +271,12 @@ declare module 'incur' {
       'wearables recovery list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sources list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
-      'workout add': { args: { text?: string }; options: { vault: string; requestId?: string; input?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
+      'workout add': { args: { text?: string }; options: { vault: string; requestId?: string; input?: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; workoutSourceApp?: string; workoutSourceWorkoutId?: string; workoutStartedAt?: string; workoutEndedAt?: string; workoutRoutineId?: string; workoutRoutineName?: string; workoutSessionNote?: string; workoutMedia?: string[]; workoutExercise?: string[]; workoutSet?: string[] } }
       'workout delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'workout format list': { args: {}; options: { vault: string; requestId?: string; limit: number } }
       'workout format log': { args: { name: string }; options: { vault: string; requestId?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
-      'workout format save': { args: { name?: string; text?: string }; options: { vault: string; requestId?: string; input?: string; duration?: number; type?: string; distanceKm?: number } }
+      'workout format save': { args: { name?: string; text?: string }; options: { vault: string; requestId?: string; input?: string; workoutFormatId?: string; slug?: string; status?: "active" | "archived"; summary?: string; tag?: string[]; note?: string; templateText?: string; routineNote?: string; exercise?: string[]; setTemplate?: string[]; duration?: number; type?: string; distanceKm?: number } }
       'workout format show': { args: { name: string }; options: { vault: string; requestId?: string } }
       'workout import csv': { args: { file: string }; options: { vault: string; requestId?: string; source?: string; delimiter?: string; storeRawOnly?: boolean } }
       'workout import inspect': { args: { file: string }; options: { vault: string; requestId?: string; source?: string; delimiter?: string } }

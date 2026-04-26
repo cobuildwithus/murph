@@ -1,10 +1,21 @@
 import { Cli, z } from 'incur'
+import {
+  SAMPLE_QUALITIES,
+  SAMPLE_SOURCES,
+  SAMPLE_STREAMS,
+  SLEEP_STAGES,
+  type JsonObject,
+  type SampleStream,
+} from '@murphai/contracts'
 import { emptyArgsSchema, requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
 } from '@murphai/vault-usecases'
+import { addSampleRecords } from '@murphai/vault-usecases/records'
 import {
+  isoTimestampSchema,
   listItemSchema,
   localDateSchema,
   pathSchema,
@@ -32,6 +43,36 @@ const sampleIdSchema = z
 const batchIdSchema = z
   .string()
   .regex(/^xfm_[0-9A-Za-z]+$/u, 'Expected a transform batch id in xfm_* form.')
+
+const batchSourceFileNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .refine(isBatchSourceFileName, 'Expected a file name without path separators.')
+
+function isBatchSourceFileName(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 255 &&
+    !value.startsWith('~') &&
+    !/^[A-Za-z]:/u.test(value) &&
+    !/[\\/]/u.test(value)
+  )
+}
+
+function normalizeBatchSourceFileName(value: string): string {
+  const fileName = value.trim()
+
+  if (!isBatchSourceFileName(fileName)) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--batch-source-file-name must be a basename only; omit directories, home markers, and drive prefixes.',
+    )
+  }
+
+  return fileName
+}
 
 const sampleListItemSchema = listItemSchema.extend({
   quality: z.string().min(1).nullable(),
@@ -99,6 +140,279 @@ const sampleBatchListResultSchema = z.object({
   items: z.array(sampleBatchListItemSchema),
 })
 
+function requireNumericSampleValue(
+  stream: SampleStream,
+  value: number | undefined,
+): number {
+  if (value === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      `samples add requires --value for numeric stream "${stream}".`,
+    )
+  }
+
+  return value
+}
+
+function validateNoSleepStageFieldsForNumericSample(input: {
+  durationMinutes?: number
+  endAt?: string
+  stage?: string
+  startAt?: string
+}) {
+  if (
+    input.stage !== undefined ||
+    input.startAt !== undefined ||
+    input.endAt !== undefined ||
+    input.durationMinutes !== undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--stage, --start-at, --end-at, and --duration-minutes are only valid with --stream sleep_stage.',
+    )
+  }
+}
+
+function requireSleepStageFields(input: {
+  durationMinutes?: number
+  endAt?: string
+  stage?: string
+  startAt?: string
+  value?: number
+}): {
+  durationMinutes: number
+  endAt: string
+  stage: string
+  startAt: string
+} {
+  if (input.value !== undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'sleep_stage samples use --stage, --start-at, --end-at, and --duration-minutes; omit --value.',
+    )
+  }
+
+  const stage = input.stage
+  const startAt = input.startAt
+  const endAt = input.endAt
+  const durationMinutes = input.durationMinutes
+
+  if (
+    stage === undefined ||
+    startAt === undefined ||
+    endAt === undefined ||
+    durationMinutes === undefined
+  ) {
+    const missingFields = [
+      ['stage', stage],
+      ['start-at', startAt],
+      ['end-at', endAt],
+      ['duration-minutes', durationMinutes],
+    ]
+      .filter(([, value]) => value === undefined)
+      .map(([field]) => `--${field}`)
+
+    throw new VaultCliError(
+      'invalid_option',
+      `sleep_stage samples require ${missingFields.join(', ')}.`,
+    )
+  }
+
+  return {
+    stage,
+    startAt,
+    endAt,
+    durationMinutes,
+  }
+}
+
+function buildTypedSampleBatchProvenance(input: {
+  batchDelimiter?: string
+  batchMetadataColumns?: string[]
+  batchPresetId?: string
+  batchSourceFileName?: string
+  batchTimestampColumn?: string
+  batchValueColumn?: string
+  recordedAt: string
+  sourcePath?: string
+  stream: SampleStream
+  value?: number
+}): JsonObject | undefined {
+  const hasImportConfig =
+    input.batchDelimiter !== undefined ||
+    input.batchMetadataColumns !== undefined ||
+    input.batchPresetId !== undefined ||
+    input.batchTimestampColumn !== undefined ||
+    input.batchValueColumn !== undefined
+  const hasBatchProvenance =
+    input.batchSourceFileName !== undefined || hasImportConfig
+
+  if (!hasBatchProvenance) {
+    return undefined
+  }
+
+  if (input.sourcePath === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Typed sample batch provenance options require --source-path so the batch manifest is persisted.',
+    )
+  }
+
+  const batchProvenance: JsonObject = {}
+
+  if (input.batchSourceFileName !== undefined) {
+    batchProvenance.sourceFileName = normalizeBatchSourceFileName(
+      input.batchSourceFileName,
+    )
+  }
+
+  if (!hasImportConfig) {
+    return batchProvenance
+  }
+
+  if (input.stream === 'sleep_stage') {
+    throw new VaultCliError(
+      'invalid_option',
+      'Batch import-config provenance options are only valid for numeric sample streams.',
+    )
+  }
+
+  const batchDelimiter = input.batchDelimiter
+  const batchTimestampColumn = input.batchTimestampColumn
+  const batchValueColumn = input.batchValueColumn
+
+  if (
+    batchDelimiter === undefined ||
+    batchTimestampColumn === undefined ||
+    batchValueColumn === undefined
+  ) {
+    const missingImportConfigFields = [
+      ['--batch-delimiter', batchDelimiter],
+      ['--batch-timestamp-column', batchTimestampColumn],
+      ['--batch-value-column', batchValueColumn],
+    ]
+      .filter(([, value]) => value === undefined)
+      .map(([field]) => field)
+
+    throw new VaultCliError(
+      'invalid_option',
+      `Batch import-config provenance requires ${missingImportConfigFields.join(', ')}.`,
+    )
+  }
+
+  const numericValue = requireNumericSampleValue(input.stream, input.value)
+  const importConfig: JsonObject = {
+    delimiter: batchDelimiter,
+    tsColumn: batchTimestampColumn,
+    valueColumn: batchValueColumn,
+  }
+  const row: JsonObject = {
+    rowNumber: 1,
+    recordedAt: input.recordedAt,
+    value: numericValue,
+    rawRecordedAt: input.recordedAt,
+    rawValue: String(numericValue),
+  }
+
+  if (input.batchPresetId !== undefined) {
+    importConfig.presetId = input.batchPresetId
+  }
+  if (input.batchMetadataColumns !== undefined) {
+    importConfig.metadataColumns = input.batchMetadataColumns
+  }
+
+  batchProvenance.importConfig = importConfig
+  batchProvenance.rows = [row]
+
+  return batchProvenance
+}
+
+function applyTypedSampleProvenance(
+  payload: JsonObject,
+  input: {
+    batchDelimiter?: string
+    batchMetadataColumns?: string[]
+    batchPresetId?: string
+    batchSourceFileName?: string
+    batchTimestampColumn?: string
+    batchValueColumn?: string
+    recordedAt: string
+    sourcePath?: string
+    stream: SampleStream
+    value?: number
+  },
+): JsonObject {
+  if (input.sourcePath !== undefined) {
+    payload.sourcePath = input.sourcePath
+  }
+
+  const batchProvenance = buildTypedSampleBatchProvenance(input)
+  if (batchProvenance !== undefined) {
+    payload.batchProvenance = batchProvenance
+  }
+
+  return payload
+}
+
+function buildTypedSamplePayload(input: {
+  batchDelimiter?: string
+  batchMetadataColumns?: string[]
+  batchPresetId?: string
+  batchSourceFileName?: string
+  batchTimestampColumn?: string
+  batchValueColumn?: string
+  durationMinutes?: number
+  endAt?: string
+  quality: string
+  recordedAt: string
+  source: string
+  sourcePath?: string
+  stage?: string
+  startAt?: string
+  stream: SampleStream
+  unit: string
+  value?: number
+}): JsonObject {
+  if (input.stream === 'sleep_stage') {
+    const sleepStage = requireSleepStageFields(input)
+
+    return applyTypedSampleProvenance({
+      stream: input.stream,
+      unit: input.unit,
+      source: input.source,
+      quality: input.quality,
+      samples: [
+        {
+          recordedAt: input.recordedAt,
+          stage: sleepStage.stage,
+          startAt: sleepStage.startAt,
+          endAt: sleepStage.endAt,
+          durationMinutes: sleepStage.durationMinutes,
+        },
+      ],
+    }, input)
+  }
+
+  validateNoSleepStageFieldsForNumericSample(input)
+  const numericValue = requireNumericSampleValue(input.stream, input.value)
+
+  return applyTypedSampleProvenance({
+    stream: input.stream,
+    unit: input.unit,
+    source: input.source,
+    quality: input.quality,
+    samples: [
+      {
+        recordedAt: input.recordedAt,
+        value: numericValue,
+      },
+    ],
+  }, {
+    ...input,
+    value: numericValue,
+  })
+}
+
 export function registerSamplesCommands(
   cli: Cli.Cli,
   services: VaultServices,
@@ -110,10 +424,123 @@ export function registerSamplesCommands(
   samples.command(
     'add',
     {
-      description: 'Append one or more manually curated sample records from a JSON payload file or stdin.',
+      description: 'Append one manually curated sample record from typed command options.',
       args: emptyArgsSchema,
       options: withBaseOptions({
-        input: inputFileOptionSchema,
+        stream: z
+          .enum(SAMPLE_STREAMS)
+          .describe('Sample stream to record, such as heart_rate, glucose, steps, or sleep_stage.'),
+        unit: z
+          .string()
+          .min(1)
+          .describe('Sample unit. Numeric streams require their canonical unit; sleep_stage uses stage.'),
+        recordedAt: z
+          .string()
+          .pipe(isoTimestampSchema)
+          .describe('Sample timestamp in ISO 8601 form.'),
+        value: z
+          .number()
+          .optional()
+          .describe('Numeric value for non-sleep_stage streams.'),
+        source: z
+          .enum(SAMPLE_SOURCES)
+          .optional()
+          .describe('Sample source. Defaults to manual for direct entry.'),
+        quality: z
+          .enum(SAMPLE_QUALITIES)
+          .optional()
+          .describe('Sample quality marker. Defaults to raw.'),
+        sourcePath: pathSchema
+          .optional()
+          .describe('Optional original source artifact file path to store with a sample batch manifest.'),
+        batchSourceFileName: batchSourceFileNameSchema
+          .optional()
+          .describe('Optional original source file name to store in the sample batch manifest; requires --source-path.'),
+        batchPresetId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional import preset id to store in batch provenance; requires the batch import-config flags.'),
+        batchDelimiter: z
+          .string()
+          .length(1)
+          .optional()
+          .describe('Single-character delimiter to store in batch import-config provenance.'),
+        batchTimestampColumn: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Original timestamp column name to store in batch import-config provenance.'),
+        batchValueColumn: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Original numeric value column name to store in batch import-config provenance.'),
+        batchMetadataColumns: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Optional metadata column names to store in batch import-config provenance. Repeat --batch-metadata-columns for multiple values.',
+          ),
+        stage: z
+          .enum(SLEEP_STAGES)
+          .optional()
+          .describe('Sleep stage for --stream sleep_stage.'),
+        startAt: z
+          .string()
+          .pipe(isoTimestampSchema)
+          .optional()
+          .describe('Sleep-stage segment start timestamp in ISO 8601 form.'),
+        endAt: z
+          .string()
+          .pipe(isoTimestampSchema)
+          .optional()
+          .describe('Sleep-stage segment end timestamp in ISO 8601 form.'),
+        durationMinutes: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Sleep-stage segment duration in minutes.'),
+      }),
+      output: samplesAddResultSchema,
+      async run({ options }) {
+        return addSampleRecords({
+          vault: options.vault,
+          payload: buildTypedSamplePayload({
+            batchDelimiter: options.batchDelimiter,
+            batchMetadataColumns: normalizeRepeatableFlagOption(
+              options.batchMetadataColumns,
+              'batch-metadata-columns',
+            ),
+            batchPresetId: options.batchPresetId,
+            batchSourceFileName: options.batchSourceFileName,
+            batchTimestampColumn: options.batchTimestampColumn,
+            batchValueColumn: options.batchValueColumn,
+            durationMinutes: options.durationMinutes,
+            endAt: options.endAt,
+            quality: options.quality ?? 'raw',
+            recordedAt: options.recordedAt,
+            source: options.source ?? 'manual',
+            sourcePath: options.sourcePath,
+            stage: options.stage,
+            startAt: options.startAt,
+            stream: options.stream,
+            unit: options.unit,
+            value: options.value,
+          }),
+        })
+      },
+    },
+  )
+
+  samples.command(
+    'import-json',
+    {
+      description: 'Import one or more sample records from an explicit JSON payload file or stdin.',
+      args: emptyArgsSchema,
+      options: withBaseOptions({
+        input: inputFileOptionSchema.describe('JSON sample batch payload in @file.json form or - for stdin.'),
       }),
       output: samplesAddResultSchema,
       async run({ options }) {

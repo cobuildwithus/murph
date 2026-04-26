@@ -4,8 +4,10 @@ import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   captureAddResultSchema,
   listResultSchema,
+  occurredAtOptionSchema,
   pathSchema,
   showResultSchema,
+  timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   inputFileOptionSchema,
@@ -21,7 +23,6 @@ import {
   showCaptureRecord,
 } from '@murphai/vault-usecases/captures'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { occurredAtOptionSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
@@ -103,6 +104,10 @@ export function registerCaptureCommands(
         .array(z.string().min(1))
         .optional()
         .describe('Optional capture tag. Repeat --tag for multiple entries.'),
+      relatedId: z
+        .array(z.string().min(1).max(160))
+        .optional()
+        .describe('Optional related record id. Repeat --related-id to link multiple records.'),
       note: z
         .string()
         .min(1)
@@ -121,6 +126,9 @@ export function registerCaptureCommands(
       source: eventSourceSchema
         .optional()
         .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      timeZone: timeZoneSchema
+        .optional()
+        .describe('Optional IANA time zone for the capture timestamp, such as America/Los_Angeles.'),
     }),
     output: captureAddResultSchema,
     async run({ options }) {
@@ -137,6 +145,7 @@ export function registerCaptureCommands(
         bodySite: typeof options.bodySite === 'string' ? options.bodySite : undefined,
         collection: typeof options.collection === 'string' ? options.collection : undefined,
         tags: normalizeRepeatableFlagOption(options.tag, 'tag'),
+        relatedIds: normalizeRepeatableFlagOption(options.relatedId, 'related-id'),
         note: typeof options.note === 'string' ? options.note : undefined,
         title: typeof options.title === 'string' ? options.title : undefined,
         occurredAt: await normalizeOccurredAtOption({
@@ -147,6 +156,7 @@ export function registerCaptureCommands(
               : undefined,
         }),
         source: typeof options.source === 'string' ? options.source : undefined,
+        timeZone: typeof options.timeZone === 'string' ? options.timeZone : undefined,
       })
     },
   })

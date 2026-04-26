@@ -75,6 +75,124 @@ test('samples import-csv schema exposes the expansion-only import options', asyn
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
+test.sequential('samples add records typed manual samples and validates stream-specific fields', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-samples-add-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const numericSample = await runSliceCli<{
+      stream: string
+      source: string
+      quality: string
+      addedCount: number
+      lookupIds: string[]
+    }>([
+      'samples',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'heart_rate',
+      '--unit',
+      'bpm',
+      '--recorded-at',
+      '2026-03-12T08:00:00.000Z',
+      '--value',
+      '61',
+    ])
+
+    assert.equal(numericSample.ok, true)
+    assert.equal(numericSample.meta?.command, 'samples add')
+    assert.equal(requireData(numericSample).stream, 'heart_rate')
+    assert.equal(requireData(numericSample).source, 'manual')
+    assert.equal(requireData(numericSample).quality, 'raw')
+    assert.equal(requireData(numericSample).addedCount, 1)
+    assert.equal(requireData(numericSample).lookupIds.length, 1)
+
+    const sleepStageSample = await runSliceCli<{
+      addedCount: number
+      lookupIds: string[]
+    }>([
+      'samples',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'sleep_stage',
+      '--unit',
+      'stage',
+      '--recorded-at',
+      '2026-03-12T02:00:00.000Z',
+      '--stage',
+      'deep',
+      '--start-at',
+      '2026-03-12T02:00:00.000Z',
+      '--end-at',
+      '2026-03-12T03:00:00.000Z',
+      '--duration-minutes',
+      '60',
+    ])
+
+    assert.equal(sleepStageSample.ok, true)
+    assert.equal(requireData(sleepStageSample).addedCount, 1)
+    assert.equal(requireData(sleepStageSample).lookupIds.length, 1)
+
+    const sleepStageList = await runSliceCli<{
+      count: number
+      items: Array<{
+        data: Record<string, unknown>
+      }>
+    }>([
+      'samples',
+      'list',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'sleep_stage',
+    ])
+
+    assert.equal(sleepStageList.ok, true)
+    assert.equal(requireData(sleepStageList).count, 1)
+    assert.equal(requireData(sleepStageList).items[0]?.data.stage, 'deep')
+    assert.equal(requireData(sleepStageList).items[0]?.data.durationMinutes, 60)
+
+    const missingValue = await runSliceCli([
+      'samples',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'hrv',
+      '--unit',
+      'ms',
+      '--recorded-at',
+      '2026-03-12T08:05:00.000Z',
+    ])
+    assert.equal(missingValue.ok, false)
+    assert.match(missingValue.error?.message ?? '', /requires --value/u)
+
+    const sleepStageWithValue = await runSliceCli([
+      'samples',
+      'add',
+      '--vault',
+      vaultRoot,
+      '--stream',
+      'sleep_stage',
+      '--unit',
+      'stage',
+      '--recorded-at',
+      '2026-03-12T02:00:00.000Z',
+      '--value',
+      '1',
+    ])
+    assert.equal(sleepStageWithValue.ok, false)
+    assert.match(sleepStageWithValue.error?.message ?? '', /omit --value/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('samples commands support richer import options plus show/list/batch follow-up flows', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-samples-'))
   const csvPath = path.join(vaultRoot, 'samples-semicolon.csv')

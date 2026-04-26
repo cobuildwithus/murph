@@ -1,0 +1,681 @@
+import assert from 'node:assert/strict'
+import { test } from 'vitest'
+import { createVaultCli } from '../src/vault-cli.js'
+
+const BASE_OPTION_NAMES = new Set(['requestId', 'vault'])
+
+interface CommandGuard {
+  label: string
+  commandNames: readonly string[]
+  fieldHints: readonly string[]
+}
+
+interface ManifestCommand {
+  name: string
+  schema: JsonRecord
+}
+
+type JsonRecord = Record<string, unknown>
+
+const canonicalTypedCommands = [
+  {
+    label: 'experiment checkpoint',
+    commandNames: ['experiment checkpoint'],
+    fieldHints: ['id', 'lookup', 'occurredAt', 'title', 'note'],
+  },
+  {
+    label: 'experiment session log',
+    commandNames: ['experiment session log'],
+    fieldHints: [
+      'id',
+      'lookup',
+      'interventionType',
+      'durationMinutes',
+      'sessionStatus',
+      'status',
+      'confounder',
+      'note',
+    ],
+  },
+  {
+    label: 'experiment context log',
+    commandNames: ['experiment context log'],
+    fieldHints: [
+      'id',
+      'lookup',
+      'kind',
+      'contextType',
+      'supplementName',
+      'severity',
+      'note',
+    ],
+  },
+  {
+    label: 'samples add',
+    commandNames: ['samples add'],
+    fieldHints: ['stream', 'recordedAt', 'value', 'stage', 'unit', 'sourcePath', 'batch'],
+  },
+  {
+    label: 'event note add',
+    commandNames: ['event note add', 'event add note'],
+    fieldHints: ['note', 'title', 'occurredAt', 'tag'],
+  },
+  {
+    label: 'event symptom add',
+    commandNames: ['event symptom add', 'event add symptom'],
+    fieldHints: ['symptom', 'severity', 'title', 'occurredAt', 'tag'],
+  },
+  {
+    label: 'event observation add',
+    commandNames: ['event observation add', 'event add observation'],
+    fieldHints: ['observation', 'value', 'title', 'note', 'occurredAt', 'tag'],
+  },
+  {
+    label: 'event intake add',
+    commandNames: [
+      'event intake add',
+      'event supplement-intake add',
+      'event supplement intake add',
+      'event medication-intake add',
+      'event medication intake add',
+    ],
+    fieldHints: [
+      'kind',
+      'name',
+      'supplementName',
+      'medicationName',
+      'dose',
+      'unit',
+      'occurredAt',
+    ],
+  },
+  {
+    label: 'event encounter add',
+    commandNames: ['event encounter add'],
+    fieldHints: ['encounterType', 'location', 'providerId', 'occurredAt', 'note'],
+  },
+  {
+    label: 'event procedure add',
+    commandNames: ['event procedure add'],
+    fieldHints: ['procedure', 'status', 'occurredAt', 'note'],
+  },
+  {
+    label: 'event adverse-effect add',
+    commandNames: ['event adverse-effect add'],
+    fieldHints: ['substance', 'effect', 'severity', 'occurredAt', 'note'],
+  },
+  {
+    label: 'event exposure add',
+    commandNames: ['event exposure add'],
+    fieldHints: ['exposureType', 'substance', 'duration', 'occurredAt', 'note'],
+  },
+  {
+    label: 'supplement save',
+    commandNames: ['supplement save'],
+    fieldHints: [
+      'title',
+      'name',
+      'slug',
+      'ingredient',
+      'ingredientName',
+      'compoundName',
+      'dose',
+      'doseUnit',
+      'substance',
+      'ingredientActive',
+      'unit',
+      'status',
+    ],
+  },
+  {
+    label: 'regimen save',
+    commandNames: ['regimen save'],
+    fieldHints: [
+      'title',
+      'kind',
+      'slug',
+      'dose',
+      'schedule',
+      'status',
+      'brand',
+      'servingSize',
+      'ingredientCompound',
+      'ingredientActive',
+    ],
+  },
+  {
+    label: 'condition save',
+    commandNames: ['condition save'],
+    fieldHints: [
+      'title',
+      'slug',
+      'clinicalStatus',
+      'verificationStatus',
+      'assertedOn',
+      'resolvedOn',
+      'severity',
+      'bodySite',
+      'relatedGoalId',
+      'relatedRegimenId',
+      'note',
+    ],
+  },
+  {
+    label: 'allergy save',
+    commandNames: ['allergy save'],
+    fieldHints: [
+      'title',
+      'slug',
+      'substance',
+      'status',
+      'criticality',
+      'reaction',
+      'recordedOn',
+      'relatedConditionId',
+      'note',
+    ],
+  },
+  {
+    label: 'goal save',
+    commandNames: ['goal save'],
+    fieldHints: [
+      'title',
+      'slug',
+      'status',
+      'horizon',
+      'priority',
+      'startAt',
+      'targetAt',
+      'parentGoalId',
+      'relatedGoalId',
+      'relatedExperimentId',
+      'domain',
+    ],
+  },
+  {
+    label: 'family save',
+    commandNames: ['family save'],
+    fieldHints: [
+      'title',
+      'relationship',
+      'condition',
+      'deceased',
+      'relatedVariantId',
+      'note',
+    ],
+  },
+  {
+    label: 'genetics save',
+    commandNames: ['genetics save'],
+    fieldHints: [
+      'title',
+      'gene',
+      'slug',
+      'zygosity',
+      'significance',
+      'inheritance',
+      'sourceFamilyMemberId',
+      'note',
+    ],
+  },
+] as const satisfies readonly CommandGuard[]
+
+const typedCommandsWithInputFallback = [
+  {
+    label: 'capture add',
+    commandNames: ['capture add'],
+    fieldHints: ['media', 'label', 'bodySite', 'collection', 'relatedId', 'timeZone'],
+  },
+  {
+    label: 'meal add',
+    commandNames: ['meal add'],
+    fieldHints: [
+      'photo',
+      'audio',
+      'note',
+      'ingredient',
+      'nutritionCalories',
+      'nutritionSource',
+    ],
+  },
+  {
+    label: 'measurement add',
+    commandNames: ['measurement add'],
+    fieldHints: ['metric', 'value', 'unit', 'measurementNote', 'tag', 'timeZone'],
+  },
+  {
+    label: 'workout add',
+    commandNames: ['workout add'],
+    fieldHints: [
+      'text',
+      'note',
+      'title',
+      'workoutSourceApp',
+      'workoutExercise',
+      'workoutSet',
+    ],
+  },
+  {
+    label: 'workout format save',
+    commandNames: ['workout format save'],
+    fieldHints: [
+      'name',
+      'workoutFormatId',
+      'slug',
+      'templateText',
+      'exercise',
+      'setTemplate',
+    ],
+  },
+] as const satisfies readonly CommandGuard[]
+
+test('canonical agent write commands expose typed schemas without primary JSON input blobs', async () => {
+  const commands = await loadFullLlmCommands()
+  const failures: string[] = []
+
+  for (const guard of canonicalTypedCommands) {
+    const command = findManifestCommand(commands, guard)
+
+    if (!command) {
+      failures.push(formatMissingManifestCommand(commands, guard))
+      continue
+    }
+
+    collectAssertionFailure(failures, `${command.name} llms schema`, () => {
+      assertCanonicalTypedSchema(command.name, command.schema, guard.fieldHints)
+    })
+
+    try {
+      const schema = await loadCommandSchema(command.name)
+      collectAssertionFailure(failures, `${command.name} direct schema`, () => {
+        assertCanonicalTypedSchema(command.name, schema, guard.fieldHints)
+      })
+    } catch (error) {
+      failures.push(`${command.name} direct schema: ${errorMessage(error)}`)
+    }
+  }
+
+  assert.deepEqual(failures, [], failures.join('\n'))
+})
+
+test('hybrid typed write commands keep JSON input optional and expose field parity', async () => {
+  const commands = await loadFullLlmCommands()
+  const failures: string[] = []
+
+  for (const guard of typedCommandsWithInputFallback) {
+    const command = findManifestCommand(commands, guard)
+
+    if (!command) {
+      failures.push(formatMissingManifestCommand(commands, guard))
+      continue
+    }
+
+    collectAssertionFailure(failures, `${command.name} llms schema`, () => {
+      assertHybridTypedInputFallbackSchema(command.name, command.schema, guard.fieldHints)
+    })
+
+    try {
+      const schema = await loadCommandSchema(command.name)
+      collectAssertionFailure(failures, `${command.name} direct schema`, () => {
+        assertHybridTypedInputFallbackSchema(command.name, schema, guard.fieldHints)
+      })
+    } catch (error) {
+      failures.push(`${command.name} direct schema: ${errorMessage(error)}`)
+    }
+  }
+
+  assert.deepEqual(failures, [], failures.join('\n'))
+})
+
+test('explicit JSON fallback commands remain separate from the canonical typed surfaces', async () => {
+  const commands = await loadFullLlmCommands()
+  const commandNames = new Set(commands.map((command) => command.name))
+
+  for (const [typedName, jsonName, typedHint] of [
+    ['samples add', 'samples import-json', 'stream'],
+    ['event note add', 'event import-json', 'note'],
+    ['goal save', 'goal upsert', 'title'],
+    ['condition save', 'condition upsert', 'title'],
+    ['allergy save', 'allergy upsert', 'title'],
+    ['supplement save', 'supplement import-json', 'title'],
+    ['regimen save', 'regimen import-json', 'title'],
+    ['family save', 'family upsert', 'title'],
+    ['genetics save', 'genetics upsert', 'gene'],
+  ] as const) {
+    assert.equal(commandNames.has(typedName), true)
+    assert.equal(commandNames.has(jsonName), true)
+
+    const typedCommand = requireManifestCommand(commands, {
+      label: typedName,
+      commandNames: [typedName],
+      fieldHints: [typedHint],
+    })
+    const jsonCommand = requireManifestCommand(commands, {
+      label: jsonName,
+      commandNames: [jsonName],
+      fieldHints: ['input'],
+    })
+
+    assert.equal(
+      schemaIncludesProperty(typedCommand.schema, 'input'),
+      false,
+      `${typedName} must stay the typed agent-first surface`,
+    )
+    assert.equal(
+      schemaIncludesProperty(jsonCommand.schema, 'input'),
+      true,
+      `${jsonName} is the explicit JSON payload fallback`,
+    )
+  }
+})
+
+test('legacy hard-cut command aliases stay out of the agent command manifest', async () => {
+  const commands = await loadFullLlmCommands()
+  const commandNames = new Set(commands.map((command) => command.name))
+
+  const legacyNames = [
+    ['event', 'upsert'],
+    ['supplement', 'upsert'],
+    ['protocol', 'profile', 'upsert'],
+    ['protocol', 'save'],
+    ['protocol', 'import-json'],
+    ['protocol', 'scaffold'],
+    ['protocol', 'stop'],
+  ].map((segments) => segments.join(' '))
+
+  for (const legacyName of legacyNames) {
+    assert.equal(
+      commandNames.has(legacyName),
+      false,
+      `${legacyName} must not remain an agent-visible compatibility command`,
+    )
+  }
+})
+
+test('agent-visible input-file command surfaces stay explicitly reviewed', async () => {
+  const commands = await loadFullLlmCommands()
+  const reviewedInputCommands = [
+    'allergy upsert',
+    'automation upsert',
+    'blood-test upsert',
+    'capture add',
+    'condition upsert',
+    'document edit',
+    'event edit',
+    'event import-json',
+    'experiment checkpoint-json',
+    'experiment context log-json',
+    'experiment plan',
+    'experiment session log-json',
+    'experiment start',
+    'family upsert',
+    'food edit',
+    'food upsert',
+    'genetics upsert',
+    'goal upsert',
+    'intervention edit',
+    'meal add',
+    'meal edit',
+    'measurement add',
+    'protocol upsert',
+    'provider edit',
+    'provider upsert',
+    'recipe edit',
+    'regimen import-json',
+    'recipe upsert',
+    'samples import-json',
+    'scheduled-log upsert',
+    'supplement import-json',
+    'workout add',
+    'workout edit',
+    'workout format save',
+  ].sort()
+
+  const inputCommands = commands
+    .filter((command) => schemaIncludesProperty(command.schema, 'input'))
+    .map((command) => command.name)
+    .sort()
+
+  assert.deepEqual(inputCommands, reviewedInputCommands)
+})
+
+async function runSourceCliRaw(args: readonly string[]): Promise<string> {
+  const cli = createVaultCli()
+  const output: string[] = []
+  let exitCode: number | null = null
+
+  await cli.serve([...args], {
+    env: process.env,
+    exit(code) {
+      exitCode = code
+    },
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  if (exitCode !== null && exitCode !== 0) {
+    assert.fail(`source CLI exited ${exitCode} for ${args.join(' ')}`)
+  }
+
+  return output.join('').trim()
+}
+
+async function loadFullLlmCommands(): Promise<ManifestCommand[]> {
+  const manifest = parseJsonObject(
+    await runSourceCliRaw(['--llms-full', '--format', 'json']),
+    'llms manifest',
+  )
+  const commands = requireArray(manifest.commands, 'llms manifest commands')
+
+  return commands.map((value, index) => {
+    const command = requireRecord(value, `llms manifest commands[${index}]`)
+    const name = requireString(command.name, `llms manifest commands[${index}].name`)
+    const schema = requireRecord(
+      command.schema,
+      `llms manifest commands[${index}].schema`,
+    )
+
+    return { name, schema }
+  })
+}
+
+async function loadCommandSchema(commandName: string): Promise<JsonRecord> {
+  return parseJsonObject(
+    await runSourceCliRaw([...commandName.split(' '), '--schema', '--format', 'json']),
+    `${commandName} schema`,
+  )
+}
+
+function requireManifestCommand(
+  commands: readonly ManifestCommand[],
+  guard: CommandGuard,
+): ManifestCommand {
+  const command = findManifestCommand(commands, guard)
+
+  if (!command) {
+    assert.fail(formatMissingManifestCommand(commands, guard))
+  }
+
+  return command
+}
+
+function findManifestCommand(
+  commands: readonly ManifestCommand[],
+  guard: CommandGuard,
+): ManifestCommand | undefined {
+  const commandNameSet = new Set(guard.commandNames)
+  return commands.find((candidate) => commandNameSet.has(candidate.name))
+}
+
+function formatMissingManifestCommand(
+  commands: readonly ManifestCommand[],
+  guard: CommandGuard,
+): string {
+  const rootNames = new Set(guard.commandNames.map((name) => name.split(' ')[0] ?? name))
+  const available = commands
+    .map((candidate) => candidate.name)
+    .filter((name) => rootNames.has(name.split(' ')[0] ?? name))
+    .sort((left, right) => left.localeCompare(right))
+
+  return `${guard.label} is missing from the LLM command manifest. Tried ${guard.commandNames.join(
+    ', ',
+  )}. Available matching commands: ${available.join(', ')}`
+}
+
+function collectAssertionFailure(
+  failures: string[],
+  label: string,
+  action: () => void,
+) {
+  try {
+    action()
+  } catch (error) {
+    failures.push(`${label}: ${errorMessage(error)}`)
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function assertCanonicalTypedSchema(
+  commandName: string,
+  schema: JsonRecord,
+  fieldHints: readonly string[],
+) {
+  assert.equal(
+    schemaIncludesProperty(schema, 'input'),
+    false,
+    `${commandName} must not expose a generic input payload on its canonical schema`,
+  )
+  assert.equal(
+    requiredFields(schema, 'args').includes('input'),
+    false,
+    `${commandName} must not require a positional input payload`,
+  )
+  assert.equal(
+    requiredFields(schema, 'options').includes('input'),
+    false,
+    `${commandName} must not require --input as its primary agent input`,
+  )
+
+  const typedFieldNames = commandFieldNames(schema).filter(
+    (fieldName) => !BASE_OPTION_NAMES.has(fieldName),
+  )
+  assert.notEqual(
+    typedFieldNames.length,
+    0,
+    `${commandName} should expose at least one concrete typed arg or option`,
+  )
+  assert.equal(
+    fieldHints.some((fieldName) => typedFieldNames.includes(fieldName)),
+    true,
+    `${commandName} should expose one of: ${fieldHints.join(', ')}`,
+  )
+}
+
+function assertHybridTypedInputFallbackSchema(
+  commandName: string,
+  schema: JsonRecord,
+  fieldHints: readonly string[],
+) {
+  assert.equal(
+    schemaIncludesProperty(schema, 'input'),
+    true,
+    `${commandName} should expose --input as an explicit fallback`,
+  )
+  assert.equal(
+    requiredFields(schema, 'args').includes('input'),
+    false,
+    `${commandName} must not require a positional input payload`,
+  )
+  assert.equal(
+    requiredFields(schema, 'options').includes('input'),
+    false,
+    `${commandName} must keep --input optional`,
+  )
+
+  const typedFieldNames = commandFieldNames(schema).filter(
+    (fieldName) => !BASE_OPTION_NAMES.has(fieldName) && fieldName !== 'input',
+  )
+  assert.notEqual(
+    typedFieldNames.length,
+    0,
+    `${commandName} should expose concrete typed args or options besides --input`,
+  )
+  assert.equal(
+    fieldHints.some((fieldName) => typedFieldNames.includes(fieldName)),
+    true,
+    `${commandName} should expose one of: ${fieldHints.join(', ')}`,
+  )
+}
+
+function schemaIncludesProperty(schema: JsonRecord, propertyName: string): boolean {
+  return (
+    propertyName in schemaProperties(schema, 'args') ||
+    propertyName in schemaProperties(schema, 'options')
+  )
+}
+
+function commandFieldNames(schema: JsonRecord): string[] {
+  return [
+    ...Object.keys(schemaProperties(schema, 'args')),
+    ...Object.keys(schemaProperties(schema, 'options')),
+  ]
+}
+
+function schemaProperties(schema: JsonRecord, key: 'args' | 'options'): JsonRecord {
+  const objectSchema = requireRecord(schema[key], `schema.${key}`)
+  const properties = objectSchema.properties
+  return properties === undefined
+    ? {}
+    : requireRecord(properties, `schema.${key}.properties`)
+}
+
+function requiredFields(schema: JsonRecord, key: 'args' | 'options'): string[] {
+  const objectSchema = requireRecord(schema[key], `schema.${key}`)
+  const required = objectSchema.required
+
+  if (required === undefined) {
+    return []
+  }
+
+  const values = requireArray(required, `schema.${key}.required`)
+  return values.map((value, index) =>
+    requireString(value, `schema.${key}.required[${index}]`),
+  )
+}
+
+function parseJsonObject(text: string, label: string): JsonRecord {
+  const parsed: unknown = JSON.parse(text)
+  return requireRecord(parsed, label)
+}
+
+function requireArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    assert.fail(`${label} must be an array`)
+  }
+
+  return value
+}
+
+function requireRecord(value: unknown, label: string): JsonRecord {
+  if (!isJsonRecord(value)) {
+    assert.fail(`${label} must be an object`)
+  }
+
+  return value
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== 'string') {
+    assert.fail(`${label} must be a string`)
+  }
+
+  return value
+}
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}

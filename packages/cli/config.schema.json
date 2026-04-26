@@ -2066,6 +2066,15 @@
                             "minLength": 1
                           }
                         },
+                        "relatedId": {
+                          "description": "Optional related record id. Repeat --related-id to link multiple records.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
                         "note": {
                           "description": "Optional capture note.",
                           "type": "string",
@@ -2103,6 +2112,11 @@
                             "device",
                             "derived"
                           ]
+                        },
+                        "timeZone": {
+                          "description": "Optional IANA time zone for the capture timestamp, such as America/Los_Angeles.",
+                          "type": "string",
+                          "minLength": 3
                         }
                       }
                     }
@@ -3271,6 +3285,67 @@
                             "device",
                             "derived"
                           ]
+                        },
+                        "ingredient": {
+                          "description": "Optional repeatable meal ingredient. Repeat --ingredient for each item.",
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "nutritionCalories": {
+                          "description": "Optional meal calorie total.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionProteinGrams": {
+                          "description": "Optional meal protein grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionCarbsGrams": {
+                          "description": "Optional meal carbohydrate grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionFatGrams": {
+                          "description": "Optional meal fat grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionFiberGrams": {
+                          "description": "Optional meal fiber grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionSource": {
+                          "description": "Optional meal nutrition provenance source.",
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "label",
+                            "database",
+                            "inherited",
+                            "estimated"
+                          ]
+                        },
+                        "nutritionConfidence": {
+                          "description": "Optional meal nutrition provenance confidence. Requires --nutrition-source.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ]
+                        },
+                        "nutritionSourceDetail": {
+                          "description": "Optional meal nutrition provenance detail. Requires --nutrition-source.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         }
                       }
                     }
@@ -3505,27 +3580,45 @@
                           "type": "string"
                         },
                         "metric": {
-                          "description": "Measurement metric name or slug. Friendly names are normalized to kebab-case.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 120
+                          "description": "Measurement metric name or slug. Repeat --metric with --value and --unit for grouped measurements. Friendly names are normalized to kebab-case.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          }
                         },
                         "value": {
-                          "description": "Single measurement numeric value when --input is not provided.",
-                          "type": "number"
+                          "description": "Measurement numeric value. Repeat --value with --metric and --unit for grouped measurements.",
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
                         },
                         "unit": {
-                          "description": "Measurement unit such as lb, kg, percent, ms, bpm, or mmol/L.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 64
+                          "description": "Measurement unit such as lb, kg, percent, ms, bpm, or mmol/L. Repeat --unit with --metric and --value for grouped measurements.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
                         },
                         "qualifier": {
-                          "description": "Optional measurement qualifier in key=value form. Repeat --qualifier for multiple entries.",
+                          "description": "Optional measurement qualifier as key=value for one measurement or N:key=value for grouped measurements. Repeat --qualifier for multiple entries.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1
+                          }
+                        },
+                        "measurementNote": {
+                          "description": "Optional per-measurement note. Use note for one measurement or N:note for grouped measurements.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
                           }
                         },
                         "note": {
@@ -3574,6 +3667,20 @@
                             "minLength": 1,
                             "description": "Filesystem path supplied by the operator."
                           }
+                        },
+                        "tag": {
+                          "description": "Optional event tag slug. Repeat --tag for multiple tags.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                            "description": "Stable lowercase kebab-case identifier."
+                          }
+                        },
+                        "timeZone": {
+                          "description": "Optional IANA timezone for the measurement event.",
+                          "type": "string",
+                          "minLength": 3
                         }
                       }
                     }
@@ -3697,8 +3804,20 @@
                           "maxLength": 128
                         },
                         "input": {
-                          "description": "Optional structured workout payload in @file.json form or - for stdin.",
+                          "description": "Optional advanced structured workout payload in @file.json form or - for stdin.",
                           "type": "string"
+                        },
+                        "note": {
+                          "description": "Optional workout note when omitting positional text.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "title": {
+                          "description": "Optional explicit workout title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         },
                         "duration": {
                           "description": "Optional duration override in minutes when the note or structured payload is missing or ambiguous.",
@@ -3751,6 +3870,71 @@
                             "type": "string",
                             "minLength": 1,
                             "description": "Filesystem path supplied by the operator."
+                          }
+                        },
+                        "workoutSourceApp": {
+                          "description": "Optional workout-session source app slug.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "workoutSourceWorkoutId": {
+                          "description": "Optional source workout id for the workout session.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "workoutStartedAt": {
+                          "description": "Optional workout started-at timestamp.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "workoutEndedAt": {
+                          "description": "Optional workout ended-at timestamp.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "workoutRoutineId": {
+                          "description": "Optional workout routine id.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "workoutRoutineName": {
+                          "description": "Optional workout routine name.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "workoutSessionNote": {
+                          "description": "Optional nested workout session note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "workoutMedia": {
+                          "description": "Stored workout media as kind=...;relativePath=... with optional mediaType/caption. Repeat --workout-media for multiple entries. Use --media for local file staging.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "workoutExercise": {
+                          "description": "Workout exercise as order=...;name=... with optional sourceExerciseId/groupId/mode/unitOverride/note. Repeat --workout-exercise for multiple exercises.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "workoutSet": {
+                          "description": "Workout set as exercise=...;order=... plus optional type/reps/weight/weightUnit/durationSeconds/distanceMeters/rpe/bodyweightKg/assistanceKg/addedWeightKg. Repeat --workout-set for multiple sets.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
                           }
                         }
                       }
@@ -4112,6 +4296,72 @@
                                 "input": {
                                   "description": "Optional structured workout format payload in @file.json form or - for stdin.",
                                   "type": "string"
+                                },
+                                "workoutFormatId": {
+                                  "description": "Optional stable workout-format id such as wfmt_<ULID>.",
+                                  "type": "string",
+                                  "pattern": "^wfmt_[0-9A-Za-z]+$"
+                                },
+                                "slug": {
+                                  "description": "Optional saved workout-format slug. Defaults from the name.",
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "status": {
+                                  "description": "Saved workout-format status.",
+                                  "type": "string",
+                                  "enum": [
+                                    "active",
+                                    "archived"
+                                  ]
+                                },
+                                "summary": {
+                                  "description": "Optional short description for the saved workout format.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "tag": {
+                                  "description": "Optional workout-format tag slug. Repeat --tag for multiple tags.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                  }
+                                },
+                                "note": {
+                                  "description": "Optional persistent note about the saved workout format.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "templateText": {
+                                  "description": "Optional saved workout text stored with the routine template.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "routineNote": {
+                                  "description": "Optional routine note copied into logged sessions from this format.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "exercise": {
+                                  "description": "Routine exercise as order=...;name=... with optional groupId/mode/unitOverride/note. Repeat --exercise for multiple exercises.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "setTemplate": {
+                                  "description": "Planned set as exercise=...;order=... plus optional type/targetReps/targetWeight/targetWeightUnit/targetDurationSeconds/targetDistanceMeters/targetRpe. Repeat --set-template for multiple sets.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
                                 },
                                 "duration": {
                                   "description": "Optional default duration override in minutes when the saved note or payload is missing or ambiguous.",

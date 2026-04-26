@@ -312,7 +312,9 @@ test('meal add help documents the structured payload path and override rule', as
   assert.match(help, /--input/u)
   assert.match(help, /--input @meal\.json/u)
   assert.match(help, /Explicit flags override payload fields\./u)
-  assert.match(help, /ingredients,\s+and nutrition/u)
+  assert.match(help, /typed media, ingredient, nutrition, and text fields/u)
+  assert.match(help, /--ingredient/u)
+  assert.match(help, /--nutrition-calories/u)
   assert.match(help, /Structured payload object keys:/u)
   assert.match(help, /sourceDetail/u)
 })
@@ -1051,7 +1053,7 @@ test.sequential(
       assert.equal(result.error?.code, 'invalid_option')
       assert.match(
         result.error?.message ?? '',
-        /Meal capture requires --photo, --audio, --note, or a structured --input payload with ingredients and\/or nutrition\./u,
+        /Meal capture requires --photo, --audio, --note, --ingredient, nutrition options, or a structured --input payload with ingredients and\/or nutrition\./u,
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })

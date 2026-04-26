@@ -62,6 +62,7 @@ export interface SaveWorkoutFormatInput {
   vault: string
   name?: string
   text?: string
+  payload?: WorkoutFormatUpsertPayload
   inputFile?: string
   durationMinutes?: number
   activityType?: string
@@ -246,7 +247,9 @@ function normalizeStructuredWorkoutFormatPayload(
 export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
   let payload: WorkoutFormatUpsertPayload
 
-  if (typeof input.inputFile === 'string') {
+  if (input.payload) {
+    payload = input.payload
+  } else if (typeof input.inputFile === 'string') {
     payload = normalizeStructuredWorkoutFormatPayload(
       await loadJsonInputObject(input.inputFile, 'workout format payload'),
       input.name,

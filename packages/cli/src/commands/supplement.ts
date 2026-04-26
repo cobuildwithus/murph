@@ -308,6 +308,7 @@ export function registerSupplementCommands(
         return services.core.upsertSupplement(input)
       },
     },
+    includeLegacyJsonUpsert: false,
     show: {
       argName: 'id',
       argSchema: z.string().min(1),

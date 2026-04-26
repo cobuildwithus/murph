@@ -676,7 +676,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['meal', 'add'],
         description:
-          'Record one meal from simple media/text flags or a structured JSON payload.',
+          'Record one meal from typed media, ingredient, nutrition, and text fields, with JSON input reserved for advanced imports.',
       },
       {
         path: ['meal', 'show'],
@@ -741,7 +741,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'add'],
         description:
-          'Record one workout either from a freeform note or from a structured JSON payload.',
+          'Record one workout from typed session fields, freeform text, or advanced structured JSON input.',
       },
       {
         path: ['workout', 'show'],
@@ -784,7 +784,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'format', 'save'],
         description:
-          'Save or update one reusable workout format from freeform text or a structured JSON payload.',
+          'Save or update one reusable workout format from typed routine-template fields, freeform text, or advanced structured JSON input.',
       },
       {
         path: ['workout', 'format', 'show'],
