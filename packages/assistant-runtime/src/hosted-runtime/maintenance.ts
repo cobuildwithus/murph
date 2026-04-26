@@ -35,6 +35,7 @@ import type {
 } from "./platform.ts";
 import { createHostedAssistantTurnInputPort } from "./turn-input.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
+import { emitHostedAssistantProviderTraceLog } from "./events.ts";
 import {
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
@@ -236,12 +237,22 @@ export async function runHostedAssistantAutomation(
         }
       },
       onTraceEvent: (event) => {
-        const logEntry = emitHostedAssistantContextTraceLog({
+        const contextEntry = emitHostedAssistantContextTraceLog({
           event,
           wake,
         });
-        if (logEntry) {
-          redactedLogEntries.push(logEntry);
+        if (contextEntry) {
+          redactedLogEntries.push(contextEntry);
+        }
+        const providerEntry = emitHostedAssistantProviderTraceLog({
+          details: {
+            requestId,
+          },
+          event,
+          wake,
+        });
+        if (providerEntry) {
+          redactedLogEntries.push(providerEntry);
         }
       },
       vaultServices,
