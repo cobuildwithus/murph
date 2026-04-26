@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   buildAssistantCliGuidanceText,
   type AssistantCliAccessContext,
@@ -53,6 +55,30 @@ export type AssistantHealthCommonsAccessMode =
   | "direct-cli"
   | "none";
 
+export interface AssistantSystemPromptLayers {
+  dynamicContextStartsAfterStaticCore: number;
+  dynamicTurnContextPrompt: string;
+  prompt: string;
+  stableRouteCapabilityPrompt: string;
+  staticCacheableCorePrompt: string;
+}
+
+export interface AssistantPromptCacheMetadata {
+  dynamicContextStartsAfterStaticCore: number;
+  stableRouteCapabilityPromptHash: string;
+  staticPromptHash: string;
+  toolSchemaHash: string | null;
+}
+
+export interface AssistantPromptCacheMetadataInput {
+  toolSchemaHash?: string | null;
+}
+
+export interface AssistantSystemPromptResult {
+  cacheMetadata: AssistantPromptCacheMetadata;
+  prompt: string;
+}
+
 function joinPromptSections(
   ...sections: Array<string | null | undefined | false>
 ): string {
@@ -91,14 +117,61 @@ function renderAssistantToolNameAliases(
 export function buildAssistantSystemPrompt(
   input: AssistantSystemPromptInput
 ): string {
-  const prompt = joinPromptSections(
+  return buildAssistantSystemPromptWithCacheMetadata(input).prompt;
+}
+
+export function buildAssistantSystemPromptWithCacheMetadata(
+  input: AssistantSystemPromptInput,
+  cacheInput: AssistantPromptCacheMetadataInput = {}
+): AssistantSystemPromptResult {
+  const layers = buildAssistantSystemPromptLayers(input);
+  return {
+    cacheMetadata: buildAssistantPromptCacheMetadata(layers, cacheInput),
+    prompt: layers.prompt,
+  };
+}
+
+export function buildAssistantSystemPromptLayers(
+  input: AssistantSystemPromptInput
+): AssistantSystemPromptLayers {
+  const staticCacheableCorePrompt = buildStaticCacheableCorePrompt();
+  const stableRouteCapabilityPrompt = renderAssistantToolNameAliases(
+    buildStableRouteCapabilityPrompt(input),
+    input.assistantToolNameAliases
+  );
+  const dynamicTurnContextPrompt = renderAssistantToolNameAliases(
+    buildDynamicTurnContextPrompt(input),
+    input.assistantToolNameAliases
+  );
+  const stablePrefix = joinPromptSections(
+    staticCacheableCorePrompt,
+    stableRouteCapabilityPrompt
+  );
+  const prompt = joinPromptSections(stablePrefix, dynamicTurnContextPrompt);
+
+  return {
+    dynamicContextStartsAfterStaticCore: stablePrefix.length,
+    dynamicTurnContextPrompt,
+    prompt,
+    stableRouteCapabilityPrompt,
+    staticCacheableCorePrompt,
+  };
+}
+
+function buildStaticCacheableCorePrompt(): string {
+  return joinPromptSections(
     buildAssistantIdentityAndScopeText(),
-    buildAssistantCurrentDateContextText({
-      currentLocalDate: input.currentLocalDate,
-      currentTimeZone: input.currentTimeZone,
-    }),
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
+    buildAssistantHealthCommonsCoreGuidanceText(),
+    buildAssistantToolTruthfulnessText()
+  );
+}
+
+function buildStableRouteCapabilityPrompt(
+  input: AssistantSystemPromptInput
+): string {
+  return joinPromptSections(
     buildAssistantHealthCommonsGuidanceText({
       assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
     }),
@@ -116,22 +189,6 @@ export function buildAssistantSystemPrompt(
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
     }),
-    input.vaultOverview ?? null,
-    input.activeExperimentContext ?? null,
-    buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
-    buildAssistantToolTruthfulnessText(),
-    buildAssistantEvidenceAndReplyStyleText(input.channel),
-    buildAssistantExecutionContextText({
-      turnTrigger: input.turnTrigger ?? null,
-    }),
-    buildAssistantOnboardingGuidanceText({
-      assistantCommandAccessMode: input.assistantCommandAccessMode,
-      assistantHostedDeviceConnectAvailable:
-        input.assistantHostedDeviceConnectAvailable ?? false,
-      assistantHostedDeviceConnectProviders:
-        input.assistantHostedDeviceConnectProviders ?? [],
-      enabled: input.onboardingGuidance,
-    }),
     buildAssistantKnowledgeGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
@@ -144,36 +201,149 @@ export function buildAssistantSystemPrompt(
     buildAssistantCliGuidanceText(input.cliAccess),
     buildAssistantCliContractText(input.assistantCliContract)
   );
-  return renderAssistantToolNameAliases(prompt, input.assistantToolNameAliases);
+}
+
+function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
+  return joinPromptSections(
+    buildAssistantCurrentDateContextText({
+      currentLocalDate: input.currentLocalDate,
+      currentTimeZone: input.currentTimeZone,
+    }),
+    input.vaultOverview ?? null,
+    input.activeExperimentContext ?? null,
+    buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
+    buildAssistantEvidenceAndReplyStyleText(input.channel),
+    buildAssistantExecutionContextText({
+      turnTrigger: input.turnTrigger ?? null,
+    }),
+    buildAssistantOnboardingGuidanceText({
+      assistantCommandAccessMode: input.assistantCommandAccessMode,
+      assistantHostedDeviceConnectAvailable:
+        input.assistantHostedDeviceConnectAvailable ?? false,
+      assistantHostedDeviceConnectProviders:
+        input.assistantHostedDeviceConnectProviders ?? [],
+      enabled: input.onboardingGuidance,
+    })
+  );
 }
 
 export function buildAssistantNotificationDecisionSystemPrompt(
   input: AssistantNotificationDecisionSystemPromptInput
 ): string {
-  const prompt = joinPromptSections(
-    buildAssistantIdentityAndScopeText(),
-    buildAssistantCurrentDateContextText({
-      currentLocalDate: input.currentLocalDate,
-      currentTimeZone: input.currentTimeZone,
-    }),
-    buildAssistantProductPrinciplesText(),
-    buildAssistantHealthReasoningText(),
-    buildAssistantHealthCommonsGuidanceText({
-      assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
-    }),
-    buildAssistantHostedDeviceConnectGuidanceText({
-      assistantHostedDeviceConnectAvailable:
-        input.assistantHostedDeviceConnectAvailable ?? false,
-      assistantHostedDeviceConnectProviders:
-        input.assistantHostedDeviceConnectProviders ?? [],
-    }),
-    input.vaultOverview ?? null,
-    input.activeExperimentContext ?? null,
-    buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
-    buildAssistantToolTruthfulnessText(),
-    buildAssistantNotificationDecisionGuidanceText(input.channel)
+  return buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(input)
+    .prompt;
+}
+
+export function buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+  input: AssistantNotificationDecisionSystemPromptInput,
+  cacheInput: AssistantPromptCacheMetadataInput = {}
+): AssistantSystemPromptResult {
+  const layers = buildAssistantNotificationDecisionSystemPromptLayers(input);
+  return {
+    cacheMetadata: buildAssistantPromptCacheMetadata(layers, cacheInput),
+    prompt: layers.prompt,
+  };
+}
+
+export function buildAssistantNotificationDecisionSystemPromptLayers(
+  input: AssistantNotificationDecisionSystemPromptInput
+): AssistantSystemPromptLayers {
+  const staticCacheableCorePrompt = buildStaticCacheableCorePrompt();
+  const stableRouteCapabilityPrompt = renderAssistantToolNameAliases(
+    joinPromptSections(
+      buildAssistantHealthCommonsGuidanceText({
+        assistantHealthCommonsAccessMode: input.assistantHealthCommonsAccessMode,
+      }),
+      buildAssistantHostedDeviceConnectGuidanceText({
+        assistantHostedDeviceConnectAvailable:
+          input.assistantHostedDeviceConnectAvailable ?? false,
+        assistantHostedDeviceConnectProviders:
+          input.assistantHostedDeviceConnectProviders ?? [],
+      })
+    ),
+    input.assistantToolNameAliases
   );
-  return renderAssistantToolNameAliases(prompt, input.assistantToolNameAliases);
+  const dynamicTurnContextPrompt = renderAssistantToolNameAliases(
+    joinPromptSections(
+      buildAssistantCurrentDateContextText({
+        currentLocalDate: input.currentLocalDate,
+        currentTimeZone: input.currentTimeZone,
+      }),
+      input.vaultOverview ?? null,
+      input.activeExperimentContext ?? null,
+      buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
+      buildAssistantNotificationDecisionGuidanceText(input.channel)
+    ),
+    input.assistantToolNameAliases
+  );
+  const stablePrefix = joinPromptSections(
+    staticCacheableCorePrompt,
+    stableRouteCapabilityPrompt
+  );
+  const prompt = joinPromptSections(stablePrefix, dynamicTurnContextPrompt);
+
+  return {
+    dynamicContextStartsAfterStaticCore: stablePrefix.length,
+    dynamicTurnContextPrompt,
+    prompt,
+    stableRouteCapabilityPrompt,
+    staticCacheableCorePrompt,
+  };
+}
+
+function buildAssistantPromptCacheMetadata(
+  layers: AssistantSystemPromptLayers,
+  input: AssistantPromptCacheMetadataInput
+): AssistantPromptCacheMetadata {
+  const staticPromptHash = hashAssistantPromptCacheValue(
+    layers.staticCacheableCorePrompt
+  );
+  const stableRouteCapabilityPromptHash = hashAssistantPromptCacheValue(
+    layers.stableRouteCapabilityPrompt
+  );
+  const toolSchemaHash = input.toolSchemaHash ?? null;
+
+  return {
+    dynamicContextStartsAfterStaticCore:
+      layers.dynamicContextStartsAfterStaticCore,
+    stableRouteCapabilityPromptHash,
+    staticPromptHash,
+    toolSchemaHash,
+  };
+}
+
+function hashAssistantPromptCacheValue(value: unknown): string {
+  return createHash("sha256")
+    .update(stableStringifyAssistantPromptCacheValue(value))
+    .digest("hex");
+}
+
+function stableStringifyAssistantPromptCacheValue(value: unknown): string {
+  if (value === undefined) {
+    return "undefined";
+  }
+
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringifyAssistantPromptCacheValue).join(",")}]`;
+  }
+
+  const record = value as Record<string, unknown>;
+  const entries = Object.keys(record)
+    .sort()
+    .flatMap((key) =>
+      record[key] === undefined
+        ? []
+        : [
+            `${JSON.stringify(key)}:${stableStringifyAssistantPromptCacheValue(
+              record[key]
+            )}`,
+          ]
+    );
+  return `{${entries.join(",")}}`;
 }
 
 function buildAssistantCurrentDateContextText(input: {
@@ -222,9 +392,13 @@ function buildAssistantHealthReasoningText(): string {
 function buildAssistantHealthCommonsGuidanceText(input: {
   assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode;
 }): string {
+  return `Health Commons route surface:
+- For health improvement ideas, protocol discovery, protocol setup, and experiment design, search Health Commons first. ${buildHealthCommonsDiscoverySurfaceText(input.assistantHealthCommonsAccessMode)}`;
+}
+
+function buildAssistantHealthCommonsCoreGuidanceText(): string {
   return `Health Commons:
 - Health Commons is the public source-backed reference corpus for protocols, biomarkers, sources, and related health pages. It is separate from the user's private vault.
-- For health improvement ideas, protocol discovery, protocol setup, and experiment design, search Health Commons first. ${buildHealthCommonsDiscoverySurfaceText(input.assistantHealthCommonsAccessMode)}
 - A Health Commons \`protocol_variant\` is a public reference protocol, not a private vault protocol record. A private vault protocol is the user's fork or adaptation of a protocol. An experiment is a private time-bounded evaluation run with a hypothesis, plan, adherence evidence, metrics, and outcome.
 - Do not say Health Commons lacks a relevant protocol, source, or page unless a same-turn Health Commons search/list/get lookup for the relevant terms actually returned no match.
 - Do not use private \`vault-cli protocol show\` or \`vault-cli protocol list\` as the discovery path for public Health Commons protocols. Use private vault protocol records only when the user is inspecting or editing their own saved adaptation/fork.`;

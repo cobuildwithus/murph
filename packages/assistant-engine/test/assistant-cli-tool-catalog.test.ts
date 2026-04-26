@@ -25,6 +25,7 @@ import {
   CliBackedCapabilityHost,
   NativeLocalCapabilityHost,
   createAssistantToolCatalogFromCapabilities,
+  hashAssistantToolCatalogForPromptCache,
 } from '../src/model-harness.ts'
 import { restoreEnvironmentVariable } from './test-helpers.js'
 
@@ -339,6 +340,58 @@ describe('assistant CLI tool catalogs', () => {
     )
   })
 
+  it('keeps provider-turn tool order and prompt-cache hash stable across request context', () => {
+    delete process.env.EXA_API_KEY
+    delete process.env.MURPH_WEB_FETCH_ENABLED
+    delete process.env.MURPH_WEB_SEARCH_PROVIDER
+
+    const catalogA = createProviderTurnAssistantToolCatalog(
+      createToolContext({
+        requestId: 'request-a',
+        sessionId: 'session-a',
+        vault: '/tmp/murph-vault-a',
+        executionContext: createHostedDeviceExecutionContext('member-a'),
+      }),
+    )
+    const catalogB = createProviderTurnAssistantToolCatalog(
+      createToolContext({
+        requestId: 'request-b',
+        sessionId: 'session-b',
+        vault: '/tmp/murph-vault-b',
+        executionContext: createHostedDeviceExecutionContext('member-b'),
+      }),
+    )
+    const namesA = catalogA.listTools().map((tool) => tool.name)
+
+    expect(namesA).toEqual([...namesA].sort((left, right) => left.localeCompare(right)))
+    expect(hashAssistantToolCatalogForPromptCache(catalogA)).toEqual(
+      hashAssistantToolCatalogForPromptCache(catalogB),
+    )
+
+    process.env.EXA_API_KEY = 'test-exa-key'
+    process.env.MURPH_WEB_FETCH_ENABLED = '1'
+
+    const webCatalog = createProviderTurnAssistantToolCatalog(
+      createToolContext({
+        requestId: 'request-c',
+        sessionId: 'session-c',
+        vault: '/tmp/murph-vault-c',
+        executionContext: createHostedDeviceExecutionContext('member-c'),
+      }),
+    )
+    const webNames = webCatalog.listTools().map((tool) => tool.name)
+
+    expect(webNames).toEqual(
+      [...webNames].sort((left, right) => left.localeCompare(right)),
+    )
+    expect(webNames).toEqual(
+      expect.arrayContaining(['web.fetch', 'web.pdf.read', 'web.search']),
+    )
+    expect(hashAssistantToolCatalogForPromptCache(webCatalog)).not.toEqual(
+      hashAssistantToolCatalogForPromptCache(catalogA),
+    )
+  })
+
   it('normalizes capability metadata, binds preferred hosts, and emits preview execution results', async () => {
     const cliCapability = defineAssistantCapabilityTool(
       {
@@ -415,18 +468,18 @@ describe('assistant CLI tool catalogs', () => {
     const listed = catalog.listTools()
     expect(listed).toEqual([
       expect.objectContaining({
-        name: 'vault.cli.run',
-        selectedHostKind: 'cli-backed',
-        preferredHostKind: 'cli-backed',
-        mutationSemantics: 'mixed',
-        backendKind: 'cli-wrapper',
-      }),
-      expect.objectContaining({
         name: 'assistant.note.peek',
         selectedHostKind: 'native-local',
         preferredHostKind: 'native-local',
         mutationSemantics: 'read-only',
         backendKind: 'local-service',
+      }),
+      expect.objectContaining({
+        name: 'vault.cli.run',
+        selectedHostKind: 'cli-backed',
+        preferredHostKind: 'cli-backed',
+        mutationSemantics: 'mixed',
+        backendKind: 'cli-wrapper',
       }),
     ])
 
@@ -473,6 +526,27 @@ function createToolContext(
   return {
     vault: '/tmp/murph-vault',
     ...overrides,
+  }
+}
+
+function createHostedDeviceExecutionContext(
+  memberId: string,
+): NonNullable<AssistantToolContext['executionContext']> {
+  return {
+    hosted: {
+      memberId,
+      userEnvKeys: [],
+      deviceConnectProviders: [
+        { label: 'Oura', provider: 'oura' },
+        { label: 'WHOOP', provider: 'whoop' },
+      ],
+      issueDeviceConnectLink: async ({ provider }) => ({
+        authorizationUrl: `https://example.com/connect/${provider}`,
+        expiresAt: '2026-04-09T00:00:00.000Z',
+        provider,
+        providerLabel: provider,
+      }),
+    },
   }
 }
 

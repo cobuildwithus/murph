@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { tool, type ToolSet } from 'ai'
 import { z, type ZodType, type ZodTypeAny } from 'zod'
 
@@ -46,6 +48,9 @@ export type AnyAssistantBoundToolDefinition = AssistantBoundToolDefinition<
   unknown
 >
 
+const ASSISTANT_TOOL_CACHE_SIGNATURE_VERSION =
+  'murph.assistant-tool-cache-signature.v1'
+
 export type AssistantToolExecutionMode = 'preview' | 'apply'
 
 export interface AssistantAiSdkToolEvent {
@@ -74,14 +79,18 @@ export interface AssistantToolCatalog {
   }): Promise<AssistantToolExecutionResult[]>
   hasTool(name: string): boolean
   listTools(): AssistantToolSpec[]
+  promptCacheToolSchemaHash?(): string
 }
 
 export function createBoundAssistantToolCatalog(
   definitions: readonly AnyAssistantBoundToolDefinition[],
 ): AssistantToolCatalog {
+  const orderedDefinitions = sortAssistantBoundToolDefinitions(definitions)
+  const promptCacheToolSchemaHash =
+    hashAssistantBoundToolDefinitionsForPromptCache(orderedDefinitions)
   const toolMap = new Map<string, AnyAssistantBoundToolDefinition>()
 
-  for (const definition of definitions) {
+  for (const definition of orderedDefinitions) {
     if (toolMap.has(definition.name)) {
       throw new Error(
         `Duplicate assistant bound tool "${definition.name}" cannot be added to one catalog.`,
@@ -186,6 +195,10 @@ export function createBoundAssistantToolCatalog(
           provenance: definition.provenance,
         }),
       )
+    },
+
+    promptCacheToolSchemaHash() {
+      return promptCacheToolSchemaHash
     },
   }
 }
@@ -373,6 +386,80 @@ export function bindAssistantCapabilityToBoundTool(
     inputExample: capability.inputExample,
     execute: async (input) => await execute(input),
   }
+}
+
+export function hashAssistantToolCatalogForPromptCache(
+  toolCatalog: Pick<AssistantToolCatalog, 'promptCacheToolSchemaHash'>,
+): string {
+  const promptCacheToolSchemaHash = toolCatalog.promptCacheToolSchemaHash?.()
+  if (promptCacheToolSchemaHash) {
+    return promptCacheToolSchemaHash
+  }
+
+  throw new Error('Assistant tool catalog is missing a schema-aware prompt cache hash.')
+}
+
+function hashAssistantBoundToolDefinitionsForPromptCache(
+  definitions: readonly AnyAssistantBoundToolDefinition[],
+): string {
+  return hashAssistantToolCacheValue({
+    schema: ASSISTANT_TOOL_CACHE_SIGNATURE_VERSION,
+    tools: sortAssistantBoundToolDefinitions(definitions).map((definition) => ({
+      name: definition.name,
+      description: definition.description,
+      inputExample: definition.inputExample ?? null,
+      inputSchema: z.toJSONSchema(definition.inputSchema, {
+        io: 'input',
+        unrepresentable: 'any',
+      }),
+      backendKind: definition.backendKind,
+      mutationSemantics: definition.mutationSemantics,
+      riskClass: definition.riskClass,
+      preferredHostKind: definition.preferredHostKind,
+      selectedHostKind: definition.selectedHostKind,
+      provenance: definition.provenance,
+    })),
+  })
+}
+
+function sortAssistantBoundToolDefinitions(
+  definitions: readonly AnyAssistantBoundToolDefinition[],
+): AnyAssistantBoundToolDefinition[] {
+  return [...definitions].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+function hashAssistantToolCacheValue(value: unknown): string {
+  return createHash('sha256')
+    .update(stableStringifyAssistantToolCacheValue(value))
+    .digest('hex')
+}
+
+function stableStringifyAssistantToolCacheValue(value: unknown): string {
+  if (value === undefined) {
+    return 'undefined'
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringifyAssistantToolCacheValue).join(',')}]`
+  }
+
+  const record = value as Record<string, unknown>
+  const entries = Object.keys(record)
+    .sort()
+    .flatMap((key) =>
+      record[key] === undefined
+        ? []
+        : [
+            `${JSON.stringify(key)}:${stableStringifyAssistantToolCacheValue(
+              record[key],
+            )}`,
+          ],
+    )
+  return `{${entries.join(',')}}`
 }
 
 function inferAssistantErrorCode(error: unknown): string {
