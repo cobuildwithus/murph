@@ -212,6 +212,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
     executionContext,
     operatorAuthority: input.plan.operatorAuthority,
     requestId: input.turnId,
+    sessionBinding: input.resolvedSession.binding,
     sessionId: input.resolvedSession.sessionId,
     vault: input.input.vault,
     vaultServices: createIntegratedVaultServices({

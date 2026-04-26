@@ -23,6 +23,9 @@ import {
 } from './definition-factory.js'
 import { createHealthCommonsToolDefinitions } from './definitions/health-commons.js'
 import {
+  createAssistantAutomationToolDefinitions,
+} from './definitions/automation.js'
+import {
   createAssistantKnowledgeReadToolDefinitions,
   createAssistantKnowledgeWriteToolDefinitions,
 } from './definitions/knowledge.js'
@@ -44,6 +47,9 @@ export {
   defineVaultServiceBackedTool,
   type AssistantCapabilityToolDefinitionInput,
 } from './definition-factory.js'
+export {
+  createAssistantAutomationToolDefinitions,
+} from './definitions/automation.js'
 export {
   createAssistantKnowledgeReadToolDefinitions,
   createAssistantKnowledgeWriteToolDefinitions,

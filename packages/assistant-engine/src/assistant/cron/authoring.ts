@@ -62,6 +62,7 @@ export interface AddAssistantCronJobInput
   foodAutoLog?: {
     foodId: string
   }
+  resolveTargetDefaults?: boolean
 }
 
 export interface AddAssistantFoodAutoLogCronJobInput
@@ -124,7 +125,10 @@ export async function installAssistantCronPreset(
 export async function addAssistantCronJob(
   input: AddAssistantCronJobInput,
 ): Promise<AssistantCronJob> {
-  const resolvedInput = await resolveAssistantCronTargetDefaults(input)
+  const resolvedInput =
+    input.resolveTargetDefaults === false
+      ? input
+      : await resolveAssistantCronTargetDefaults(input)
   const { foodAutoLog } = resolvedInput
   if (foodAutoLog) {
     return addAssistantFoodAutoLogCronJob({

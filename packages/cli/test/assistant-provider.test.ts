@@ -648,10 +648,11 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.equal(call?.profile, 'primary')
   assert.equal(call?.oss, true)
   assert.doesNotMatch(call?.prompt ?? '', /system prompt/u)
-  assert.doesNotMatch(call?.prompt ?? '', /channel: telegram/u)
-  assert.doesNotMatch(call?.prompt ?? '', /thread: chat-123/u)
   assert.doesNotMatch(call?.prompt ?? '', /Recent local conversation transcript/u)
-  assert.equal(call?.prompt, 'User message:\nhello')
+  assert.match(call?.prompt ?? '', /Conversation context:/u)
+  assert.match(call?.prompt ?? '', /channel: telegram/u)
+  assert.match(call?.prompt ?? '', /thread: chat-123/u)
+  assert.match(call?.prompt ?? '', /User message:\nhello/u)
   assert.deepEqual(result, {
     provider: 'codex-cli',
     providerSessionId: 'thread-123',
