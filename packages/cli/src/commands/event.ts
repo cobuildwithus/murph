@@ -1,25 +1,42 @@
 import { Cli, z } from 'incur'
 import {
+  ADVERSE_EFFECT_SEVERITIES,
+  eventSourceSchema,
+  type EventSource,
+} from '@murphai/contracts'
+import {
+  appendHistoryEvent,
+  PROCEDURE_STATUSES,
+} from '@murphai/core'
+import { withBaseOptions } from '@murphai/operator-config/command-helpers'
+import {
   listItemSchema,
   localDateSchema,
+  occurredAtOptionSchema,
   pathSchema,
   showResultSchema,
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  normalizeRepeatableFlagOption,
+  type JsonObject,
+} from '@murphai/vault-usecases'
+import {
   deleteEventRecord,
   editEventRecord,
+  upsertEventRecord,
 } from '@murphai/vault-usecases/records'
 import {
   eventScaffoldKindSchema,
   showEventRecord,
 } from '@murphai/vault-usecases/records'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { registerLedgerEventEntityGroup } from './entity-command-groups.js'
+import { createLedgerEventEntityGroup } from './entity-command-groups.js'
 import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const eventIdSchema = z
   .string()
@@ -55,8 +72,226 @@ const eventListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
+const eventTitleOptionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(160)
+  .optional()
+  .describe('Optional event title. If omitted, the command derives a short title.')
+const eventNoteOptionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(4000)
+  .optional()
+  .describe('Optional freeform event note.')
+const eventTagOptionSchema = z
+  .array(slugSchema)
+  .optional()
+  .describe('Optional event tags. Repeat --tag for multiple values.')
+const eventUnitSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9._/%-]+$/u,
+    'Expected a compact unit such as mg, bpm, ms, count, or %.',
+  )
+  .describe('Compact unit such as mg, bpm, ms, count, or %.')
+
+const typedEventBaseResultSchema = eventUpsertResultSchema.extend({
+  kind: z.enum([
+    'adverse_effect',
+    'encounter',
+    'exposure',
+    'note',
+    'medication_intake',
+    'observation',
+    'procedure',
+    'supplement_intake',
+    'symptom',
+  ]),
+})
+
+const eventNoteAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('note'),
+})
+
+const eventSymptomAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('symptom'),
+})
+
+const eventObservationAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('observation'),
+})
+
+const eventMedicationIntakeAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('medication_intake'),
+})
+
+const eventSupplementIntakeAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('supplement_intake'),
+})
+
+const eventEncounterAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('encounter'),
+})
+
+const eventProcedureAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('procedure'),
+})
+
+const eventAdverseEffectAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('adverse_effect'),
+})
+
+const eventExposureAddResultSchema = typedEventBaseResultSchema.extend({
+  kind: z.literal('exposure'),
+})
+
+const procedureStatusSchema = z
+  .enum(PROCEDURE_STATUSES)
+  .optional()
+  .describe('Optional procedure status: planned, completed, or cancelled.')
+const adverseEffectSeveritySchema = z
+  .enum(ADVERSE_EFFECT_SEVERITIES)
+  .optional()
+  .describe('Optional adverse-effect severity: mild, moderate, or severe.')
+
+const optionalEventStringSchema = (max: number, description: string) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .optional()
+    .describe(description)
+
+type GenericTypedEventKind =
+  | 'note'
+  | 'symptom'
+  | 'observation'
+  | 'medication_intake'
+  | 'supplement_intake'
+
+type HistoryTypedEventKind =
+  | 'encounter'
+  | 'procedure'
+  | 'adverse_effect'
+  | 'exposure'
+
+type CommonTypedEventPayload = JsonObject & {
+  kind: GenericTypedEventKind
+  occurredAt: string
+  source: EventSource
+  title: string
+  note?: string
+  tags?: string[]
+}
+
+type CommonHistoryEventInput = {
+  occurredAt: string
+  source: EventSource
+  title: string
+  note?: string
+  tags?: string[]
+}
+
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  const normalized = value?.trim()
+  return normalized && normalized.length > 0 ? normalized : undefined
+}
+
+function deriveEventTitle(explicitTitle: string | undefined, fallback: string): string {
+  const explicit = normalizeOptionalText(explicitTitle)
+  if (explicit) {
+    return explicit
+  }
+
+  const normalizedFallback = fallback.trim().replace(/\s+/gu, ' ')
+  return normalizedFallback.length <= 160
+    ? normalizedFallback
+    : `${normalizedFallback.slice(0, 157)}...`
+}
+
+function normalizeEventTags(value: readonly string[] | undefined): string[] {
+  return normalizeRepeatableFlagOption(value, 'tag') ?? []
+}
+
+async function buildCommonTypedEventPayload(input: {
+  kind: GenericTypedEventKind
+  vault: string
+  occurredAt?: string
+  source?: EventSource
+  title: string
+  note?: string
+  tag?: readonly string[]
+}): Promise<CommonTypedEventPayload> {
+  const occurredAt =
+    (await normalizeOccurredAtOption({
+      vault: input.vault,
+      occurredAt: input.occurredAt,
+    })) ?? new Date().toISOString()
+  const source = input.source ?? 'manual'
+  const note = normalizeOptionalText(input.note)
+  const tags = normalizeEventTags(input.tag)
+
+  return {
+    kind: input.kind,
+    occurredAt,
+    source,
+    title: input.title,
+    ...(note ? { note } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  }
+}
+
+async function buildCommonHistoryEventInput(input: {
+  vault: string
+  occurredAt: string
+  source?: EventSource
+  title: string
+  note?: string
+  tag?: readonly string[]
+}): Promise<CommonHistoryEventInput> {
+  const occurredAt = await normalizeOccurredAtOption({
+    vault: input.vault,
+    occurredAt: input.occurredAt,
+  })
+
+  if (typeof occurredAt !== 'string') {
+    throw new Error('Expected --occurred-at to be present after option validation.')
+  }
+
+  const source = input.source ?? 'manual'
+  const note = normalizeOptionalText(input.note)
+  const tags = normalizeEventTags(input.tag)
+
+  return {
+    occurredAt,
+    source,
+    title: input.title,
+    ...(note ? { note } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  }
+}
+
+function mapHistoryAddResult<TKind extends HistoryTypedEventKind>(input: {
+  vault: string
+  kind: TKind
+  result: Awaited<ReturnType<typeof appendHistoryEvent>>
+}) {
+  return {
+    vault: input.vault,
+    eventId: input.result.record.id,
+    lookupId: input.result.record.id,
+    ledgerFile: input.result.relativePath,
+    created: true,
+    kind: input.kind,
+  }
+}
+
 export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
-  registerLedgerEventEntityGroup(cli, {
+  const event = createLedgerEventEntityGroup({
     commandName: 'event',
     description: 'Generic canonical event commands for event kinds without specialized nouns.',
     scaffold: {
@@ -179,4 +414,510 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       }),
     ],
   })
+
+  const note = Cli.create('note', {
+    description: 'Typed note event write commands.',
+  })
+
+  note.command('add', {
+    description: 'Append one canonical note event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      note: z
+        .string()
+        .trim()
+        .min(1)
+        .max(4000)
+        .describe('Freeform note text to store on the event.'),
+      occurredAt: occurredAtOptionSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventNoteAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, options.note)
+      const payload = await buildCommonTypedEventPayload({
+        kind: 'note',
+        vault: options.vault,
+        occurredAt: options.occurredAt,
+        source: options.source,
+        title,
+        note: options.note,
+        tag: options.tag,
+      })
+      const result = await upsertEventRecord({
+        vault: options.vault,
+        payload,
+      })
+
+      return {
+        ...result,
+        kind: 'note' as const,
+      }
+    },
+  })
+
+  const symptom = Cli.create('symptom', {
+    description: 'Typed symptom event write commands.',
+  })
+
+  symptom.command('add', {
+    description: 'Append one canonical symptom event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      symptom: z
+        .string()
+        .trim()
+        .min(1)
+        .max(120)
+        .describe('Symptom name, such as headache or nausea.'),
+      severity: z
+        .number()
+        .int()
+        .min(0)
+        .max(10)
+        .describe('Symptom severity on a 0-10 scale.'),
+      bodyRegion: z
+        .string()
+        .trim()
+        .min(1)
+        .max(120)
+        .optional()
+        .describe('Optional affected body region.'),
+      occurredAt: occurredAtOptionSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventSymptomAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `Symptom: ${options.symptom}`)
+      const bodyRegion = normalizeOptionalText(options.bodyRegion)
+      const payload = {
+        ...(await buildCommonTypedEventPayload({
+          kind: 'symptom',
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        symptom: options.symptom,
+        intensity: options.severity,
+        ...(bodyRegion ? { bodySite: bodyRegion } : {}),
+      }
+      const result = await upsertEventRecord({
+        vault: options.vault,
+        payload,
+      })
+
+      return {
+        ...result,
+        kind: 'symptom' as const,
+      }
+    },
+  })
+
+  const observation = Cli.create('observation', {
+    description: 'Typed observation event write commands.',
+  })
+
+  observation.command('add', {
+    description: 'Append one canonical observation event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      metric: slugSchema.describe('Observation metric slug, such as resting-heart-rate.'),
+      value: z.number().describe('Observed numeric value.'),
+      unit: eventUnitSchema,
+      occurredAt: occurredAtOptionSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventObservationAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `Observation: ${options.metric}`)
+      const payload = {
+        ...(await buildCommonTypedEventPayload({
+          kind: 'observation',
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        metric: options.metric,
+        value: options.value,
+        unit: options.unit,
+      }
+      const result = await upsertEventRecord({
+        vault: options.vault,
+        payload,
+      })
+
+      return {
+        ...result,
+        kind: 'observation' as const,
+      }
+    },
+  })
+
+  const supplementIntake = Cli.create('supplement-intake', {
+    description: 'Typed supplement intake event write commands.',
+  })
+
+  supplementIntake.command('add', {
+    description: 'Append one canonical supplement intake event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      supplementName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Supplement name, such as magnesium glycinate.'),
+      dose: z.number().nonnegative().describe('Supplement dose amount.'),
+      unit: eventUnitSchema,
+      occurredAt: occurredAtOptionSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventSupplementIntakeAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `Supplement: ${options.supplementName}`)
+      const payload = {
+        ...(await buildCommonTypedEventPayload({
+          kind: 'supplement_intake',
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        supplementName: options.supplementName,
+        dose: options.dose,
+        unit: options.unit,
+      }
+      const result = await upsertEventRecord({
+        vault: options.vault,
+        payload,
+      })
+
+      return {
+        ...result,
+        kind: 'supplement_intake' as const,
+      }
+    },
+  })
+
+  const medicationIntake = Cli.create('medication-intake', {
+    description: 'Typed medication intake event write commands.',
+  })
+
+  medicationIntake.command('add', {
+    description: 'Append one canonical medication intake event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      medicationName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Medication name, such as metformin.'),
+      dose: z.number().nonnegative().describe('Medication dose amount.'),
+      unit: eventUnitSchema,
+      occurredAt: occurredAtOptionSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventMedicationIntakeAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `Medication: ${options.medicationName}`)
+      const payload = {
+        ...(await buildCommonTypedEventPayload({
+          kind: 'medication_intake',
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        medicationName: options.medicationName,
+        dose: options.dose,
+        unit: options.unit,
+      }
+      const result = await upsertEventRecord({
+        vault: options.vault,
+        payload,
+      })
+
+      return {
+        ...result,
+        kind: 'medication_intake' as const,
+      }
+    },
+  })
+
+  const encounter = Cli.create('encounter', {
+    description: 'Typed encounter history event write commands.',
+  })
+
+  encounter.command('add', {
+    description: 'Append one canonical encounter history event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      encounterType: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Encounter type, such as office_visit, specialist_follow_up, or urgent-care.'),
+      location: optionalEventStringSchema(160, 'Optional encounter location.'),
+      providerId: z
+        .string()
+        .regex(/^prov_[0-9A-Za-z]+$/u, 'Expected a canonical provider id in prov_* form.')
+        .optional()
+        .describe('Optional canonical provider id such as prov_<ULID>.'),
+      occurredAt: occurredAtOptionSchema
+        .describe('Occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventEncounterAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `Encounter: ${options.encounterType}`)
+      const result = await appendHistoryEvent({
+        ...(await buildCommonHistoryEventInput({
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        vaultRoot: options.vault,
+        kind: 'encounter',
+        encounterType: options.encounterType,
+        ...(options.location ? { location: options.location } : {}),
+        ...(options.providerId ? { providerId: options.providerId } : {}),
+      })
+
+      return mapHistoryAddResult({
+        vault: options.vault,
+        kind: 'encounter',
+        result,
+      })
+    },
+  })
+
+  const procedure = Cli.create('procedure', {
+    description: 'Typed procedure history event write commands.',
+  })
+
+  procedure.command('add', {
+    description: 'Append one canonical procedure history event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      procedure: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Procedure name or slug, such as right-knee-arthroscopy.'),
+      status: procedureStatusSchema,
+      occurredAt: occurredAtOptionSchema
+        .describe('Occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventProcedureAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `Procedure: ${options.procedure}`)
+      const result = await appendHistoryEvent({
+        ...(await buildCommonHistoryEventInput({
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        vaultRoot: options.vault,
+        kind: 'procedure',
+        procedure: options.procedure,
+        ...(options.status ? { status: options.status } : {}),
+      })
+
+      return mapHistoryAddResult({
+        vault: options.vault,
+        kind: 'procedure',
+        result,
+      })
+    },
+  })
+
+  const adverseEffect = Cli.create('adverse-effect', {
+    description: 'Typed adverse-effect history event write commands.',
+  })
+
+  adverseEffect.command('add', {
+    description: 'Append one canonical adverse-effect history event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      substance: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Substance associated with the adverse effect.'),
+      effect: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Observed adverse effect, such as nausea or rash.'),
+      severity: adverseEffectSeveritySchema,
+      occurredAt: occurredAtOptionSchema
+        .describe('Occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventAdverseEffectAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `${options.effect} after ${options.substance}`)
+      const result = await appendHistoryEvent({
+        ...(await buildCommonHistoryEventInput({
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        vaultRoot: options.vault,
+        kind: 'adverse_effect',
+        substance: options.substance,
+        effect: options.effect,
+        ...(options.severity ? { severity: options.severity } : {}),
+      })
+
+      return mapHistoryAddResult({
+        vault: options.vault,
+        kind: 'adverse_effect',
+        result,
+      })
+    },
+  })
+
+  const exposure = Cli.create('exposure', {
+    description: 'Typed exposure history event write commands.',
+  })
+
+  exposure.command('add', {
+    description: 'Append one canonical exposure history event from typed fields.',
+    args: z.object({}),
+    options: withBaseOptions({
+      exposureType: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Exposure type, such as environmental, food, or medication.'),
+      substance: z
+        .string()
+        .trim()
+        .min(1)
+        .max(160)
+        .describe('Substance or agent involved in the exposure.'),
+      duration: optionalEventStringSchema(120, 'Optional exposure duration string, such as 45 minutes.'),
+      occurredAt: occurredAtOptionSchema
+        .describe('Occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+      title: eventTitleOptionSchema,
+      note: eventNoteOptionSchema,
+      tag: eventTagOptionSchema,
+    }),
+    output: eventExposureAddResultSchema,
+    async run({ options }) {
+      const title = deriveEventTitle(options.title, `Exposure: ${options.substance}`)
+      const result = await appendHistoryEvent({
+        ...(await buildCommonHistoryEventInput({
+          vault: options.vault,
+          occurredAt: options.occurredAt,
+          source: options.source,
+          title,
+          note: options.note,
+          tag: options.tag,
+        })),
+        vaultRoot: options.vault,
+        kind: 'exposure',
+        exposureType: options.exposureType,
+        substance: options.substance,
+        ...(options.duration ? { duration: options.duration } : {}),
+      })
+
+      return mapHistoryAddResult({
+        vault: options.vault,
+        kind: 'exposure',
+        result,
+      })
+    },
+  })
+
+  event.command(encounter)
+  event.command(procedure)
+  event.command(adverseEffect)
+  event.command(exposure)
+  event.command(note)
+  event.command(symptom)
+  event.command(observation)
+  event.command(medicationIntake)
+  event.command(supplementIntake)
+
+  cli.command(event)
 }
