@@ -48,6 +48,7 @@ import {
   runHostedNoopSystemWakeLane,
 } from "./maintenance.ts";
 import type {
+  HostedAssistantDeliveryOutcome,
   HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedCommittedExecutionState,
@@ -60,6 +61,7 @@ import type {
 import { exportHostedPendingAssistantRuntimeIssues } from "./issues.ts";
 import { exportHostedPendingAssistantUsage } from "./usage.ts";
 import { exportHostedBrowserVaultReplica } from "./browser-vault.ts";
+import { deleteHostedLinqMessages } from "./message-cleanup.ts";
 import { computeHostedRunElapsedMs, resolveHostedWake } from "./utils.ts";
 
 const HOSTED_IMMEDIATE_MAINTENANCE_PASS_BUDGET = 8;
@@ -317,6 +319,7 @@ export async function completeHostedRunDrainAfterCommit(input: {
       committedGatewayProjectionSnapshot: null,
       committedResult,
     },
+    runDrain,
     wake: input.wake,
   });
 }
@@ -790,6 +793,7 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
+  runDrain: HostedRuntimeDrainRequest;
   wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantRuntimeCompletedJobResult> {
   emitHostedExecutionStructuredLog({
@@ -812,6 +816,13 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     forwardedEnv: input.runtime.forwardedEnv,
     platformEnv: input.runtime.platformEnv,
     vaultRoot: input.restored.vaultRoot,
+    wake: input.wake,
+  });
+  await deleteHostedLinqProviderMessagesAfterSideEffects({
+    assistantDeliveryOutcomes,
+    run: input.run ?? null,
+    runDrain: input.runDrain,
+    runtimeEnv: input.runtime.forwardedEnv,
     wake: input.wake,
   });
   await exportHostedPendingAssistantUsage({
@@ -959,6 +970,99 @@ async function finalizeHostedCommittedRunAfterCommit(input: {
     phase: "completed",
     result: finalResult,
   };
+}
+
+async function deleteHostedLinqProviderMessagesAfterSideEffects(input: {
+  assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+  run?: HostedExecutionRunContext | null;
+  runDrain: HostedRuntimeDrainRequest;
+  runtimeEnv: Readonly<Record<string, string>>;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  const messageIds = collectHostedLinqProviderMessageIds(input);
+  if (messageIds.length === 0) {
+    return;
+  }
+
+  try {
+    await deleteHostedLinqMessages({
+      env: { ...input.runtimeEnv },
+      messageIds,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: input.wake,
+      details: {
+        messageIdCount: messageIds.length,
+        provider: "linq",
+        runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      },
+      message: "Hosted runtime deleted Linq provider-visible messages after side effects.",
+      phase: "side-effects.draining",
+      run: input.run ?? null,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      wake: input.wake,
+      error,
+      level: "warn",
+      details: {
+        messageIdCount: messageIds.length,
+        provider: "linq",
+        runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      },
+      message:
+        "Hosted runtime Linq provider-visible message cleanup failed after side effects; parent cleanup may retry.",
+      phase: "side-effects.draining",
+      run: input.run ?? null,
+    });
+  }
+}
+
+function collectHostedLinqProviderMessageIds(input: {
+  assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+  runDrain: HostedRuntimeDrainRequest;
+}): string[] {
+  const messageIds = new Set<string>();
+
+  for (const event of input.runDrain.events) {
+    const wake = event.wake;
+    if (wake.kind === "conversation.message" && wake.message.channel === "linq") {
+      messageIds.add(wake.message.linqMessage.messageId);
+    }
+  }
+
+  for (const cleanupTarget of input.runDrain.committedResult?.result.adoptedCleanupTargets ?? []) {
+    if (cleanupTarget.channel === "linq") {
+      messageIds.add(cleanupTarget.messageId);
+    }
+  }
+
+  for (const outcome of input.assistantDeliveryOutcomes) {
+    if (
+      outcome.deliveryChannel !== "linq"
+      || (outcome.deliveryStatus !== "sent" && outcome.deliveryStatus !== "failed_ambiguous")
+    ) {
+      continue;
+    }
+
+    for (const messageId of readHostedAssistantDeliveryProviderMessageIds(outcome)) {
+      messageIds.add(messageId);
+    }
+  }
+
+  return [...messageIds].filter((messageId) => messageId.trim().length > 0);
+}
+
+function readHostedAssistantDeliveryProviderMessageIds(
+  outcome: HostedAssistantDeliveryOutcome,
+): string[] {
+  if (Array.isArray(outcome.providerMessageIds) && outcome.providerMessageIds.length > 0) {
+    return outcome.providerMessageIds;
+  }
+
+  return outcome.providerMessageId ? [outcome.providerMessageId] : [];
 }
 
 function collectHostedBundleArtifactHashes(bytes: Uint8Array | null): Set<string> {
