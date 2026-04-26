@@ -44,19 +44,19 @@ function buildRegistryLinks(
   family: BankEntityKind,
   attributes: Record<string, unknown>,
 ) {
-  const protocolSelfId =
-    family === "protocol" ? firstString(attributes, ["protocolId"]) : null;
+  const regimenSelfId =
+    family === "regimen" ? firstString(attributes, ["regimenId"]) : null;
 
   return normalizeCanonicalLinks(
     extractBankEntityRegistryLinks(family, attributes)
       .filter((link) =>
         !(
-          family === "protocol" &&
-          protocolSelfId &&
-          link.type === "related_protocol" &&
-          link.targetId === protocolSelfId &&
+          family === "regimen" &&
+          regimenSelfId &&
+          link.type === "related_regimen" &&
+          link.targetId === regimenSelfId &&
           link.sourceKeys.length === 1 &&
-          link.sourceKeys[0] === "protocolId"
+          link.sourceKeys[0] === "regimenId"
         )
       )
       .map((link) => ({

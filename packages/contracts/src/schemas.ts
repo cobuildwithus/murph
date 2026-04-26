@@ -18,6 +18,7 @@ import {
   goalFrontmatterSchema as goalFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
+  regimenFrontmatterSchema as regimenFrontmatterContract,
   providerFrontmatterSchema as providerFrontmatterContract,
   recipeFrontmatterSchema as recipeFrontmatterContract,
   sampleRecordSchema as sampleRecordContract,
@@ -42,6 +43,16 @@ function toJsonSchema(schema: z.ZodTypeAny): JsonSchema {
   return z.toJSONSchema(schema) as JsonSchema;
 }
 
+function withDependentRequired(
+  schema: JsonSchema,
+  dependentRequired: Record<string, readonly string[]>,
+): JsonSchema {
+  return {
+    ...schema,
+    dependentRequired,
+  };
+}
+
 export const vaultMetadataSchema = toJsonSchema(vaultMetadataContract);
 export const eventRecordSchema = toJsonSchema(eventRecordContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
@@ -50,7 +61,13 @@ export const inboxCaptureRecordSchema = toJsonSchema(inboxCaptureRecordContract)
 export const automationFrontmatterSchema = toJsonSchema(automationFrontmatterContract);
 export const coreFrontmatterSchema = toJsonSchema(coreFrontmatterContract);
 export const journalDayFrontmatterSchema = toJsonSchema(journalDayFrontmatterContract);
-export const experimentFrontmatterSchema = toJsonSchema(experimentFrontmatterContract);
+export const experimentFrontmatterSchema = withDependentRequired(
+  toJsonSchema(experimentFrontmatterContract),
+  {
+    commonsProtocolRef: ["effectiveProtocolSnapshot"],
+    protocolRef: ["commonsProtocolRef", "effectiveProtocolSnapshot"],
+  },
+);
 export const foodFrontmatterSchema = toJsonSchema(foodFrontmatterContract);
 export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract);
 export const memoryDocumentFrontmatterSchema = toJsonSchema(memoryDocumentFrontmatterContract);
@@ -63,6 +80,7 @@ export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
 export const allergyFrontmatterSchema = toJsonSchema(allergyFrontmatterContract);
 export const protocolFrontmatterSchema = toJsonSchema(protocolFrontmatterContract);
+export const regimenFrontmatterSchema = toJsonSchema(regimenFrontmatterContract);
 export const familyMemberFrontmatterSchema = toJsonSchema(familyMemberFrontmatterContract);
 export const geneticVariantFrontmatterSchema = toJsonSchema(geneticVariantFrontmatterContract);
 
@@ -84,6 +102,7 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-memory": memoryDocumentFrontmatterSchema,
   "frontmatter-provider": providerFrontmatterSchema,
   "frontmatter-protocol": protocolFrontmatterSchema,
+  "frontmatter-regimen": regimenFrontmatterSchema,
   "frontmatter-recipe": recipeFrontmatterSchema,
   "frontmatter-scheduled-log": scheduledLogFrontmatterSchema,
   "frontmatter-workout-format": workoutFormatFrontmatterSchema,

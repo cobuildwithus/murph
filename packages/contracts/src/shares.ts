@@ -10,9 +10,9 @@ import {
   FOOD_STATUSES,
   GOAL_HORIZONS,
   GOAL_STATUSES,
-  PROTOCOL_KINDS,
-  PROTOCOL_STATUSES,
   RECIPE_STATUSES,
+  REGIMEN_KINDS,
+  REGIMEN_STATUSES,
   VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES,
   WORKOUT_FORMAT_STATUSES,
@@ -32,8 +32,8 @@ import {
   foodRelationLinkSchema,
   geneticVariantRelationLinkSchema,
   goalRelationLinkSchema,
-  protocolRelationLinkSchema,
   recipeRelationLinkSchema,
+  regimenRelationLinkSchema,
 } from "./relation-links.ts";
 import { isStrictIsoDate, isStrictIsoDateTime } from "./time.ts";
 
@@ -157,12 +157,12 @@ const allergyIdSchema = patternedString(idPattern(ID_PREFIXES.allergy));
 const familyMemberIdSchema = patternedString(idPattern(ID_PREFIXES.family));
 const goalIdSchema = patternedString(idPattern(ID_PREFIXES.goal));
 const conditionIdSchema = patternedString(idPattern(ID_PREFIXES.condition));
-const protocolIdSchema = patternedString(idPattern(ID_PREFIXES.protocol));
+const regimenIdSchema = patternedString(idPattern(ID_PREFIXES.regimen));
 const experimentIdSchema = patternedString(idPattern(ID_PREFIXES.experiment));
 const variantIdSchema = patternedString(idPattern(ID_PREFIXES.variant));
 const shareEntityRefSchema = patternedString(SHARE_ENTITY_REF_PATTERN);
 
-export const attachedProtocolIdsSchema = uniqueArray(protocolIdSchema, {
+export const attachedRegimenIdsSchema = uniqueArray(regimenIdSchema, {
   maxItems: 32,
   uniqueItems: true,
 }).optional();
@@ -203,7 +203,7 @@ export const foodUpsertPayloadSchema = withContractMetadata(
       tags: uniqueArray(slugSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
       autoLogDaily: foodAutoLogDailySchema.optional(),
-      attachedProtocolIds: attachedProtocolIdsSchema,
+      attachedRegimenIds: attachedRegimenIdsSchema,
       links: uniqueArray(foodRelationLinkSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
@@ -330,7 +330,7 @@ export const conditionUpsertPayloadSchema = withContractMetadata(
       severity: z.enum(CONDITION_SEVERITIES).optional(),
       bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
-      relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).optional(),
+      relatedRegimenIds: uniqueArray(regimenIdSchema, { uniqueItems: true }).optional(),
       links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
     })
@@ -352,7 +352,7 @@ export const conditionUpsertPatchPayloadSchema = withContractMetadata(
       severity: z.enum(CONDITION_SEVERITIES).nullable().optional(),
       bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).nullable().optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).nullable().optional(),
-      relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).nullable().optional(),
+      relatedRegimenIds: uniqueArray(regimenIdSchema, { uniqueItems: true }).nullable().optional(),
       links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).nullable().optional(),
       note: boundedString(1, 4000).nullable().optional(),
     })
@@ -479,14 +479,14 @@ export const geneticVariantUpsertPatchPayloadSchema = withContractMetadata(
   "Murph Genetic Variant Upsert Patch Payload",
 );
 
-export const protocolUpsertPayloadSchema = withContractMetadata(
+export const regimenUpsertPayloadSchema = withContractMetadata(
   z
     .object({
-      protocolId: protocolIdSchema.optional(),
+      regimenId: regimenIdSchema.optional(),
       slug: slugSchema.optional(),
       title: boundedString(1, 160),
-      kind: z.enum(PROTOCOL_KINDS).default("supplement"),
-      status: z.enum(PROTOCOL_STATUSES).default("active"),
+      kind: z.enum(REGIMEN_KINDS).default("supplement"),
+      status: z.enum(REGIMEN_STATUSES).default("active"),
       startedOn: isoDateString().optional(),
       stoppedOn: isoDateString().optional(),
       substance: boundedString(1, 160).optional(),
@@ -499,23 +499,23 @@ export const protocolUpsertPayloadSchema = withContractMetadata(
       ingredients: uniqueArray(supplementIngredientPayloadSchema, { maxItems: 64 }).optional(),
       relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
-      relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).optional(),
-      links: uniqueArray(protocolRelationLinkSchema, { uniqueItems: true }).optional(),
+      relatedRegimenIds: uniqueArray(regimenIdSchema, { uniqueItems: true }).optional(),
+      links: uniqueArray(regimenRelationLinkSchema, { uniqueItems: true }).optional(),
       group: patternedString(GROUP_PATTERN, 1, 160).optional(),
     })
     .strict(),
-  "@murphai/contracts/protocol-upsert-payload.schema.json",
-  "Murph Protocol Upsert Payload",
+  "@murphai/contracts/regimen-upsert-payload.schema.json",
+  "Murph Regimen Upsert Payload",
 );
 
 export const sharePackFoodPayloadSchema = withContractMetadata(
   foodUpsertPayloadSchema
     .omit({
-      attachedProtocolIds: true,
+      attachedRegimenIds: true,
       foodId: true,
     })
     .extend({
-      attachedProtocolRefs: uniqueArray(shareEntityRefSchema, {
+      attachedRegimenRefs: uniqueArray(shareEntityRefSchema, {
         maxItems: 32,
         uniqueItems: true,
       }).optional(),
@@ -531,10 +531,10 @@ export const sharePackRecipePayloadSchema = withContractMetadata(
   "Murph Share Pack Recipe Payload",
 );
 
-export const sharePackProtocolPayloadSchema = withContractMetadata(
-  protocolUpsertPayloadSchema.omit({ protocolId: true }).strict(),
-  "@murphai/contracts/share-pack-protocol-payload.schema.json",
-  "Murph Share Pack Protocol Payload",
+export const sharePackRegimenPayloadSchema = withContractMetadata(
+  regimenUpsertPayloadSchema.omit({ regimenId: true }).strict(),
+  "@murphai/contracts/share-pack-regimen-payload.schema.json",
+  "Murph Share Pack Regimen Payload",
 );
 
 export const sharePackEntitySchema = withContractMetadata(
@@ -555,9 +555,9 @@ export const sharePackEntitySchema = withContractMetadata(
       .strict(),
     z
       .object({
-        kind: z.literal("protocol"),
+        kind: z.literal("regimen"),
         ref: shareEntityRefSchema,
-        payload: sharePackProtocolPayloadSchema,
+        payload: sharePackRegimenPayloadSchema,
       })
       .strict(),
   ]),
@@ -605,23 +605,23 @@ export const sharePackSchema = withContractMetadata(
       const refKinds = new Map(value.entities.map((entity) => [entity.ref, entity.kind] as const));
       value.entities.forEach((entity, index) => {
         if (entity.kind === "food") {
-          for (const [attachedIndex, attachedRef] of (entity.payload.attachedProtocolRefs ?? []).entries()) {
+          for (const [attachedIndex, attachedRef] of (entity.payload.attachedRegimenRefs ?? []).entries()) {
             const attachedKind = refKinds.get(attachedRef);
 
             if (!attachedKind) {
               context.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: `Food entity references unknown protocol ref \"${attachedRef}\".`,
-                path: ["entities", index, "payload", "attachedProtocolRefs", attachedIndex],
+                message: `Food entity references unknown regimen ref \"${attachedRef}\".`,
+                path: ["entities", index, "payload", "attachedRegimenRefs", attachedIndex],
               });
               continue;
             }
 
-            if (attachedKind !== "protocol") {
+            if (attachedKind !== "regimen") {
               context.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: `Food entity refs must target protocol share entities, but \"${attachedRef}\" is a ${attachedKind}.`,
-                path: ["entities", index, "payload", "attachedProtocolRefs", attachedIndex],
+                message: `Food entity refs must target regimen share entities, but \"${attachedRef}\" is a ${attachedKind}.`,
+                path: ["entities", index, "payload", "attachedRegimenRefs", attachedIndex],
               });
             }
           }
@@ -659,13 +659,13 @@ export type ConditionUpsertPayload = z.infer<typeof conditionUpsertPayloadSchema
 export type ConditionUpsertPatchPayload = z.infer<typeof conditionUpsertPatchPayloadSchema>;
 export type AllergyUpsertPayload = z.infer<typeof allergyUpsertPayloadSchema>;
 export type AllergyUpsertPatchPayload = z.infer<typeof allergyUpsertPatchPayloadSchema>;
-export type ProtocolUpsertPayload = z.infer<typeof protocolUpsertPayloadSchema>;
+export type RegimenUpsertPayload = z.infer<typeof regimenUpsertPayloadSchema>;
 export type FamilyMemberUpsertPayload = z.infer<typeof familyMemberUpsertPayloadSchema>;
 export type FamilyMemberUpsertPatchPayload = z.infer<typeof familyMemberUpsertPatchPayloadSchema>;
 export type GeneticVariantUpsertPayload = z.infer<typeof geneticVariantUpsertPayloadSchema>;
 export type GeneticVariantUpsertPatchPayload = z.infer<typeof geneticVariantUpsertPatchPayloadSchema>;
 export type SharePackFoodPayload = z.infer<typeof sharePackFoodPayloadSchema>;
 export type SharePackRecipePayload = z.infer<typeof sharePackRecipePayloadSchema>;
-export type SharePackProtocolPayload = z.infer<typeof sharePackProtocolPayloadSchema>;
+export type SharePackRegimenPayload = z.infer<typeof sharePackRegimenPayloadSchema>;
 export type SharePackEntity = z.infer<typeof sharePackEntitySchema>;
 export type SharePack = z.infer<typeof sharePackSchema>;

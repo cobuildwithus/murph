@@ -24,11 +24,16 @@ import { walkRelativeFiles } from "./health/loaders.ts";
 import { collapseEventLedgerEntities } from "./health/projectors/history.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import { parseMarkdownDocument } from "./markdown.ts";
+import {
+  PROTOCOL_DIRECTORY,
+  PROTOCOL_DOC_TYPE,
+  readProtocolFrontmatter,
+} from "./protocols.ts";
 import type { QueryRecordData } from "./query-record-data.ts";
 
 export type { QueryRecordData } from "./query-record-data.ts";
 
-type FrontmatterRecordType = "core" | "experiment" | "journal";
+type FrontmatterRecordType = "core" | "experiment" | "journal" | "protocol";
 type JsonRecordType = "audit" | "event" | "sample";
 
 export interface VaultSourceSnapshot {
@@ -197,6 +202,7 @@ async function readBaseEntities(
 ): Promise<CanonicalEntity[]> {
   const coreDocument = await readOptionalCoreEntity(vaultRoot, metadata);
   const experiments = await readExperimentEntities(vaultRoot);
+  const protocols = await readProtocolEntities(vaultRoot);
   const journalEntries = await readJournalEntities(vaultRoot);
   const events = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, "event");
   const samples = await readSampleEntities(vaultRoot);
@@ -205,6 +211,7 @@ async function readBaseEntities(
   return [
     ...(coreDocument ? [coreDocument] : []),
     ...experiments,
+    ...protocols,
     ...journalEntries,
     ...events,
     ...samples,
@@ -266,9 +273,12 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
       const filePath = path.join(vaultRoot, relativePath);
       const source = await readFile(filePath, "utf8");
       const document = parseMarkdownDocument(source);
-      const attributes = normalizeFrontmatterAttributes(
-        "experiment",
-        document.attributes,
+      const attributes = readExperimentProtocolAttributesForQuery(
+        normalizeFrontmatterAttributes(
+          "experiment",
+          document.attributes,
+        ),
+        relativePath,
       );
       const id = requireCanonicalString(
         attributes,
@@ -303,12 +313,65 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         attributes: {
           ...attributes,
         },
-        frontmatter: attributes,
+        frontmatter: {
+          ...attributes,
+        },
         links,
         relatedIds: linkTargetIds(links),
         stream: null,
         experimentSlug: slug,
         tags: normalizeTags(attributes.tags),
+      } satisfies CanonicalEntity;
+    }),
+  );
+
+  return pages.sort(compareCanonicalEntities);
+}
+
+async function readProtocolEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
+  const relativePaths = await walkRelativeFiles(vaultRoot, PROTOCOL_DIRECTORY, ".md");
+
+  const pages = await Promise.all(
+    relativePaths.map(async (relativePath) => {
+      const filePath = path.join(vaultRoot, relativePath);
+      const source = await readFile(filePath, "utf8");
+      const document = parseMarkdownDocument(source);
+      const attributes = readProtocolAttributesForQuery(
+        normalizeFrontmatterAttributes(
+          "protocol",
+          document.attributes,
+        ),
+        relativePath,
+      );
+      const id = attributes.protocolId;
+      const slug = attributes.slug;
+      const title = attributes.title ?? extractMarkdownHeading(document.body) ?? slug;
+      const links: CanonicalEntity["links"] = [];
+
+      return {
+        entityId: id,
+        primaryLookupId: id,
+        lookupIds: uniqueStrings([id, slug]),
+        family: "protocol",
+        recordClass: resolveCanonicalRecordClass("protocol"),
+        kind: PROTOCOL_DOC_TYPE,
+        status: attributes.status,
+        occurredAt: null,
+        date: null,
+        path: relativePath,
+        title,
+        body: document.body,
+        attributes: {
+          ...attributes,
+        },
+        frontmatter: {
+          ...attributes,
+        },
+        links,
+        relatedIds: linkTargetIds(links),
+        stream: null,
+        experimentSlug: null,
+        tags: [],
       } satisfies CanonicalEntity;
     }),
   );
@@ -645,6 +708,21 @@ function normalizeFrontmatterAttributes(
       normalizeArrayField(normalized, "eventIds");
       normalizeArrayField(normalized, "sampleStreams");
       return normalized;
+    case "protocol":
+      removeKeys(normalized, [
+        "id",
+        "protocol_id",
+        "protocolSlug",
+        "protocol_slug",
+        "revision_id",
+        "content_hash",
+        "created_at",
+        "created_on",
+        "updated_at",
+      ]);
+      normalizeArrayField(normalized, "tags");
+      normalizeObjectArrayField(normalized, "links");
+      return normalized;
     default:
       return normalized;
   }
@@ -726,6 +804,39 @@ function requireCanonicalString(
   }
 
   throw new Error(`Missing canonical "${key}" in ${context}.`);
+}
+
+function readExperimentProtocolAttributesForQuery(
+  attributes: QueryRecordData,
+  _relativePath: string,
+): QueryRecordData {
+  if (
+    attributes.commonsProtocolRef === undefined &&
+    attributes.protocolRef === undefined &&
+    attributes.effectiveProtocolSnapshot === undefined
+  ) {
+    return attributes;
+  }
+
+  return { ...attributes };
+}
+
+function readProtocolAttributesForQuery(
+  attributes: QueryRecordData,
+  relativePath: string,
+): ReturnType<typeof readProtocolFrontmatter> {
+  try {
+    return readProtocolFrontmatter(attributes);
+  } catch (error) {
+    throw new QueryVaultSourceError(
+      "FRONTMATTER_INVALID",
+      `Protocol frontmatter at ${relativePath} has an unexpected shape.`,
+      {
+        relativePath,
+        reason: error instanceof Error ? error.message : "invalid_protocol_frontmatter",
+      },
+    );
+  }
 }
 
 function removeKeys(target: QueryRecordData, keys: readonly string[]): void {

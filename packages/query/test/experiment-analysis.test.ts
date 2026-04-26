@@ -42,6 +42,8 @@ function makeExperiment(
   overrides: {
     analysisPlan?: Record<string, unknown>;
     assistantSupport?: Record<string, unknown>;
+    commonsProtocolRef?: Record<string, unknown> | null;
+    effectiveProtocolSnapshot?: Record<string, unknown> | null;
     experimentId?: string;
     protocolRef?: Record<string, unknown> | null;
     runPlan?: Record<string, unknown>;
@@ -69,15 +71,41 @@ function makeExperiment(
     remindersEnabled: true,
     weeklyDigestEnabled: false,
   };
-  const protocolRef =
-    overrides.protocolRef === null
+  const commonsProtocolRef =
+    overrides.commonsProtocolRef === null
       ? undefined
-      : overrides.protocolRef ?? {
+      : overrides.commonsProtocolRef ?? {
           key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
           pageRevisionId: "sha256:page-revision",
           runSpecRevisionId: "sha256:run-spec-revision",
           testPlanId: "rhr-21d",
         };
+  const protocolRef =
+    overrides.protocolRef === null ? undefined : overrides.protocolRef;
+  const effectiveProtocolSnapshot =
+    overrides.effectiveProtocolSnapshot === null
+      ? undefined
+      : overrides.effectiveProtocolSnapshot ??
+        (commonsProtocolRef
+          ? {
+              effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+              doseSignature: "3x/week dry sauna, 15-20 min, 80-100 C",
+              modality: "traditional_dry_sauna",
+              frequency: {
+                sessionsPerWeek: 3,
+              },
+              durationMinutes: {
+                min: 15,
+                max: 20,
+              },
+              temperatureC: {
+                min: 80,
+                max: 100,
+              },
+              targetSessions: 6,
+              minimumUsefulSessions: 4,
+            }
+          : undefined);
 
   return makeEntity({
     entityId: experimentId,
@@ -97,7 +125,9 @@ function makeExperiment(
       status,
       title: slug === "sauna-rhr" ? "Sauna RHR" : "Sleep metrics",
       startedOn,
+      ...(commonsProtocolRef ? { commonsProtocolRef } : {}),
       ...(protocolRef ? { protocolRef } : {}),
+      ...(effectiveProtocolSnapshot ? { effectiveProtocolSnapshot } : {}),
       runPlan,
       analysisPlan,
       assistantSupport,
@@ -336,7 +366,7 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
   assert.equal(progress.phase, "intervention");
   assert.equal(progress.dayInRun, 20);
   assert.equal(progress.experiment.id, "exp_01JNV4458HYPP53JDQCBP1QJFM");
-  assert.equal(progress.protocolRef?.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
+  assert.equal(progress.commonsProtocolRef?.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
   assert.deepEqual(progress.windows, {
     baselineEnd: "2026-04-07",
     baselineStart: "2026-04-01",
@@ -417,6 +447,47 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
   });
 });
 
+test("experiment progress and outcome preserve private protocol refs and effective snapshots", () => {
+  const effectiveSpecHash = `sha256:${"4".repeat(64)}`;
+  const protocolRef = {
+    protocolId: "prot_01K72NVW6Z4QK8VYAVX7GT7S4B",
+    protocolRevisionId: `sha256:${"3".repeat(64)}`,
+    effectiveSpecHash,
+  };
+  const effectiveProtocolSnapshot = {
+    effectiveSpecHash,
+    doseSignature: "Two short sauna sessions weekly",
+    modality: "sauna",
+    frequency: {
+      sessionsPerWeek: 2,
+    },
+    durationMinutes: {
+      target: 12,
+    },
+    targetSessions: 6,
+    minimumUsefulSessions: 4,
+  };
+  const vault = createExperimentVault();
+  vault.experiments = [
+    makeExperiment("active", {
+      effectiveProtocolSnapshot,
+      protocolRef,
+    }),
+  ];
+
+  const progress = summarizeExperimentProgress(vault, "sauna-rhr", {
+    asOf: "2026-04-20",
+  });
+  const outcome = analyzeExperimentOutcome(vault, "sauna-rhr", {
+    asOf: "2026-04-25",
+  });
+
+  assert.deepEqual(progress.protocolRef, protocolRef);
+  assert.deepEqual(progress.effectiveProtocolSnapshot, effectiveProtocolSnapshot);
+  assert.deepEqual(outcome.protocolRef, protocolRef);
+  assert.deepEqual(outcome.effectiveProtocolSnapshot, effectiveProtocolSnapshot);
+});
+
 test("experiment outcome stays deterministic and expresses uncertainty through confidence reasons", () => {
   const outcome = analyzeExperimentOutcome(createExperimentVault(), "sauna-rhr", {
     asOf: "2026-04-25",
@@ -429,7 +500,7 @@ test("experiment outcome stays deterministic and expresses uncertainty through c
   assert.equal(outcome.schemaVersion, "murph.experiment-outcome.v1");
   assert.equal(outcome.experiment.status, "active");
   assert.equal(outcome.outcomeId, "exp_01JNV4458HYPP53JDQCBP1QJFM-outcome-2026-04-25");
-  assert.equal(outcome.runRef?.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
+  assert.equal(outcome.commonsProtocolRef?.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
   assert.equal(outcome.generatedAt, undefined);
   assert.deepEqual(outcome.adherenceSummary, {
     adherenceLevel: "low",
@@ -822,5 +893,4 @@ test("experiment outcome reports sparse primary data as medium-confidence incomp
   );
   assert.match(outcome.conclusion.plainLanguage, /not enough primary biomarker data/u);
   assert.equal(outcome.protocolRef, null);
-  assert.equal(outcome.runRef, undefined);
 });

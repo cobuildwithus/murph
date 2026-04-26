@@ -47,7 +47,7 @@ It may include:
 Before Murph writes a private run, it should already know the exact Health Commons page it is using.
 
 - Read the protocol page before planning.
-- Preserve `protocolRef.key`, `protocolRef.pageRevisionId`, `protocolRef.runSpecRevisionId`, and the selected `testPlanId` in the richer private run record.
+- Preserve `commonsProtocolRef.key`, `commonsProtocolRef.pageRevisionId`, `commonsProtocolRef.runSpecRevisionId`, and the selected `testPlanId` in the richer private run record. Store a private `protocolRef` only when the run uses a saved private adaptation.
 - Treat `runSpecRevisionId` as the hash of the runnable contract: protocol dose, safety, test plans, and experiment onboarding. Copy edits or narrative body changes may change `pageRevisionId` without changing `runSpecRevisionId`.
 - The private run should store user choices and assistant support policy separately from public protocol copy.
 - Completed outcome cards, shares, and community contributions must remain traceable back to this exact runnable contract.

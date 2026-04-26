@@ -4,7 +4,7 @@ import {
   familyRegistryEntityDefinition,
   geneticsRegistryEntityDefinition,
   goalRegistryEntityDefinition,
-  protocolRegistryEntityDefinition,
+  regimenRegistryEntityDefinition,
   type HealthEntityDefinitionWithRegistry,
 } from "@murphai/contracts";
 
@@ -78,9 +78,9 @@ export const healthRegistryFamilyByKind = {
     definition: allergyRegistryEntityDefinition,
     kind: "allergy",
   }),
-  protocol: buildHealthRegistryFamily({
-    definition: protocolRegistryEntityDefinition,
-    kind: "protocol",
+  regimen: buildHealthRegistryFamily({
+    definition: regimenRegistryEntityDefinition,
+    kind: "regimen",
   }),
   family: buildHealthRegistryFamily({
     definition: familyRegistryEntityDefinition,

@@ -54,7 +54,8 @@
         "recipe_delete",
         "recipe_upsert",
         "research_note_write",
-        "protocol_stop",
+        "regimen_stop",
+        "regimen_upsert",
         "protocol_upsert",
         "samples_import_csv",
         "show",
@@ -100,7 +101,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+        "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
     },

@@ -1,7 +1,5 @@
 import {
-  deriveProtocolGroupFromRelativePath,
   extractHealthEntityRegistryLinks,
-  type ProtocolUpsertPayload,
 } from "@murphai/contracts";
 
 import { VaultError } from "../errors.ts";
@@ -15,11 +13,11 @@ import {
 } from "../registry/markdown.ts";
 
 import {
-  PROTOCOL_DOC_TYPE,
-  PROTOCOL_KINDS,
-  PROTOCOLS_DIRECTORY,
-  PROTOCOL_SCHEMA_VERSION,
-  PROTOCOL_STATUSES,
+  REGIMEN_DOC_TYPE,
+  REGIMEN_KINDS,
+  REGIMENS_DIRECTORY,
+  REGIMEN_SCHEMA_VERSION,
+  REGIMEN_STATUSES,
 } from "./types.ts";
 import {
   buildMarkdownBody,
@@ -46,17 +44,30 @@ import {
 
 import type { FrontmatterObject } from "../types.ts";
 import type {
-  ProtocolLink,
-  ProtocolLinkType,
-  ReadProtocolItemInput,
-  ProtocolItemEntity,
-  ProtocolItemStoredDocument,
+  RegimenLink,
+  RegimenLinkType,
+  ReadRegimenInput,
+  RegimenEntity,
+  RegimenStoredDocument,
   SupplementIngredientRecord,
-  StopProtocolItemInput,
-  StopProtocolItemResult,
-  UpsertProtocolItemInput,
-  UpsertProtocolItemResult,
+  StopRegimenInput,
+  StopRegimenResult,
+  UpsertRegimenInput,
+  UpsertRegimenResult,
 } from "./types.ts";
+
+type RegimenUpsertPayload = Omit<RegimenEntity, "schemaVersion" | "docType" | "regimenId">;
+
+function deriveRegimenGroupFromRelativePath(relativePath: string, directory: string): string | null {
+  const prefix = `${directory.replace(/\/+$/u, "")}/`;
+  if (!relativePath.startsWith(prefix)) {
+    return null;
+  }
+
+  const suffix = relativePath.slice(prefix.length);
+  const segments = suffix.split("/");
+  return segments.length > 1 ? segments.slice(0, -1).join("/") : null;
+}
 
 function optionalBoolean(value: unknown, fieldName: string): boolean | undefined {
   if (value === undefined || value === null) {
@@ -125,8 +136,8 @@ function formatIngredientLine(ingredient: SupplementIngredientRecord): string {
   return parts.join("; ");
 }
 
-function buildBody(record: ProtocolItemEntity): string {
-  const relations = canonicalizeProtocolRelations(record);
+function buildBody(record: RegimenEntity): string {
+  const relations = canonicalizeRegimenRelations(record);
   const sections = [
     (record.brand || record.manufacturer || record.servingSize)
       ? section(
@@ -155,7 +166,7 @@ function buildBody(record: ProtocolItemEntity): string {
       : null,
     listSection("Related Goals", relations.relatedGoalIds),
     listSection("Related Conditions", relations.relatedConditionIds),
-    listSection("Related Protocols", relations.relatedProtocolIds),
+    listSection("Related Regimens", relations.relatedRegimenIds),
   ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
 
   return buildMarkdownBody(
@@ -172,51 +183,51 @@ function buildBody(record: ProtocolItemEntity): string {
   );
 }
 
-function normalizeProtocolLinkType(value: string): ProtocolLinkType | null {
+function normalizeRegimenLinkType(value: string): RegimenLinkType | null {
   switch (value) {
     case "supports_goal":
     case "addresses_condition":
-    case "related_protocol":
+    case "related_regimen":
       return value;
     default:
       return null;
   }
 }
 
-function compareProtocolLinks(left: ProtocolLink, right: ProtocolLink): number {
-  const order: Record<ProtocolLinkType, number> = {
+function compareRegimenLinks(left: RegimenLink, right: RegimenLink): number {
+  const order: Record<RegimenLinkType, number> = {
     supports_goal: 0,
     addresses_condition: 1,
-    related_protocol: 2,
+    related_regimen: 2,
   };
 
   return order[left.type] - order[right.type] || left.targetId.localeCompare(right.targetId);
 }
 
-function buildProtocolLinksFromFields(input: {
+function buildRegimenLinksFromFields(input: {
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
-  relatedProtocolIds?: string[];
-}): ProtocolLink[] {
+  relatedRegimenIds?: string[];
+}): RegimenLink[] {
   return [
     ...(input.relatedGoalIds ?? []).map((targetId) => ({
       type: "supports_goal",
       targetId,
-    }) satisfies ProtocolLink),
+    }) satisfies RegimenLink),
     ...(input.relatedConditionIds ?? []).map((targetId) => ({
       type: "addresses_condition",
       targetId,
-    }) satisfies ProtocolLink),
-    ...(input.relatedProtocolIds ?? []).map((targetId) => ({
-      type: "related_protocol",
+    }) satisfies RegimenLink),
+    ...(input.relatedRegimenIds ?? []).map((targetId) => ({
+      type: "related_regimen",
       targetId,
-    }) satisfies ProtocolLink),
+    }) satisfies RegimenLink),
   ];
 }
 
-function normalizeProtocolLinks(rawLinks: readonly ProtocolLink[]): ProtocolLink[] {
-  const sortedLinks = [...rawLinks].sort(compareProtocolLinks);
-  const links: ProtocolLink[] = [];
+function normalizeRegimenLinks(rawLinks: readonly RegimenLink[]): RegimenLink[] {
+  const sortedLinks = [...rawLinks].sort(compareRegimenLinks);
+  const links: RegimenLink[] = [];
   const seen = new Set<string>();
 
   for (const link of sortedLinks) {
@@ -232,113 +243,131 @@ function normalizeProtocolLinks(rawLinks: readonly ProtocolLink[]): ProtocolLink
   return links;
 }
 
-function parseProtocolLinks(attributes: FrontmatterObject): ProtocolLink[] {
-  const protocolSelfId =
-    typeof attributes.protocolId === "string" && attributes.protocolId.trim().length > 0
-      ? attributes.protocolId.trim()
+function parseRegimenLinks(attributes: FrontmatterObject): RegimenLink[] {
+  const regimenSelfId =
+    typeof attributes.regimenId === "string" && attributes.regimenId.trim().length > 0
+      ? attributes.regimenId.trim()
       : null;
 
-  return normalizeProtocolLinks(
-    extractHealthEntityRegistryLinks("protocol", attributes)
+  return normalizeRegimenLinks(
+    extractHealthEntityRegistryLinks("regimen", attributes)
       .filter((link) =>
         !(
-          protocolSelfId &&
-          link.type === "related_protocol" &&
-          link.targetId === protocolSelfId &&
+          regimenSelfId &&
+          link.type === "related_regimen" &&
+          link.targetId === regimenSelfId &&
           link.sourceKeys.length === 1 &&
-          link.sourceKeys[0] === "protocolId"
+          link.sourceKeys[0] === "regimenId"
         )
       )
       .flatMap((link) => {
-      const type = normalizeProtocolLinkType(link.type);
-      return type ? [{ type, targetId: link.targetId } satisfies ProtocolLink] : [];
+      const type = normalizeRegimenLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies RegimenLink] : [];
       }),
   );
 }
 
-function protocolRelationsFromLinks(
-  links: readonly ProtocolLink[],
-): Pick<ProtocolItemEntity, "relatedGoalIds" | "relatedConditionIds" | "relatedProtocolIds" | "links"> {
+function regimenRelationsFromLinks(
+  links: readonly RegimenLink[],
+): Pick<RegimenEntity, "relatedGoalIds" | "relatedConditionIds" | "relatedRegimenIds" | "links"> {
   const relatedGoalIds = links
     .filter((link) => link.type === "supports_goal")
     .map((link) => link.targetId);
   const relatedConditionIds = links
     .filter((link) => link.type === "addresses_condition")
     .map((link) => link.targetId);
-  const relatedProtocolIds = links
-    .filter((link) => link.type === "related_protocol")
+  const relatedRegimenIds = links
+    .filter((link) => link.type === "related_regimen")
     .map((link) => link.targetId);
 
   return {
     relatedGoalIds: relatedGoalIds.length > 0 ? relatedGoalIds : undefined,
     relatedConditionIds: relatedConditionIds.length > 0 ? relatedConditionIds : undefined,
-    relatedProtocolIds: relatedProtocolIds.length > 0 ? relatedProtocolIds : undefined,
+    relatedRegimenIds: relatedRegimenIds.length > 0 ? relatedRegimenIds : undefined,
     links: [...links],
   };
 }
 
-function canonicalizeProtocolRelations(input: {
-  links?: readonly ProtocolLink[];
+function canonicalizeRegimenRelations(input: {
+  links?: readonly RegimenLink[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
-  relatedProtocolIds?: string[];
-}): Pick<ProtocolItemEntity, "relatedGoalIds" | "relatedConditionIds" | "relatedProtocolIds" | "links"> {
-  const links = normalizeProtocolLinks(
+  relatedRegimenIds?: string[];
+}): Pick<RegimenEntity, "relatedGoalIds" | "relatedConditionIds" | "relatedRegimenIds" | "links"> {
+  const links = normalizeRegimenLinks(
     input.links !== undefined
       ? [...input.links]
-      : buildProtocolLinksFromFields({
+      : buildRegimenLinksFromFields({
           relatedGoalIds: input.relatedGoalIds,
           relatedConditionIds: input.relatedConditionIds,
-          relatedProtocolIds: input.relatedProtocolIds,
+          relatedRegimenIds: input.relatedRegimenIds,
         }),
   );
 
-  return protocolRelationsFromLinks(links);
+  return regimenRelationsFromLinks(links);
 }
 
-function requireProtocolGroupFromRelativePath(relativePath: string): string {
-  const group = deriveProtocolGroupFromRelativePath(relativePath, PROTOCOLS_DIRECTORY);
+function requireRegimenGroupFromRelativePath(relativePath: string): string {
+  const group = deriveRegimenGroupFromRelativePath(relativePath, REGIMENS_DIRECTORY);
 
   if (!group) {
-    throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol path is missing a group directory.");
+    throw new VaultError("VAULT_INVALID_REGIMEN", "Regimen path is missing a group directory.");
   }
 
   return group;
 }
 
-function parseProtocolItemRecord(
+function requirePersistedRegimenId(value: unknown): string {
+  try {
+    const regimenId = normalizeId(value, "regimenId", "reg");
+
+    if (regimenId) {
+      return regimenId;
+    }
+  } catch (error) {
+    if (error instanceof VaultError) {
+      throw new VaultError("VAULT_INVALID_REGIMEN", error.message);
+    }
+
+    throw error;
+  }
+
+  throw new VaultError("VAULT_INVALID_REGIMEN", "regimenId is required.");
+}
+
+function parseRegimenRecord(
   attributes: FrontmatterObject,
   relativePath: string,
   markdown: string,
-): ProtocolItemStoredDocument {
+): RegimenStoredDocument {
   requireMatchingDocType(
     attributes,
-    PROTOCOL_SCHEMA_VERSION,
-    PROTOCOL_DOC_TYPE,
-    "VAULT_INVALID_PROTOCOL",
-    "Protocol registry document has an unexpected shape.",
+    REGIMEN_SCHEMA_VERSION,
+    REGIMEN_DOC_TYPE,
+    "VAULT_INVALID_REGIMEN",
+    "Regimen registry document has an unexpected shape.",
   );
   const startedOn = optionalDateOnly(attributes.startedOn as string | undefined, "startedOn");
 
   if (!startedOn) {
-    throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol registry document is missing startedOn.");
+    throw new VaultError("VAULT_INVALID_REGIMEN", "Regimen registry document is missing startedOn.");
   }
 
-  const relations = canonicalizeProtocolRelations({
-    links: parseProtocolLinks(attributes),
+  const relations = canonicalizeRegimenRelations({
+    links: parseRegimenLinks(attributes),
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
     relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
-    relatedProtocolIds: normalizeRecordIdList(attributes.relatedProtocolIds, "relatedProtocolIds", "prot"),
+    relatedRegimenIds: normalizeRecordIdList(attributes.relatedRegimenIds, "relatedRegimenIds", "reg"),
   });
 
   const entity = stripUndefined({
-    schemaVersion: PROTOCOL_SCHEMA_VERSION,
-    docType: PROTOCOL_DOC_TYPE,
-    protocolId: requireString(attributes.protocolId, "protocolId", 64),
+    schemaVersion: REGIMEN_SCHEMA_VERSION,
+    docType: REGIMEN_DOC_TYPE,
+    regimenId: requirePersistedRegimenId(attributes.regimenId),
     slug: requireString(attributes.slug, "slug", 160),
     title: requireString(attributes.title, "title", 160),
-    kind: optionalEnum(attributes.kind, PROTOCOL_KINDS, "kind") ?? "medication",
-    status: optionalEnum(attributes.status, PROTOCOL_STATUSES, "status") ?? "active",
+    kind: optionalEnum(attributes.kind, REGIMEN_KINDS, "kind") ?? "medication",
+    status: optionalEnum(attributes.status, REGIMEN_STATUSES, "status") ?? "active",
     startedOn,
     stoppedOn: optionalDateOnly(attributes.stoppedOn as string | undefined, "stoppedOn"),
     substance: optionalString(attributes.substance, "substance", 160),
@@ -351,10 +380,10 @@ function parseProtocolItemRecord(
     ingredients: normalizeSupplementIngredients(attributes.ingredients),
     relatedGoalIds: relations.relatedGoalIds,
     relatedConditionIds: relations.relatedConditionIds,
-    relatedProtocolIds: relations.relatedProtocolIds,
+    relatedRegimenIds: relations.relatedRegimenIds,
     links: relations.links,
-    group: requireProtocolGroupFromRelativePath(relativePath),
-  }) as ProtocolItemEntity;
+    group: requireRegimenGroupFromRelativePath(relativePath),
+  }) as RegimenEntity;
 
   return {
     entity,
@@ -365,10 +394,10 @@ function parseProtocolItemRecord(
   };
 }
 
-export function protocolRecordToUpsertPayload(
-  record: ProtocolItemEntity,
-): Omit<ProtocolUpsertPayload, "protocolId"> {
-  const relations = canonicalizeProtocolRelations(record);
+export function regimenRecordToUpsertPayload(
+  record: RegimenEntity,
+): Omit<RegimenUpsertPayload, "regimenId"> {
+  const relations = canonicalizeRegimenRelations(record);
 
   return stripUndefined({
     slug: record.slug,
@@ -396,24 +425,35 @@ export function protocolRecordToUpsertPayload(
     ),
     relatedGoalIds: relations.relatedGoalIds,
     relatedConditionIds: relations.relatedConditionIds,
-    relatedProtocolIds: relations.relatedProtocolIds,
-    links: frontmatterLinkObjects(relations.links),
+    relatedRegimenIds: relations.relatedRegimenIds,
+    links: relations.links.length > 0 ? relations.links : undefined,
     group: record.group,
-  }) as Omit<ProtocolUpsertPayload, "protocolId">;
+  }) as Omit<RegimenUpsertPayload, "regimenId">;
 }
 
-function buildAttributes(record: ProtocolItemEntity): FrontmatterObject {
-  const { group: _group, ...payload } = protocolRecordToUpsertPayload(record);
+function buildAttributes(record: RegimenEntity): FrontmatterObject {
+  const { group: _group, links, ...payload } = regimenRecordToUpsertPayload(record);
 
   return stripUndefined({
-    schemaVersion: PROTOCOL_SCHEMA_VERSION,
-    docType: PROTOCOL_DOC_TYPE,
-    protocolId: record.protocolId,
+    schemaVersion: REGIMEN_SCHEMA_VERSION,
+    docType: REGIMEN_DOC_TYPE,
+    regimenId: record.regimenId,
     ...payload,
+    ingredients: payload.ingredients?.map((ingredient) =>
+      stripUndefined({
+        compound: ingredient.compound,
+        label: ingredient.label,
+        amount: ingredient.amount,
+        unit: ingredient.unit,
+        active: ingredient.active,
+        note: ingredient.note,
+      }),
+    ),
+    links: frontmatterLinkObjects(links),
   }) as FrontmatterObject;
 }
 
-function validateProtocolTiming(record: ProtocolItemEntity): ProtocolItemEntity {
+function validateRegimenTiming(record: RegimenEntity): RegimenEntity {
   if (!record.startedOn) {
     throw new VaultError("VAULT_INVALID_INPUT", "startedOn is required.");
   }
@@ -433,35 +473,35 @@ function validateProtocolTiming(record: ProtocolItemEntity): ProtocolItemEntity 
   return record;
 }
 
-async function loadProtocolItems(vaultRoot: string): Promise<ProtocolItemStoredDocument[]> {
+async function loadRegimens(vaultRoot: string): Promise<RegimenStoredDocument[]> {
   const records = await loadMarkdownRegistryDocuments({
     vaultRoot,
-    directory: PROTOCOLS_DIRECTORY,
-    recordFromParts: parseProtocolItemRecord,
+    directory: REGIMENS_DIRECTORY,
+    recordFromParts: parseRegimenRecord,
     isExpectedRecord: (record) =>
-      record.entity.docType === PROTOCOL_DOC_TYPE
-      && record.entity.schemaVersion === PROTOCOL_SCHEMA_VERSION,
-    invalidCode: "VAULT_INVALID_PROTOCOL",
-    invalidMessage: "Protocol registry document has an unexpected shape.",
+      record.entity.docType === REGIMEN_DOC_TYPE
+      && record.entity.schemaVersion === REGIMEN_SCHEMA_VERSION,
+    invalidCode: "VAULT_INVALID_REGIMEN",
+    invalidMessage: "Regimen registry document has an unexpected shape.",
   });
 
   records.sort(
     (left, right) =>
       left.entity.group.localeCompare(right.entity.group) ||
       left.entity.title.localeCompare(right.entity.title) ||
-      left.entity.protocolId.localeCompare(right.entity.protocolId),
+      left.entity.regimenId.localeCompare(right.entity.regimenId),
   );
   return records;
 }
 
-function selectProtocolRecord(
-  records: ProtocolItemStoredDocument[],
-  protocolId: string | undefined,
+function selectRegimenRecord(
+  records: RegimenStoredDocument[],
+  regimenId: string | undefined,
   slug: string | undefined,
   group: string | undefined,
-): ProtocolItemStoredDocument | null {
-  const byId = protocolId
-    ? records.find((record) => record.entity.protocolId === protocolId) ?? null
+): RegimenStoredDocument | null {
+  const byId = regimenId
+    ? records.find((record) => record.entity.regimenId === regimenId) ?? null
     : null;
   const slugMatches = slug
     ? records.filter(
@@ -470,73 +510,73 @@ function selectProtocolRecord(
     : [];
   const bySlug = slugMatches.length > 0 ? slugMatches[0] ?? null : null;
 
-  if (slugMatches.length > 1 && !protocolId) {
-    throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group or protocolId.");
+  if (slugMatches.length > 1 && !regimenId) {
+    throw new VaultError("VAULT_REGIMEN_CONFLICT", "slug resolves to multiple regimen records; include group or regimenId.");
   }
 
-  if (byId && bySlug && byId.entity.protocolId !== bySlug.entity.protocolId) {
-    throw new VaultError("VAULT_PROTOCOL_CONFLICT", "protocolId and slug resolve to different protocol records.");
+  if (byId && bySlug && byId.entity.regimenId !== bySlug.entity.regimenId) {
+    throw new VaultError("VAULT_REGIMEN_CONFLICT", "regimenId and slug resolve to different regimen records.");
   }
 
   return byId ?? bySlug;
 }
 
-async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<ProtocolItemStoredDocument> {
-  const normalizedProtocolId = normalizeId(input.protocolId, "protocolId", "prot");
+async function resolveRegimenRecord(input: ReadRegimenInput): Promise<RegimenStoredDocument> {
+  const normalizedRegimenId = normalizeId(input.regimenId, "regimenId", "reg");
   const normalizedSlug = normalizeSelectorSlug(input.slug);
-  const normalizedGroup = input.group ? normalizeGroupPath(input.group, "protocol") : undefined;
-  const records = await loadProtocolItems(input.vaultRoot);
+  const normalizedGroup = input.group ? normalizeGroupPath(input.group, "regimen") : undefined;
+  const records = await loadRegimens(input.vaultRoot);
 
-  if (normalizedSlug && !normalizedGroup && !normalizedProtocolId) {
+  if (normalizedSlug && !normalizedGroup && !normalizedRegimenId) {
     const collisions = records.filter((record) => record.entity.slug === normalizedSlug);
     if (collisions.length > 1) {
-      throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group.");
+      throw new VaultError("VAULT_REGIMEN_CONFLICT", "slug resolves to multiple regimen records; include group.");
     }
   }
 
-  const match = selectProtocolRecord(records, normalizedProtocolId, normalizedSlug, normalizedGroup);
+  const match = selectRegimenRecord(records, normalizedRegimenId, normalizedSlug, normalizedGroup);
 
   if (!match) {
-    throw new VaultError("VAULT_PROTOCOL_MISSING", "Protocol item was not found.");
+    throw new VaultError("VAULT_REGIMEN_MISSING", "Regimen item was not found.");
   }
 
-  if (normalizedSlug && !normalizedGroup && !normalizedProtocolId) {
+  if (normalizedSlug && !normalizedGroup && !normalizedRegimenId) {
     const collisions = records.filter((record) => record.entity.slug === normalizedSlug);
     if (collisions.length > 1) {
-      throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group.");
+      throw new VaultError("VAULT_REGIMEN_CONFLICT", "slug resolves to multiple regimen records; include group.");
     }
   }
 
   return match;
 }
 
-export async function upsertProtocolItem(
-  input: UpsertProtocolItemInput,
-): Promise<UpsertProtocolItemResult> {
+export async function upsertRegimen(
+  input: UpsertRegimenInput,
+): Promise<UpsertRegimenResult> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
   const today = toLocalDayKey(new Date(), vault.metadata.timezone ?? defaultTimeZone(), "startedOn");
-  const normalizedProtocolId = normalizeId(input.protocolId, "protocolId", "prot");
-  const existingRecords = await loadProtocolItems(input.vaultRoot);
+  const normalizedRegimenId = normalizeId(input.regimenId, "regimenId", "reg");
+  const existingRecords = await loadRegimens(input.vaultRoot);
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
-  const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "protocol") : undefined;
-  const existingRecord = selectProtocolRecord(existingRecords, normalizedProtocolId, requestedSlug, requestedGroup);
+  const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "regimen") : undefined;
+  const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
   const existingEntity = existingRecord?.entity;
   const title = requireString(input.title ?? existingEntity?.title, "title", 160);
   const kind = resolveRequiredUpsertValue(input.kind, existingEntity?.kind, "medication", (value) =>
-    optionalEnum(value, PROTOCOL_KINDS, "kind") ?? "medication",
+    optionalEnum(value, REGIMEN_KINDS, "kind") ?? "medication",
   );
   const group = existingEntity?.group ?? requestedGroup ?? normalizeGroupPath(undefined, kind);
   const target = resolveMarkdownRegistryUpsertTarget({
     existingRecord,
-    recordId: normalizedProtocolId,
+    recordId: normalizedRegimenId,
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     allowSlugUpdate: input.allowSlugRename === true,
-    directory: `${PROTOCOLS_DIRECTORY}/${group}`,
-    getRecordId: (record) => record.entity.protocolId,
+    directory: `${REGIMENS_DIRECTORY}/${group}`,
+    getRecordId: (record) => record.entity.regimenId,
     getRecordSlug: (record) => record.entity.slug,
     getRecordRelativePath: (record) => record.document.relativePath,
-    createRecordId: () => generateRecordId("prot"),
+    createRecordId: () => generateRecordId("reg"),
   });
   const relatedGoalIds = resolveOptionalUpsertValue(
     input.relatedGoalIds,
@@ -548,27 +588,27 @@ export async function upsertProtocolItem(
     existingEntity?.relatedConditionIds,
     (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
   );
-  const relatedProtocolIds = resolveOptionalUpsertValue(
-    input.relatedProtocolIds,
-    existingEntity?.relatedProtocolIds,
-    (value) => normalizeRecordIdList(value, "relatedProtocolIds", "prot"),
+  const relatedRegimenIds = resolveOptionalUpsertValue(
+    input.relatedRegimenIds,
+    existingEntity?.relatedRegimenIds,
+    (value) => normalizeRecordIdList(value, "relatedRegimenIds", "reg"),
   );
   const usesRelationInputs =
     input.links !== undefined ||
     input.relatedGoalIds !== undefined ||
     input.relatedConditionIds !== undefined ||
-    input.relatedProtocolIds !== undefined;
+    input.relatedRegimenIds !== undefined;
   const attributes = buildAttributes(
-    validateProtocolTiming(
+    validateRegimenTiming(
       stripUndefined({
-        schemaVersion: PROTOCOL_SCHEMA_VERSION,
-        docType: PROTOCOL_DOC_TYPE,
-        protocolId: target.recordId,
+        schemaVersion: REGIMEN_SCHEMA_VERSION,
+        docType: REGIMEN_DOC_TYPE,
+        regimenId: target.recordId,
         slug: target.slug,
         title,
         kind,
         status: resolveRequiredUpsertValue(input.status, existingEntity?.status, "active", (value) =>
-          optionalEnum(value, PROTOCOL_STATUSES, "status") ?? "active",
+          optionalEnum(value, REGIMEN_STATUSES, "status") ?? "active",
         ),
         startedOn: optionalDateOnly(input.startedOn ?? existingEntity?.startedOn ?? today, "startedOn") ?? "",
         stoppedOn: resolveOptionalUpsertValue(input.stoppedOn, existingEntity?.stoppedOn, (value) =>
@@ -600,13 +640,13 @@ export async function upsertProtocolItem(
         ingredients: resolveOptionalUpsertValue(input.ingredients, existingEntity?.ingredients, (value) =>
           normalizeSupplementIngredients(value),
         ),
-        ...canonicalizeProtocolRelations({
+        ...canonicalizeRegimenRelations({
           links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingEntity?.links,
           relatedGoalIds,
           relatedConditionIds,
-          relatedProtocolIds,
+          relatedRegimenIds,
         }),
-      }) as ProtocolItemEntity,
+      }) as RegimenEntity,
     ),
   );
   const { auditPath, record } = await writeMarkdownRegistryRecord({
@@ -616,14 +656,14 @@ export async function upsertProtocolItem(
     body: buildBody({
       ...attributes,
       group,
-    } as ProtocolItemEntity),
-    recordFromParts: parseProtocolItemRecord,
-    operationType: "protocol_upsert",
-    summary: `Upsert protocol ${target.recordId}`,
+    } as RegimenEntity),
+    recordFromParts: parseRegimenRecord,
+    operationType: "regimen_upsert",
+    summary: `Upsert regimen ${target.recordId}`,
     audit: {
-      action: "protocol_upsert",
-      commandName: "core.upsertProtocolItem",
-      summary: `Upserted protocol ${target.recordId}.`,
+      action: "regimen_upsert",
+      commandName: "core.upsertRegimen",
+      summary: `Upserted regimen ${target.recordId}.`,
       targetIds: [target.recordId],
     },
   });
@@ -635,48 +675,48 @@ export async function upsertProtocolItem(
   };
 }
 
-export async function listProtocolItems(vaultRoot: string): Promise<ProtocolItemStoredDocument[]> {
-  return loadProtocolItems(vaultRoot);
+export async function listRegimens(vaultRoot: string): Promise<RegimenStoredDocument[]> {
+  return loadRegimens(vaultRoot);
 }
 
-export async function readProtocolItem(
-  input: ReadProtocolItemInput,
-): Promise<ProtocolItemStoredDocument> {
-  return resolveProtocolRecord(input);
+export async function readRegimen(
+  input: ReadRegimenInput,
+): Promise<RegimenStoredDocument> {
+  return resolveRegimenRecord(input);
 }
 
-export async function stopProtocolItem(
-  input: StopProtocolItemInput,
-): Promise<StopProtocolItemResult> {
+export async function stopRegimen(
+  input: StopRegimenInput,
+): Promise<StopRegimenResult> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const current = await resolveProtocolRecord(input);
+  const current = await resolveRegimenRecord(input);
   const stoppedOn = optionalDateOnly(
     input.stoppedOn ?? toLocalDayKey(new Date(), vault.metadata.timezone ?? defaultTimeZone(), "stoppedOn"),
     "stoppedOn",
   ) ?? "";
-  const updatedEntity = validateProtocolTiming({
+  const updatedEntity = validateRegimenTiming({
     ...current.entity,
     status: "stopped",
     stoppedOn,
-  } satisfies ProtocolItemEntity);
+  } satisfies RegimenEntity);
   const { auditPath, record } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
     target: {
-      recordId: updatedEntity.protocolId,
+      recordId: updatedEntity.regimenId,
       slug: updatedEntity.slug,
       relativePath: current.document.relativePath,
       created: false,
     },
     attributes: buildAttributes(updatedEntity),
     body: buildBody(updatedEntity),
-    recordFromParts: parseProtocolItemRecord,
-    operationType: "protocol_stop",
-    summary: `Stop protocol ${updatedEntity.protocolId}`,
+    recordFromParts: parseRegimenRecord,
+    operationType: "regimen_stop",
+    summary: `Stop regimen ${updatedEntity.regimenId}`,
     audit: {
-      action: "protocol_stop",
-      commandName: "core.stopProtocolItem",
-      summary: `Stopped protocol ${updatedEntity.protocolId}.`,
-      targetIds: [updatedEntity.protocolId],
+      action: "regimen_stop",
+      commandName: "core.stopRegimen",
+      summary: `Stopped regimen ${updatedEntity.regimenId}.`,
+      targetIds: [updatedEntity.regimenId],
     },
   });
 

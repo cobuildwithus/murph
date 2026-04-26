@@ -481,7 +481,7 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
         occurredAt: string
         interventionType: string
         durationMinutes: number | null
-        protocolId: string | null
+        regimenId: string | null
       }>(cli, [
         'intervention',
         'add',
@@ -490,8 +490,8 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
         'sauna',
         '--duration',
         '20',
-        '--protocol-id',
-        'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
+        '--regimen-id',
+        'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
         '--occurred-at',
         '2026-03-12',
         '--source',
@@ -510,7 +510,7 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
         title: string
         interventionType: string
         durationMinutes: number | null
-        protocolId: string | null
+        regimenId: string | null
       }>(cli, [
         'intervention',
         'add',
@@ -531,7 +531,7 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
         title: string
         interventionType: string
         durationMinutes: number | null
-        protocolId: string | null
+        regimenId: string | null
       }>(cli, [
         'intervention',
         'add',

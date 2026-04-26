@@ -10,11 +10,11 @@ import {
   geneticsBankEntityDefinition,
   providerBankEntityDefinition,
   recipeBankEntityDefinition,
-  protocolBankEntityDefinition,
+  regimenBankEntityDefinition,
   workoutFormatBankEntityDefinition,
 } from "../src/bank-entities.ts";
 import {
-  deriveProtocolGroupFromRelativePath,
+  deriveRegimenGroupFromRelativePath,
   extractHealthEntityRegistryLinks,
   extractHealthEntityRegistryRelatedIds,
   getHealthEntityRegistryCommandMetadata,
@@ -23,7 +23,7 @@ import {
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
   requireHealthEntityRegistryDefinition,
-  protocolRegistryEntityDefinition,
+  regimenRegistryEntityDefinition,
 } from "../src/health-entities.ts";
 import {
   applyRegistryMetadataDefaults,
@@ -114,14 +114,14 @@ describe("registry helper seam", () => {
 
     expect(
       applyRegistryMetadataDefaults({
-        directory: "bank/protocols",
-        idField: "protocolId",
-        idKeys: ["protocolId", "legacyProtocolId"],
+        directory: "bank/regimens",
+        idField: "regimenId",
+        idKeys: ["regimenId", "legacyRegimenId"],
         slugKeys: ["slug", "aliases"],
         titleKeys: ["title"],
       }),
     ).toMatchObject({
-      idKeys: ["protocolId", "legacyProtocolId"],
+      idKeys: ["regimenId", "legacyRegimenId"],
       slugKeys: ["slug", "aliases"],
     });
   });
@@ -244,21 +244,21 @@ describe("health registry seam", () => {
       upsertServiceMethodName: "upsertGoal",
     });
 
-    expect(getHealthEntityRegistryCommandMetadata("protocol")).toMatchObject({
-      runtimeMethodName: "upsertProtocolItem",
-      payloadFile: "protocol.json",
+    expect(getHealthEntityRegistryCommandMetadata("regimen")).toMatchObject({
+      runtimeMethodName: "upsertRegimen",
+      payloadFile: "regimen.json",
     });
   });
 
-  it("projects protocol metadata, derives protocol groups from paths, and keeps explicit links authoritative", () => {
-    const projection = getHealthEntityRegistryProjectionMetadata("protocol");
+  it("projects regimen metadata, derives regimen groups from paths, and keeps explicit links authoritative", () => {
+    const projection = getHealthEntityRegistryProjectionMetadata("regimen");
 
-    expect(deriveProtocolGroupFromRelativePath("bank/protocols/sleep/magnesium.md")).toBe("sleep");
-    expect(deriveProtocolGroupFromRelativePath("./bank/protocols/recovery/evening/magnesium.md")).toBe(
+    expect(deriveRegimenGroupFromRelativePath("bank/regimens/sleep/magnesium.md")).toBe("sleep");
+    expect(deriveRegimenGroupFromRelativePath("./bank/regimens/recovery/evening/magnesium.md")).toBe(
       "recovery/evening",
     );
-    expect(deriveProtocolGroupFromRelativePath("bank/protocols/magnesium.md")).toBeNull();
-    expect(deriveProtocolGroupFromRelativePath("bank/foods/magnesium.md")).toBeNull();
+    expect(deriveRegimenGroupFromRelativePath("bank/regimens/magnesium.md")).toBeNull();
+    expect(deriveRegimenGroupFromRelativePath("bank/foods/magnesium.md")).toBeNull();
 
     expect(
       projection.transform({
@@ -274,10 +274,10 @@ describe("health registry seam", () => {
           ],
           relatedGoalIds: [" goal_energy ", "goal_sleep"],
           relatedConditionIds: ["cond_insomnia"],
-          relatedProtocolIds: [" protocol_existing "],
+          relatedRegimenIds: [" regimen_existing "],
         },
         helpers: projectionHelpers,
-        relativePath: "bank/protocols/sleep/magnesium-glycinate.md",
+        relativePath: "bank/regimens/sleep/magnesium-glycinate.md",
       }),
     ).toEqual({
       kind: "supplement",
@@ -310,15 +310,15 @@ describe("health registry seam", () => {
       ],
       relatedGoalIds: ["goal_energy", "goal_sleep"],
       relatedConditionIds: ["cond_insomnia"],
-      relatedProtocolIds: ["protocol_existing"],
+      relatedRegimenIds: ["regimen_existing"],
       group: "sleep",
     });
 
     expect(
-      extractHealthEntityRegistryLinks("protocol", {
+      extractHealthEntityRegistryLinks("regimen", {
         relatedGoalIds: ["goal_sleep", "goal_energy"],
         relatedConditionIds: [" cond_fatigue ", "cond_insomnia"],
-        relatedProtocolIds: ["protocol_stack", "protocol_base"],
+        relatedRegimenIds: ["regimen_stack", "regimen_base"],
       }),
     ).toEqual([
       {
@@ -342,23 +342,23 @@ describe("health registry seam", () => {
         sourceKeys: ["relatedConditionIds"],
       },
       {
-        type: "related_protocol",
-        targetId: "protocol_stack",
-        sourceKeys: ["relatedProtocolIds"],
+        type: "related_regimen",
+        targetId: "regimen_stack",
+        sourceKeys: ["relatedRegimenIds"],
       },
       {
-        type: "related_protocol",
-        targetId: "protocol_base",
-        sourceKeys: ["relatedProtocolIds"],
+        type: "related_regimen",
+        targetId: "regimen_base",
+        sourceKeys: ["relatedRegimenIds"],
       },
     ]);
 
     expect(
-      extractHealthEntityRegistryLinks("protocol", {
+      extractHealthEntityRegistryLinks("regimen", {
         relatedGoalIds: ["goal_should_be_ignored"],
         links: [
           { type: "supports_goal", targetId: "goal_explicit" },
-          { type: "related_protocol", targetId: "protocol_explicit" },
+          { type: "related_regimen", targetId: "regimen_explicit" },
           { type: "unknown", targetId: "ignored" },
         ],
       }),
@@ -369,8 +369,8 @@ describe("health registry seam", () => {
         sourceKeys: ["links"],
       },
       {
-        type: "related_protocol",
-        targetId: "protocol_explicit",
+        type: "related_regimen",
+        targetId: "regimen_explicit",
         sourceKeys: ["links"],
       },
     ]);
@@ -381,7 +381,7 @@ describe("bank registry seam", () => {
   it("reuses health-backed registry definitions and projects bank-owned entities", () => {
     expect(bankEntityDefinitionByKind.get("goal")).toBe(goalBankEntityDefinition);
     expect(goalBankEntityDefinition).toBe(goalRegistryEntityDefinition);
-    expect(protocolBankEntityDefinition).toBe(protocolRegistryEntityDefinition);
+    expect(regimenBankEntityDefinition).toBe(regimenRegistryEntityDefinition);
 
     const projection = getBankEntityRegistryProjectionMetadata("food");
 
@@ -409,7 +409,7 @@ describe("bank registry seam", () => {
           aliases: [" acai bowl ", "", "breakfast bowl", "acai bowl"],
           ingredients: ["acai", " banana "],
           tags: [" breakfast ", "post-workout"],
-          attachedProtocolIds: [" protocol_sleep ", "protocol_sleep"],
+          attachedRegimenIds: [" regimen_sleep ", "regimen_sleep"],
           autoLogDaily: {
             time: " 08:30 ",
           },
@@ -442,7 +442,7 @@ describe("bank registry seam", () => {
       ingredients: ["acai", "banana"],
       tags: ["breakfast", "post-workout"],
       note: null,
-      attachedProtocolIds: ["protocol_sleep"],
+      attachedRegimenIds: ["regimen_sleep"],
       autoLogDaily: {
         time: "08:30",
       },
@@ -598,12 +598,12 @@ describe("bank registry seam", () => {
     });
 
     expect(extractBankEntityRegistryLinks("food", {
-      attachedProtocolIds: ["prot_0123456789ABCDEFGHJKMNPQRS"],
+      attachedRegimenIds: ["reg_0123456789ABCDEFGHJKMNPQRS"],
     })).toEqual([
       {
-        type: "related_protocol",
-        targetId: "prot_0123456789ABCDEFGHJKMNPQRS",
-        sourceKeys: ["attachedProtocolIds"],
+        type: "related_regimen",
+        targetId: "reg_0123456789ABCDEFGHJKMNPQRS",
+        sourceKeys: ["attachedRegimenIds"],
       },
     ]);
     expect(extractBankEntityRegistryRelatedIds("recipe", {
@@ -695,7 +695,7 @@ describe("bank registry seam", () => {
       }
     }
 
-    expect(getHealthEntityRegistryProjectionMetadata("protocol").transform({
+    expect(getHealthEntityRegistryProjectionMetadata("regimen").transform({
       attributes: {
         ingredients: [
           {
@@ -718,7 +718,7 @@ describe("bank registry seam", () => {
         title: "Magnesium glycinate",
       },
       helpers: projectionHelpers,
-      relativePath: "bank/protocols/supplements/magnesium.md",
+      relativePath: "bank/regimens/supplements/magnesium.md",
     })).toMatchObject({
       kind: "supplement",
       relatedGoalIds: ["goal_0123456789ABCDEFGHJKMNPQRS"],

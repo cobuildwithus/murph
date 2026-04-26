@@ -10,8 +10,8 @@ import {
   GOAL_HORIZONS as CONTRACT_GOAL_HORIZONS,
   GOAL_STATUSES as CONTRACT_GOAL_STATUSES,
   type FoodNutrition,
-  PROTOCOL_KINDS as CONTRACT_PROTOCOL_KINDS,
-  PROTOCOL_STATUSES as CONTRACT_PROTOCOL_STATUSES,
+  REGIMEN_KINDS as CONTRACT_REGIMEN_KINDS,
+  REGIMEN_STATUSES as CONTRACT_REGIMEN_STATUSES,
   RECIPE_STATUSES as CONTRACT_RECIPE_STATUSES,
   WORKOUT_FORMAT_STATUSES as CONTRACT_WORKOUT_FORMAT_STATUSES,
   type WorkoutTemplate,
@@ -38,10 +38,10 @@ export const ALLERGY_DOC_TYPE = FRONTMATTER_DOC_TYPES.allergy;
 export const ALLERGY_STATUSES = CONTRACT_ALLERGY_STATUSES;
 export const ALLERGY_CRITICALITIES = CONTRACT_ALLERGY_CRITICALITIES;
 
-export const PROTOCOL_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.protocolFrontmatter;
-export const PROTOCOL_DOC_TYPE = FRONTMATTER_DOC_TYPES.protocol;
-export const PROTOCOL_KINDS = CONTRACT_PROTOCOL_KINDS;
-export const PROTOCOL_STATUSES = CONTRACT_PROTOCOL_STATUSES;
+export const REGIMEN_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.regimenFrontmatter;
+export const REGIMEN_DOC_TYPE = FRONTMATTER_DOC_TYPES.regimen;
+export const REGIMEN_KINDS = CONTRACT_REGIMEN_KINDS;
+export const REGIMEN_STATUSES = CONTRACT_REGIMEN_STATUSES;
 
 export const RECIPE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.recipeFrontmatter;
 export const RECIPE_DOC_TYPE = FRONTMATTER_DOC_TYPES.recipe;
@@ -60,7 +60,8 @@ export const CONDITIONS_DIRECTORY = VAULT_LAYOUT.conditionsDirectory;
 export const ALLERGIES_DIRECTORY = VAULT_LAYOUT.allergiesDirectory;
 export const FOODS_DIRECTORY = VAULT_LAYOUT.foodsDirectory;
 export const RECIPES_DIRECTORY = VAULT_LAYOUT.recipesDirectory;
-export const PROTOCOLS_DIRECTORY = VAULT_LAYOUT.protocolsDirectory;
+const VAULT_LAYOUT_WITH_REGIMENS = VAULT_LAYOUT as typeof VAULT_LAYOUT & { regimensDirectory?: string };
+export const REGIMENS_DIRECTORY = VAULT_LAYOUT_WITH_REGIMENS.regimensDirectory ?? "bank/regimens";
 export const WORKOUT_FORMATS_DIRECTORY = VAULT_LAYOUT.workoutFormatsDirectory;
 
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
@@ -73,8 +74,8 @@ export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
 export type WorkoutFormatStatus = (typeof WORKOUT_FORMAT_STATUSES)[number];
-export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
-export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
+export type RegimenKind = (typeof REGIMEN_KINDS)[number];
+export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
 
 export type MarkdownRegistryDocumentEnvelope = ContractMarkdownDocumentEnvelope;
 
@@ -135,7 +136,7 @@ export interface ReadWorkoutFormatInput {
   slug?: string;
 }
 
-export type FoodLinkType = "related_protocol";
+export type FoodLinkType = "related_regimen";
 
 export interface FoodLink {
   type: FoodLinkType;
@@ -160,7 +161,7 @@ export interface FoodRecord {
   ingredients?: string[];
   tags?: string[];
   note?: string;
-  attachedProtocolIds?: string[];
+  attachedRegimenIds?: string[];
   links: FoodLink[];
   autoLogDaily?: FoodAutoLogDailyRule;
   relativePath: string;
@@ -185,7 +186,7 @@ export interface UpsertFoodInput {
   ingredients?: string[];
   tags?: string[];
   note?: string;
-  attachedProtocolIds?: string[];
+  attachedRegimenIds?: string[];
   links?: FoodLink[];
   autoLogDaily?: FoodAutoLogDailyRule | null;
 }
@@ -364,7 +365,7 @@ export interface ReadGoalInput {
   slug?: string;
 }
 
-export type ConditionLinkType = "related_goal" | "related_protocol";
+export type ConditionLinkType = "related_goal" | "related_regimen";
 
 export interface ConditionLink {
   type: ConditionLinkType;
@@ -384,7 +385,7 @@ export interface ConditionEntity {
   severity?: ConditionSeverity;
   bodySites?: string[];
   relatedGoalIds?: string[];
-  relatedProtocolIds?: string[];
+  relatedRegimenIds?: string[];
   note?: string;
   links: ConditionLink[];
 }
@@ -403,7 +404,7 @@ export interface UpsertConditionInput {
   severity?: ConditionSeverity;
   bodySites?: string[];
   relatedGoalIds?: string[];
-  relatedProtocolIds?: string[];
+  relatedRegimenIds?: string[];
   links?: ConditionLink[];
   note?: string;
 }
@@ -460,10 +461,10 @@ export interface UpsertAllergyInput {
   note?: string;
 }
 
-export type ProtocolLinkType = "supports_goal" | "addresses_condition" | "related_protocol";
+export type RegimenLinkType = "supports_goal" | "addresses_condition" | "related_regimen";
 
-export interface ProtocolLink {
-  type: ProtocolLinkType;
+export interface RegimenLink {
+  type: RegimenLinkType;
   targetId: string;
 }
 
@@ -479,14 +480,14 @@ export interface ReadAllergyInput {
   slug?: string;
 }
 
-export interface ProtocolItemEntity {
-  schemaVersion: typeof PROTOCOL_SCHEMA_VERSION;
-  docType: typeof PROTOCOL_DOC_TYPE;
-  protocolId: string;
+export interface RegimenEntity {
+  schemaVersion: typeof REGIMEN_SCHEMA_VERSION;
+  docType: typeof REGIMEN_DOC_TYPE;
+  regimenId: string;
   slug: string;
   title: string;
-  kind: ProtocolKind;
-  status: ProtocolStatus;
+  kind: RegimenKind;
+  status: RegimenStatus;
   startedOn: string;
   stoppedOn?: string;
   substance?: string;
@@ -499,21 +500,21 @@ export interface ProtocolItemEntity {
   ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
-  relatedProtocolIds?: string[];
-  links: ProtocolLink[];
+  relatedRegimenIds?: string[];
+  links: RegimenLink[];
   group: string;
 }
 
-export type ProtocolItemStoredDocument = StoredMarkdownRegistryEntity<ProtocolItemEntity>;
+export type RegimenStoredDocument = StoredMarkdownRegistryEntity<RegimenEntity>;
 
-export interface UpsertProtocolItemInput {
+export interface UpsertRegimenInput {
   vaultRoot: string;
-  protocolId?: string;
+  regimenId?: string;
   slug?: string;
   allowSlugRename?: boolean;
   title?: string;
-  kind?: ProtocolKind;
-  status?: ProtocolStatus;
+  kind?: RegimenKind;
+  status?: RegimenStatus;
   startedOn?: DateInput;
   stoppedOn?: DateInput;
   substance?: string;
@@ -526,33 +527,33 @@ export interface UpsertProtocolItemInput {
   ingredients?: SupplementIngredientRecord[];
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
-  relatedProtocolIds?: string[];
-  links?: ProtocolLink[];
+  relatedRegimenIds?: string[];
+  links?: RegimenLink[];
   group?: string;
 }
 
-export interface UpsertProtocolItemResult {
+export interface UpsertRegimenResult {
   created: boolean;
   auditPath: string;
-  record: ProtocolItemStoredDocument;
+  record: RegimenStoredDocument;
 }
 
-export interface ReadProtocolItemInput {
+export interface ReadRegimenInput {
   vaultRoot: string;
-  protocolId?: string;
+  regimenId?: string;
   slug?: string;
   group?: string;
 }
 
-export interface StopProtocolItemInput {
+export interface StopRegimenInput {
   vaultRoot: string;
-  protocolId?: string;
+  regimenId?: string;
   slug?: string;
   group?: string;
   stoppedOn?: DateInput;
 }
 
-export interface StopProtocolItemResult {
+export interface StopRegimenResult {
   auditPath: string;
-  record: ProtocolItemStoredDocument;
+  record: RegimenStoredDocument;
 }

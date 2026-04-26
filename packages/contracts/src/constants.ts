@@ -19,6 +19,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   recipeFrontmatter: "murph.frontmatter.recipe.v1",
   workoutFormatFrontmatter: "murph.frontmatter.workout-format.v1",
   rawImportManifest: "murph.raw-import-manifest.v1",
+  regimenFrontmatter: "murph.frontmatter.regimen.v1",
   protocolFrontmatter: "murph.frontmatter.protocol.v1",
   sample: "murph.sample.v1",
   sharePack: "murph.share-pack.v1",
@@ -46,6 +47,7 @@ export const ID_PREFIXES = Object.freeze({
   memory: "mem",
   pack: "pack",
   provider: "prov",
+  regimen: "reg",
   recipe: "rcp",
   protocol: "prot",
   sample: "smp",
@@ -149,9 +151,11 @@ export const ALLERGY_STATUSES = Object.freeze(["active", "inactive", "resolved"]
 
 export const ALLERGY_CRITICALITIES = Object.freeze(["low", "high", "unable_to_assess"] as const);
 
-export const PROTOCOL_KINDS = Object.freeze(["medication", "supplement", "therapy", "habit"] as const);
+export const REGIMEN_KINDS = Object.freeze(["medication", "supplement", "therapy", "habit"] as const);
 
-export const PROTOCOL_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
+export const REGIMEN_STATUSES = Object.freeze(["active", "paused", "completed", "stopped"] as const);
+
+export const PROTOCOL_STATUSES = Object.freeze(["available", "archived"] as const);
 
 export const FOOD_STATUSES = Object.freeze(["active", "archived"] as const);
 export const WORKOUT_FORMAT_STATUSES = Object.freeze(["active", "archived"] as const);
@@ -220,7 +224,8 @@ export const AUDIT_ACTIONS = Object.freeze([
   "recipe_delete",
   "recipe_upsert",
   "research_note_write",
-  "protocol_stop",
+  "regimen_stop",
+  "regimen_upsert",
   "protocol_upsert",
   "samples_import_csv",
   "show",
@@ -252,6 +257,7 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   journalDay: "journal_day",
   memory: "memory",
   provider: "provider",
+  regimen: "regimen",
   recipe: "recipe",
   protocol: "protocol",
   workoutFormat: "workout_format",

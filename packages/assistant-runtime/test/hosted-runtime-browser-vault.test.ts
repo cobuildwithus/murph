@@ -88,7 +88,7 @@ test("hosted browser vault export minimizes experiments while preserving allowed
   await mkdir(path.join(vaultRoot, "bank/experiments"), { recursive: true });
   await mkdir(path.join(vaultRoot, "bank/conditions"), { recursive: true });
   await mkdir(path.join(vaultRoot, "bank/goals"), { recursive: true });
-  await mkdir(path.join(vaultRoot, "bank/protocols/sleep"), { recursive: true });
+  await mkdir(path.join(vaultRoot, "bank/regimens/supplement"), { recursive: true });
 
   const longBody = "Testing a deliberately long hosted browser vault preview sentence. ".repeat(12);
 
@@ -185,11 +185,11 @@ priority: 1
     "utf8",
   );
   await writeFile(
-    path.join(vaultRoot, "bank/protocols/sleep/magnesium.md"),
+    path.join(vaultRoot, "bank/regimens/supplement/magnesium.md"),
     `---
-schemaVersion: murph.frontmatter.protocol.v1
-docType: protocol
-protocolId: prot_hosted_browser_vault_01
+schemaVersion: murph.frontmatter.regimen.v1
+docType: regimen
+regimenId: reg_01K72NVW6Z4QK8VYAVX7GT7S4B
 slug: magnesium
 title: Magnesium
 kind: supplement
@@ -233,7 +233,7 @@ schedule: nightly
     replica.entities.filter((entity) =>
       entity.family === "condition" ||
       entity.family === "goal" ||
-      entity.family === "protocol"
+      entity.family === "regimen"
     ).length,
     3,
   );

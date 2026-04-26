@@ -47,7 +47,7 @@ interface FoodReadModel {
   ingredients?: string[]
   tags?: string[]
   note?: string
-  attachedProtocolIds?: string[]
+  attachedRegimenIds?: string[]
   autoLogDaily?: FoodAutoLogDailyReadModel | null
   relativePath: string
   markdown: string
@@ -101,7 +101,7 @@ interface FoodCoreRuntime {
     ingredients?: string[]
     tags?: string[]
     note?: string
-    attachedProtocolIds?: string[]
+    attachedRegimenIds?: string[]
     autoLogDaily?: FoodAutoLogDailyReadModel | null
   }): Promise<{
     created: boolean
@@ -157,7 +157,7 @@ export function scaffoldFoodPayload() {
     ingredients: ['acai base', 'banana', 'strawberries', 'granola', 'almond butter'],
     tags: ['breakfast', 'favorite'],
     note: 'Typical order includes extra granola and no honey.',
-    attachedProtocolIds: ['prot_01234567890123456789012345', 'prot_01234567890123456789012346'],
+    attachedRegimenIds: ['reg_01234567890123456789012345', 'reg_01234567890123456789012346'],
   })
 }
 
@@ -371,7 +371,7 @@ export async function renameFoodRecord(input: {
         ingredients: existing.ingredients,
         tags: existing.tags,
         note: existing.note,
-        attachedProtocolIds: existing.attachedProtocolIds,
+        attachedRegimenIds: existing.attachedRegimenIds,
         autoLogDaily: existing.autoLogDaily ?? undefined,
       },
     })
@@ -621,7 +621,7 @@ interface FoodCoreUpsertInput {
   ingredients?: string[]
   tags?: string[]
   note?: string
-  attachedProtocolIds?: string[]
+  attachedRegimenIds?: string[]
   autoLogDaily?: FoodAutoLogDailyReadModel | null
 }
 
@@ -651,9 +651,9 @@ function buildFoodCoreInput(input: {
     ingredients: clearedFields.has('ingredients') ? [] : input.payload.ingredients,
     tags: clearedFields.has('tags') ? [] : input.payload.tags,
     note: clearedFields.has('note') ? '' : input.payload.note,
-    attachedProtocolIds: clearedFields.has('attachedProtocolIds')
+    attachedRegimenIds: clearedFields.has('attachedRegimenIds')
       ? []
-      : input.payload.attachedProtocolIds,
+      : input.payload.attachedRegimenIds,
     autoLogDaily: clearedFields.has('autoLogDaily') ? null : input.payload.autoLogDaily,
   }) as FoodCoreUpsertInput
 }

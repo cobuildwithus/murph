@@ -235,6 +235,7 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         `${page.frontmatter.key} experimentOnboarding planDefaults.testPlanId points to missing test plan ${onboardingTestPlanId}.`,
       );
     }
+    validateExperimentOnboardingAdaptationPolicy(page, keys, pagesByKey);
     if (page.frontmatter.lineage?.forkOf) {
       assertTargetExists(keys, page.frontmatter.lineage.forkOf, `${page.frontmatter.key} lineage forkOf`);
     }
@@ -547,6 +548,87 @@ function assertTargetEntityType(
     throw new Error(
       `${context} must point to ${expectedEntityType}, but ${target} is ${page.frontmatter.entityType}.`,
     );
+  }
+}
+
+function validateExperimentOnboardingAdaptationPolicy(
+  page: HealthCommonsSourcePage,
+  keys: ReadonlyMap<string, string>,
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+): void {
+  const onboarding = page.frontmatter.experimentOnboarding;
+  if (!onboarding) {
+    return;
+  }
+
+  const policy = onboarding.adaptationPolicy;
+  const setupSlotIds = new Set((onboarding.setupSlots ?? []).map((slot) => slot.id));
+  const testPlanIds = new Set((page.frontmatter.testPlans ?? []).map((plan) => plan.planId));
+
+  if (policy) {
+    for (const field of policy.fields) {
+      assertSetupSlotIdsExist(
+        setupSlotIds,
+        field.sourceSlotIds ?? [],
+        `${page.frontmatter.key} experimentOnboarding adaptationPolicy field ${field.id} sourceSlotIds`,
+      );
+    }
+
+    assertSetupSlotIdsExist(
+      setupSlotIds,
+      policy.reusableSetup?.sourceSlotIds ?? [],
+      `${page.frontmatter.key} experimentOnboarding adaptationPolicy reusableSetup sourceSlotIds`,
+    );
+  }
+
+  const measurementPlan = policy?.measurementPlan;
+  if (!measurementPlan) {
+    return;
+  }
+
+  if (measurementPlan.testPlanId && !testPlanIds.has(measurementPlan.testPlanId)) {
+    throw new Error(
+      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.testPlanId points to missing test plan ${measurementPlan.testPlanId}.`,
+    );
+  }
+
+  for (const signalKey of measurementPlan.requiredSignals ?? []) {
+    assertTargetExists(
+      keys,
+      signalKey,
+      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.requiredSignals`,
+    );
+    assertTargetEntityType(
+      pagesByKey,
+      signalKey,
+      "biomarker",
+      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.requiredSignals`,
+    );
+  }
+  for (const signalKey of measurementPlan.optionalSignals ?? []) {
+    assertTargetExists(
+      keys,
+      signalKey,
+      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.optionalSignals`,
+    );
+    assertTargetEntityType(
+      pagesByKey,
+      signalKey,
+      "biomarker",
+      `${page.frontmatter.key} experimentOnboarding adaptationPolicy.measurementPlan.optionalSignals`,
+    );
+  }
+}
+
+function assertSetupSlotIdsExist(
+  setupSlotIds: ReadonlySet<string>,
+  sourceSlotIds: readonly string[],
+  context: string,
+): void {
+  for (const sourceSlotId of sourceSlotIds) {
+    if (!setupSlotIds.has(sourceSlotId)) {
+      throw new Error(`${context} points to missing setup slot ${sourceSlotId}.`);
+    }
   }
 }
 

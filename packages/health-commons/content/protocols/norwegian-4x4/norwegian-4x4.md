@@ -298,7 +298,9 @@ experimentOnboarding:
         - treadmill
         - hill
         - safe_running_route
-      writePath: runPlan.modality
+      target:
+        object: experimentRun
+        field: modality
     -
       id: safe_environment
       label: Safe environment
@@ -307,7 +309,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: true
       question: Do you have a place to do this without traffic, obstacles, or footing hazards?
-      writePath: onboarding.answers.safe_environment
+      target:
+        object: onboardingCapture
+        field: answers.safeEnvironment
     -
       id: hr_monitor
       label: Heart-rate monitor
@@ -320,7 +324,9 @@ experimentOnboarding:
         - chest_strap
         - wrist_wearable
         - none
-      writePath: runPlan.hrMonitor
+      target:
+        object: experimentRun
+        field: hrMonitor
     -
       id: weekly_schedule
       label: Weekly schedule
@@ -332,7 +338,9 @@ experimentOnboarding:
       constraints:
         sessionsPerWeek: 2
         minimumHoursBetweenSessions: 48
-      writePath: runPlan.schedule
+      target:
+        object: experimentRun
+        field: schedule
     -
       id: reminder_policy
       label: Reminder policy
@@ -345,7 +353,9 @@ experimentOnboarding:
         - none
         - pre_session
         - pre_session_plus_same_day_missing_log_check
-      writePath: assistantSupport.reminderPolicy
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: wearable-cardio-fitness-49d
     baselineDays: 7

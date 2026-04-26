@@ -401,6 +401,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown_or_stale
       required: true
       question: What is your current weekly running, terrain, hills, shoes, and what reliably triggers lateral knee pain?
+      target:
+        object: onboardingCapture
+        field: setupAnswers.currentRunningExposure
     -
       id: pain_scale_commitment
       label: Pain scale commitment
@@ -409,6 +412,9 @@ experimentOnboarding:
       askPolicy: ask_at_confirmation
       required: true
       question: Can you log lateral knee pain before, during, after, and the next morning using the same 0-10 scale?
+      target:
+        object: onboardingCapture
+        field: setupAnswers.painScaleCommitment
   planDefaults:
     testPlanId: itbs-return-to-run-42d
     baselineDays: 7

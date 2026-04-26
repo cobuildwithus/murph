@@ -19,6 +19,7 @@ import {
 
 const MAX_IMPORT_MANIFEST_BYTES = 2 * 1024 * 1024;
 const MAX_IMPORT_MANIFEST_FILES = 10_000;
+const MAX_IMPORT_MANIFEST_EXCLUDED_SUMMARIES = 20;
 const MAX_IMPORT_MANIFEST_EXCLUDED_FILES = 20_000;
 const MAX_IMPORT_TOTAL_BYTES = 512 * 1024 * 1024;
 const MAX_IMPORT_TEXT_FILE_BYTES = 16 * 1024 * 1024;
@@ -159,12 +160,18 @@ export function parseManifestExcludedEntry(entry: unknown): VaultSyncImportManif
     invalidImportManifest("Vault sync import manifest contains an invalid excluded entry.");
   }
 
-  if (typeof entry.path !== "string" || typeof entry.reason !== "string") {
+  if (
+    typeof entry.count !== "number"
+    || !Number.isSafeInteger(entry.count)
+    || entry.count < 0
+    || typeof entry.reason !== "string"
+    || entry.reason.trim().length === 0
+  ) {
     invalidImportManifest("Vault sync import manifest contains a malformed excluded entry.");
   }
 
   return {
-    path: normalizeRelativeVaultPath(entry.path),
+    count: entry.count,
     reason: entry.reason,
   };
 }
@@ -189,7 +196,7 @@ export async function readVaultSyncImportManifest(importMetaRoot: string): Promi
     invalidImportManifest("Vault sync import manifest contains too many files.");
   }
 
-  if (excludedValue.length > MAX_IMPORT_MANIFEST_EXCLUDED_FILES) {
+  if (excludedValue.length > MAX_IMPORT_MANIFEST_EXCLUDED_SUMMARIES) {
     invalidImportManifest("Vault sync import manifest contains too many excluded files.");
   }
 
@@ -210,8 +217,14 @@ export async function readVaultSyncImportManifest(importMetaRoot: string): Promi
   }
 
   const excluded: VaultSyncImportManifestExcludedFile[] = [];
+  let excludedFileCount = 0;
   for (const entry of excludedValue) {
-    excluded.push(parseManifestExcludedEntry(entry));
+    const parsedExcluded = parseManifestExcludedEntry(entry);
+    excludedFileCount += parsedExcluded.count;
+    if (excludedFileCount > MAX_IMPORT_MANIFEST_EXCLUDED_FILES) {
+      invalidImportManifest("Vault sync import manifest contains too many excluded files.");
+    }
+    excluded.push(parsedExcluded);
   }
 
   const manifest: VaultSyncImportManifest = {

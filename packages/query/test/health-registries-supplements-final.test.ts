@@ -29,8 +29,8 @@ import {
   goalRegistryDefinition,
   listProjectedRegistryRecords,
   listRegistryRecords,
-  protocolRecordFromEntity,
-  protocolRegistryDefinition,
+  regimenRecordFromEntity,
+  regimenRegistryDefinition,
   providerRecordFromEntity,
   providerRegistryDefinition,
   readPriority,
@@ -196,11 +196,11 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
 
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/liposomal-vitamin-c.md",
+    "bank/regimens/supplements/liposomal-vitamin-c.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_vitamin_c",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_vitamin_c",
       "slug: liposomal-vitamin-c",
       "title: Liposomal Vitamin C",
       "status: active",
@@ -227,11 +227,11 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
 
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/legacy-magnesium.md",
+    "bank/regimens/supplements/legacy-magnesium.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_legacy_magnesium",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_legacy_magnesium",
       "slug: legacy-magnesium",
       "title: Legacy Magnesium",
       "status: stopped",
@@ -250,11 +250,11 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
 
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/punctuation-source.md",
+    "bank/regimens/supplements/punctuation-source.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_symbols",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_symbols",
       "slug: punctuation-source",
       "title: Symbol Source",
       "status: active",
@@ -274,11 +274,11 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
 
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/empty-supplement.md",
+    "bank/regimens/supplements/empty-supplement.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_empty",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_empty",
       "slug: empty-supplement",
       "title: Empty Supplement",
       "status: active",
@@ -292,17 +292,17 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
 
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/manual.md",
+    "bank/regimens/manual.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_manual",
-      "slug: manual-protocol",
-      "title: Manual Protocol",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_manual",
+      "slug: manual-regimen",
+      "title: Manual Regimen",
       "status: active",
-      "kind: protocol",
+      "kind: habit",
       "---",
-      "# Manual Protocol",
+      "# Manual Regimen",
       "",
     ].join("\n"),
   );
@@ -320,8 +320,8 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
       "serving: 1 bowl",
       "tags:",
       "  - breakfast",
-      "attachedProtocolIds:",
-      "  - prot_vitamin_c",
+      "attachedRegimenIds:",
+      "  - reg_vitamin_c",
       "autoLogDaily:",
       "  time: 08:00",
       "---",
@@ -641,12 +641,12 @@ test("registry queries cover the remaining projection and wrapper branches", asy
     ),
     geneticsRegistryDefinition,
   );
-  const protocolRecord = projectedRegistryEntity(
-    "protocol",
+  const regimenRecord = projectedRegistryEntity(
+    "regimen",
     documentRecord(
-      "bank/protocols/supplements/liposomal-vitamin-c.md",
+      "bank/regimens/supplements/liposomal-vitamin-c.md",
       {
-        protocolId: "prot_vitamin_c",
+        regimenId: "reg_vitamin_c",
         slug: "liposomal-vitamin-c",
         title: "Liposomal Vitamin C",
         status: "active",
@@ -674,7 +674,7 @@ test("registry queries cover the remaining projection and wrapper branches", asy
       },
       "# Liposomal Vitamin C",
     ),
-    protocolRegistryDefinition,
+    regimenRegistryDefinition,
   );
   const foodRecord = projectedRegistryEntity(
     "food",
@@ -687,7 +687,7 @@ test("registry queries cover the remaining projection and wrapper branches", asy
         status: "active",
         serving: "1 bowl",
         tags: ["breakfast"],
-        attachedProtocolIds: ["prot_vitamin_c"],
+        attachedRegimenIds: ["reg_vitamin_c"],
         autoLogDaily: { time: "08:00" },
       },
       "# Overnight Oats",
@@ -750,7 +750,7 @@ test("registry queries cover the remaining projection and wrapper branches", asy
   assert.ok(allergyRecordFromEntity(allergyRecord));
   assert.ok(familyRecordFromEntity(familyRecord));
   assert.ok(geneticsRecordFromEntity(geneticsRecord));
-  assert.ok(protocolRecordFromEntity(protocolRecord));
+  assert.ok(regimenRecordFromEntity(regimenRecord));
   assert.ok(foodRecordFromEntity(foodRecord));
   assert.ok(recipeRecordFromEntity(recipeRecord));
   assert.ok(providerRecordFromEntity(providerRecord));
@@ -777,28 +777,28 @@ test("supplement queries cover lookup, aggregation, and filtering branches", asy
   assert.deepEqual(
     supplements.map((record) => record.entity.id),
     [
-      "prot_empty",
-      "prot_legacy_magnesium",
-      "prot_vitamin_c",
-      "prot_symbols",
+      "reg_empty",
+      "reg_legacy_magnesium",
+      "reg_vitamin_c",
+      "reg_symbols",
     ],
   );
   assert.deepEqual(
     activeSupplements.map((record) => record.entity.id),
     [
-      "prot_empty",
-      "prot_vitamin_c",
-      "prot_symbols",
+      "reg_empty",
+      "reg_vitamin_c",
+      "reg_symbols",
     ],
   );
   assert.deepEqual(
     stoppedSupplements.map((record) => record.entity.id),
-    ["prot_legacy_magnesium"],
+    ["reg_legacy_magnesium"],
   );
 
-  assert.equal((await readSupplement(vaultRoot, "prot_vitamin_c"))?.entity.brand, "LivOn Labs");
-  assert.equal(await readSupplement(vaultRoot, "prot_manual"), null);
-  assert.equal((await showSupplement(vaultRoot, "liposomal vitamin c"))?.entity.id, "prot_vitamin_c");
+  assert.equal((await readSupplement(vaultRoot, "reg_vitamin_c"))?.entity.brand, "LivOn Labs");
+  assert.equal(await readSupplement(vaultRoot, "reg_manual"), null);
+  assert.equal((await showSupplement(vaultRoot, "liposomal vitamin c"))?.entity.id, "reg_vitamin_c");
   assert.equal(await showSupplement(vaultRoot, "missing supplement"), null);
 
   const compounds = await listSupplementCompounds(vaultRoot, {
@@ -820,7 +820,7 @@ test("supplement queries cover lookup, aggregation, and filtering branches", asy
     },
   ]);
   assert.equal(magnesium?.supplementCount, 1);
-  assert.deepEqual(magnesium?.supplementIds, ["prot_legacy_magnesium"]);
+  assert.deepEqual(magnesium?.supplementIds, ["reg_legacy_magnesium"]);
   assert.deepEqual(magnesium?.totals, [
     {
       unit: "mg",
@@ -859,11 +859,11 @@ test("supplement compound rollups ignore legacy scalar-only supplement fields", 
 
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/legacy-scalar.md",
+    "bank/regimens/supplements/legacy-scalar.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_legacy_scalar",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_legacy_scalar",
       "slug: legacy-scalar",
       "title: Legacy Scalar",
       "status: active",
@@ -878,11 +878,11 @@ test("supplement compound rollups ignore legacy scalar-only supplement fields", 
   );
   await writeVaultFile(
     vaultRoot,
-    "bank/protocols/supplements/vitamin-c.md",
+    "bank/regimens/supplements/vitamin-c.md",
     [
       "---",
-      "schemaVersion: hv/protocol@v1",
-      "protocolId: prot_vitamin_c",
+      "schemaVersion: hv/regimen@v1",
+      "regimenId: reg_vitamin_c",
       "slug: vitamin-c",
       "title: Vitamin C",
       "status: active",
@@ -906,7 +906,7 @@ test("supplement compound rollups ignore legacy scalar-only supplement fields", 
   assert.deepEqual(compounds.map((record) => record.lookupId), ["vitamin-c"]);
   assert.equal((await showSupplementCompound(vaultRoot, "Legacy Scalar")) ?? null, null);
   assert.equal(
-    (await readSupplement(vaultRoot, "prot_legacy_scalar"))?.entity.substance,
+    (await readSupplement(vaultRoot, "reg_legacy_scalar"))?.entity.substance,
     "Legacy Scalar",
   );
 });

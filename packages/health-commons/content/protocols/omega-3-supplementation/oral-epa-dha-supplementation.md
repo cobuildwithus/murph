@@ -640,7 +640,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: What exact product do you plan to use? Include brand, product name, serving size, and a label/photo if available.
-    writePath: experiment.protocol.product_identity
+    target:
+      object: protocol
+      field: productIdentity
   -
     id: source_type
     label: Source type
@@ -657,7 +659,9 @@ experimentOnboarding:
     - cod_liver_oil_route_out
     - prescription_omega3_route_out
     - other_or_unknown
-    writePath: experiment.protocol.source_type
+    target:
+      object: protocol
+      field: sourceType
   -
     id: epa_mg_per_day
     label: EPA mg per planned day
@@ -668,7 +672,9 @@ experimentOnboarding:
     question: How many milligrams of EPA will you take on a planned day?
     constraints:
       min: 0
-    writePath: experiment.protocol.epa_mg_per_day
+    target:
+      object: protocol
+      field: epaMgPerDay
   -
     id: dha_mg_per_day
     label: DHA mg per planned day
@@ -679,7 +685,9 @@ experimentOnboarding:
     question: How many milligrams of DHA will you take on a planned day?
     constraints:
       min: 0
-    writePath: experiment.protocol.dha_mg_per_day
+    target:
+      object: protocol
+      field: dhaMgPerDay
   -
     id: servings_per_day
     label: Servings per day
@@ -690,7 +698,9 @@ experimentOnboarding:
     question: How many capsules, softgels, teaspoons, or servings will you take per day?
     constraints:
       min: 0
-    writePath: experiment.protocol.servings_per_day
+    target:
+      object: protocol
+      field: servingsPerDay
   -
     id: formulation
     label: Formulation if known
@@ -707,7 +717,9 @@ experimentOnboarding:
     - phospholipid
     - free_fatty_acid
     - unknown
-    writePath: experiment.protocol.formulation
+    target:
+      object: protocol
+      field: formulation
   -
     id: lab_plan
     label: Lab plan
@@ -721,7 +733,9 @@ experimentOnboarding:
     - erythrocyte_epa_dha
     - lipid_panel
     - no_lab_manual_log
-    writePath: experiment.test_plan.lab_plan
+    target:
+      object: analysisPlan
+      field: testPlan.labPlan
   -
     id: dosing_time
     label: Dosing time
@@ -730,7 +744,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: What time do you plan to take it most days?
-    writePath: experiment.schedule.dosing_time
+    target:
+      object: experimentRun
+      field: schedule.dosingTime
   -
     id: background_seafood
     label: Background seafood intake
@@ -739,7 +755,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: About how often do you eat fish or seafood now, what types, any high-mercury fish exposure, and will you keep that stable?
-    writePath: experiment.context.background_seafood
+    target:
+      object: onboardingCapture
+      field: context.backgroundSeafood
   -
     id: reminder_policy
     label: Reminder preference
@@ -753,7 +771,9 @@ experimentOnboarding:
     - daily_checkin
     - missed_dose_check
     - weekly_digest
-    writePath: experiment.assistant.reminder_policy
+    target:
+      object: assistantSupport
+      field: reminderPolicy
   -
     id: product_quality_details
     label: Product quality details
@@ -762,7 +782,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: Can you record batch/lot, expiration date, storage conditions, and any third-party testing or certificate-of-analysis information?
-    writePath: experiment.protocol.product_quality_details
+    target:
+      object: protocol
+      field: productQualityDetails
   -
     id: dose_with_food_context
     label: Dose and meal context
@@ -771,7 +793,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: Will you take it with food or fat, and will you keep that meal pattern stable?
-    writePath: experiment.protocol.dose_with_food_context
+    target:
+      object: protocol
+      field: doseWithFoodContext
   -
     id: medication_supplement_context
     label: Medication and supplement context
@@ -780,7 +804,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: List anticoagulants, antiplatelets, regular NSAIDs, SSRIs/SNRIs, statins, fibrates, niacin, diabetes/thyroid/blood-pressure medicines, vitamin E, garlic, ginkgo, ginger, turmeric/curcumin, nattokinase, or other bleeding-relevant supplements.
-    writePath: experiment.context.medication_supplement_context
+    target:
+      object: onboardingCapture
+      field: context.medicationSupplementContext
   -
     id: diet_lifestyle_confounders
     label: Diet and lifestyle confounders
@@ -789,7 +815,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: Note ALA foods such as flax/chia/walnut/canola, saturated-fat or omega-6 changes, alcohol changes, weight-change efforts, and exercise-load changes you expect during the run.
-    writePath: experiment.context.diet_lifestyle_confounders
+    target:
+      object: onboardingCapture
+      field: context.dietLifestyleConfounders
   -
     id: baseline_safety_context
     label: Baseline safety context
@@ -798,7 +826,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: Any AF/flutter, palpitations, syncope, CVD, diabetes, liver disease, kidney disease, gout, pancreatitis, lipid disorder, bleeding disorder, fish/shellfish allergy, pregnancy/lactation, planned procedures, baseline bruising/nosebleeds/gum bleeding, or unusual menstrual bleeding pattern?
-    writePath: experiment.context.baseline_safety_context
+    target:
+      object: onboardingCapture
+      field: context.baselineSafetyContext
   planDefaults:
     testPlanId: omega3-index-status-98d
     baselineDays: 14

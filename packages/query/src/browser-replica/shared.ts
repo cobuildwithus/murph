@@ -34,6 +34,7 @@ export const INCLUDED_FAMILIES = [
   "goal",
   "journal",
   "protocol",
+  "regimen",
   "provider",
   "sample",
   "workout_format",

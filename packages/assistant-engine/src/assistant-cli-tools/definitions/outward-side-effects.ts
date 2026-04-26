@@ -67,13 +67,13 @@ export function createOutwardSideEffectToolDefinitions(
       defineHostedApiBackedTool({
         name: 'vault.share.createLink',
         description:
-          'Create a one-time hosted share link for remembered foods, recipes, and protocols. When a food has attached protocol ids, keep includeAttachedProtocols=true so the recipient gets the full smoothie + supplement bundle.',
+          'Create a one-time hosted share link for remembered foods, recipes, and regimens. When a food has attached regimen ids, keep includeAttachedRegimens=true so the recipient gets the full smoothie + supplement bundle.',
         inputSchema: z.object({
           title: z.string().min(1).optional(),
           foods: z.array(shareEntitySelectorSchema).optional(),
-          protocols: z.array(shareEntitySelectorSchema).optional(),
+          regimens: z.array(shareEntitySelectorSchema).optional(),
           recipes: z.array(shareEntitySelectorSchema).optional(),
-          includeAttachedProtocols: z.boolean().optional(),
+          includeAttachedRegimens: z.boolean().optional(),
           logMeal: z.object({
             food: shareEntitySelectorSchema,
             note: z.string().min(1).optional(),
@@ -89,7 +89,7 @@ export function createOutwardSideEffectToolDefinitions(
               slug: 'morning-smoothie',
             },
           ],
-          includeAttachedProtocols: true,
+          includeAttachedRegimens: true,
           logMeal: {
             food: {
               slug: 'morning-smoothie',
@@ -99,10 +99,10 @@ export function createOutwardSideEffectToolDefinitions(
         execute: async ({
           expiresInHours,
           foods,
-          includeAttachedProtocols,
+          includeAttachedRegimens,
           inviteCode,
           logMeal,
-          protocols,
+          regimens,
           recipientPhoneNumber,
           recipes,
           title,
@@ -111,9 +111,9 @@ export function createOutwardSideEffectToolDefinitions(
             vaultRoot: input.vault,
             title,
             foods,
-            protocols,
+            regimens,
             recipes,
-            includeAttachedProtocols,
+            includeAttachedRegimens,
             logMeal,
           })
 

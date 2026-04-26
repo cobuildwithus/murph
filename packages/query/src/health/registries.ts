@@ -405,7 +405,7 @@ export interface ConditionQueryEntity extends RegistryQueryEntity {
   severity: string | null;
   bodySites: string[];
   relatedGoalIds: string[];
-  relatedProtocolIds: string[];
+  relatedRegimenIds: string[];
   note: string | null;
 }
 
@@ -437,7 +437,7 @@ export interface SupplementIngredientQueryRecord {
   note: string | null;
 }
 
-export interface ProtocolQueryEntity extends RegistryQueryEntity {
+export interface RegimenQueryEntity extends RegistryQueryEntity {
   kind: string | null;
   startedOn: string | null;
   stoppedOn: string | null;
@@ -451,14 +451,14 @@ export interface ProtocolQueryEntity extends RegistryQueryEntity {
   ingredients: SupplementIngredientQueryRecord[];
   relatedGoalIds: string[];
   relatedConditionIds: string[];
-  relatedProtocolIds: string[];
+  relatedRegimenIds: string[];
   group: string | null;
 }
 
-export type ProtocolQueryRecord = RegistryStoredDocument<ProtocolQueryEntity>;
+export type RegimenQueryRecord = RegistryStoredDocument<RegimenQueryEntity>;
 
-export const protocolRegistryDefinition: RegistryDefinition<ProtocolQueryEntity> =
-  createBankEntityRegistryDefinition("protocol");
+export const regimenRegistryDefinition: RegistryDefinition<RegimenQueryEntity> =
+  createBankEntityRegistryDefinition("regimen");
 
 export interface FamilyQueryEntity extends RegistryQueryEntity {
   relationship: string | null;
@@ -508,7 +508,7 @@ export interface FoodQueryEntity extends RegistryQueryEntity {
   ingredients: string[];
   tags: string[];
   note: string | null;
-  attachedProtocolIds: string[];
+  attachedRegimenIds: string[];
   autoLogDaily: FoodAutoLogDailyQueryRule | null;
 }
 
@@ -663,8 +663,8 @@ export function allergyRecordFromEntity(entity: CanonicalEntity): AllergyQueryRe
   return projectRegistryRecordFromEntity(entity, "allergy", allergyRegistryDefinition);
 }
 
-export function protocolRecordFromEntity(entity: CanonicalEntity): ProtocolQueryRecord | null {
-  return projectRegistryRecordFromEntity(entity, "protocol", protocolRegistryDefinition);
+export function regimenRecordFromEntity(entity: CanonicalEntity): RegimenQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "regimen", regimenRegistryDefinition);
 }
 
 export function familyRecordFromEntity(entity: CanonicalEntity): FamilyQueryRecord | null {

@@ -2,14 +2,14 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type { SharePack } from "@murphai/contracts";
 
 export type HostedSharePageStage = "invalid" | "expired" | "signin" | "ready" | "processing" | "consumed";
-export type HostedShareKind = "food" | "protocol" | "recipe";
+export type HostedShareKind = "food" | "recipe" | "regimen";
 
 export interface HostedSharePreview {
   kinds: HostedShareKind[];
   counts: {
     foods: number;
-    protocols: number;
     recipes: number;
+    regimens: number;
     total: number;
   };
   logMealAfterImport: boolean;

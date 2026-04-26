@@ -3,12 +3,14 @@ import path from "node:path";
 
 import type {
   HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
+  HostedRuntimeEvent,
+} from "@murphai/hosted-execution/contracts";
 import {
   emitHostedExecutionStructuredLog,
-  parseHostedExecutionRunnerResult,
-  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionRunnerResult,
+} from "@murphai/hosted-execution/parsers";
 import {
   resolveAssistantStatePaths,
   writeJsonFileAtomic,

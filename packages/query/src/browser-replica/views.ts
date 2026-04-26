@@ -87,6 +87,7 @@ function vaultViewFromReplica(replica: BrowserVaultReplica): VaultReadModel {
     metadata: null,
     protocols: byFamily.protocol ?? [],
     providers: byFamily.provider ?? [],
+    regimens: byFamily.regimen ?? [],
     recipes: [],
     samples: byFamily.sample ?? [],
     vaultRoot: "browser-vault-replica",

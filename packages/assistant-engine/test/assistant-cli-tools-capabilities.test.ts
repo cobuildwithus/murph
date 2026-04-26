@@ -887,8 +887,8 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(writeTools, 'vault.intake.project', {
       assessmentId: 'asmt_example',
     })
-    await executeTool(writeTools, 'vault.protocol.stop', {
-      protocolId: 'prot_example',
+    await executeTool(writeTools, 'vault.regimen.stop', {
+      regimenId: 'reg_example',
       stoppedOn: '2026-04-08',
     })
 
@@ -979,8 +979,8 @@ describe('assistant CLI tool capability seam', () => {
     expect(findCall(coreCalls, 'projectAssessment')).toMatchObject({
       assessmentId: 'asmt_example',
     })
-    expect(findCall(coreCalls, 'stopProtocol')).toMatchObject({
-      protocolId: 'prot_example',
+    expect(findCall(coreCalls, 'stopRegimen')).toMatchObject({
+      regimenId: 'reg_example',
       stoppedOn: '2026-04-08',
     })
     for (const descriptor of healthEntityDescriptors.filter(hasHealthCommandDescriptor)) {
@@ -1036,8 +1036,8 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(nullRequestWriteTools, 'vault.intake.project', {
       assessmentId: 'asmt_null',
     })
-    await executeTool(nullRequestWriteTools, 'vault.protocol.stop', {
-      protocolId: 'prot_null',
+    await executeTool(nullRequestWriteTools, 'vault.regimen.stop', {
+      regimenId: 'reg_null',
     })
     await executeBoundTool(createHealthUpsertToolDefinitions(nullRequestContext)[0]!, {
       payload: {
@@ -1048,8 +1048,8 @@ describe('assistant CLI tool capability seam', () => {
       assessmentId: 'asmt_null',
       requestId: null,
     })
-    expect(findLastCall(coreCalls, 'stopProtocol')).toMatchObject({
-      protocolId: 'prot_null',
+    expect(findLastCall(coreCalls, 'stopRegimen')).toMatchObject({
+      regimenId: 'reg_null',
       requestId: null,
     })
     expect(findLastCall(importerCalls, 'importDocument')).toMatchObject({
@@ -1077,7 +1077,7 @@ describe('assistant CLI tool capability seam', () => {
     expect(await executeTool(outwardTools, 'vault.share.createLink', {
       title: 'Morning Smoothie',
       foods: [{ slug: 'morning-smoothie' }],
-      includeAttachedProtocols: true,
+      includeAttachedRegimens: true,
       logMeal: {
         food: {
           slug: 'morning-smoothie',
@@ -1094,9 +1094,9 @@ describe('assistant CLI tool capability seam', () => {
       vaultRoot,
       title: 'Morning Smoothie',
       foods: [{ slug: 'morning-smoothie' }],
-      protocols: undefined,
+      regimens: undefined,
       recipes: undefined,
-      includeAttachedProtocols: true,
+      includeAttachedRegimens: true,
       logMeal: {
         food: {
           slug: 'morning-smoothie',
@@ -1958,7 +1958,7 @@ function createVaultServicesStub(input: {
     upsertEvent: makeCoreMethod('upsertEvent'),
     addSamples: makeCoreMethod('addSamples'),
     projectAssessment: makeCoreMethod('projectAssessment'),
-    stopProtocol: makeCoreMethod('stopProtocol'),
+    stopRegimen: makeCoreMethod('stopRegimen'),
   } as Record<string, ReturnType<typeof vi.fn>>
 
   for (const descriptor of healthEntityDescriptors.filter(hasHealthCommandDescriptor)) {

@@ -68,7 +68,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -86,7 +86,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -104,7 +104,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -122,7 +122,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -140,7 +140,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -158,7 +158,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -176,7 +176,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -194,7 +194,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -212,7 +212,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -440,7 +440,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -458,7 +458,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -476,7 +476,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -494,7 +494,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -512,7 +512,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -530,7 +530,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -548,7 +548,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -566,7 +566,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -584,7 +584,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -812,7 +812,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -830,7 +830,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -848,7 +848,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -866,7 +866,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -884,7 +884,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -902,7 +902,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -920,7 +920,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -938,7 +938,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -956,7 +956,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1247,7 +1247,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1265,7 +1265,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1283,7 +1283,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1301,7 +1301,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1319,7 +1319,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1337,7 +1337,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1355,7 +1355,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1373,7 +1373,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1391,7 +1391,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1616,7 +1616,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1634,7 +1634,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1652,7 +1652,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1670,7 +1670,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1688,7 +1688,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1706,7 +1706,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1724,7 +1724,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1742,7 +1742,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1760,7 +1760,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -1987,7 +1987,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2005,7 +2005,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2023,7 +2023,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2041,7 +2041,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2059,7 +2059,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2077,7 +2077,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2095,7 +2095,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2113,7 +2113,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2131,7 +2131,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2358,7 +2358,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2376,7 +2376,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2394,7 +2394,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2412,7 +2412,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2430,7 +2430,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2448,7 +2448,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2466,7 +2466,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2484,7 +2484,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2502,7 +2502,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2812,7 +2812,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2830,7 +2830,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2848,7 +2848,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2866,7 +2866,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2884,7 +2884,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2902,7 +2902,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2920,7 +2920,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2938,7 +2938,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -2956,7 +2956,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3188,7 +3188,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3206,7 +3206,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3224,7 +3224,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3242,7 +3242,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3260,7 +3260,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3278,7 +3278,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3296,7 +3296,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3314,7 +3314,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3332,7 +3332,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3569,7 +3569,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3587,7 +3587,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3605,7 +3605,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3623,7 +3623,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3641,7 +3641,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3659,7 +3659,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3677,7 +3677,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3695,7 +3695,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3713,7 +3713,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3942,7 +3942,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3960,7 +3960,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3978,7 +3978,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -3996,7 +3996,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4014,7 +4014,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4032,7 +4032,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4050,7 +4050,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4068,7 +4068,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4086,7 +4086,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4311,7 +4311,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4329,7 +4329,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4347,7 +4347,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4365,7 +4365,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4383,7 +4383,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4401,7 +4401,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4419,7 +4419,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4437,7 +4437,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4455,7 +4455,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4692,7 +4692,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4710,7 +4710,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4728,7 +4728,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4746,7 +4746,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4764,7 +4764,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4782,7 +4782,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4800,7 +4800,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4818,7 +4818,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -4836,7 +4836,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5189,7 +5189,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5207,7 +5207,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5225,7 +5225,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5243,7 +5243,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5261,7 +5261,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5279,7 +5279,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5297,7 +5297,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5315,7 +5315,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5333,7 +5333,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5772,7 +5772,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5790,7 +5790,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5808,7 +5808,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5826,7 +5826,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5844,7 +5844,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5862,7 +5862,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5880,7 +5880,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5898,7 +5898,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -5916,7 +5916,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6220,7 +6220,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6238,7 +6238,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6256,7 +6256,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6274,7 +6274,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6292,7 +6292,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6310,7 +6310,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6328,7 +6328,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6346,7 +6346,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6364,7 +6364,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6592,7 +6592,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6610,7 +6610,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6628,7 +6628,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6646,7 +6646,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6664,7 +6664,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6682,7 +6682,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6700,7 +6700,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6718,7 +6718,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6736,7 +6736,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -6880,6 +6880,10 @@
         "protocolId": {
           "type": "string",
           "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "regimenId": {
+          "type": "string",
+          "pattern": "^reg_[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "experimentId": {
           "type": "string",
@@ -7038,7 +7042,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7056,7 +7060,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7074,7 +7078,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7092,7 +7096,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7110,7 +7114,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7128,7 +7132,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7146,7 +7150,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7164,7 +7168,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7182,7 +7186,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7424,7 +7428,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7442,7 +7446,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7460,7 +7464,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7478,7 +7482,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7496,7 +7500,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7514,7 +7518,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7532,7 +7536,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7550,7 +7554,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [
@@ -7568,7 +7572,7 @@
                   },
                   "targetId": {
                     "type": "string",
-                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^(?:alg|asmt|aud|automation|slog|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|reg|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
                   }
                 },
                 "required": [

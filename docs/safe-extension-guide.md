@@ -93,7 +93,7 @@ Storage and authority rules for this extension:
 
 CLI and package-boundary rules for this extension:
 
-- Keep the public surface payload-first. The intended noun pattern is `scaffold`, `upsert --input`, `show`, and `list`, with special cases for `intake import`, `intake project`, and `protocol stop`.
+- Keep generic health nouns on the `scaffold`, `upsert --input`, `show`, and `list` pattern. For high-value agent-facing writes, prefer typed args/options with an explicit `import-json` fallback for advanced payloads; current examples include typed event adds, `samples add`, `supplement save`, and `regimen save`. Keep private Health Commons-backed adaptations on the `protocol upsert/show/list` surface, and keep public Health Commons lookup under `commons protocol`.
 - Keep canonical writes in `@murphai/core` even when health nouns originate from `@murphai/importers` or `@murphai/cli`.
 - Keep `@murphai/query` read-only. If the health read model needs repair logic, move that work into core mutation or validation paths instead.
 - If this area looks duplicated, simplify selector/helper plumbing around the seam rather than collapsing the seam itself. Any cleanup has to preserve the split between canonical memory, canonical typed preferences, stable reference docs, and derived wiki pages.

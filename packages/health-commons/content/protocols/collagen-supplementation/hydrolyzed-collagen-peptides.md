@@ -641,6 +641,9 @@ experimentOnboarding:
     - body_composition_with_training
     - bone_lab_context
     - tolerability_adherence
+    target:
+      object: onboardingCapture
+      field: setupAnswers.targetOutcome
   -
     id: product_identity
     label: Exact product
@@ -649,6 +652,9 @@ experimentOnboarding:
     askPolicy: always
     required: true
     question: What exact product, brand, manufacturer, serving size, grams per serving, lot/batch, expiration date, ingredient list, allergen information, and serving instructions are on the label?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.productIdentity
   -
     id: planned_daily_grams
     label: Planned daily grams
@@ -657,6 +663,9 @@ experimentOnboarding:
     askPolicy: always
     required: true
     question: How many grams of hydrolyzed collagen peptides per day will you hold constant?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.plannedDailyGrams
   -
     id: source_species
     label: Source species
@@ -672,6 +681,9 @@ experimentOnboarding:
     - chicken
     - mixed
     - unknown
+    target:
+      object: onboardingCapture
+      field: setupAnswers.sourceSpecies
   -
     id: coingredients
     label: Cointerventions and coingredients
@@ -680,6 +692,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: Does the product include biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, vitamin C, hyaluronic acid, calcium, vitamin D, sweeteners, or other active ingredients?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.coingredients
   -
     id: schedule_timing
     label: Dose timing
@@ -688,6 +703,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: When will you take it each day, and will timing around training or loading be part of the plan?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.scheduleTiming
   -
     id: duration_target
     label: Target duration
@@ -703,6 +721,9 @@ experimentOnboarding:
     - twelve_weeks_training_or_recovery
     - three_to_six_months_tendon_loading
     - twelve_months_bone_clinical
+    target:
+      object: onboardingCapture
+      field: setupAnswers.durationTarget
   -
     id: primary_metric
     label: Primary metric
@@ -711,6 +732,9 @@ experimentOnboarding:
     askPolicy: always
     required: true
     question: What exact score, questionnaire, photo method, pain/function scale, or recovery check will be used as the primary metric?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.primaryMetric
   -
     id: baseline_plan
     label: Baseline plan
@@ -719,6 +743,9 @@ experimentOnboarding:
     askPolicy: always
     required: true
     question: How will you collect a 7-day baseline before starting the supplement?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.baselinePlan
   -
     id: cointerventions_to_keep_stable
     label: Confounders to hold stable
@@ -727,6 +754,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: true
     question: Which training, rehab, skincare, sun exposure, diet/protein, analgesic, medication, and supplement variables will you keep stable or log as changes?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.cointerventionsToKeepStable
   -
     id: reminder_policy
     label: Reminder policy
@@ -735,6 +765,9 @@ experimentOnboarding:
     askPolicy: ask_at_confirmation
     required: false
     question: Do you want a daily dose/log reminder and weekly check-in?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.reminderPolicy
   -
     id: allergy_and_alpha_gal_context
     label: Allergy and alpha-gal context
@@ -743,6 +776,9 @@ experimentOnboarding:
     askPolicy: always
     required: true
     question: Any fish, Crustacean shellfish, collagen, gelatin, bovine/porcine, mammalian-meat, capsule/gummy/marshmallow, alpha-gal, or same-product reactions?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.allergyAndAlphaGalContext
   -
     id: kidney_and_stone_context
     label: Kidney and stone context
@@ -751,6 +787,9 @@ experimentOnboarding:
     askPolicy: always
     required: true
     question: Any CKD, transplant, dialysis, protein restriction, recurrent stones, calcium-oxalate stones, hyperoxaluria, or uncertain kidney function?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.kidneyAndStoneContext
   -
     id: biotin_and_lab_context
     label: Biotin and upcoming labs
@@ -759,6 +798,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: Does the product contain biotin, and are thyroid, cardiac/troponin, endocrine, hormone, or other clinical labs coming up?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.biotinAndLabContext
   -
     id: marine_contaminant_testing
     label: Marine-source testing
@@ -767,6 +809,9 @@ experimentOnboarding:
     askPolicy: ask_if_unknown
     required: false
     question: For fish/marine collagen, is a batch COA or third-party contaminant test available, including metals/metalloids?
+    target:
+      object: onboardingCapture
+      field: setupAnswers.marineContaminantTesting
   planDefaults:
     testPlanId: chosen-primary-outcome-91d
     baselineDays: 7

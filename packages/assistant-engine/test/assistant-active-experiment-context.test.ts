@@ -42,11 +42,25 @@ it('renders capped active experiment context from canonical experiment records',
       remindersEnabled: true,
       weeklyDigestEnabled: true,
     },
-    protocolRef: {
+    commonsProtocolRef: {
       key: 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
       pageRevisionId: 'sha256:page-revision',
       runSpecRevisionId: 'sha256:run-spec-revision',
       testPlanId: 'rhr-21d',
+    },
+    effectiveProtocolSnapshot: {
+      effectiveSpecHash: `sha256:${'4'.repeat(64)}`,
+      doseSignature: '3x/week dry sauna, 15-20 min, 80-100 C',
+      modality: 'dry sauna',
+      frequency: {
+        sessionsPerWeek: 3,
+      },
+      durationMinutes: {
+        min: 15,
+        max: 20,
+      },
+      targetSessions: 9,
+      minimumUsefulSessions: 6,
     },
     relativePath: sauna.experiment.relativePath,
     runPlan: {

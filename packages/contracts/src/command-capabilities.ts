@@ -161,6 +161,7 @@ export type CommandCapabilityBundleId = keyof typeof commandCapabilityBundles;
 
 export type CommandSurfaceNoun =
   | HealthEntityKind
+  | "protocol"
   | "supplement"
   | "food"
   | "provider"
@@ -218,8 +219,13 @@ const checkedCommandNounCapabilities = [
   {
     bundles: ["payloadCrud"],
     capabilities: ["scaffold", "upsert", "show", "list", "stop"],
-    noun: "protocol",
+    noun: "regimen",
     additionalCapabilities: ["stop"],
+  },
+  {
+    bundles: ["payloadCrud"],
+    capabilities: ["upsert", "show", "list"],
+    noun: "protocol",
   },
   {
     bundles: ["payloadCrud"],
@@ -440,6 +446,7 @@ export const frozenHealthCommandNouns = Object.freeze([
   "allergy",
   "food",
   "supplement",
+  "regimen",
   "protocol",
   "family",
   "genetics",

@@ -172,6 +172,8 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
     "onboarding",
     "outcome",
     "outcomeRef",
+    "commonsProtocolRef",
+    "effectiveProtocolSnapshot",
     "protocolRef",
     "runPlan",
     "startedOn",

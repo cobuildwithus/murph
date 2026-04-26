@@ -36,6 +36,7 @@ import {
   protocolFrontmatterSchema as protocolFrontmatterContract,
   providerFrontmatterSchema as providerFrontmatterContract,
   recipeFrontmatterSchema as recipeFrontmatterContract,
+  regimenFrontmatterSchema as regimenFrontmatterContract,
   rawAssetOwnerSchema as rawAssetOwnerContract,
   rawImportManifestArtifactSchema as rawImportManifestArtifactContract,
   rawImportManifestSchema as rawImportManifestContract,
@@ -65,6 +66,7 @@ import {
   protocolFrontmatterSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
+  regimenFrontmatterSchema,
   sampleRecordSchema,
   scheduledLogFrontmatterSchema,
   schemaCatalog,
@@ -91,6 +93,7 @@ const schemaFixtures = [
   ["frontmatter-memory", memoryDocumentFrontmatterSchema, memoryDocumentFrontmatterContract],
   ["frontmatter-provider", providerFrontmatterSchema, providerFrontmatterContract],
   ["frontmatter-protocol", protocolFrontmatterSchema, protocolFrontmatterContract],
+  ["frontmatter-regimen", regimenFrontmatterSchema, regimenFrontmatterContract],
   ["frontmatter-recipe", recipeFrontmatterSchema, recipeFrontmatterContract],
   ["frontmatter-scheduled-log", scheduledLogFrontmatterSchema, scheduledLogFrontmatterContract],
   ["frontmatter-workout-format", workoutFormatFrontmatterSchema, workoutFormatFrontmatterContract],
@@ -124,6 +127,7 @@ const frontmatterObjectExamples = [
   ["condition", conditionFrontmatterContract, exampleHealthFrontmatterObjects.condition],
   ["allergy", allergyFrontmatterContract, exampleHealthFrontmatterObjects.allergy],
   ["protocol", protocolFrontmatterContract, exampleHealthFrontmatterObjects.protocol],
+  ["regimen", regimenFrontmatterContract, exampleHealthFrontmatterObjects.regimen],
   ["family member", familyMemberFrontmatterContract, exampleHealthFrontmatterObjects.familyMember],
   ["genetic variant", geneticVariantFrontmatterContract, exampleHealthFrontmatterObjects.geneticVariant],
 ] as const;
@@ -194,6 +198,11 @@ describe("schema catalog and example seam", () => {
     expect(Object.keys(schemaCatalog).sort()).toEqual(
       schemaFixtures.map(([catalogKey]) => catalogKey).sort(),
     );
+    expect(experimentFrontmatterSchema).toMatchObject({
+      dependentRequired: {
+        protocolRef: ["commonsProtocolRef", "effectiveProtocolSnapshot"],
+      },
+    });
 
     for (const [catalogKey, schemaExport, contract] of schemaFixtures) {
       expect(schemaCatalog[catalogKey]).toBe(schemaExport);
@@ -242,6 +251,114 @@ describe("schema catalog and example seam", () => {
     for (const [, contract, example] of frontmatterObjectExamples) {
       expectValidExample(contract, example);
     }
+  });
+
+  it("rejects unknown fields in protocol and experiment protocol snapshot frontmatter", () => {
+    const protocolResult = safeParseContract(protocolFrontmatterContract, {
+      ...exampleHealthFrontmatterObjects.protocol,
+      unexpected: true,
+    });
+    expect(protocolResult.success).toBe(false);
+    if (!protocolResult.success) {
+      expect(protocolResult.errors.join("\n")).toContain("unexpected");
+    }
+
+    const protocolRef = exampleFrontmatterObjects.experiment.protocolRef;
+    if (!protocolRef) {
+      throw new Error("Expected experiment example to include protocolRef.");
+    }
+    const protocolRefResult = safeParseContract(experimentFrontmatterContract, {
+      ...exampleFrontmatterObjects.experiment,
+      protocolRef: {
+        ...protocolRef,
+        unexpected: true,
+      },
+    });
+    expect(protocolRefResult.success).toBe(false);
+    if (!protocolRefResult.success) {
+      expect(protocolRefResult.errors.join("\n")).toContain("protocolRef");
+      expect(protocolRefResult.errors.join("\n")).toContain("unexpected");
+    }
+
+    const effectiveProtocolSnapshot = exampleFrontmatterObjects.experiment.effectiveProtocolSnapshot;
+    if (!effectiveProtocolSnapshot) {
+      throw new Error("Expected experiment example to include effectiveProtocolSnapshot.");
+    }
+    const effectiveSnapshotResult = safeParseContract(experimentFrontmatterContract, {
+      ...exampleFrontmatterObjects.experiment,
+      effectiveProtocolSnapshot: {
+        ...effectiveProtocolSnapshot,
+        unexpected: true,
+      },
+    });
+    expect(effectiveSnapshotResult.success).toBe(false);
+    if (!effectiveSnapshotResult.success) {
+      expect(effectiveSnapshotResult.errors.join("\n")).toContain("effectiveProtocolSnapshot");
+      expect(effectiveSnapshotResult.errors.join("\n")).toContain("unexpected");
+    }
+  });
+
+  it("requires commonsProtocolRef and an effective snapshot for protocol-backed experiments", () => {
+    const { commonsProtocolRef: _commonsProtocolRef, ...missingCommonsProtocolRef } =
+      exampleFrontmatterObjects.experiment;
+    const missingCommonsProtocolRefResult = safeParseContract(
+      experimentFrontmatterContract,
+      missingCommonsProtocolRef,
+    );
+    expect(missingCommonsProtocolRefResult.success).toBe(false);
+    if (!missingCommonsProtocolRefResult.success) {
+      expect(missingCommonsProtocolRefResult.errors.join("\n")).toContain("commonsProtocolRef");
+    }
+
+    const { effectiveProtocolSnapshot: _effectiveProtocolSnapshot, ...missingSnapshot } =
+      exampleFrontmatterObjects.experiment;
+    const missingSnapshotResult = safeParseContract(experimentFrontmatterContract, missingSnapshot);
+    expect(missingSnapshotResult.success).toBe(false);
+    if (!missingSnapshotResult.success) {
+      expect(missingSnapshotResult.errors.join("\n")).toContain("effectiveProtocolSnapshot");
+    }
+
+    const effectiveProtocolSnapshot = exampleFrontmatterObjects.experiment.effectiveProtocolSnapshot;
+    if (!effectiveProtocolSnapshot) {
+      throw new Error("Expected experiment example to include effectiveProtocolSnapshot.");
+    }
+    const mismatchedHashResult = safeParseContract(experimentFrontmatterContract, {
+      ...exampleFrontmatterObjects.experiment,
+      effectiveProtocolSnapshot: {
+        ...effectiveProtocolSnapshot,
+        effectiveSpecHash: "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      },
+    });
+    expect(mismatchedHashResult.success).toBe(false);
+    if (!mismatchedHashResult.success) {
+      expect(mismatchedHashResult.errors.join("\n")).toContain("effectiveSpecHash");
+    }
+  });
+
+  it("requires parent protocol refs for protocol lineage", () => {
+    const protocolWithoutParentResult = safeParseContract(protocolFrontmatterContract, {
+      ...exampleHealthFrontmatterObjects.protocol,
+      lineage: {
+        sourceKind: "protocol",
+      },
+    });
+    expect(protocolWithoutParentResult.success).toBe(false);
+    if (!protocolWithoutParentResult.success) {
+      expect(protocolWithoutParentResult.errors.join("\n")).toContain("parentProtocolRef");
+    }
+
+    const protocolWithParentResult = safeParseContract(protocolFrontmatterContract, {
+      ...exampleHealthFrontmatterObjects.protocol,
+      lineage: {
+        sourceKind: "protocol",
+        parentProtocolRef: {
+          protocolId: "prot_01K72NVW6Z4QK8VYAVX7GT7S4B",
+          protocolRevisionId: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+          effectiveSpecHash: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        },
+      },
+    });
+    expect(protocolWithParentResult.success).toBe(true);
   });
 
   it("parses markdown frontmatter fixtures into the canonical contract shape", () => {

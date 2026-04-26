@@ -406,7 +406,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: What exact whole-body red/NIR PBM device model would you use?
-      writePath: experiment.setup.deviceModel
+      target:
+        object: protocol
+        field: personalization.setup.deviceModel
     -
       id: wavelengths
       label: Red/NIR wavelengths
@@ -415,7 +417,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: What red and near-infrared wavelengths does the device report for the mode you plan to use?
-      writePath: experiment.setup.wavelengths
+      target:
+        object: protocol
+        field: personalization.setup.wavelengths
     -
       id: irradiance_fluence
       label: Irradiance or fluence
@@ -424,7 +428,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: What irradiance and/or fluence does the device report for your distance, mode, and session length? If unavailable, say unknown and keep the run parameter-logged rather than dose-claimed.
-      writePath: experiment.setup.irradianceFluence
+      target:
+        object: protocol
+        field: personalization.setup.irradianceFluence
     -
       id: session_duration_minutes
       label: Session duration
@@ -441,7 +447,9 @@ experimentOnboarding:
           - 15
           - 20
       question: How many minutes will each session last? This starter caps sessions at 20 minutes and should start at the lower of the device instructions and the candidate range.
-      writePath: experiment.plan.sessionDurationMinutes
+      target:
+        object: experimentRun
+        field: sessionDurationMinutes
     -
       id: session_timing
       label: Session timing
@@ -456,7 +464,9 @@ experimentOnboarding:
         - afternoon
         - early_evening
         - variable_but_logged
-      writePath: experiment.plan.sessionTiming
+      target:
+        object: experimentRun
+        field: sessionTiming
     -
       id: exposure_geometry_body_coverage
       label: Exposure geometry and body coverage
@@ -465,7 +475,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: "What exposure geometry will you use: distance, front-only or front-and-back, position, clothing/body coverage, and any areas excluded?"
-      writePath: experiment.setup.exposureGeometryBodyCoverage
+      target:
+        object: protocol
+        field: personalization.setup.exposureGeometryBodyCoverage
     -
       id: eye_protection
       label: Eye protection
@@ -474,7 +486,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: What device-appropriate eye protection will you use for every session, and how will you avoid direct emitter gaze?
-      writePath: experiment.setup.eyeProtection
+      target:
+        object: protocol
+        field: personalization.setup.eyeProtection
     -
       id: nonthermal_comfort
       label: Nonthermal comfort
@@ -486,7 +500,9 @@ experimentOnboarding:
       options:
         - yes_nonthermal_and_stop_if_warm
         - unsure_or_device_feels_hot
-      writePath: experiment.setup.nonthermalComfort
+      target:
+        object: protocol
+        field: personalization.setup.nonthermalComfort
     -
       id: logging_path
       label: Logging path
@@ -500,7 +516,9 @@ experimentOnboarding:
         - daily_journal
         - spreadsheet_import
         - other_logged_path
-      writePath: experiment.logging.path
+      target:
+        object: experimentRun
+        field: logging.path
     -
       id: reminder_policy
       label: Reminder preference
@@ -514,7 +532,9 @@ experimentOnboarding:
         - session_reminders_only
         - session_reminders_plus_same_day_missing_log_check
         - weekly_digest_only
-      writePath: assistantSupport.reminderPolicy
+      target:
+        object: assistantSupport
+        field: reminderPolicy
   planDefaults:
     testPlanId: whole-body-pbm-rhr-sleep-42d
     baselineDays: 14

@@ -15,7 +15,7 @@ import {
   goalRegistryEntityDefinition,
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
-  protocolRegistryEntityDefinition,
+  regimenRegistryEntityDefinition,
   type BankEntityRegistryProjectionHelpers,
 } from "@murphai/contracts";
 import { test } from "vitest";
@@ -33,8 +33,8 @@ import {
   geneticsRegistryDefinition,
   goalRecordFromEntity,
   goalRegistryDefinition,
-  protocolRecordFromEntity,
-  protocolRegistryDefinition,
+  regimenRecordFromEntity,
+  regimenRegistryDefinition,
   providerRecordFromEntity,
   providerRegistryDefinition,
   recipeRecordFromEntity,
@@ -70,7 +70,7 @@ test("query registry definitions combine canonical registry metadata with query-
     ["goal", goalRegistryDefinition],
     ["condition", conditionRegistryDefinition],
     ["allergy", allergyRegistryDefinition],
-    ["protocol", protocolRegistryDefinition],
+    ["regimen", regimenRegistryDefinition],
     ["family", familyRegistryDefinition],
     ["genetics", geneticsRegistryDefinition],
   ] as const;
@@ -127,7 +127,7 @@ test("food auto-log projection metadata stays owned by contracts", () => {
         ingredients: ["acai", "banana"],
         tags: ["breakfast"],
         note: "Seasonal fruit works too.",
-        attachedProtocolIds: ["protocol_123"],
+        attachedRegimenIds: ["regimen_123"],
         autoLogDaily: {
           time: "08:00",
         },
@@ -147,7 +147,7 @@ test("food auto-log projection metadata stays owned by contracts", () => {
       tags: ["breakfast"],
       note: "Seasonal fruit works too.",
       nutrition: null,
-      attachedProtocolIds: ["protocol_123"],
+      attachedRegimenIds: ["regimen_123"],
       autoLogDaily: {
         time: "08:00",
       },
@@ -155,31 +155,31 @@ test("food auto-log projection metadata stays owned by contracts", () => {
   );
 });
 
-test("protocol registry projection keeps the shared relative-path grouping rule", () => {
+test("regimen registry projection keeps the shared relative-path grouping rule", () => {
   const projected = toRegistryRecord(
     {
-      relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
+      relativePath: "bank/regimens/supplements/sleep/magnesium-glycinate.md",
       markdown: "",
       body: "",
       attributes: {
-        protocolId: "prot_01",
+        regimenId: "reg_01",
         title: "Magnesium glycinate",
         status: "active",
         kind: "supplement",
       },
     },
-    protocolRegistryDefinition,
+    regimenRegistryDefinition,
   );
 
   assert.equal(projected?.entity.group, "supplements/sleep");
 });
 
-test("protocol shared registry definition owns payload and relation metadata", () => {
-  assert.equal(protocolRegistryEntityDefinition.registry.idField, "protocolId");
-  assert.ok(protocolRegistryEntityDefinition.registry.frontmatterSchema);
-  assert.ok(protocolRegistryEntityDefinition.registry.upsertPayloadSchema);
+test("regimen shared registry definition owns payload and relation metadata", () => {
+  assert.equal(regimenRegistryEntityDefinition.registry.idField, "regimenId");
+  assert.ok(regimenRegistryEntityDefinition.registry.frontmatterSchema);
+  assert.ok(regimenRegistryEntityDefinition.registry.upsertPayloadSchema);
 
-  const parsedPayload = protocolRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
+  const parsedPayload = regimenRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     title: "Magnesium glycinate",
   });
 
@@ -191,10 +191,10 @@ test("protocol shared registry definition owns payload and relation metadata", (
     assert.equal(payload.status, "active");
   }
 
-  const links = extractHealthEntityRegistryLinks("protocol", {
+  const links = extractHealthEntityRegistryLinks("regimen", {
     relatedGoalIds: ["goal_scalar_01"],
     relatedConditionIds: ["cond_array_01"],
-    relatedProtocolIds: ["prot_related_01", "prot_self_01"],
+    relatedRegimenIds: ["reg_related_01", "reg_self_01"],
   });
 
   assert.deepEqual(
@@ -202,42 +202,42 @@ test("protocol shared registry definition owns payload and relation metadata", (
     [
       { type: "supports_goal", targetId: "goal_scalar_01" },
       { type: "addresses_condition", targetId: "cond_array_01" },
-      { type: "related_protocol", targetId: "prot_related_01" },
-      { type: "related_protocol", targetId: "prot_self_01" },
+      { type: "related_regimen", targetId: "reg_related_01" },
+      { type: "related_regimen", targetId: "reg_self_01" },
     ],
   );
   assert.deepEqual(
-    extractHealthEntityRegistryRelatedIds("protocol", {
+    extractHealthEntityRegistryRelatedIds("regimen", {
       relatedGoalIds: ["goal_scalar_01"],
       relatedConditionIds: ["cond_array_01"],
-      relatedProtocolIds: ["prot_related_01", "prot_self_01"],
+      relatedRegimenIds: ["reg_related_01", "reg_self_01"],
     }),
-    ["goal_scalar_01", "cond_array_01", "prot_related_01", "prot_self_01"],
+    ["goal_scalar_01", "cond_array_01", "reg_related_01", "reg_self_01"],
   );
 });
 
-test("protocol query projection normalizes current relation arrays into links", () => {
-  const protocolRecord = toRegistryRecord(
+test("regimen query projection normalizes current relation arrays into links", () => {
+  const regimenRecord = toRegistryRecord(
     {
-      relativePath: "bank/protocols/recovery/cold-exposure.md",
+      relativePath: "bank/regimens/recovery/cold-exposure.md",
       markdown: "# Cold exposure",
       body: "# Cold exposure",
       attributes: {
-        protocolId: "prot_01",
+        regimenId: "reg_01",
         title: "Cold exposure",
         status: "active",
         kind: "recovery",
         relatedGoalIds: ["goal_primary_01", "goal_shared_01", "goal_secondary_01", "goal_shared_01"],
         relatedConditionIds: ["cond_primary_01", "cond_shared_01", "cond_secondary_01", "cond_shared_01"],
-        relatedProtocolIds: ["prot_related_01", "prot_shared_01", "prot_related_02", "prot_shared_01"],
+        relatedRegimenIds: ["reg_related_01", "reg_shared_01", "reg_related_02", "reg_shared_01"],
       },
     },
-    protocolRegistryDefinition,
+    regimenRegistryDefinition,
   );
 
-  assert.ok(protocolRecord);
+  assert.ok(regimenRecord);
 
-  const entity = projectRegistryEntity("protocol", protocolRecord!);
+  const entity = projectRegistryEntity("regimen", regimenRecord!);
 
   assert.deepEqual(
     entity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
@@ -248,9 +248,9 @@ test("protocol query projection normalizes current relation arrays into links", 
       { type: "addresses_condition", targetId: "cond_primary_01" },
       { type: "addresses_condition", targetId: "cond_shared_01" },
       { type: "addresses_condition", targetId: "cond_secondary_01" },
-      { type: "related_to", targetId: "prot_related_01" },
-      { type: "related_to", targetId: "prot_shared_01" },
-      { type: "related_to", targetId: "prot_related_02" },
+      { type: "related_to", targetId: "reg_related_01" },
+      { type: "related_to", targetId: "reg_shared_01" },
+      { type: "related_to", targetId: "reg_related_02" },
     ],
   );
   assert.deepEqual(entity.relatedIds, [
@@ -260,54 +260,54 @@ test("protocol query projection normalizes current relation arrays into links", 
     "cond_primary_01",
     "cond_shared_01",
     "cond_secondary_01",
-    "prot_related_01",
-    "prot_shared_01",
-    "prot_related_02",
+    "reg_related_01",
+    "reg_shared_01",
+    "reg_related_02",
   ]);
 });
 
 test("explicit registry links remain authoritative over legacy relation arrays", () => {
   const attributes = {
-    protocolId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6Z",
-    slug: "cleared-protocol-links",
-    title: "Cleared protocol links",
+    regimenId: "reg_01JNY0B2W4VG5C2A0G9S8M7R6Z",
+    slug: "cleared-regimen-links",
+    title: "Cleared regimen links",
     kind: "supplement",
     status: "active",
     startedOn: "2026-03-12",
     links: [],
     relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
     relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"],
-    relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6Y"],
+    relatedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6Y"],
   } satisfies Record<string, unknown>;
 
-  assert.deepEqual(extractHealthEntityRegistryLinks("protocol", attributes), []);
-  assert.deepEqual(extractHealthEntityRegistryRelatedIds("protocol", attributes), []);
+  assert.deepEqual(extractHealthEntityRegistryLinks("regimen", attributes), []);
+  assert.deepEqual(extractHealthEntityRegistryRelatedIds("regimen", attributes), []);
 
-  const protocolRecord = toRegistryRecord(
+  const regimenRecord = toRegistryRecord(
     {
-      relativePath: "bank/protocols/supplements/cleared-protocol-links.md",
-      markdown: "# Cleared protocol links",
-      body: "# Cleared protocol links",
+      relativePath: "bank/regimens/supplements/cleared-regimen-links.md",
+      markdown: "# Cleared regimen links",
+      body: "# Cleared regimen links",
       attributes,
     },
-    protocolRegistryDefinition,
+    regimenRegistryDefinition,
   );
 
-  assert.ok(protocolRecord);
+  assert.ok(regimenRecord);
 
-  const entity = projectRegistryEntity("protocol", protocolRecord!);
+  const entity = projectRegistryEntity("regimen", regimenRecord!);
 
   assert.deepEqual(entity.links, []);
   assert.deepEqual(entity.relatedIds, []);
 });
 
-test("protocol query projection round-trips shared protocol relation and ingredient metadata", () => {
+test("regimen query projection round-trips shared regimen relation and ingredient metadata", () => {
   const document: MarkdownDocumentRecord = {
-    relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
+    relativePath: "bank/regimens/supplements/sleep/magnesium-glycinate.md",
     markdown: "# Magnesium glycinate",
     body: "# Magnesium glycinate",
     attributes: {
-      protocolId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6P",
+      regimenId: "reg_01JNY0B2W4VG5C2A0G9S8M7R6P",
       slug: "magnesium-glycinate",
       title: "Magnesium glycinate",
       kind: "supplement",
@@ -333,14 +333,14 @@ test("protocol query projection round-trips shared protocol relation and ingredi
       ],
       relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"],
       relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"],
-      relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      relatedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
     },
   };
 
-  const protocolRecord = toRegistryRecord(document, protocolRegistryDefinition);
+  const regimenRecord = toRegistryRecord(document, regimenRegistryDefinition);
 
-  assert.ok(protocolRecord);
-  assert.deepEqual(protocolRecord?.entity.ingredients, [
+  assert.ok(regimenRecord);
+  assert.deepEqual(regimenRecord?.entity.ingredients, [
     {
       compound: "Magnesium",
       label: null,
@@ -358,19 +358,19 @@ test("protocol query projection round-trips shared protocol relation and ingredi
       note: "Paired to smooth GI tolerance.",
     },
   ]);
-  assert.deepEqual(protocolRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
-  assert.deepEqual(protocolRecord?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(protocolRecord?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
-  assert.equal(protocolRecord?.entity.group, "supplements/sleep");
+  assert.deepEqual(regimenRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
+  assert.deepEqual(regimenRecord?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(regimenRecord?.entity.relatedRegimenIds, ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.equal(regimenRecord?.entity.group, "supplements/sleep");
 
-  const entity = projectRegistryEntity("protocol", protocolRecord!);
-  const roundTripped = protocolRecordFromEntity(entity);
+  const entity = projectRegistryEntity("regimen", regimenRecord!);
+  const roundTripped = regimenRecordFromEntity(entity);
 
   assert.ok(roundTripped);
-  assert.deepEqual(roundTripped?.entity.ingredients, protocolRecord?.entity.ingredients);
+  assert.deepEqual(roundTripped?.entity.ingredients, regimenRecord?.entity.ingredients);
   assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
   assert.deepEqual(roundTripped?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(roundTripped?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(roundTripped?.entity.relatedRegimenIds, ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
   assert.equal(roundTripped?.entity.group, "supplements/sleep");
 });
 
@@ -461,7 +461,7 @@ test("condition and allergy shared registry definitions own payload and relation
 
   const conditionLinks = extractHealthEntityRegistryLinks("condition", {
     relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
-    relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    relatedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
   });
   const allergyLinks = extractHealthEntityRegistryLinks("allergy", {
     relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"],
@@ -474,15 +474,15 @@ test("condition and allergy shared registry definitions own payload and relation
     })),
     [
       { type: "related_goal", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6R" },
-      { type: "related_protocol", targetId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6S" },
+      { type: "related_regimen", targetId: "reg_01JNY0B2W4VG5C2A0G9S8M7R6S" },
     ],
   );
   assert.deepEqual(
     extractHealthEntityRegistryRelatedIds("condition", {
       relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R", "goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
-      relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      relatedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
     }),
-    ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R", "prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R", "reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
   );
   assert.deepEqual(
     allergyLinks.map((link: { type: string; targetId: string }) => ({
@@ -728,7 +728,7 @@ test("condition query projection round-trips shared condition relation metadata"
       severity: "moderate",
       bodySites: ["head"],
       relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
-      relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      relatedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
       note: "Likely worsened by poor sleep.",
     },
   };
@@ -740,7 +740,7 @@ test("condition query projection round-trips shared condition relation metadata"
   assert.equal(conditionRecord?.entity.verificationStatus, "confirmed");
   assert.deepEqual(conditionRecord?.entity.bodySites, ["head"]);
   assert.deepEqual(conditionRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(conditionRecord?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(conditionRecord?.entity.relatedRegimenIds, ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
 
   const entity = projectRegistryEntity("condition", conditionRecord!);
 
@@ -748,12 +748,12 @@ test("condition query projection round-trips shared condition relation metadata"
     entity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
     [
       { type: "related_to", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6R" },
-      { type: "related_to", targetId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6S" },
+      { type: "related_to", targetId: "reg_01JNY0B2W4VG5C2A0G9S8M7R6S" },
     ],
   );
   assert.deepEqual(entity.relatedIds, [
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
-    "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
+    "reg_01JNY0B2W4VG5C2A0G9S8M7R6S",
   ]);
 
   const roundTripped = conditionRecordFromEntity(entity);
@@ -763,7 +763,7 @@ test("condition query projection round-trips shared condition relation metadata"
   assert.equal(roundTripped?.entity.verificationStatus, "confirmed");
   assert.deepEqual(roundTripped?.entity.bodySites, ["head"]);
   assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(roundTripped?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(roundTripped?.entity.relatedRegimenIds, ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
   assert.equal(roundTripped?.entity.note, "Likely worsened by poor sleep.");
 });
 
@@ -842,17 +842,17 @@ test("bank registry definitions inherit canonical registry metadata from shared 
 test("bank entity projections normalize food and workout format metadata through the shared seam", () => {
   assert.deepEqual(
     extractBankEntityRegistryLinks("food", {
-      attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      attachedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
     }).map((link) => ({ type: link.type, targetId: link.targetId })),
     [
-      { type: "related_protocol", targetId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6S" },
+      { type: "related_regimen", targetId: "reg_01JNY0B2W4VG5C2A0G9S8M7R6S" },
     ],
   );
   assert.deepEqual(
     extractBankEntityRegistryRelatedIds("food", {
-      attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      attachedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
     }),
-    ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
   );
 
   const foodRecord = toRegistryRecord(
@@ -870,7 +870,7 @@ test("bank entity projections normalize food and workout format metadata through
         autoLogDaily: {
           time: "08:00",
         },
-        attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+        attachedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
       },
     },
     foodRegistryDefinition,
@@ -884,14 +884,14 @@ test("bank entity projections normalize food and workout format metadata through
   const foodEntity = projectRegistryEntity("food", foodRecord!);
   assert.equal(foodEntity.recordClass, "bank");
   assert.deepEqual(foodEntity.relatedIds, [
-    "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
+    "reg_01JNY0B2W4VG5C2A0G9S8M7R6S",
   ]);
 
   const roundTrippedFood = foodRecordFromEntity(foodEntity);
   assert.ok(roundTrippedFood);
   assert.deepEqual(roundTrippedFood?.entity.autoLogDaily, { time: "08:00" });
-  assert.deepEqual(roundTrippedFood?.entity.attachedProtocolIds, [
-    "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
+  assert.deepEqual(roundTrippedFood?.entity.attachedRegimenIds, [
+    "reg_01JNY0B2W4VG5C2A0G9S8M7R6S",
   ]);
 
   const workoutFormatRecord = toRegistryRecord(

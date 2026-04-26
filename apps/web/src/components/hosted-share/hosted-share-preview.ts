@@ -3,8 +3,8 @@ import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 export function formatHostedSharePreviewSummary(preview: HostedSharePreview): string {
   return [
     preview.counts.foods ? formatHostedSharePreviewCount(preview.counts.foods, "food") : null,
-    preview.counts.protocols ? formatHostedSharePreviewCount(preview.counts.protocols, "protocol") : null,
     preview.counts.recipes ? formatHostedSharePreviewCount(preview.counts.recipes, "recipe") : null,
+    preview.counts.regimens ? formatHostedSharePreviewCount(preview.counts.regimens, "regimen") : null,
   ].filter((value): value is string => Boolean(value)).join(" · ");
 }
 

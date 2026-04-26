@@ -93,7 +93,7 @@ function buildHealthContext(
     goals: readonly CanonicalEntity[];
     conditions: readonly CanonicalEntity[];
     allergies: readonly CanonicalEntity[];
-    protocols: readonly CanonicalEntity[];
+    regimens: readonly CanonicalEntity[];
     familyMembers: readonly CanonicalEntity[];
     geneticVariants: readonly CanonicalEntity[];
     markdownByPath?: ReadonlyMap<string, string>;
@@ -116,7 +116,7 @@ function buildHealthContext(
     goals: mapBankPages([...input.goals], markdownByPath),
     conditions: mapBankPages([...input.conditions], markdownByPath),
     allergies: mapBankPages([...input.allergies], markdownByPath),
-    protocols: mapBankPages([...input.protocols], markdownByPath),
+    regimens: mapBankPages([...input.regimens], markdownByPath),
     familyMembers: mapBankPages([...input.familyMembers], markdownByPath),
     geneticVariants: mapBankPages([...input.geneticVariants], markdownByPath),
   };
@@ -138,7 +138,7 @@ export function readHealthContext(
         goals: collected.goals,
         conditions: collected.conditions,
         allergies: collected.allergies,
-        protocols: collected.protocols,
+        regimens: collected.regimens,
         familyMembers: collected.familyMembers,
         geneticVariants: collected.geneticVariants,
         markdownByPath: collected.markdownByPath,
@@ -164,7 +164,7 @@ export function readHealthContextTolerant(
       goals: collected.goals,
       conditions: collected.conditions,
       allergies: collected.allergies,
-      protocols: collected.protocols,
+      regimens: collected.regimens,
       familyMembers: collected.familyMembers,
       geneticVariants: collected.geneticVariants,
       markdownByPath: collected.markdownByPath,
@@ -184,7 +184,7 @@ export function buildHealthContextFromVault(
       goals: vault.goals,
       conditions: vault.conditions,
       allergies: vault.allergies,
-      protocols: vault.protocols,
+      regimens: vault.regimens,
       familyMembers: vault.familyMembers,
       geneticVariants: vault.geneticVariants,
     },

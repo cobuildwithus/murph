@@ -111,7 +111,7 @@ function buildBody(record: FoodRecord): string {
     record.ingredients?.length ? listSection("Ingredients", record.ingredients) : null,
     nutritionLines.length ? listSection("Nutrition per serving", nutritionLines) : null,
     listSection("Tags", record.tags),
-    listSection("Attached protocols", relations.attachedProtocolIds),
+    listSection("Attached regimens", relations.attachedRegimenIds),
     record.note ? section("Notes", record.note) : null,
   ].filter((sectionValue): sectionValue is string => Boolean(sectionValue));
 
@@ -131,7 +131,7 @@ function buildBody(record: FoodRecord): string {
 }
 
 function normalizeFoodLinkType(value: string): FoodLinkType | null {
-  return value === "related_protocol" ? value : null;
+  return value === "related_regimen" ? value : null;
 }
 
 function compareFoodLinks(left: FoodLink, right: FoodLink): number {
@@ -139,10 +139,10 @@ function compareFoodLinks(left: FoodLink, right: FoodLink): number {
 }
 
 function buildFoodLinksFromFields(input: {
-  attachedProtocolIds?: string[];
+  attachedRegimenIds?: string[];
 }): FoodLink[] {
-  return (input.attachedProtocolIds ?? []).map((targetId) => ({
-    type: "related_protocol",
+  return (input.attachedRegimenIds ?? []).map((targetId) => ({
+    type: "related_regimen",
     targetId,
   }) satisfies FoodLink);
 }
@@ -176,24 +176,24 @@ function parseFoodLinks(attributes: FrontmatterObject): FoodLink[] {
 
 function foodRelationsFromLinks(
   links: readonly FoodLink[],
-): Pick<FoodRecord, "attachedProtocolIds" | "links"> {
-  const attachedProtocolIds = links.map((link) => link.targetId);
+): Pick<FoodRecord, "attachedRegimenIds" | "links"> {
+  const attachedRegimenIds = links.map((link) => link.targetId);
 
   return {
-    attachedProtocolIds: attachedProtocolIds.length > 0 ? attachedProtocolIds : undefined,
+    attachedRegimenIds: attachedRegimenIds.length > 0 ? attachedRegimenIds : undefined,
     links: [...links],
   };
 }
 
 function canonicalizeFoodRelations(input: {
   links?: readonly FoodLink[];
-  attachedProtocolIds?: string[];
-}): Pick<FoodRecord, "attachedProtocolIds" | "links"> {
+  attachedRegimenIds?: string[];
+}): Pick<FoodRecord, "attachedRegimenIds" | "links"> {
   const links = normalizeFoodLinks(
     input.links !== undefined
       ? [...input.links]
       : buildFoodLinksFromFields({
-          attachedProtocolIds: input.attachedProtocolIds,
+          attachedRegimenIds: input.attachedRegimenIds,
         }),
   );
 
@@ -215,7 +215,7 @@ function parseFoodRecord(
 
   const relations = canonicalizeFoodRelations({
     links: parseFoodLinks(attributes),
-    attachedProtocolIds: normalizeRecordIdList(attributes.attachedProtocolIds, "attachedProtocolIds", "prot"),
+    attachedRegimenIds: normalizeRecordIdList(attributes.attachedRegimenIds, "attachedRegimenIds", "reg"),
   });
 
   return stripUndefined({
@@ -236,7 +236,7 @@ function parseFoodRecord(
     ingredients: normalizeUniqueTextList(attributes.ingredients, "ingredients"),
     tags: normalizeDomainList(attributes.tags, "tags"),
     note: optionalString(attributes.note, "note", 4000),
-    attachedProtocolIds: relations.attachedProtocolIds,
+    attachedRegimenIds: relations.attachedRegimenIds,
     links: relations.links,
     autoLogDaily: normalizeFoodAutoLogDailyRule(attributes.autoLogDaily),
     relativePath,
@@ -262,7 +262,7 @@ export function foodRecordToBasePayload(record: FoodRecord): Omit<FoodUpsertPayl
     ingredients: record.ingredients,
     tags: record.tags,
     note: record.note,
-    attachedProtocolIds: relations.attachedProtocolIds,
+    attachedRegimenIds: relations.attachedRegimenIds,
     links: frontmatterLinkObjects(relations.links),
     autoLogDaily: record.autoLogDaily,
   }) as Omit<FoodUpsertPayload, "foodId">;
@@ -332,17 +332,17 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     allowSlugUpdate: input.allowSlugRename === true,
     buildDocument: (target) => {
-      const attachedProtocolIds = resolveOptionalUpsertValue(
-        input.attachedProtocolIds,
-        existingRecord?.attachedProtocolIds,
-        (value) => normalizeRecordIdList(value, "attachedProtocolIds", "prot"),
+      const attachedRegimenIds = resolveOptionalUpsertValue(
+        input.attachedRegimenIds,
+        existingRecord?.attachedRegimenIds,
+        (value) => normalizeRecordIdList(value, "attachedRegimenIds", "reg"),
       );
       const usesRelationInputs =
         input.links !== undefined ||
-        input.attachedProtocolIds !== undefined;
+        input.attachedRegimenIds !== undefined;
       const relations = canonicalizeFoodRelations({
         links: input.links !== undefined ? input.links : usesRelationInputs ? undefined : existingRecord?.links,
-        attachedProtocolIds,
+        attachedRegimenIds,
       });
       const attributes = buildAttributes(
         stripUndefined({
@@ -387,7 +387,7 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
           note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
             optionalString(value, "note", 4000),
           ),
-          attachedProtocolIds: relations.attachedProtocolIds,
+          attachedRegimenIds: relations.attachedRegimenIds,
           links: relations.links,
           autoLogDaily: resolveOptionalUpsertValue(
             input.autoLogDaily,

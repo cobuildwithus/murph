@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-04-24
+Last verified: 2026-04-26
 
 ## Purpose
 
@@ -16,7 +16,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-04-24 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, and package-boundary hygiene notes. | Current architectural baseline | High | 2026-04-22 |
-| `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and invariants. | Canonical vault interface decisions | High | 2026-03-27 |
+| `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and invariants. | Canonical vault interface decisions | High | 2026-04-26 |
 | `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-04-19 |
 | `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-04-03 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-04-03 |
@@ -32,8 +32,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-04-22 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons product boundary for wiki-like pages, generated catalogs, aggregate outcome summaries, revisions, and artifact manifests. | Health Commons behavior | High | 2026-04-22 |
-| `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding product boundary for start intents, Health Commons setup slots, assistant safety/setup flow, and private run handoff. | Experiment onboarding behavior | High | 2026-04-22 |
-| `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for outcome cards, sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-04-22 |
+| `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding product boundary for start intents, Health Commons setup slots, assistant safety/setup flow, and private run handoff. | Experiment onboarding behavior | High | 2026-04-26 |
+| `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for outcome cards, sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-04-26 |
 | `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence. | Capture behavior | High | 2026-04-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |

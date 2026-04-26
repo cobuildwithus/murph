@@ -8,8 +8,8 @@ export function createHostedShareMinimalPreview(): HostedSharePreview {
     kinds: [],
     counts: {
       foods: 0,
-      protocols: 0,
       recipes: 0,
+      regimens: 0,
       total: 0,
     },
     logMealAfterImport: false,
@@ -19,8 +19,8 @@ export function createHostedShareMinimalPreview(): HostedSharePreview {
 export function buildHostedSharePreview(pack: SharePack): HostedSharePreview {
   const kinds = new Set<HostedShareKind>();
   let foods = 0;
-  let protocols = 0;
   let recipes = 0;
+  let regimens = 0;
 
   for (const entity of pack.entities) {
     if (entity.kind === "food") {
@@ -29,9 +29,9 @@ export function buildHostedSharePreview(pack: SharePack): HostedSharePreview {
       continue;
     }
 
-    if (entity.kind === "protocol") {
-      protocols += 1;
-      kinds.add("protocol");
+    if (entity.kind === "regimen") {
+      regimens += 1;
+      kinds.add("regimen");
       continue;
     }
 
@@ -43,8 +43,8 @@ export function buildHostedSharePreview(pack: SharePack): HostedSharePreview {
     kinds: [...kinds].sort(),
     counts: {
       foods,
-      protocols,
       recipes,
+      regimens,
       total: pack.entities.length,
     },
     logMealAfterImport: Boolean(pack.afterImport?.logMeal),
@@ -56,8 +56,8 @@ export function serializeHostedSharePreview(preview: HostedSharePreview): Prisma
     kinds: [...preview.kinds],
     counts: {
       foods: preview.counts.foods,
-      protocols: preview.counts.protocols,
       recipes: preview.counts.recipes,
+      regimens: preview.counts.regimens,
       total: preview.counts.total,
     },
     logMealAfterImport: preview.logMealAfterImport,
@@ -79,8 +79,8 @@ export function readHostedSharePreview(value: Prisma.JsonValue): HostedSharePrev
     kinds: readHostedSharePreviewKinds(value.kinds),
     counts: {
       foods: readHostedSharePreviewCount(counts.foods, "foods"),
-      protocols: readHostedSharePreviewCount(counts.protocols, "protocols"),
       recipes: readHostedSharePreviewCount(counts.recipes, "recipes"),
+      regimens: readHostedSharePreviewCount(counts.regimens, "regimens"),
       total: readHostedSharePreviewCount(counts.total, "total"),
     },
     logMealAfterImport: value.logMealAfterImport === true,
@@ -98,7 +98,7 @@ function readHostedSharePreviewCount(value: unknown, field: string): number {
 function readHostedSharePreviewKinds(value: unknown): HostedShareKind[] {
   if (
     !Array.isArray(value)
-    || value.some((entry) => entry !== "food" && entry !== "protocol" && entry !== "recipe")
+    || value.some((entry) => entry !== "food" && entry !== "recipe" && entry !== "regimen")
   ) {
     throw new TypeError("Hosted share preview kinds must be a HostedShareKind array.");
   }

@@ -246,12 +246,17 @@ test("id-family helpers no longer register the hard-cut legacy colon-prefixed fa
   assert.equal(isQueryableLookupId("doc_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(isQueryableLookupId("rcp_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(isQueryableLookupId("prov_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(isQueryableLookupId("prot_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(isQueryableLookupId("wfmt_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
   assert.equal(inferIdEntityKind("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), "food");
   assert.equal(inferIdEntityKind("meal_01JNV40W8VFYQ2H7CMJY5A9R4K"), "meal");
   assert.equal(inferIdEntityKind("doc_01JNV40W8VFYQ2H7CMJY5A9R4K"), "document");
   assert.equal(inferIdEntityKind("rcp_01JNV40W8VFYQ2H7CMJY5A9R4K"), "recipe");
   assert.equal(inferIdEntityKind("prov_01JNV40W8VFYQ2H7CMJY5A9R4K"), "provider");
+  assert.equal(
+    inferIdEntityKind("prot_01JNV40W8VFYQ2H7CMJY5A9R4K"),
+    "protocol",
+  );
   assert.equal(
     inferIdEntityKind("wfmt_01JNV40W8VFYQ2H7CMJY5A9R4K"),
     "workout_format",

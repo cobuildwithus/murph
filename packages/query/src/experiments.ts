@@ -7,12 +7,15 @@ import {
   safeParseContract,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
-  type ExperimentProtocolRef,
   type ExperimentProgressMetricSignal,
   type ExperimentProgressSnapshot,
 } from "@murphai/contracts";
 
 import { getExperiment, type VaultReadModel } from "./read-model.ts";
+import {
+  readExperimentProtocolProjectionFields,
+  type ExperimentProtocolProjectionFields,
+} from "./protocols.ts";
 import { summarizeWearableDay, type WearableDaySummary, type WearableResolvedMetric } from "./wearables.ts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
@@ -92,8 +95,10 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
     status: ExperimentFrontmatter["status"];
     title: string;
   };
+  commonsProtocolRef: ExperimentProtocolProjectionFields["commonsProtocolRef"];
+  effectiveProtocolSnapshot: ExperimentProtocolProjectionFields["effectiveProtocolSnapshot"];
   phase: ExperimentProgressPhase;
-  protocolRef: ExperimentProtocolRef | null;
+  protocolRef: ExperimentProtocolProjectionFields["protocolRef"];
   recommendation: {
     action: ExperimentRecommendationAction;
     reason: string;
@@ -137,9 +142,10 @@ export interface ExperimentOutcomeSummary extends ExperimentOutcome {
     status: ExperimentFrontmatter["status"];
     title: string;
   };
+  commonsProtocolRef: ExperimentProtocolProjectionFields["commonsProtocolRef"];
+  effectiveProtocolSnapshot: ExperimentProtocolProjectionFields["effectiveProtocolSnapshot"];
   metricResults: ExperimentMetricResult[];
-  protocolRef: ExperimentProtocolRef | null;
-  runRef?: ExperimentProtocolRef;
+  protocolRef: ExperimentProtocolProjectionFields["protocolRef"];
   windows: ExperimentProgressSummary["windows"];
 }
 
@@ -150,11 +156,13 @@ interface ExperimentSummaryContext {
   confounders: string[];
   events: CanonicalEntity[];
   experiment: CanonicalEntity;
-  frontmatter: ExperimentFrontmatter;
+  frontmatter: QueryExperimentFrontmatter;
   interventionDates: string[];
   progressPhase: ExperimentProgressPhase;
   summariesByDate: Map<string, WearableDaySummary | null>;
 }
+
+type QueryExperimentFrontmatter = ExperimentFrontmatter;
 
 interface MetricWindowPoint {
   date: string;
@@ -207,6 +215,7 @@ export function summarizeExperimentProgress(
       status: context.frontmatter.status,
       title: context.frontmatter.title,
     },
+    commonsProtocolRef: context.frontmatter.commonsProtocolRef ?? null,
     phase: context.progressPhase,
     protocolRef: context.frontmatter.protocolRef ?? null,
     recommendation: buildProgressRecommendation({
@@ -225,7 +234,13 @@ export function summarizeExperimentProgress(
     throw new Error(`Experiment progress for "${slug}" is invalid.`);
   }
 
-  return result.data as ExperimentProgressSummary;
+  return {
+    ...result.data,
+    schema: EXPERIMENT_PROGRESS_SCHEMA_VERSION,
+    commonsProtocolRef: context.frontmatter.commonsProtocolRef ?? null,
+    effectiveProtocolSnapshot: context.frontmatter.effectiveProtocolSnapshot ?? null,
+    protocolRef: context.frontmatter.protocolRef ?? null,
+  } as ExperimentProgressSummary;
 }
 
 export function analyzeExperimentOutcome(
@@ -263,10 +278,11 @@ export function analyzeExperimentOutcome(
       status: context.frontmatter.status,
       title: context.frontmatter.title,
     },
+    commonsProtocolRef: context.frontmatter.commonsProtocolRef ?? null,
+    effectiveProtocolSnapshot: context.frontmatter.effectiveProtocolSnapshot ?? null,
     metricResults,
     outcomeId: `${context.frontmatter.experimentId}-outcome-${context.asOf}`,
     protocolRef: context.frontmatter.protocolRef ?? null,
-    runRef: context.frontmatter.protocolRef ?? undefined,
     windows: buildWindowSummary(context.frontmatter),
   });
 
@@ -274,7 +290,13 @@ export function analyzeExperimentOutcome(
     throw new Error(`Experiment outcome for "${slug}" is invalid.`);
   }
 
-  return result.data as ExperimentOutcomeSummary;
+  return {
+    ...result.data,
+    schema: EXPERIMENT_OUTCOME_SCHEMA_VERSION,
+    commonsProtocolRef: context.frontmatter.commonsProtocolRef ?? null,
+    effectiveProtocolSnapshot: context.frontmatter.effectiveProtocolSnapshot ?? null,
+    protocolRef: context.frontmatter.protocolRef ?? null,
+  } as ExperimentOutcomeSummary;
 }
 
 function buildExperimentSummaryContext(
@@ -322,7 +344,7 @@ function buildExperimentSummaryContext(
   };
 }
 
-function requireExperimentFrontmatter(entity: CanonicalEntity): ExperimentFrontmatter {
+function requireExperimentFrontmatter(entity: CanonicalEntity): QueryExperimentFrontmatter {
   const result = safeParseContract(experimentFrontmatterSchema, entity.attributes);
   if (!result.success) {
     throw new Error(`Experiment "${entity.entityId}" has invalid frontmatter for experiment analysis.`);

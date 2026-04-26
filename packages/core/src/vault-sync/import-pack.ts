@@ -286,16 +286,14 @@ export async function buildVaultSyncImportPack(
   const files = await listVaultFiles(vaultRoot);
   const included = new Map<string, VaultSyncImportFileKind>();
   const manifestFiles: VaultSyncImportManifestFile[] = [];
-  const excluded: VaultSyncImportManifestExcludedFile[] = [];
+  const excludedByReason = new Map<string, number>();
 
   for (const relativePath of files) {
     const explicitExclusion = isExcludedLocalPath(relativePath);
     const kind = classifyImportFile(relativePath);
     if (!kind || explicitExclusion) {
-      excluded.push({
-        path: relativePath,
-        reason: explicitExclusion ?? "not_canonical_sync_input",
-      });
+      const reason = explicitExclusion ?? "not_canonical_sync_input";
+      excludedByReason.set(reason, (excludedByReason.get(reason) ?? 0) + 1);
       continue;
     }
 
@@ -312,7 +310,9 @@ export async function buildVaultSyncImportPack(
 
   const manifestBase = {
     createdAt,
-    excluded,
+    excluded: [...excludedByReason.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([reason, count]): VaultSyncImportManifestExcludedFile => ({ count, reason })),
     files: manifestFiles,
     schema: VAULT_SYNC_IMPORT_MANIFEST_SCHEMA,
     sourceVault,

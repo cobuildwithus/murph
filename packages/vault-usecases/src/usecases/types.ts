@@ -1,4 +1,9 @@
-import type { ExperimentStatus, MealNutrition } from "@murphai/contracts"
+import type {
+  EventSource,
+  ExperimentFrontmatter,
+  ExperimentStatus,
+  MealNutrition,
+} from "@murphai/contracts"
 import type {
   DocumentImportResult,
   ExperimentCreateResult,
@@ -24,6 +29,7 @@ import type {
   HealthCoreRuntimeMethods,
   HealthCoreServiceMethods,
   HealthListEnvelope,
+  HealthListInput,
   HealthQueryServiceMethods,
   JsonObject,
   UpsertRecordResult,
@@ -54,9 +60,64 @@ export interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string
 }
 
-export interface StopProtocolInput extends CommandContext {
-  protocolId: string
+export interface StopSupplementInput extends CommandContext {
+  regimenId: string
   stoppedOn?: string
+}
+
+export interface StopRegimenInput extends CommandContext {
+  regimenId: string
+  stoppedOn?: string
+}
+
+export interface PrivateProtocolUpsertInput extends CommandContext {
+  protocolId?: string
+  slug?: string
+  allowSlugRename?: boolean
+  title?: string
+  frontmatter?: JsonObject
+  body?: string
+}
+
+export interface PrivateProtocolUpsertResult {
+  vault: string
+  protocolId: string
+  lookupId: string
+  slug: string
+  path: string
+  protocolRevisionId: string
+  effectiveSpecHash: string
+  created: boolean
+}
+
+export interface PrivateProtocolSummaryResult {
+  vault: string
+  protocol: {
+    id: string
+    protocolId: string
+    slug: string | null
+    title: string
+    status: string | null
+    commonsProtocolRef: JsonObject | null
+    effectiveSpec: JsonObject | null
+    effectiveSpecHash: string | null
+    protocolRevisionId: string | null
+    updatedAt: string | null
+    path: string
+    tags: string[]
+    summary: string | null
+  }
+}
+
+export interface PrivateProtocolListResult {
+  vault: string
+  filters: {
+    status?: string
+    limit: number
+  }
+  protocols: PrivateProtocolSummaryResult["protocol"][]
+  count: number
+  nextCursor: string | null
 }
 
 export interface AssessmentProjectionResult {
@@ -276,6 +337,19 @@ export interface ExperimentContextLogResult {
   kind: "note" | "supplement_intake" | "experiment_context"
 }
 
+export type ExperimentSessionStatus = "completed" | "partial" | "missed" | "skipped"
+
+export type ExperimentContextLogKind =
+  | "experiment_context"
+  | "note"
+  | "supplement_intake"
+
+export type ExperimentContextSeverity =
+  | "info"
+  | "potential_confounder"
+  | "safety"
+  | "blocking"
+
 export interface ExperimentProgressResult {
   vault: string
   experimentId: string
@@ -294,6 +368,42 @@ export interface ExperimentOutcomeResult {
   outcome: QueryExperimentOutcomeSummary
   outcomePath?: string | null
   updatedExperiment?: boolean
+}
+
+export interface ExperimentPlanSummary {
+  planId: string | null
+  materialAdaptation: boolean
+  needsPrivateProtocol: boolean
+  reasons: string[]
+  operations: string[]
+}
+
+export interface ExperimentPlanResult {
+  vault: string
+  plan: ExperimentPlanSummary
+}
+
+export interface ExperimentStartResult {
+  vault: string
+  plan: ExperimentPlanSummary
+  protocol: {
+    protocolId: string
+    slug: string
+    title: string
+    protocolRevisionId: string
+    effectiveSpecHash: string
+    path: string
+    created: boolean
+  } | null
+  experiment: {
+    experimentId: string
+    lookupId: string
+    slug: string
+    experimentPath: string
+    status: ExperimentStatus
+    created: boolean
+    updated: boolean
+  }
 }
 
 export interface JournalMutationResult {
@@ -474,9 +584,9 @@ export interface VaultRepairResult {
   auditPath: string | null
 }
 
-export interface StopProtocolResult {
+export interface StopRegimenResult {
   vault: string
-  protocolId: string
+  regimenId: string
   lookupId: string
   stoppedOn: string | null
   status: string
@@ -560,6 +670,16 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       status?: ExperimentStatus
     },
   ): Promise<ExperimentCreateResult>
+  planExperiment(
+    input: CommandContext & {
+      inputFile: string
+    },
+  ): Promise<ExperimentPlanResult>
+  startExperiment(
+    input: CommandContext & {
+      inputFile: string
+    },
+  ): Promise<ExperimentStartResult>
   updateExperiment(
     input: CommandContext & {
       lookup: string
@@ -569,6 +689,15 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       status?: ExperimentStatus
       body?: string
       tags?: readonly string[]
+      commonsProtocolRef?: ExperimentFrontmatter['commonsProtocolRef'] | null
+      protocolRef?: ExperimentFrontmatter['protocolRef'] | null
+      effectiveProtocolSnapshot?: ExperimentFrontmatter['effectiveProtocolSnapshot'] | null
+      runPlan?: ExperimentFrontmatter['runPlan'] | null
+      analysisPlan?: ExperimentFrontmatter['analysisPlan'] | null
+      onboarding?: ExperimentFrontmatter['onboarding'] | null
+      assistantSupport?: ExperimentFrontmatter['assistantSupport'] | null
+      outcome?: ExperimentFrontmatter['outcome'] | null
+      outcomeRef?: ExperimentFrontmatter['outcomeRef'] | null
     },
   ): Promise<ExperimentUpdateResult>
   applyExperimentOnboarding(
@@ -619,6 +748,14 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   ): Promise<ExperimentUpdateResult>
   checkpointExperiment(
     input: CommandContext & {
+      lookup: string
+      occurredAt?: string
+      title?: string
+      note?: string
+    },
+  ): Promise<ExperimentLifecycleResult>
+  checkpointExperimentJson(
+    input: CommandContext & {
       inputFile: string
     },
   ): Promise<ExperimentLifecycleResult>
@@ -632,10 +769,45 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   logExperimentSession(
     input: CommandContext & {
       lookup: string
+      occurredAt?: string
+      source?: EventSource
+      title?: string
+      note?: string
+      interventionType?: string
+      status?: ExperimentSessionStatus
+      sessionStatus?: ExperimentSessionStatus
+      durationMinutes?: number
+      protocolId?: string
+      timing?: string
+      temperatureC?: number
+      afterExercise?: boolean
+      symptoms?: string[]
+      confounders?: string[] | Record<string, string | number | boolean | null>
+    },
+  ): Promise<ExperimentSessionLogResult>
+  logExperimentSessionJson(
+    input: CommandContext & {
+      lookup: string
       inputFile: string
     },
   ): Promise<ExperimentSessionLogResult>
   logExperimentContext(
+    input: CommandContext & {
+      lookup: string
+      kind?: ExperimentContextLogKind
+      occurredAt?: string
+      source?: EventSource
+      title?: string
+      note?: string
+      contextType?: string
+      severity?: ExperimentContextSeverity
+      tags?: string[]
+      supplementName?: string
+      dose?: number
+      unit?: string
+    },
+  ): Promise<ExperimentContextLogResult>
+  logExperimentContextJson(
     input: CommandContext & {
       lookup: string
       inputFile: string
@@ -771,16 +943,29 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     input: CommandContext & {
       input: string
     },
-  ): Promise<UpsertRecordResult & { protocolId: string }>
+  ): Promise<UpsertRecordResult & { regimenId: string }>
+  scaffoldRegimen(
+    input: CommandContext,
+  ): Promise<{
+    vault: string
+    noun: 'regimen'
+    payload: JsonObject
+  }>
+  upsertRegimen(
+    input: CommandContext & {
+      input: string
+    },
+  ): Promise<UpsertRecordResult & { regimenId: string }>
   renameSupplement(
     input: CommandContext & {
       lookup: string
       title: string
       slug?: string
     },
-  ): Promise<UpsertRecordResult & { protocolId: string }>
-  stopProtocol(input: StopProtocolInput): Promise<StopProtocolResult>
-  stopSupplement(input: StopProtocolInput): Promise<StopProtocolResult>
+  ): Promise<UpsertRecordResult & { regimenId: string }>
+  upsertPrivateProtocol(input: PrivateProtocolUpsertInput): Promise<PrivateProtocolUpsertResult>
+  stopRegimen(input: StopRegimenInput): Promise<StopRegimenResult>
+  stopSupplement(input: StopSupplementInput): Promise<StopRegimenResult>
 }
 
 export interface ImporterServices {
@@ -810,6 +995,22 @@ export interface ImporterServices {
 }
 
 export interface QueryServices extends HealthQueryServiceMethods {
+  showRegimen(
+    input: CommandContext & {
+      id: string
+    },
+  ): Promise<HealthEntityEnvelope>
+  listRegimens(
+    input: HealthListInput,
+  ): Promise<HealthListEnvelope>
+  showPrivateProtocol(
+    input: CommandContext & {
+      id: string
+    },
+  ): Promise<PrivateProtocolSummaryResult>
+  listPrivateProtocols(
+    input: HealthListInput,
+  ): Promise<PrivateProtocolListResult>
   showSupplement(
     input: CommandContext & {
       id: string
@@ -1159,14 +1360,30 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   projectAssessmentResponse(input: {
     assessmentResponse: JsonObject
   }): Promise<JsonObject>
-  stopProtocolItem(input: {
+  upsertProtocol(input: Omit<PrivateProtocolUpsertInput, "vault" | "requestId"> & {
     vaultRoot: string
-    protocolId: string
+  }): Promise<{
+    created: boolean
+    record: {
+      entity: JsonObject & {
+        protocolId: string
+        slug: string
+        protocolRevisionId: string
+        effectiveSpecHash: string
+      }
+      document: JsonObject & {
+        relativePath: string
+      }
+    }
+  }>
+  stopRegimen(input: {
+    vaultRoot: string
+    regimenId: string
     stoppedOn?: string
   }): Promise<{
     record: {
       entity: {
-        protocolId: string
+        regimenId: string
         stoppedOn?: string | null
         status: string
       }

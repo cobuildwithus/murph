@@ -39,8 +39,8 @@ export type BankEntityKind =
   | "food"
   | "genetics"
   | "goal"
-  | "protocol"
   | "provider"
+  | "regimen"
   | "recipe"
   | "workout_format";
 
@@ -83,7 +83,7 @@ const HEALTH_BANK_ENTITY_KINDS = [
   "goal",
   "condition",
   "allergy",
-  "protocol",
+  "regimen",
   "family",
   "genetics",
 ] as const satisfies readonly HealthBackedBankEntityKind[];
@@ -224,15 +224,15 @@ const checkedBankEntityDefinitions = [
             ingredients: helpers.firstStringArray(attributes, ["ingredients"]),
             tags: helpers.firstStringArray(attributes, ["tags"]),
             note: helpers.firstString(attributes, ["note"]),
-            attachedProtocolIds: helpers.firstStringArray(attributes, ["attachedProtocolIds"]),
+            attachedRegimenIds: helpers.firstStringArray(attributes, ["attachedRegimenIds"]),
             autoLogDaily: projectFoodAutoLogDaily(attributes.autoLogDaily, helpers),
           };
         },
       },
       relationKeys: [
         {
-          type: "related_protocol",
-          keys: ["attachedProtocolIds"],
+          type: "related_regimen",
+          keys: ["attachedRegimenIds"],
           cardinality: "many",
         },
       ],
@@ -423,7 +423,7 @@ export function extractBankEntityRegistryRelatedIds(
 export const goalBankEntityDefinition = requireBankEntityRegistryDefinition("goal");
 export const conditionBankEntityDefinition = requireBankEntityRegistryDefinition("condition");
 export const allergyBankEntityDefinition = requireBankEntityRegistryDefinition("allergy");
-export const protocolBankEntityDefinition = requireBankEntityRegistryDefinition("protocol");
+export const regimenBankEntityDefinition = requireBankEntityRegistryDefinition("regimen");
 export const familyBankEntityDefinition = requireBankEntityRegistryDefinition("family");
 export const geneticsBankEntityDefinition = requireBankEntityRegistryDefinition("genetics");
 export const foodBankEntityDefinition = requireBankEntityRegistryDefinition("food");

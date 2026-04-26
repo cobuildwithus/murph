@@ -1,11 +1,12 @@
 import type {
+  CommonsProtocolRef,
   ExperimentAnalysisPlan,
   ExperimentAssistantSupport,
+  EffectiveProtocolSnapshot,
   ExperimentFrontmatter,
   ExperimentOnboardingCapture,
   ExperimentOutcomeRef,
   ExperimentOutcomeTracking,
-  ExperimentProtocolRef,
   ExperimentRunPlan,
   ExperimentStatus,
 } from "@murphai/contracts";
@@ -33,13 +34,13 @@ import {
   compactObject,
   normalizeOptionalText,
   normalizeTimestampInput,
-  readValidatedFrontmatterDocument,
   runLoadedCanonicalWrite,
   uniqueTrimmedStringList,
   validateContract,
 } from "./shared.ts";
 
 import type { ExperimentEventRecord } from "@murphai/contracts";
+import type { ProtocolRef } from "../protocols.ts";
 import type { DateInput, FrontmatterObject, UnknownRecord } from "../types.ts";
 
 export interface CreateExperimentInput {
@@ -71,7 +72,9 @@ export interface UpdateExperimentInput {
   status?: string;
   body?: string;
   tags?: string[];
-  protocolRef?: ExperimentProtocolRef | null;
+  commonsProtocolRef?: CommonsProtocolRef | null;
+  protocolRef?: ProtocolRef | null;
+  effectiveProtocolSnapshot?: EffectiveProtocolSnapshot | null;
   runPlan?: ExperimentRunPlan | null;
   analysisPlan?: ExperimentAnalysisPlan | null;
   onboarding?: ExperimentOnboardingCapture | null;
@@ -134,6 +137,15 @@ function frontmatterString(value: FrontmatterObject, key: string): string {
   return typeof candidate === "string" ? candidate : "";
 }
 
+function experimentFrontmatterObject(attributes: ExperimentFrontmatter): FrontmatterObject {
+  const cloned = JSON.parse(JSON.stringify(attributes));
+  if (typeof cloned !== "object" || cloned === null || Array.isArray(cloned)) {
+    throw new VaultError("FRONTMATTER_INVALID", "Experiment frontmatter failed object serialization.");
+  }
+
+  return cloned as FrontmatterObject;
+}
+
 function toExperimentComparableAttributes(
   attributes:
     | Pick<ExperimentFrontmatter, "slug" | "status" | "title" | "startedOn" | "hypothesis">
@@ -152,9 +164,13 @@ function validateExperimentFrontmatter(
   value: unknown,
   relativePath = "experiment",
 ): ExperimentFrontmatter {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as FrontmatterObject
+    : {};
+
   return validateContract(
     experimentFrontmatterSchema,
-    value,
+    source,
     "EXPERIMENT_FRONTMATTER_INVALID",
     `Experiment frontmatter for "${relativePath}" is invalid.`,
     {
@@ -173,13 +189,16 @@ export async function readExperimentFrontmatterDocument(
     body: string;
   };
 }> {
-  return readValidatedFrontmatterDocument(
-    vaultRoot,
-    relativePath,
-    experimentFrontmatterSchema,
-    "EXPERIMENT_FRONTMATTER_INVALID",
-    `Experiment frontmatter for "${relativePath}" is invalid.`,
-  );
+  const rawDocument = await readUtf8File(vaultRoot, relativePath);
+  const parsed = parseFrontmatterDocument(rawDocument);
+
+  return {
+    rawDocument,
+    document: {
+      attributes: validateExperimentFrontmatter(parsed.attributes, relativePath),
+      body: parsed.body,
+    },
+  };
 }
 
 function appendExperimentNoteBlock(
@@ -300,7 +319,7 @@ export async function createExperiment({
     "Experiment frontmatter failed contract validation before write.",
   );
   const markdown = stringifyFrontmatterDocument({
-    attributes: { ...attributes },
+    attributes: experimentFrontmatterObject(attributes),
     body: `# ${normalizedTitle}\n\n## Plan\n\n## Notes\n\n`,
   });
   const event = buildExperimentEventRecord({
@@ -383,7 +402,18 @@ export async function updateExperiment(
         input.tags === undefined
           ? document.attributes.tags
           : uniqueTrimmedStringList(input.tags) ?? undefined,
-      protocolRef: nextOptionalExperimentValue(input.protocolRef, document.attributes.protocolRef),
+      commonsProtocolRef: nextOptionalExperimentValue(
+        input.commonsProtocolRef,
+        document.attributes.commonsProtocolRef,
+      ),
+      protocolRef: nextOptionalExperimentValue(
+        input.protocolRef,
+        document.attributes.protocolRef,
+      ),
+      effectiveProtocolSnapshot: nextOptionalExperimentValue(
+        input.effectiveProtocolSnapshot,
+        document.attributes.effectiveProtocolSnapshot,
+      ),
       runPlan: nextOptionalExperimentValue(input.runPlan, document.attributes.runPlan),
       analysisPlan: nextOptionalExperimentValue(
         input.analysisPlan,
@@ -400,7 +430,7 @@ export async function updateExperiment(
     input.relativePath,
   );
   const nextMarkdown = stringifyFrontmatterDocument({
-    attributes: nextAttributes,
+    attributes: experimentFrontmatterObject(nextAttributes),
     body: input.body ?? document.body,
   });
 
@@ -466,7 +496,7 @@ async function appendExperimentLifecycleEvent(
     input.relativePath,
   );
   const nextMarkdown = stringifyFrontmatterDocument({
-    attributes: nextAttributes,
+    attributes: experimentFrontmatterObject(nextAttributes),
     body: appendExperimentNoteBlock(document.body, {
       occurredAt,
       title: input.title,

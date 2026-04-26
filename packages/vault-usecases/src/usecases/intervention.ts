@@ -96,7 +96,7 @@ export interface AddInterventionRecordInput {
   source?: EventSource
   durationMinutes?: number
   interventionType?: string
-  protocolId?: string
+  regimenId?: string
 }
 
 export async function addInterventionRecord(
@@ -109,7 +109,7 @@ export async function addInterventionRecord(
 
   const intervention = resolveInterventionDescriptor(note, input.interventionType)
   const durationMinutes = resolveDurationMinutes(note, input.durationMinutes)
-  const protocolId = normalizeOptionalText(input.protocolId)
+  const regimenId = normalizeOptionalText(input.regimenId)
   const occurredAt = input.occurredAt ?? new Date().toISOString()
   const payload = {
     kind: 'intervention_session',
@@ -118,13 +118,13 @@ export async function addInterventionRecord(
     title: buildInterventionTitle(intervention.label, durationMinutes),
     interventionType: intervention.interventionType,
     ...(typeof durationMinutes === 'number' ? { durationMinutes } : {}),
-    ...(protocolId
+    ...(regimenId
       ? {
-          protocolId,
+          regimenId,
           links: [
             {
               type: 'related_to',
-              targetId: protocolId,
+              targetId: regimenId,
             },
           ],
         }
@@ -144,7 +144,7 @@ export async function addInterventionRecord(
     title: String(payload.title),
     interventionType: String(payload.interventionType),
     durationMinutes: durationMinutes ?? null,
-    protocolId: protocolId ?? null,
+    regimenId: regimenId ?? null,
     note,
   }
 }

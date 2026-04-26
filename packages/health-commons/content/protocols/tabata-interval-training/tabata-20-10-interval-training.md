@@ -568,7 +568,9 @@ experimentOnboarding:
         - treadmill
         - simple_bodyweight
         - other
-      writePath: experiment.protocol.modality
+      target:
+        object: protocol
+        field: modality
     -
       id: movement_choice
       label: Movement choice
@@ -577,7 +579,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: false
       question: If you are not using a machine, what exact movement or movement sequence will you do?
-      writePath: experiment.protocol.movementChoice
+      target:
+        object: protocol
+        field: movementChoice
     -
       id: safe_environment
       label: Safe environment
@@ -586,7 +590,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: Will you do the intervals somewhere you can stop immediately without traffic, obstacles, or unsafe fall risk?
-      writePath: experiment.safety.safeEnvironment
+      target:
+        object: onboardingCapture
+        field: safety.safeEnvironment
     -
       id: hr_monitor
       label: Heart-rate monitor
@@ -599,7 +605,9 @@ experimentOnboarding:
         - chest_strap
         - wrist_wearable
         - none
-      writePath: experiment.measurement.hrMonitor
+      target:
+        object: analysisPlan
+        field: measurement.hrMonitor
     -
       id: weekly_schedule
       label: Weekly schedule
@@ -608,7 +616,9 @@ experimentOnboarding:
       askPolicy: always
       required: true
       question: Which two weekly time windows should Murph suggest, with at least 48 hours between sessions?
-      writePath: experiment.schedule.weeklyWindows
+      target:
+        object: experimentRun
+        field: schedule.weeklyWindows
     -
       id: reminder_policy
       label: Reminders
@@ -617,7 +627,9 @@ experimentOnboarding:
       askPolicy: ask_if_unknown
       required: false
       question: Would you like reminders for the baseline, sessions, and next-day recovery logs?
-      writePath: experiment.reminders.policy
+      target:
+        object: assistantSupport
+        field: reminders.policy
   planDefaults:
     testPlanId: wearable-cardio-fitness-and-recovery-49d
     baselineDays: 7

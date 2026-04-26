@@ -8,11 +8,13 @@ export {
   createVaultReadModel,
   entityRelationTargetIds,
   getExperiment,
+  getProtocol,
   getVaultEntities,
   getJournalEntry,
   listEntities,
   listExperiments,
   listJournalEntries,
+  listProtocols,
   lookupEntityById,
 } from "./model.ts";
 export {
@@ -23,6 +25,7 @@ export type {
   EntityFilter,
   ExperimentFilter,
   JournalFilter,
+  ProtocolFilter,
   VaultEntitiesByFamily,
   VaultReadModel,
 } from "./model.ts";
@@ -75,6 +78,20 @@ export type {
   ExperimentProgressSummary,
   ExperimentRecommendationAction,
 } from "./experiments.ts";
+export {
+  getProtocolSummary,
+  isProtocolEntity,
+  listProtocolSummaries,
+  PROTOCOL_DIRECTORY,
+  PROTOCOL_DOC_TYPE,
+  PROTOCOL_FAMILY,
+  readExperimentProtocolProjectionFields,
+  summarizeProtocol,
+} from "./protocols.ts";
+export type {
+  ExperimentProtocolProjectionFields,
+  ProtocolSummary,
+} from "./protocols.ts";
 export type { DailySampleSummary } from "./summaries.ts";
 export { summarizeDailySamples } from "./summaries.ts";
 export {

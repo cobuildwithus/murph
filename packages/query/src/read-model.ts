@@ -64,6 +64,14 @@ export interface JournalFilter {
   text?: string;
 }
 
+export interface ProtocolFilter {
+  ids?: string[];
+  slug?: string;
+  statuses?: string[];
+  tags?: string[];
+  text?: string;
+}
+
 interface SharedListFilterInput {
   ids?: string[];
   recordClasses?: CanonicalRecordClass[];
@@ -117,6 +125,7 @@ const VAULT_FAMILY_VIEW_SPECS = {
   conditions: { family: "condition", mode: "many" },
   allergies: { family: "allergy", mode: "many" },
   protocols: { family: "protocol", mode: "many" },
+  regimens: { family: "regimen", mode: "many" },
   familyMembers: { family: "family", mode: "many" },
   geneticVariants: { family: "genetics", mode: "many" },
   foods: { family: "food", mode: "many" },
@@ -361,6 +370,56 @@ export function getExperiment(
   slug: string,
 ): CanonicalEntity | null {
   return vault.experiments.find((record) => record.experimentSlug === slug) ?? null;
+}
+
+export function listProtocols(
+  vault: VaultReadModel,
+  filters: ProtocolFilter = {},
+): CanonicalEntity[] {
+  const { slug, statuses } = filters;
+  const idSet = toOptionalSet(filters.ids);
+  const statusSet = toOptionalSet(statuses);
+  const tagAndTextFilter = prepareTagAndTextFilter(filters);
+
+  return entitiesOfFamily(vault.byFamily, "protocol").filter((record) => {
+    if (idSet && !record.lookupIds.some((lookupId) => idSet.has(lookupId))) {
+      return false;
+    }
+
+    if (slug && readRecordSlug(record) !== slug) {
+      return false;
+    }
+
+    if (!matchesOptionalSet(record.status, statusSet)) {
+      return false;
+    }
+
+    return matchesTagAndTextFilter(
+      record.tags,
+      [record.title, record.body, JSON.stringify(record.frontmatter)],
+      tagAndTextFilter,
+    );
+  });
+}
+
+export function getProtocol(
+  vault: VaultReadModel,
+  idOrSlug: string,
+): CanonicalEntity | null {
+  const normalized = normalizeLookupId(idOrSlug);
+  if (!normalized) {
+    return null;
+  }
+
+  return (
+    entitiesOfFamily(vault.byFamily, "protocol").find((record) =>
+      record.lookupIds.includes(normalized)
+    ) ??
+    entitiesOfFamily(vault.byFamily, "protocol").find((record) =>
+      readRecordSlug(record) === normalized
+    ) ??
+    null
+  );
 }
 
 export function listJournalEntries(
@@ -611,4 +670,9 @@ function buildTextHaystack(values: readonly unknown[]): string {
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join("\n")
     .toLowerCase();
+}
+
+function readRecordSlug(record: CanonicalEntity): string | null {
+  const value = record.attributes.slug;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }

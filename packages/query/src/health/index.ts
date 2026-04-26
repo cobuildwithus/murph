@@ -6,7 +6,7 @@ export { listFoods, readFood, showFood } from "./foods.ts";
 export { listRecipes, readRecipe, showRecipe } from "./recipes.ts";
 export { listProviders, readProvider, showProvider } from "./providers.ts";
 export { listWorkoutFormats, readWorkoutFormat, showWorkoutFormat } from "./workout-formats.ts";
-export { listProtocols, readProtocol, showProtocol } from "./protocols.ts";
+export { listRegimens, readRegimen, showRegimen } from "./regimens.ts";
 export {
   listSupplementCompounds,
   listSupplements,
@@ -45,7 +45,7 @@ export type {
   RecipeQueryEntity,
   RecipeQueryRecord,
   RegistryListOptions,
-  ProtocolQueryRecord,
+  RegimenQueryRecord,
   SupplementIngredientQueryRecord,
   WorkoutFormatQueryEntity,
   WorkoutFormatQueryRecord,

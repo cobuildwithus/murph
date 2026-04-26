@@ -270,7 +270,7 @@ test('generic show and list forward canonical read filters through the shared qu
 
 test('supplement stop, rename, and compound commands forward arguments and keep follow-up CTAs intact', async () => {
   const stopCalls: Array<{
-    protocolId: string
+    regimenId: string
     requestId: string | null
     stoppedOn?: string
     vault: string
@@ -297,14 +297,14 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
 
   const stopResult = await runSliceCli<{
     vault: string
-    protocolId: string
+    regimenId: string
     lookupId: string
     stoppedOn: string | null
     status: string
   }>([
     'supplement',
     'stop',
-    'supp_magnesium',
+    'reg_magnesium',
     '--stopped-on',
     '2026-03-12',
     '--vault',
@@ -314,7 +314,7 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   ], (services) => {
     services.core.stopSupplement = async (input) => {
       stopCalls.push({
-        protocolId: input.protocolId,
+        regimenId: input.regimenId,
         stoppedOn: input.stoppedOn,
         vault: input.vault,
         requestId: input.requestId,
@@ -322,8 +322,8 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
 
       return {
         vault: input.vault,
-        protocolId: input.protocolId,
-        lookupId: input.protocolId,
+        regimenId: input.regimenId,
+        lookupId: input.regimenId,
         stoppedOn: input.stoppedOn ?? null,
         status: 'stopped',
       }
@@ -340,9 +340,9 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
 
       return {
         vault: input.vault,
-        protocolId: 'supp_magnesium',
+        regimenId: 'reg_magnesium',
         lookupId: input.slug ?? 'magnesium-glycinate',
-        path: 'bank/protocols/supplements/magnesium-glycinate-200.md',
+        path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
         created: false,
       }
     }
@@ -374,10 +374,10 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
               },
             ],
             supplementCount: 2,
-            supplementIds: ['supp_magnesium', 'supp_evening_stack'],
+            supplementIds: ['reg_magnesium', 'reg_evening_stack'],
             sources: [
               {
-                supplementId: 'supp_magnesium',
+                supplementId: 'reg_magnesium',
                 supplementSlug: 'magnesium-glycinate',
                 supplementTitle: 'Magnesium Glycinate',
                 brand: null,
@@ -422,10 +422,10 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
             },
           ],
           supplementCount: 2,
-          supplementIds: ['supp_magnesium', 'supp_evening_stack'],
+          supplementIds: ['reg_magnesium', 'reg_evening_stack'],
           sources: [
             {
-              supplementId: 'supp_magnesium',
+              supplementId: 'reg_magnesium',
               supplementSlug: 'magnesium-glycinate',
               supplementTitle: 'Magnesium Glycinate',
               brand: null,
@@ -444,14 +444,14 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
 
   const renameResult = await runSliceCli<{
     vault: string
-    protocolId: string
+    regimenId: string
     lookupId: string
     path?: string
     created: boolean
   }>([
     'supplement',
     'rename',
-    'supp_magnesium',
+    'reg_magnesium',
     '--title',
     'Magnesium Glycinate 200',
     '--slug',
@@ -463,8 +463,8 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   ], (services) => {
     services.core.stopSupplement = async (input) => ({
       vault: input.vault,
-      protocolId: input.protocolId,
-      lookupId: input.protocolId,
+      regimenId: input.regimenId,
+      lookupId: input.regimenId,
       stoppedOn: input.stoppedOn ?? null,
       status: 'stopped',
     })
@@ -480,9 +480,9 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
 
       return {
         vault: input.vault,
-        protocolId: 'supp_magnesium',
+        regimenId: 'reg_magnesium',
         lookupId: input.slug ?? 'magnesium-glycinate',
-        path: 'bank/protocols/supplements/magnesium-glycinate-200.md',
+        path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
         created: false,
       }
     }
@@ -543,17 +543,17 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   ], (services) => {
     services.core.stopSupplement = async (input) => ({
       vault: input.vault,
-      protocolId: input.protocolId,
-      lookupId: input.protocolId,
+      regimenId: input.regimenId,
+      lookupId: input.regimenId,
       stoppedOn: input.stoppedOn ?? null,
       status: 'stopped',
     })
 
     services.core.renameSupplement = async (input) => ({
       vault: input.vault,
-      protocolId: 'supp_magnesium',
+      regimenId: 'reg_magnesium',
       lookupId: input.slug ?? 'magnesium-glycinate',
-      path: 'bank/protocols/supplements/magnesium-glycinate-200.md',
+      path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
       created: false,
     })
 
@@ -577,7 +577,7 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
             lookupId: 'magnesium-glycinate',
             totals: [],
             supplementCount: 2,
-            supplementIds: ['supp_magnesium', 'supp_evening_stack'],
+            supplementIds: ['reg_magnesium', 'reg_evening_stack'],
             sources: [],
           },
         ],
@@ -597,7 +597,7 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
         lookupId: 'magnesium-glycinate',
         totals: [],
         supplementCount: 2,
-        supplementIds: ['supp_magnesium', 'supp_evening_stack'],
+        supplementIds: ['reg_magnesium', 'reg_evening_stack'],
         sources: [],
       },
     })
@@ -628,17 +628,17 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   ], (services) => {
     services.core.stopSupplement = async (input) => ({
       vault: input.vault,
-      protocolId: input.protocolId,
-      lookupId: input.protocolId,
+      regimenId: input.regimenId,
+      lookupId: input.regimenId,
       stoppedOn: input.stoppedOn ?? null,
       status: 'stopped',
     })
 
     services.core.renameSupplement = async (input) => ({
       vault: input.vault,
-      protocolId: 'supp_magnesium',
+      regimenId: 'reg_magnesium',
       lookupId: input.slug ?? 'magnesium-glycinate',
-      path: 'bank/protocols/supplements/magnesium-glycinate-200.md',
+      path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
       created: false,
     })
 
@@ -672,7 +672,7 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
           lookupId: 'magnesium-glycinate',
           totals: [],
           supplementCount: 2,
-          supplementIds: ['supp_magnesium', 'supp_evening_stack'],
+          supplementIds: ['reg_magnesium', 'reg_evening_stack'],
           sources: [],
         },
       }
@@ -684,7 +684,7 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   assert.equal(requireData(stopResult).status, 'stopped')
   assert.deepEqual(stopCalls, [
     {
-      protocolId: 'supp_magnesium',
+      regimenId: 'reg_magnesium',
       stoppedOn: '2026-03-12',
       vault: vaultRoot,
       requestId: 'req-stop-01',
@@ -692,7 +692,7 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   ])
   assert.deepEqual(stopResult.meta?.cta?.commands, [
     {
-      command: 'vault-cli supplement show supp_magnesium --vault <vault>',
+      command: 'vault-cli supplement show reg_magnesium --vault <vault>',
       description: 'Show the stopped supplement record.',
     },
     {
@@ -706,7 +706,7 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   assert.equal(requireData(renameResult).lookupId, 'magnesium-glycinate-200')
   assert.deepEqual(renameCalls, [
     {
-      lookup: 'supp_magnesium',
+      lookup: 'reg_magnesium',
       title: 'Magnesium Glycinate 200',
       slug: 'magnesium-glycinate-200',
       vault: vaultRoot,

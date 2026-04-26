@@ -24,7 +24,7 @@ describe("health registry family seams", () => {
       "goal",
       "condition",
       "allergy",
-      "protocol",
+      "regimen",
       "family",
       "genetics",
     ]);
@@ -189,10 +189,10 @@ describe("health registry family seams", () => {
     const upsertCalls: Array<Record<string, unknown>> = [];
     const services = createExplicitHealthCoreServices(async () => ({
       core: {
-        async readProtocolItem() {
+        async readRegimen() {
           return {
             entity: {
-              protocolId: "prot_01JSHARED000000000000000010",
+              regimenId: "reg_01JSHARED000000000000000010",
               kind: "supplement",
               title: "Old title",
               status: "active",
@@ -208,20 +208,21 @@ describe("health registry family seams", () => {
               ingredients: [],
               relatedGoalIds: [],
               relatedConditionIds: [],
+              relatedRegimenIds: [],
               group: "supplements",
             },
           };
         },
-        async upsertProtocolItem(input: Record<string, unknown>) {
+        async upsertRegimen(input: Record<string, unknown>) {
           upsertCalls.push(input);
 
           return {
             record: {
               entity: {
-                protocolId: "prot_01JSHARED000000000000000010",
+                regimenId: "reg_01JSHARED000000000000000010",
               },
               document: {
-                relativePath: "bank/protocols/supplements/magnesium-glycinate.md",
+                relativePath: "bank/regimens/supplements/magnesium-glycinate.md",
               },
             },
             created: false,
@@ -231,13 +232,13 @@ describe("health registry family seams", () => {
     }));
 
     await services.renameSupplement({
-      lookup: "prot_01JSHARED000000000000000010",
+      lookup: "reg_01JSHARED000000000000000010",
       requestId: null,
       title: "Magnesium Glycinate",
       vault: "./vault",
     });
     await services.renameSupplement({
-      lookup: "prot_01JSHARED000000000000000010",
+      lookup: "reg_01JSHARED000000000000000010",
       requestId: null,
       slug: "custom-slug",
       title: "Magnesium Glycinate",

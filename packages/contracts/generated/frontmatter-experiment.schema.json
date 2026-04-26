@@ -54,12 +54,12 @@
       },
       "uniqueItems": true
     },
-    "protocolRef": {
+    "commonsProtocolRef": {
       "type": "object",
       "properties": {
         "key": {
           "type": "string",
-          "pattern": "^[a-z_]+:[a-z0-9][a-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+          "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
         },
         "pageRevisionId": {
           "type": "string",
@@ -81,9 +81,152 @@
       ],
       "additionalProperties": false
     },
+    "protocolRef": {
+      "type": "object",
+      "properties": {
+        "protocolId": {
+          "type": "string",
+          "pattern": "^prot_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "protocolRevisionId": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "effectiveSpecHash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "protocolId",
+        "protocolRevisionId",
+        "effectiveSpecHash"
+      ],
+      "additionalProperties": false
+    },
+    "effectiveProtocolSnapshot": {
+      "type": "object",
+      "properties": {
+        "effectiveSpecHash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "doseSignature": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "modality": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "frequency": {
+          "type": "object",
+          "properties": {
+            "sessionsPerDay": {
+              "type": "number",
+              "minimum": 0
+            },
+            "sessionsPerWeek": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "durationMinutes": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max": {
+              "type": "number",
+              "minimum": 0
+            },
+            "target": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "temperatureC": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "target": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "targetSessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minimumUsefulSessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stopConditions": {
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "required": [
+        "effectiveSpecHash",
+        "doseSignature"
+      ],
+      "additionalProperties": false
+    },
     "runPlan": {
       "type": "object",
       "properties": {
+        "baseline": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "prospective",
+                "retrospective",
+                "omitted"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "wearable_history",
+                "manual_measurements"
+              ]
+            },
+            "start": {
+              "type": "string",
+              "format": "date"
+            },
+            "end": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
         "baselineStart": {
           "type": "string",
           "format": "date"
@@ -169,13 +312,13 @@
       "properties": {
         "primaryBiomarkerKey": {
           "type": "string",
-          "pattern": "^[a-z_]+:[a-z0-9][a-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+          "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
         },
         "secondaryBiomarkerKeys": {
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^[a-z_]+:[a-z0-9][a-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
+            "pattern": "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$"
           },
           "uniqueItems": true
         },
@@ -394,5 +537,14 @@
         }
       ]
     }
+  },
+  "dependentRequired": {
+    "commonsProtocolRef": [
+      "effectiveProtocolSnapshot"
+    ],
+    "protocolRef": [
+      "commonsProtocolRef",
+      "effectiveProtocolSnapshot"
+    ]
   }
 }

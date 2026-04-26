@@ -30,7 +30,7 @@ import {
   foodRegistryDefinition,
   geneticsRegistryDefinition,
   goalRegistryDefinition,
-  protocolRegistryDefinition,
+  regimenRegistryDefinition,
   providerRegistryDefinition,
   recipeRegistryDefinition,
   toRegistryRecord,
@@ -45,7 +45,7 @@ type RegistryCollectionKey =
   | "goals"
   | "conditions"
   | "allergies"
-  | "protocols"
+  | "regimens"
   | "familyMembers"
   | "geneticVariants"
   | "foods"
@@ -64,7 +64,7 @@ interface RegistryCollections {
   goals: CanonicalEntity[];
   conditions: CanonicalEntity[];
   allergies: CanonicalEntity[];
-  protocols: CanonicalEntity[];
+  regimens: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   foods: CanonicalEntity[];
@@ -107,7 +107,7 @@ export interface CanonicalHealthEntityCollection {
   goals: CanonicalEntity[];
   conditions: CanonicalEntity[];
   allergies: CanonicalEntity[];
-  protocols: CanonicalEntity[];
+  regimens: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   foods: CanonicalEntity[];
@@ -155,10 +155,10 @@ const REGISTRY_COLLECTORS = [
     (document) => toRegistryRecord(document, allergyRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "protocols",
-    "protocol",
-    protocolRegistryDefinition.registry.directory,
-    (document) => toRegistryRecord(document, protocolRegistryDefinition),
+    "regimens",
+    "regimen",
+    regimenRegistryDefinition.registry.directory,
+    (document) => toRegistryRecord(document, regimenRegistryDefinition),
   ),
   createRegistryCollectorConfig(
     "familyMembers",
@@ -366,7 +366,7 @@ function buildCanonicalHealthCollection(input: {
   goals: CanonicalEntity[];
   conditions: CanonicalEntity[];
   allergies: CanonicalEntity[];
-  protocols: CanonicalEntity[];
+  regimens: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   foods: CanonicalEntity[];
@@ -383,7 +383,7 @@ function buildCanonicalHealthCollection(input: {
       ...input.goals,
       ...input.conditions,
       ...input.allergies,
-      ...input.protocols,
+      ...input.regimens,
       ...input.familyMembers,
       ...input.geneticVariants,
       ...input.foods,
@@ -399,7 +399,7 @@ function createEmptyRegistryCollections(): RegistryCollections {
     goals: [],
     conditions: [],
     allergies: [],
-    protocols: [],
+    regimens: [],
     familyMembers: [],
     geneticVariants: [],
     foods: [],

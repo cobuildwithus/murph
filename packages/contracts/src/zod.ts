@@ -32,9 +32,10 @@ import {
   NUTRITION_PROVENANCE_SOURCES,
   RAW_ASSET_OWNER_KINDS,
   RAW_IMPORT_KINDS,
-  RECIPE_STATUSES,
-  PROTOCOL_KINDS,
   PROTOCOL_STATUSES,
+  RECIPE_STATUSES,
+  REGIMEN_KINDS,
+  REGIMEN_STATUSES,
   WORKOUT_FORMAT_STATUSES,
   SAMPLE_QUALITIES,
   SAMPLE_SOURCES,
@@ -58,8 +59,8 @@ import {
   foodRelationLinkSchema,
   geneticVariantRelationLinkSchema,
   goalRelationLinkSchema,
-  protocolRelationLinkSchema,
   recipeRelationLinkSchema,
+  regimenRelationLinkSchema,
 } from "./relation-links.ts";
 import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
@@ -86,8 +87,9 @@ export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
 export type NutritionProvenanceSource = (typeof NUTRITION_PROVENANCE_SOURCES)[number];
 export type NutritionConfidenceLevel = (typeof NUTRITION_CONFIDENCE_LEVELS)[number];
-export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
 export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
+export type RegimenKind = (typeof REGIMEN_KINDS)[number];
+export type RegimenStatus = (typeof REGIMEN_STATUSES)[number];
 export type SampleStream = (typeof SAMPLE_STREAMS)[number];
 export type SampleSource = (typeof SAMPLE_SOURCES)[number];
 export type SampleQuality = (typeof SAMPLE_QUALITIES)[number];
@@ -117,6 +119,7 @@ const RAW_ASSESSMENT_SOURCE_PATTERN = "^raw/assessments/[A-Za-z0-9._/-]+/source\
 const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SINGLE_PATH_SEGMENT_PATTERN = "^[A-Za-z0-9._-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
+const SHA256_DIGEST_PATTERN = "^sha256:[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
@@ -822,6 +825,7 @@ export const eventRecordSchema = withContractMetadata(
       interventionType: patternedString(SLUG_PATTERN),
       durationMinutes: integerSchema(1).optional(),
       protocolId: idSchema(ID_PREFIXES.protocol).optional(),
+      regimenId: idSchema(ID_PREFIXES.regimen).optional(),
       ...experimentLinkShape,
       sessionStatus: experimentSessionStatusSchema.optional(),
       timing: boundedString(1, 120).optional(),
@@ -1011,12 +1015,115 @@ export const journalDayFrontmatterSchema = withContractMetadata(
   "Murph Journal Day Frontmatter",
 );
 
-export const experimentProtocolRefSchema = z
+export const commonsProtocolRefSchema = z
   .object({
     key: healthCommonsKeySchema,
     pageRevisionId: z.string().startsWith("sha256:"),
     runSpecRevisionId: z.string().startsWith("sha256:"),
     testPlanId: healthCommonsStableIdSchema.optional(),
+  })
+  .strict();
+
+const sha256DigestSchema = patternedString(SHA256_DIGEST_PATTERN);
+
+export const protocolRefSchema = z
+  .object({
+    protocolId: idSchema(ID_PREFIXES.protocol),
+    protocolRevisionId: sha256DigestSchema,
+    effectiveSpecHash: sha256DigestSchema,
+  })
+  .strict();
+
+const protocolFrequencySchema = z
+  .object({
+    sessionsPerDay: numberSchema(0).optional(),
+    sessionsPerWeek: numberSchema(0).optional(),
+  })
+  .strict();
+
+const protocolNonnegativeRangeSchema = z
+  .object({
+    min: numberSchema(0).optional(),
+    max: numberSchema(0).optional(),
+    target: numberSchema(0).optional(),
+  })
+  .strict();
+
+const protocolTemperatureRangeSchema = z
+  .object({
+    min: numberSchema().optional(),
+    max: numberSchema().optional(),
+    target: numberSchema().optional(),
+  })
+  .strict();
+
+export const effectiveProtocolSnapshotSchema = z
+  .object({
+    effectiveSpecHash: sha256DigestSchema,
+    doseSignature: boundedString(1, 240),
+    modality: boundedString(1, 160).optional(),
+    frequency: protocolFrequencySchema.optional(),
+    durationMinutes: protocolNonnegativeRangeSchema.optional(),
+    temperatureC: protocolTemperatureRangeSchema.optional(),
+    targetSessions: integerSchema(0).optional(),
+    minimumUsefulSessions: integerSchema(0).optional(),
+    stopConditions: z.array(boundedString(1, 4000)).max(50).optional(),
+  })
+  .strict();
+
+export const protocolEffectiveSpecSchema = z
+  .object({
+    doseSignature: boundedString(1, 240),
+    modality: boundedString(1, 160).optional(),
+    frequency: protocolFrequencySchema.optional(),
+    durationMinutes: protocolNonnegativeRangeSchema.optional(),
+    temperatureC: protocolTemperatureRangeSchema.optional(),
+    targetSessions: integerSchema(0).optional(),
+    minimumUsefulSessions: integerSchema(0).optional(),
+    instructions: z.array(boundedString(1, 4000)).max(100).optional(),
+    stopConditions: z.array(boundedString(1, 4000)).max(50).optional(),
+    notes: z.array(boundedString(1, 4000)).max(50).optional(),
+  })
+  .strict();
+
+export const protocolLineageSchema = z
+  .object({
+    sourceKind: z.enum(["health_commons_protocol", "protocol"]),
+    parentProtocolRef: protocolRefSchema.optional(),
+    notes: z.array(boundedString(1, 4000)).max(50).optional(),
+  })
+  .strict()
+  .superRefine((lineage, context) => {
+    if (lineage.sourceKind !== "protocol") {
+      return;
+    }
+
+    if (lineage.parentProtocolRef === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Protocol lineage requires parentProtocolRef when sourceKind is protocol.",
+        path: ["parentProtocolRef"],
+      });
+    }
+  });
+
+export const protocolDiffEntrySchema = z
+  .object({
+    path: boundedString(1, 240),
+    op: z.enum(["add", "remove", "replace"]),
+    before: jsonValueSchema.optional(),
+    after: jsonValueSchema.optional(),
+    reason: boundedString(1, 4000).optional(),
+  })
+  .strict();
+
+export const protocolPersonalizationSchema = z
+  .object({
+    target: boundedString(1, 240).optional(),
+    constraints: jsonObjectSchema.optional(),
+    preferences: jsonObjectSchema.optional(),
+    rationale: z.array(boundedString(1, 4000)).max(50).optional(),
+    notes: z.array(boundedString(1, 4000)).max(50).optional(),
   })
   .strict();
 
@@ -1027,8 +1134,18 @@ export const experimentRunLoggingSchema = z
   })
   .strict();
 
+export const experimentRunBaselineSchema = z
+  .object({
+    mode: z.enum(["prospective", "retrospective", "omitted"]),
+    source: z.enum(["wearable_history", "manual_measurements"]).optional(),
+    start: isoDateString().optional(),
+    end: isoDateString().optional(),
+  })
+  .strict();
+
 export const experimentRunPlanSchema = z
   .object({
+    baseline: experimentRunBaselineSchema.optional(),
     baselineStart: isoDateString().optional(),
     baselineEnd: isoDateString().optional(),
     interventionStart: isoDateString().optional(),
@@ -1189,7 +1306,8 @@ export const experimentProgressSnapshotSchema = z
       })
       .strict(),
     phase: z.enum(EXPERIMENT_PROGRESS_PHASES),
-    protocolRef: experimentProtocolRefSchema.nullable(),
+    commonsProtocolRef: commonsProtocolRefSchema.nullable(),
+    protocolRef: protocolRefSchema.nullable().optional(),
     recommendation: z
       .object({
         action: z.enum(EXPERIMENT_RECOMMENDATION_ACTIONS),
@@ -1241,9 +1359,10 @@ export const experimentOutcomeSchema = z
         title: boundedString(1, 160),
       })
       .strict(),
+    commonsProtocolRef: commonsProtocolRefSchema.nullable(),
+    effectiveProtocolSnapshot: effectiveProtocolSnapshotSchema.nullable().optional(),
     metricResults: z.array(experimentMetricResultSchema).max(50),
-    protocolRef: experimentProtocolRefSchema.nullable(),
-    runRef: experimentProtocolRefSchema.optional(),
+    protocolRef: protocolRefSchema.nullable().optional(),
     windows: experimentWindowSummarySchema,
   })
   .strict();
@@ -1261,7 +1380,9 @@ export const experimentFrontmatterSchema = withContractMetadata(
       endedOn: isoDateString().optional(),
       hypothesis: boundedString(1, 4000).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
-      protocolRef: experimentProtocolRefSchema.optional(),
+      commonsProtocolRef: commonsProtocolRefSchema.optional(),
+      protocolRef: protocolRefSchema.optional(),
+      effectiveProtocolSnapshot: effectiveProtocolSnapshotSchema.optional(),
       runPlan: experimentRunPlanSchema.optional(),
       analysisPlan: experimentAnalysisPlanSchema.optional(),
       onboarding: experimentOnboardingCaptureSchema.optional(),
@@ -1269,7 +1390,38 @@ export const experimentFrontmatterSchema = withContractMetadata(
       outcome: experimentOutcomeTrackingSchema.optional(),
       outcomeRef: experimentOutcomeRefSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .superRefine((frontmatter, context) => {
+      if (frontmatter.protocolRef !== undefined && frontmatter.commonsProtocolRef === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Protocol-backed experiment frontmatter requires a commonsProtocolRef.",
+          path: ["commonsProtocolRef"],
+        });
+      }
+
+      if (frontmatter.commonsProtocolRef !== undefined && frontmatter.effectiveProtocolSnapshot === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Commons protocol-backed experiment frontmatter requires an effectiveProtocolSnapshot.",
+          path: ["effectiveProtocolSnapshot"],
+        });
+        return;
+      }
+
+      if (
+        frontmatter.protocolRef !== undefined &&
+        frontmatter.effectiveProtocolSnapshot !== undefined &&
+        frontmatter.protocolRef.effectiveSpecHash !==
+        frontmatter.effectiveProtocolSnapshot.effectiveSpecHash
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Protocol-backed experiment effectiveSpecHash values must match.",
+          path: ["effectiveProtocolSnapshot", "effectiveSpecHash"],
+        });
+      }
+    }),
   "@murphai/contracts/frontmatter-experiment.schema.json",
   "Murph Experiment Frontmatter",
 );
@@ -1316,7 +1468,7 @@ export const foodFrontmatterSchema = withContractMetadata(
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
-      attachedProtocolIds: uniqueArray(idSchema(ID_PREFIXES.protocol), {
+      attachedRegimenIds: uniqueArray(idSchema(ID_PREFIXES.regimen), {
         maxItems: 32,
         uniqueItems: true,
       }).optional(),
@@ -1517,7 +1669,7 @@ export const conditionFrontmatterSchema = withContractMetadata(
       severity: z.enum(CONDITION_SEVERITIES).optional(),
       bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-      relatedProtocolIds: uniqueArray(idSchema(ID_PREFIXES.protocol), { uniqueItems: true }).optional(),
+      relatedRegimenIds: uniqueArray(idSchema(ID_PREFIXES.regimen), { uniqueItems: true }).optional(),
       links: uniqueArray(conditionRelationLinkSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
     })
@@ -1549,6 +1701,28 @@ export const allergyFrontmatterSchema = withContractMetadata(
 );
 
 export const protocolFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.protocolFrontmatter),
+      docType: z.literal(FRONTMATTER_DOC_TYPES.protocol),
+      protocolId: idSchema(ID_PREFIXES.protocol),
+      slug: patternedString(SLUG_PATTERN),
+      title: boundedString(1, 160),
+      status: z.enum(PROTOCOL_STATUSES),
+      commonsProtocolRef: commonsProtocolRefSchema,
+      lineage: protocolLineageSchema,
+      diff: z.array(protocolDiffEntrySchema).max(100),
+      effectiveSpec: protocolEffectiveSpecSchema,
+      personalization: protocolPersonalizationSchema,
+      effectiveSpecHash: sha256DigestSchema,
+      protocolRevisionId: sha256DigestSchema,
+    })
+    .strict(),
+  "@murphai/contracts/frontmatter-protocol.schema.json",
+  "Murph Protocol Frontmatter",
+);
+
+export const regimenFrontmatterSchema = withContractMetadata(
   (() => {
     const supplementIngredientSchema = z
       .object({
@@ -1563,13 +1737,13 @@ export const protocolFrontmatterSchema = withContractMetadata(
 
     return z
       .object({
-        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.protocolFrontmatter),
-        docType: z.literal(FRONTMATTER_DOC_TYPES.protocol),
-        protocolId: idSchema(ID_PREFIXES.protocol),
+        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.regimenFrontmatter),
+        docType: z.literal(FRONTMATTER_DOC_TYPES.regimen),
+        regimenId: idSchema(ID_PREFIXES.regimen),
         slug: patternedString(SLUG_PATTERN),
         title: boundedString(1, 160),
-        kind: z.enum(PROTOCOL_KINDS),
-        status: z.enum(PROTOCOL_STATUSES),
+        kind: z.enum(REGIMEN_KINDS),
+        status: z.enum(REGIMEN_STATUSES),
         startedOn: isoDateString(),
         stoppedOn: isoDateString().optional(),
         substance: boundedString(1, 160).optional(),
@@ -1582,13 +1756,13 @@ export const protocolFrontmatterSchema = withContractMetadata(
         ingredients: z.array(supplementIngredientSchema).optional(),
         relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
         relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
-        relatedProtocolIds: uniqueArray(idSchema(ID_PREFIXES.protocol), { uniqueItems: true }).optional(),
-        links: uniqueArray(protocolRelationLinkSchema, { uniqueItems: true }).optional(),
+        relatedRegimenIds: uniqueArray(idSchema(ID_PREFIXES.regimen), { uniqueItems: true }).optional(),
+        links: uniqueArray(regimenRelationLinkSchema, { uniqueItems: true }).optional(),
       })
       .strict();
   })(),
-  "@murphai/contracts/frontmatter-protocol.schema.json",
-  "Murph Protocol Frontmatter",
+  "@murphai/contracts/frontmatter-regimen.schema.json",
+  "Murph Regimen Frontmatter",
 );
 
 export const familyMemberFrontmatterSchema = withContractMetadata(
@@ -1699,7 +1873,13 @@ export type InboxCaptureAttachmentRecord = z.infer<typeof inboxCaptureAttachment
 export type InboxCaptureRecord = z.infer<typeof inboxCaptureRecordSchema>;
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
-export type ExperimentProtocolRef = z.infer<typeof experimentProtocolRefSchema>;
+export type CommonsProtocolRef = z.infer<typeof commonsProtocolRefSchema>;
+export type ProtocolRef = z.infer<typeof protocolRefSchema>;
+export type EffectiveProtocolSnapshot = z.infer<typeof effectiveProtocolSnapshotSchema>;
+export type ProtocolEffectiveSpec = z.infer<typeof protocolEffectiveSpecSchema>;
+export type ProtocolLineage = z.infer<typeof protocolLineageSchema>;
+export type ProtocolDiffEntry = z.infer<typeof protocolDiffEntrySchema>;
+export type ProtocolPersonalization = z.infer<typeof protocolPersonalizationSchema>;
 export type ExperimentRunLogging = z.infer<typeof experimentRunLoggingSchema>;
 export type ExperimentRunPlan = z.infer<typeof experimentRunPlanSchema>;
 export type ExperimentAnalysisPlan = z.infer<typeof experimentAnalysisPlanSchema>;
@@ -1726,6 +1906,7 @@ export type GoalFrontmatter = z.infer<typeof goalFrontmatterSchema>;
 export type ConditionFrontmatter = z.infer<typeof conditionFrontmatterSchema>;
 export type AllergyFrontmatter = z.infer<typeof allergyFrontmatterSchema>;
 export type ProtocolFrontmatter = z.infer<typeof protocolFrontmatterSchema>;
-export type SupplementIngredientFrontmatter = NonNullable<ProtocolFrontmatter["ingredients"]>[number];
+export type RegimenFrontmatter = z.infer<typeof regimenFrontmatterSchema>;
+export type SupplementIngredientFrontmatter = NonNullable<RegimenFrontmatter["ingredients"]>[number];
 export type FamilyMemberFrontmatter = z.infer<typeof familyMemberFrontmatterSchema>;
 export type GeneticVariantFrontmatter = z.infer<typeof geneticVariantFrontmatterSchema>;

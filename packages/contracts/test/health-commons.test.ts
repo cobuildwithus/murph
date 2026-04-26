@@ -129,6 +129,10 @@ const validProtocolVariantPageWithOnboarding = {
         valueType: "enum",
         askPolicy: "ask_if_unknown",
         required: true,
+        target: {
+          object: "experimentRun",
+          field: "modality",
+        },
         options: ["bike", "rower"],
       },
     ],

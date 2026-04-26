@@ -15,8 +15,8 @@ import {
 import { isContractId } from "../src/ids.ts";
 import {
   goalUpsertPayloadSchema,
-  protocolUpsertPayloadSchema,
   recipeUpsertPayloadSchema,
+  regimenUpsertPayloadSchema,
   sharePackSchema,
 } from "../src/shares.ts";
 
@@ -199,7 +199,7 @@ describe("shares schema coverage", () => {
     });
 
     expect(
-      protocolUpsertPayloadSchema.parse({
+      regimenUpsertPayloadSchema.parse({
         title: "Vitamin D",
         startedOn: "2026-04-08",
         stoppedOn: "2026-04-30",
@@ -238,7 +238,7 @@ describe("shares schema coverage", () => {
     ).toThrow("Expected unique array items.");
   });
 
-  it("validates share-pack ref integrity for duplicates, attached protocols, and afterImport targets", () => {
+  it("validates share-pack ref integrity for duplicates, attached regimens, and afterImport targets", () => {
     expect(
       sharePackSchema.parse({
         schemaVersion: CONTRACT_SCHEMA_VERSION.sharePack,
@@ -246,8 +246,8 @@ describe("shares schema coverage", () => {
         createdAt: "2026-04-08T04:00:00.000Z",
         entities: [
           {
-            kind: "protocol",
-            ref: "prot:vitamin-d",
+            kind: "regimen",
+            ref: "reg:vitamin-d",
             payload: {
               title: "Vitamin D",
             },
@@ -257,7 +257,7 @@ describe("shares schema coverage", () => {
             ref: "food:yogurt",
             payload: {
               title: "Greek yogurt",
-              attachedProtocolRefs: ["prot:vitamin-d"],
+              attachedRegimenRefs: ["reg:vitamin-d"],
             },
           },
         ],
@@ -287,7 +287,7 @@ describe("shares schema coverage", () => {
             ref: "food:duplicate",
             payload: {
               title: "Yogurt",
-              attachedProtocolRefs: ["prot:missing"],
+              attachedRegimenRefs: ["reg:missing"],
             },
           },
           {
@@ -323,7 +323,7 @@ describe("shares schema coverage", () => {
             ref: "food:yogurt",
             payload: {
               title: "Greek yogurt",
-              attachedProtocolRefs: ["recipe:breakfast"],
+              attachedRegimenRefs: ["recipe:breakfast"],
             },
           },
         ],
@@ -333,6 +333,6 @@ describe("shares schema coverage", () => {
           },
         },
       }),
-    ).toThrow(/must target protocol share entities|must target a food share entity/u);
+    ).toThrow(/must target regimen share entities|must target a food share entity/u);
   });
 });

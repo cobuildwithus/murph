@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
-import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murphai/core";
+import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertRegimen } from "@murphai/core";
 import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@murphai/inboxd";
 import {
   decodeHostedBundleBase64,
@@ -1692,7 +1692,7 @@ describe("runHostedExecutionJob", () => {
     cleanupPaths.push(sourceVaultRoot);
     await initializeVault({ vaultRoot: sourceVaultRoot });
 
-    const creatine = await upsertProtocolItem({
+    const creatine = await upsertRegimen({
       vaultRoot: sourceVaultRoot,
       title: "Creatine monohydrate",
       kind: "supplement",
@@ -1703,7 +1703,7 @@ describe("runHostedExecutionJob", () => {
       vaultRoot: sourceVaultRoot,
       title: "Morning Smoothie",
       kind: "smoothie",
-      attachedProtocolIds: [creatine.record.entity.protocolId],
+      attachedRegimenIds: [creatine.record.entity.regimenId],
       autoLogDaily: {
         time: "08:00",
       },
@@ -1711,7 +1711,7 @@ describe("runHostedExecutionJob", () => {
     const pack = await buildSharePackFromVault({
       vaultRoot: sourceVaultRoot,
       foods: [{ id: smoothie.record.foodId }],
-      includeAttachedProtocols: true,
+      includeAttachedRegimens: true,
       logMeal: {
         food: { id: smoothie.record.foodId },
       },
@@ -1754,7 +1754,7 @@ describe("runHostedExecutionJob", () => {
     cleanupPaths.push(sourceVaultRoot);
     await initializeVault({ vaultRoot: sourceVaultRoot });
 
-    const supplement = await upsertProtocolItem({
+    const supplement = await upsertRegimen({
       vaultRoot: sourceVaultRoot,
       title: "Magnesium glycinate",
       kind: "supplement",
@@ -1765,7 +1765,7 @@ describe("runHostedExecutionJob", () => {
       vaultRoot: sourceVaultRoot,
       title: "Proxy Smoothie",
       kind: "smoothie",
-      attachedProtocolIds: [supplement.record.entity.protocolId],
+      attachedRegimenIds: [supplement.record.entity.regimenId],
       autoLogDaily: {
         time: "08:00",
       },
@@ -1773,7 +1773,7 @@ describe("runHostedExecutionJob", () => {
     const pack = await buildSharePackFromVault({
       vaultRoot: sourceVaultRoot,
       foods: [{ id: food.record.foodId }],
-      includeAttachedProtocols: true,
+      includeAttachedRegimens: true,
       logMeal: {
         food: { id: food.record.foodId },
       },
@@ -1812,7 +1812,7 @@ describe("runHostedExecutionJob", () => {
 
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(importedFood).toBeDefined();
-      expect(importedFood?.attachedProtocolIds?.length).toBe(1);
+      expect(importedFood?.attachedRegimenIds?.length).toBe(1);
       expectProcessedRunDrainSummary(result.result.summary);
     } finally {
       restoreEnvVar("HOSTED_WEB_BASE_URL", previousHostedWebBaseUrl);

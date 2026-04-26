@@ -117,7 +117,7 @@ describe("experiment detail private-run composition", () => {
     expect(privateRun).toBeNull();
   });
 
-  it("matches browser-vault tracked experiments by canonical protocolRef key", async () => {
+  it("matches browser-vault tracked experiments by canonical commonsProtocolRef key", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
@@ -128,7 +128,7 @@ describe("experiment detail private-run composition", () => {
         trackedExperiments: [{
           frontmatter: createExperimentFrontmatter({
             id: "exp_sauna_protocol_ref",
-            protocolRef: {
+            commonsProtocolRef: {
               key: protocol!.commons!.key,
               pageRevisionId: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
               runSpecRevisionId: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
@@ -437,14 +437,30 @@ function createExperimentFrontmatter(input: {
   startedOn: string;
   status: string;
   title: string;
-  protocolRef?: Record<string, unknown>;
+  commonsProtocolRef?: Record<string, unknown>;
   runPlan?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
     docType: "experiment",
+    commonsProtocolRef: input.commonsProtocolRef,
+    effectiveProtocolSnapshot: input.commonsProtocolRef
+      ? {
+          effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+          doseSignature: "3x/week dry sauna, 15-20 min",
+          modality: "dry_sauna",
+          frequency: {
+            sessionsPerWeek: 3,
+          },
+          durationMinutes: {
+            min: 15,
+            max: 20,
+          },
+          targetSessions: 6,
+          minimumUsefulSessions: 4,
+        }
+      : undefined,
     experimentId: input.id,
     hypothesis: "Test the canonical private-run metadata path.",
-    protocolRef: input.protocolRef,
     runPlan: input.runPlan,
     schemaVersion: "murph.frontmatter.experiment.v1",
     slug: input.slug,

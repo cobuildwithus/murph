@@ -66,7 +66,7 @@ describe("handleHostedShareAcceptedWake", () => {
       assert.ok(result.shareImportResult);
       assert.equal(result.shareImportResult.pack.title, "Breakfast staples");
       assert.equal(result.shareImportResult.foods.length, 1);
-      assert.equal(result.shareImportResult.protocols.length, 0);
+      assert.equal(result.shareImportResult.regimens.length, 0);
       assert.equal(result.shareImportResult.recipes.length, 0);
       assert.equal(result.shareImportResult.meal, null);
 

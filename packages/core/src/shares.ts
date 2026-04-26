@@ -1,7 +1,7 @@
 import {
   assertContract,
   foodUpsertPayloadSchema,
-  protocolUpsertPayloadSchema,
+  regimenUpsertPayloadSchema,
   recipeUpsertPayloadSchema,
   sharePackFoodPayloadSchema,
   sharePackSchema,
@@ -12,16 +12,16 @@ import {
 import { generateRecordId } from "./ids.ts";
 import { addMeal } from "./public-mutations.ts";
 import { foodRecordToBasePayload, readFood, upsertFood } from "./bank/foods.ts";
-import { protocolRecordToUpsertPayload, readProtocolItem, upsertProtocolItem } from "./bank/protocols.ts";
+import { regimenRecordToUpsertPayload, readRegimen, upsertRegimen } from "./bank/regimens.ts";
 import { readRecipe, recipeRecordToUpsertPayload, upsertRecipe } from "./bank/recipes.ts";
 
 import type { DateInput } from "./types.ts";
 import type {
   FoodLink,
   FoodRecord,
-  ProtocolLink,
-  ProtocolItemEntity,
-  ProtocolItemStoredDocument,
+  RegimenLink,
+  RegimenEntity,
+  RegimenStoredDocument,
   RecipeLink,
   RecipeRecord,
 } from "./bank/types.ts";
@@ -36,9 +36,9 @@ export interface BuildSharePackFromVaultInput {
   vaultRoot: string;
   title?: string;
   foods?: ShareEntitySelector[];
-  protocols?: ShareEntitySelector[];
+  regimens?: ShareEntitySelector[];
   recipes?: ShareEntitySelector[];
-  includeAttachedProtocols?: boolean;
+  includeAttachedRegimens?: boolean;
   logMeal?: {
     food?: ShareEntitySelector;
     note?: string;
@@ -54,7 +54,7 @@ export interface ImportSharePackIntoVaultInput {
 export interface ImportSharePackIntoVaultResult {
   pack: SharePack;
   foods: FoodRecord[];
-  protocols: ProtocolItemEntity[];
+  regimens: RegimenEntity[];
   recipes: RecipeRecord[];
   meal: Awaited<ReturnType<typeof addMeal>> | null;
 }
@@ -63,31 +63,31 @@ export async function buildSharePackFromVault(
   input: BuildSharePackFromVaultInput,
 ): Promise<SharePack> {
   const entities: SharePackEntity[] = [];
-  const includeAttachedProtocols = input.includeAttachedProtocols !== false;
-  const protocolRefsById = new Map<string, string>();
+  const includeAttachedRegimens = input.includeAttachedRegimens !== false;
+  const regimenRefsById = new Map<string, string>();
   const foodRefsById = new Map<string, string>();
   const recipeRefsById = new Map<string, string>();
 
-  const addProtocolRecord = (record: ProtocolItemStoredDocument): string => {
-    const existing = protocolRefsById.get(record.entity.protocolId);
+  const addRegimenRecord = (record: RegimenStoredDocument): string => {
+    const existing = regimenRefsById.get(record.entity.regimenId);
 
     if (existing) {
       return existing;
     }
 
-    const ref = buildProtocolRef(record);
+    const ref = buildRegimenRef(record);
     const payload = assertContract(
-      protocolUpsertPayloadSchema,
-      protocolRecordToUpsertPayload(record.entity),
-      `protocol payload ${record.entity.protocolId}`,
+      regimenUpsertPayloadSchema,
+      regimenRecordToUpsertPayload(record.entity),
+      `regimen payload ${record.entity.regimenId}`,
     );
 
     entities.push({
-      kind: "protocol",
+      kind: "regimen",
       ref,
       payload,
     });
-    protocolRefsById.set(record.entity.protocolId, ref);
+    regimenRefsById.set(record.entity.regimenId, ref);
     return ref;
   };
 
@@ -98,25 +98,25 @@ export async function buildSharePackFromVault(
       return existing;
     }
 
-    const attachedProtocolRefs: string[] = [];
+    const attachedRegimenRefs: string[] = [];
 
-    if (includeAttachedProtocols) {
-      for (const protocolId of record.attachedProtocolIds ?? []) {
-        const protocol = await readProtocolItem({
+    if (includeAttachedRegimens) {
+      for (const regimenId of record.attachedRegimenIds ?? []) {
+        const regimen = await readRegimen({
           vaultRoot: input.vaultRoot,
-          protocolId,
+          regimenId,
         });
-        attachedProtocolRefs.push(addProtocolRecord(protocol));
+        attachedRegimenRefs.push(addRegimenRecord(regimen));
       }
     }
 
     const ref = buildFoodRef(record);
-    const { attachedProtocolIds: _attachedProtocolIds, ...foodPayload } = foodRecordToBasePayload(record);
+    const { attachedRegimenIds: _attachedRegimenIds, ...foodPayload } = foodRecordToBasePayload(record);
     const payload = assertContract(
       sharePackFoodPayloadSchema,
       stripUndefined({
         ...foodPayload,
-        attachedProtocolRefs: attachedProtocolRefs.length > 0 ? attachedProtocolRefs : undefined,
+        attachedRegimenRefs: attachedRegimenRefs.length > 0 ? attachedRegimenRefs : undefined,
       }),
       `food payload ${record.foodId}`,
     );
@@ -153,14 +153,14 @@ export async function buildSharePackFromVault(
     return ref;
   };
 
-  for (const selector of input.protocols ?? []) {
-    const protocol = await readProtocolItem({
+  for (const selector of input.regimens ?? []) {
+    const regimen = await readRegimen({
       vaultRoot: input.vaultRoot,
-      protocolId: selector.id,
+      regimenId: selector.id,
       slug: selector.slug,
       group: selector.group,
     });
-    addProtocolRecord(protocol);
+    addRegimenRecord(regimen);
   }
 
   for (const selector of input.recipes ?? []) {
@@ -222,28 +222,28 @@ export async function importSharePackIntoVault(
   input: ImportSharePackIntoVaultInput,
 ): Promise<ImportSharePackIntoVaultResult> {
   const pack = assertContract(sharePackSchema, input.pack, "share pack");
-  const protocolIdsByRef = new Map<string, string>();
+  const regimenIdsByRef = new Map<string, string>();
   const foods: FoodRecord[] = [];
-  const protocols: ProtocolItemEntity[] = [];
+  const regimens: RegimenEntity[] = [];
   const recipes: RecipeRecord[] = [];
 
   for (const entity of pack.entities) {
-    if (entity.kind !== "protocol") {
+    if (entity.kind !== "regimen") {
       continue;
     }
 
-    const payload = assertContract(protocolUpsertPayloadSchema, entity.payload, `protocol ${entity.ref}`);
-    const protocolId = generateRecordId("prot");
-    const result = await upsertProtocolItem({
+    const payload = assertContract(regimenUpsertPayloadSchema, entity.payload, `regimen ${entity.ref}`);
+    const regimenId = generateRecordId("reg");
+    const result = await upsertRegimen({
       vaultRoot: input.vaultRoot,
       ...payload,
-      links: normalizeProtocolLinks(payload.links),
-      protocolId,
-      slug: buildImportedSlug(payload.slug ?? payload.title, protocolId),
+      links: normalizeRegimenLinks(payload.links),
+      regimenId,
+      slug: buildImportedSlug(payload.slug ?? payload.title, regimenId),
     });
 
-    protocolIdsByRef.set(entity.ref, result.record.entity.protocolId);
-    protocols.push(result.record.entity);
+    regimenIdsByRef.set(entity.ref, result.record.entity.regimenId);
+    regimens.push(result.record.entity);
   }
 
   for (const entity of pack.entities) {
@@ -271,21 +271,21 @@ export async function importSharePackIntoVault(
       continue;
     }
 
-    const attachedProtocolIds = (entity.payload.attachedProtocolRefs ?? []).map((ref) => {
-      const protocolId = protocolIdsByRef.get(ref);
+    const attachedRegimenIds = (entity.payload.attachedRegimenRefs ?? []).map((ref) => {
+      const regimenId = regimenIdsByRef.get(ref);
 
-      if (!protocolId) {
-        throw new TypeError(`Food share entity ${entity.ref} references missing protocol ref ${ref}.`);
+      if (!regimenId) {
+        throw new TypeError(`Food share entity ${entity.ref} references missing regimen ref ${ref}.`);
       }
 
-      return protocolId;
+      return regimenId;
     });
-    const { attachedProtocolRefs, ...foodPayload } = entity.payload;
+    const { attachedRegimenRefs, ...foodPayload } = entity.payload;
     const payload = assertContract(
       foodUpsertPayloadSchema,
       stripUndefined({
         ...foodPayload,
-        attachedProtocolIds: attachedProtocolIds.length > 0 ? attachedProtocolIds : undefined,
+        attachedRegimenIds: attachedRegimenIds.length > 0 ? attachedRegimenIds : undefined,
       }),
       `food ${entity.ref}`,
     );
@@ -318,7 +318,7 @@ export async function importSharePackIntoVault(
   return {
     pack,
     foods,
-    protocols,
+    regimens,
     recipes,
     meal,
   };
@@ -332,12 +332,12 @@ function normalizeFoodLinks(
   }
 
   return links.map((link, index) => {
-    if (link.type !== "related_protocol") {
+    if (link.type !== "related_regimen") {
       throw new TypeError(`Food share payload links[${index}] has unsupported type "${link.type}".`);
     }
 
     return {
-      type: "related_protocol",
+      type: "related_regimen",
       targetId: link.targetId,
     } satisfies FoodLink;
   });
@@ -368,9 +368,9 @@ function normalizeRecipeLinks(
   });
 }
 
-function normalizeProtocolLinks(
+function normalizeRegimenLinks(
   links: readonly { type: string; targetId: string }[] | undefined,
-): ProtocolLink[] | undefined {
+): RegimenLink[] | undefined {
   if (!links || links.length === 0) {
     return undefined;
   }
@@ -381,19 +381,19 @@ function normalizeProtocolLinks(
         return {
           type: "supports_goal",
           targetId: link.targetId,
-        } satisfies ProtocolLink;
+        } satisfies RegimenLink;
       case "addresses_condition":
         return {
           type: "addresses_condition",
           targetId: link.targetId,
-        } satisfies ProtocolLink;
-      case "related_protocol":
+        } satisfies RegimenLink;
+      case "related_regimen":
         return {
-          type: "related_protocol",
+          type: "related_regimen",
           targetId: link.targetId,
-        } satisfies ProtocolLink;
+        } satisfies RegimenLink;
       default:
-        throw new TypeError(`Protocol share payload links[${index}] has unsupported type "${link.type}".`);
+        throw new TypeError(`Regimen share payload links[${index}] has unsupported type "${link.type}".`);
     }
   });
 }
@@ -406,8 +406,8 @@ function buildRecipeRef(record: RecipeRecord): string {
   return `recipe:${sanitizeRefSegment(record.slug || record.recipeId)}`;
 }
 
-function buildProtocolRef(record: ProtocolItemStoredDocument): string {
-  return `protocol:${sanitizeRefSegment(record.entity.group)}:${sanitizeRefSegment(record.entity.slug || record.entity.protocolId)}`;
+function buildRegimenRef(record: RegimenStoredDocument): string {
+  return `regimen:${sanitizeRefSegment(record.entity.group)}:${sanitizeRefSegment(record.entity.slug || record.entity.regimenId)}`;
 }
 
 function buildSharedMealNote(input: {

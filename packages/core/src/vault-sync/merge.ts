@@ -617,7 +617,7 @@ export async function mergeVaultSyncImportIntoVault(
   const sessionId = normalizeOpaquePathSegment(input.sessionId, "Vault sync session id");
   const importedAt = input.importedAt ?? new Date();
   const manifest = await readVaultSyncImportManifest(input.importMetaRoot);
-  const excludedFiles = manifest.excluded.length;
+  const excludedFiles = manifest.excluded.reduce((total, entry) => total + entry.count, 0);
   return await withCanonicalWriteLockScope(input.targetVaultRoot, async () => {
     const lock = await acquireCanonicalWriteLock(input.targetVaultRoot);
 

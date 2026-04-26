@@ -4,6 +4,6 @@ export * from "./foods.ts";
 export * from "./goals.ts";
 export * from "./providers.ts";
 export * from "./recipes.ts";
-export * from "./protocols.ts";
+export * from "./regimens.ts";
 export * from "./workout-formats.ts";
 export * from "./types.ts";

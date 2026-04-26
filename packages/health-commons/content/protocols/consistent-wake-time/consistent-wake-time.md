@@ -428,7 +428,9 @@ experimentOnboarding:
       question: "What 60-minute wake/rise window can you realistically keep on most days while still getting enough sleep?"
       constraints:
         maxWindowMinutes: 60
-      writePath: "run.schedule.targetWakeWindow"
+      target:
+        object: experimentRun
+        field: schedule.targetWakeWindow
     -
       id: "sleep_opportunity_plan"
       label: "Sleep-opportunity plan"
@@ -437,7 +439,9 @@ experimentOnboarding:
       askPolicy: "always"
       required: true
       question: "What bedtime or lights-out guardrail will protect enough sleep before that wake window?"
-      writePath: "run.safety.sleepOpportunityPlan"
+      target:
+        object: experimentRun
+        field: safety.sleepOpportunityPlan
     -
       id: "measurement_method"
       label: "Measurement method"
@@ -450,7 +454,9 @@ experimentOnboarding:
         - "sleep_diary"
         - "wearable_plus_diary"
         - "wearable_only"
-      writePath: "run.measurement.method"
+      target:
+        object: experimentRun
+        field: measurement.method
     -
       id: "weekend_recovery_policy"
       label: "Weekend and recovery policy"
@@ -463,7 +469,9 @@ experimentOnboarding:
         - "same_window_when_slept_enough"
         - "protect_sleep_after_short_sleep"
         - "needs_variable_schedule"
-      writePath: "run.safety.weekendRecoveryPolicy"
+      target:
+        object: experimentRun
+        field: safety.weekendRecoveryPolicy
     -
       id: "reminder_policy"
       label: "Reminder policy"
@@ -472,7 +480,9 @@ experimentOnboarding:
       askPolicy: "ask_at_confirmation"
       required: false
       question: "Would you like opt-in morning or weekly reminder support, or no reminders?"
-      writePath: "run.assistant.reminderPolicy"
+      target:
+        object: experimentRun
+        field: assistant.reminderPolicy
   planDefaults:
     testPlanId: "wake-regularity-35d"
     baselineDays: 7

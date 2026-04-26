@@ -11,10 +11,21 @@ import {
   healthListResultSchema,
   healthPayloadSchema,
   healthShowResultSchema,
+  type HealthCoreScaffoldServiceMethodName,
+  type HealthCoreServiceMethods,
+  type HealthCoreUpsertServiceMethodName,
   type HealthCommandDescriptorEntry,
+  type HealthQueryListServiceMethodName,
+  type HealthQueryServiceMethods,
+  type HealthQueryShowServiceMethodName,
 } from "@murphai/vault-usecases";
 import { pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import type { VaultServices } from "@murphai/vault-usecases";
+
+type DescriptorBackedVaultServices = VaultServices & {
+  core: VaultServices["core"] & HealthCoreServiceMethods;
+  query: VaultServices["query"] & HealthQueryServiceMethods;
+};
 
 function requireHealthCommandDescriptor(commandName: string): HealthCommandDescriptorEntry {
   const descriptor = healthEntityDescriptorByCommandName.get(commandName);
@@ -59,17 +70,31 @@ function bindCrudServices(
   services: VaultServices,
   descriptor: HealthCommandDescriptorEntry,
 ) {
-  return bindHealthCrudServices(services, {
+  const descriptorBackedServices = services as DescriptorBackedVaultServices;
+  const methodNames = {
     list: descriptor.query.listServiceMethod,
     scaffold: descriptor.core.scaffoldServiceMethod,
     show: descriptor.query.showServiceMethod,
     upsert: descriptor.core.upsertServiceMethod,
+  } satisfies {
+    list: HealthQueryListServiceMethodName;
+    scaffold: HealthCoreScaffoldServiceMethodName;
+    show: HealthQueryShowServiceMethodName;
+    upsert: HealthCoreUpsertServiceMethodName;
+  };
+
+  return bindHealthCrudServices(descriptorBackedServices, {
+    list: methodNames.list,
+    scaffold: methodNames.scaffold,
+    show: methodNames.show,
+    upsert: methodNames.upsert,
   });
 }
 
 function createHealthEntityCrudConfig(
   services: VaultServices,
   descriptor: HealthCommandDescriptorEntry,
+  options: HealthEntityCrudGroupOptions = {},
 ) {
   return {
     commandName: descriptor.command.commandName,
@@ -79,6 +104,7 @@ function createHealthEntityCrudConfig(
     hints: descriptor.command.hints,
     listFilterCapabilities: descriptor.query.genericListFilterCapabilities,
     listStatusDescription: descriptor.command.listStatusDescription,
+    jsonImportCommandName: options.jsonImportCommandName,
     noun: descriptor.noun,
     outputs: {
       list: healthListResultSchema,
@@ -88,6 +114,7 @@ function createHealthEntityCrudConfig(
     },
     payloadFile: descriptor.command.payloadFile,
     pluralNoun: descriptor.plural,
+    registerUpsert: options.registerUpsert,
     services: bindCrudServices(services, descriptor),
     showId: {
       ...descriptor.command.showId,
@@ -98,6 +125,11 @@ function createHealthEntityCrudConfig(
       },
     },
   };
+}
+
+interface HealthEntityCrudGroupOptions {
+  jsonImportCommandName?: string;
+  registerUpsert?: boolean;
 }
 
 export function registerHealthEntityCrudGroup(
@@ -111,7 +143,8 @@ export function registerHealthEntityCrudGroup(
 export function createHealthEntityCrudGroup(
   services: VaultServices,
   commandName: string,
+  options: HealthEntityCrudGroupOptions = {},
 ) {
   const descriptor = requireHealthCommandDescriptor(commandName);
-  return createHealthCrudGroup(createHealthEntityCrudConfig(services, descriptor));
+  return createHealthCrudGroup(createHealthEntityCrudConfig(services, descriptor, options));
 }
