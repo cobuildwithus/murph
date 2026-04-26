@@ -2,6 +2,7 @@ declare module 'incur' {
   interface Register {
     commands: {
       'allergy list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
+      'allergy save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
       'allergy scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'allergy show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'allergy upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -29,6 +30,7 @@ declare module 'incur' {
       'automation show': { args: { lookup: string }; options: { vault: string; requestId?: string } }
       'automation upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'blood-test list': { args: {}; options: { vault: string; requestId?: string; status?: string; from?: string; to?: string; limit: number } }
+      'blood-test save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; note?: string; tag?: string[]; link?: string[]; rawRef?: string[]; testName: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; specimenType?: string; labName?: string; labPanelId?: string; collectedAt?: string; reportedAt?: string; fastingStatus?: "fasting" | "non_fasting" | "unknown"; result: string[] } }
       'blood-test scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'blood-test show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'blood-test upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -38,11 +40,12 @@ declare module 'incur' {
       'capture show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean } }
       'commons get': { args: { key: string }; options: { type?: string } }
-      'commons protocol list': { args: {}; options: { query?: string; status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community"; category?: string[]; limit: number } }
+      'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }
       'commons search': { args: { query?: string }; options: { text?: string; type?: string[]; limit: number } }
-      'commons source list': { args: {}; options: { query?: string; kind?: "journal_article" | "review" | "guideline" | "book" | "podcast" | "external_protocol" | "web_page" | "other"; protocol?: string; status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community"; limit: number } }
+      'commons source list': { args: {}; options: { query?: string; kind?: string; protocol?: string; status?: string; limit: number } }
       'condition list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
+      'condition save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }
       'condition scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'condition upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -63,22 +66,36 @@ declare module 'incur' {
       'document list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
       'document manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'document show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'event adverse-effect add': { args: {}; options: { vault: string; requestId?: string; substance: string; effect: string; severity?: "mild" | "moderate" | "severe"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'event edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
+      'event encounter add': { args: {}; options: { vault: string; requestId?: string; encounterType: string; location?: string; providerId?: string; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event exposure add': { args: {}; options: { vault: string; requestId?: string; exposureType: string; substance: string; duration?: string; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'event list': { args: {}; options: { vault: string; requestId?: string; kind?: string; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
+      'event medication-intake add': { args: {}; options: { vault: string; requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event note add': { args: {}; options: { vault: string; requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
+      'event observation add': { args: {}; options: { vault: string; requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event procedure add': { args: {}; options: { vault: string; requestId?: string; procedure: string; status?: "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event scaffold': { args: {}; options: { vault: string; requestId?: string; kind: "symptom" | "note" | "observation" | "measurement" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'event upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'event supplement-intake add': { args: {}; options: { vault: string; requestId?: string; supplementName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
+      'event symptom add': { args: {}; options: { vault: string; requestId?: string; symptom: string; severity: number; bodyRegion?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'experiment apply-onboarding': { args: { id: string }; options: { vault: string; requestId?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned"; protocolKey?: string; pageRevisionId?: string; runSpecRevisionId?: string; testPlanId?: string; baselineStart?: string; baselineEnd?: string; baselineDays?: number; interventionStart?: string; interventionEnd?: string; interventionDays?: number; modality?: string; schedule?: string; dose?: string; sessionsPerWeek?: number; targetSessions?: number; minimumUsefulSessions?: number; sessionField?: string[]; confounderField?: string[]; stopCondition?: string[]; primaryBiomarkerKey?: string; secondaryBiomarkerKey?: string[]; desiredDirection?: "increase" | "decrease" | "stabilize"; analysisNote?: string[]; onboardingCompletedAt?: string; setupAnswer?: string[]; safetyCautionLevel?: "low" | "moderate" | "high" | "unknown"; safetyDisposition?: "continue_with_caution" | "clinician_guidance_before_unsupervised_start" | "do_not_start_unsupervised"; positiveQuestionId?: string[]; safetyNote?: string[]; contextNote?: string[]; reminderPolicy?: string; reminderOptionId?: string; remindersEnabled?: boolean; checkInCadence?: "none" | "daily" | "every_3_days" | "weekly"; notificationStyle?: "skip_by_default" | "send_scheduled_summary"; missedLogFollowup?: "never" | "opt_in_only" | "default_on"; weeklyDigestEnabled?: boolean } }
-      'experiment checkpoint': { args: {}; options: { vault: string; requestId?: string; input: string } }
-      'experiment context log': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
+      'experiment checkpoint': { args: { lookup: string }; options: { vault: string; requestId?: string; occurredAt?: string; title?: string; note?: string } }
+      'experiment checkpoint-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'experiment context log': { args: { lookup: string }; options: { vault: string; requestId?: string; kind?: "experiment_context" | "note" | "supplement_intake"; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; contextType?: string; severity?: "info" | "potential_confounder" | "safety" | "blocking"; tag?: string[]; supplementName?: string; dose?: number; unit?: string } }
+      'experiment context log-json': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
       'experiment create': { args: { slug: string }; options: { vault: string; requestId?: string; title?: string; hypothesis?: string; startedOn?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
       'experiment list': { args: {}; options: { vault: string; requestId?: string; limit: number; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
       'experiment outcome analyze': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
       'experiment outcome write': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
+      'experiment plan': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'experiment progress': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
-      'experiment session log': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
+      'experiment session log': { args: { lookup: string }; options: { vault: string; requestId?: string; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; interventionType?: string; status?: "completed" | "partial" | "missed" | "skipped"; sessionStatus?: "completed" | "partial" | "missed" | "skipped"; durationMinutes?: number; protocolId?: string; timing?: string; temperatureC?: number; afterExercise?: boolean; symptoms?: string[]; confounders?: string[]; confounder?: string[] } }
+      'experiment session log-json': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
       'experiment show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'experiment start': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'experiment stop': { args: { id: string }; options: { vault: string; requestId?: string; occurredAt?: string; note?: string } }
       'experiment update': { args: { id: string }; options: { vault: string; requestId?: string; title?: string; hypothesis?: string; startedOn?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned"; body?: string; tag?: string[] } }
       'export pack create': { args: {}; options: { vault: string; requestId?: string; from: string; to: string; experiment?: string; out?: string } }
@@ -87,6 +104,7 @@ declare module 'incur' {
       'export pack prune': { args: { id: string }; options: { vault: string; requestId?: string } }
       'export pack show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'family list': { args: {}; options: { vault: string; requestId?: string; limit: number } }
+      'family save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; relationship: string; condition?: string[]; deceased?: boolean; relatedVariantId?: string[]; note?: string } }
       'family scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'family show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'family upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -94,16 +112,19 @@ declare module 'incur' {
       'food edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
       'food list': { args: {}; options: { vault: string; requestId?: string; status?: "active" | "archived"; limit: number } }
       'food rename': { args: { lookup: string }; options: { vault: string; requestId?: string; title: string; slug?: string } }
+      'food save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "archived"; summary?: string; kind?: string; brand?: string; vendor?: string; location?: string; serving?: string; calories?: number; proteinGrams?: number; carbsGrams?: number; fatGrams?: number; fiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string; alias?: string[]; ingredient?: string[]; tag?: string[]; note?: string; autoLogDailyTime?: string; attachedRegimenId?: string[]; linkRelatedRegimenId?: string[] } }
       'food scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'food schedule': { args: { title: string }; options: { vault: string; requestId?: string; time: string; note?: string; slug?: string } }
       'food show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food unschedule': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'genetics list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
+      'genetics save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; gene: string; zygosity?: "heterozygous" | "homozygous" | "compound_heterozygous" | "unknown"; significance?: "pathogenic" | "likely_pathogenic" | "risk_factor" | "vus" | "benign" | "unknown"; inheritance?: string; sourceFamilyMemberId?: string[]; note?: string } }
       'genetics scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'genetics show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'genetics upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'goal list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
+      'goal save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'goal show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'goal upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -144,7 +165,7 @@ declare module 'incur' {
       'intake project': { args: { id: string }; options: { vault: string; requestId?: string } }
       'intake raw': { args: { id: string }; options: { vault: string; requestId?: string } }
       'intake show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'intervention add': { args: { text: string }; options: { vault: string; requestId?: string; duration?: number; type?: string; protocolId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
+      'intervention add': { args: { text: string }; options: { vault: string; requestId?: string; duration?: number; type?: string; regimenId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
       'intervention delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'intervention edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'journal append': { args: { date: string }; options: { vault: string; requestId?: string; text: string } }
@@ -177,14 +198,13 @@ declare module 'incur' {
       'memory update': { args: { memoryId: string; text: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { vault: string; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex" | "openai-compatible"; providerPreset?: "openai" | "vercel-ai-gateway" | "openrouter" | "venice" | "deepseek" | "groq" | "together" | "fireworks" | "cerebras" | "xai" | "huggingface" | "nvidia" | "ollama" | "lm-studio" | "vllm" | "litellm" | "custom"; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; zeroDataRetention?: boolean; codexCommand?: string; profile?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
-      'protocol list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
-      'protocol scaffold': { args: {}; options: { vault: string; requestId?: string } }
+      'protocol list': { args: {}; options: { vault: string; requestId?: string; status?: string; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'protocol stop': { args: { protocolId: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
       'protocol upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'provider delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'provider edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
       'provider list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
+      'provider save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: string; specialty?: string; organization?: string; location?: string; website?: string; phone?: string; note?: string; alias?: string[]; body?: string } }
       'provider scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'provider show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'provider upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -193,22 +213,31 @@ declare module 'incur' {
       'recipe delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'recipe edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
       'recipe list': { args: {}; options: { vault: string; requestId?: string; status?: "draft" | "saved" | "archived"; limit: number } }
+      'recipe save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "draft" | "saved" | "archived"; summary?: string; cuisine?: string; dishType?: string; source?: string; servings?: number; prepTimeMinutes?: number; cookTimeMinutes?: number; totalTimeMinutes?: number; tag?: string[]; ingredient?: string[]; step?: string[]; relatedGoalId?: string[]; relatedConditionId?: string[]; link?: string[] } }
       'recipe scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'recipe show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'recipe upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'regimen import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'regimen list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
+      'regimen save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; kind: "medication" | "supplement" | "therapy" | "habit"; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; brand?: string; manufacturer?: string; servingSize?: string; substance?: string; dose?: number; unit?: string; ingredientCompound?: string; ingredientLabel?: string; ingredientAmount?: number; ingredientUnit?: string; ingredientNote?: string; ingredientActive?: boolean; group?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
+      'regimen scaffold': { args: {}; options: { vault: string; requestId?: string } }
+      'regimen show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'regimen stop': { args: { regimenId: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
       'research': { args: { prompt: string }; options: { vault: string; requestId?: string; title?: string; chat?: string; browserPath?: string; timeout?: string; waitTimeout?: string } }
       'route estimate': { args: { origin: string; destination: string }; options: { waypoint?: string[]; profile?: "walking" | "cycling" | "driving" | "driving-traffic"; elevation?: boolean; geometry?: boolean; country?: string[]; language?: string; elevationSampleSpacingMeters?: number; maxElevationSamples?: number } }
       'run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
-      'samples add': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'samples add': { args: {}; options: { vault: string; requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string; endAt?: string; durationMinutes?: number } }
       'samples batch list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; limit: number } }
       'samples batch show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'samples import-csv': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
+      'samples import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'samples list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'scheduled-log archive': { args: { lookup: string }; options: { vault: string; requestId?: string } }
       'scheduled-log list': { args: {}; options: { vault: string; requestId?: string; status?: ("active" | "paused" | "archived")[]; text?: string; limit: number } }
       'scheduled-log pause': { args: { lookup: string }; options: { vault: string; requestId?: string } }
       'scheduled-log resume': { args: { lookup: string }; options: { vault: string; requestId?: string } }
+      'scheduled-log save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "archived"; scheduleKind: "at" | "every" | "cron" | "dailyLocal"; scheduleAt?: string; scheduleEveryMs?: number; scheduleCron?: string; scheduleLocalTime?: string; actionKind: "meal.add" | "activity_session.add" | "intervention_session.add" | "measurement.add"; actionTitle?: string; actionNote?: string; actionTag?: string[]; foodId?: string; ingredient?: string[]; nutritionCalories?: number; nutritionProteinGrams?: number; nutritionCarbsGrams?: number; nutritionFatGrams?: number; nutritionFiberGrams?: number; nutritionSource?: "user" | "label" | "database" | "inherited" | "estimated"; nutritionConfidence?: "low" | "medium" | "high"; nutritionSourceDetail?: string; activityType?: string; interventionType?: string; durationMinutes?: number; distanceKm?: number; protocolId?: string; workoutSourceApp?: string; workoutSourceWorkoutId?: string; workoutStartedAt?: string; workoutEndedAt?: string; workoutRoutineId?: string; workoutRoutineName?: string; workoutSessionNote?: string; workoutMedia?: string[]; workoutExercise?: string[]; workoutSet?: string[]; measurementMetric?: string[]; measurementValue?: number[]; measurementUnit?: string[]; measurementQualifier?: string[]; measurementNote?: string[]; summary?: string; tag?: string[]; body?: string } }
       'scheduled-log scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'scheduled-log show': { args: { lookup: string }; options: { vault: string; requestId?: string } }
       'scheduled-log upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
@@ -218,12 +247,13 @@ declare module 'incur' {
       'stop': { args: {}; options: { vault: string; requestId?: string } }
       'supplement compound list': { args: {}; options: { vault: string; requestId?: string; limit: number; status?: string } }
       'supplement compound show': { args: { compound: string }; options: { vault: string; requestId?: string; status?: string } }
+      'supplement import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'supplement list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'supplement rename': { args: { lookup: string }; options: { vault: string; requestId?: string; title: string; slug?: string } }
+      'supplement save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "stopped"; startedOn?: string; stoppedOn?: string; schedule?: string; group?: string; substance?: string; dose?: number; doseUnit?: string; brand?: string; manufacturer?: string; servingSize?: string; compound?: string; ingredientLabel?: string; amount?: number; unit?: string; ingredientActive?: boolean; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[] } }
       'supplement scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'supplement show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'supplement stop': { args: { id: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
-      'supplement upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'sync push': { args: {}; options: { vault: string; requestId?: string; session: string; host: string; dryRun: boolean } }
       'timeline': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId?: string } }

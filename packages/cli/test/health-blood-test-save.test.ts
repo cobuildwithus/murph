@@ -1,0 +1,407 @@
+import assert from "node:assert/strict";
+import { readFile, rm, stat } from "node:fs/promises";
+import path from "node:path";
+
+import { Cli } from "incur";
+import { test } from "vitest";
+
+import { initializeVault } from "@murphai/core";
+import { createUnwiredVaultServices } from "@murphai/vault-usecases";
+
+import { registerBloodTestCommands } from "../src/commands/health-blood-test-save.js";
+import { incurErrorBridge } from "../src/incur-error-bridge.js";
+import {
+  createTempVaultContext,
+  requireData,
+  runInProcessJsonCli,
+} from "./cli-test-helpers.js";
+
+interface CommandSchemaEnvelope {
+  args: {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  options: {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+interface BloodTestSaveResult {
+  vault: string;
+  eventId: string;
+  lookupId: string;
+  ledgerFile?: string;
+  created: boolean;
+}
+
+interface StoredBloodTestEvent {
+  id: string;
+  title: string;
+  kind: string;
+  source?: string;
+  note?: string;
+  tags?: string[];
+  links?: Array<{ type: string; targetId: string }>;
+  rawRefs?: string[];
+  testName: string;
+  resultStatus: string;
+  summary?: string;
+  testCategory?: string;
+  specimenType?: string;
+  labName?: string;
+  labPanelId?: string;
+  collectedAt?: string;
+  reportedAt?: string;
+  fastingStatus?: string;
+  results?: Array<{
+    analyte: string;
+    slug?: string;
+    value?: number;
+    textValue?: string;
+    comparator?: string;
+    unit?: string;
+    flag?: string;
+    biomarkerSlug?: string;
+    referenceRange?: {
+      low?: number;
+      high?: number;
+      text?: string;
+    };
+    note?: string;
+  }>;
+}
+
+function createBloodTestCli() {
+  const cli = Cli.create("vault-cli", {
+    description: "blood-test typed save test cli",
+    version: "0.0.0-test",
+  });
+  cli.use(incurErrorBridge);
+
+  registerBloodTestCommands(cli, createUnwiredVaultServices());
+  return cli;
+}
+
+async function runRawInProcessCli(
+  cli: Cli.Cli,
+  args: string[],
+): Promise<string> {
+  const output: string[] = [];
+  let exitCode: number | null = null;
+
+  await cli.serve(args, {
+    env: process.env,
+    exit(code) {
+      exitCode = code;
+    },
+    stdout(chunk) {
+      output.push(chunk);
+    },
+  });
+
+  assert.equal(exitCode, null);
+  return output.join("").trim();
+}
+
+async function readCommandSchema(
+  cli: Cli.Cli,
+  commandArgs: string[],
+): Promise<CommandSchemaEnvelope> {
+  return JSON.parse(
+    await runRawInProcessCli(cli, [...commandArgs, "--schema", "--format", "json"]),
+  ) as CommandSchemaEnvelope;
+}
+
+async function readLedgerRecords(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<StoredBloodTestEvent[]> {
+  const content = await readFile(path.join(vaultRoot, relativePath), "utf8");
+  return content
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as StoredBloodTestEvent);
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error) {
+      return (error as { code?: string }).code !== "ENOENT";
+    }
+
+    throw error;
+  }
+}
+
+test("blood-test save schema exposes typed fields while blood-test upsert remains the JSON fallback", async () => {
+  const cli = createBloodTestCli();
+
+  const saveSchema = await readCommandSchema(cli, ["blood-test", "save"]);
+  assert.deepEqual(saveSchema.args.required, ["title"]);
+  assert.equal("input" in saveSchema.options.properties, false);
+  assert.equal(saveSchema.options.required?.includes("input") ?? false, false);
+
+  for (const field of [
+    "id",
+    "occurredAt",
+    "recordedAt",
+    "timeZone",
+    "source",
+    "note",
+    "tag",
+    "link",
+    "rawRef",
+    "testName",
+    "resultStatus",
+    "summary",
+    "specimenType",
+    "labName",
+    "labPanelId",
+    "collectedAt",
+    "reportedAt",
+    "fastingStatus",
+    "result",
+  ]) {
+    assert.equal(field in saveSchema.options.properties, true, field);
+  }
+
+  const upsertSchema = await readCommandSchema(cli, ["blood-test", "upsert"]);
+  assert.equal("input" in upsertSchema.options.properties, true);
+  assert.equal(upsertSchema.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(upsertSchema.args.required ?? [], []);
+});
+
+test("blood-test save maps typed fields and can revise a saved event id", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const savedResult = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Functional health panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--recorded-at",
+      "2026-03-12T14:00:00.000Z",
+      "--time-zone",
+      "America/New_York",
+      "--source",
+      "manual",
+      "--note",
+      "Drawn before breakfast.",
+      "--tag",
+      "cardio",
+      "--tag",
+      "baseline",
+      "--link",
+      "supports_goal:goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      "--raw-ref",
+      "raw/labs/panel.pdf",
+      "--test-name",
+      "functional_health_panel",
+      "--result-status",
+      "mixed",
+      "--summary",
+      "Two lipid markers reviewed.",
+      "--specimen-type",
+      "serum",
+      "--lab-name",
+      "Function Health",
+      "--lab-panel-id",
+      "panel-2026-03",
+      "--collected-at",
+      "2026-03-12T12:00:00.000Z",
+      "--reported-at",
+      "2026-03-13T12:00:00.000Z",
+      "--fasting-status",
+      "fasting",
+      "--result",
+      "analyte=Apolipoprotein B;slug=apob;value=87;unit=mg/dL;flag=normal;biomarkerSlug=apolipoprotein-b;referenceRange.text=<90;note=Target range",
+      "--result",
+      "analyte=LDL Cholesterol;value=134;comparator=>;unit=mg/dL;flag=high;referenceRange.low=0;referenceRange.high=99",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(savedResult.exitCode, null, JSON.stringify(savedResult.envelope));
+
+    const saved = requireData(savedResult.envelope);
+    assert.equal(saved.created, true);
+    assert.equal(saved.lookupId, saved.eventId);
+    assert.equal(saved.ledgerFile, "ledger/events/2026/2026-03.jsonl");
+
+    const records = await readLedgerRecords(vaultRoot, saved.ledgerFile);
+    const event = records[0];
+    assert.equal(event?.id, saved.eventId);
+    assert.equal(event?.title, "Functional health panel");
+    assert.equal(event?.kind, "test");
+    assert.equal(event?.source, "manual");
+    assert.equal(event?.note, "Drawn before breakfast.");
+    assert.deepEqual(event?.tags, ["baseline", "cardio"]);
+    assert.deepEqual(event?.links, [
+      {
+        type: "supports_goal",
+        targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      },
+    ]);
+    assert.deepEqual(event?.rawRefs, ["raw/labs/panel.pdf"]);
+    assert.equal(event?.testName, "functional_health_panel");
+    assert.equal(event?.resultStatus, "mixed");
+    assert.equal(event?.summary, "Two lipid markers reviewed.");
+    assert.equal(event?.testCategory, "blood");
+    assert.equal(event?.specimenType, "serum");
+    assert.equal(event?.labName, "Function Health");
+    assert.equal(event?.labPanelId, "panel-2026-03");
+    assert.equal(event?.collectedAt, "2026-03-12T12:00:00.000Z");
+    assert.equal(event?.reportedAt, "2026-03-13T12:00:00.000Z");
+    assert.equal(event?.fastingStatus, "fasting");
+    assert.deepEqual(event?.results, [
+      {
+        analyte: "Apolipoprotein B",
+        slug: "apob",
+        value: 87,
+        unit: "mg/dL",
+        flag: "normal",
+        biomarkerSlug: "apolipoprotein-b",
+        referenceRange: {
+          text: "<90",
+        },
+        note: "Target range",
+      },
+      {
+        analyte: "LDL Cholesterol",
+        value: 134,
+        comparator: ">",
+        unit: "mg/dL",
+        flag: "high",
+        referenceRange: {
+          low: 0,
+          high: 99,
+        },
+      },
+    ]);
+
+    const revisedResult = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Functional health panel revised",
+      "--id",
+      saved.eventId,
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "functional_health_panel",
+      "--result",
+      "analyte=Ferritin;textValue=not tested;flag=unknown",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(revisedResult.exitCode, null, JSON.stringify(revisedResult.envelope));
+    assert.equal(requireData(revisedResult.envelope).eventId, saved.eventId);
+
+    const revisedRecords = await readLedgerRecords(vaultRoot, saved.ledgerFile);
+    assert.equal(revisedRecords.length, 2);
+    assert.equal(revisedRecords[1]?.id, saved.eventId);
+    assert.equal(revisedRecords[1]?.title, "Functional health panel revised");
+    assert.deepEqual(revisedRecords[1]?.results, [
+      {
+        analyte: "Ferritin",
+        textValue: "not tested",
+        flag: "unknown",
+      },
+    ]);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test save rejects malformed typed results without writing an event", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-invalid-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Malformed panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "malformed_panel",
+      "--result",
+      "analyte=Ferritin;unit=ng/mL",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.match(result.envelope.error.message ?? "", /Invalid --result/u);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test save rejects non-vault raw refs before writing an event", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-invalid-raw-ref-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Panel with invalid raw ref",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "invalid_raw_ref_panel",
+      "--raw-ref",
+      "/tmp/lab.pdf",
+      "--result",
+      "analyte=Ferritin;value=45;unit=ng/mL",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "VALIDATION_ERROR");
+    assert.match(result.envelope.error.message ?? "", /raw/i);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});

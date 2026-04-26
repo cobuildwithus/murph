@@ -41,12 +41,15 @@ import { registerInterventionCommands } from './commands/intervention.js'
 import { registerExportCommands } from './commands/export.js'
 import {
   createHealthUpsertResultSchema,
-  registerHealthEntityCrudGroup,
 } from './commands/health-entity-command-registry.js'
 import {
   allergySaveResultSchema,
   registerAllergyCommands,
 } from './commands/health-allergy-save.js'
+import {
+  bloodTestSaveResultSchema,
+  registerBloodTestCommands,
+} from './commands/health-blood-test-save.js'
 import {
   familySaveResultSchema,
   registerFamilyCommands,
@@ -94,7 +97,14 @@ import { registerReadCommands } from './commands/read.js'
 import { registerProtocolCommands } from './commands/protocol.js'
 import { registerSamplesCommands } from './commands/samples.js'
 import { registerSearchCommands } from './commands/search.js'
-import { registerScheduledLogCommands } from './commands/scheduled-log.js'
+import {
+  registerScheduledLogCommands,
+  scheduledLogListResultSchema,
+  scheduledLogScaffoldResultSchema,
+  scheduledLogShowResultSchema,
+  scheduledLogStatusResultSchema,
+  scheduledLogUpsertResultSchema,
+} from './commands/scheduled-log.js'
 import { registerSyncCommands, syncPushResultSchema } from './commands/sync.js'
 import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
@@ -323,17 +333,6 @@ function buildHealthCommandManifestDescriptor(input: {
   }
 }
 
-const genericHealthCommandDescriptors = genericHealthRootCommandNames.map(
-  (commandName) =>
-    buildHealthCommandManifestDescriptor({
-      commandName,
-      additionalLeafCommands: createTypedHealthSaveLeafCommands(commandName),
-      register({ cli, services }) {
-        registerHealthCommands(cli, services, commandName)
-      },
-    }),
-)
-
 const typedHealthSaveCommands = {
   goal: {
     description: 'Create or update one goal from typed command fields.',
@@ -350,6 +349,11 @@ const typedHealthSaveCommands = {
     output: allergySaveResultSchema,
     register: registerAllergyCommands,
   },
+  'blood-test': {
+    description: 'Create or update one blood-test event from typed command fields.',
+    output: bloodTestSaveResultSchema,
+    register: registerBloodTestCommands,
+  },
   family: {
     description: 'Create or update one family member from typed command fields.',
     output: familySaveResultSchema,
@@ -361,7 +365,7 @@ const typedHealthSaveCommands = {
     register: registerGeneticsCommands,
   },
 } satisfies Record<
-  Exclude<GenericHealthRootCommandName, 'blood-test'>,
+  GenericHealthRootCommandName,
   {
     description: string
     output: z.ZodType<unknown>
@@ -369,13 +373,20 @@ const typedHealthSaveCommands = {
   }
 >
 
+const genericHealthCommandDescriptors = genericHealthRootCommandNames.map(
+  (commandName) =>
+    buildHealthCommandManifestDescriptor({
+      commandName,
+      additionalLeafCommands: createTypedHealthSaveLeafCommands(commandName),
+      register({ cli, services }) {
+        registerHealthCommands(cli, services, commandName)
+      },
+    }),
+)
+
 function createTypedHealthSaveLeafCommands(
   commandName: GenericHealthRootCommandName,
 ): readonly VaultCliLeafCommandDescriptor[] | undefined {
-  if (commandName === 'blood-test') {
-    return undefined
-  }
-
   const command = typedHealthSaveCommands[commandName]
   return [
     {
@@ -391,11 +402,6 @@ function registerHealthCommands(
   services: VaultServices,
   commandName: GenericHealthRootCommandName,
 ) {
-  if (commandName === 'blood-test') {
-    registerHealthEntityCrudGroup(cli, services, commandName)
-    return
-  }
-
   typedHealthSaveCommands[commandName].register(cli, services)
 }
 
@@ -447,6 +453,49 @@ export const vaultCliCommandDescriptors = [
     id: 'scheduled-log',
     bindingMode: 'none',
     rootCommandNames: ['scheduled-log'],
+    leafCommands: [
+      {
+        path: ['scheduled-log', 'scaffold'],
+        description: 'Emit an advanced scheduled-log JSON payload template for import fallback use.',
+        output: scheduledLogScaffoldResultSchema,
+      },
+      {
+        path: ['scheduled-log', 'save'],
+        description: 'Create or update one scheduled log from typed command fields.',
+        output: scheduledLogUpsertResultSchema,
+      },
+      {
+        path: ['scheduled-log', 'show'],
+        description: 'Show one scheduled log by id or slug.',
+        output: scheduledLogShowResultSchema,
+      },
+      {
+        path: ['scheduled-log', 'list'],
+        description: 'List scheduled logs with optional filters.',
+        output: scheduledLogListResultSchema,
+      },
+      {
+        path: ['scheduled-log', 'upsert'],
+        description: 'Import or bulk-edit one scheduled log from an advanced JSON payload.',
+        hint: 'Prefer scheduled-log save for canonical typed create/update usage.',
+        output: scheduledLogUpsertResultSchema,
+      },
+      {
+        path: ['scheduled-log', 'pause'],
+        description: 'Pause a scheduled log.',
+        output: scheduledLogStatusResultSchema,
+      },
+      {
+        path: ['scheduled-log', 'resume'],
+        description: 'Resume a scheduled log.',
+        output: scheduledLogStatusResultSchema,
+      },
+      {
+        path: ['scheduled-log', 'archive'],
+        description: 'Archive a scheduled log.',
+        output: scheduledLogStatusResultSchema,
+      },
+    ],
     register({ cli }) {
       registerScheduledLogCommands(cli)
     },
@@ -786,7 +835,11 @@ export const vaultCliCommandDescriptors = [
     leafCommands: [
       {
         path: ['provider', 'scaffold'],
-        description: 'Emit a provider payload template for `provider upsert`.',
+        description: 'Emit an advanced provider JSON payload template for import fallback use.',
+      },
+      {
+        path: ['provider', 'save'],
+        description: 'Create or update one provider from typed command fields.',
       },
       {
         path: ['provider', 'show'],
@@ -798,7 +851,8 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['provider', 'upsert'],
-        description: 'Create or update one provider Markdown record from a JSON payload file or stdin.',
+        description: 'Import or bulk-edit one provider Markdown record from a JSON payload file or stdin.',
+        hint: 'Prefer provider save for canonical typed create/update usage.',
       },
       {
         path: ['provider', 'edit'],
@@ -824,7 +878,11 @@ export const vaultCliCommandDescriptors = [
     leafCommands: [
       {
         path: ['recipe', 'scaffold'],
-        description: 'Emit a recipe payload template for `recipe upsert`.',
+        description: 'Emit an advanced recipe JSON payload template for import fallback use.',
+      },
+      {
+        path: ['recipe', 'save'],
+        description: 'Create or update one recipe from typed command fields.',
       },
       {
         path: ['recipe', 'show'],
@@ -836,7 +894,8 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['recipe', 'upsert'],
-        description: 'Create or update one recipe Markdown record from a JSON payload file or stdin.',
+        description: 'Import or bulk-edit one recipe Markdown record from a JSON payload file or stdin.',
+        hint: 'Prefer recipe save for canonical typed create/update usage.',
       },
       {
         path: ['recipe', 'edit'],
@@ -866,7 +925,11 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['food', 'scaffold'],
-        description: 'Emit a food payload template for `food upsert`.',
+        description: 'Emit an advanced food JSON payload template for import fallback use.',
+      },
+      {
+        path: ['food', 'save'],
+        description: 'Create or update one food from typed command fields.',
       },
       {
         path: ['food', 'show'],
@@ -874,7 +937,8 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['food', 'upsert'],
-        description: 'Create or update one food Markdown record from a JSON payload file or stdin.',
+        description: 'Import or bulk-edit one food Markdown record from a JSON payload file or stdin.',
+        hint: 'Prefer food save for canonical typed create/update usage.',
       },
       {
         path: ['food', 'edit'],
@@ -919,8 +983,44 @@ export const vaultCliCommandDescriptors = [
         description: 'Show one canonical event by event id.',
       },
       {
-        path: ['event', 'upsert'],
-        description: 'Create or update one canonical event from a JSON payload file or stdin.',
+        path: ['event', 'import-json'],
+        description: 'Import one canonical event from an explicit JSON payload file or stdin.',
+      },
+      {
+        path: ['event', 'note', 'add'],
+        description: 'Append one canonical note event from typed fields.',
+      },
+      {
+        path: ['event', 'symptom', 'add'],
+        description: 'Append one canonical symptom event from typed fields.',
+      },
+      {
+        path: ['event', 'observation', 'add'],
+        description: 'Append one canonical observation event from typed fields.',
+      },
+      {
+        path: ['event', 'medication-intake', 'add'],
+        description: 'Append one canonical medication intake event from typed fields.',
+      },
+      {
+        path: ['event', 'supplement-intake', 'add'],
+        description: 'Append one canonical supplement intake event from typed fields.',
+      },
+      {
+        path: ['event', 'encounter', 'add'],
+        description: 'Append one canonical encounter history event from typed fields.',
+      },
+      {
+        path: ['event', 'procedure', 'add'],
+        description: 'Append one canonical procedure history event from typed fields.',
+      },
+      {
+        path: ['event', 'adverse-effect', 'add'],
+        description: 'Append one canonical adverse-effect history event from typed fields.',
+      },
+      {
+        path: ['event', 'exposure', 'add'],
+        description: 'Append one canonical exposure history event from typed fields.',
       },
       {
         path: ['event', 'edit'],
@@ -1034,6 +1134,14 @@ export const vaultCliCommandDescriptors = [
         description: 'Create a baseline experiment document.',
       },
       {
+        path: ['experiment', 'plan'],
+        description: 'Validate an explicit experiment start plan payload without writing vault records.',
+      },
+      {
+        path: ['experiment', 'start'],
+        description: 'Start an explicit experiment plan payload, creating or reusing a private protocol when requested.',
+      },
+      {
         path: ['experiment', 'show'],
         description: 'Show one experiment by canonical id or slug.',
       },
@@ -1043,11 +1151,15 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['experiment', 'update'],
-        description: 'Update one experiment frontmatter/body payload from a JSON payload file or stdin.',
+        description: 'Update simple scalar experiment fields by id or slug.',
       },
       {
         path: ['experiment', 'checkpoint'],
-        description: 'Append one experiment checkpoint event from a JSON payload file or stdin.',
+        description: 'Append one experiment checkpoint event using typed fields.',
+      },
+      {
+        path: ['experiment', 'checkpoint-json'],
+        description: 'Advanced JSON import escape hatch for appending one experiment checkpoint event from a payload file or stdin.',
       },
       {
         path: ['experiment', 'stop'],
@@ -1059,11 +1171,19 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['experiment', 'session', 'log'],
-        description: 'Log one structured intervention session for an experiment from a JSON payload file or stdin.',
+        description: 'Log one structured intervention session for an experiment using typed fields.',
+      },
+      {
+        path: ['experiment', 'session', 'log-json'],
+        description: 'Advanced JSON import escape hatch for logging one structured intervention session from a payload file or stdin.',
       },
       {
         path: ['experiment', 'context', 'log'],
-        description: 'Log one experiment-linked context record from a JSON payload file or stdin.',
+        description: 'Log one experiment-linked context, note, or supplement-intake record using typed fields.',
+      },
+      {
+        path: ['experiment', 'context', 'log-json'],
+        description: 'Advanced JSON import escape hatch for logging one experiment-linked context record from a payload file or stdin.',
       },
       {
         path: ['experiment', 'outcome', 'analyze'],
@@ -1077,11 +1197,16 @@ export const vaultCliCommandDescriptors = [
     directVaultServiceBindings: {
       core: [
         'createExperiment',
+        'planExperiment',
+        'startExperiment',
         'updateExperiment',
         'checkpointExperiment',
+        'checkpointExperimentJson',
         'stopExperiment',
         'logExperimentSession',
+        'logExperimentSessionJson',
         'logExperimentContext',
+        'logExperimentContextJson',
         'writeExperimentOutcome',
       ],
       query: [
@@ -1320,8 +1445,16 @@ export const vaultCliCommandDescriptors = [
         output: healthShowResultSchema,
       },
       {
-        path: ['supplement', 'upsert'],
-        description: 'Upsert one supplement from a JSON payload file or stdin.',
+        path: ['supplement', 'import-json'],
+        description: 'Import one supplement from an explicit JSON payload file or stdin.',
+      },
+      {
+        path: ['supplement', 'save'],
+        description: 'Create or update one supplement from typed command fields.',
+      },
+      {
+        path: ['supplement', 'rename'],
+        description: 'Rename one supplement product while preserving its canonical id.',
       },
       {
         path: ['supplement', 'stop'],
@@ -1337,7 +1470,12 @@ export const vaultCliCommandDescriptors = [
       },
     ],
     directVaultServiceBindings: {
-      core: ['scaffoldSupplement', 'upsertSupplement', 'stopSupplement'],
+      core: [
+        'scaffoldSupplement',
+        'upsertSupplement',
+        'renameSupplement',
+        'stopSupplement',
+      ],
       query: [
         'showSupplement',
         'listSupplements',
@@ -1349,15 +1487,66 @@ export const vaultCliCommandDescriptors = [
       registerSupplementCommands(cli, services)
     },
   },
-  buildHealthCommandManifestDescriptor({
-    commandName: 'protocol',
-    additionalVaultServiceBindings: {
-      core: ['stopProtocol'],
+  {
+    id: 'regimen-protocol',
+    bindingMode: 'direct',
+    rootCommandNames: ['regimen', 'protocol'],
+    leafCommands: [
+      {
+        path: ['regimen', 'scaffold'],
+        description: 'Print a starter regimen JSON payload.',
+      },
+      {
+        path: ['regimen', 'list'],
+        description: 'List private regimen records.',
+      },
+      {
+        path: ['regimen', 'show'],
+        description: 'Show one private regimen record.',
+      },
+      {
+        path: ['regimen', 'import-json'],
+        description: 'Import one regimen from an explicit JSON payload file or stdin.',
+      },
+      {
+        path: ['regimen', 'save'],
+        description: 'Create or update one regimen from typed command fields.',
+      },
+      {
+        path: ['regimen', 'stop'],
+        description: 'Stop one regimen while preserving its canonical id.',
+      },
+      {
+        path: ['protocol', 'upsert'],
+        description: 'Create or update one private Health Commons-backed protocol adaptation from JSON.',
+      },
+      {
+        path: ['protocol', 'list'],
+        description: 'List private Health Commons-backed protocol adaptations.',
+      },
+      {
+        path: ['protocol', 'show'],
+        description: 'Show one private Health Commons-backed protocol adaptation.',
+      },
+    ],
+    directVaultServiceBindings: {
+      core: [
+        'scaffoldRegimen',
+        'upsertRegimen',
+        'stopRegimen',
+        'upsertPrivateProtocol',
+      ],
+      query: [
+        'showRegimen',
+        'listRegimens',
+        'showPrivateProtocol',
+        'listPrivateProtocols',
+      ],
     },
     register({ cli, services }) {
       registerProtocolCommands(cli, services)
     },
-  }),
+  },
 ] as const satisfies readonly VaultCliCommandDescriptor[]
 
 function assertValidVaultCliCommandManifest(
