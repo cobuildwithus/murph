@@ -86,8 +86,35 @@ function requireSavedPath(result: ConditionSaveResult): string {
   return result.path;
 }
 
-test("condition save schema exposes typed condition fields", async () => {
-  const schema = await readCommandSchema(createConditionCli(), ["condition", "save"]);
+function hasCommandMap(value: unknown): value is { commands: Map<string, unknown> } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "commands" in value &&
+    value.commands instanceof Map
+  );
+}
+
+function requireConditionCommandNames(cli: Cli.Cli): string[] {
+  const commands = Cli.toCommands.get(cli);
+  const condition = commands?.get("condition");
+
+  if (!hasCommandMap(condition)) {
+    throw new Error("Expected condition command group to be registered.");
+  }
+
+  return [...condition.commands.keys()].map((name) => `condition ${name}`);
+}
+
+test("condition save schema exposes typed fields while condition import-json is the JSON fallback", async () => {
+  const cli = createConditionCli();
+
+  const conditionCommandNames = requireConditionCommandNames(cli);
+  assert.equal(conditionCommandNames.includes("condition save"), true);
+  assert.equal(conditionCommandNames.includes("condition import-json"), true);
+  assert.equal(conditionCommandNames.includes("condition upsert"), false);
+
+  const schema = await readCommandSchema(cli, ["condition", "save"]);
 
   assert.deepEqual(schema.args.required, ["title"]);
   assert.equal("input" in schema.options.properties, false);
@@ -108,6 +135,11 @@ test("condition save schema exposes typed condition fields", async () => {
   ]) {
     assert.equal(field in schema.options.properties, true, field);
   }
+
+  const jsonFallback = await readCommandSchema(cli, ["condition", "import-json"]);
+  assert.equal("input" in jsonFallback.options.properties, true);
+  assert.equal(jsonFallback.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(jsonFallback.args.required ?? [], []);
 });
 
 test("condition save persists typed fields and preserves omitted fields on update", async () => {

@@ -223,6 +223,32 @@ function examplesFor<
   return config.examples?.[command] ?? defaultExamplesByCommand[command](config)
 }
 
+function jsonImportExamplesFor<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(
+  config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>,
+) {
+  const examples = examplesFor(config, 'upsert')
+
+  if ((config.jsonImportCommandName ?? 'upsert') === 'upsert') {
+    return examples
+  }
+
+  return examples.map((example) => {
+    if (typeof example.description !== 'string') {
+      return example
+    }
+
+    return {
+      ...example,
+      description: example.description.replace(/^Upsert one /u, 'Import one '),
+    }
+  })
+}
+
 function hintFor<
   TScaffold,
   TUpsert extends object,
@@ -233,6 +259,21 @@ function hintFor<
   command: keyof CrudHints,
 ) {
   return config.hints?.[command] ?? defaultHintsByCommand[command]?.(config)
+}
+
+function jsonImportDescriptionFor<
+  TScaffold,
+  TUpsert extends object,
+  TShow,
+  TList,
+>(
+  config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>,
+) {
+  if ((config.jsonImportCommandName ?? 'upsert') === 'upsert') {
+    return config.descriptions.upsert
+  }
+
+  return `Import one ${config.noun} from a JSON payload file or stdin.`
 }
 
 function bindServiceMethod<
@@ -357,6 +398,8 @@ export function registerHealthCrudCommands<
   TShow,
   TList,
 >(config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>) {
+  const jsonInputCommandName = config.jsonImportCommandName ?? 'upsert'
+
   config.group.command('scaffold', {
     args: emptyArgsSchema,
     description: config.descriptions.scaffold,
@@ -376,11 +419,11 @@ export function registerHealthCrudCommands<
     },
   })
 
-  if (config.registerUpsert !== false) {
-    config.group.command('upsert', {
+  if (config.registerUpsert !== false || config.jsonImportCommandName !== undefined) {
+    config.group.command(jsonInputCommandName, {
       args: emptyArgsSchema,
-      description: config.descriptions.upsert,
-      examples: examplesFor(config, 'upsert'),
+      description: jsonImportDescriptionFor(config),
+      examples: jsonImportExamplesFor(config),
       hint: hintFor(config, 'upsert'),
       options: withBaseOptions({
         input: inputFileOptionSchema,

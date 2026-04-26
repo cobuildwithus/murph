@@ -1,11 +1,11 @@
 declare module 'incur' {
   interface Register {
     commands: {
+      'allergy import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'allergy list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'allergy save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
       'allergy scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'allergy show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'allergy upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'assistant ask': { args: { prompt: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean; deliverResponse?: boolean; deliveryTarget?: string } }
       'assistant chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean } }
       'assistant deliver': { args: { message: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
@@ -44,11 +44,11 @@ declare module 'incur' {
       'commons protocol show': { args: { key: string }; options: {} }
       'commons search': { args: { query?: string }; options: { text?: string; type?: string[]; limit: number } }
       'commons source list': { args: {}; options: { query?: string; kind?: string; protocol?: string; status?: string; limit: number } }
+      'condition import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'condition list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'condition save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; clinicalStatus?: "active" | "inactive" | "resolved"; verificationStatus?: "unconfirmed" | "provisional" | "confirmed" | "refuted"; assertedOn?: string; resolvedOn?: string; severity?: "mild" | "moderate" | "severe"; bodySite?: string[]; relatedGoalId?: string[]; relatedRegimenId?: string[]; note?: string } }
       'condition scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'condition show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'condition upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'deepthink': { args: { prompt: string }; options: { vault: string; requestId?: string; title?: string; chat?: string; browserPath?: string; timeout?: string; waitTimeout?: string } }
       'device account disconnect': { args: { accountId: string }; options: { vault: string; requestId?: string; baseUrl?: string } }
       'device account list': { args: {}; options: { vault: string; requestId?: string; baseUrl?: string; provider?: string } }
@@ -103,11 +103,11 @@ declare module 'incur' {
       'export pack materialize': { args: { id: string }; options: { vault: string; requestId?: string; out?: string } }
       'export pack prune': { args: { id: string }; options: { vault: string; requestId?: string } }
       'export pack show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'family import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'family list': { args: {}; options: { vault: string; requestId?: string; limit: number } }
       'family save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; relationship: string; condition?: string[]; deceased?: boolean; relatedVariantId?: string[]; note?: string } }
       'family scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'family show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'family upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'food delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[] } }
       'food list': { args: {}; options: { vault: string; requestId?: string; status?: "active" | "archived"; limit: number } }
@@ -118,16 +118,16 @@ declare module 'incur' {
       'food show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food unschedule': { args: { id: string }; options: { vault: string; requestId?: string } }
       'food upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'genetics import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'genetics list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'genetics save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; gene: string; zygosity?: "heterozygous" | "homozygous" | "compound_heterozygous" | "unknown"; significance?: "pathogenic" | "likely_pathogenic" | "risk_factor" | "vus" | "benign" | "unknown"; inheritance?: string; sourceFamilyMemberId?: string[]; note?: string } }
       'genetics scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'genetics show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'genetics upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
+      'goal import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'goal list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'goal save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'goal show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'goal upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'inbox attachment decode': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox attachment inspect': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox attachment list': { args: { captureId: string }; options: { vault: string; requestId?: string; limit?: number } }

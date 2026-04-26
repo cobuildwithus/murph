@@ -119,7 +119,7 @@ async function listMarkdownFiles(directory: string): Promise<string[]> {
   return markdownFiles;
 }
 
-test("genetics save schema exposes typed variant fields while upsert remains the JSON fallback", async () => {
+test("genetics save schema exposes typed variant fields while import-json remains the JSON fallback", async () => {
   const cli = createGeneticsCli();
 
   const geneticsSave = await readCommandSchema(cli, ["genetics", "save"]);
@@ -141,10 +141,27 @@ test("genetics save schema exposes typed variant fields while upsert remains the
     assert.equal(field in geneticsSave.options.properties, true, field);
   }
 
-  const geneticsJsonFallback = await readCommandSchema(cli, ["genetics", "upsert"]);
+  const geneticsJsonFallback = await readCommandSchema(cli, [
+    "genetics",
+    "import-json",
+  ]);
   assert.equal("input" in geneticsJsonFallback.options.properties, true);
   assert.equal(geneticsJsonFallback.options.required?.includes("input") ?? false, true);
   assert.deepEqual(geneticsJsonFallback.args.required ?? [], []);
+
+  const geneticsUpsertResult = await runInProcessJsonCli(cli, [
+    "genetics",
+    "upsert",
+  ]);
+  assert.notEqual(geneticsUpsertResult.exitCode, null);
+  assert.equal(geneticsUpsertResult.envelope.ok, false);
+  if (!geneticsUpsertResult.envelope.ok) {
+    assert.equal(geneticsUpsertResult.envelope.error.code, "COMMAND_NOT_FOUND");
+    assert.match(
+      geneticsUpsertResult.envelope.error.message ?? "",
+      /'upsert' is not a command/u,
+    );
+  }
 });
 
 test("genetics save persists typed fields and repeated source family members", async () => {

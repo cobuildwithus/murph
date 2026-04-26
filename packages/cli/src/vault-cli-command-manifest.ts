@@ -191,6 +191,14 @@ const genericHealthRootCommandNames = [
   'genetics',
 ] as const
 type GenericHealthRootCommandName = typeof genericHealthRootCommandNames[number]
+type HealthJsonInputCommandName = 'import-json' | 'upsert'
+const healthJsonImportRootCommandNames = new Set<GenericHealthRootCommandName>([
+  'allergy',
+  'condition',
+  'family',
+  'genetics',
+  'goal',
+])
 
 function orderedUniqueStrings<TValue extends string>(
   values: readonly TValue[],
@@ -224,6 +232,7 @@ function createHealthLeafCommands(
   descriptor: HealthCommandDescriptorEntry,
   options: {
     includeUpsert?: boolean
+    jsonInputCommandName?: HealthJsonInputCommandName
   } = {},
 ): readonly VaultCliLeafCommandDescriptor[] {
   const leafCommands: VaultCliLeafCommandDescriptor[] = [
@@ -251,9 +260,14 @@ function createHealthLeafCommands(
   ]
 
   if (options.includeUpsert !== false) {
+    const jsonInputCommandName = options.jsonInputCommandName ?? 'upsert'
+
     leafCommands.push({
-      path: [descriptor.command.commandName, 'upsert'],
-      description: descriptor.command.descriptions.upsert,
+      path: [descriptor.command.commandName, jsonInputCommandName],
+      description:
+        jsonInputCommandName === 'import-json'
+          ? `Import one ${descriptor.noun} from a JSON payload file or stdin.`
+          : descriptor.command.descriptions.upsert,
       examples: descriptor.command.examples?.upsert,
       hint: descriptor.command.hints?.upsert,
       output: createHealthUpsertResultSchema(descriptor),
@@ -303,6 +317,7 @@ function buildHealthCommandManifestDescriptor(input: {
   additionalVaultServiceBindings?: DirectVaultServiceBindings
   additionalLeafCommands?: readonly VaultCliLeafCommandDescriptor[]
   includeUpsert?: boolean
+  jsonInputCommandName?: HealthJsonInputCommandName
 }): DirectBindingCommandDescriptor {
   const descriptor = requireHealthCommandDescriptor(input.commandName)
 
@@ -313,6 +328,7 @@ function buildHealthCommandManifestDescriptor(input: {
     leafCommands: [
       ...createHealthLeafCommands(descriptor, {
         includeUpsert: input.includeUpsert,
+        jsonInputCommandName: input.jsonInputCommandName,
       }),
       ...(input.additionalLeafCommands ?? []),
     ],
@@ -377,6 +393,9 @@ const genericHealthCommandDescriptors = genericHealthRootCommandNames.map(
   (commandName) =>
     buildHealthCommandManifestDescriptor({
       commandName,
+      jsonInputCommandName: healthJsonImportRootCommandNames.has(commandName)
+        ? 'import-json'
+        : undefined,
       additionalLeafCommands: createTypedHealthSaveLeafCommands(commandName),
       register({ cli, services }) {
         registerHealthCommands(cli, services, commandName)

@@ -202,7 +202,7 @@ test("goal descriptor wiring keeps noun-specific and generic reads aligned", asy
       goalId: string;
     }>([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
@@ -338,7 +338,7 @@ test("goal show projects shared Goal relations through the noun-specific CLI sur
       goalId: string;
     }>([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${parentPayloadPath}`,
       "--vault",
@@ -348,7 +348,7 @@ test("goal show projects shared Goal relations through the noun-specific CLI sur
       goalId: string;
     }>([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${relatedPayloadPath}`,
       "--vault",
@@ -371,7 +371,7 @@ test("goal show projects shared Goal relations through the noun-specific CLI sur
       goalId: string;
     }>([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${childPayloadPath}`,
       "--vault",
@@ -433,7 +433,7 @@ test("goal show projects shared Goal relations through the noun-specific CLI sur
   }
 });
 
-test("goal upsert rejects reserved vault-root overrides from JSON payloads", async () => {
+test("goal import-json rejects reserved vault-root overrides from JSON payloads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const redirectVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-override.json");
@@ -454,7 +454,7 @@ test("goal upsert rejects reserved vault-root overrides from JSON payloads", asy
 
     const upsertResult = await runCli([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
@@ -479,7 +479,7 @@ test("goal upsert rejects reserved vault-root overrides from JSON payloads", asy
   }
 });
 
-test("goal upsert preserves omitted fields on patch updates", async () => {
+test("goal import-json preserves omitted fields on patch updates", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const createPayloadPath = path.join(vaultRoot, "goal-create.json");
   const patchPriorityPayloadPath = path.join(vaultRoot, "goal-patch-priority.json");
@@ -501,7 +501,7 @@ test("goal upsert preserves omitted fields on patch updates", async () => {
       goalId: string;
     }>([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${createPayloadPath}`,
       "--vault",
@@ -520,7 +520,7 @@ test("goal upsert preserves omitted fields on patch updates", async () => {
 
     const patchPriority = await runCli([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${patchPriorityPayloadPath}`,
       "--vault",
@@ -538,7 +538,7 @@ test("goal upsert preserves omitted fields on patch updates", async () => {
 
     const patchTitle = await runCli([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${patchTitlePayloadPath}`,
       "--vault",
@@ -571,7 +571,7 @@ test("goal upsert preserves omitted fields on patch updates", async () => {
   }
 });
 
-test("goal upsert validates payloads through the shared goal schema", async () => {
+test("goal import-json validates payloads through the shared goal schema", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-invalid.json");
 
@@ -588,7 +588,7 @@ test("goal upsert validates payloads through the shared goal schema", async () =
 
     const upsertResult = await runCli([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
@@ -635,7 +635,7 @@ test("condition and allergy commands keep noun-specific and generic reads aligne
       conditionId: string;
     }>([
       "condition",
-      "upsert",
+      "import-json",
       "--input",
       `@${conditionPayloadPath}`,
       "--vault",
@@ -645,7 +645,7 @@ test("condition and allergy commands keep noun-specific and generic reads aligne
       allergyId: string;
     }>([
       "allergy",
-      "upsert",
+      "import-json",
       "--input",
       `@${allergyPayloadPath}`,
       "--vault",
@@ -737,7 +737,7 @@ test("condition and allergy commands keep noun-specific and generic reads aligne
   }
 });
 
-test("condition and allergy upsert validate payloads through the shared schemas", async () => {
+test("condition and allergy import-json validate payloads through the shared schemas", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const conditionPayloadPath = path.join(vaultRoot, "condition-invalid.json");
   const allergyPayloadPath = path.join(vaultRoot, "allergy-invalid.json");
@@ -764,7 +764,7 @@ test("condition and allergy upsert validate payloads through the shared schemas"
 
     const conditionUpsertResult = await runCli([
       "condition",
-      "upsert",
+      "import-json",
       "--input",
       `@${conditionPayloadPath}`,
       "--vault",
@@ -772,7 +772,7 @@ test("condition and allergy upsert validate payloads through the shared schemas"
     ]);
     const allergyUpsertResult = await runCli([
       "allergy",
-      "upsert",
+      "import-json",
       "--input",
       `@${allergyPayloadPath}`,
       "--vault",
@@ -814,7 +814,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
       conditionId: string;
     }>([
       "condition",
-      "upsert",
+      "import-json",
       "--input",
       `@${conditionCreatePath}`,
       "--vault",
@@ -832,7 +832,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
     );
     const conditionPatched = await runCli([
       "condition",
-      "upsert",
+      "import-json",
       "--input",
       `@${conditionPatchPath}`,
       "--vault",
@@ -862,7 +862,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
       allergyId: string;
     }>([
       "allergy",
-      "upsert",
+      "import-json",
       "--input",
       `@${allergyCreatePath}`,
       "--vault",
@@ -880,7 +880,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
     );
     const allergyPatched = await runCli([
       "allergy",
-      "upsert",
+      "import-json",
       "--input",
       `@${allergyPatchPath}`,
       "--vault",
@@ -910,7 +910,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
       familyMemberId: string;
     }>([
       "family",
-      "upsert",
+      "import-json",
       "--input",
       `@${familyCreatePath}`,
       "--vault",
@@ -928,7 +928,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
     );
     const familyPatched = await runCli([
       "family",
-      "upsert",
+      "import-json",
       "--input",
       `@${familyPatchPath}`,
       "--vault",
@@ -990,7 +990,7 @@ test("family descriptor wiring keeps member-specific commands aligned with gener
       familyMemberId: string;
     }>([
       "family",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
@@ -1130,7 +1130,7 @@ Legacy alias coverage fixture.
   }
 });
 
-test("family upsert validates payloads through the shared schema and does not expose a fake status filter", async () => {
+test("family import-json validates payloads through the shared schema and does not expose a fake status filter", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "family-invalid.json");
 
@@ -1148,7 +1148,7 @@ test("family upsert validates payloads through the shared schema and does not ex
 
     const upsertResult = await runCli([
       "family",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
@@ -1194,7 +1194,7 @@ test("genetics descriptor wiring keeps variant-specific commands aligned with ge
       variantId: string;
     }>([
       "genetics",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",
@@ -1287,7 +1287,7 @@ test("genetics descriptor wiring keeps variant-specific commands aligned with ge
   }
 });
 
-test("genetics upsert validates payloads through the shared schema and preserves omitted gene values on patch updates", async () => {
+test("genetics import-json validates payloads through the shared schema and preserves omitted gene values on patch updates", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const createPayloadPath = path.join(vaultRoot, "genetics-create.json");
   const patchPayloadPath = path.join(vaultRoot, "genetics-patch.json");
@@ -1309,7 +1309,7 @@ test("genetics upsert validates payloads through the shared schema and preserves
       variantId: string;
     }>([
       "genetics",
-      "upsert",
+      "import-json",
       "--input",
       `@${createPayloadPath}`,
       "--vault",
@@ -1337,7 +1337,7 @@ test("genetics upsert validates payloads through the shared schema and preserves
 
     const patched = await runCli([
       "genetics",
-      "upsert",
+      "import-json",
       "--input",
       `@${patchPayloadPath}`,
       "--vault",
@@ -1356,7 +1356,7 @@ test("genetics upsert validates payloads through the shared schema and preserves
     ]);
     const invalid = await runCli([
       "genetics",
-      "upsert",
+      "import-json",
       "--input",
       `@${invalidPayloadPath}`,
       "--vault",
@@ -1676,7 +1676,7 @@ test("goal list and show preserve canonical links and strip reserved fields", as
       goalId: string;
     }>([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${goalPayloadPath}`,
       "--vault",
@@ -1772,7 +1772,7 @@ test("goal list preserves status filters after explicit adapter migration", asyn
       goalId: string;
     }>([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${activePath}`,
       "--vault",
@@ -1780,7 +1780,7 @@ test("goal list preserves status filters after explicit adapter migration", asyn
     ]);
     await runCli([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${archivedPath}`,
       "--vault",
@@ -2174,7 +2174,7 @@ test("supplement rename moves the product record to the new slug while preservin
   }
 });
 
-test("goal upsert rejects malformed payloads instead of coercing them into saved records", async () => {
+test("goal import-json rejects malformed payloads instead of coercing them into saved records", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-invalid.json");
 
@@ -2190,7 +2190,7 @@ test("goal upsert rejects malformed payloads instead of coercing them into saved
 
     const upsertResult = await runCli([
       "goal",
-      "upsert",
+      "import-json",
       "--input",
       `@${payloadPath}`,
       "--vault",

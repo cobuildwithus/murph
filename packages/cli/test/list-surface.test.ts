@@ -239,7 +239,7 @@ test('goal list keeps status-only filters canonical', async () => {
 
     const activeUpsert = await runSourceCli<{ goalId: string }>([
       'goal',
-      'upsert',
+      'import-json',
       '--input',
       `@${activeGoalPath}`,
       '--vault',
@@ -247,7 +247,7 @@ test('goal list keeps status-only filters canonical', async () => {
     ], options)
     const pausedUpsert = await runSourceCli<{ goalId: string }>([
       'goal',
-      'upsert',
+      'import-json',
       '--input',
       `@${pausedGoalPath}`,
       '--vault',

@@ -35,6 +35,11 @@ interface AllergySaveResult {
   created: boolean;
 }
 
+interface RawCliResult {
+  exitCode: number | null;
+  stdout: string;
+}
+
 function createAllergyCli() {
   const cli = Cli.create("vault-cli", {
     description: "allergy typed save test cli",
@@ -52,6 +57,15 @@ async function runRawInProcessCli(
   cli: Cli.Cli,
   args: string[],
 ): Promise<string> {
+  const result = await runRawInProcessCliResult(cli, args);
+  assert.equal(result.exitCode, null);
+  return result.stdout.trim();
+}
+
+async function runRawInProcessCliResult(
+  cli: Cli.Cli,
+  args: string[],
+): Promise<RawCliResult> {
   const output: string[] = [];
   let exitCode: number | null = null;
 
@@ -65,8 +79,10 @@ async function runRawInProcessCli(
     },
   });
 
-  assert.equal(exitCode, null);
-  return output.join("").trim();
+  return {
+    exitCode,
+    stdout: output.join(""),
+  };
 }
 
 async function readCommandSchema(
@@ -86,7 +102,7 @@ function requireSavedPath(result: AllergySaveResult): string {
   return result.path;
 }
 
-test("allergy save schema exposes typed allergy fields while allergy upsert remains the JSON fallback", async () => {
+test("allergy save schema exposes typed allergy fields while allergy import-json remains the JSON fallback", async () => {
   const cli = createAllergyCli();
 
   const saveSchema = await readCommandSchema(cli, ["allergy", "save"]);
@@ -109,10 +125,20 @@ test("allergy save schema exposes typed allergy fields while allergy upsert rema
     assert.equal(field in saveSchema.options.properties, true, field);
   }
 
-  const upsertSchema = await readCommandSchema(cli, ["allergy", "upsert"]);
-  assert.equal("input" in upsertSchema.options.properties, true);
-  assert.equal(upsertSchema.options.required?.includes("input") ?? false, true);
-  assert.deepEqual(upsertSchema.args.required ?? [], []);
+  const importJsonSchema = await readCommandSchema(cli, ["allergy", "import-json"]);
+  assert.equal("input" in importJsonSchema.options.properties, true);
+  assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(importJsonSchema.args.required ?? [], []);
+
+  const legacyUpsert = await runRawInProcessCliResult(cli, [
+    "allergy",
+    "upsert",
+    "--schema",
+    "--format",
+    "json",
+  ]);
+  assert.equal(legacyUpsert.exitCode, 1);
+  assert.match(legacyUpsert.stdout, /upsert/u);
 });
 
 test("allergy save persists typed fields and repeated condition relationships", async () => {

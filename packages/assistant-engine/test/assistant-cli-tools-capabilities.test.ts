@@ -20,7 +20,7 @@ import {
   createAssistantRuntimeToolDefinitions,
   createCanonicalVaultWriteToolDefinitions,
   createHealthCommonsToolDefinitions,
-  createHealthUpsertToolDefinitions,
+  createHealthJsonImportToolDefinitions,
   createInboxPromotionToolDefinitions,
   createOutwardSideEffectToolDefinitions,
   createVaultQueryToolDefinitions,
@@ -892,8 +892,14 @@ describe('assistant CLI tool capability seam', () => {
       stoppedOn: '2026-04-08',
     })
 
-    const healthTools = createHealthUpsertToolDefinitions(context)
+    const healthTools = createHealthJsonImportToolDefinitions(context)
+    const healthToolNames = healthTools.map((tool) => tool.name)
     expect(healthTools.length).toBeGreaterThan(0)
+    for (const toolRoot of ['goal', 'condition', 'allergy', 'family', 'genetics']) {
+      expect(healthToolNames).toContain(`vault.${toolRoot}.importJson`)
+      expect(healthToolNames).not.toContain(`vault.${toolRoot}.upsert`)
+    }
+    expect(healthToolNames).toContain('vault.blood-test.upsert')
     for (const tool of healthTools) {
       await executeBoundTool(tool, {
         payload: tool.inputExample?.payload ?? {
@@ -1039,7 +1045,7 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(nullRequestWriteTools, 'vault.regimen.stop', {
       regimenId: 'reg_null',
     })
-    await executeBoundTool(createHealthUpsertToolDefinitions(nullRequestContext)[0]!, {
+    await executeBoundTool(createHealthJsonImportToolDefinitions(nullRequestContext)[0]!, {
       payload: {
         title: 'Null request health payload',
       },
@@ -1429,7 +1435,7 @@ describe('assistant CLI tool capability seam', () => {
     ).toEqual([])
     expect(createVaultQueryToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
     expect(createCanonicalVaultWriteToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
-    expect(createHealthUpsertToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
+    expect(createHealthJsonImportToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
     expect(createOutwardSideEffectToolDefinitions(createToolContext({ vault: vaultRoot }))).toEqual([])
 
     const defaultRegistry = createDefaultAssistantCapabilityRegistry(context)

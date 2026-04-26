@@ -11133,7 +11133,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -11351,7 +11351,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -11572,7 +11572,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -12073,7 +12073,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -12252,7 +12252,7 @@
                     }
                   }
                 },
-                "upsert": {
+                "import-json": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {

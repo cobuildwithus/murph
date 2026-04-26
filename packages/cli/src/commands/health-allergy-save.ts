@@ -78,7 +78,10 @@ export function registerAllergyCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const allergy = createHealthEntityCrudGroup(services, "allergy");
+  const allergy = createHealthEntityCrudGroup(services, "allergy", {
+    jsonImportCommandName: "import-json",
+    registerUpsert: false,
+  });
 
   allergy.command("save", {
     args: z.object({
@@ -99,7 +102,7 @@ export function registerAllergyCommands(
         },
       },
     ],
-    hint: "Use allergy upsert only when importing an advanced JSON payload from @file.json or stdin.",
+    hint: "Use allergy import-json only when importing an advanced JSON payload from @file.json or stdin.",
     options: withBaseOptions({
       id: z
         .string()

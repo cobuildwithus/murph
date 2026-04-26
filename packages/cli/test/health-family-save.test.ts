@@ -13,6 +13,22 @@ import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { requireData, runInProcessJsonCli } from "./cli-test-helpers.js";
 import { localParallelCliTest as test } from "./local-parallel-test.js";
 
+interface CommandSchemaEnvelope {
+  args: {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  options: {
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+interface RawCliResult {
+  exitCode: number | null;
+  output: string;
+}
+
 function createFamilyCli() {
   const cli = Cli.create("vault-cli", {
     description: "family typed save test cli",
@@ -24,6 +40,65 @@ function createFamilyCli() {
   registerFamilyCommands(cli, services);
 
   return cli;
+}
+
+async function runRawInProcessCli(
+  cli: Cli.Cli,
+  args: string[],
+): Promise<RawCliResult> {
+  const output: string[] = [];
+  let exitCode: number | null = null;
+
+  await cli.serve(args, {
+    env: process.env,
+    exit(code) {
+      exitCode = code;
+    },
+    stdout(chunk) {
+      output.push(chunk);
+    },
+  });
+
+  return {
+    exitCode,
+    output: output.join("").trim(),
+  };
+}
+
+async function readCommandSchema(
+  cli: Cli.Cli,
+  commandArgs: string[],
+): Promise<CommandSchemaEnvelope> {
+  const result = await runRawInProcessCli(cli, [
+    ...commandArgs,
+    "--schema",
+    "--format",
+    "json",
+  ]);
+  assert.equal(result.exitCode, null);
+
+  return JSON.parse(result.output) as CommandSchemaEnvelope;
+}
+
+async function assertCommandSchemaMissing(
+  cli: Cli.Cli,
+  commandArgs: string[],
+): Promise<void> {
+  const result = await runRawInProcessCli(cli, [
+    ...commandArgs,
+    "--schema",
+    "--format",
+    "json",
+  ]);
+
+  assert.equal(result.exitCode, 1);
+}
+
+async function readCommandHelp(cli: Cli.Cli, commandArgs: string[]): Promise<string> {
+  const result = await runRawInProcessCli(cli, [...commandArgs, "--help"]);
+  assert.equal(result.exitCode, null);
+
+  return result.output;
 }
 
 async function listMarkdownFiles(directory: string): Promise<string[]> {
@@ -58,6 +133,38 @@ async function listMarkdownFiles(directory: string): Promise<string[]> {
 
   return markdownFiles;
 }
+
+test("family save schema exposes typed fields while family import-json is the JSON fallback", async () => {
+  const cli = createFamilyCli();
+
+  const saveSchema = await readCommandSchema(cli, ["family", "save"]);
+  assert.deepEqual(saveSchema.args.required, ["title"]);
+  assert.equal("input" in saveSchema.options.properties, false);
+  assert.equal(saveSchema.options.required?.includes("input") ?? false, false);
+
+  const saveHelp = await readCommandHelp(cli, ["family", "save"]);
+  assert.match(saveHelp, /family import-json/u);
+  assert.doesNotMatch(saveHelp, /family upsert/u);
+
+  for (const field of [
+    "id",
+    "slug",
+    "relationship",
+    "condition",
+    "deceased",
+    "relatedVariantId",
+    "note",
+  ]) {
+    assert.equal(field in saveSchema.options.properties, true, field);
+  }
+
+  const jsonFallback = await readCommandSchema(cli, ["family", "import-json"]);
+  assert.equal("input" in jsonFallback.options.properties, true);
+  assert.equal(jsonFallback.options.required?.includes("input") ?? false, true);
+  assert.deepEqual(jsonFallback.args.required ?? [], []);
+
+  await assertCommandSchemaMissing(cli, ["family", "upsert"]);
+});
 
 test("family save creates and updates family members from typed flags", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-family-save-"));
