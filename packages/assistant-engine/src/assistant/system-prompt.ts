@@ -558,6 +558,12 @@ function buildAssistantSharedAutomationActionText(
 
 ${buildAssistantSharedAutomationPreferenceText()}
 
+When the provider tool ${code(
+    "assistant.automation.createReminderForCurrentThread"
+  )} is available and the user asks to be reminded, texted, or notified in this current chat, use that tool instead of copying route fields into a scaffolded payload. It derives the current direct-thread route; refer to internal ${code(
+    "linq"
+  )} routes as iMessage in user-facing copy.
+
 Automation schedules execute while ${code(
     assistantRunCommand
   )} is active for the vault.`;

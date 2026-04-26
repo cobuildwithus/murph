@@ -6,6 +6,7 @@ import {
   type AssistantCapabilityDefinition,
 } from '../model-harness.js'
 import {
+  createAssistantAutomationToolDefinitions,
   createAssistantCliExecutorToolDefinitions,
   createAssistantKnowledgeReadToolDefinitions,
   createAssistantKnowledgeWriteToolDefinitions,
@@ -147,6 +148,7 @@ function listProviderTurnAssistantCapabilities(
   return [
     ...createAssistantKnowledgeReadToolDefinitions(input),
     ...createAssistantKnowledgeWriteToolDefinitions(input),
+    ...createAssistantAutomationToolDefinitions(input),
     ...createHealthCommonsToolDefinitions(),
     ...createAssistantCliExecutorToolDefinitions(input),
     ...createVaultTextReadToolDefinitions(input),

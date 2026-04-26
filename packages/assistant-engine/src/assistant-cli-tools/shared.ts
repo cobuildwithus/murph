@@ -6,6 +6,7 @@ export interface AssistantToolContext {
   inboxServices?: import('@murphai/inbox-services').InboxServices
   operatorAuthority?: import('../assistant/operator-authority.js').AssistantOperatorAuthority | null
   requestId?: string | null
+  sessionBinding?: import('@murphai/operator-config/assistant-cli-contracts').AssistantSessionBinding | null
   sessionId?: string | null
   vault: string
   vaultServices?: import('@murphai/vault-usecases/vault-services').VaultServices

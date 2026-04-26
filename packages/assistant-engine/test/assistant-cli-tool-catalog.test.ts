@@ -311,6 +311,7 @@ describe('assistant CLI tool catalogs', () => {
     )
     expect(providerTurnCatalog.hasTool('assistant.knowledge.list')).toBe(true)
     expect(providerTurnCatalog.hasTool('assistant.knowledge.upsert')).toBe(true)
+    expect(providerTurnCatalog.hasTool('assistant.automation.createReminderForCurrentThread')).toBe(true)
     expect(providerTurnCatalog.hasTool('healthCommons.search')).toBe(true)
     expect(providerTurnCatalog.hasTool('healthCommons.get')).toBe(true)
     expect(providerTurnCatalog.hasTool('healthCommons.listProtocols')).toBe(true)

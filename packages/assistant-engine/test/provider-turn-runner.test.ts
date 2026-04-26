@@ -379,6 +379,7 @@ describe('executeProviderTurnWithRecovery', () => {
           MEMORY_CONTEXT: 'enabled',
         },
         operatorAuthority: 'direct-operator',
+        sessionBinding: session.binding,
       }),
     )
     expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(

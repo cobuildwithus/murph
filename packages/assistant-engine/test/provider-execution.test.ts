@@ -1593,10 +1593,13 @@ describe('codexCliProviderDefinition', () => {
     expect(providerMocks.executeCodexAppServerTurn).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        prompt: 'User message:\nCurrent user turn',
+        prompt: expect.stringContaining('User message:\nCurrent user turn'),
         resumeSessionId: 'stale-session',
       }),
     )
+    expect(
+      providerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]?.prompt,
+    ).toContain('Conversation context:')
     expect(providerMocks.executeCodexAppServerTurn).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
