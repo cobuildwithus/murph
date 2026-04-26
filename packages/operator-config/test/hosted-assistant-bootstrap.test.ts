@@ -539,6 +539,54 @@ test('hosted assistant bootstrap seeds or updates platform profiles from hosted 
   assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 0)
 })
 
+test('hosted assistant bootstrap promotes hosted env over saved member profiles', async () => {
+  const memberProfile = createHostedAssistantProfile({
+    id: 'member-profile',
+    providerConfig: {
+      provider: 'openai-compatible',
+      baseUrl: 'https://gateway.example.test/v1',
+      model: 'gpt-4.1',
+      providerName: 'Gateway',
+    },
+  })
+  const memberConfig = createHostedAssistantConfig({
+    activeProfileId: memberProfile.id,
+    profiles: [memberProfile],
+    updatedAt: '2026-04-08T10:00:00.000Z',
+  })
+  const hostedConfigModule = await loadHostedAssistantModule({
+    readOperatorConfigResult: {
+      hostedAssistant: memberConfig,
+      hostedAssistantInvalid: false,
+    },
+  })
+
+  const promoted = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: true,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.5',
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'false',
+    },
+  })
+
+  assert.deepEqual(promoted, {
+    configured: true,
+    provider: 'openai-compatible',
+    seeded: true,
+    source: 'hosted-env',
+  })
+  assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 1)
+  const savedConfig = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
+  assert.equal(savedConfig?.activeProfileId, 'platform-default')
+  assert.equal(savedConfig?.profiles.length, 2)
+  assert.equal(savedConfig?.profiles[0]?.id, memberProfile.id)
+  assert.equal(savedConfig?.profiles[1]?.id, 'platform-default')
+  assert.equal(savedConfig?.profiles[1]?.managedBy, 'platform')
+  assert.equal(savedConfig?.profiles[1]?.target.model, 'openai/gpt-5.5')
+  assert.equal(savedConfig?.profiles[1]?.target.zeroDataRetention, undefined)
+})
+
 test('hosted assistant bootstrap normalizes container-rewritten local bridge base urls before persisting platform profiles', async () => {
   const hostedConfigModule = await loadHostedAssistantModule({
     readOperatorConfigResult: null,

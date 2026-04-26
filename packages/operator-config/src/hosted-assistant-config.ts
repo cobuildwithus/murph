@@ -257,16 +257,9 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
     )
   }
 
-  if (existingState.configured) {
-    if (
-      existingActiveProfile?.managedBy === 'platform' &&
-      envProfile &&
-      !hostedAssistantConfigsEqual(
-        existingHostedConfig,
-        upsertHostedAssistantProfile(existingHostedConfig, envProfile),
-      )
-    ) {
-      const nextConfig = upsertHostedAssistantProfile(existingHostedConfig, envProfile)
+  if (envProfile) {
+    const nextConfig = upsertHostedAssistantProfile(existingHostedConfig, envProfile)
+    if (!hostedAssistantConfigsEqual(existingHostedConfig, nextConfig)) {
       const saved = await saveHostedAssistantConfig(nextConfig, input.homeDirectory)
       const savedState = resolveHostedAssistantOperatorDefaultsState(saved.hostedAssistant)
 
@@ -276,41 +269,13 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
         source: 'hosted-env',
       }
     }
+  }
 
+  if (existingState.configured) {
     return {
       ...existingState,
       seeded: false,
       source: 'saved',
-    }
-  }
-
-  if (
-    existingActiveProfile?.managedBy === 'platform' &&
-    envProfile
-  ) {
-    const nextConfig = upsertHostedAssistantProfile(existingHostedConfig, envProfile)
-    const saved = await saveHostedAssistantConfig(nextConfig, input.homeDirectory)
-    const savedState = resolveHostedAssistantOperatorDefaultsState(saved.hostedAssistant)
-
-    return {
-      ...savedState,
-      seeded: true,
-      source: 'hosted-env',
-    }
-  }
-
-  if (!existingHostedConfig && envProfile) {
-    const nextConfig = createHostedAssistantConfig({
-      activeProfileId: envProfile.id,
-      profiles: [envProfile],
-    })
-    const saved = await saveHostedAssistantConfig(nextConfig, input.homeDirectory)
-    const savedState = resolveHostedAssistantOperatorDefaultsState(saved.hostedAssistant)
-
-    return {
-      ...savedState,
-      seeded: true,
-      source: 'hosted-env',
     }
   }
 
