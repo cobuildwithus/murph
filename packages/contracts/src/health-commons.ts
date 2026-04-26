@@ -11,12 +11,15 @@ export const HEALTH_COMMONS_SOURCE_ARTIFACT_INDEX_SCHEMA_VERSION =
   "murph.commons.source-artifact-index.v1" as const;
 export const HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION =
   "murph.commons.experiment-onboarding.v1" as const;
+export const HEALTH_COMMONS_MEASUREMENT_PLAN_SCHEMA_VERSION =
+  "murph.commons.measurement-plan.v1" as const;
 export const HEALTH_COMMONS_REDIRECTS_SCHEMA_VERSION = "murph.commons.redirects.v1" as const;
 
 export const HEALTH_COMMONS_ENTITY_TYPES = [
   "mission",
   "domain",
   "biomarker",
+  "measurement_method",
   "goal_template",
   "experiment_family",
   "protocol_variant",
@@ -32,10 +35,13 @@ export const HEALTH_COMMONS_RELATION_TYPES = [
   "child_family",
   "cites",
   "contraindicates",
+  "default_measurement_method",
   "duplicate_source_identity",
   "fork_of",
   "measures",
+  "measurement_upgrade",
   "mirror_of",
+  "optional_measurement_method",
   "parent_family",
   "primary_biomarker",
   "publication_for",
@@ -44,6 +50,7 @@ export const HEALTH_COMMONS_RELATION_TYPES = [
   "registry_for",
   "same_work_as",
   "secondary_biomarker",
+  "safety_outcome",
   "source_person",
 ] as const;
 
@@ -371,6 +378,7 @@ export const healthCommonsTestPlanSchema = z
     interventionDays: z.number().int().positive(),
     primaryBiomarkerKey: healthCommonsKeySchema,
     secondaryBiomarkerKeys: z.array(healthCommonsKeySchema).optional(),
+    safetyOutcomeKeys: z.array(healthCommonsKeySchema).optional(),
     minimumAdherenceSessions: z.number().int().nonnegative().optional(),
     targetAdherenceSessions: z.number().int().nonnegative().optional(),
     notes: z.array(longStringSchema).optional(),
@@ -378,6 +386,251 @@ export const healthCommonsTestPlanSchema = z
   .strict();
 
 export type HealthCommonsTestPlan = z.infer<typeof healthCommonsTestPlanSchema>;
+
+export const HEALTH_COMMONS_MEASUREMENT_METHOD_TIERS = [
+  "default_home",
+  "optional_home",
+  "consumer_device",
+  "clinic",
+  "research",
+  "reference",
+] as const;
+
+export type HealthCommonsMeasurementMethodTier =
+  (typeof HEALTH_COMMONS_MEASUREMENT_METHOD_TIERS)[number];
+
+export const HEALTH_COMMONS_MEASUREMENT_METHOD_MODALITIES = [
+  "self_rating",
+  "standardized_photo",
+  "calibrated_photo",
+  "image_analysis",
+  "clinical_scale",
+  "instrumented_imaging",
+  "biophysical_device",
+  "colorimetry",
+  "wearable",
+  "lab",
+  "other",
+] as const;
+
+export type HealthCommonsMeasurementMethodModality =
+  (typeof HEALTH_COMMONS_MEASUREMENT_METHOD_MODALITIES)[number];
+
+const HEALTH_COMMONS_PRIVACY_SENSITIVE_IMAGE_MODALITIES: readonly HealthCommonsMeasurementMethodModality[] = [
+  "standardized_photo",
+  "calibrated_photo",
+  "image_analysis",
+  "instrumented_imaging",
+];
+
+export const HEALTH_COMMONS_MEASUREMENT_METHOD_OUTPUT_VALUE_TYPES = [
+  "score",
+  "number",
+  "index",
+  "symptom_log",
+  "photo",
+  "enum",
+  "boolean",
+  "text",
+] as const;
+
+export type HealthCommonsMeasurementMethodOutputValueType =
+  (typeof HEALTH_COMMONS_MEASUREMENT_METHOD_OUTPUT_VALUE_TYPES)[number];
+
+export const HEALTH_COMMONS_MEASUREMENT_METHOD_OUTPUT_DIRECTIONS = [
+  "higher_is_better",
+  "lower_is_better",
+  "lower_or_stable",
+  "mixed_or_contextual",
+] as const;
+
+export type HealthCommonsMeasurementMethodOutputDirection =
+  (typeof HEALTH_COMMONS_MEASUREMENT_METHOD_OUTPUT_DIRECTIONS)[number];
+
+export const healthCommonsMeasurementMethodOutputSchema = z
+  .object({
+    outputId: healthCommonsStableIdSchema,
+    label: shortStringSchema,
+    valueType: z.enum(HEALTH_COMMONS_MEASUREMENT_METHOD_OUTPUT_VALUE_TYPES),
+    unit: shortStringSchema.optional(),
+    mapsToBiomarkerKey: healthCommonsKeySchema.optional(),
+    direction: z.enum(HEALTH_COMMONS_MEASUREMENT_METHOD_OUTPUT_DIRECTIONS).optional(),
+    notes: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsMeasurementMethodOutput = z.infer<
+  typeof healthCommonsMeasurementMethodOutputSchema
+>;
+
+export const healthCommonsMeasurementMethodProcedureSchema = z
+  .object({
+    summary: longStringSchema,
+    materials: z.array(shortStringSchema).optional(),
+    steps: z.array(longStringSchema).min(1),
+    schedule: z.array(shortStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsMeasurementMethodProcedure = z.infer<
+  typeof healthCommonsMeasurementMethodProcedureSchema
+>;
+
+export const healthCommonsMeasurementMethodFidelitySchema = z
+  .object({
+    minimumRequirements: z.array(longStringSchema).optional(),
+    repeatabilityRisks: z.array(shortStringSchema).optional(),
+    calibration: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsMeasurementMethodFidelity = z.infer<
+  typeof healthCommonsMeasurementMethodFidelitySchema
+>;
+
+export const healthCommonsMeasurementMethodPrivacySchema = z
+  .object({
+    containsIdentifiableImages: z.boolean().optional(),
+    localOnlyRecommended: z.boolean().optional(),
+    notes: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsMeasurementMethodPrivacy = z.infer<
+  typeof healthCommonsMeasurementMethodPrivacySchema
+>;
+
+export const healthCommonsMeasurementMethodBurdenSchema = z
+  .object({
+    userBurden: z.enum(["low", "moderate", "high"]),
+    costTier: z.enum(["free", "low_cost", "consumer_device", "clinic", "research"]),
+  })
+  .strict();
+
+export type HealthCommonsMeasurementMethodBurden = z.infer<
+  typeof healthCommonsMeasurementMethodBurdenSchema
+>;
+
+export const healthCommonsMeasurementMethodInterpretationSchema = z
+  .object({
+    principle: longStringSchema,
+    caveat: longStringSchema,
+  })
+  .strict();
+
+export type HealthCommonsMeasurementMethodInterpretation = z.infer<
+  typeof healthCommonsMeasurementMethodInterpretationSchema
+>;
+
+export const healthCommonsMeasurementMethodSchema = z
+  .object({
+    shortName: shortStringSchema.optional(),
+    displayName: shortStringSchema.optional(),
+    tier: z.enum(HEALTH_COMMONS_MEASUREMENT_METHOD_TIERS),
+    modalities: z.array(z.enum(HEALTH_COMMONS_MEASUREMENT_METHOD_MODALITIES)).min(1),
+    measuredBiomarkerKeys: z.array(healthCommonsKeySchema).optional(),
+    outputs: z.array(healthCommonsMeasurementMethodOutputSchema).min(1),
+    procedure: healthCommonsMeasurementMethodProcedureSchema,
+    fidelity: healthCommonsMeasurementMethodFidelitySchema.optional(),
+    privacy: healthCommonsMeasurementMethodPrivacySchema.optional(),
+    burden: healthCommonsMeasurementMethodBurdenSchema.optional(),
+    confounders: z.array(shortStringSchema).optional(),
+    interpretation: healthCommonsMeasurementMethodInterpretationSchema.optional(),
+  })
+  .strict()
+  .superRefine((method, context) => {
+    const hasPrivacySensitiveImageModality = method.modalities.some((modality) =>
+      HEALTH_COMMONS_PRIVACY_SENSITIVE_IMAGE_MODALITIES.includes(modality)
+    );
+
+    if (!hasPrivacySensitiveImageModality) {
+      return;
+    }
+
+    if (!method.privacy) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Photo or image measurement methods must include explicit privacy metadata.",
+        path: ["privacy"],
+      });
+      return;
+    }
+
+    if (method.privacy.containsIdentifiableImages === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Photo or image measurement methods must explicitly set containsIdentifiableImages.",
+        path: ["privacy", "containsIdentifiableImages"],
+      });
+    }
+
+    if (method.privacy.localOnlyRecommended === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Photo or image measurement methods must explicitly set localOnlyRecommended.",
+        path: ["privacy", "localOnlyRecommended"],
+      });
+    }
+
+    if (
+      method.privacy.localOnlyRecommended === false
+      && (method.privacy.notes ?? []).length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Photo or image measurement methods without local-only recommendation must document the privacy exception.",
+        path: ["privacy", "notes"],
+      });
+    }
+  });
+
+export type HealthCommonsMeasurementMethod = z.infer<
+  typeof healthCommonsMeasurementMethodSchema
+>;
+
+export const healthCommonsMeasurementPlanPathSchema = z
+  .object({
+    pathId: healthCommonsStableIdSchema,
+    label: shortStringSchema,
+    tier: z.enum(HEALTH_COMMONS_MEASUREMENT_METHOD_TIERS),
+    required: z.boolean(),
+    methodKeys: z.array(healthCommonsKeySchema).min(1),
+    outcomeKeys: z.array(healthCommonsKeySchema).optional(),
+    safetyOutcomeKeys: z.array(healthCommonsKeySchema).optional(),
+    notes: z.array(longStringSchema).optional(),
+  })
+  .strict();
+
+export type HealthCommonsMeasurementPlanPath = z.infer<
+  typeof healthCommonsMeasurementPlanPathSchema
+>;
+
+export const healthCommonsMeasurementPlanSchema = z
+  .object({
+    schemaVersion: z.literal(HEALTH_COMMONS_MEASUREMENT_PLAN_SCHEMA_VERSION),
+    defaultPathId: healthCommonsStableIdSchema,
+    paths: z.array(healthCommonsMeasurementPlanPathSchema).min(1),
+  })
+  .strict()
+  .superRefine((plan, context) => {
+    addDuplicateStableIdIssues(
+      context,
+      plan.paths,
+      ["paths"],
+      "pathId",
+    );
+    if (!plan.paths.some((path) => path.pathId === plan.defaultPathId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "defaultPathId must match one measurement plan pathId.",
+        path: ["defaultPathId"],
+      });
+    }
+  });
+
+export type HealthCommonsMeasurementPlan = z.infer<
+  typeof healthCommonsMeasurementPlanSchema
+>;
 
 export const healthCommonsProtocolSpecSchema = z
   .object({
@@ -680,6 +933,30 @@ function addDuplicateIdIssues(
       code: z.ZodIssueCode.custom,
       message: `Duplicate onboarding id ${entry.id}; first seen at index ${firstIndex}.`,
       path: [...pathPrefix, index, "id"],
+    });
+  });
+}
+
+function addDuplicateStableIdIssues<TField extends string, TEntry extends Record<TField, string>>(
+  context: z.RefinementCtx,
+  entries: readonly TEntry[],
+  pathPrefix: readonly (string | number)[],
+  fieldName: TField,
+): void {
+  const firstIndexById = new Map<string, number>();
+
+  entries.forEach((entry, index) => {
+    const id = entry[fieldName];
+    const firstIndex = firstIndexById.get(id);
+    if (firstIndex === undefined) {
+      firstIndexById.set(id, index);
+      return;
+    }
+
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Duplicate ${fieldName} ${id}; first seen at index ${firstIndex}.`,
+      path: [...pathPrefix, index, fieldName],
     });
   });
 }
@@ -1170,9 +1447,11 @@ export const healthCommonsPageFrontmatterSchema = z
     measurementContexts: z.array(shortStringSchema).optional(),
     interpretationFrame: healthCommonsInterpretationFrameSchema.optional(),
     biomarker: healthCommonsBiomarkerDetailSchema.optional(),
+    measurementMethod: healthCommonsMeasurementMethodSchema.optional(),
     protocolRanking: healthCommonsBiomarkerProtocolRankingSchema.optional(),
     communityOutcomeSummary: healthCommonsBiomarkerCommunityOutcomeSummarySchema.optional(),
     testPlans: z.array(healthCommonsTestPlanSchema).optional(),
+    measurementPlan: healthCommonsMeasurementPlanSchema.optional(),
     experimentOnboarding: healthCommonsExperimentOnboardingSchema.optional(),
     whyItWorks: z.array(longStringSchema).optional(),
     claims: z.array(healthCommonsClaimSchema).optional(),
@@ -1246,6 +1525,30 @@ export const healthCommonsPageFrontmatterSchema = z
         code: z.ZodIssueCode.custom,
         message: "biomarker pages with protocolRanking should include a biomarker block.",
         path: ["biomarker"],
+      });
+    }
+
+    if (page.entityType === "measurement_method") {
+      if (!page.measurementMethod) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "measurement_method pages must include a measurementMethod block.",
+          path: ["measurementMethod"],
+        });
+      }
+    } else if (page.measurementMethod) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "measurementMethod is only valid on measurement_method pages.",
+        path: ["measurementMethod"],
+      });
+    }
+
+    if (page.entityType !== "protocol_variant" && page.measurementPlan) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "measurementPlan is only valid on protocol_variant pages.",
+        path: ["measurementPlan"],
       });
     }
 

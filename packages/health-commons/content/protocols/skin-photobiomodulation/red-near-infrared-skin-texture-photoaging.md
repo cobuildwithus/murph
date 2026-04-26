@@ -35,17 +35,17 @@ relations:
     type: "secondary_biomarker"
     target: "biomarker:skin-texture-roughness-score"
   -
-    type: "secondary_biomarker"
+    type: "safety_outcome"
     target: "biomarker:skin-tolerability-symptoms"
   -
-    type: "secondary_biomarker"
-    target: "biomarker:image-derived-wrinkle-length-area"
+    type: "default_measurement_method"
+    target: "measurement_method:skin/standardized-photo-score-workflow"
   -
-    type: "secondary_biomarker"
-    target: "biomarker:calibrated-skin-color-pigment-delta"
+    type: "optional_measurement_method"
+    target: "measurement_method:skin/home-standardized-photo-roi-analysis"
   -
-    type: "secondary_biomarker"
-    target: "biomarker:image-derived-skin-texture-index"
+    type: "measurement_upgrade"
+    target: "measurement_method:skin/clinic-imaging-upgrade"
   -
     type: "cites"
     target: "source_artifact:pmid-39960921"
@@ -311,10 +311,6 @@ protocol:
     - "cosmetic procedures"
     - "sun exposure"
     - "standardized photo checkpoint"
-    - "optional wrinkle ROI line length or area"
-    - "optional color card or gray card reference"
-    - "optional calibrated color ROI delta"
-    - "optional image texture ROI index"
   stopConditions:
     - "Stop for tearing, distorted vision, temporary vision loss, persistent or recurrent afterimage, flashes, spots, floaters, blurry vision, eye pain, eye irritation, or any new ocular or visual symptom during or after use."
     - "Stop if eye inserts, shields, or goggles shift, fit poorly, feel hot, cause contact irritation or allergy, or cannot be used without removing them near the eyelids."
@@ -333,18 +329,65 @@ testPlans:
     secondaryBiomarkerKeys:
       - "biomarker:periocular-wrinkle-score"
       - "biomarker:skin-texture-roughness-score"
+    safetyOutcomeKeys:
       - "biomarker:skin-tolerability-symptoms"
-      - "biomarker:image-derived-wrinkle-length-area"
-      - "biomarker:calibrated-skin-color-pigment-delta"
-      - "biomarker:image-derived-skin-texture-index"
     minimumAdherenceSessions: 24
     targetAdherenceSessions: 30
     notes:
       - "Use the 14 baseline days to lock camera, lighting, region, expression, skincare, and scoring rules before any intervention sessions."
       - "Score week-4 photos as an early check and week-6 photos as the first starter read; a 12-to-16-week extension can be created as a separate fork when the device label and user burden support it."
       - "Analyze standardized photo scores separately from satisfaction or skin-feel ratings because subjective and objective signals can diverge."
-      - "Use optional image-derived wrinkle, color, and texture metrics only when the ROI template, lighting, calibration, and analysis settings are locked before comparing baseline with week-4 or week-6 images."
+      - "Use optional image-analysis method outputs only when the ROI template, lighting, calibration, and analysis settings are locked before comparing baseline with week-4 or week-6 images."
       - "Treat tolerability and eye symptoms as safety outcomes, not as noise to be averaged away."
+measurementPlan:
+  schemaVersion: "murph.commons.measurement-plan.v1"
+  defaultPathId: "home-photo-score"
+  paths:
+    -
+      pathId: "home-photo-score"
+      label: "Home photo score"
+      tier: "default_home"
+      required: true
+      methodKeys:
+        - "measurement_method:skin/standardized-photo-score-workflow"
+      outcomeKeys:
+        - "biomarker:standardized-skin-photo-score"
+        - "biomarker:periocular-wrinkle-score"
+        - "biomarker:skin-texture-roughness-score"
+      safetyOutcomeKeys:
+        - "biomarker:skin-tolerability-symptoms"
+      notes:
+        - "Default path: standardized photos, fixed scoring rubrics, and session-by-session tolerability logs. This is the lowest-burden starter path."
+    -
+      pathId: "home-image-analysis-add-on"
+      label: "Home image-analysis add-on"
+      tier: "optional_home"
+      required: false
+      methodKeys:
+        - "measurement_method:skin/home-standardized-photo-roi-analysis"
+      outcomeKeys:
+        - "biomarker:periocular-wrinkle-score"
+        - "biomarker:skin-texture-roughness-score"
+      safetyOutcomeKeys:
+        - "biomarker:skin-tolerability-symptoms"
+      notes:
+        - "Optional add-on: fixed ROI analysis can quantify wrinkle-line and texture proxies, while calibrated color stays a safety/context proxy unless a pigment or erythema outcome is added."
+        - "Do not require this path for a normal starter run; use it only when the user can keep ROI templates, calibration, and analysis settings stable."
+    -
+      pathId: "clinic-imaging-upgrade"
+      label: "Clinic imaging upgrade"
+      tier: "clinic"
+      required: false
+      methodKeys:
+        - "measurement_method:skin/clinic-imaging-upgrade"
+      outcomeKeys:
+        - "biomarker:standardized-skin-photo-score"
+        - "biomarker:periocular-wrinkle-score"
+        - "biomarker:skin-texture-roughness-score"
+      safetyOutcomeKeys:
+        - "biomarker:skin-tolerability-symptoms"
+      notes:
+        - "Upgrade path only: use clinic imaging, profilometry, colorimetry, or validated scales when they already exist or the user intentionally chooses the extra cost and burden."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -523,7 +566,7 @@ experimentOnboarding:
       valueType: "free_text"
       askPolicy: "always"
       required: true
-      question: "How will you keep camera, lighting, distance, expression, and makeup/sunscreen rules identical for baseline and follow-up photos?"
+      question: "What workflow and private/local storage plan will you use to keep camera, lighting, distance, expression, and makeup/sunscreen rules identical for baseline and follow-up photos without uploading or sharing identifiable originals unless you intentionally import them?"
       writePath: "experiment.measurement.photoWorkflow"
     -
       id: "skincare_stability"
@@ -575,10 +618,6 @@ experimentOnboarding:
       - "ocular_symptoms"
       - "skincare_changes"
       - "photo_checkpoint"
-      - "optional_wrinkle_roi_line_length_or_area"
-      - "optional_color_card_or_gray_card_reference"
-      - "optional_calibrated_color_roi_delta"
-      - "optional_image_texture_roi_index"
     confounders:
       - "sun_exposure"
       - "retinoids_or_acids"

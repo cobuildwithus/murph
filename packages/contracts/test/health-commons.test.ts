@@ -6,6 +6,7 @@ import {
   HEALTH_COMMONS_CHANGE_SCHEMA_VERSION,
   HEALTH_COMMONS_EVIDENCE_APPRAISAL_SCHEMA_VERSION,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_SCHEMA_VERSION,
+  HEALTH_COMMONS_MEASUREMENT_PLAN_SCHEMA_VERSION,
   HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
   HEALTH_COMMONS_SOURCE_ARTIFACT_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_SOURCE_INDEX_SCHEMA_VERSION,
@@ -225,6 +226,43 @@ const validBiomarkerPageWithRanking = {
   },
 } as const;
 
+const validMeasurementMethodPage = {
+  schemaVersion: HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
+  entityType: "measurement_method",
+  key: "measurement_method:skin/home-standardized-photo-roi-analysis",
+  slug: "measurement-methods/skin/home-standardized-photo-roi-analysis",
+  title: "Home Standardized Photo ROI Analysis",
+  measurementMethod: {
+    shortName: "Home ROI photo analysis",
+    tier: "optional_home",
+    modalities: ["standardized_photo", "image_analysis"],
+    measuredBiomarkerKeys: ["biomarker:periocular-wrinkle-score"],
+    outputs: [
+      {
+        outputId: "wrinkle_line_length_or_area",
+        label: "Wrinkle ROI line length / area",
+        valueType: "number",
+        unit: "normalized line length or percent ROI",
+        mapsToBiomarkerKey: "biomarker:periocular-wrinkle-score",
+        direction: "lower_or_stable",
+      },
+    ],
+    procedure: {
+      summary: "Analyze the same photo region across repeated standardized photos.",
+      materials: ["same phone camera", "stable lighting"],
+      steps: ["Capture a standardized photo.", "Analyze the same ROI with fixed settings."],
+    },
+    privacy: {
+      containsIdentifiableImages: true,
+      localOnlyRecommended: true,
+    },
+    burden: {
+      userBurden: "moderate",
+      costTier: "free",
+    },
+  },
+} as const;
+
 describe("@murphai/contracts health commons schemas", () => {
   it("accepts the source-artifact page and manifest shapes used by Health Commons", () => {
     expect(safeParseContract(healthCommonsArtifactPointerSchema, validArtifactPointer)).toEqual({
@@ -304,6 +342,34 @@ describe("@murphai/contracts health commons schemas", () => {
     ).toEqual({
       success: true,
       data: validBiomarkerPageWithRanking,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, validMeasurementMethodPage),
+    ).toEqual({
+      success: true,
+      data: validMeasurementMethodPage,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validProtocolVariantPageWithOnboarding,
+        measurementPlan: {
+          schemaVersion: HEALTH_COMMONS_MEASUREMENT_PLAN_SCHEMA_VERSION,
+          defaultPathId: "home-photo-score",
+          paths: [
+            {
+              pathId: "home-photo-score",
+              label: "Default home photo score",
+              tier: "default_home",
+              required: true,
+              methodKeys: ["measurement_method:skin/home-standardized-photo-roi-analysis"],
+              outcomeKeys: ["biomarker:periocular-wrinkle-score"],
+              safetyOutcomeKeys: ["biomarker:skin-tolerability-symptoms"],
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      success: true,
     });
     expect(safeParseContract(healthCommonsCatalogEntitySchema, validCatalogEntity)).toEqual({
       success: true,
@@ -547,6 +613,53 @@ describe("@murphai/contracts health commons schemas", () => {
       safeParseContract(healthCommonsPageFrontmatterSchema, {
         ...validBiomarkerPageWithRanking,
         biomarker: undefined,
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validMeasurementMethodPage,
+        measurementMethod: undefined,
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validMeasurementMethodPage,
+        measurementMethod: {
+          ...validMeasurementMethodPage.measurementMethod,
+          privacy: undefined,
+        },
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validBiomarkerPageWithRanking,
+        measurementMethod: validMeasurementMethodPage.measurementMethod,
+      }),
+    ).toMatchObject({
+      success: false,
+    });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validMeasurementMethodPage,
+        measurementPlan: {
+          schemaVersion: HEALTH_COMMONS_MEASUREMENT_PLAN_SCHEMA_VERSION,
+          defaultPathId: "missing-path",
+          paths: [
+            {
+              pathId: "home-photo-score",
+              label: "Default home photo score",
+              tier: "default_home",
+              required: true,
+              methodKeys: ["measurement_method:skin/home-standardized-photo-roi-analysis"],
+            },
+          ],
+        },
       }),
     ).toMatchObject({
       success: false,

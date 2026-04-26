@@ -1,6 +1,8 @@
 import type {
   HealthCommonsCatalogEntity,
   HealthCommonsClaim,
+  HealthCommonsMeasurementMethod,
+  HealthCommonsMeasurementPlanPath,
   HealthCommonsProtocolSpec,
   HealthCommonsSafety,
   HealthCommonsTestPlan,
@@ -10,7 +12,11 @@ import {
   CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
 } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
-import { healthCommonsCatalog, type HealthCommonsCatalogReader } from "./catalog";
+import {
+  healthCommonsCatalog,
+  type HealthCommonsCatalogReader,
+  type HealthCommonsEntity,
+} from "./catalog";
 import {
   listProtocolBiomarkers,
   toExpectedSignal,
@@ -130,6 +136,7 @@ function toExperimentDetail(
   const routeId = toExperimentId(protocol);
   const testPlan = protocol.testPlans?.[0] ?? null;
   const protocolSpec = protocol.protocol;
+  const measurementPaths = toMeasurementPaths(protocol, catalog);
   const safety = protocol.safety;
   const citedSources = catalog.listRelated({
     entity: protocol,
@@ -190,6 +197,7 @@ function toExperimentDetail(
     expectedSignals: biomarkerEntities.map((biomarker) =>
       toExpectedSignal(protocol, biomarker)
     ),
+    measurementPaths,
     protocolFacts: toProtocolFacts(protocolSpec, testPlan),
     protocol: toProtocolSteps(protocolSpec),
     protocolTips: protocolSpec?.tips ?? [],
@@ -265,7 +273,11 @@ function toExperimentId(protocol: HealthCommonsCatalogEntity): string {
     return FINNISH_SAUNA_ROUTE_ID;
   }
 
-  return protocol.slug.split("/").at(-1) ?? protocol.slug;
+  return toTrailingRouteId(protocol.slug);
+}
+
+function toTrailingRouteId(slug: string): string {
+  return slug.split("/").at(-1) ?? slug;
 }
 
 function buildProtocolRouteAliases(protocol: HealthCommonsCatalogEntity): string[] {
@@ -276,6 +288,132 @@ function buildProtocolRouteAliases(protocol: HealthCommonsCatalogEntity): string
     protocol.slug,
     protocol.slug.split("/").at(-1) ?? null,
   ]);
+}
+
+function toMeasurementPaths(
+  protocol: HealthCommonsCatalogEntity,
+  catalog: HealthCommonsCatalogReader,
+): ExperimentProtocol["measurementPaths"] {
+  const plan = protocol.measurementPlan;
+
+  if (!plan) {
+    return [];
+  }
+
+  return plan.paths
+    .map((path, index) => ({
+      index,
+      path,
+    }))
+    .sort((left, right) => {
+      if (left.path.pathId === plan.defaultPathId) {
+        return -1;
+      }
+
+      if (right.path.pathId === plan.defaultPathId) {
+        return 1;
+      }
+
+      return left.index - right.index;
+    })
+    .map(({ path }) => toMeasurementPath({
+      catalog,
+      isDefault: path.pathId === plan.defaultPathId,
+      path,
+    }));
+}
+
+function toMeasurementPath(input: {
+  catalog: HealthCommonsCatalogReader;
+  isDefault: boolean;
+  path: HealthCommonsMeasurementPlanPath;
+}): ExperimentProtocol["measurementPaths"][number] {
+  return {
+    isDefault: input.isDefault,
+    label: input.path.label,
+    methodKeys: input.path.methodKeys,
+    methods: input.path.methodKeys.map((methodKey) =>
+      toMeasurementMethodReference({
+        catalog: input.catalog,
+        methodKey,
+      })
+    ),
+    notes: input.path.notes ?? [],
+    outcomeLabels: toMeasurementOutcomeLabels(input.catalog, input.path.outcomeKeys ?? []),
+    pathId: input.path.pathId,
+    required: input.path.required,
+    safetyOutcomeLabels: toMeasurementOutcomeLabels(
+      input.catalog,
+      input.path.safetyOutcomeKeys ?? [],
+    ),
+    tier: input.path.tier,
+  };
+}
+
+function toMeasurementMethodReference(input: {
+  catalog: HealthCommonsCatalogReader;
+  methodKey: string;
+}): ExperimentProtocol["measurementPaths"][number]["methods"][number] {
+  const entity = input.catalog.findByKey(input.methodKey);
+
+  if (!isMeasurementMethodEntity(entity)) {
+    throw new Error(
+      `Measurement plan method key ${input.methodKey} did not resolve to a measurement_method.`,
+    );
+  }
+
+  const method = entity.measurementMethod;
+  const routeId = toTrailingRouteId(entity.slug);
+
+  return {
+    href: `/measurement-methods/${routeId}`,
+    key: entity.key,
+    modalities: method.modalities.map(formatCategory),
+    ...(method.privacy
+      ? {
+          privacy: {
+            ...(method.privacy.containsIdentifiableImages === undefined
+              ? {}
+              : { containsIdentifiableImages: method.privacy.containsIdentifiableImages }),
+            ...(method.privacy.localOnlyRecommended === undefined
+              ? {}
+              : { localOnlyRecommended: method.privacy.localOnlyRecommended }),
+            notes: method.privacy.notes ?? [],
+          },
+        }
+      : {}),
+    routeId,
+    shortName: method.shortName ?? method.displayName ?? entity.title,
+    summary: entity.summary ?? summarizeBody(entity.body),
+    tier: method.tier,
+    title: method.displayName ?? entity.title,
+  };
+}
+
+function toMeasurementOutcomeLabels(
+  catalog: HealthCommonsCatalogReader,
+  keys: readonly string[],
+): string[] {
+  return keys.map((key) => {
+    const entity = catalog.findByKey(key);
+
+    if (entity?.entityType !== "biomarker") {
+      throw new Error(
+        `Measurement plan outcome key ${key} did not resolve to a biomarker.`,
+      );
+    }
+
+    return entity.title;
+  });
+}
+
+function isMeasurementMethodEntity(
+  entity: HealthCommonsEntity | null,
+): entity is HealthCommonsEntity & {
+  entityType: "measurement_method";
+  measurementMethod: HealthCommonsMeasurementMethod;
+} {
+  return entity?.entityType === "measurement_method" && entity.measurementMethod !== undefined;
 }
 
 function toProtocolFacts(

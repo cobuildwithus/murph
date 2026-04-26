@@ -30,6 +30,41 @@ const biomarkerPage: HealthCommonsSourcePage = {
   },
 };
 
+const measurementMethodPage: HealthCommonsSourcePage = {
+  body: "Measurement method body",
+  rawFrontmatter: null,
+  relativePath: "measurement-methods/example.md",
+  frontmatter: {
+    schemaVersion: HEALTH_COMMONS_PAGE_SCHEMA_VERSION,
+    entityType: "measurement_method",
+    key: "measurement_method:example",
+    slug: "measurement-methods/example",
+    title: "Example measurement method",
+    measurementMethod: {
+      tier: "optional_home",
+      modalities: ["standardized_photo", "image_analysis"],
+      measuredBiomarkerKeys: ["biomarker:example"],
+      outputs: [
+        {
+          outputId: "example_output",
+          label: "Example output",
+          valueType: "score",
+          mapsToBiomarkerKey: "biomarker:example",
+          direction: "lower_or_stable",
+        },
+      ],
+      procedure: {
+        summary: "Measure the same outcome with a repeatable method.",
+        steps: ["Record the same measurement repeatedly."],
+      },
+      privacy: {
+        containsIdentifiableImages: true,
+        localOnlyRecommended: true,
+      },
+    },
+  },
+};
+
 const sourcePage = (key: string, slug: string): HealthCommonsSourcePage => ({
   body: "Source body",
   rawFrontmatter: null,
@@ -219,6 +254,257 @@ describe("@murphai/health-commons catalog coverage", () => {
     expect(() => validateHealthCommonsContent(duplicateRecipeContent)).toThrow(
       /Duplicate protocol recipeHash/u,
     );
+  });
+
+  it("rejects non-biomarker test-plan, measurement-plan, and measurement-method targets", () => {
+    const methodAsBiomarkerContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        measurementMethodPage,
+        {
+          ...protocolPage("protocol_variant:dry-sauna/one", "one"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter,
+            testPlans: [
+              {
+                planId: "method-as-biomarker",
+                durationDays: 7,
+                baselineDays: 3,
+                interventionDays: 4,
+                primaryBiomarkerKey: "measurement_method:example",
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(methodAsBiomarkerContent)).toThrow(
+      "primaryBiomarkerKey must point to biomarker",
+    );
+
+    const secondaryBiomarkerAsMethodContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        measurementMethodPage,
+        {
+          ...protocolPage("protocol_variant:dry-sauna/one", "one"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter,
+            testPlans: [
+              {
+                ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter.testPlans![0]!,
+                secondaryBiomarkerKeys: ["measurement_method:example"],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(secondaryBiomarkerAsMethodContent)).toThrow(
+      "secondaryBiomarkerKeys must point to biomarker",
+    );
+
+    const safetyOutcomeAsMethodContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        measurementMethodPage,
+        {
+          ...protocolPage("protocol_variant:dry-sauna/one", "one"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter,
+            testPlans: [
+              {
+                ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter.testPlans![0]!,
+                safetyOutcomeKeys: ["measurement_method:example"],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(safetyOutcomeAsMethodContent)).toThrow(
+      "safetyOutcomeKeys must point to biomarker",
+    );
+
+    const validMeasurementPlanContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        measurementMethodPage,
+        {
+          ...protocolPage("protocol_variant:dry-sauna/one", "one"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter,
+            measurementPlan: {
+              schemaVersion: "murph.commons.measurement-plan.v1",
+              defaultPathId: "home-photo-score",
+              paths: [
+                {
+                  pathId: "home-photo-score",
+                  label: "Home photo score",
+                  tier: "default_home",
+                  required: true,
+                  methodKeys: ["measurement_method:example"],
+                  outcomeKeys: ["biomarker:example"],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(validMeasurementPlanContent)).not.toThrow();
+
+    const biomarkerAsMethodContent: HealthCommonsContentSet = {
+      ...validMeasurementPlanContent,
+      pages: validMeasurementPlanContent.pages.map((page) =>
+        page.frontmatter.entityType === "protocol_variant"
+          ? {
+              ...page,
+              frontmatter: {
+                ...page.frontmatter,
+                measurementPlan: {
+                  schemaVersion: "murph.commons.measurement-plan.v1",
+                  defaultPathId: "home-photo-score",
+                  paths: [
+                    {
+                      pathId: "home-photo-score",
+                      label: "Home photo score",
+                      tier: "default_home",
+                      required: true,
+                      methodKeys: ["biomarker:example"],
+                      outcomeKeys: ["biomarker:example"],
+                    },
+                  ],
+                },
+              },
+            }
+          : page,
+      ),
+    };
+
+    expect(() => validateHealthCommonsContent(biomarkerAsMethodContent)).toThrow(
+      "measurementPlan path home-photo-score methodKeys must point to measurement_method",
+    );
+
+    const measurementPlanOutcomeAsMethodContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        measurementMethodPage,
+        {
+          ...protocolPage("protocol_variant:dry-sauna/one", "one"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter,
+            measurementPlan: {
+              schemaVersion: "murph.commons.measurement-plan.v1",
+              defaultPathId: "home-photo-score",
+              paths: [
+                {
+                  pathId: "home-photo-score",
+                  label: "Home photo score",
+                  tier: "default_home",
+                  required: true,
+                  methodKeys: ["measurement_method:example"],
+                  outcomeKeys: ["measurement_method:example"],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(measurementPlanOutcomeAsMethodContent)).toThrow(
+      "measurementPlan path home-photo-score outcomeKeys must point to biomarker",
+    );
+
+    const measurementPlanSafetyAsMethodContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        measurementMethodPage,
+        {
+          ...protocolPage("protocol_variant:dry-sauna/one", "one"),
+          frontmatter: {
+            ...protocolPage("protocol_variant:dry-sauna/one", "one").frontmatter,
+            measurementPlan: {
+              schemaVersion: "murph.commons.measurement-plan.v1",
+              defaultPathId: "home-photo-score",
+              paths: [
+                {
+                  pathId: "home-photo-score",
+                  label: "Home photo score",
+                  tier: "default_home",
+                  required: true,
+                  methodKeys: ["measurement_method:example"],
+                  safetyOutcomeKeys: ["measurement_method:example"],
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(measurementPlanSafetyAsMethodContent)).toThrow(
+      "measurementPlan path home-photo-score safetyOutcomeKeys must point to biomarker",
+    );
+
+    const measurementMethodOutputAsMethodContent: HealthCommonsContentSet = {
+      artifactManifests: [],
+      changes: [],
+      evidenceAppraisals: [],
+      redirects: [],
+      pages: [
+        biomarkerPage,
+        {
+          ...measurementMethodPage,
+          frontmatter: {
+            ...measurementMethodPage.frontmatter,
+            measurementMethod: {
+              ...measurementMethodPage.frontmatter.measurementMethod!,
+              outputs: [
+                {
+                  ...measurementMethodPage.frontmatter.measurementMethod!.outputs[0]!,
+                  mapsToBiomarkerKey: "measurement_method:example",
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    expect(() => validateHealthCommonsContent(measurementMethodOutputAsMethodContent)).toThrow(
+      "measurementMethod output example_output must point to biomarker",
+    );
+
   });
 
   it("rejects experiment onboarding plan defaults that point to a missing test plan", () => {

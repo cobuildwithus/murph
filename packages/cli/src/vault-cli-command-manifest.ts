@@ -26,6 +26,7 @@ import {
   registerCaptureCommands,
 } from './commands/capture.js'
 import {
+  commonsGetResultSchema,
   commonsProtocolListResultSchema,
   commonsProtocolShowResultSchema,
   commonsSearchResultSchema,
@@ -261,6 +262,7 @@ function buildHealthCommandManifestDescriptor(input: {
   commandName: string
   register: DirectBindingCommandDescriptor['register']
   additionalVaultServiceBindings?: DirectVaultServiceBindings
+  additionalLeafCommands?: readonly VaultCliLeafCommandDescriptor[]
 }): DirectBindingCommandDescriptor {
   const descriptor = requireHealthCommandDescriptor(input.commandName)
 
@@ -268,7 +270,10 @@ function buildHealthCommandManifestDescriptor(input: {
     id: `health:${input.commandName}`,
     bindingMode: 'direct',
     rootCommandNames: [input.commandName],
-    leafCommands: createHealthLeafCommands(descriptor),
+    leafCommands: [
+      ...createHealthLeafCommands(descriptor),
+      ...(input.additionalLeafCommands ?? []),
+    ],
     directVaultServiceBindings: mergeDirectVaultServiceBindings(
       {
         core: [
@@ -393,6 +398,12 @@ export const vaultCliCommandDescriptors = [
         description:
           'Search the public Health Commons catalog without reading or writing private vault protocols.',
         output: commonsSearchResultSchema,
+      },
+      {
+        path: ['commons', 'get'],
+        description:
+          'Show one public Health Commons entity by key, slug, or route id, including measurement-method and protocol measurement-plan fields when present.',
+        output: commonsGetResultSchema,
       },
       {
         path: ['commons', 'protocol', 'list'],

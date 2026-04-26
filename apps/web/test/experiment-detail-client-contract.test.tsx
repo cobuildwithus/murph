@@ -265,6 +265,7 @@ function createProtocol(
     evidenceLabel: "Field testing · Usable",
     description: "Simple heat exposure experiment.",
     expectedSignals: [],
+    measurementPaths: [],
     protocolFacts: [],
     protocol: [],
     protocolTips: [],

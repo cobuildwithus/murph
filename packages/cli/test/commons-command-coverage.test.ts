@@ -124,6 +124,109 @@ test("commons protocol list and show expose protocol revisions distinctly from p
   assert.ok(showData.protocol.testPlans.length > 0);
 });
 
+test("commons get inspects generic entities and accepts measurement method disambiguation", async () => {
+  const cli = createCommonsSliceCli();
+
+  const getResult = await runInProcessJsonCli<{
+    entity: {
+      entityType: string;
+      entityTypeLabel: string;
+      key: string;
+      measurementMethod: unknown | null;
+      measurementPlan: unknown | null;
+    };
+    lookup: string;
+  }>(cli, [
+    "commons",
+    "get",
+    "finnish-sauna",
+  ]);
+
+  assert.equal(getResult.envelope.ok, true);
+  const getData = requireData(getResult.envelope);
+  assert.equal(getData.lookup, "finnish-sauna");
+  assert.equal(getData.entity.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
+  assert.equal(getData.entity.entityType, "protocol_variant");
+  assert.equal(getData.entity.entityTypeLabel, "protocol");
+  assert.equal(getData.entity.measurementMethod, null);
+  assert.ok("measurementPlan" in getData.entity);
+
+  const absentMeasurementMethod = await runInProcessJsonCli(cli, [
+    "commons",
+    "get",
+    "finnish-sauna",
+    "--type",
+    "measurement_method",
+  ]);
+  assert.equal(absentMeasurementMethod.exitCode, 1);
+  assert.equal(absentMeasurementMethod.envelope.ok, false);
+  if (!absentMeasurementMethod.envelope.ok) {
+    assert.equal(absentMeasurementMethod.envelope.error.code, "commons_entity_not_found");
+    assert.match(
+      absentMeasurementMethod.envelope.error.message ?? "",
+      /with type measurement_method/u,
+    );
+  }
+});
+
+test("commons search accepts measurement methods through the shared entity enum", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    filters: {
+      entityTypes: string[];
+    };
+    hits: Array<{
+      entityType: string;
+      entityTypeLabel: string;
+      key: string;
+    }>;
+  }>(cli, [
+    "commons",
+    "search",
+    "standardized photo",
+    "--type",
+    "measurement_method",
+    "--limit",
+    "5",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.deepEqual(data.filters.entityTypes, ["measurement_method"]);
+  assert.ok(
+    data.hits.every(
+      (hit) =>
+        hit.entityType === "measurement_method" &&
+        hit.entityTypeLabel === "measurement method",
+    ),
+  );
+
+  const firstMeasurementMethod = data.hits[0];
+  if (firstMeasurementMethod) {
+    const getResult = await runInProcessJsonCli<{
+      entity: {
+        entityType: string;
+        entityTypeLabel: string;
+        measurementMethod: unknown | null;
+        measurementPlan: unknown | null;
+      };
+    }>(cli, [
+      "commons",
+      "get",
+      firstMeasurementMethod.key,
+      "--type",
+      "measurement_method",
+    ]);
+
+    assert.equal(getResult.envelope.ok, true);
+    const getData = requireData(getResult.envelope);
+    assert.equal(getData.entity.entityType, "measurement_method");
+    assert.equal(getData.entity.entityTypeLabel, "measurement method");
+    assert.ok(getData.entity.measurementMethod);
+    assert.equal(getData.entity.measurementPlan, null);
+  }
+});
+
 test("commons protocol list treats wildcard categories as unfiltered", async () => {
   const cli = createCommonsSliceCli();
 
