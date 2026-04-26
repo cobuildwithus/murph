@@ -30,7 +30,6 @@ import {
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
 
-const webhookUserId = `member_local_linq_webhook_${Date.now()}`;
 const linqWebhookSecret = "linq-local-webhook-secret";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -39,11 +38,12 @@ const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_UR
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
-let activeLinqMember: ActiveLinqWebhookMember | null = null;
+let linqWebhookMemberCounter = 0;
 
 interface ActiveLinqWebhookMember {
   chatId: string;
   replyChatPath: string;
+  userId: string;
 }
 
 it("derives stable numeric suffixes from the full Linq user id", () => {
@@ -57,11 +57,9 @@ describe("hosted local Linq webhook e2e", () => {
     await startLinqScenario((linq) => ({
       LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
     }));
-    activeLinqMember = await activateLinqWebhookMember(webhookUserId);
   }, 300_000);
 
   afterAll(async () => {
-    activeLinqMember = null;
     await scenario?.stop();
     scenario = null;
     await linqStub?.stop();
@@ -69,7 +67,8 @@ describe("hosted local Linq webhook e2e", () => {
   }, 120_000);
 
   it("routes a signed Linq webhook through apps/web and delivers the follow-up reply", async () => {
-    const { chatId: materializedChatId, replyChatPath } = requireActiveLinqMember();
+    const { chatId: materializedChatId, replyChatPath, userId } =
+      await createActiveLinqWebhookMember("reply");
     const expectedReplyChatPath = replyChatPath;
     const typingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
     const typingCountBeforeWebhook = requireLinqStub().countObservedRequests({
@@ -80,9 +79,9 @@ describe("hosted local Linq webhook e2e", () => {
       requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
-    const inboundMessageId = `msg_webhook_${webhookUserId}`;
-    const webhookEvent = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
-      eventId: `evt_webhook_${webhookUserId}`,
+    const inboundMessageId = `msg_webhook_${userId}`;
+    const webhookEvent = buildHostedLinqInboundEvent(userId, materializedChatId, {
+      eventId: `evt_webhook_${userId}`,
       messageId: inboundMessageId,
       text: "U can call me Rocket Man",
     });
@@ -99,14 +98,14 @@ describe("hosted local Linq webhook e2e", () => {
       expectedPath: typingPath,
     })).toBeGreaterThanOrEqual(typingCountBeforeWebhook + 1);
 
-    await requireScenario().waitForLatestPendingWake(webhookUserId);
-    await requireScenario().waitForHostedCompletion(webhookUserId);
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireScenario().waitForHostedCompletion(userId);
 
     const replySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeReply,
       expectedPath: expectedReplyChatPath,
       scenario: requireScenario(),
-      userId: webhookUserId,
+      userId,
     });
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
@@ -120,7 +119,7 @@ describe("hosted local Linq webhook e2e", () => {
         expectedMethod: "DELETE",
         expectedPath: `/messages/${encodeURIComponent(messageId)}`,
         scenario: requireScenario(),
-        userId: webhookUserId,
+        userId,
       });
     }
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
@@ -131,22 +130,22 @@ describe("hosted local Linq webhook e2e", () => {
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
-    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath } =
-      requireActiveLinqMember();
+    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
+      await createActiveLinqWebhookMember("rapid");
     const observedMessageIdsBeforeReply =
       requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
-    const firstInboundMessageId = `msg_webhook_name_${webhookUserId}_rapid`;
-    const firstWebhook = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
-      eventId: `evt_webhook_name_${webhookUserId}_rapid`,
+    const firstInboundMessageId = `msg_webhook_name_${userId}_rapid`;
+    const firstWebhook = buildHostedLinqInboundEvent(userId, materializedChatId, {
+      eventId: `evt_webhook_name_${userId}_rapid`,
       messageId: firstInboundMessageId,
       text: "U can call me Comet Rider",
     });
-    const secondInboundMessageId = `msg_webhook_goals_${webhookUserId}_rapid`;
-    const secondWebhook = buildHostedLinqInboundEvent(webhookUserId, materializedChatId, {
-      eventId: `evt_webhook_goals_${webhookUserId}_rapid`,
+    const secondInboundMessageId = `msg_webhook_goals_${userId}_rapid`;
+    const secondWebhook = buildHostedLinqInboundEvent(userId, materializedChatId, {
+      eventId: `evt_webhook_goals_${userId}_rapid`,
       messageId: secondInboundMessageId,
       text: "I want to build more strength, improve endurance, and get fitter overall.",
     });
@@ -166,14 +165,14 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "wake-appended-active-member",
     });
 
-    await requireScenario().waitForLatestPendingWake(webhookUserId);
-    await requireScenario().waitForHostedCompletion(webhookUserId);
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireScenario().waitForHostedCompletion(userId);
 
     const replySends = await requireLinqStub().waitForMatchingSendCount({
       expectedCount: outboundCountBeforeReply + 1,
       expectedPath: expectedReplyChatPath,
       scenario: requireScenario(),
-      userId: webhookUserId,
+      userId,
     });
     const newReplySends = replySends.slice(outboundCountBeforeReply);
     expect(newReplySends).toHaveLength(1);
@@ -192,7 +191,7 @@ describe("hosted local Linq webhook e2e", () => {
         expectedMethod: "DELETE",
         expectedPath: `/messages/${encodeURIComponent(messageId)}`,
         scenario: requireScenario(),
-        userId: webhookUserId,
+        userId,
       });
     }
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
@@ -206,10 +205,10 @@ describe("hosted local Linq webhook e2e", () => {
   }, 300_000);
 
   it("hydrates a metadata-only Linq voice memo through the local attachment API and drains without a transcript", async () => {
-    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath } =
-      requireActiveLinqMember();
+    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
+      await createActiveLinqWebhookMember("voice");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
-    const attachmentId = `att_voice_${webhookUserId}`;
+    const attachmentId = `att_voice_${userId}`;
     const expectedAttachmentMetadataPath = `/attachments/${encodeURIComponent(attachmentId)}`;
     const expectedAttachmentDownloadPath =
       `/attachment-downloads/${encodeURIComponent(attachmentId)}.wav`;
@@ -222,18 +221,18 @@ describe("hosted local Linq webhook e2e", () => {
       expectedPath: expectedAttachmentDownloadPath,
     });
     const expectedInboundDeletePath =
-      `/messages/${encodeURIComponent(`msg_voice_memo_${webhookUserId}`)}`;
+      `/messages/${encodeURIComponent(`msg_voice_memo_${userId}`)}`;
     const inboundDeleteCountBeforeReply = requireLinqStub().countObservedRequests({
       expectedMethod: "DELETE",
       expectedPath: expectedInboundDeletePath,
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      webhookUserId,
+      userId,
       materializedChatId,
       {
-        eventId: `evt_voice_memo_${webhookUserId}`,
-        messageId: `msg_voice_memo_${webhookUserId}`,
+        eventId: `evt_voice_memo_${userId}`,
+        messageId: `msg_voice_memo_${userId}`,
         parts: [
           {
             attachmentId,
@@ -250,29 +249,29 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "wake-appended-active-member",
     });
 
-    await requireScenario().waitForLatestPendingWake(webhookUserId);
+    await requireScenario().waitForLatestPendingWake(userId);
     await requireLinqStub().waitForAdditionalRequest({
       baselineCount: attachmentMetadataCountBeforeReply,
       expectedMethod: "GET",
       expectedPath: expectedAttachmentMetadataPath,
       scenario: requireScenario(),
-      userId: webhookUserId,
+      userId,
     });
     await requireLinqStub().waitForAdditionalRequest({
       baselineCount: attachmentDownloadCountBeforeReply,
       expectedMethod: "GET",
       expectedPath: expectedAttachmentDownloadPath,
       scenario: requireScenario(),
-      userId: webhookUserId,
+      userId,
     });
     await requireLinqStub().waitForAdditionalRequest({
       baselineCount: inboundDeleteCountBeforeReply,
       expectedMethod: "DELETE",
       expectedPath: expectedInboundDeletePath,
       scenario: requireScenario(),
-      userId: webhookUserId,
+      userId,
     });
-    const finalStatus = await requireScenario().waitForHostedCompletion(webhookUserId);
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastError).toBeNull();
     expect(finalStatus.pendingIngressEventCount).toBe(0);
     expect(finalStatus.inFlight).toBe(false);
@@ -341,14 +340,6 @@ function requireScenario(): HostedLocalFullStackScenario {
   return scenario;
 }
 
-function requireActiveLinqMember(): ActiveLinqWebhookMember {
-  if (!activeLinqMember) {
-    throw new Error("Hosted local active Linq member was not initialized.");
-  }
-
-  return activeLinqMember;
-}
-
 async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebhookMember> {
   await requireScenario().seedActiveHostedLinqMember({
     homePhone: buildLinqHomePhoneNumber(userId),
@@ -383,7 +374,15 @@ async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebh
   return {
     chatId,
     replyChatPath: `/chats/${encodeURIComponent(chatId)}/messages`,
+    userId,
   };
+}
+
+async function createActiveLinqWebhookMember(label: string): Promise<ActiveLinqWebhookMember> {
+  linqWebhookMemberCounter += 1;
+  const userId = `member_local_linq_webhook_${label}_${Date.now()}_${linqWebhookMemberCounter}`;
+
+  return await activateLinqWebhookMember(userId);
 }
 
 async function startLinqScenario(
