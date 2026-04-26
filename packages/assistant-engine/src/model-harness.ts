@@ -25,6 +25,7 @@ export type {
 } from './model-harness/tool-catalog.js'
 export {
   createAssistantToolCatalogFromCapabilities,
+  hashAssistantToolCatalogForPromptCache,
   normalizeJsonRecord,
 } from './model-harness/tool-catalog.js'
 export type {

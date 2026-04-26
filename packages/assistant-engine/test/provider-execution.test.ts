@@ -306,7 +306,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         reasoningEffort: 'medium',
         webSearch: 'murph',
       }),
-      resumeProviderSessionId: 'resume-session-123',
+      resumeProviderSessionId: 'resp_resume_session_123',
       systemPrompt: 'You are concise.',
       toolRuntime: {
         toolCatalog,
@@ -353,7 +353,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       ok: true,
       result: {
         provider: 'openai-compatible',
-        providerSessionId: 'resume-session-123',
+        providerSessionId: 'resp_resume_session_123',
         rawEvents: [
           {
             mode: 'apply',
@@ -449,7 +449,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       },
       providerOptions: {
         openai: {
-          previousResponseId: 'resume-session-123',
+          previousResponseId: 'resp_resume_session_123',
           reasoningEffort: 'medium',
           store: true,
         },
@@ -521,6 +521,69 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         ],
       },
     )
+  })
+
+  it('falls back fresh when an OpenAI Responses resume id is not a response id', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Fresh answer',
+      response: {
+        id: 'gen_gateway_1',
+        model: 'gpt-4.1-mini-2026-04-01',
+      },
+      usage: {
+        input_tokens: 4,
+        output_tokens: 6,
+        total_tokens: 10,
+      },
+    })
+
+    const result = await openAiCompatibleProviderDefinition.executeTurn({
+      continuityContext: 'Recovered bootstrap context.',
+      conversationMessages: [
+        {
+          content: 'Earlier question',
+          role: 'user',
+        },
+      ],
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4.1-mini',
+        presetId: 'openai',
+        providerName: 'OpenAI',
+      }),
+      resumeProviderSessionId: 'gen_gateway_123',
+      userPrompt: 'Please reply now.',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(result).toMatchObject({
+      ok: true,
+      result: {
+        providerSessionId: null,
+        response: 'Fresh answer',
+      },
+    })
+    expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+      messages: [
+        {
+          content: 'Earlier question',
+          role: 'user',
+        },
+        {
+          content: 'Recovered bootstrap context.\n\nPlease reply now.',
+          role: 'user',
+        },
+      ],
+      providerOptions: {
+        openai: {
+          store: true,
+        },
+      },
+    })
+    expect(
+      providerMocks.generateText.mock.calls[0]?.[0]?.providerOptions?.openai,
+    ).not.toHaveProperty('previousResponseId')
   })
 
   it('uses normalized provider option keys outside the OpenAI Responses API and leaves provider sessions unset', async () => {

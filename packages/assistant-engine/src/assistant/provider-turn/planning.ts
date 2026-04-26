@@ -369,6 +369,52 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const activeExperimentContext = input.sharedPlan.allowSensitiveHealthContext
     ? await resolveAssistantActiveExperimentContextBlock(input.input.vault)
     : null
+  const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
+    input.route.providerOptions,
+  )
+  const systemPrompt =
+    input.profile.promptProfile === 'notification-decision'
+      ? buildAssistantNotificationDecisionSystemPrompt({
+            activeExperimentContext,
+            allowSensitiveHealthContext:
+              input.sharedPlan.allowSensitiveHealthContext,
+            assistantHealthCommonsAccessMode:
+              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
+            assistantHostedDeviceConnectAvailable:
+              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
+            assistantHostedDeviceConnectProviders:
+              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
+            assistantToolNameAliases,
+            channel: resolvedChannel,
+            currentLocalDate: input.promptTimeContext.currentLocalDate,
+            currentTimeZone: input.promptTimeContext.currentTimeZone,
+            vaultOverview,
+          })
+      : buildAssistantSystemPrompt({
+            activeExperimentContext,
+            assistantCliContract,
+            allowSensitiveHealthContext:
+              input.sharedPlan.allowSensitiveHealthContext,
+            assistantCommandAccessMode:
+              promptCapabilityAvailability.assistantCommandAccessMode,
+            assistantHealthCommonsAccessMode:
+              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
+            assistantHostedDeviceConnectAvailable:
+              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
+            assistantHostedDeviceConnectProviders:
+              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
+            assistantKnowledgeToolsAvailable:
+              promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+            assistantToolNameAliases,
+            cliAccess: input.sharedPlan.cliAccess,
+            channel: resolvedChannel,
+            currentLocalDate: input.promptTimeContext.currentLocalDate,
+            currentTimeZone: input.promptTimeContext.currentTimeZone,
+            onboardingGuidance: shouldInjectOnboardingGuidance,
+            modelBehaviorProfile,
+            turnTrigger: input.input.turnTrigger ?? null,
+            vaultOverview,
+          })
 
   return {
     assistantCommandAccessMode,
@@ -391,49 +437,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         }
       : undefined,
     workingDirectory,
-    systemPrompt:
-      input.profile.promptProfile === 'notification-decision'
-        ? buildAssistantNotificationDecisionSystemPrompt({
-            activeExperimentContext,
-            allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-            assistantHealthCommonsAccessMode:
-              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
-            assistantHostedDeviceConnectAvailable:
-              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
-            assistantHostedDeviceConnectProviders:
-              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
-            assistantToolNameAliases,
-            channel: resolvedChannel,
-            currentLocalDate: input.promptTimeContext.currentLocalDate,
-            currentTimeZone: input.promptTimeContext.currentTimeZone,
-            vaultOverview,
-          })
-        : buildAssistantSystemPrompt({
-            activeExperimentContext,
-            assistantCliContract,
-            allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-            assistantCommandAccessMode:
-              promptCapabilityAvailability.assistantCommandAccessMode,
-            assistantHealthCommonsAccessMode:
-              promptCapabilityAvailability.assistantHealthCommonsAccessMode,
-            assistantHostedDeviceConnectAvailable:
-              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
-            assistantHostedDeviceConnectProviders:
-              promptCapabilityAvailability.assistantHostedDeviceConnectProviders,
-            assistantKnowledgeToolsAvailable:
-              promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
-            assistantToolNameAliases,
-            cliAccess: input.sharedPlan.cliAccess,
-            channel: resolvedChannel,
-            currentLocalDate: input.promptTimeContext.currentLocalDate,
-            currentTimeZone: input.promptTimeContext.currentTimeZone,
-            onboardingGuidance: shouldInjectOnboardingGuidance,
-            modelBehaviorProfile: resolveAssistantModelBehaviorProfile(
-              input.route.providerOptions,
-            ),
-            turnTrigger: input.input.turnTrigger ?? null,
-            vaultOverview,
-          }),
+    systemPrompt,
     supportsToolRuntime,
   }
 }

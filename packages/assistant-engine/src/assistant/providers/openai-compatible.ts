@@ -272,15 +272,28 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
     const usesResponsesApi =
       (languageModelSpec.executionDriver ?? 'openai-compatible') === 'responses'
+    const resumeProviderSessionId =
+      resolveOpenAiCompatibleEffectiveResumeProviderSessionId({
+        providerConfig,
+        resumeProviderSessionId: input.resumeProviderSessionId,
+        usesResponsesApi,
+      })
     const providerOptions = resolveOpenAiCompatibleProviderOptions({
       providerConfig,
-      resumeProviderSessionId: input.resumeProviderSessionId,
+      resumeProviderSessionId,
       usageAttribution,
       usesResponsesApi,
     })
+    const providerInput =
+      resumeProviderSessionId === normalizeNullableString(input.resumeProviderSessionId)
+        ? input
+        : {
+            ...input,
+            resumeProviderSessionId,
+          }
 
     try {
-      const messages = buildAssistantProviderMessages(input)
+      const messages = buildAssistantProviderMessages(providerInput)
       const result = await generateText({
         abortSignal: input.abortSignal,
         maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
@@ -324,8 +337,9 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
           providerSessionId:
             shouldUseOpenAiCompatibleProviderState(providerConfig)
               ? (
-                  extractOpenAICompatibleProviderSessionId(result) ??
-                  normalizeNullableString(input.resumeProviderSessionId)
+                  normalizeOpenAiCompatibleResponsesProviderSessionId(
+                    extractOpenAICompatibleProviderSessionId(result),
+                  ) ?? resumeProviderSessionId
                 )
               : null,
           response: result.text,
@@ -990,6 +1004,31 @@ export function shouldUseOpenAiCompatibleProviderState(
   )
 }
 
+function normalizeOpenAiCompatibleResponsesProviderSessionId(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+  return normalized?.startsWith('resp') === true ? normalized : null
+}
+
+function resolveOpenAiCompatibleEffectiveResumeProviderSessionId(input: {
+  providerConfig: AssistantProviderConfig
+  resumeProviderSessionId: string | null | undefined
+  usesResponsesApi: boolean
+}): string | null {
+  if (!input.usesResponsesApi) {
+    return normalizeNullableString(input.resumeProviderSessionId)
+  }
+
+  if (!shouldUseOpenAiCompatibleProviderState(input.providerConfig)) {
+    return null
+  }
+
+  return normalizeOpenAiCompatibleResponsesProviderSessionId(
+    input.resumeProviderSessionId,
+  )
+}
+
 export function resolveOpenAiCompatibleProviderOptions(input: {
   providerConfig: AssistantProviderConfig
   resumeProviderSessionId: string | null | undefined
@@ -1000,9 +1039,8 @@ export function resolveOpenAiCompatibleProviderOptions(input: {
   const reasoningEffort = supportsAssistantReasoningEffort(input.providerConfig)
     ? normalizeNullableString(input.providerConfig.policy.reasoningEffort)
     : null
-  const normalizedResumeProviderSessionId = normalizeNullableString(
-    input.resumeProviderSessionId,
-  )
+  const normalizedResumeProviderSessionId =
+    resolveOpenAiCompatibleEffectiveResumeProviderSessionId(input)
   const gatewayOptions = resolveOpenAiCompatibleGatewayProviderOptions({
     providerZeroDataRetention: input.providerConfig.policy.zeroDataRetention === true,
     providerTarget: isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
