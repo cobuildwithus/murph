@@ -5,6 +5,10 @@ import {
   createDefaultLocalAssistantModelTarget,
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import {
+  parseAssistantSessionRecord,
+  type AssistantSessionResumeState,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 
 const sessionResolutionMocks = vi.hoisted(() => ({
@@ -116,6 +120,51 @@ function createMessageInput(
     prompt: 'Summarize the session state.',
     vault: '/tmp/assistant-session-resolution-vault',
     ...overrides,
+  }
+}
+
+function createTestAssistantSession(input: {
+  resumeState?: AssistantSessionResumeState | null
+  sessionId?: string
+  target: AssistantModelTarget
+}) {
+  return parseAssistantSessionRecord({
+    schema: 'murph.assistant-session.v1',
+    sessionId: input.sessionId ?? 'session-123',
+    target: input.target,
+    resumeState: input.resumeState ?? null,
+    alias: 'conversation-alias',
+    binding: {
+      actorId: 'conversation-participant',
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|actor:conversation-participant',
+      delivery: null,
+      identityId: 'default-identity',
+      threadId: 'conversation-thread',
+      threadIsDirect: true,
+    },
+    createdAt: '2026-04-08T00:00:00.000Z',
+    lastTurnAt: null,
+    turnCount: 0,
+    updatedAt: '2026-04-08T00:00:00.000Z',
+  })
+}
+
+function createResolvedAssistantSessionForTest(input: {
+  resumeState?: AssistantSessionResumeState | null
+  sessionId?: string
+  target: AssistantModelTarget
+}) {
+  return {
+    created: false,
+    paths: {
+      indexesDirectory: '/tmp/indexes',
+      rootDirectory: '/tmp/root',
+      sessionsDirectory: '/tmp/sessions',
+      statusDirectory: '/tmp/status',
+      transcriptsDirectory: '/tmp/transcripts',
+    },
+    session: createTestAssistantSession(input),
   }
 }
 
@@ -377,5 +426,88 @@ describe('assistant session resolution', () => {
     expect(sessionResolutionMocks.resolveAssistantSession).toHaveBeenCalledWith(
       buildResolveAssistantSessionInput(message, defaults, boundaryDefaultTarget),
     )
+  })
+
+  it('projects hosted message sessions onto the hosted default target and clears stale resume state', async () => {
+    const previousTarget = createOpenAiTarget({
+      model: 'openai/gpt-5.4',
+      reasoningEffort: 'medium',
+    })
+    const hostedDefaultTarget = createOpenAiTarget({
+      model: 'openai/gpt-5.5',
+      providerName: 'Platform Gateway',
+      reasoningEffort: 'high',
+    })
+    const resolvedSession = createResolvedAssistantSessionForTest({
+      target: previousTarget,
+      resumeState: {
+        providerSessionId: 'resp_old',
+        resumeRouteId: 'route-old',
+      },
+    })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    const result = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: hostedDefaultTarget,
+      defaults: createOperatorDefaults({
+        backend: hostedDefaultTarget,
+      }),
+      message: createMessageInput({
+        executionContext: {
+          hosted: {
+            defaultTarget: hostedDefaultTarget,
+            memberId: 'member-123',
+            userEnvKeys: [],
+          },
+        },
+      }),
+    })
+
+    expect(result).not.toBe(resolvedSession)
+    expect(result.created).toBe(false)
+    expect(result.paths).toBe(resolvedSession.paths)
+    expect(result.session.sessionId).toBe(resolvedSession.session.sessionId)
+    expect(result.session.target).toEqual(hostedDefaultTarget)
+    expect(result.session.providerOptions.model).toBe('openai/gpt-5.5')
+    expect(result.session.providerOptions.reasoningEffort).toBe('high')
+    expect(result.session.resumeState).toBeNull()
+    expect(resolvedSession.session.target).toEqual(previousTarget)
+    expect(resolvedSession.session.resumeState?.providerSessionId).toBe('resp_old')
+  })
+
+  it('keeps hosted resume state when the hosted default continuity has not changed', async () => {
+    const hostedDefaultTarget = createOpenAiTarget({
+      model: 'openai/gpt-5.5',
+      providerName: 'Platform Gateway',
+      reasoningEffort: 'high',
+    })
+    const resumeState = {
+      providerSessionId: 'resp_current',
+      resumeRouteId: 'route-current',
+    }
+    const resolvedSession = createResolvedAssistantSessionForTest({
+      target: hostedDefaultTarget,
+      resumeState,
+    })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    const result = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: hostedDefaultTarget,
+      defaults: createOperatorDefaults({
+        backend: hostedDefaultTarget,
+      }),
+      message: createMessageInput({
+        executionContext: {
+          hosted: {
+            defaultTarget: hostedDefaultTarget,
+            memberId: 'member-123',
+            userEnvKeys: [],
+          },
+        },
+      }),
+    })
+
+    expect(result.session.target).toEqual(hostedDefaultTarget)
+    expect(result.session.resumeState).toEqual(resumeState)
   })
 })
