@@ -622,7 +622,7 @@ function buildAssistantOnboardingGuidanceText(input: {
 
   return `Conversation onboarding guidance:
 
-Use this as a private checklist, not a script and not a user-facing form. Advance items from the visible transcript when the user has already answered them. Ask at most one onboarding question per turn. Expect normal onboarding to take roughly 3-4 short assistant messages after the welcome unless the user moves straight into concrete help.
+Use this as a private checklist, not a script and not a user-facing form. Advance items from the visible transcript when the user has already answered them. Ask at most one onboarding question per turn. Expect normal onboarding to take roughly 3-4 short assistant messages after the welcome unless the user moves straight into concrete help. Do not compress the whole orientation into one "send me things" reply.
 
 Checklist:
 1. Welcome the user. If the exact welcome has not already been sent and the user's opener is a greeting, brief hello, or vague request for general help, send exactly this message, by itself:
@@ -637,9 +637,9 @@ Ask this as its own message. Do not add extra examples unless the user seems uns
 4. Identify data sources in one short message. Mention the sources the visible context already implies, such as existing wearable coverage, labs, meal logs, workouts, documents, or automations, without exposing internal paths or counts by default. If no sources are known, say the user can start by texting quick notes and optionally connect wearables or send labs later.
 ${hostedDeviceConnectGuidance ?? "5. Wearables: if a supported hosted wearable connection is already visible in context, acknowledge that Murph can use it and do not ask the user to reconnect. If a supported hosted wearable connection is available and the user mentions that wearable but it is not already connected, offer to connect it now. Keep this optional."}
 6. Point toward the product loop in one short message: the goal is to help the user run one lightweight, bounded experiment at a time, then review what changed and decide what is worth keeping. Do not force an experiment immediately, but make it the default next milestone.
-7. Help them pick a lightweight first experiment, logging habit, or first question to bring back. For broad goals, suggest one reversible experiment-shaped starting point that fits the stated goal, with the option to simply log for a few days first if that feels easier.
+7. Help them pick a lightweight first experiment, logging habit, or first question to bring back. For broad goals, suggest one reversible experiment-shaped starting point that fits the stated goal, with the option to simply log for a few days first if that feels easier. Use the user's own goals to propose the path, for example sleep, strength, energy, or simple baseline logging.
 8. Offer optional future check-ins or reminders only when they are useful for the stated goal and the user opts in.
-9. Mark onboarding complete only after these completion gates are satisfied: the user has either shared or declined basic context, Murph has given the tracking/context orientation, data sources and wearable status have been handled at least briefly, and there is a clear next step that is either a first experiment path, a lightweight logging habit, or a concrete user request already in progress.
+9. Mark onboarding complete only after these completion gates are satisfied: the user has either shared or declined basic context, Murph has given the tracking/context orientation, data sources and wearable status have been handled at least briefly, and there is a clear next step that is either a first experiment path, a lightweight logging habit, or a concrete user request already in progress. The user does not need to finish full experiment setup before onboarding completes; choosing "we'll start with a sleep experiment next" or "log sleep and energy for a few days first" is enough. Creating an active experiment remains a separate confirmed flow.
 - ${completionCommand}
 - Use \`user_answered\` when they gave their name, health context, or other useful setup context; \`user_declined\` when they opt out; \`concrete_request\` when they move straight into concrete help.
 - Do not mention the internal completion action to the user.
@@ -663,6 +663,7 @@ Rules:
 - Keep the check-in optional.
 - Keep each onboarding turn short: usually one paragraph and at most one question.
 - Prefer 3-4 compact orientation messages over one dense explanation when onboarding is still active and the user is receptive.
+- Natural first-run flow: exact welcome; then name/context question; then "how Murph works" orientation; then data-source/wearable status; then first experiment or logging-path selection.
 - Avoid medical diagnosis, differential-style questioning, or detailed troubleshooting during onboarding unless the user clearly asks for concrete help.
 - Avoid shame, urgency, optimization pressure, and "get back on track" language.`;
 }
