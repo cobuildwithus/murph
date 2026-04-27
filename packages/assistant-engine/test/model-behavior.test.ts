@@ -156,8 +156,8 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata).toMatchInlineSnapshot(`
       {
-        "dynamicContextStartsAfterStaticCore": 20974,
-        "stableRouteCapabilityPromptHash": "15c0a30f00f54e74a2cb87fd612ed42177dab87e1c095b19eb47c370a240e144",
+        "dynamicContextStartsAfterStaticCore": 21475,
+        "stableRouteCapabilityPromptHash": "c79a80e05651fd58f590c24a1969bcc91379a5a5e096ba201676627e8f852cf5",
         "staticPromptHash": "ee411cd5984a0ea4bd72a58d31446957eb38b809346373bcf9632d381e5802fc",
         "toolSchemaHash": "assistant-tool-schema-common-openai-test",
       }
@@ -267,6 +267,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('set up the default/required measurement path first')
     expect(prompt).toContain('Do not ask detailed ROI, color, texture, photo, or imaging fields by default')
     expect(prompt).toContain('Do not read raw revision hashes, field names, or test-plan ids aloud')
+    expect(prompt).toContain('Start by asking what the user wants to get out of the experiment')
+    expect(prompt).toContain('Ask at most two questions in any response')
+    expect(prompt).toContain('continue the onboarding loop in later replies')
     expect(prompt).not.toContain('scaffold and update the experiment record')
     expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
   })

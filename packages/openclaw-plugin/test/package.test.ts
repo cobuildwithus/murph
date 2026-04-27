@@ -28,5 +28,6 @@ describe("@murphai/openclaw-plugin", () => {
     expect(skill).toContain("`vault-cli <command path> --schema --format json`");
     expect(skill).toContain('`vault-cli search query "<query>"`');
     expect(skill).toContain("Do not read raw revision hashes, field names, or test-plan ids aloud");
+    expect(skill).toContain("Ask at most two questions per response");
   });
 });

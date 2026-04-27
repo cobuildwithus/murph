@@ -74,9 +74,10 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 ## Flow Rules
 
 - Check for an already active experiment before starting another meaningful one by default.
+- Ask what the user wants to get out of the experiment unless the goal is already clear.
 - Review relevant saved context and wearable availability before asking setup questions that Murph can already answer from the vault.
 - Ask the safety screen even when the vault is silent for high-caution protocols.
-- Keep setup lightweight: ask only the slots that materially affect safety, logistics, measurement fidelity, or assistant support, and prefer one or two questions per turn.
+- Keep setup lightweight and gradual: ask only the slots that materially affect safety, logistics, measurement fidelity, or assistant support; ask at most two questions per response; and continue across turns until goal, safety, logistics, measurement, logging, stop-condition, and reminder coverage is complete.
 - Before any write, summarize the exact protocol reference, dates, schedule, modality or dose, logging expectations, stop conditions, and reminder policy.
 - That summary should be crisp enough that a later outcome card or share artifact can clearly point back to what was actually run.
 - Keep the confirmation summary human-readable. Raw revision hashes, internal field names, and selected test-plan identifiers are lineage data for the saved run record, not default onboarding copy; mention them only when the user asks for technical provenance.
