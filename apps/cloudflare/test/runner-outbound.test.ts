@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  HOSTED_RUNTIME_WORKSPACE_PATH,
+} from "@murphai/hosted-execution/routes";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
@@ -386,6 +389,54 @@ describe("handleRunnerOutboundRequest", () => {
     expect(String(url)).toBe(
       "https://web.example.test/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
     );
+    expect(init?.method).toBe("GET");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBeNull();
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+  });
+
+  it("proxies the hosted workspace read route through web-control GET", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      workspace: null,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_WORKSPACE_PATH}`, {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      workspace: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the workspace read web-control fetch to run.");
+    }
+    const [url, init] = firstCall;
+    expect(String(url)).toBe(`https://web.example.test${HOSTED_RUNTIME_WORKSPACE_PATH}`);
     expect(init?.method).toBe("GET");
     expect(init?.body).toBeUndefined();
     const headers = new Headers(init?.headers);

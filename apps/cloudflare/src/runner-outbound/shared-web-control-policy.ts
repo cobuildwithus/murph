@@ -9,6 +9,7 @@ import {
   HOSTED_RUNTIME_SHARE_IMPORT_PATH,
   HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+  HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 
 export {
@@ -42,7 +43,8 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
   path: string;
 }): boolean {
   if (input.method === "GET") {
-    return HOSTED_RUNTIME_SHARE_PAYLOAD_PATH.test(input.path)
+    return input.path === HOSTED_RUNTIME_WORKSPACE_PATH
+      || HOSTED_RUNTIME_SHARE_PAYLOAD_PATH.test(input.path)
       || HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_PATH.test(input.path);
   }
 
@@ -63,4 +65,17 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
     || path === HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH
     || path === HOSTED_WEB_USAGE_RECORD_PATH
     || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
+}
+
+export function assertAllowedHostedRunnerWebControlRequest(input: {
+  method: string;
+  path: string;
+}): void {
+  if (isAllowedHostedRunnerWebControlRequest(input)) {
+    return;
+  }
+
+  throw new TypeError(
+    `Hosted runtime web-control route is not allowlisted for proxy transport: ${input.method} ${input.path}`,
+  );
 }

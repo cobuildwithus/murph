@@ -59,6 +59,7 @@ import {
   assertHostedLocalInternalProxyBaseUrl,
 } from "./local-loopback-proxy.ts";
 import {
+  assertAllowedHostedRunnerWebControlRequest,
   HOSTED_WEB_ISSUE_RECORD_PATH,
   HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
   HOSTED_WEB_USAGE_RECORD_PATH,
@@ -770,6 +771,11 @@ async function fetchHostedWebControlPlaneJson(input: {
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
   const method = input.method ?? (input.body === undefined ? "GET" : "POST");
+  const path = readHostedWebControlPathname(input.path);
+  assertAllowedHostedRunnerWebControlRequest({
+    method,
+    path,
+  });
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   const response = input.transport.mode === "direct"
     ? await fetchHostedExecutionWebControlPlaneResponse({
@@ -841,6 +847,10 @@ async function fetchHostedWebControlPlaneJson(input: {
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
+}
+
+function readHostedWebControlPathname(path: string): string {
+  return new URL(path.replace(/^\/+/u, ""), "https://hosted-runtime.invalid/").pathname;
 }
 
 function createHostedWebControlProxyUrl(path: string): URL {
