@@ -29,7 +29,7 @@ import {
 } from '@murphai/operator-config/setup-cli-contracts'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
-export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.4'
+export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.5'
 export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_CODEX_REASONING_EFFORT = 'medium'
 export const DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL =
