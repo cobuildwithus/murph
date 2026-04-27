@@ -1,0 +1,10 @@
+{
+  "id": "commons-protocol-show",
+  "command": "vault-cli commons protocol show <key-or-slug>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents the frozen command surface entry for release fixture coverage."
+}

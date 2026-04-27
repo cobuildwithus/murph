@@ -1,6 +1,6 @@
 {
   "id": "audit-tail",
-  "command": "vault-cli audit tail --vault <path> [--limit <n>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/audit/README.md",

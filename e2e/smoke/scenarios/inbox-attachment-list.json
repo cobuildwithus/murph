@@ -1,6 +1,6 @@
 {
   "id": "inbox-attachment-list",
-  "command": "vault-cli inbox attachment list <captureId> --vault <path> [--limit <n>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli inbox attachment list <captureId> --vault <path> [--limit <n>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

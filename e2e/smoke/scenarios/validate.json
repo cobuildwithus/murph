@@ -1,6 +1,6 @@
 {
   "id": "validate",
-  "command": "vault-cli validate --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli validate --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [],
   "goldenOutput": "fixtures/golden-outputs/validate",

@@ -1,6 +1,6 @@
 {
   "id": "inbox-model-route",
-  "command": "vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--apply] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli inbox model route <captureId> --vault <path> --model <model> [--baseUrl <url>] [--apiKey <key>] [--apiKeyEnv <name>] [--providerName <name>] [--headersJson <json>] [--apply] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

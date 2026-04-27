@@ -1,6 +1,6 @@
 {
   "id": "inbox-model-bundle",
-  "command": "vault-cli inbox model bundle <captureId> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli inbox model bundle <captureId> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md"

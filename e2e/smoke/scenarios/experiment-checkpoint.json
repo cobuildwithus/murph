@@ -1,6 +1,6 @@
 {
   "id": "experiment-checkpoint",
-  "command": "vault-cli experiment checkpoint --vault <path> --input @file.json [--format json|md] [--request-id <id>]",
+  "command": "vault-cli experiment checkpoint-json --vault <path> --input @file.json [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/experiments/baseline-observation.md",

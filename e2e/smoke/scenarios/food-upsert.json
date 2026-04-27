@@ -1,6 +1,6 @@
 {
   "id": "food-upsert",
-  "command": "vault-cli food upsert --vault <path> --input @file.json [--request-id <id>]",
+  "command": "vault-cli food import-json --vault <path> --input @file.json [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/payloads/food-upsert.json",

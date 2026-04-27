@@ -1,6 +1,6 @@
 {
   "id": "export-prune",
-  "command": "vault-cli export pack prune <id> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli export pack prune <id> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/exports/README.md",

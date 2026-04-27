@@ -1,6 +1,6 @@
 {
   "id": "document-manifest",
-  "command": "vault-cli document manifest <id> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli document manifest <id> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/documents/care-plan.txt",

@@ -1,6 +1,6 @@
 {
   "id": "provider-list",
-  "command": "vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli provider list --vault <path> [--status active|inactive] [--limit <n>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/providers/README.md",

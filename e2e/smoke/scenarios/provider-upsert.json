@@ -1,6 +1,6 @@
 {
   "id": "provider-upsert",
-  "command": "vault-cli provider upsert --vault <path> --input @file.json [--format json|md] [--request-id <id>]",
+  "command": "vault-cli provider import-json --vault <path> --input @file.json [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/providers/README.md",

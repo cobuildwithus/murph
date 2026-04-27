@@ -1,6 +1,6 @@
 {
   "id": "vault-update",
-  "command": "vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli vault update --vault <path> [--title <title>] [--timezone <tz>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md",

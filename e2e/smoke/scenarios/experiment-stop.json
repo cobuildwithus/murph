@@ -1,6 +1,6 @@
 {
   "id": "experiment-stop",
-  "command": "vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note \"...\"] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli experiment stop <id> --vault <path> [--occurred-at <ts>] [--note \"...\"] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/experiments/baseline-observation.md",

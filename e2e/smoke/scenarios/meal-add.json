@@ -1,6 +1,6 @@
 {
   "id": "meal-add",
-  "command": "vault-cli meal add --vault <path> [--input @file.json|-] [--photo <path>] [--audio <path>] [--note \"...\"] [--occurred-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli meal add --vault <path> [--input @file.json|-] [--photo <path>] [--audio <path>] [--note \"...\"] [--occurred-at <ts>] [--source <source>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/meals/meal-photo-placeholder.txt",
