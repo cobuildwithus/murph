@@ -25,6 +25,13 @@ import {
   updateAssistantTurnReceipt,
 } from './turns.js'
 import {
+  appendAssistantAcceptedTurnInputItems,
+  readAssistantAcceptedTurnInputJournal,
+  recordAssistantAcceptedTurnInputProviderRequest,
+  updateAssistantAcceptedTurnInputAdmissionState,
+  type AssistantAcceptedTurnInputJournal,
+} from './active-turn-input-journal.js'
+import {
   createAssistantOutboxIntent,
   deliverAssistantOutboxMessage,
   dispatchAssistantOutboxIntent,
@@ -67,6 +74,15 @@ type UpdateAssistantTurnReceiptInput = Omit<Parameters<
 type FinalizeAssistantTurnReceiptInput = Omit<Parameters<
   typeof finalizeAssistantTurnReceipt
 >[0], 'vault'>
+type AppendAssistantAcceptedTurnInputItemsInput = Omit<Parameters<
+  typeof appendAssistantAcceptedTurnInputItems
+>[0], 'vault'>
+type UpdateAssistantAcceptedTurnInputAdmissionStateInput = Omit<Parameters<
+  typeof updateAssistantAcceptedTurnInputAdmissionState
+>[0], 'vault'>
+type RecordAssistantAcceptedTurnInputProviderRequestInput = Omit<Parameters<
+  typeof recordAssistantAcceptedTurnInputProviderRequest
+>[0], 'vault'>
 
 export interface AssistantRuntimeStateService {
   diagnostics: {
@@ -107,6 +123,12 @@ export interface AssistantRuntimeStateService {
     list: (sessionId: string) => Promise<AssistantTranscriptEntry[]>
   }
   turns: {
+    acceptedInputs: {
+      append: (input: AppendAssistantAcceptedTurnInputItemsInput) => Promise<AssistantAcceptedTurnInputJournal>
+      read: (turnId: string) => Promise<AssistantAcceptedTurnInputJournal | null>
+      recordProviderRequest: (input: RecordAssistantAcceptedTurnInputProviderRequestInput) => Promise<AssistantAcceptedTurnInputJournal | null>
+      updateAdmissionState: (input: UpdateAssistantAcceptedTurnInputAdmissionStateInput) => Promise<AssistantAcceptedTurnInputJournal | null>
+    }
     appendEvent: (input: AppendAssistantTurnReceiptEventInput) => ReturnType<typeof appendAssistantTurnReceiptEvent>
     createReceipt: (input: CreateAssistantTurnReceiptInput) => ReturnType<typeof createAssistantTurnReceipt>
     finalizeReceipt: (input: FinalizeAssistantTurnReceiptInput) => ReturnType<typeof finalizeAssistantTurnReceipt>
@@ -162,6 +184,14 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
       list: (sessionId) => listAssistantTranscriptEntries(vault, sessionId),
     },
     turns: {
+      acceptedInputs: {
+        append: (input) => appendAssistantAcceptedTurnInputItems({ ...input, vault }),
+        read: (turnId) => readAssistantAcceptedTurnInputJournal(vault, turnId),
+        recordProviderRequest: (input) =>
+          recordAssistantAcceptedTurnInputProviderRequest({ ...input, vault }),
+        updateAdmissionState: (input) =>
+          updateAssistantAcceptedTurnInputAdmissionState({ ...input, vault }),
+      },
       appendEvent: (input) => appendAssistantTurnReceiptEvent({ ...input, vault }),
       createReceipt: (input) => createAssistantTurnReceipt({ ...input, vault }),
       finalizeReceipt: (input) => finalizeAssistantTurnReceipt({ ...input, vault }),

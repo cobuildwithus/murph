@@ -553,7 +553,7 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
-  it('uses the notification-decision profile, notification tool catalog, and disabled native resume for notification turns', async () => {
+  it('uses the notification-decision profile, notification tool catalog, and Murph-history-only continuity for notification turns', async () => {
     const onTraceEvent = vi.fn()
     const route = createRoute({
       routeId: 'route-notification',
@@ -611,9 +611,9 @@ describe('executeProviderTurnWithRecovery', () => {
         onboardingGuidanceOpen: true,
       }),
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'notification-decision',
         toolProfile: 'notification-turn',
+        turnContinuityPolicy: 'murph-history-only',
       },
       resolvedSession: session,
       routes: [route],
@@ -688,6 +688,7 @@ describe('executeProviderTurnWithRecovery', () => {
           systemPromptHash: expect.any(String),
           systemPromptLength: expect.any(Number),
           turnTrigger: 'automation-cron',
+          turnContinuityPolicy: 'murph-history-only',
           type: 'assistant.provider.request.debug',
           userPromptHash: expect.any(String),
           userPromptLength: 'Check the notification decision.'.length,
@@ -970,6 +971,136 @@ describe('executeProviderTurnWithRecovery', () => {
         }),
       }),
     )
+  })
+
+  it('does not pass stale provider resume state for auto-reply turns', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'provider-session-stale',
+      resumeRouteId: 'route-primary',
+      turnCount: 3,
+    })
+    const route = createRoute({
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
+      routeId: 'route-primary',
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'direct-cli',
+      requestFormat: 'messages',
+      supportsNativeResume: true,
+      supportsToolRuntime: false,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.resumeState,
+    )
+    runnerMocks.listAssistantTranscriptEntries.mockResolvedValue([
+      {
+        kind: 'user',
+        text: 'Earlier inbound message',
+      },
+      {
+        kind: 'assistant',
+        text: 'Earlier assistant reply',
+      },
+    ])
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-new-auto-reply',
+        response: 'Auto-reply answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Current inbound message',
+        turnTrigger: 'automation-auto-reply',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: false,
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-auto-reply-history-only',
+    })
+
+    expect(runnerMocks.resolveAssistantProviderResumeKey).not.toHaveBeenCalled()
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationMessages: [
+          {
+            content: 'Earlier inbound message',
+            role: 'user',
+          },
+          {
+            content: 'Earlier assistant reply',
+            role: 'assistant',
+          },
+        ],
+        resumeProviderSessionId: null,
+      }),
+    )
+  })
+
+  it('does not recover provider resume state after auto-reply provider failures', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'provider-session-stale',
+      resumeRouteId: 'route-primary',
+      turnCount: 3,
+    })
+    const route = createRoute({
+      routeId: 'route-primary',
+    })
+    const connectionLostError = createError(
+      'provider connection lost',
+      'PROVIDER_CONNECTION_LOST',
+      {
+        connectionLost: true,
+        providerSessionId: 'provider-session-new-auto-reply',
+        recoverableConnectionLoss: true,
+      },
+    )
+    const recoveredSession = createAssistantSession({
+      providerSessionId: 'provider-session-new-auto-reply',
+      resumeRouteId: 'route-primary',
+    })
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createFailedAttemptResult({
+        error: connectionLostError,
+        executedToolCount: 0,
+      }),
+    )
+    runnerMocks.recoverAssistantSessionAfterProviderFailure.mockResolvedValue(
+      recoveredSession,
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Current inbound message',
+        turnTrigger: 'automation-auto-reply',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: false,
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-auto-reply-recovery-history-only',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'failed_terminal',
+      session,
+    })
+    expect(
+      runnerMocks.recoverAssistantSessionAfterProviderFailure,
+    ).not.toHaveBeenCalled()
+    expect(runnerMocks.attachRecoveredAssistantSession).not.toHaveBeenCalled()
   })
 
   it('does not resolve active experiment context when sensitive context is disallowed', async () => {

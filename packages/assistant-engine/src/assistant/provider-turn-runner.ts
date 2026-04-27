@@ -64,15 +64,19 @@ import {
 import type {
   AssistantProviderAttemptPlan,
   AssistantProviderFailoverState,
+  AssistantProviderTurnContinuityProfile,
   AssistantProviderTurnExecutionPlan,
   AssistantProviderTurnExecutionProfile,
 } from './provider-turn/planning.js'
 
 export {
+  resolveAssistantProviderTurnContinuityPolicy,
   resolveAssistantProviderTurnContinuityPlan,
 } from './provider-turn/planning.js'
 export type {
   AssistantProviderTurnContinuityPlan,
+  AssistantProviderTurnContinuityPolicy,
+  AssistantProviderTurnContinuityProfile,
   AssistantProviderTurnExecutionProfile,
   AssistantProviderTurnNativeResumePolicy,
   AssistantProviderTurnPromptProfile,
@@ -116,7 +120,7 @@ export type AssistantProviderTurnRecoveryOutcome =
 export async function executeProviderTurnWithRecovery(input: {
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
-  profile?: AssistantProviderTurnExecutionProfile | null
+  profile?: AssistantProviderTurnContinuityProfile | null
   resolvedSession: AssistantSession
   routes: readonly ResolvedAssistantFailoverRoute[]
   turnCreatedAt: string
@@ -398,14 +402,19 @@ async function executeAssistantProviderAttempt(input: {
     }
   } catch (error) {
     const errorCode = readAssistantErrorCode(error)
-    const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
-      error,
-      routeId: attemptPlan.route.routeId,
-      session: attemptPlan.session,
-      vault: executionPlan.input.vault,
-    })
+    const recoveredSession =
+      executionPlan.profile.turnContinuityPolicy === 'continuous-provider-thread'
+        ? await recoverAssistantSessionAfterProviderFailure({
+            error,
+            routeId: attemptPlan.route.routeId,
+            session: attemptPlan.session,
+            vault: executionPlan.input.vault,
+          })
+        : null
     const session = recoveredSession ?? attemptPlan.session
-    attachRecoveredAssistantSession(error, recoveredSession)
+    if (recoveredSession) {
+      attachRecoveredAssistantSession(error, recoveredSession)
+    }
     void appendAssistantTranscriptEntries(
       executionPlan.input.vault,
       session.sessionId,
@@ -537,7 +546,6 @@ function emitHostedProviderRequestDebugTrace(input: {
         gatewayOnlyProviderCount:
           providerOptions.gatewayOnlyProviders?.length ?? 0,
         gatewayOnlyProviders: providerOptions.gatewayOnlyProviders ?? null,
-        nativeResumePolicy: executionPlan.profile.nativeResumePolicy,
         previousResponseIdPresent:
           attemptPlan.routePlan.resumeProviderSessionId !== null,
         provider: attemptPlan.route.provider,
@@ -548,6 +556,7 @@ function emitHostedProviderRequestDebugTrace(input: {
         routeId: attemptPlan.route.routeId,
         sessionContextPresent: attemptPlan.routePlan.sessionContext != null,
         supportsToolRuntime: attemptPlan.routePlan.supportsToolRuntime,
+        turnContinuityPolicy: executionPlan.profile.turnContinuityPolicy,
         promptCacheDynamicContextStartsAfterStaticCore:
           promptCacheMetadata?.dynamicContextStartsAfterStaticCore ?? null,
         promptCacheStableRouteCapabilityPromptHash:

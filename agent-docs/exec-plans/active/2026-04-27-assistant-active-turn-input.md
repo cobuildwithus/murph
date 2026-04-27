@@ -64,8 +64,10 @@ hard cut, not as a blocker for it:
   encrypted workspace checkpoint. It is the source for provider-visible
   active-turn history, not a companion to a second mutable turn-history store.
   It records ordered input ids, capture ids, transcript/content references,
-  source-specific cursor effects, provisional reply target metadata, provider
-  request ordinals, and reconstruction metadata.
+  source-specific cursor effects, provider request ordinals, and reconstruction
+  metadata. Raw contact, conversation, thread, and reply-target identifiers stay
+  in their owner records; the accepted-input journal should use opaque refs and
+  coarse fallback metadata only.
 - The active-turn hosted path should target the new workspace runner shape:
   `runHostedWorkspaceUntilIdleOrBudget` or its workspace-invocation entrypoint,
   `HostedRuntimePlatform.mailboxPort`, `HostedRuntimePlatform.workspacePort`, and
@@ -74,6 +76,31 @@ hard cut, not as a blocker for it:
 - Outbox intent checkpointing is the user-visible commit boundary. Once the
   runtime has checkpointed an outbox intent for a reply, later passive mailbox
   input belongs to a later turn.
+
+## Landed Slice
+
+2026-04-28 implementation slice:
+
+- Added the assistant-engine accepted active-turn input journal scaffold under
+  assistant runtime state, exposed through `turns.acceptedInputs`.
+- The journal is metadata-first: ordered accepted input ids, capture ids,
+  transcript/content refs, coarse prompt-fallback metadata, cursor effects,
+  admission state, and provider request ordinals. It does not persist raw prompt
+  fallback text, raw conversation/contact/reply-target identifiers, or duplicate
+  hosted mailbox message state.
+- Added append/read/admission-state/provider-request helpers with identity
+  checks for session drift, accepted-input id ordering, and
+  append-only provider request ordinals.
+- Added the provider continuity policy primitive:
+  `continuous-provider-thread` for manual chat, `murph-history-only` for
+  auto-reply, cron automation, and notification-decision turns.
+- Native provider resume request, provider-failure resume recovery, and
+  finalizer-time provider resume persistence are all gated by the resolved
+  continuity policy. This folds the stale auto-reply resume fix into the durable
+  policy rather than a trigger-local execution hack.
+- Hosted/Cloudflare active-turn admission is intentionally not wired in this
+  slice. That should land after the mailbox/checkpoint hard cut has stabilized,
+  using the runtime-owned mailbox/workspace ports from `migration.md`.
 
 ## Codex Reference Model
 
@@ -120,7 +147,7 @@ interface AssistantTurnInputItem {
   source: "initial" | "inbox" | "manual" | "system";
   captureIds: readonly string[];
   cursorEffects: readonly AssistantTurnInputCursorEffect[];
-  conversation: AssistantConversationCaptureRef | null;
+  conversationRef: AssistantOpaqueConversationRef | null;
   transcriptRef: AssistantTranscriptInputRef | null;
   contentRef: AssistantTurnInputContentRef | null;
   promptText?: string;
@@ -138,7 +165,7 @@ interface AssistantActiveTurnInputAdmission {
 interface AssistantActiveTurnFence {
   turnId: string;
   sessionId: string;
-  conversationKey: string | null;
+  conversationFence: AssistantOpaqueConversationRef | null;
   providerAttemptId: string | null;
 }
 ```
@@ -152,13 +179,15 @@ The active turn must also persist an accepted-input journal, because the current
 transcript model only stores text rows and the current resume state only stores a
 single provider session id. The journal should be portable assistant runtime
 state and metadata-first: ordered input ids, capture ids, transcript/content
-references, materializer version, admission state, provisional reply-target
-metadata, source-specific cursor effects, and provider request/continuation
-metadata needed for explicit-history reconstruction. Store prompt text or raw
-content parts only when no existing durable private transcript/content reference
-can reconstruct the provider request. Receipts, timeline events, operator logs,
-and hosted status projections carry redacted ids, counts, cursors, and hashes,
-not raw prompt or message content.
+references, materializer version, admission state, source-specific cursor
+effects, coarse fallback metadata, and provider request/continuation metadata
+needed for explicit-history reconstruction. Do not store prompt text, raw
+content parts, raw contact/conversation identifiers, or raw reply-target
+identifiers in the accepted-input journal. If reconstruction is impossible from
+existing private owner refs, defer/abort admission or create a private owner ref
+first rather than writing raw content into this journal. Receipts, timeline
+events, operator logs, and hosted status projections carry redacted ids, counts,
+and cursors, not raw prompt or message content.
 
 ## Active Turn Loop
 

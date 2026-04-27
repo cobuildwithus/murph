@@ -1,6 +1,7 @@
 import type {
   AssistantOnboardingCompletionReason,
   AssistantSession,
+  AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeIanaTimeZone,
@@ -110,6 +111,10 @@ export type AssistantProviderTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
 
+export type AssistantProviderTurnContinuityPolicy =
+  | 'continuous-provider-thread'
+  | 'murph-history-only'
+
 export type AssistantProviderTurnNativeResumePolicy =
   | 'default'
   | 'disabled'
@@ -119,6 +124,16 @@ export interface AssistantProviderTurnExecutionProfile {
   promptProfile?: AssistantProviderTurnPromptProfile
   toolProfile?: AssistantProviderTurnToolProfile
 }
+
+export interface AssistantProviderTurnContinuityProfile
+  extends AssistantProviderTurnExecutionProfile {
+  turnContinuityPolicy?: AssistantProviderTurnContinuityPolicy
+}
+
+export type AssistantProviderTurnResolvedExecutionProfile =
+  Required<Omit<AssistantProviderTurnExecutionProfile, 'nativeResumePolicy'>> & {
+    turnContinuityPolicy: AssistantProviderTurnContinuityPolicy
+  }
 
 export interface AssistantProviderTurnContinuityPlan {
   onboardingGuidanceInjected: boolean
@@ -130,7 +145,7 @@ export interface AssistantProviderTurnExecutionPlan {
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
-  profile: Required<AssistantProviderTurnExecutionProfile>
+  profile: AssistantProviderTurnResolvedExecutionProfile
   primaryRoute: ResolvedAssistantFailoverRoute | null
   promptTimeContext: AssistantPromptTimeContext
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
@@ -173,19 +188,49 @@ export function resolveAssistantProviderTurnContinuityPlan(input: {
 }
 
 function resolveAssistantProviderTurnExecutionProfile(
-  profile: AssistantProviderTurnExecutionProfile | null | undefined,
-): Required<AssistantProviderTurnExecutionProfile> {
+  input: {
+    profile: AssistantProviderTurnContinuityProfile | null | undefined
+    turnTrigger: AssistantTurnTrigger | null | undefined
+  },
+): AssistantProviderTurnResolvedExecutionProfile {
+  const turnContinuityPolicy = resolveAssistantProviderTurnContinuityPolicy({
+    profile: input.profile,
+    turnTrigger: input.turnTrigger,
+  })
+
   return {
-    nativeResumePolicy: profile?.nativeResumePolicy ?? 'default',
-    promptProfile: profile?.promptProfile ?? 'conversation',
-    toolProfile: profile?.toolProfile ?? 'provider-turn',
+    promptProfile: input.profile?.promptProfile ?? 'conversation',
+    toolProfile: input.profile?.toolProfile ?? 'provider-turn',
+    turnContinuityPolicy,
   }
+}
+
+export function resolveAssistantProviderTurnContinuityPolicy(input: {
+  profile?: AssistantProviderTurnContinuityProfile | null
+  turnTrigger?: AssistantTurnTrigger | null
+}): AssistantProviderTurnContinuityPolicy {
+  if (
+    input.profile?.promptProfile === 'notification-decision' ||
+    input.turnTrigger === 'automation-auto-reply' ||
+    input.turnTrigger === 'automation-cron'
+  ) {
+    return 'murph-history-only'
+  }
+
+  if (
+    input.profile?.turnContinuityPolicy === 'murph-history-only' ||
+    input.profile?.nativeResumePolicy === 'disabled'
+  ) {
+    return 'murph-history-only'
+  }
+
+  return 'continuous-provider-thread'
 }
 
 export async function buildAssistantProviderTurnExecutionPlan(input: {
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
-  profile?: AssistantProviderTurnExecutionProfile | null
+  profile?: AssistantProviderTurnContinuityProfile | null
   resolvedSession: AssistantSession
   routes: readonly ResolvedAssistantFailoverRoute[]
   turnCreatedAt: string
@@ -199,7 +244,10 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
     turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
     vault: input.input.vault,
   })
-  const profile = resolveAssistantProviderTurnExecutionProfile(input.profile)
+  const profile = resolveAssistantProviderTurnExecutionProfile({
+    profile: input.profile,
+    turnTrigger: input.input.turnTrigger,
+  })
   const toolCatalog = (
     profile.toolProfile === 'notification-turn'
       ? createNotificationTurnAssistantToolCatalog
@@ -283,7 +331,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   input: AssistantMessageInput
-  profile: Required<AssistantProviderTurnExecutionProfile>
+  profile: AssistantProviderTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
@@ -297,7 +345,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
     ...input.route.providerOptions,
   })
-  const nativeResumeEnabled = input.profile.nativeResumePolicy !== 'disabled'
+  const nativeResumeEnabled =
+    input.profile.turnContinuityPolicy === 'continuous-provider-thread'
   const candidateResumeProviderSessionId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&

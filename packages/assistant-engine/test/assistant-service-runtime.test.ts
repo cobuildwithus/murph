@@ -1523,8 +1523,8 @@ describe("assistant turn finalizer seam", () => {
         route: createRoute({ routeId: "route-notification" }),
         session,
       }),
-      resumeStatePolicy: "clear",
       session,
+      turnContinuityPolicy: "murph-history-only",
       turnCreatedAt: "2026-04-08T15:29:00.000Z",
       turnId: "turn-finalizer-clear",
     });
@@ -1546,6 +1546,53 @@ describe("assistant turn finalizer seam", () => {
         resumeState: null,
         turnCount: 3,
         updatedAt: "2026-04-08T15:30:00.000Z",
+      })
+    );
+    expect(saved.resumeState).toBeNull();
+  });
+
+  it("does not persist new provider resume state for Murph-history-only auto-reply turns", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        providerSessionId: "provider-session-stale",
+        resumeRouteId: "route-existing",
+      },
+      turnCount: 2,
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        prompt: "Reply to the inbound message.",
+        turnTrigger: "automation-auto-reply",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      providerResult: createProviderResult({
+        providerSessionId: "provider-session-new",
+        response: "Here is the reply.",
+        route: createRoute({ routeId: "route-auto-reply" }),
+        session,
+      }),
+      session,
+      turnContinuityPolicy: "murph-history-only",
+      turnCreatedAt: "2026-04-08T15:44:00.000Z",
+      turnId: "turn-finalizer-auto-reply",
+    });
+
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastTurnAt: "2026-04-08T15:45:00.000Z",
+        resumeState: null,
+        turnCount: 3,
+        updatedAt: "2026-04-08T15:45:00.000Z",
       })
     );
     expect(saved.resumeState).toBeNull();

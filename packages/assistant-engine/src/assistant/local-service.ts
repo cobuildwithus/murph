@@ -59,6 +59,7 @@ import {
 } from './provider-turn-recovery.js'
 import {
   executeProviderTurnWithRecovery,
+  resolveAssistantProviderTurnContinuityPolicy,
 } from './provider-turn-runner.js'
 import {
   normalizeAssistantAskResultForReturn,
@@ -203,10 +204,16 @@ export async function sendAssistantMessageLocal(
 
       try {
         userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
+        const turnContinuityPolicy = resolveAssistantProviderTurnContinuityPolicy({
+          turnTrigger: input.turnTrigger ?? null,
+        })
         const providerOutcome = await executeProviderTurnWithRecovery({
           input,
           routes,
           plan: sharedPlan,
+          profile: {
+            turnContinuityPolicy,
+          },
           resolvedSession: resolved.session,
           turnCreatedAt: userTurn.turnCreatedAt,
           turnId: userTurn.turnId,
@@ -234,6 +241,7 @@ export async function sendAssistantMessageLocal(
           input,
           plan: sharedPlan,
           providerResult,
+          turnContinuityPolicy,
           session: providerResult.session,
           turnCreatedAt: userTurn.turnCreatedAt,
           turnId: userTurn.turnId,
