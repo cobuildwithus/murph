@@ -3,10 +3,10 @@ import type {
   HostedRunnerStatusResponse,
   HostedRuntimeWebStatusResponse,
   HostedWorkspaceReadResponse,
-  HostedWorkspaceRunReason,
-  HostedWorkspaceRunResult,
+  HostedWorkspaceInvocationReason,
+  HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -49,8 +49,8 @@ import type {
   RunnerStateRecord,
 } from "./user-runner/types.js";
 import {
-  HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND,
-  type HostedExecutionWorkspaceRunJobInput,
+  HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
+  type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
@@ -204,8 +204,7 @@ export class HostedUserRunner {
       inFlight: this.invocationLock !== null || record.inFlight,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
-      ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}),
-      leaseGeneration: record.leaseGeneration.toString(),
+      ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
       nextAlarmAt: record.nextWakeAt ?? webStatus.workspace?.nextWakeAt ?? null,
       userId: record.userId,
       workspace: webStatus.workspace,
@@ -227,14 +226,31 @@ export class HostedUserRunner {
       alarmScheduled: record.nextWakeAt !== null,
       alreadyRunning,
       inFlight: alreadyRunning,
-      leaseGeneration: record.leaseGeneration.toString(),
       nextAlarmAt: record.nextWakeAt,
     };
   }
 
+  async ownsActiveInvocationLease(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean> {
+    return this.stateStore.ownsActiveInvocationLease(input);
+  }
+
+  async recordActiveInvocationWorkspaceCheckpoint(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{ recorded: boolean }> {
+    return this.stateStore.recordActiveInvocationWorkspaceCheckpoint(input);
+  }
+
   async runUntilIdleOrBudget(input: {
-    reason: HostedWorkspaceRunReason;
-  }): Promise<HostedWorkspaceRunResult> {
+    reason: HostedWorkspaceInvocationReason;
+  }): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
       const record = await this.markPendingNudgeAndApplyAlarm();
       return {
@@ -247,8 +263,8 @@ export class HostedUserRunner {
   }
 
   private async runUntilIdleOrBudgetInternal(input: {
-    reason: HostedWorkspaceRunReason;
-  }): Promise<HostedWorkspaceRunResult> {
+    reason: HostedWorkspaceInvocationReason;
+  }): Promise<HostedWorkspaceInvocationResult> {
     let initialRecord = await this.stateStore.readState();
     if (initialRecord.inFlight) {
       if (initialRecord.workspaceInvocation) {
@@ -389,10 +405,10 @@ export class HostedUserRunner {
 
   private async invokeWorkspaceRunner(input: {
     lease: RunnerInvocationLease;
-    reason: HostedWorkspaceRunReason;
+    reason: HostedWorkspaceInvocationReason;
     userId: string;
     workspaceVersion: string;
-  }): Promise<HostedWorkspaceRunResult> {
+  }): Promise<HostedWorkspaceInvocationResult> {
     if (!this.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
@@ -408,8 +424,8 @@ export class HostedUserRunner {
       rewritePlatformUrlsForContainer: true,
       runnerSecrets,
     });
-    const job: HostedExecutionWorkspaceRunJobInput = {
-      kind: HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND,
+    const job: HostedExecutionWorkspaceInvocationJobInput = {
+      kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       request: {
         attemptId: input.lease.attemptId,
         leaseGeneration: input.lease.leaseGeneration,

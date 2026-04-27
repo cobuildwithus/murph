@@ -103,7 +103,7 @@ describe("hosted execution observability", () => {
     }
   });
 
-  it("validates run phases, levels, and raw error-message normalization", () => {
+  it("validates structured log phases, levels, and raw error-message normalization", () => {
     expect(isHostedExecutionLogPhase("wake.running")).toBe(true);
     expect(isHostedExecutionLogPhase("not-a-phase")).toBe(false);
     expect(isHostedExecutionLogLevel("warn")).toBe(true);

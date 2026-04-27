@@ -2,10 +2,10 @@ import type {
   HostedMailboxFetchResponse,
   HostedMailboxItem,
   HostedMailboxLane,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_LANES,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   advanceHostedMailboxLaneWatermark,
@@ -160,13 +160,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       });
       if (payload.status === "blocked") {
         const reasonCode = `payload.${payload.code}`;
-        nextState = recordHostedMailboxImportQuarantine(nextState, {
-          itemKind: item.kind,
-          lane,
-          occurredAt: now(),
-          reasonCode,
-          seq: item.laneSeq,
-        });
         blocked.push({
           itemId: item.id,
           lane,
@@ -177,6 +170,13 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         if (payload.retryable) {
           break;
         }
+        nextState = recordHostedMailboxImportQuarantine(nextState, {
+          itemKind: item.kind,
+          lane,
+          occurredAt: now(),
+          reasonCode,
+          seq: item.laneSeq,
+        });
         nextState = advanceHostedMailboxLaneWatermark(nextState, {
           lane,
           seq: item.laneSeq,
@@ -203,13 +203,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
       if (outcome.status === "blocked") {
         const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.blocked");
-        nextState = recordHostedMailboxImportQuarantine(nextState, {
-          itemKind: item.kind,
-          lane,
-          occurredAt: now(),
-          reasonCode,
-          seq: item.laneSeq,
-        });
         blocked.push({
           itemId: item.id,
           lane,
@@ -220,6 +213,13 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         if (outcome.retryable) {
           break;
         }
+        nextState = recordHostedMailboxImportQuarantine(nextState, {
+          itemKind: item.kind,
+          lane,
+          occurredAt: now(),
+          reasonCode,
+          seq: item.laneSeq,
+        });
         nextState = advanceHostedMailboxLaneWatermark(nextState, {
           lane,
           seq: item.laneSeq,

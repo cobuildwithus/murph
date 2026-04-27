@@ -95,7 +95,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).toHaveBeenCalled();
   });
 
-  it("routes vault-sync mailbox imports through the runtime-owned importer", async () => {
+  it("queues vault-sync mailbox imports for the runtime after the import checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
     const key = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 1));
     const occurredAt = "2026-04-21T00:00:00.000Z";
     const wake = buildHostedExecutionVaultSyncImportWake({
@@ -125,7 +127,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         workspaceVersion: "7",
       },
       runtime: {},
-      vaultRoot: "/tmp/unused-vault",
+      vaultRoot,
     });
     const payloadCiphertext = await encryptHostedMailboxPayload({
       key,
@@ -171,8 +173,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     expect(result).toEqual({
-      reasonCode: "vault_sync.port_missing",
-      status: "deferred",
+      reasonCode: "system_mailbox.queued",
+      status: "imported",
     });
   });
 

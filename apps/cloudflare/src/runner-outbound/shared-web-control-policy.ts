@@ -20,9 +20,6 @@ export const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usag
 export const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
 export const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
   "/api/internal/hosted-execution/billing/stripe/customer/resolve";
-export const HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER =
-  "x-hosted-runtime-web-control-user-id";
-
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/providers\/[^/]+\/connect-link$/u;
 const HOSTED_RUNTIME_SHARE_PAYLOAD_PATH =
@@ -66,9 +63,4 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
     || path === HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH
     || path === HOSTED_WEB_USAGE_RECORD_PATH
     || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
-}
-
-export function allowsHostedRunnerWebControlSignedUserOverride(path: string): boolean {
-  return path === HOSTED_RUNTIME_SHARE_IMPORT_PATH
-    || HOSTED_RUNTIME_SHARE_PAYLOAD_PATH.test(path);
 }

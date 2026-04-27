@@ -297,6 +297,7 @@ export async function listAssistantOutboxIntentsLocal(
 }
 
 export async function dispatchAssistantOutboxIntent(input: {
+  allowPreparedSending?: boolean
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   force?: boolean
@@ -313,6 +314,15 @@ export async function dispatchAssistantOutboxIntent(input: {
     })
     if (!intent) {
       throw new Error(`Assistant outbox intent ${input.intentId} was not found.`)
+    }
+
+    if (input.allowPreparedSending === true && intent.status === 'sending') {
+      return {
+        action: 'dispatch' as const,
+        intent,
+        intentPath,
+        sending: intent,
+      }
     }
 
     if (!shouldBeginAssistantOutboxDispatch(intent, now, input.force === true)) {

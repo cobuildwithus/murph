@@ -17,6 +17,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-share/shared", () => ({
   deleteHostedSharePayload: mocks.deleteHostedSharePayload,
+  HOSTED_SHARE_PAYLOAD_SCHEMA: "murph.hosted-share-payload.v1",
   projectHostedSharePayloadState: mocks.projectHostedSharePayloadState,
 }));
 
@@ -31,7 +32,7 @@ describe("hosted share payload route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_sender");
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_recipient");
     mocks.projectHostedSharePayloadState.mockReturnValue({
       pack: {
         schemaVersion: "murph.share-pack.v1",
@@ -42,7 +43,7 @@ describe("hosted share payload route", () => {
     });
   });
 
-  it("returns a payload only while the share is accepted, pending, and owned by the bound sender", async () => {
+  it("returns a payload only while the share is accepted, pending, owned by the requested sender, and bound to the runner", async () => {
     const prisma = {
       hostedSharePayload: {
         findUnique: vi.fn(async () => ({
@@ -62,7 +63,7 @@ describe("hosted share payload route", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const response = await hostedSharePayloadRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload"),
+      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?ownerUserId=member_sender"),
       {
         params: Promise.resolve({
           shareId: "share_123",
@@ -72,14 +73,40 @@ describe("hosted share payload route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      ownerUserId: "member_sender",
-      pack: {
-        schemaVersion: "murph.share-pack.v1",
-        title: "Shared pack",
+      fetchedAt: expect.any(String),
+      payload: {
+        ownerUserId: "member_sender",
+        pack: {
+          schemaVersion: "murph.share-pack.v1",
+          title: "Shared pack",
+        },
+        payloadSchema: "murph.hosted-share-payload.v1",
+        shareId: "share_123",
       },
-      shareId: "share_123",
+      unavailable: null,
     });
     expect(mocks.deleteHostedSharePayload).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the owner query is missing", async () => {
+    const response = await hostedSharePayloadRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload"),
+      {
+        params: Promise.resolve({
+          shareId: "share_123",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_SHARE_PAYLOAD_NOT_FOUND",
+        message: "That shared bundle is no longer available.",
+        retryable: false,
+      },
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
   });
 
   it("fails closed when the share has not been accepted yet", async () => {
@@ -102,7 +129,7 @@ describe("hosted share payload route", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const response = await hostedSharePayloadRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload"),
+      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?ownerUserId=member_sender"),
       {
         params: Promise.resolve({
           shareId: "share_123",
@@ -144,7 +171,7 @@ describe("hosted share payload route", () => {
       mocks.getPrisma.mockReturnValue(prisma);
 
       const response = await hostedSharePayloadRoute.GET(
-        new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload"),
+        new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?ownerUserId=member_sender"),
         {
           params: Promise.resolve({
             shareId: "share_123",

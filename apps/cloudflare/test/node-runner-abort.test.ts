@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createHostedExecutionJobRunner,
+  createHostedWorkspaceInvocationRunner,
 } from "../src/node-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
-describe("runHostedExecutionJob abort forwarding", () => {
+describe("runHostedWorkspaceInvocation abort forwarding", () => {
   const runHostedAssistantRuntimeJobIsolated = vi.fn();
-  let runHostedExecutionJob = createHostedExecutionJobRunner();
+  let runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner();
 
   beforeEach(() => {
     runHostedAssistantRuntimeJobIsolated.mockReset();
-    runHostedExecutionJob = createHostedExecutionJobRunner({
+    runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner({
       runIsolated: runHostedAssistantRuntimeJobIsolated,
     });
     for (const [key, value] of Object.entries(createHostedExecutionTestEnv())) {
@@ -35,8 +35,8 @@ describe("runHostedExecutionJob abort forwarding", () => {
   it("forwards abort signals into isolated hosted runs", async () => {
     const controller = new AbortController();
 
-    await runHostedExecutionJob({
-      kind: "workspace-run",
+    await runHostedWorkspaceInvocation({
+      kind: "workspace-invocation",
       request: {
         attemptId: "attempt_abort_forwarding",
         leaseGeneration: "1",

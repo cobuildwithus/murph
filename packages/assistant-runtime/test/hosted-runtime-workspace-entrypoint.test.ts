@@ -19,9 +19,9 @@ import {
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceReadResponse,
-  type HostedWorkspaceRunRequest,
+  type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -279,7 +279,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("fails closed when required workspace-run ports are absent", async () => {
+  test("fails closed when required workspace-invocation ports are absent", async () => {
     const input = {
       request: createWorkspaceRunRequest(),
     };
@@ -910,6 +910,9 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedAssistantNextWakeAt: null,
           hostedAssistantProgressed: true,
           hostedOutboxPendingDeliveryEffects: 0,
+          hostedOutboxTerminalizedSending: 0,
+          hostedSystemMailboxPrepared: 0,
+          hostedSystemMailboxRetryableFailed: 0,
         },
         status: "idle",
       });
@@ -918,7 +921,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("parses additive workspace-run inputs and rejects legacy run-drain fields", () => {
+  test("parses additive workspace-invocation inputs and rejects legacy run-drain fields", () => {
     const parsed = parseHostedAssistantWorkspaceRuntimeJobInput({
       request: createWorkspaceRunRequest(),
       runtime: {
@@ -1070,8 +1073,8 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 }
 
 function createWorkspaceRunRequest(
-  overrides: Partial<HostedWorkspaceRunRequest> = {},
-): HostedWorkspaceRunRequest {
+  overrides: Partial<HostedWorkspaceInvocationRequest> = {},
+): HostedWorkspaceInvocationRequest {
   return {
     attemptId: "attempt_synthetic_workspace_run",
     leaseGeneration: "1",

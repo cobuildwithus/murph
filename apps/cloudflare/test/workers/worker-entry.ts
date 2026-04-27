@@ -1,8 +1,10 @@
 import { DurableObject, env } from "cloudflare:workers";
 import {
   buildHostedExecutionRuntimeTimerWake,
-  parseHostedExecutionWake,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionWake,
+} from "@murphai/hosted-execution/parsers";
 
 import worker from "../../src/index.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";

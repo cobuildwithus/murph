@@ -9,12 +9,14 @@ import {
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
-import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
+import { json, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
   requireRunnerInternalProxyAuthorization,
+  requireRunnerOutboundUserStubMethod,
   resolveRunnerOutboundUserCryptoContext,
+  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 
@@ -52,6 +54,7 @@ export async function handleRunnerOutboundRequest(
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
       return handleRunnerWebControlRequest({
+        env,
         environment,
         request,
         url,
@@ -152,12 +155,46 @@ async function handleRunnerArtifactRequest(input: {
     });
   }
 
+  const ownsActiveLease = await artifactWriteRequestOwnsActiveInvocationLease({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!ownsActiveLease) {
+    return unauthorized();
+  }
+
   const bytes = new Uint8Array(await input.request.arrayBuffer());
   await artifactStore.writeArtifact(input.sha256, bytes);
   return json({
     ok: true,
     sha256: input.sha256,
     size: bytes.byteLength,
+  });
+}
+
+async function artifactWriteRequestOwnsActiveInvocationLease(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<boolean> {
+  const attemptId = input.request.headers.get("x-hosted-runtime-attempt-id");
+  const leaseGeneration = input.request.headers.get("x-hosted-runtime-lease-generation");
+  const workspaceVersion = input.request.headers.get("x-hosted-runtime-workspace-version");
+  if (!attemptId || !leaseGeneration || !workspaceVersion) {
+    return false;
+  }
+
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
+    stub,
+    "ownsActiveInvocationLease",
+  );
+  return await ownsActiveInvocationLease({
+    attemptId,
+    leaseGeneration,
+    userId: input.userId,
+    workspaceVersion,
   });
 }
 

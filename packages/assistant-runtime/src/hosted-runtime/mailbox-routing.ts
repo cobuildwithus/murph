@@ -2,12 +2,12 @@ import type {
   HostedMailboxItem,
   HostedMailboxKind,
   HostedMailboxLane,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "import-conversation-message",

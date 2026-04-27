@@ -1,4 +1,4 @@
-import { parseHostedRuntimeVaultSyncImportRequest } from "@murphai/hosted-execution";
+import { parseHostedRuntimeVaultSyncImportRequest } from "@murphai/hosted-execution/parsers";
 
 import {
   requireHostedCloudflareCallbackRequest,

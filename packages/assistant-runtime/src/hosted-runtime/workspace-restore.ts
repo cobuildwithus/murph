@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type {
   HostedWorkspaceState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   resolveAssistantStatePaths,
   restoreHostedBundleRoots,

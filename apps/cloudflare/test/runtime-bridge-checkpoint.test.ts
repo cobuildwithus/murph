@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   HostedExecutionBundleRef,
+} from "@murphai/hosted-execution";
+import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   checkpointHostedRuntimeBridgeWorkspace,
@@ -122,6 +124,7 @@ describe("checkpointHostedRuntimeBridgeWorkspace", () => {
       "write:1,2,3",
       "lease",
       `checkpoint:${WRITTEN_REF.key}`,
+      "lease",
     ]);
     expect(snapshotWorkspace.mock.calls[0]?.[0].lease).toBe(initialLease);
     expect(writeBundle.mock.calls[0]?.[0].lease).toBe(bundleWriteLease);

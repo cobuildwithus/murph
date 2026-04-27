@@ -4,11 +4,13 @@ import { describe, test } from "vitest";
 
 import type {
   HostedExecutionConversationMessageWake,
+} from "@murphai/hosted-execution/contracts";
+import type {
   HostedMailboxItem,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   createHostedConversationMailboxImportItem,
@@ -270,7 +272,7 @@ function createResolvedMailboxItem(
 function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMailboxItem {
   return {
     createdAt: TEST_NOW,
-    dedupeKey: "dedupe_synthetic_conversation_import",
+    dedupeKey: "evt_synthetic_conversation_001",
     expiresAt: null,
     id: "mailbox_item_conversation_001",
     kind: "conversation.message",

@@ -154,7 +154,7 @@ function buildJobBody(input: {
   return {
     internalWorkerProxyToken: "proxy-token",
     job: {
-      kind: "workspace-run",
+      kind: "workspace-invocation",
       request: {
         attemptId: `attempt_${input.wake.eventId}`,
         leaseGeneration: "1",
@@ -181,7 +181,7 @@ function buildWorkspaceJobBody() {
     internalWorkerProxyToken: "workspace-proxy-token",
     localInternalProxyBaseUrl: "http://127.0.0.1:8787",
     job: {
-      kind: "workspace-run",
+      kind: "workspace-invocation",
       request: {
         attemptId: "attempt_container_workspace",
         leaseGeneration: "8",
@@ -305,7 +305,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -326,7 +326,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects a first run bearer token when no startup control token exists", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
     const server = await startHostedContainerEntrypoint({
@@ -349,7 +349,7 @@ describe("startHostedContainerEntrypoint", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
-      path: "/internal/run",
+      path: "/internal/workspace-invocation",
       port: address.port,
     });
 
@@ -377,7 +377,7 @@ describe("startHostedContainerEntrypoint", () => {
     );
   });
 
-  it("returns a stable invalid JSON error for malformed run requests", async () => {
+  it("returns a stable invalid JSON error for malformed invocation requests", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
       port: 0,
@@ -389,7 +389,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: "{]",
       headers: {
         authorization: "Bearer runner-token",
@@ -409,8 +409,8 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("rejects oversized run requests before parsing JSON", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+  it("rejects oversized invocation requests before parsing JSON", async () => {
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
     const server = await startHostedContainerEntrypoint({
@@ -424,7 +424,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: " ".repeat(hostedContainerRunRequestBodyLimitBytes + 1),
       headers: {
         authorization: "Bearer runner-token",
@@ -441,8 +441,8 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects chunked oversized run requests while streaming without content-length", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+  it("rejects chunked oversized invocation requests while streaming without content-length", async () => {
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
     const server = await startHostedContainerEntrypoint({
@@ -462,7 +462,7 @@ describe("startHostedContainerEntrypoint", () => {
         " ".repeat(hostedContainerRunRequestBodyLimitBytes),
         " ",
       ],
-      path: "/internal/run",
+      path: "/internal/workspace-invocation",
       port: address.port,
     });
 
@@ -474,7 +474,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects unauthorized run requests before decoding the body", async () => {
+  it("rejects unauthorized invocation requests before decoding the body", async () => {
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
       port: 0,
@@ -486,7 +486,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: "{]",
       headers: {
         authorization: "Bearer runner-tokez",
@@ -520,10 +520,10 @@ describe("startHostedContainerEntrypoint", () => {
       ...actualContractsModule,
       parseHostedAssistantWorkspaceRuntimeJobInput,
     };
-    const runHostedExecutionJob = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
+    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
     const nodeRunnerModule = {
       ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
-      runHostedExecutionJob,
+      runHostedWorkspaceInvocation,
     };
     const loadRuntimeContracts = vi.fn(async () => contractsModule);
     const loadNodeRunner = vi.fn(async () => nodeRunnerModule);
@@ -547,7 +547,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(requestBody),
       headers: {
         authorization: "Bearer runner-token",
@@ -560,10 +560,10 @@ describe("startHostedContainerEntrypoint", () => {
     expect(loadRuntimeContracts).toHaveBeenCalledTimes(1);
     expect(loadNodeRunner).toHaveBeenCalledTimes(1);
     expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
-    expect(runHostedExecutionJob).toHaveBeenCalledWith(
+    expect(runHostedWorkspaceInvocation).toHaveBeenCalledWith(
       {
         ...parsedJob,
-        kind: "workspace-run",
+        kind: "workspace-invocation",
       },
       expect.objectContaining({
         internalWorkerProxyToken: "proxy-token",
@@ -571,7 +571,7 @@ describe("startHostedContainerEntrypoint", () => {
     );
   });
 
-  it("parses workspace-run requests through the workspace contract before invoking the node runner", async () => {
+  it("parses workspace-invocation requests through the workspace contract before invoking the node runner", async () => {
     const requestBody = buildWorkspaceJobBody();
     const actualContractsModule =
       await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>(
@@ -584,10 +584,10 @@ describe("startHostedContainerEntrypoint", () => {
       ...actualContractsModule,
       parseHostedAssistantWorkspaceRuntimeJobInput,
     };
-    const runHostedExecutionJob = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
+    const runHostedWorkspaceInvocation = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
     const nodeRunnerModule = {
       ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
-      runHostedExecutionJob,
+      runHostedWorkspaceInvocation,
     };
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
@@ -604,7 +604,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(requestBody),
       headers: {
         authorization: "Bearer runner-token",
@@ -615,10 +615,10 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
-    expect(runHostedExecutionJob).toHaveBeenCalledWith(
+    expect(runHostedWorkspaceInvocation).toHaveBeenCalledWith(
       {
         ...parsedJob,
-        kind: "workspace-run",
+        kind: "workspace-invocation",
       },
       expect.objectContaining({
         internalWorkerProxyToken: "workspace-proxy-token",
@@ -668,7 +668,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("forwards the invocation proxy token and local bridge config into the node runner", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
 
@@ -684,7 +684,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -723,7 +723,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(["not-an-object"]),
       headers: {
         authorization: "Bearer runner-token",
@@ -755,7 +755,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify({
         ...buildJobBody({
           wake: {
@@ -814,7 +814,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("surfaces safe downstream runtime TypeError diagnostics after request decoding succeeds", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
       new TypeError("missing hosted runtime config"),
     );
 
@@ -830,7 +830,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -862,7 +862,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("redacts downstream runtime secrets while surfacing safe failure diagnostics", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
       new Error("Authorization: Bearer placeholder for ops@example.com OPENAI_API_KEY=placeholder"),
     );
 
@@ -878,7 +878,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -910,7 +910,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("returns safe configuration error details from the inner hosted runtime", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
       new HostedAssistantConfigurationError(
         "HOSTED_ASSISTANT_CONFIG_REQUIRED",
         "Hosted assistant defaults are missing.",
@@ -929,7 +929,7 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
         body: JSON.stringify(buildJobBody({
           wake: {
             event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -959,8 +959,8 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
-  it("passes the workspace-run context through request parsing into the node runner", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+  it("passes the workspace-invocation context through request parsing into the node runner", async () => {
+    const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
 
@@ -977,7 +977,7 @@ describe("startHostedContainerEntrypoint", () => {
       }
 
       const requestBody = buildWorkspaceJobBody();
-      const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
         body: JSON.stringify(requestBody),
         headers: {
           authorization: "Bearer runner-token",
@@ -1005,7 +1005,7 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
-  it("rejects concurrent run requests inside one warm container shell", async () => {
+  it("rejects concurrent invocation requests inside one warm container shell", async () => {
     const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
     servers.push(server);
     const address = server.address();
@@ -1032,7 +1032,7 @@ describe("startHostedContainerEntrypoint", () => {
           },
           host: "127.0.0.1",
           method: "POST",
-          path: "/internal/run",
+          path: "/internal/workspace-invocation",
           port: address.port,
         }, (response) => {
           const chunks: Buffer[] = [];
@@ -1068,7 +1068,7 @@ describe("startHostedContainerEntrypoint", () => {
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
-      path: "/internal/run",
+      path: "/internal/workspace-invocation",
       port: address.port,
     });
     expect(secondResponse.status).toBe(409);
@@ -1130,7 +1130,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(
       buildWorkspaceRunnerResult(),
     );
 
@@ -1149,7 +1149,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -1189,7 +1189,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+    vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
       new TypeError("missing hosted runtime config"),
     );
 
@@ -1209,7 +1209,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
@@ -1251,7 +1251,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(buildWorkspaceRunnerResult());
+    vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockResolvedValue(buildWorkspaceRunnerResult());
 
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
@@ -1269,7 +1269,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },

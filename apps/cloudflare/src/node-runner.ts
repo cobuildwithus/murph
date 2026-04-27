@@ -10,14 +10,13 @@ import {
   buildHostedRunnerPlatformEnv,
 } from "./runner-env.ts";
 import {
-  runHostedExecutionJobIsolatedDetailed,
+  runHostedWorkspaceInvocationIsolatedDetailed,
   type HostedExecutionIsolatedRunnerInput,
 } from "./node-runner-isolated.ts";
 import {
   buildHostedExecutionRuntimePlatform,
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./runtime-platform.ts";
-import { readHostedExecutionEnvironment } from "./env.ts";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
@@ -25,40 +24,39 @@ import {
 import type { HostedRuntimeBridgeCheckpointLease } from "./runtime-bridge-checkpoint.ts";
 import {
   readHostedExecutionRunnerJobUserId,
-  type HostedExecutionWorkspaceRunJobInput,
+  type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
 
-export type HostedExecutionJobRunMode = "in-process" | "isolated";
+export type HostedWorkspaceInvocationMode = "in-process" | "isolated";
 
-export interface HostedExecutionJobOptions {
+export interface HostedWorkspaceInvocationOptions {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
   signal?: AbortSignal;
 }
 
-export interface HostedExecutionJobRunnerDependencies {
+export interface HostedWorkspaceInvocationRunnerDependencies {
   buildRuntime?: typeof buildHostedExecutionJobRuntime;
   buildRuntimePlatform?: typeof buildHostedExecutionRuntimePlatform;
   onBeforeRun?: () => void;
-  readEnvironment?: typeof readHostedExecutionEnvironment;
   runWorkspaceInProcess?: typeof runHostedWorkspaceRuntimeJobInProcess;
   runIsolated?: (
     input: HostedExecutionIsolatedRunnerInput,
     options?: { signal?: AbortSignal },
   ) => Promise<HostedAssistantWorkspaceRuntimeJobResult>;
-  runMode?: HostedExecutionJobRunMode;
+  runMode?: HostedWorkspaceInvocationMode;
   readWorkspaceBridgeLease?: (
-    input: HostedExecutionWorkspaceRunJobInput,
+    input: HostedExecutionWorkspaceInvocationJobInput,
   ) =>
     | HostedRuntimeBridgeCheckpointLease
     | null
     | Promise<HostedRuntimeBridgeCheckpointLease | null>;
 }
 
-export interface HostedExecutionJobRunner {
+export interface HostedWorkspaceInvocationRunner {
   (
-    input: HostedExecutionWorkspaceRunJobInput,
-    options?: HostedExecutionJobOptions,
+    input: HostedExecutionWorkspaceInvocationJobInput,
+    options?: HostedWorkspaceInvocationOptions,
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 }
 
@@ -89,27 +87,26 @@ export function buildHostedExecutionJobRuntime(
   });
 }
 
-export function createHostedExecutionJobRunner(
-  dependencies: HostedExecutionJobRunnerDependencies = {},
+export function createHostedWorkspaceInvocationRunner(
+  dependencies: HostedWorkspaceInvocationRunnerDependencies = {},
 ) {
   const buildRuntime = dependencies.buildRuntime ?? buildHostedExecutionJobRuntime;
   const buildRuntimePlatform =
     dependencies.buildRuntimePlatform ?? buildHostedExecutionRuntimePlatform;
   const onBeforeRun = dependencies.onBeforeRun;
-  const readEnvironment = dependencies.readEnvironment ?? readHostedExecutionEnvironment;
   const runWorkspaceInProcess =
     dependencies.runWorkspaceInProcess ?? runHostedWorkspaceRuntimeJobInProcess;
   const runIsolated =
-    dependencies.runIsolated ?? runHostedExecutionJobIsolatedDetailed;
+    dependencies.runIsolated ?? runHostedWorkspaceInvocationIsolatedDetailed;
   const runMode = dependencies.runMode ?? "isolated";
 
-  async function runHostedExecutionJob(
-    input: HostedExecutionWorkspaceRunJobInput,
-    options?: HostedExecutionJobOptions,
+  async function runHostedWorkspaceInvocation(
+    input: HostedExecutionWorkspaceInvocationJobInput,
+    options?: HostedWorkspaceInvocationOptions,
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
-  async function runHostedExecutionJob(
-    input: HostedExecutionWorkspaceRunJobInput,
-    options?: HostedExecutionJobOptions,
+  async function runHostedWorkspaceInvocation(
+    input: HostedExecutionWorkspaceInvocationJobInput,
+    options?: HostedWorkspaceInvocationOptions,
   ): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
     onBeforeRun?.();
     const internalWorkerProxyToken = options?.internalWorkerProxyToken ?? null;
@@ -120,16 +117,11 @@ export function createHostedExecutionJobRunner(
       input,
       readWorkspaceBridgeLease: dependencies.readWorkspaceBridgeLease,
     });
-    const directHostedEnvironment = internalWorkerProxyToken
-      ? null
-      : readEnvironment();
     const runtimePlatform = buildRuntimePlatform({
       boundUserId,
       commitTimeoutMs: runtime.commitTimeoutMs,
       internalWorkerProxyToken,
       localInternalProxyBaseUrl,
-      webCallbackSigning: directHostedEnvironment?.webCallbackSigning ?? null,
-      webControlBaseUrl: directHostedEnvironment?.hostedWebBaseUrl ?? null,
       workspaceCheckpointBridge,
     });
 
@@ -154,14 +146,14 @@ export function createHostedExecutionJobRunner(
       },
     }, options);
   }
-  return runHostedExecutionJob;
+  return runHostedWorkspaceInvocation;
 }
 
-export const runHostedExecutionJob = createHostedExecutionJobRunner();
+export const runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner();
 
 function createHostedWorkspaceCheckpointBridgeAuthority(input: {
-  input: HostedExecutionWorkspaceRunJobInput;
-  readWorkspaceBridgeLease: HostedExecutionJobRunnerDependencies["readWorkspaceBridgeLease"];
+  input: HostedExecutionWorkspaceInvocationJobInput;
+  readWorkspaceBridgeLease: HostedWorkspaceInvocationRunnerDependencies["readWorkspaceBridgeLease"];
 }): HostedWorkspaceCheckpointBridgeAuthority {
   const staticLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.input.request);
   return {

@@ -133,7 +133,6 @@ describe("hosted email worker ingress", () => {
       alarmScheduled: true,
       alreadyRunning: false,
       inFlight: false,
-      leaseGeneration: "0",
       nextAlarmAt: null,
     });
     mocks.runUntilIdleOrBudget.mockResolvedValue({
@@ -429,7 +428,6 @@ describe("hosted email worker ingress", () => {
       alarmScheduled: true,
       alreadyRunning: true,
       inFlight: true,
-      leaseGeneration: "0",
       nextAlarmAt: null,
     });
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(

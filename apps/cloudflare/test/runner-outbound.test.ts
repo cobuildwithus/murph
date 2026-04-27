@@ -5,9 +5,6 @@ import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
-import {
-  HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER,
-} from "../src/runner-outbound/shared-web-control-policy.ts";
 import { resolveRunnerOutboundUserRunnerStub } from "../src/runner-outbound/shared.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import type {
@@ -231,15 +228,23 @@ describe("handleRunnerOutboundRequest", () => {
       const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
       const fetchMock = vi.fn(async (
         ..._args: Parameters<typeof fetch>
-      ): Promise<Response> => new Response(JSON.stringify({
-        ok: true,
-        path,
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      }));
+      ): Promise<Response> =>
+        new Response(
+          JSON.stringify(
+            path === "/api/internal/hosted-workspace/checkpoint"
+              ? createHostedWorkspaceCheckpointResponse("5")
+              : {
+                  ok: true,
+                  path,
+                },
+          ),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        ));
       vi.stubGlobal("fetch", fetchMock);
 
       const response = await handleRunnerOutboundRequest(
@@ -264,10 +269,14 @@ describe("handleRunnerOutboundRequest", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        ok: true,
-        path,
-      });
+      await expect(response.json()).resolves.toEqual(
+        path === "/api/internal/hosted-workspace/checkpoint"
+          ? createHostedWorkspaceCheckpointResponse("5")
+          : {
+              ok: true,
+              path,
+            },
+      );
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const firstCall = fetchMock.mock.calls[0];
       if (!firstCall) {
@@ -283,6 +292,51 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("rejects workspace checkpoints when the user runner no longer owns the active lease", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-workspace/checkpoint", {
+        body: JSON.stringify({
+          attemptId: "attempt_stale",
+          expectedWorkspaceVersion: "4",
+          leaseGeneration: "9",
+          reason: "import",
+          snapshotRef: null,
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              ownsActiveInvocationLease: vi.fn(async () => false),
+              recordActiveInvocationWorkspaceCheckpoint: vi.fn(async () => ({
+                recorded: true,
+              })),
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("proxies allowlisted hosted web-control GET payload routes without a body", async () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
@@ -340,7 +394,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(45_000);
   });
 
-  it("allows share payload proxy calls to be signed for the runtime-supplied owner only", async () => {
+  it("signs share payload proxy calls as the bound runner while carrying the owner query", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> => new Response(JSON.stringify({
@@ -360,11 +414,9 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(
-        "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+        "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
         {
-          headers: createRunnerProxyHeaders({
-            [HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER]: "member_sender",
-          }),
+          headers: createRunnerProxyHeaders(),
           method: "GET",
         },
       ),
@@ -383,15 +435,15 @@ describe("handleRunnerOutboundRequest", () => {
     }
     const [url, init] = firstCall;
     expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
     );
     expect(init?.method).toBe("GET");
     const headers = new Headers(init?.headers);
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_sender");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
-  it("allows share import proxy calls to be signed for the runtime-supplied owner only", async () => {
+  it("signs share import proxy calls as the bound runner", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> => new Response(JSON.stringify({
@@ -416,7 +468,6 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
-          [HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER]: "member_sender",
         }),
         method: "POST",
       }),
@@ -444,12 +495,26 @@ describe("handleRunnerOutboundRequest", () => {
     }));
     const headers = new Headers(init?.headers);
     expect(headers.get("content-type")).toBe("application/json");
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_sender");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
-  it("rejects signed-user overrides on non-share web-control proxy paths", async () => {
-    const fetchMock = vi.fn();
+  it("ignores legacy signed-user override headers on web-control proxy paths", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -457,7 +522,7 @@ describe("handleRunnerOutboundRequest", () => {
         "http://web-control.worker/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
         {
           headers: createRunnerProxyHeaders({
-            [HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER]: "member_sender",
+            "x-hosted-runtime-web-control-user-id": "member_sender",
           }),
           method: "GET",
         },
@@ -469,11 +534,15 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: "Not found",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the vault-sync payload web-control fetch to run.");
+    }
+    const [_url, init] = firstCall;
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
   it("rejects method mismatches on otherwise allowlisted web-control proxy paths", async () => {
@@ -585,6 +654,12 @@ function createRunnerOutboundEnv(
         async bindUser() {
           return { userId: "member_123" };
         },
+        async ownsActiveInvocationLease() {
+          return true;
+        },
+        async recordActiveInvocationWorkspaceCheckpoint() {
+          return { recorded: true };
+        },
       };
     },
   };
@@ -655,6 +730,23 @@ function createRunnerOutboundEnv(
           },
         };
       },
+    },
+  };
+}
+
+function createHostedWorkspaceCheckpointResponse(version: string) {
+  return {
+    checkpointed: true,
+    workspace: {
+      checkpointedAt: "2026-04-26T00:00:05.000Z",
+      createdAt: "2026-04-26T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-04-26T00:00:05.000Z",
+      userId: "member_123",
+      version,
     },
   };
 }

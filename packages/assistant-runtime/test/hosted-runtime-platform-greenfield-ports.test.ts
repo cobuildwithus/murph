@@ -14,7 +14,7 @@ import type {
   HostedRuntimeVaultSyncPayloadFetchRequest,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import type {
   HostedRuntimeLogPort,

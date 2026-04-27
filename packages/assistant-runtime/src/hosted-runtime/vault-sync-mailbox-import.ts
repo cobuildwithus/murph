@@ -3,8 +3,10 @@ import type {
 } from "@murphai/core";
 import type {
   HostedExecutionWake,
-  HostedRuntimeVaultSyncImportStatus,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeVaultSyncImportStatus,
+} from "@murphai/hosted-execution/runtime-control";
 
 import type {
   HostedMailboxItemImportOutcome,
@@ -126,16 +128,17 @@ function decodedVaultSyncWakeMatchesMailboxItem(
   item: HostedMailboxResolvedImportItem,
 ): boolean {
   return wake.userId === item.item.userId
-    && wake.occurredAt === item.item.occurredAt;
+    && wake.occurredAt === item.item.occurredAt
+    && wake.eventId === item.item.dedupeKey;
 }
 
-function resolveHostedVaultSyncImportStatus(
+export function resolveHostedVaultSyncImportStatus(
   result: VaultSyncImportMergeResult,
 ): HostedRuntimeVaultSyncImportStatus {
   return result.conflicts.length > 0 ? "imported_with_conflicts" : "imported";
 }
 
-function createHostedVaultSyncImportSummary(
+export function createHostedVaultSyncImportSummary(
   result: VaultSyncImportMergeResult,
 ) {
   return {

@@ -22,13 +22,13 @@ import {
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
   type HostedExecutionRunnerJobResult,
-  type HostedExecutionWorkspaceRunJobInput,
+  type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_HEALTH_URL = "http://container/health";
-const RUNNER_EXECUTE_URL = "http://container/internal/run";
+const RUNNER_EXECUTE_URL = "http://container/internal/workspace-invocation";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_DESTROY_TIMEOUT_MS = 5_000;
@@ -266,7 +266,7 @@ export class RunnerContainer extends Container {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/internal/run" || url.pathname === "/internal/destroy") {
+    if (url.pathname === "/internal/workspace-invocation" || url.pathname === "/internal/destroy") {
       return methodNotAllowed();
     }
 
@@ -764,7 +764,7 @@ RunnerContainer.outboundHandlers = {
 };
 
 export async function invokeHostedExecutionContainerRunner(
-  input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceRunJobInput },
+  input: HostedExecutionContainerRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,

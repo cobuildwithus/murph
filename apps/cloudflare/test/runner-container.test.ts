@@ -1,4 +1,4 @@
-import type { HostedWorkspaceRunResult } from "@murphai/hosted-execution";
+import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -67,7 +67,7 @@ describe("RunnerContainer", () => {
 
     const firstResponse = await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest(),
       },
       timeoutMs: 60_000,
@@ -75,7 +75,7 @@ describe("RunnerContainer", () => {
     });
     const secondResponse = await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_second"),
       },
       timeoutMs: 60_000,
@@ -94,10 +94,10 @@ describe("RunnerContainer", () => {
     });
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/run")
+      String(url).endsWith("/internal/workspace-invocation")
     );
     expect(executeCalls).toHaveLength(2);
-    expect(String(executeCalls[0]?.[0])).toBe("http://container/internal/run");
+    expect(String(executeCalls[0]?.[0])).toBe("http://container/internal/workspace-invocation");
     const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
     const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
     expect(firstAuthorization).toBe(
@@ -223,7 +223,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_local_proxy_upstream"),
       },
       timeoutMs: 60_000,
@@ -259,7 +259,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_procfs_supervisor_env"),
       },
       timeoutMs: 60_000,
@@ -288,7 +288,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_local_bridge_forwarding"),
       },
       timeoutMs: 60_000,
@@ -296,7 +296,7 @@ describe("RunnerContainer", () => {
     })).resolves.toEqual(createRunnerResult());
 
     const executeCall = containerFetch.mock.calls.find(([url]) =>
-      String(url).endsWith("/internal/run")
+      String(url).endsWith("/internal/workspace-invocation")
     );
     expect(executeCall).toBeTruthy();
     if (!executeCall?.[1]?.body || typeof executeCall[1].body !== "string") {
@@ -361,7 +361,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_active_proxy_token"),
       },
       timeoutMs: 60_000,
@@ -387,7 +387,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_retry_outbound_handlers"),
       },
       timeoutMs: 60_000,
@@ -410,7 +410,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_loopback_proxy"),
       },
       timeoutMs: 60_000,
@@ -430,14 +430,14 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest(),
       },
       timeoutMs: 60_000,
       userId: "member_123",
     });
     const firstExecuteCall = containerFetch.mock.calls.find(([url]) =>
-      String(url).endsWith("/internal/run")
+      String(url).endsWith("/internal/workspace-invocation")
     );
     const firstToken = readAuthorizationHeader(firstExecuteCall?.[1]?.headers);
 
@@ -447,14 +447,14 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_after_alarm"),
       },
       timeoutMs: 60_000,
       userId: "member_123",
     });
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/run")
+      String(url).endsWith("/internal/workspace-invocation")
     );
     const secondToken = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
     const outboundTokens = setOutboundByHosts.mock.calls
@@ -497,7 +497,7 @@ describe("RunnerContainer", () => {
 
       const firstInvoke = container.invoke({
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request: createRunnerRequest("evt_teardown_failure_first"),
         },
         timeoutMs: 30_000,
@@ -508,7 +508,7 @@ describe("RunnerContainer", () => {
 
       await expect(container.invoke({
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request: createRunnerRequest("evt_teardown_failure_second"),
         },
         timeoutMs: 30_000,
@@ -516,7 +516,7 @@ describe("RunnerContainer", () => {
       })).resolves.toEqual(createRunnerResult());
 
       const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-        String(url).endsWith("/internal/run")
+        String(url).endsWith("/internal/workspace-invocation")
       );
       const firstAuthorization = readAuthorizationHeader(executeCalls[0]?.[1]?.headers);
       const secondAuthorization = readAuthorizationHeader(executeCalls[1]?.[1]?.headers);
@@ -549,7 +549,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest(),
       },
       timeoutMs: 60_000,
@@ -591,7 +591,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_restart_ambiguous_shell"),
       },
       timeoutMs: 30_000,
@@ -638,7 +638,7 @@ describe("RunnerContainer", () => {
 
       await container.invoke({
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request: createRunnerRequest("evt_restart_after_failed_health"),
         },
         timeoutMs: 5_000,
@@ -671,7 +671,7 @@ describe("RunnerContainer", () => {
 
     const response = await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_short_budget"),
       },
       timeoutMs: 1_000,
@@ -699,12 +699,12 @@ describe("RunnerContainer", () => {
     expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeGreaterThan(0);
   });
 
-  it("emits workspace-run readiness timing in container logs", async () => {
+  it("emits workspace-invocation readiness timing in container logs", async () => {
     const { container } = createContainerDouble();
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_workspace_ready"),
       },
       timeoutMs: 60_000,
@@ -750,7 +750,7 @@ describe("RunnerContainer", () => {
 
     const thrown = await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_config_error"),
       },
       timeoutMs: 10_000,
@@ -796,7 +796,7 @@ describe("RunnerContainer", () => {
 
     const thrown = await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_invalid_request_diagnostics"),
       },
       timeoutMs: 10_000,
@@ -847,7 +847,7 @@ describe("RunnerContainer", () => {
 
     const thrown = await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_bundle_validation_diagnostics"),
       },
       timeoutMs: 10_000,
@@ -870,10 +870,10 @@ describe("RunnerContainer", () => {
   it("keeps the canonical internal HTTP run route disabled", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
-    const response = await container.fetch(new Request("https://runner.internal/internal/run", {
+    const response = await container.fetch(new Request("https://runner.internal/internal/workspace-invocation", {
       body: JSON.stringify({
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request: createRunnerRequest("evt_no_token"),
         },
         timeoutMs: 30_000,
@@ -897,7 +897,7 @@ describe("RunnerContainer", () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
     const invokeResponse = await container.fetch(
-      new Request("https://runner.internal/internal/run", { method: "GET" }),
+      new Request("https://runner.internal/internal/workspace-invocation", { method: "GET" }),
     );
     const destroyResponse = await container.fetch(
       new Request("https://runner.internal/internal/destroy", { method: "GET" }),
@@ -1153,7 +1153,7 @@ describe("RunnerContainer", () => {
     try {
       const invokeResultPromise = container.invoke({
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request: createRunnerRequest("evt_destroy_failure"),
         },
         timeoutMs: 30_000,
@@ -1219,7 +1219,7 @@ describe("RunnerContainer", () => {
 
       const invokePromise = container.invoke({
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request: createRunnerRequest("evt_after_destroy_race"),
         },
         timeoutMs: 30_000,
@@ -1263,7 +1263,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_bad_ready_timeout"),
       },
       timeoutMs: 60_000,
@@ -1286,7 +1286,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_ready_timeout"),
       },
       timeoutMs: 60_000,
@@ -1335,7 +1335,7 @@ describe("RunnerContainer", () => {
 
     await invokeHostedExecutionContainerRunner({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_namespace"),
       },
       runnerContainerNamespace: { getByName },
@@ -1351,7 +1351,7 @@ describe("RunnerContainer", () => {
     const body = requireObject(firstCall.at(0), "Runner container invoke payload");
     expect(body).toMatchObject({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_namespace"),
       },
       timeoutMs: 45_000,
@@ -1379,7 +1379,7 @@ describe("RunnerContainer", () => {
 
     await expect(invokeHostedExecutionContainerRunner({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_namespace_mismatch"),
       },
       runnerContainerNamespace: { getByName },
@@ -1396,7 +1396,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_invoke_mismatch"),
       },
       timeoutMs: 45_000,
@@ -1406,7 +1406,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("rejects workspace-run route mismatches against the workspace job userId", async () => {
+  it("rejects workspace-invocation route mismatches against the workspace job userId", async () => {
     const invoke = vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,
@@ -1438,7 +1438,7 @@ describe("RunnerContainer", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("forwards workspace-run jobs without run-drain fields to the container shell", async () => {
+  it("forwards workspace-invocation jobs without run-drain fields to the container shell", async () => {
     const { container, containerFetch, setOutboundByHosts } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/health")) {
@@ -1478,7 +1478,7 @@ describe("RunnerContainer", () => {
     });
 
     const executeCall = containerFetch.mock.calls.find(([url]) =>
-      String(url).endsWith("/internal/run")
+      String(url).endsWith("/internal/workspace-invocation")
     );
     expect(executeCall).toBeTruthy();
     if (!executeCall?.[1]?.body || typeof executeCall[1].body !== "string") {
@@ -1488,7 +1488,7 @@ describe("RunnerContainer", () => {
     expect(forwarded).toMatchObject({
       internalWorkerProxyToken: expect.any(String),
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: {
           attemptId: "attempt_member_workspace_container",
           leaseGeneration: "11",
@@ -1532,17 +1532,17 @@ describe("RunnerContainer", () => {
       },
       timeoutMs: 45_000,
       userId: "member_123",
-    })).rejects.toThrow("kind must be workspace-run");
+    })).rejects.toThrow("kind must be workspace-invocation");
 
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("rejects legacy run fields on workspace-run requests", async () => {
+  it("rejects legacy run fields on workspace-invocation requests", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
     await expect(container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: {
           ...createRunnerRequest("evt_legacy_fields_rejected"),
           // @ts-expect-error Deliberately exercising the runtime parse boundary.
@@ -1561,7 +1561,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("preserves workspace-run request fields when the container is invoked over durable-object RPC", async () => {
+  it("preserves workspace-invocation request fields when the container is invoked over durable-object RPC", async () => {
     const { container, containerFetch } = createContainerDouble();
     const extendedRequest = {
       ...createRunnerRequest("evt_extended"),
@@ -1572,7 +1572,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: extendedRequest,
         runtime: {
           userEnv: {
@@ -1585,7 +1585,7 @@ describe("RunnerContainer", () => {
     });
 
     const executeCall = containerFetch.mock.calls.find(([url]) =>
-      String(url).endsWith("/internal/run")
+      String(url).endsWith("/internal/workspace-invocation")
     );
     expect(executeCall).toBeTruthy();
     if (!executeCall?.[1]?.body || typeof executeCall[1].body !== "string") {
@@ -1596,7 +1596,7 @@ describe("RunnerContainer", () => {
       internalWorkerProxyToken: expect.any(String),
       localInternalProxyBaseUrl: null,
       job: {
-        kind: "workspace-run",
+        kind: "workspace-invocation",
         request: {
           attemptId: "attempt_evt_extended",
           budget: {
@@ -1778,7 +1778,7 @@ function createRunnerRequest(eventId = "evt_123") {
 
 function createWorkspaceRunnerJob(userId: string) {
   return {
-    kind: "workspace-run" as const,
+    kind: "workspace-invocation" as const,
     request: {
       attemptId: `attempt_${userId}`,
       budget: {
@@ -1850,7 +1850,7 @@ async function readParentProcEnvironmentFromChild(
   return Buffer.concat(stdoutChunks).toString("utf8");
 }
 
-function createRunnerResult(): HostedWorkspaceRunResult {
+function createRunnerResult(): HostedWorkspaceInvocationResult {
   return {
     nextWakeAt: null,
     redactedStatus: {

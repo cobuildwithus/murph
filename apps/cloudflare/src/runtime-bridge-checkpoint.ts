@@ -1,8 +1,10 @@
 import type {
   HostedExecutionBundleRef,
+} from "@murphai/hosted-execution/contracts";
+import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 export interface HostedRuntimeBridgeCheckpointLease {
   attemptId: string;
@@ -157,6 +159,13 @@ export async function checkpointHostedRuntimeBridgeWebWorkspace(
       "after_web_checkpoint",
     );
   }
+
+  requireCheckpointLeaseMatchesRequest({
+    lease: await input.readCurrentLease(),
+    request: input.request,
+    stage: "after_web_checkpoint",
+    userId: input.userId,
+  });
 
   return response;
 }

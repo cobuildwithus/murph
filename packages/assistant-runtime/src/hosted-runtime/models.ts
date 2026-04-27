@@ -8,9 +8,11 @@ import type {
 import type {
   HostedExecutionWake,
   HostedExecutionRedactedLogEntry,
-  HostedWorkspaceRunRequest,
-  HostedWorkspaceRunResult,
 } from "@murphai/hosted-execution";
+import type {
+  HostedWorkspaceInvocationRequest,
+  HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
@@ -43,11 +45,11 @@ export interface HostedAssistantRuntimeConfig {
 }
 
 export interface HostedAssistantWorkspaceRuntimeJobInput {
-  request: HostedWorkspaceRunRequest;
+  request: HostedWorkspaceInvocationRequest;
   runtime?: HostedAssistantRuntimeConfig;
 }
 
-export type HostedAssistantWorkspaceRuntimeJobResult = HostedWorkspaceRunResult;
+export type HostedAssistantWorkspaceRuntimeJobResult = HostedWorkspaceInvocationResult;
 
 export interface HostedBootstrapResult {
   assistantConfigStatus:

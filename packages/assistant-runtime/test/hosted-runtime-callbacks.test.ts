@@ -12,11 +12,10 @@ import {
 import type { HostedEmailSendRequest } from "../src/hosted-email.ts";
 
 const mocks = vi.hoisted(() => ({
-  createAssistantDeliveryAmbiguousError: vi.fn(),
+  beginAssistantOutboxIntentMirrorDispatch: vi.fn(),
   dispatchAssistantOutboxIntent: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
-  markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   sendTelegramMessage: vi.fn(),
@@ -34,12 +33,10 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 vi.mock("@murphai/assistant-engine", () => ({
-  createAssistantDeliveryAmbiguousError:
-    mocks.createAssistantDeliveryAmbiguousError,
+  beginAssistantOutboxIntentMirrorDispatch:
+    mocks.beginAssistantOutboxIntentMirrorDispatch,
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
-  markAssistantOutboxIntentMirrorTerminalById:
-    mocks.markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
@@ -145,11 +142,6 @@ function createDispatchResult(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.createAssistantDeliveryAmbiguousError.mockImplementation((cause?: { message?: string }) => ({
-    code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-    message: cause?.message ?? "ambiguous",
-    retryable: false,
-  }));
   mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
     createDispatchResult({
       delivery: createDelivery(),
@@ -247,6 +239,47 @@ describe("hosted runtime callbacks", () => {
     ).rejects.toMatchObject({
       code: "ASSISTANT_HOSTED_EMAIL_PARTICIPANT_UNSUPPORTED",
     });
+  });
+
+  it("leaves stale non-idempotent sending intents to local outbox reconciliation", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "participant", target: "chat_1" },
+        channel: "telegram",
+        dedupeKey: "dedupe_1",
+        deliveryIdempotencyKey: null,
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_1",
+        lastError: null,
+        message: "hello 1",
+        replyToMessageId: null,
+        sessionId: "session_1",
+        status: "sending",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+    ]);
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(
+        {
+          intentId: "intent_1",
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingPastGraceWindow: true,
+          sendingStartedAt: "2026-04-08T00:00:00.000Z",
+        },
+      ),
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
+
+    expect(sideEffects).toEqual([]);
   });
 
   it("returns sent without re-dispatching when the outbox mirror already has a sent record", async () => {
@@ -361,7 +394,6 @@ describe("hosted runtime callbacks", () => {
       now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
     });
-    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
     expect(outcomes[0]).toEqual(
       expect.objectContaining({
         deliveryStatus: "sent",
@@ -432,7 +464,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("ages a stale non-idempotent sending record into terminal ambiguity", async () => {
+  it("leaves stale non-idempotent sending records retryable without dispatching again", async () => {
     const effect = createEffect({ transportIdempotent: false });
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));
@@ -459,17 +491,10 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryStatus: "failed_ambiguous",
-        retryable: false,
+        deliveryStatus: "sending",
+        retryable: true,
       }),
     ]);
-    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentId: effect.effectId,
-        status: "abandoned",
-        vault: HOSTED_WAKE.vaultRoot,
-      }),
-    );
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
@@ -683,7 +708,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("promotes non-idempotent confirmation-pending retries into abandoned terminal state", async () => {
+  it("keeps non-idempotent confirmation-pending retries in local retryable state", async () => {
     const effect = createEffect({ transportIdempotent: false });
     mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
       createDispatchResult(
@@ -708,68 +733,10 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(
-      expect.objectContaining({
-        intentId: effect.effectId,
-        status: "abandoned",
-      }),
-    );
     expect(outcomes[0]).toEqual(
       expect.objectContaining({
-        deliveryStatus: "failed_ambiguous",
-        retryable: false,
-      }),
-    );
-  });
-
-  it("keeps an ambiguous confirmation-pending outcome when mirror sync logging is best effort", async () => {
-    const effect = createEffect({ transportIdempotent: false });
-    mocks.dispatchAssistantOutboxIntent.mockResolvedValue(
-      createDispatchResult(
-        {
-          delivery: createDelivery({
-            cleanupMessages: [{ messageId: "1001", target: "123" }],
-            cleanupTargetAliases: ["123"],
-            providerMessageIds: ["1001"],
-            target: "456",
-          }),
-          lastError: {
-            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-            message: "telegram timeout",
-          },
-          status: "retryable",
-        },
-        {
-          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-          message: "telegram timeout",
-        },
-      ),
-    );
-    mocks.markAssistantOutboxIntentMirrorTerminalById.mockRejectedValueOnce(
-      new Error("mirror write failed"),
-    );
-
-    const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      assistantDeliveryEffects: [effect],
-      wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
-      vaultRoot: HOSTED_WAKE.vaultRoot,
-    });
-
-    expect(outcomes).toEqual([
-      expect.objectContaining({
-        cleanupMessages: [{ messageId: "1001", target: "123" }],
-        cleanupTargetAliases: ["123"],
-        deliveryStatus: "failed_ambiguous",
-        providerMessageIds: ["1001"],
-        retryable: false,
-        target: "456",
-      }),
-    ]);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        level: "warn",
-        message: "Hosted assistant delivery local mirror update failed.",
+        deliveryStatus: "retryable",
+        retryable: true,
       }),
     );
   });
@@ -799,7 +766,6 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
     expect(outcomes[0]).toEqual(
       expect.objectContaining({
         deliveryStatus: "retryable",
@@ -845,7 +811,6 @@ describe("hosted runtime callbacks", () => {
         retryable: true,
       }),
     );
-    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
   });
 
   it("returns missing-result when the committed outbox intent disappeared", async () => {
@@ -1017,7 +982,7 @@ describe("hosted runtime callbacks", () => {
         details: expect.objectContaining({
           retryable: true,
         }),
-        message: "Hosted assistant delivery threw during post-commit delivery.",
+        message: "Hosted assistant delivery threw.",
       }),
     );
   });

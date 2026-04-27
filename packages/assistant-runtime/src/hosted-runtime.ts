@@ -1,7 +1,7 @@
 import type {
-  HostedWorkspaceRunResult,
+  HostedWorkspaceInvocationResult,
   HostedWorkspaceState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   normalizeHostedAssistantRuntimeConfig,
   withHostedProcessEnvironment,
@@ -48,6 +48,12 @@ import {
 import {
   importHostedVaultSyncMailboxItem,
 } from "./hosted-runtime/vault-sync-mailbox-import.ts";
+import {
+  createHostedConversationMailboxImportItem,
+} from "./hosted-runtime/mailbox-conversation-import.ts";
+import {
+  enqueueHostedSystemMailboxItem,
+} from "./hosted-runtime/system-mailbox.ts";
 import {
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
@@ -148,6 +154,12 @@ export {
   importHostedVaultSyncMailboxItem,
 };
 export {
+  createHostedConversationMailboxImportItem,
+};
+export {
+  enqueueHostedSystemMailboxItem,
+};
+export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   parseHostedAssistantWorkspaceRuntimeJobRequest,
@@ -179,7 +191,7 @@ export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Erro
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
-): Promise<HostedWorkspaceRunResult> {
+): Promise<HostedWorkspaceInvocationResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
   const mailboxPort = runtime.platform.mailboxPort ?? null;
   const workspacePort = runtime.platform.workspacePort ?? null;
@@ -246,7 +258,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           mailboxPort,
           workspacePort,
         },
-        requestId: `hosted-workspace-run:${input.request.attemptId}`,
+        requestId: `hosted-workspace-invocation:${input.request.attemptId}`,
         runAssistantPhase: (phaseInput) =>
           (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
             ...phaseInput,
@@ -272,7 +284,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     ...(committedWorkspace?.redactedStatus
       ? { redactedStatus: committedWorkspace.redactedStatus }
       : { redactedStatus: buildHostedMailboxImportRedactedStatus(result.initialMailboxImport.importResult) }),
-    status: resolveHostedWorkspaceRunStatus({
+    status: resolveHostedWorkspaceInvocationStatus({
       mailboxBudgetExhausted: mailboxBudget.exhausted,
       nextWakeAt,
     }),
@@ -361,10 +373,10 @@ function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number
   return importLimit >= Number.MAX_SAFE_INTEGER ? importLimit : importLimit + 1;
 }
 
-function resolveHostedWorkspaceRunStatus(input: {
+function resolveHostedWorkspaceInvocationStatus(input: {
   mailboxBudgetExhausted: boolean;
   nextWakeAt: string | null;
-}): HostedWorkspaceRunResult["status"] {
+}): HostedWorkspaceInvocationResult["status"] {
   if (input.mailboxBudgetExhausted) {
     return "budget_exhausted";
   }

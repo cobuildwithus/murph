@@ -2,45 +2,26 @@ import { Buffer } from "node:buffer";
 import path from "node:path";
 
 import {
-  createHostedAssistantChannelTypingDependencies,
-  executeHostedMailboxEvent,
-  importHostedVaultSyncMailboxItem,
+  createHostedConversationMailboxImportItem,
+  enqueueHostedSystemMailboxItem,
   normalizeHostedAssistantRuntimeConfig,
   type HostedAssistantRuntimeConfig,
-  type HostedRuntimePlatform,
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 import {
   parseHostedExecutionWake,
-  type HostedExecutionBundleRef,
-  type HostedExecutionConversationMessageWake,
-  type HostedExecutionRunnerSharePack,
-  type HostedExecutionSystemWake,
-  type HostedExecutionVaultSyncImportWake,
-  type HostedExecutionWake,
-  type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceRunRequest,
-} from "@murphai/hosted-execution";
-import {
-  isHostedEmailConversationMessageWake,
-  isHostedLinqConversationMessageWake,
-  isHostedTelegramConversationMessageWake,
-} from "@murphai/hosted-execution";
-import {
-  resolveHostedEmailSelfAddresses,
-} from "@murphai/hosted-execution/hosted-email";
-import {
-  normalizeHostedEmailConversationCapture,
-  normalizeHostedLinqConversationCapture,
-  normalizeHostedTelegramConversationCapture,
-  type LinqAttachmentDownloadDriver,
-  type TelegramAttachmentDownloadDriver,
-} from "@murphai/inboxd/connectors/hosted-conversation";
-import {
-  createParsedInboxPipeline,
-  openInboxRuntime,
-} from "@murphai/inboxd";
-import { createConfiguredParserRegistry } from "@murphai/parsers";
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedExecutionSystemWake,
+  HostedExecutionWake,
+} from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionBundleRef,
+} from "@murphai/hosted-execution/contracts";
+import type {
+  HostedWorkspaceCheckpointRequest,
+  HostedWorkspaceInvocationRequest,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   sha256HostedBundleHex,
   snapshotHostedExecutionContext,
@@ -64,7 +45,6 @@ const HOSTED_MAILBOX_SCOPE_SALT = new TextEncoder().encode("murph.hosted.device-
 const ENCRYPTED_SECRET_PREFIX = "hbds";
 const HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD = "hosted-mailbox-inline-payload";
 const HOSTED_MAILBOX_REF_PAYLOAD_FIELD = "hosted-mailbox-ref-payload";
-const DEFAULT_HOSTED_LINQ_ATTACHMENT_CDN_BASE_URL = "https://cdn.linqapp.com";
 const BASE64URL_CANONICAL_PATTERN = /^[A-Za-z0-9_-]*$/u;
 
 type HostedWorkspaceRuntimeBridgeImportItem =
@@ -79,14 +59,12 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
   ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 >;
-type HostedRuntimeBridgeExecutionContext =
-  Parameters<typeof executeHostedMailboxEvent>[0]["executionContext"];
 
 export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   readCurrentLease?: HostedRuntimeBridgeReadCurrentLease;
   readEncryptionEnvironment?: () => HostedMailboxEncryptionEnvironment;
-  request: HostedWorkspaceRunRequest;
+  request: HostedWorkspaceInvocationRequest;
   runtime: HostedAssistantRuntimeConfig;
   vaultRoot?: string | null;
 }
@@ -133,7 +111,7 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
 }
 
 export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
-  request: HostedWorkspaceRunRequest,
+  request: HostedWorkspaceInvocationRequest,
 ): HostedRuntimeBridgeCheckpointLease {
   return {
     attemptId: request.attemptId,
@@ -194,13 +172,43 @@ function createHostedWorkspaceBridgeMailboxImporter(input: {
   } & Pick<HostedRuntimeBridgeNormalizedRuntime, "commitTimeoutMs" | "resolvedConfig" | "userEnv">;
   vaultRoot: string;
 }): HostedWorkspaceRuntimeBridgeImportItem {
+  const importConversationItem = createHostedConversationMailboxImportItem({
+    decodePayload: {
+      decode: async (decodeInput) => {
+        const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
+          ciphertext: decodeInput.payloadCiphertext,
+          environment: input.readEncryptionEnvironment(),
+          userId: decodeInput.itemRef.userId,
+        });
+        const wake = parseHostedExecutionWake(decodedPayload);
+        if (wake.kind !== "conversation.message") {
+          return {
+            reasonCode: "payload.decode_mismatch",
+            retryable: false,
+            status: "blocked",
+          };
+        }
+
+        return {
+          status: "decoded",
+          wake,
+        };
+      },
+    },
+    runtime: input.runtime,
+    vaultRoot: input.vaultRoot,
+  });
+
   return async (item) => importHostedWorkspaceBridgeMailboxItem({
     ...input,
+    importConversationItem,
     item,
   });
 }
 
 async function importHostedWorkspaceBridgeMailboxItem(input: {
+  importConversationItem: (item: HostedWorkspaceRuntimeBridgeImportItemInput) =>
+    ReturnType<HostedWorkspaceRuntimeBridgeImportItem>;
   item: HostedWorkspaceRuntimeBridgeImportItemInput;
   readEncryptionEnvironment: () => HostedMailboxEncryptionEnvironment;
   runtime: {
@@ -211,39 +219,15 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   vaultRoot: string;
 }): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
   if (
-    input.item.route.action === "import-vault-sync"
-    && input.item.item.kind === "vault.sync.import"
+    input.item.route.action === "import-conversation-message"
+    && input.item.item.kind === "conversation.message"
   ) {
-    const decodedPayload = await decryptHostedMailboxPayloadCiphertext({
-      ciphertext: input.item.payload.payloadCiphertext,
-      environment: input.readEncryptionEnvironment(),
-      userId: input.item.item.userId,
-    });
-    const wake = parseHostedExecutionWake(decodedPayload);
-
-    if (!decodedVaultSyncWakeMatchesMailboxItem(wake, input.item)) {
-      return {
-        reasonCode: "payload.decode_mismatch",
-        retryable: false,
-        status: "blocked",
-      };
-    }
-
-    return await importHostedVaultSyncMailboxItem({
-      item: input.item,
-      platform: input.runtime.platform,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
+    return await input.importConversationItem(input.item);
   }
 
   if (
-    input.item.route.action !== "import-conversation-message"
-    && input.item.route.action !== "apply-member-activation"
-    && input.item.route.action !== "apply-member-channels-update"
-    && input.item.route.action !== "dispatch-assistant-notification"
-    && input.item.route.action !== "run-device-sync-wake"
-    && input.item.route.action !== "import-vault-share"
+    input.item.route.action === "import-conversation-message"
+    || input.item.item.kind === "conversation.message"
   ) {
     return {
       reasonCode: "cloudflare_bridge.unhandled_mailbox_route",
@@ -258,27 +242,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   });
   const wake = parseHostedExecutionWake(decodedPayload);
 
-  if (
-    input.item.route.action !== "import-conversation-message"
-    && input.item.item.kind !== "conversation.message"
-  ) {
-    if (!decodedSystemWakeMatchesMailboxItem(wake, input.item)) {
-      return {
-        reasonCode: "payload.decode_mismatch",
-        retryable: false,
-        status: "blocked",
-      };
-    }
-
-    return await executeHostedSystemWakeFromMailbox({
-      item: input.item,
-      runtime: input.runtime,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
-  }
-
-  if (!decodedWakeMatchesMailboxItem(wake, input.item)) {
+  if (!decodedSystemWakeMatchesMailboxItem(wake, input.item)) {
     return {
       reasonCode: "payload.decode_mismatch",
       retryable: false,
@@ -286,210 +250,11 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     };
   }
 
-  const imported = await importHostedConversationMessageWakeIntoLocalInbox({
-    runtime: input.runtime,
+  return await enqueueHostedSystemMailboxItem({
+    item: input.item,
     vaultRoot: input.vaultRoot,
     wake,
   });
-
-  if (imported.capture.deduped) {
-    return {
-      reasonCode: "capture.deduped",
-      status: "skipped",
-    };
-  }
-
-  return {
-    status: "imported",
-  };
-}
-
-async function executeHostedSystemWakeFromMailbox(input: {
-  item: HostedWorkspaceRuntimeBridgeImportItemInput;
-  runtime: HostedRuntimeBridgeNormalizedRuntime;
-  vaultRoot: string;
-  wake: HostedExecutionSystemWake;
-}): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
-  const sharePack = await fetchHostedSharePackForWake({
-    platform: input.runtime.platform,
-    requestId: input.item.payload.requestId,
-    wake: input.wake,
-  });
-  if (input.wake.kind === "vault.share.accepted" && !sharePack) {
-    return {
-      reasonCode: "share.port_missing",
-      status: "deferred",
-    };
-  }
-  const executionContext: HostedRuntimeBridgeExecutionContext = {
-    hosted: {
-      channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-        forwardedEnv: input.runtime.forwardedEnv,
-        platformEnv: input.runtime.platformEnv,
-        runtimeEnv: buildHostedRuntimeEnv(input.runtime),
-      }),
-      memberId: input.wake.userId,
-      userEnvKeys: Object.keys(input.runtime.userEnv),
-    },
-  };
-
-  await executeHostedMailboxEvent({
-    executionContext,
-    runtime: input.runtime,
-    runtimeEnv: buildHostedRuntimeEnv(input.runtime),
-    sharePack,
-    vaultRoot: input.vaultRoot,
-    wake: input.wake,
-  });
-
-  return {
-    status: "imported",
-  };
-}
-
-async function fetchHostedSharePackForWake(input: {
-  platform: HostedRuntimePlatform;
-  requestId: string | null;
-  wake: HostedExecutionSystemWake;
-}): Promise<HostedExecutionRunnerSharePack | null> {
-  if (input.wake.kind !== "vault.share.accepted") {
-    return null;
-  }
-
-  if (!input.platform.sharePort) {
-    return null;
-  }
-
-  const response = await input.platform.sharePort.fetchPayload({
-    ownerUserId: input.wake.share.ownerUserId,
-    requestId: input.requestId ?? input.wake.eventId,
-    shareId: input.wake.share.shareId,
-  });
-
-  return response.payload;
-}
-
-async function importHostedConversationMessageWakeIntoLocalInbox(input: {
-  runtime: {
-    forwardedEnv: Readonly<Record<string, string>>;
-    platform: HostedWorkspaceRuntimeJobOptions["platform"];
-    platformEnv: Readonly<Record<string, string>>;
-  };
-  vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
-}) {
-  const capture = await normalizeHostedConversationMessageWake(input);
-  const runtime = await openInboxRuntime({
-    vaultRoot: input.vaultRoot,
-  });
-  let pipeline: Awaited<ReturnType<typeof createParsedInboxPipeline>> | null = null;
-
-  try {
-    const configured = await createConfiguredParserRegistry({
-      vaultRoot: input.vaultRoot,
-    });
-    pipeline = await createParsedInboxPipeline({
-      ffmpeg: configured.ffmpeg,
-      registry: configured.registry,
-      runtime,
-      vaultRoot: input.vaultRoot,
-    });
-
-    return {
-      capture: await pipeline.processCapture(capture),
-    };
-  } finally {
-    if (pipeline) {
-      pipeline.close();
-    } else {
-      runtime.close();
-    }
-  }
-}
-
-async function normalizeHostedConversationMessageWake(input: {
-  runtime: {
-    forwardedEnv: Readonly<Record<string, string>>;
-    platform: HostedWorkspaceRuntimeJobOptions["platform"];
-    platformEnv: Readonly<Record<string, string>>;
-  };
-  wake: HostedExecutionConversationMessageWake;
-}) {
-  if (isHostedLinqConversationMessageWake(input.wake)) {
-    return await normalizeHostedLinqConversationCapture({
-      accountId: input.wake.message.phoneLookupKey,
-      attachmentDownloadTimeoutMs: 15_000,
-      downloadDriver: createHostedLinqAttachmentDownloadDriver(),
-      linqMessage: input.wake.message.linqMessage,
-      occurredAt: input.wake.occurredAt,
-    });
-  }
-
-  if (isHostedTelegramConversationMessageWake(input.wake)) {
-    return await normalizeHostedTelegramConversationCapture({
-      accountId: "bot",
-      downloadDriver: createHostedTelegramAttachmentDownloadDriver(
-        buildHostedRuntimeEnv(input.runtime),
-      ),
-      externalId: input.wake.eventId,
-      message: input.wake.message.telegramMessage,
-      occurredAt: input.wake.occurredAt,
-      receivedAt: input.wake.occurredAt,
-    });
-  }
-
-  if (isHostedEmailConversationMessageWake(input.wake)) {
-    const bytes = await input.runtime.platform.effectsPort.readRawEmailMessage(
-      input.wake.message.rawMessageKey,
-    );
-
-    if (!bytes) {
-      throw new HostedMailboxRawEmailMissingError();
-    }
-
-    return await normalizeHostedEmailConversationCapture({
-      accountAddress: input.wake.message.identityId,
-      accountId: input.wake.message.identityId,
-      rawMessage: bytes,
-      selfAddresses: resolveHostedEmailSelfAddresses({
-        extra: [input.wake.message.selfAddress],
-        senderIdentity: input.wake.message.identityId,
-      }),
-      source: "email",
-      threadTarget: null,
-    });
-  }
-
-  throw new TypeError("Unsupported hosted conversation message wake kind.");
-}
-
-class HostedMailboxRawEmailMissingError extends Error {
-  readonly code = "email-raw-message-missing";
-
-  constructor() {
-    super("Hosted mailbox raw email payload is missing.");
-    this.name = "HostedMailboxRawEmailMissingError";
-  }
-}
-
-function decodedWakeMatchesMailboxItem(
-  wake: ReturnType<typeof parseHostedExecutionWake>,
-  item: HostedWorkspaceRuntimeBridgeImportItemInput,
-): wake is HostedExecutionConversationMessageWake {
-  return wake.kind === "conversation.message"
-    && wake.userId === item.item.userId
-    && wake.occurredAt === item.item.occurredAt
-    && wake.eventId === item.item.dedupeKey;
-}
-
-function decodedVaultSyncWakeMatchesMailboxItem(
-  wake: ReturnType<typeof parseHostedExecutionWake>,
-  item: HostedWorkspaceRuntimeBridgeImportItemInput,
-): wake is HostedExecutionVaultSyncImportWake {
-  return wake.kind === "vault.sync.import"
-    && wake.userId === item.item.userId
-    && wake.occurredAt === item.item.occurredAt
-    && wake.eventId === item.item.dedupeKey;
 }
 
 function decodedSystemWakeMatchesMailboxItem(
@@ -627,168 +392,6 @@ function buildHostedMailboxFieldAad(input: {
     memberId: input.userId,
     purpose: "hosted-mailbox-payload",
   }));
-}
-
-function createHostedLinqAttachmentDownloadDriver(): LinqAttachmentDownloadDriver | null {
-  if (typeof globalThis.fetch !== "function") {
-    return null;
-  }
-
-  return {
-    downloadUrl: async (url, signal) => {
-      const normalizedUrl = normalizeHostedLinqAttachmentUrl(url);
-      if (!normalizedUrl) {
-        return null;
-      }
-
-      const response = await globalThis.fetch(normalizedUrl, {
-        method: "GET",
-        signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Hosted Linq attachment download failed with HTTP ${response.status}.`);
-      }
-
-      return new Uint8Array(await response.arrayBuffer());
-    },
-  };
-}
-
-function normalizeHostedLinqAttachmentUrl(value: string | null | undefined): string | null {
-  const normalized = normalizeOptionalString(value);
-  if (!normalized) {
-    return null;
-  }
-
-  try {
-    const url = new URL(normalized);
-    const attachmentCdnBaseUrl = normalizeHostedUrl(
-      process.env.LINQ_ATTACHMENT_CDN_BASE_URL,
-      DEFAULT_HOSTED_LINQ_ATTACHMENT_CDN_BASE_URL,
-    );
-
-    if (!attachmentCdnBaseUrl) {
-      return null;
-    }
-
-    const allowedBaseUrl = new URL(attachmentCdnBaseUrl);
-    if (url.protocol !== "https:" || url.hostname !== allowedBaseUrl.hostname) {
-      return null;
-    }
-
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function createHostedTelegramAttachmentDownloadDriver(
-  env: Readonly<Record<string, string | undefined>>,
-): TelegramAttachmentDownloadDriver | null {
-  const token = normalizeOptionalString(env.TELEGRAM_BOT_TOKEN);
-  if (!token || typeof globalThis.fetch !== "function") {
-    return null;
-  }
-
-  const apiBaseUrl = normalizeHostedUrl(env.TELEGRAM_API_BASE_URL, "https://api.telegram.org");
-  const fileBaseUrl = normalizeHostedUrl(env.TELEGRAM_FILE_BASE_URL, "https://api.telegram.org/file");
-  if (!apiBaseUrl || !fileBaseUrl) {
-    return null;
-  }
-
-  return {
-    downloadFile: async (filePath, signal) => {
-      const response = await globalThis.fetch(
-        `${fileBaseUrl}/bot${token}/${filePath.replace(/^\/+/u, "")}`,
-        {
-          method: "GET",
-          signal,
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Hosted Telegram attachment download failed with HTTP ${response.status}.`);
-      }
-
-      return new Uint8Array(await response.arrayBuffer());
-    },
-    getFile: async (fileId, signal) => {
-      const url = new URL(`${apiBaseUrl}/bot${token}/getFile`);
-      url.searchParams.set("file_id", fileId);
-      const response = await globalThis.fetch(url, {
-        method: "GET",
-        signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Hosted Telegram API request failed with HTTP ${response.status}.`);
-      }
-
-      const payload = await response.json();
-      return parseHostedTelegramApiResult(payload);
-    },
-  };
-}
-
-function parseHostedTelegramApiResult(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted Telegram API response must be an object.");
-  }
-
-  const record = value as {
-    description?: unknown;
-    error_code?: unknown;
-    ok?: unknown;
-    result?: unknown;
-  };
-  if (record.ok !== true || record.result === undefined) {
-    throw new Error(typeof record.description === "string"
-      ? record.description
-      : "Hosted Telegram API request returned an invalid response.");
-  }
-
-  if (!record.result || typeof record.result !== "object" || Array.isArray(record.result)) {
-    throw new TypeError("Hosted Telegram API result must be an object.");
-  }
-
-  const result = record.result as Record<string, unknown>;
-  if (typeof result.file_id !== "string") {
-    throw new TypeError("Hosted Telegram API result.file_id must be a string.");
-  }
-
-  return {
-    ...result,
-    file_id: result.file_id,
-    ...(typeof result.file_path === "string" ? { file_path: result.file_path } : {}),
-    ...(typeof result.file_size === "number" ? { file_size: result.file_size } : {}),
-    ...(typeof result.file_unique_id === "string"
-      ? { file_unique_id: result.file_unique_id }
-      : {}),
-  };
-}
-
-function buildHostedRuntimeEnv(input: {
-  forwardedEnv: Readonly<Record<string, string>>;
-  platformEnv: Readonly<Record<string, string>>;
-}): Record<string, string> {
-  return {
-    ...input.forwardedEnv,
-    ...input.platformEnv,
-  };
-}
-
-function normalizeHostedUrl(value: string | undefined, fallback: string): string | null {
-  try {
-    return new URL((value?.trim() || fallback).replace(/\/+$/u, "")).toString().replace(/\/+$/u, "");
-  } catch {
-    return null;
-  }
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized ? normalized : null;
 }
 
 function parseJsonValue(value: string, label: string): unknown {

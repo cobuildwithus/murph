@@ -104,7 +104,7 @@ describe("runHostedExecutionChild", () => {
     );
   });
 
-  it("routes workspace-run child payloads through the workspace runtime with proxy-only authority", async () => {
+  it("routes workspace-invocation child payloads through the workspace runtime with proxy-only authority", async () => {
     const stdout = { write: vi.fn() };
     const setExitCode = vi.fn();
     const runWorkspaceInProcess = vi.fn(async (
@@ -123,7 +123,7 @@ describe("runHostedExecutionChild", () => {
         internalWorkerProxyToken: "bridge-token",
         localInternalProxyBaseUrl: "http://127.0.0.1:8787/__murph/local-internal-proxy/users/u_workspace",
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request: {
             attemptId: "attempt_workspace_child",
             leaseGeneration: "7",
@@ -146,7 +146,7 @@ describe("runHostedExecutionChild", () => {
     expect(setExitCode).not.toHaveBeenCalled();
     expect(runWorkspaceInProcess).toHaveBeenCalledTimes(1);
     expect(runWorkspaceInProcess.mock.calls[0]?.[0]).toMatchObject({
-      kind: "workspace-run",
+      kind: "workspace-invocation",
       request: {
         attemptId: "attempt_workspace_child",
         userId: "u_workspace",

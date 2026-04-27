@@ -11,7 +11,20 @@ import type {
   WorkerEnvironmentContract,
 } from "../worker-contracts.ts";
 
-type RunnerOutboundUserRunnerStubLike = WorkerBindUserRunnerStubLike;
+interface RunnerOutboundUserRunnerStubLike extends WorkerBindUserRunnerStubLike {
+  ownsActiveInvocationLease?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean>;
+  recordActiveInvocationWorkspaceCheckpoint?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{ recorded: boolean }>;
+}
 
 export interface RunnerOutboundEnvironmentSource
   extends WorkerEnvironmentContract<WorkerBindUserRunnerStubLike> {}

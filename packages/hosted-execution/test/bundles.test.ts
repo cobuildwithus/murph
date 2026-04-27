@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
-} from "../src/index.ts";
+} from "../src/parsers.ts";
 
 describe("hosted execution bundle helpers", () => {
   it("parses the single bundle payload through the shared wire contract", () => {

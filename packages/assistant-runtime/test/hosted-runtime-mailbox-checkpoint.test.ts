@@ -13,11 +13,13 @@ import type {
   HostedMailboxPayloadFetchResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   parseHostedWorkspaceCheckpointRequest,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 
 import {
   HostedMailboxImportCheckpointConflictError,
@@ -193,7 +195,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
     }
   });
 
-  test("checkpoints retryable mailbox blocks as redacted status only", async () => {
+  test("leaves retryable mailbox payload blocks uncheckpointed", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
     const item = createMailboxItem({
       id: "mailbox_item_conversation_sidecar",
@@ -215,26 +217,8 @@ describe("hosted mailbox import checkpoint wrapper", () => {
     try {
       const result = await importHostedMailboxPrefixAndCheckpoint({
         expectedUserId: TEST_USER_ID,
-        async createCheckpointRequest(input) {
-          assert.deepEqual(input.redactedStatus, {
-            hostedMailboxBlockedCount: 1,
-            hostedMailboxConversationImportedSeq: "0",
-            hostedMailboxFetchedCount: 1,
-            hostedMailboxImportedCount: 0,
-            hostedMailboxRetryableBlockedCount: 1,
-            hostedMailboxSystemImportedSeq: "0",
-          });
-          assert.equal(input.state.recentStatuses[0]?.reasonCode, "payload.sidecar_unavailable");
-          return {
-            attemptId: "attempt_synthetic_checkpoint_retryable",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "1",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            reason: "import",
-            redactedStatus: input.redactedStatus,
-            snapshotRef: null,
-          };
+        async createCheckpointRequest() {
+          throw new Error("Retryable mailbox payload blocks should not checkpoint state.");
         },
         async importItem() {
           throw new Error("Import should not run while the payload is unavailable.");
@@ -247,9 +231,10 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         workspacePort,
       });
 
-      assert.equal(result.stateChanged, true);
+      assert.equal(result.stateChanged, false);
       assert.equal(result.importResult.blocked[0]?.retryable, true);
       assert.equal(result.state.watermarks.conversation, "0");
+      assert.deepEqual(result.state.recentStatuses, []);
       assert.deepEqual(payloadFetchRequests, [
         {
           dedupeKey: "dedupe_synthetic_checkpoint",
@@ -258,7 +243,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
           requestId: "request_synthetic_checkpoint_retryable:mailbox_item_conversation_sidecar:payload",
         },
       ]);
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests.length, 0);
       assert.equal(
         JSON.stringify(checkpointRequests).includes("ciphertext_inline_synthetic_checkpoint"),
         false,

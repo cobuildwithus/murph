@@ -6,19 +6,19 @@ import {
   parseHostedAssistantWorkspaceRuntimeJobInput,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  parseHostedWorkspaceRunResult,
-} from "@murphai/hosted-execution";
+  parseHostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/parsers";
 
-export const HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND = "workspace-run";
+export const HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND = "workspace-invocation";
 
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 
-export interface HostedExecutionWorkspaceRunJobInput
+export interface HostedExecutionWorkspaceInvocationJobInput
   extends HostedAssistantWorkspaceRuntimeJobInput {
-  kind: typeof HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND;
+  kind: typeof HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND;
 }
 
-export type HostedExecutionRunnerJobInput = HostedExecutionWorkspaceRunJobInput;
+export type HostedExecutionRunnerJobInput = HostedExecutionWorkspaceInvocationJobInput;
 
 export type HostedExecutionRunnerJobResult = HostedAssistantWorkspaceRuntimeJobResult;
 
@@ -53,10 +53,10 @@ export function parseHostedExecutionRunnerJobInput(
   };
 }
 
-export function isHostedExecutionWorkspaceRunJob(
+export function isHostedExecutionWorkspaceInvocationJob(
   job: HostedExecutionRunnerJobInput,
-): job is HostedExecutionWorkspaceRunJobInput {
-  return job.kind === HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND;
+): job is HostedExecutionWorkspaceInvocationJobInput {
+  return job.kind === HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND;
 }
 
 export function readHostedExecutionRunnerJobUserId(
@@ -69,7 +69,7 @@ export function assertHostedExecutionRunnerJobResult(
   value: unknown,
   _job: HostedExecutionRunnerJobInput,
 ): HostedExecutionRunnerJobResult {
-  return parseHostedWorkspaceRunResult(value);
+  return parseHostedWorkspaceInvocationResult(value);
 }
 
 export function formatHostedExecutionRunnerChildResult(
@@ -106,12 +106,12 @@ export function parseHostedExecutionRunnerChildResult(
 
 function requireHostedExecutionWorkspaceJobKind(
   value: unknown,
-): typeof HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND {
-  if (value === HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND) {
-    return HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND;
+): typeof HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND {
+  if (value === HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND) {
+    return HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND;
   }
 
-  throw new TypeError("Hosted execution runner job input.kind must be workspace-run.");
+  throw new TypeError("Hosted execution runner job input.kind must be workspace-invocation.");
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

@@ -291,7 +291,10 @@ export const HOSTED_WORKSPACE_CHECKPOINT_REASONS = [
   "import",
   "before_delivery_refresh",
   "outbox_intent",
+  "outbox_sending",
   "outbox_receipt",
+  "system_mailbox_sending",
+  "system_mailbox_receipt",
   "maintenance",
   "idle",
   "budget_exhausted",
@@ -350,7 +353,7 @@ export const HOSTED_RUNTIME_LOG_PHASES = [
   "idle",
   "import",
   "outbox",
-  "run",
+  "invoke",
 ] as const;
 
 export type HostedRuntimeLogPhase = (typeof HOSTED_RUNTIME_LOG_PHASES)[number];
@@ -420,7 +423,6 @@ export interface HostedRunnerNudgeResult {
   alarmScheduled: boolean;
   alreadyRunning: boolean;
   inFlight: boolean;
-  leaseGeneration: string;
   nextAlarmAt?: string | null;
 }
 
@@ -429,8 +431,7 @@ export interface HostedRunnerStatusResponse {
   inFlight: boolean;
   lastErrorAt?: string | null;
   lastErrorCode?: string | null;
-  lastRunAt?: string | null;
-  leaseGeneration: string;
+  lastInvocationAt?: string | null;
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
@@ -445,42 +446,42 @@ export interface HostedRuntimeWebStatusResponse {
   workspace: HostedWorkspaceState | null;
 }
 
-export const HOSTED_WORKSPACE_RUN_REASONS = [
+export const HOSTED_WORKSPACE_INVOCATION_REASONS = [
   "nudge",
   "alarm",
   "retry",
   "manual",
 ] as const;
 
-export type HostedWorkspaceRunReason = (typeof HOSTED_WORKSPACE_RUN_REASONS)[number];
+export type HostedWorkspaceInvocationReason = (typeof HOSTED_WORKSPACE_INVOCATION_REASONS)[number];
 
-export const HOSTED_WORKSPACE_RUN_STATUSES = [
+export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
   "idle",
   "budget_exhausted",
   "scheduled",
   "failed",
 ] as const;
 
-export type HostedWorkspaceRunStatus = (typeof HOSTED_WORKSPACE_RUN_STATUSES)[number];
+export type HostedWorkspaceInvocationStatus = (typeof HOSTED_WORKSPACE_INVOCATION_STATUSES)[number];
 
-export interface HostedWorkspaceRunBudget {
+export interface HostedWorkspaceInvocationBudget {
   maxMailboxItems?: number | null;
   maxRuntimeMs?: number | null;
 }
 
-export interface HostedWorkspaceRunRequest {
+export interface HostedWorkspaceInvocationRequest {
   attemptId: string;
-  budget?: HostedWorkspaceRunBudget | null;
+  budget?: HostedWorkspaceInvocationBudget | null;
   leaseGeneration: string;
-  reason: HostedWorkspaceRunReason;
+  reason: HostedWorkspaceInvocationReason;
   userId: string;
   workspaceVersion: string;
 }
 
-export interface HostedWorkspaceRunResult {
+export interface HostedWorkspaceInvocationResult {
   nextWakeAt?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
-  status: HostedWorkspaceRunStatus;
+  status: HostedWorkspaceInvocationStatus;
 }
 
 export function isHostedMailboxLane(value: string): value is HostedMailboxLane {

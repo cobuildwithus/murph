@@ -485,7 +485,7 @@ CREATE TABLE IF NOT EXISTS runner_meta (
   heartbeat_at TEXT,
   last_error_at TEXT,
   last_error_code TEXT,
-  last_run_at TEXT,
+  last_invocation_at TEXT,
   next_alarm_at TEXT,
   pending_nudge INTEGER NOT NULL DEFAULT 0
 );
@@ -838,7 +838,7 @@ userId
 inFlight
 leaseGeneration
 heartbeatAt
-lastRunAt
+lastInvocationAt
 workspaceVersion
 snapshotRef summary
 nextWakeAt
@@ -1024,7 +1024,7 @@ Simplify:
 
 - `src/user-runner/runner-state-schema.ts` to lease/alarm/status fields only.
 - `src/index.ts` internal route names and response payloads from run semantics to runner semantics.
-- `src/runner-container.ts` job input from run-drain request to workspace-run request.
+- `src/runner-container.ts` job input from run-drain request to workspace invocation request.
 - local proxy auth so checkpoint-capable bridge calls are validated by the current UserRunner lease, not only by container-token ownership.
 
 ### `packages/assistant-runtime`
@@ -1261,7 +1261,7 @@ In `apps/cloudflare` and `packages/assistant-runtime`:
 2. Replace run-drain job input:
 
 ```text
-HostedWorkspaceRunRequest {
+HostedWorkspaceInvocationRequest {
   attemptId
   userId
   leaseGeneration
@@ -1274,7 +1274,7 @@ HostedWorkspaceRunRequest {
 3. Replace run result:
 
 ```text
-HostedWorkspaceRunResult {
+HostedWorkspaceInvocationResult {
   status: "idle" | "budget_exhausted" | "scheduled" | "failed"
   nextWakeAt
   redactedStatus
@@ -1351,8 +1351,8 @@ Already landed:
 
 - Shared mailbox/workspace/runtime-log/runner contracts exist additively in
   `packages/hosted-execution`.
-- `packages/hosted-execution` has explicit `HostedWorkspaceRunRequest` and
-  `HostedWorkspaceRunResult` parsers that reject removed run fields such as
+- `packages/hosted-execution` has explicit `HostedWorkspaceInvocationRequest` and
+  `HostedWorkspaceInvocationResult` parsers that reject removed run fields such as
   `run`, `runDrain`, `runToken`, `targetCommittedSeqHint`, and `wake`.
 - Web has additive hosted mailbox/workspace stores and signed internal
   mailbox/workspace/log route groundwork.
@@ -1363,21 +1363,21 @@ Already landed:
   can snapshot the local workspace after mailbox import has mutated portable
   runtime state, instead of requiring web or Cloudflare to provide a stale
   precomputed `snapshotRef`.
-- Runtime has an additive workspace-run job entrypoint,
+- Runtime has an additive workspace invocation job entrypoint,
   `runHostedWorkspaceRuntimeJobInProcess`, that accepts
-  `HostedWorkspaceRunRequest`, fails closed without mailbox/workspace/read
+  `HostedWorkspaceInvocationRequest`, fails closed without mailbox/workspace/read
   ports, reads current workspace before mailbox import, rejects stale workspace
   versions before fetching mailbox items, imports and checkpoints the mailbox
   prefix, runs the assistant/outbox phase through local runtime semantics, and
-  returns a run-free `HostedWorkspaceRunResult`.
-- The workspace-run job now restores the existing hosted snapshot into the
+  returns a run-free `HostedWorkspaceInvocationResult`.
+- The workspace invocation job now restores the existing hosted snapshot into the
   local vault root before mailbox import, or creates a local null-bootstrap
   workspace when web has no snapshot yet. Missing snapshot bytes fail closed
   before any mailbox fetch/import/checkpoint work.
 - Cloudflare runtime platform has mailbox/workspace/log/share/vault-sync/device
   callback ports and a workspace read port.
 - Cloudflare node/container transport now has an additive discriminated
-  `workspace-run` job envelope parsed at the container HTTP boundary, DO invoke
+  `workspace-invocation` job envelope parsed at the container HTTP boundary, DO invoke
   boundary, isolated child boundary, and child-stdin boundary. Workspace jobs
   route toward `runHostedWorkspaceRuntimeJobInProcess` with real snapshot,
   checkpoint, conversation mailbox import, and vault-sync mailbox import bridge
@@ -1401,7 +1401,7 @@ Already landed:
   builder without double-checkpointing.
 - `HostedUserRunner` has an additive `runUntilIdleOrBudget({ reason })` path
   that acquires the runner lease, reads the latest hosted workspace, invokes one
-  `workspace-run` container job, clears invocation state, and schedules the next
+  `workspace-invocation` container job, clears invocation state, and schedules the next
   alarm from the workspace projection or pending nudge.
 - Web vault-sync upload now writes the side input, updates the session, appends
   a `vault.sync.import` mailbox item in the same transaction, and nudges the

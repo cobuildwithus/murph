@@ -194,7 +194,8 @@ function decodedWakeMatchesMailboxItem(
 ): boolean {
   return wake.kind === "conversation.message"
     && wake.userId === item.userId
-    && wake.occurredAt === item.occurredAt;
+    && wake.occurredAt === item.occurredAt
+    && wake.eventId === item.dedupeKey;
 }
 
 function normalizeConversationMailboxReasonCode(

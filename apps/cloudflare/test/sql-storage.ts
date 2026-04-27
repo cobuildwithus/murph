@@ -78,7 +78,7 @@ function initializeSchema(database: DatabaseSync): void {
       in_flight INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,
-      last_run_at TEXT,
+      last_invocation_at TEXT,
       next_wake_at TEXT,
       pending_nudge INTEGER NOT NULL DEFAULT 0
     );

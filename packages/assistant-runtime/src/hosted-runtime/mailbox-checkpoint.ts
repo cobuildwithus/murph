@@ -4,7 +4,7 @@ import type {
   HostedWorkspaceCheckpointReason,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   fetchAndProcessHostedMailboxPrefix,
@@ -17,6 +17,10 @@ import {
   writeHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "./mailbox-state.ts";
+import {
+  readHostedSystemMailboxCheckpointRollbackState,
+  restoreHostedSystemMailboxCheckpointRollbackState,
+} from "./system-mailbox.ts";
 import type {
   HostedRuntimeMailboxPort,
   HostedRuntimeWorkspacePort,
@@ -84,6 +88,9 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   const previousState = await readHostedMailboxImportState({
     vaultRoot: input.vaultRoot,
   });
+  const previousSystemMailboxState = await readHostedSystemMailboxCheckpointRollbackState({
+    vaultRoot: input.vaultRoot,
+  });
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     expectedUserId: input.expectedUserId,
     importItem: input.importItem,
@@ -142,6 +149,10 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   } catch (error) {
     await writeHostedMailboxImportState({
       state: previousState,
+      vaultRoot: input.vaultRoot,
+    });
+    await restoreHostedSystemMailboxCheckpointRollbackState({
+      state: previousSystemMailboxState,
       vaultRoot: input.vaultRoot,
     });
     throw error;

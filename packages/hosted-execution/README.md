@@ -17,7 +17,7 @@ Cloudflare execution worker.
 ## Active public path
 
 New hosted runtime code should import mailbox, workspace checkpoint, runtime log,
-runner nudge/status, and workspace-run contracts from
+runner nudge/status, and workspace invocation contracts from
 `@murphai/hosted-execution/runtime-control`. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
 

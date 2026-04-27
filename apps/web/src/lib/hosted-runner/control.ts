@@ -1,4 +1,4 @@
-import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution";
+import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";

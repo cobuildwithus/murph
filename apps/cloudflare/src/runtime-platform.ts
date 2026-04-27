@@ -8,6 +8,8 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
   parseHostedRuntimeLogResponse,
@@ -17,7 +19,7 @@ import {
   parseHostedRuntimeVaultSyncPayloadFetchResponse,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
@@ -57,7 +59,6 @@ import {
   assertHostedLocalInternalProxyBaseUrl,
 } from "./local-loopback-proxy.ts";
 import {
-  HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER,
   HOSTED_WEB_ISSUE_RECORD_PATH,
   HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
   HOSTED_WEB_USAGE_RECORD_PATH,
@@ -134,11 +135,19 @@ export function buildHostedExecutionRuntimePlatform(input: {
         return new Uint8Array(await response.arrayBuffer());
       },
       async put({ bytes, sha256 }) {
+        const headers = new Headers();
+        const lease = await input.workspaceCheckpointBridge?.readCurrentLease() ?? null;
+        if (lease) {
+          headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
+          headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
+          headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
+        }
         const response = await fetchHostedResponse({
           description: `Hosted artifact upload ${sha256}`,
           fetchImpl,
           init: {
             body: copyBytesToArrayBuffer(bytes),
+            headers,
             method: "PUT",
           },
           timeoutMs,
@@ -648,8 +657,10 @@ function createHostedWebSharePort(input: {
         path: appendHostedRuntimeRequestIdQuery(
           buildHostedRuntimeSharePayloadPath(request.shareId),
           request.requestId,
+          {
+            ownerUserId: request.ownerUserId,
+          },
         ),
-        signedUserId: request.ownerUserId,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -665,7 +676,6 @@ function createHostedWebSharePort(input: {
         description: "Hosted share import record",
         fetchImpl: input.fetchImpl,
         path: HOSTED_RUNTIME_SHARE_IMPORT_PATH,
-        signedUserId: request.ownerUserId,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -755,7 +765,6 @@ async function fetchHostedWebControlPlaneJson(input: {
   fetchImpl: typeof fetch;
   method?: "GET" | "POST";
   path: string;
-  signedUserId?: string;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
@@ -765,7 +774,7 @@ async function fetchHostedWebControlPlaneJson(input: {
     ? await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: input.transport.webControlBaseUrl,
       body,
-      boundUserId: input.signedUserId ?? input.boundUserId,
+      boundUserId: input.boundUserId,
       callbackSigning: input.transport.callbackSigning,
       fetchImpl: input.fetchImpl,
       method,
@@ -779,7 +788,6 @@ async function fetchHostedWebControlPlaneJson(input: {
         ...(body === undefined ? {} : { body }),
         headers: createHostedWebControlProxyHeaders({
           hasJsonBody: body !== undefined,
-          signedUserId: input.signedUserId,
         }),
         method,
       },
@@ -855,7 +863,6 @@ function createHostedWebControlLogPath(path: string): string {
 
 function createHostedWebControlProxyHeaders(input: {
   hasJsonBody: boolean;
-  signedUserId?: string;
 }): Headers | undefined {
   const headers = new Headers();
   let hasHeaders = false;
@@ -865,17 +872,19 @@ function createHostedWebControlProxyHeaders(input: {
     hasHeaders = true;
   }
 
-  if (input.signedUserId) {
-    headers.set(HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER, input.signedUserId);
-    hasHeaders = true;
-  }
-
   return hasHeaders ? headers : undefined;
 }
 
-function appendHostedRuntimeRequestIdQuery(path: string, requestId: string): string {
+function appendHostedRuntimeRequestIdQuery(
+  path: string,
+  requestId: string,
+  extraParams: Readonly<Record<string, string>> = {},
+): string {
   const url = new URL(path.replace(/^\/+/u, ""), "https://hosted-runtime.invalid/");
   url.searchParams.set("requestId", requestId);
+  for (const [key, value] of Object.entries(extraParams)) {
+    url.searchParams.set(key, value);
+  }
   return `${url.pathname}${url.search}`;
 }
 
