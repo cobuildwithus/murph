@@ -194,6 +194,38 @@ export function HostedAuthenticatedPhoneAuthState({
     );
   }
 
+  if (view === "signin-account-not-found") {
+    return (
+      <Alert className="border-stone-200 bg-stone-50">
+        <AlertTitle>No Murph account found</AlertTitle>
+        <AlertDescription>
+          This sign-in method was verified, but it is not linked to a Murph account yet.
+        </AlertDescription>
+        <div className="mt-3 flex flex-wrap gap-3">
+          <Button
+            type="button"
+            onClick={onContinue}
+            disabled={disabled}
+            size="lg"
+            className="w-full"
+          >
+            Sign up instead
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            size={secondaryActionSize}
+            className="w-full"
+            onClick={onUseDifferentNumber}
+          >
+            Try another sign-in method
+          </Button>
+        </div>
+      </Alert>
+    );
+  }
+
   if (view === "restart") {
     return (
       <Alert className="border-stone-200 bg-stone-50">

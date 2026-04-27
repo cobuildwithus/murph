@@ -65,6 +65,18 @@ type HostedPhoneResendTarget =
 
 const HOSTED_INVITE_SEND_CONFIRM_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY = "murph.hosted-onboarding.invite-phone-code-mutation";
+const HOSTED_SIGNIN_MEMBER_NOT_FOUND_CODE = "HOSTED_SIGNIN_MEMBER_NOT_FOUND";
+
+export function isHostedSignInMemberNotFoundError(input: {
+  error: unknown;
+  intent: string;
+}): boolean {
+  return (
+    input.intent === "signin"
+    && input.error instanceof HostedOnboardingApiError
+    && input.error.code === HOSTED_SIGNIN_MEMBER_NOT_FOUND_CODE
+  );
+}
 
 export function createHostedPhoneVerificationAttempt(phoneNumber: string): HostedPhoneVerificationAttempt {
   return {
