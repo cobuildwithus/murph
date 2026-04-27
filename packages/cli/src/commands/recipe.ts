@@ -202,7 +202,7 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
-    upsert: {
+    importJson: {
       description: 'Import or bulk update one recipe from an explicit JSON payload file or stdin.',
       hint: 'Use recipe save for the canonical typed command path. Keep --input for advanced JSON import, bulk, or migration flows.',
       output: recipeUpsertResultSchema,
@@ -214,8 +214,6 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
-    jsonImportCommandName: 'import-json',
-    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one recipe by canonical id or slug.',
       argName: 'id',

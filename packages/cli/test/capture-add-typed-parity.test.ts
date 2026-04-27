@@ -142,12 +142,35 @@ function comparableCaptureShape(input: {
   }
 }
 
-test('capture add schema exposes typed single-capture fields while preserving input fallback', async () => {
+test('capture add schema exposes typed single-capture fields without raw input fallback', async () => {
   const schema = await readCommandSchema(createCaptureCli(), ['capture', 'add'])
 
   assert.deepEqual(schema.args.required ?? [], [])
+  assert.equal('input' in schema.options.properties, false)
+
+  for (const field of [
+    'media',
+    'label',
+    'bodySite',
+    'collection',
+    'tag',
+    'relatedId',
+    'note',
+    'title',
+    'occurredAt',
+    'source',
+    'timeZone',
+  ]) {
+    assert.equal(field in schema.options.properties, true, field)
+  }
+})
+
+test('capture import-json schema exposes the batch payload escape hatch', async () => {
+  const schema = await readCommandSchema(createCaptureCli(), ['capture', 'import-json'])
+
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal('input' in schema.options.properties, true)
-  assert.equal(schema.options.required?.includes('input') ?? false, false)
+  assert.equal(schema.options.required?.includes('input') ?? false, true)
 
   for (const field of [
     'media',
@@ -234,7 +257,7 @@ test('capture add typed flags persist the same single-capture shape as JSON inpu
 
     const jsonAdd = await runInProcessJsonCli<CaptureAddResult>(jsonCli, [
       'capture',
-      'add',
+      'import-json',
       '--vault',
       jsonContext.vaultRoot,
       '--input',
@@ -275,7 +298,7 @@ test('capture add typed flags persist the same single-capture shape as JSON inpu
   }
 })
 
-test('capture add keeps raw input available for multi-capture batches', async () => {
+test('capture import-json keeps raw input available for multi-capture batches', async () => {
   const parentRoot = await mkdtemp(path.join(tmpdir(), 'murph-capture-batch-'))
   const vaultRoot = path.join(parentRoot, 'vault')
 
@@ -312,7 +335,7 @@ test('capture add keeps raw input available for multi-capture batches', async ()
 
     const result = await runInProcessJsonCli<CaptureAddResult>(cli, [
       'capture',
-      'add',
+      'import-json',
       '--vault',
       vaultRoot,
       '--input',

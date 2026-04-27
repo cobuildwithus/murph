@@ -122,13 +122,12 @@ function comparableShownMealData(data: Record<string, unknown>) {
 }
 
 test(
-  'meal add schema exposes typed ingredient and nutrition options while keeping input as fallback',
+  'meal add schema exposes typed ingredient and nutrition options without raw input fallback',
   async () => {
     const schema = await readCommandSchema(createMealCli(), ['meal', 'add'])
 
     assert.deepEqual(schema.args.required ?? [], [])
-    assert.equal('input' in schema.options.properties, true)
-    assert.equal(schema.options.required?.includes('input') ?? false, false)
+    assert.equal('input' in schema.options.properties, false)
 
     for (const field of [
       'photo',
@@ -150,6 +149,33 @@ test(
     }
   },
 )
+
+test('meal import-json schema exposes the structured payload escape hatch', async () => {
+  const schema = await readCommandSchema(createMealCli(), ['meal', 'import-json'])
+
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.equal('input' in schema.options.properties, true)
+  assert.equal(schema.options.required?.includes('input') ?? false, true)
+
+  for (const field of [
+    'photo',
+    'audio',
+    'note',
+    'occurredAt',
+    'source',
+    'ingredient',
+    'nutritionCalories',
+    'nutritionProteinGrams',
+    'nutritionCarbsGrams',
+    'nutritionFatGrams',
+    'nutritionFiberGrams',
+    'nutritionSource',
+    'nutritionConfidence',
+    'nutritionSourceDetail',
+  ]) {
+    assert.equal(field in schema.options.properties, true, field)
+  }
+})
 
 test.sequential(
   'meal add typed options persist the same ingredients and nutrition as JSON input',
@@ -187,7 +213,7 @@ test.sequential(
 
       const jsonResult = await runInProcessJsonCli<MealAddResult>(cli, [
         'meal',
-        'add',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--vault',
@@ -295,7 +321,7 @@ test.sequential(
       await writeFile(payloadPath, '{}\n', 'utf8')
       const emptyPayloadResult = await runInProcessJsonCli<MealAddResult>(cli, [
         'meal',
-        'add',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--vault',
@@ -353,7 +379,7 @@ test.sequential(
 
       const result = await runInProcessJsonCli<MealAddResult>(cli, [
         'meal',
-        'add',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--ingredient',
@@ -439,7 +465,7 @@ test.sequential(
       )
       const payloadSourceResult = await runInProcessJsonCli<MealAddResult>(cli, [
         'meal',
-        'add',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--nutrition-confidence',

@@ -189,7 +189,7 @@ export function registerProviderCommands(
         })
       },
     },
-    upsert: {
+    importJson: {
       description: 'Import or bulk-update one provider Markdown record from an advanced JSON payload file or stdin.',
       hint: 'Use provider save for the canonical typed create/update path; keep provider import-json for advanced JSON imports from @file.json or stdin.',
       output: providerUpsertResultSchema,
@@ -201,8 +201,6 @@ export function registerProviderCommands(
         })
       },
     },
-    jsonImportCommandName: 'import-json',
-    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one provider by canonical id or slug.',
       argName: 'id',

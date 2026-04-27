@@ -78,10 +78,7 @@ export function registerAllergyCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const allergy = createHealthEntityCrudGroup(services, "allergy", {
-    jsonImportCommandName: "import-json",
-    registerUpsert: false,
-  });
+  const allergy = createHealthEntityCrudGroup(services, "allergy");
 
   allergy.command("save", {
     args: z.object({

@@ -262,7 +262,7 @@ function assertMealAddHasContent(input: {
 
   throw new VaultCliError(
     'invalid_option',
-    'Meal capture requires --photo, --audio, --note, --ingredient, nutrition options, or a structured --input payload with ingredients and/or nutrition.',
+    'Meal capture requires --photo, --audio, --note, --ingredient, nutrition options, or meal import-json --input @meal.json with ingredients and/or nutrition.',
   )
 }
 
@@ -296,6 +296,149 @@ const mealNutritionTotalsResultSchema = z.object({
   days: z.array(mealNutritionDaySchema),
 })
 
+const mealAddTypedOptionShape = {
+  photo: pathSchema
+    .optional()
+    .describe('Optional meal photo path.'),
+  audio: pathSchema
+    .optional()
+    .describe('Optional audio note path.'),
+  note: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe('Optional freeform meal description when no media is available.'),
+  occurredAt: occurredAtOptionSchema
+    .optional()
+    .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+  source: eventSourceSchema
+    .optional()
+    .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+  ingredient: mealIngredientsSchema
+    .describe('Optional repeatable meal ingredient. Repeat --ingredient for each item.'),
+  nutritionCalories: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe('Optional meal calorie total.'),
+  nutritionProteinGrams: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe('Optional meal protein grams.'),
+  nutritionCarbsGrams: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe('Optional meal carbohydrate grams.'),
+  nutritionFatGrams: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe('Optional meal fat grams.'),
+  nutritionFiberGrams: z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe('Optional meal fiber grams.'),
+  nutritionSource: nutritionProvenanceSourceSchema
+    .optional()
+    .describe('Optional meal nutrition provenance source.'),
+  nutritionConfidence: nutritionConfidenceLevelSchema
+    .optional()
+    .describe('Optional meal nutrition provenance confidence. Requires --nutrition-source.'),
+  nutritionSourceDetail: z
+    .string()
+    .trim()
+    .min(1)
+    .max(240)
+    .optional()
+    .describe('Optional meal nutrition provenance detail. Requires --nutrition-source.'),
+}
+
+async function runMealAdd(
+  options: Record<string, unknown> & { vault: string },
+  inputFile?: string,
+) {
+  const payload = inputFile ? await loadStructuredMealPayload(inputFile) : undefined
+  const vaultRoot = String(options.vault ?? '')
+  const photoPath =
+    typeof options.photo === 'string' ? options.photo : payload?.photo
+  const audioPath =
+    typeof options.audio === 'string' ? options.audio : payload?.audio
+  const note =
+    typeof options.note === 'string' ? options.note : payload?.note
+  const occurredAtInput =
+    typeof options.occurredAt === 'string'
+      ? options.occurredAt
+      : payload?.occurredAt
+  const source =
+    typeof options.source === 'string'
+      ? eventSourceSchema.parse(options.source)
+      : payload?.source
+  const typedIngredients = normalizeRepeatableFlagOption(
+    stringArrayOption(options.ingredient),
+    'ingredient',
+  )
+  const ingredients = typedIngredients ?? payload?.ingredients
+  const nutrition = buildMealNutritionFromOptions(payload?.nutrition, {
+    nutritionCalories: numberOption(options.nutritionCalories),
+    nutritionProteinGrams: numberOption(options.nutritionProteinGrams),
+    nutritionCarbsGrams: numberOption(options.nutritionCarbsGrams),
+    nutritionFatGrams: numberOption(options.nutritionFatGrams),
+    nutritionFiberGrams: numberOption(options.nutritionFiberGrams),
+    nutritionSource: nutritionSourceOption(options.nutritionSource),
+    nutritionConfidence: nutritionConfidenceOption(
+      options.nutritionConfidence,
+    ),
+    nutritionSourceDetail: stringOption(options.nutritionSourceDetail),
+  })
+
+  assertMealAddHasContent({
+    photo: photoPath,
+    audio: audioPath,
+    note,
+    ingredients,
+    nutrition,
+  })
+
+  const importers = (await loadImportersRuntimeModule()).createImporters()
+  const mealInput = {
+    vaultRoot,
+    ...(photoPath ? { photoPath } : {}),
+    ...(audioPath ? { audioPath } : {}),
+    ...(note ? { note } : {}),
+    ...(source ? { source } : {}),
+    ...(ingredients ? { ingredients } : {}),
+    ...(nutrition ? { nutrition } : {}),
+    ...(occurredAtInput
+      ? {
+          occurredAt: await normalizeOccurredAtOption({
+            vault: vaultRoot,
+            occurredAt: occurredAtInput,
+          }),
+        }
+      : {}),
+  }
+  const result = await importers.addMeal(mealInput)
+
+  return {
+    vault: vaultRoot,
+    mealId: result.mealId,
+    eventId: result.event.id,
+    lookupId: result.mealId,
+    occurredAt: result.event.occurredAt ?? null,
+    photoPath: result.photo?.relativePath ?? null,
+    audioPath: result.audio?.relativePath ?? null,
+    manifestFile: result.manifestPath,
+    note: result.event.note ?? note ?? null,
+    source: result.event.source ?? null,
+    ingredients: result.event.ingredients ?? null,
+    nutrition: result.event.nutrition ?? null,
+  }
+}
+
 export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
   registerArtifactBackedEntityGroup(cli, {
     commandName: 'meal',
@@ -303,7 +446,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
     primaryAction: {
       name: 'add',
       description:
-        'Record one meal from typed media, ingredient, nutrition, and text fields, with JSON input reserved for advanced imports.',
+        'Record one meal from typed media, ingredient, nutrition, and text fields.',
       examples: [
         {
           description: 'Capture a simple meal note with one optional photo.',
@@ -330,154 +473,12 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
       ],
       hint:
-        'Keep using typed flags for ordinary single-meal logs. Use --input @meal.json or --input - when importing a structured payload; explicit flags override payload fields.',
+        'Keep using typed flags for ordinary single-meal logs. Use meal import-json --input @meal.json or meal import-json --input - when importing a structured payload; explicit flags override payload fields.',
       args: z.object({}),
-      options: {
-        input: inputFileOptionSchema
-          .optional()
-          .describe(
-            `Optional structured meal payload in @file.json form or - for stdin. ${mealInputPayloadShapeDescription} Explicit flags override payload fields.`,
-          ),
-        photo: pathSchema
-          .optional()
-          .describe('Optional meal photo path.'),
-        audio: pathSchema
-          .optional()
-          .describe('Optional audio note path.'),
-        note: z
-          .string()
-          .trim()
-          .min(1)
-          .optional()
-          .describe('Optional freeform meal description when no media is available.'),
-        occurredAt: occurredAtOptionSchema
-          .optional()
-          .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
-        source: eventSourceSchema
-          .optional()
-          .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
-        ingredient: mealIngredientsSchema
-          .describe('Optional repeatable meal ingredient. Repeat --ingredient for each item.'),
-        nutritionCalories: z
-          .number()
-          .nonnegative()
-          .optional()
-          .describe('Optional meal calorie total.'),
-        nutritionProteinGrams: z
-          .number()
-          .nonnegative()
-          .optional()
-          .describe('Optional meal protein grams.'),
-        nutritionCarbsGrams: z
-          .number()
-          .nonnegative()
-          .optional()
-          .describe('Optional meal carbohydrate grams.'),
-        nutritionFatGrams: z
-          .number()
-          .nonnegative()
-          .optional()
-          .describe('Optional meal fat grams.'),
-        nutritionFiberGrams: z
-          .number()
-          .nonnegative()
-          .optional()
-          .describe('Optional meal fiber grams.'),
-        nutritionSource: nutritionProvenanceSourceSchema
-          .optional()
-          .describe('Optional meal nutrition provenance source.'),
-        nutritionConfidence: nutritionConfidenceLevelSchema
-          .optional()
-          .describe('Optional meal nutrition provenance confidence. Requires --nutrition-source.'),
-        nutritionSourceDetail: z
-          .string()
-          .trim()
-          .min(1)
-          .max(240)
-          .optional()
-          .describe('Optional meal nutrition provenance detail. Requires --nutrition-source.'),
-      },
+      options: mealAddTypedOptionShape,
       output: mealAddResultSchema,
       async run({ options }) {
-        const payload =
-          typeof options.input === 'string'
-            ? await loadStructuredMealPayload(options.input)
-            : undefined
-        const vaultRoot = String(options.vault ?? '')
-        const photoPath =
-          typeof options.photo === 'string' ? options.photo : payload?.photo
-        const audioPath =
-          typeof options.audio === 'string' ? options.audio : payload?.audio
-        const note =
-          typeof options.note === 'string' ? options.note : payload?.note
-        const occurredAtInput =
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : payload?.occurredAt
-        const source =
-          typeof options.source === 'string'
-            ? eventSourceSchema.parse(options.source)
-            : payload?.source
-        const typedIngredients = normalizeRepeatableFlagOption(
-          stringArrayOption(options.ingredient),
-          'ingredient',
-        )
-        const ingredients = typedIngredients ?? payload?.ingredients
-        const nutrition = buildMealNutritionFromOptions(payload?.nutrition, {
-          nutritionCalories: numberOption(options.nutritionCalories),
-          nutritionProteinGrams: numberOption(options.nutritionProteinGrams),
-          nutritionCarbsGrams: numberOption(options.nutritionCarbsGrams),
-          nutritionFatGrams: numberOption(options.nutritionFatGrams),
-          nutritionFiberGrams: numberOption(options.nutritionFiberGrams),
-          nutritionSource: nutritionSourceOption(options.nutritionSource),
-          nutritionConfidence: nutritionConfidenceOption(
-            options.nutritionConfidence,
-          ),
-          nutritionSourceDetail: stringOption(options.nutritionSourceDetail),
-        })
-
-        assertMealAddHasContent({
-          photo: photoPath,
-          audio: audioPath,
-          note,
-          ingredients,
-          nutrition,
-        })
-
-        const importers = (await loadImportersRuntimeModule()).createImporters()
-        const mealInput = {
-          vaultRoot,
-          ...(photoPath ? { photoPath } : {}),
-          ...(audioPath ? { audioPath } : {}),
-          ...(note ? { note } : {}),
-          ...(source ? { source } : {}),
-          ...(ingredients ? { ingredients } : {}),
-          ...(nutrition ? { nutrition } : {}),
-          ...(occurredAtInput
-            ? {
-                occurredAt: await normalizeOccurredAtOption({
-                  vault: vaultRoot,
-                  occurredAt: occurredAtInput,
-                }),
-              }
-            : {}),
-        }
-        const result = await importers.addMeal(mealInput)
-
-        return {
-          vault: vaultRoot,
-          mealId: result.mealId,
-          eventId: result.event.id,
-          lookupId: result.mealId,
-          occurredAt: result.event.occurredAt ?? null,
-          photoPath: result.photo?.relativePath ?? null,
-          audioPath: result.audio?.relativePath ?? null,
-          manifestFile: result.manifestPath,
-          note: result.event.note ?? note ?? null,
-          source: result.event.source ?? null,
-          ingredients: result.event.ingredients ?? null,
-          nutrition: result.event.nutrition ?? null,
-        }
+        return runMealAdd(options)
       },
     },
     show: {
@@ -512,6 +513,37 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
       },
     },
     additionalCommands: [
+      {
+        name: 'import-json',
+        args: z.object({}),
+        description:
+          'Import one meal from a structured JSON payload file or stdin.',
+        examples: [
+          {
+            description: 'Import a meal payload with nested nutrition provenance from disk.',
+            args: {},
+            options: {
+              input: '@meal.json',
+              vault: './vault',
+            },
+          },
+        ],
+        hint:
+          `--input accepts @file.json or - for stdin. ${mealInputPayloadShapeDescription} Explicit flags remain available on this escape hatch to override payload fields during migration/import.`,
+        options: {
+          input: inputFileOptionSchema.describe(
+            `Structured meal payload in @file.json form or - for stdin. ${mealInputPayloadShapeDescription}`,
+          ),
+          ...mealAddTypedOptionShape,
+        },
+        output: mealAddResultSchema,
+        async run({ options }) {
+          return runMealAdd(
+            options,
+            typeof options.input === 'string' ? options.input : undefined,
+          )
+        },
+      },
       {
         name: 'totals',
         args: z.object({}),

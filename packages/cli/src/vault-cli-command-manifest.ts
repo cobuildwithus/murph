@@ -40,7 +40,7 @@ import { registerExperimentCommands } from './commands/experiment.js'
 import { registerInterventionCommands } from './commands/intervention.js'
 import { registerExportCommands } from './commands/export.js'
 import {
-  createHealthUpsertResultSchema,
+  createHealthJsonImportResultSchema,
 } from './commands/health-entity-command-registry.js'
 import {
   allergySaveResultSchema,
@@ -191,16 +191,6 @@ const genericHealthRootCommandNames = [
   'genetics',
 ] as const
 type GenericHealthRootCommandName = typeof genericHealthRootCommandNames[number]
-type HealthJsonInputCommandName = 'import-json' | 'upsert'
-const healthJsonImportRootCommandNames = new Set<GenericHealthRootCommandName>([
-  'allergy',
-  'blood-test',
-  'condition',
-  'family',
-  'genetics',
-  'goal',
-])
-
 function orderedUniqueStrings<TValue extends string>(
   values: readonly TValue[],
 ): TValue[] {
@@ -231,10 +221,6 @@ function requireHealthCommandDescriptor(
 
 function createHealthLeafCommands(
   descriptor: HealthCommandDescriptorEntry,
-  options: {
-    includeUpsert?: boolean
-    jsonInputCommandName?: HealthJsonInputCommandName
-  } = {},
 ): readonly VaultCliLeafCommandDescriptor[] {
   const leafCommands: VaultCliLeafCommandDescriptor[] = [
     {
@@ -260,20 +246,21 @@ function createHealthLeafCommands(
     },
   ]
 
-  if (options.includeUpsert !== false) {
-    const jsonInputCommandName = options.jsonInputCommandName ?? 'upsert'
-
-    leafCommands.push({
-      path: [descriptor.command.commandName, jsonInputCommandName],
-      description:
-        jsonInputCommandName === 'import-json'
-          ? `Import one ${descriptor.noun} from a JSON payload file or stdin.`
-          : descriptor.command.descriptions.upsert,
-      examples: descriptor.command.examples?.upsert,
-      hint: descriptor.command.hints?.upsert,
-      output: createHealthUpsertResultSchema(descriptor),
-    })
-  }
+  leafCommands.push({
+    path: [descriptor.command.commandName, 'import-json'],
+    description: `Import one ${descriptor.noun} from a JSON payload file or stdin.`,
+    examples: [
+      {
+        description: `Import one ${descriptor.noun} from a JSON payload file.`,
+        options: {
+          input: `@${descriptor.command.payloadFile}`,
+          vault: './vault',
+        },
+      },
+    ],
+    hint: `--input accepts @file.json or - for structured ${descriptor.noun} payload imports. Run ${descriptor.command.commandName} scaffold first if you need the current canonical field shape.`,
+    output: createHealthJsonImportResultSchema(descriptor),
+  })
 
   return leafCommands
 }
@@ -317,8 +304,6 @@ function buildHealthCommandManifestDescriptor(input: {
   register: DirectBindingCommandDescriptor['register']
   additionalVaultServiceBindings?: DirectVaultServiceBindings
   additionalLeafCommands?: readonly VaultCliLeafCommandDescriptor[]
-  includeUpsert?: boolean
-  jsonInputCommandName?: HealthJsonInputCommandName
 }): DirectBindingCommandDescriptor {
   const descriptor = requireHealthCommandDescriptor(input.commandName)
 
@@ -327,10 +312,7 @@ function buildHealthCommandManifestDescriptor(input: {
     bindingMode: 'direct',
     rootCommandNames: [input.commandName],
     leafCommands: [
-      ...createHealthLeafCommands(descriptor, {
-        includeUpsert: input.includeUpsert,
-        jsonInputCommandName: input.jsonInputCommandName,
-      }),
+      ...createHealthLeafCommands(descriptor),
       ...(input.additionalLeafCommands ?? []),
     ],
     directVaultServiceBindings: mergeDirectVaultServiceBindings(
@@ -394,9 +376,6 @@ const genericHealthCommandDescriptors = genericHealthRootCommandNames.map(
   (commandName) =>
     buildHealthCommandManifestDescriptor({
       commandName,
-      jsonInputCommandName: healthJsonImportRootCommandNames.has(commandName)
-        ? 'import-json'
-        : undefined,
       additionalLeafCommands: createTypedHealthSaveLeafCommands(commandName),
       register({ cli, services }) {
         registerHealthCommands(cli, services, commandName)
@@ -537,6 +516,12 @@ export const vaultCliCommandDescriptors = [
         path: ['capture', 'add'],
         description: captureCommandDescriptions.add,
         hint: captureCommandDescriptions.addHint,
+      },
+      {
+        path: ['capture', 'import-json'],
+        description: captureCommandDescriptions.importJson,
+        hint:
+          'Explicit JSON escape hatch for batch capture metadata, media/raw refs, labels, body sites, collections, tags, and related ids.',
       },
       {
         path: ['capture', 'show'],
@@ -696,7 +681,14 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['meal', 'add'],
         description:
-          'Record one meal from typed media, ingredient, nutrition, and text fields, with JSON input reserved for advanced imports.',
+          'Record one meal from typed media, ingredient, nutrition, and text fields.',
+      },
+      {
+        path: ['meal', 'import-json'],
+        description:
+          'Import one meal from a structured JSON payload file or stdin, preserving nested ingredients and nutrition provenance fields.',
+        hint:
+          'Use this explicit JSON escape hatch for advanced imports; typed flags may override imported scalar fields.',
       },
       {
         path: ['meal', 'show'],
@@ -737,6 +729,12 @@ export const vaultCliCommandDescriptors = [
         description: measurementCommandDescriptions.add,
       },
       {
+        path: ['measurement', 'import-json'],
+        description: measurementCommandDescriptions.importJson,
+        hint:
+          'Explicit JSON escape hatch for nested links, external references, rawRefs, stored-media import metadata, and other structured measurement fields outside typed add.',
+      },
+      {
         path: ['measurement', 'show'],
         description: measurementCommandDescriptions.show,
       },
@@ -761,7 +759,14 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'add'],
         description:
-          'Record one workout from typed session fields, freeform text, or advanced structured JSON input.',
+          'Record one workout from typed session fields or freeform text.',
+      },
+      {
+        path: ['workout', 'import-json'],
+        description:
+          'Import one workout from an advanced structured JSON payload file or stdin.',
+        hint:
+          'Explicit JSON escape hatch for source fields, media/raw refs, exercises, and sets outside the typed add surface.',
       },
       {
         path: ['workout', 'show'],
@@ -804,7 +809,14 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'format', 'save'],
         description:
-          'Save or update one reusable workout format from typed routine-template fields, freeform text, or advanced structured JSON input.',
+          'Save or update one reusable workout format from typed routine-template fields or freeform text.',
+      },
+      {
+        path: ['workout', 'format', 'import-json'],
+        description:
+          'Import one reusable workout format from a structured JSON payload file or stdin.',
+        hint:
+          'Explicit JSON escape hatch for routine exercises, planned sets, grouping, tags, and persistent notes outside the typed save surface.',
       },
       {
         path: ['workout', 'format', 'show'],

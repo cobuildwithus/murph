@@ -64,10 +64,7 @@ export function registerGeneticsCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const genetics = createHealthEntityCrudGroup(services, "genetics", {
-    jsonImportCommandName: "import-json",
-    registerUpsert: false,
-  });
+  const genetics = createHealthEntityCrudGroup(services, "genetics");
 
   genetics.command("save", {
     args: z.object({

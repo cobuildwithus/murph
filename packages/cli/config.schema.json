@@ -2152,9 +2152,119 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "media": {
+                          "description": "Media file paths for one capture. Repeat --media for multiple views of the same observation.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Filesystem path supplied by the operator."
+                          }
+                        },
+                        "label": {
+                          "description": "Optional stable label. Friendly text is normalized to kebab-case and used as a continuity tag.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "bodySite": {
+                          "description": "Optional freeform body/site/location context. This is saved in the note and as a site-* tag.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 400
+                        },
+                        "collection": {
+                          "description": "Optional collection slug, such as skin-check-2026-04 or dermatology-baseline.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "tag": {
+                          "description": "Optional capture tag. Repeat --tag for multiple entries.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "relatedId": {
+                          "description": "Optional related record id. Repeat --related-id to link multiple records.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "note": {
+                          "description": "Optional capture note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "title": {
+                          "description": "Optional capture title override.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "occurredAt": {
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "source": {
+                          "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "timeZone": {
+                          "description": "Optional IANA time zone for the capture timestamp, such as America/Los_Angeles.",
+                          "type": "string",
+                          "minLength": 3
+                        }
+                      }
+                    }
+                  }
+                },
+                "import-json": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
                         "input": {
-                          "description": "Optional structured capture payload in @file.json form or - for stdin.",
-                          "type": "string"
+                          "type": "string",
+                          "description": "Structured capture payload in @file.json form or - for stdin."
                         },
                         "media": {
                           "description": "Media file paths for one capture. Repeat --media for multiple views of the same observation.",
@@ -3366,10 +3476,6 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams? }, provenance?: { source, confidence?, sourceDetail? } }`. Explicit flags override payload fields.",
-                          "type": "string"
-                        },
                         "photo": {
                           "description": "Optional meal photo path.",
                           "type": "string",
@@ -3562,6 +3668,135 @@
                     }
                   }
                 },
+                "import-json": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams? }, provenance?: { source, confidence?, sourceDetail? } }`."
+                        },
+                        "photo": {
+                          "description": "Optional meal photo path.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "audio": {
+                          "description": "Optional audio note path.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "note": {
+                          "description": "Optional freeform meal description when no media is available.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "occurredAt": {
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "source": {
+                          "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "ingredient": {
+                          "description": "Optional repeatable meal ingredient. Repeat --ingredient for each item.",
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "nutritionCalories": {
+                          "description": "Optional meal calorie total.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionProteinGrams": {
+                          "description": "Optional meal protein grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionCarbsGrams": {
+                          "description": "Optional meal carbohydrate grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionFatGrams": {
+                          "description": "Optional meal fat grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionFiberGrams": {
+                          "description": "Optional meal fiber grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionSource": {
+                          "description": "Optional meal nutrition provenance source.",
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "label",
+                            "database",
+                            "inherited",
+                            "estimated"
+                          ]
+                        },
+                        "nutritionConfidence": {
+                          "description": "Optional meal nutrition provenance confidence. Requires --nutrition-source.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ]
+                        },
+                        "nutritionSourceDetail": {
+                          "description": "Optional meal nutrition provenance detail. Requires --nutrition-source.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        }
+                      }
+                    }
+                  }
+                },
                 "totals": {
                   "type": "object",
                   "additionalProperties": false,
@@ -3700,10 +3935,6 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional structured measurement payload in @file.json form or - for stdin.",
-                          "type": "string"
-                        },
                         "metric": {
                           "description": "Measurement metric name or slug. Repeat --metric with --value and --unit for grouped measurements. Friendly names are normalized to kebab-case.",
                           "type": "array",
@@ -3806,6 +4037,80 @@
                           "description": "Optional IANA timezone for the measurement event.",
                           "type": "string",
                           "minLength": 3
+                        }
+                      }
+                    }
+                  }
+                },
+                "import-json": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Structured measurement payload in @file.json form or - for stdin."
+                        },
+                        "note": {
+                          "description": "Optional measurement note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "title": {
+                          "description": "Optional measurement title override.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "occurredAt": {
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "source": {
+                          "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "media": {
+                          "description": "Optional measurement photo or video file paths to copy into raw/measurements/** and attach to the measurement event.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Filesystem path supplied by the operator."
+                          }
                         }
                       }
                     }
@@ -3928,10 +4233,6 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional advanced structured workout payload in @file.json form or - for stdin.",
-                          "type": "string"
-                        },
                         "note": {
                           "description": "Optional workout note when omitting positional text.",
                           "type": "string",
@@ -3945,7 +4246,7 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Optional duration override in minutes when the note or structured payload is missing or ambiguous.",
+                          "description": "Optional duration override in minutes when the note is missing or ambiguous.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
@@ -4060,6 +4361,98 @@
                           "items": {
                             "type": "string",
                             "minLength": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "import-json": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Advanced structured workout payload in @file.json form or - for stdin."
+                        },
+                        "note": {
+                          "description": "Optional workout note when omitting positional text.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "title": {
+                          "description": "Optional explicit workout title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "duration": {
+                          "description": "Optional duration override in minutes when the payload is missing or ambiguous.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1440
+                        },
+                        "type": {
+                          "description": "Optional workout type override such as \"run\" or \"strength training\".",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "distanceKm": {
+                          "description": "Optional workout distance override in kilometers.",
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000
+                        },
+                        "occurredAt": {
+                          "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "source": {
+                          "description": "Optional event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "media": {
+                          "description": "Optional workout photo or video file paths to copy into raw/workouts/** and attach to the workout event.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Filesystem path supplied by the operator."
                           }
                         }
                       }
@@ -4418,10 +4811,6 @@
                                   "minLength": 1,
                                   "maxLength": 128
                                 },
-                                "input": {
-                                  "description": "Optional structured workout format payload in @file.json form or - for stdin.",
-                                  "type": "string"
-                                },
                                 "workoutFormatId": {
                                   "description": "Optional stable workout-format id such as wfmt_<ULID>.",
                                   "type": "string",
@@ -4489,7 +4878,7 @@
                                   }
                                 },
                                 "duration": {
-                                  "description": "Optional default duration override in minutes when the saved note or payload is missing or ambiguous.",
+                                  "description": "Optional default duration override in minutes when the saved note is missing or ambiguous.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1440
@@ -4505,6 +4894,33 @@
                                   "type": "number",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1000
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "import-json": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "vault": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Vault root to operate against."
+                                },
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "input": {
+                                  "type": "string",
+                                  "description": "Structured workout format payload in @file.json form or - for stdin."
                                 }
                               }
                             }
@@ -12576,6 +12992,33 @@
                     }
                   }
                 },
+                "import-json": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "input": {
+                          "type": "string",
+                          "description": "Payload input in @file.json form or - for stdin."
+                        }
+                      }
+                    }
+                  }
+                },
                 "show": {
                   "type": "object",
                   "additionalProperties": false,
@@ -12629,33 +13072,6 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
-                        }
-                      }
-                    }
-                  }
-                },
-                "import-json": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "input": {
-                          "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
                         }
                       }
                     }

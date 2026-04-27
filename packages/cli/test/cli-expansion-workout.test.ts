@@ -253,14 +253,16 @@ test('workout edit/delete schemas expose shared record mutation options', async 
   assert.deepEqual(deleteSchema.options.required, ['vault'])
 })
 
-test('workout add help keeps the positional text optional for structured input', async () => {
+test('workout add help keeps the positional text optional for typed captures', async () => {
   const help = await runSliceCliRaw(['workout', 'add', '--help'])
 
   assert.match(help, /Usage: vault-cli workout add \[text\] \[options\]/u)
   assert.match(
     help,
-    /Optional freeform workout text such as "Went for a 30-minute run\." Omit it when using --input\./u,
+    /Optional freeform workout text such as "Went for a 30-minute run\."/u,
   )
+  assert.doesNotMatch(help, /^\s+--input\s+/mu)
+  assert.match(help, /workout import-json --input @workout\.json/u)
 })
 
 test('workout format save help keeps name and text optional when using structured input', async () => {
@@ -604,7 +606,7 @@ test(
       const saved = await runSliceCli([
         'workout',
         'format',
-        'save',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--vault',

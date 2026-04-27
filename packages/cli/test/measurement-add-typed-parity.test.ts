@@ -148,8 +148,7 @@ test('measurement add schema exposes typed single-record and grouped-event field
   const schema = await readCommandSchema(createMeasurementCli(), ['measurement', 'add'])
 
   assert.deepEqual(schema.args.required ?? [], [])
-  assert.equal('input' in schema.options.properties, true)
-  assert.equal(schema.options.required?.includes('input') ?? false, false)
+  assert.equal('input' in schema.options.properties, false)
 
   for (const field of [
     'metric',
@@ -165,6 +164,21 @@ test('measurement add schema exposes typed single-record and grouped-event field
     'tag',
     'timeZone',
   ]) {
+    assert.equal(field in schema.options.properties, true, field)
+  }
+})
+
+test('measurement import-json schema exposes the structured payload escape hatch', async () => {
+  const schema = await readCommandSchema(createMeasurementCli(), [
+    'measurement',
+    'import-json',
+  ])
+
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.equal('input' in schema.options.properties, true)
+  assert.equal(schema.options.required?.includes('input') ?? false, true)
+
+  for (const field of ['note', 'title', 'occurredAt', 'source', 'media']) {
     assert.equal(field in schema.options.properties, true, field)
   }
 })
@@ -261,7 +275,7 @@ test('measurement add typed grouped fields persist with the same event shape as 
     (
       await runInProcessJsonCli<MeasurementAddResult>(cli, [
         'measurement',
-        'add',
+        'import-json',
         '--vault',
         vaultRoot,
         '--input',
@@ -404,7 +418,7 @@ test('measurement add rejects non-slug typed tags before writing', async () => {
   }
 })
 
-test('measurement add raw --input preserves nested links and import metadata', async () => {
+test('measurement import-json preserves nested links and import metadata', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-raw-input-')
   cleanupPaths.push(parentRoot)
   const cli = createMeasurementCli()
@@ -461,7 +475,7 @@ test('measurement add raw --input preserves nested links and import metadata', a
     (
       await runInProcessJsonCli<MeasurementAddResult>(cli, [
         'measurement',
-        'add',
+        'import-json',
         '--vault',
         vaultRoot,
         '--input',
@@ -521,7 +535,7 @@ test('measurement add raw --input preserves nested links and import metadata', a
   assert.equal(shown.entity.data.timeZone, 'America/Los_Angeles')
 })
 
-test('measurement add rejects typed entry and metadata flags combined with raw --input', async () => {
+test('measurement add rejects raw --input because JSON imports are explicit', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-input-flags-')
   cleanupPaths.push(parentRoot)
   const cli = createMeasurementCli()
@@ -559,7 +573,6 @@ test('measurement add rejects typed entry and metadata flags combined with raw -
   assert.equal(result.exitCode, 1)
   assert.equal(result.envelope.ok, false)
   if (!result.envelope.ok) {
-    assert.equal(result.envelope.error.code, 'invalid_option')
-    assert.match(result.envelope.error.message ?? '', /cannot combine --input with --tag, --time-zone/u)
+    assert.match(result.envelope.error.message ?? '', /input/u)
   }
 })

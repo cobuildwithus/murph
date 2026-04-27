@@ -29,7 +29,7 @@ interface RegistryDocEntityGroupConfig<
   commandName: string
   description: string
   scaffold: FactoryCommandConfig<TScaffold>
-  upsert: InputFileCommandConfig<TUpsert>
+  importJson: InputFileCommandConfig<TUpsert>
   show: NamedArgCommandConfig<TShow>
   list: {
     description: string
@@ -40,8 +40,6 @@ interface RegistryDocEntityGroupConfig<
     run(input: ListCommandContext): Promise<TList>
   }
   additionalCommands?: readonly AnyFactoryCommandConfig[]
-  includeLegacyJsonUpsert?: boolean
-  jsonImportCommandName?: string
 }
 
 interface LedgerEventListCommandContext extends ListCommandContext {
@@ -65,7 +63,7 @@ interface LedgerEventEntityGroupConfig<
     output: z.ZodType<TScaffold>
     run(input: CommandContext & { kind: string }): Promise<TScaffold>
   }
-  upsert: InputFileCommandConfig<TUpsert>
+  importJson: InputFileCommandConfig<TUpsert>
   show: NamedArgCommandConfig<TShow>
   list: {
     description: string
@@ -78,7 +76,6 @@ interface LedgerEventEntityGroupConfig<
     run(input: LedgerEventListCommandContext): Promise<TList>
   }
   additionalCommands?: readonly AnyFactoryCommandConfig[]
-  includeLegacyJsonUpsert?: boolean
 }
 
 interface ArtifactListOptionNames {
@@ -157,14 +154,7 @@ export function createRegistryDocEntityGroup<
     description: config.description,
     commands: [
       config.scaffold,
-      ...(config.jsonImportCommandName === undefined
-        ? config.includeLegacyJsonUpsert === false
-          ? []
-          : [createInputFileFactoryCommand('upsert', config.upsert)]
-        : [createInputFileFactoryCommand(config.jsonImportCommandName, config.upsert)]),
-      ...(config.includeLegacyJsonUpsert === false || config.jsonImportCommandName === undefined
-        ? []
-        : [createInputFileFactoryCommand('upsert', config.upsert)]),
+      createInputFileFactoryCommand('import-json', config.importJson),
       createNamedArgFactoryCommand('show', config.show),
       createCommonListCommand({
         description: config.list.description,
@@ -229,13 +219,10 @@ export function createLedgerEventEntityGroup<
         },
       },
       createInputFileFactoryCommand('import-json', {
-        ...config.upsert,
+        ...config.importJson,
         description:
-          config.upsert.description.replace(/^Append one canonical event/u, 'Import one canonical event'),
+          config.importJson.description.replace(/^Append one canonical event/u, 'Import one canonical event'),
       }),
-      ...(config.includeLegacyJsonUpsert === false
-        ? []
-        : [createInputFileFactoryCommand('upsert', config.upsert)]),
       createNamedArgFactoryCommand('show', config.show),
       createCommonListCommand({
         description: config.list.description,

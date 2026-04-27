@@ -252,6 +252,9 @@ test(
     const mealAddSchema = JSON.parse(
       await runRawSourceCli(['meal', 'add', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
+    const mealImportJsonSchema = JSON.parse(
+      await runRawSourceCli(['meal', 'import-json', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
     const mealEditSchema = await readCommandSchema(cli, ['meal', 'edit'])
     const mealDeleteSchema = await readCommandSchema(cli, ['meal', 'delete'])
     const mealListSchema = await readCommandSchema(cli, ['meal', 'list'])
@@ -275,17 +278,24 @@ test(
     assert.deepEqual(documentEditSchema.options.required, ['vault'])
     assert.deepEqual(documentDeleteSchema.options.required, ['vault'])
 
-    assert.equal('input' in mealAddSchema.options.properties, true)
+    assert.equal('input' in mealAddSchema.options.properties, false)
     assert.equal('source' in mealAddSchema.options.properties, true)
+    assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
+
+    assert.equal('input' in mealImportJsonSchema.options.properties, true)
+    assert.equal('source' in mealImportJsonSchema.options.properties, true)
     assert.match(
-      String((mealAddSchema.options.properties.input as { description?: unknown }).description),
-      /structured meal payload in @file\.json form or - for stdin/u,
+      String((mealImportJsonSchema.options.properties.input as { description?: unknown }).description),
+      /Structured meal payload in @file\.json form or - for stdin/u,
     )
     assert.match(
-      String((mealAddSchema.options.properties.input as { description?: unknown }).description),
+      String((mealImportJsonSchema.options.properties.input as { description?: unknown }).description),
       /Structured payload object keys:.*ingredients.*nutrition/u,
     )
-    assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
+    assert.deepEqual([...(mealImportJsonSchema.options.required ?? [])].sort(), [
+      'input',
+      'vault',
+    ])
 
     assert.equal('input' in mealEditSchema.options.properties, true)
     assert.equal('set' in mealEditSchema.options.properties, true)
@@ -306,13 +316,13 @@ test(
   DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS,
 )
 
-test('meal add help documents the structured payload path and override rule', async () => {
-  const help = await runRawSourceCli(['meal', 'add', '--help'])
+test('meal import-json help documents the structured payload path and override rule', async () => {
+  const help = await runRawSourceCli(['meal', 'import-json', '--help'])
 
   assert.match(help, /--input/u)
   assert.match(help, /--input @meal\.json/u)
-  assert.match(help, /Explicit flags override payload fields\./u)
-  assert.match(help, /typed media, ingredient, nutrition, and text fields/u)
+  assert.match(help, /Explicit flags.*override payload fields/u)
+  assert.match(help, /structured JSON payload file or stdin/u)
   assert.match(help, /--ingredient/u)
   assert.match(help, /--nutrition-calories/u)
   assert.match(help, /Structured payload object keys:/u)
@@ -819,7 +829,7 @@ test.sequential(
 )
 
 test.sequential(
-  'meal add accepts structured payloads with ingredients and nutrition only',
+  'meal import-json accepts structured payloads with ingredients and nutrition only',
   async () => {
     const vaultRoot = await createVault()
     const payloadPath = path.join(vaultRoot, 'meal-structured.json')
@@ -851,14 +861,14 @@ test.sequential(
 
       const createdMeal = await runSourceCli<MealAddEnvelope>([
         'meal',
-        'add',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--vault',
         vaultRoot,
       ])
       assert.equal(createdMeal.ok, true)
-      assert.equal(createdMeal.meta?.command, 'meal add')
+      assert.equal(createdMeal.meta?.command, 'meal import-json')
       assert.equal(requireData(createdMeal).occurredAt, '2026-03-14T08:30:00.000Z')
       assert.equal(requireData(createdMeal).note, null)
       assert.equal(requireData(createdMeal).source, 'manual')
@@ -923,7 +933,7 @@ test.sequential(
 )
 
 test.sequential(
-  'meal add lets explicit flags override structured payload fields',
+  'meal import-json lets explicit flags override structured payload fields',
   async () => {
     const vaultRoot = await createVault()
 
@@ -931,7 +941,7 @@ test.sequential(
       const overriddenMeal = await runSourceCli<MealAddEnvelope>(
         [
           'meal',
-          'add',
+          'import-json',
           '--input',
           '-',
           '--note',
@@ -1032,7 +1042,7 @@ test.sequential(
 )
 
 test.sequential(
-  'meal add rejects an empty structured payload',
+  'meal import-json rejects an empty structured payload',
   async () => {
     const vaultRoot = await createVault()
     const payloadPath = path.join(vaultRoot, 'meal-empty.json')
@@ -1042,7 +1052,7 @@ test.sequential(
 
       const result = await runSourceCli([
         'meal',
-        'add',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--vault',
@@ -1053,7 +1063,7 @@ test.sequential(
       assert.equal(result.error?.code, 'invalid_option')
       assert.match(
         result.error?.message ?? '',
-        /Meal capture requires --photo, --audio, --note, --ingredient, nutrition options, or a structured --input payload with ingredients and\/or nutrition\./u,
+        /Meal capture requires --photo, --audio, --note, --ingredient, nutrition options, or meal import-json --input @meal\.json with ingredients and\/or nutrition\./u,
       )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })

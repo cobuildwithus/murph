@@ -98,10 +98,7 @@ export function registerGoalCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const goal = createHealthEntityCrudGroup(services, "goal", {
-    jsonImportCommandName: "import-json",
-    registerUpsert: false,
-  });
+  const goal = createHealthEntityCrudGroup(services, "goal");
 
   goal.command("save", {
     args: z.object({

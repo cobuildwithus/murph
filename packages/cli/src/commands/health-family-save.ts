@@ -180,10 +180,7 @@ export function registerFamilyCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const family = createHealthEntityCrudGroup(services, "family", {
-    jsonImportCommandName: "import-json",
-    registerUpsert: false,
-  });
+  const family = createHealthEntityCrudGroup(services, "family");
   registerFamilySaveCommand(family);
   cli.command(family);
 }
