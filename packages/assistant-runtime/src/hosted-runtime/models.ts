@@ -13,6 +13,8 @@ import type {
   HostedExecutionRunnerResult,
   HostedRunCleanupTarget,
   HostedRunEventResult,
+  HostedWorkspaceRunRequest,
+  HostedWorkspaceRunResult,
   HostedRuntimeDrainRequest,
 } from "@murphai/hosted-execution";
 import type {
@@ -61,6 +63,13 @@ export interface HostedAssistantRuntimeJobInput {
   request: HostedAssistantRuntimeJobRequest;
   runtime?: HostedAssistantRuntimeConfig;
 }
+
+export interface HostedAssistantWorkspaceRuntimeJobInput {
+  request: HostedWorkspaceRunRequest;
+  runtime?: HostedAssistantRuntimeConfig;
+}
+
+export type HostedAssistantWorkspaceRuntimeJobResult = HostedWorkspaceRunResult;
 
 export interface HostedBootstrapResult {
   assistantConfigStatus:

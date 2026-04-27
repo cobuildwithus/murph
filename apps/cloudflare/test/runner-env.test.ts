@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  buildHostedRuntimeLaunchSpec,
+  buildHostedRuntimeResolvedConfig,
+  readHostedRuntimeCommitTimeoutConfigValue,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
   buildHostedRunnerAmbientEnv,
@@ -6,7 +11,7 @@ import {
   buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
-  buildHostedRunnerResolvedConfig,
+  buildHostedRunnerPlatformEnv,
   filterHostedRunnerSecrets,
 } from "../src/runner-env.js";
 import { readHostedDeployAutomationEnvironment } from "../scripts/deploy-automation.js";
@@ -276,6 +281,46 @@ describe("buildHostedRunnerContainerEnv", () => {
 });
 
 describe("buildHostedRunnerJobRuntimeConfig", () => {
+  it("keeps Cloudflare as an adapter over the shared hosted runtime launch spec", () => {
+    const configSource = {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
+      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+      LINQ_API_BASE_URL: "http://localhost:4011",
+      LINQ_API_TOKEN: "linq-token",
+      TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+    };
+    const runnerSecrets = {
+      CUSTOM_API_KEY: "custom-user",
+      TELEGRAM_BOT_TOKEN: "user-telegram-token",
+    };
+    const forwardedEnv = buildHostedRunnerContainerEnv(configSource);
+    const platformEnv = buildHostedRunnerPlatformEnv(configSource, {
+      rewriteLoopbackUrlsForContainer: true,
+    });
+
+    expect(buildHostedRunnerJobRuntimeConfig({
+      configSource,
+      forwardedEnv,
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets,
+    })).toEqual(buildHostedRuntimeLaunchSpec({
+      commitTimeoutMs: readHostedRuntimeCommitTimeoutConfigValue(
+        configSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS,
+      ),
+      configSource,
+      forwardedEnv,
+      platformEnv,
+      userEnv: filterHostedRunnerSecrets(runnerSecrets, {
+        ...configSource,
+        ...platformEnv,
+      }),
+    }).runtime);
+  });
+
   it("preserves typed runtime fields when the caller already resolved them", () => {
     expect(buildHostedRunnerJobRuntime({
       commitTimeoutMs: 45_000,
@@ -635,9 +680,9 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
   });
 });
 
-describe("buildHostedRunnerResolvedConfig", () => {
+describe("buildHostedRuntimeResolvedConfig", () => {
   it("derives explicit channel capabilities from the forwarded runner env", () => {
-    expect(buildHostedRunnerResolvedConfig({
+    expect(buildHostedRuntimeResolvedConfig({
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
@@ -653,7 +698,7 @@ describe("buildHostedRunnerResolvedConfig", () => {
   });
 
   it("requires both device-sync secrets and provider credentials before enabling device sync", () => {
-    expect(buildHostedRunnerResolvedConfig({
+    expect(buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
     })).toMatchObject({
@@ -664,7 +709,7 @@ describe("buildHostedRunnerResolvedConfig", () => {
       deviceSync: null,
     });
 
-    expect(buildHostedRunnerResolvedConfig({
+    expect(buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
       WHOOP_CLIENT_ID: "whoop-client",
@@ -688,7 +733,7 @@ describe("buildHostedRunnerResolvedConfig", () => {
   });
 
   it("reuses the shared device-sync runtime config helper and strips provider-only fields", () => {
-    const resolved = buildHostedRunnerResolvedConfig({
+    const resolved = buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
       OURA_CLIENT_ID: "oura-client",

@@ -1341,6 +1341,148 @@ Acceptance:
 - Local loopback proxy, if still needed, preserves the same header-token contract.
 - Checkpoint-capable bridge calls are rejected if the lease generation is stale even when the container token is otherwise valid.
 
+## Current Remaining Work Map
+
+As of the active wave-three implementation, the migration is partially landed
+but not yet at the destructive deletion point. Treat this as the current
+checkout status, not the abstract target.
+
+Already landed:
+
+- Shared mailbox/workspace/runtime-log/runner contracts exist additively in
+  `packages/hosted-execution`.
+- `packages/hosted-execution` has explicit `HostedWorkspaceRunRequest` and
+  `HostedWorkspaceRunResult` parsers that reject removed run fields such as
+  `run`, `runDrain`, `runToken`, `targetCommittedSeqHint`, and `wake`.
+- Web has additive hosted mailbox/workspace stores and signed internal
+  mailbox/workspace/log route groundwork.
+- Runtime has hosted mailbox import state, strict-prefix mailbox import,
+  mailbox checkpoint rollback, before-delivery mailbox refresh, and checkpoint
+  version carry-forward inside one invocation.
+- Runtime now has a semantic snapshot checkpoint builder: checkpoint creation
+  can snapshot the local workspace after mailbox import has mutated portable
+  runtime state, instead of requiring web or Cloudflare to provide a stale
+  precomputed `snapshotRef`.
+- Runtime has an additive workspace-run job entrypoint,
+  `runHostedWorkspaceRuntimeJobInProcess`, that accepts
+  `HostedWorkspaceRunRequest`, fails closed without mailbox/workspace/read
+  ports, reads current workspace before mailbox import, rejects stale workspace
+  versions before fetching mailbox items, imports and checkpoints the mailbox
+  prefix, and returns a run-free `HostedWorkspaceRunResult`. The assistant
+  phase is still intentionally omitted in this slice.
+- Cloudflare runtime platform has mailbox/workspace/log/share/vault-sync/device
+  callback ports and a workspace read port.
+- Cloudflare exposes a run-free runner nudge route and a runner-status route.
+- Web handoff calls the runner nudge route through the configured control
+  client.
+- `packages/cloudflare-hosted-control` now exposes browser-vault session,
+  runner status, and runner nudge only; its legacy `/run`, `getStatus`, and
+  `nudgeUserRun` client surfaces are gone.
+- Cloudflare's public control router no longer exposes the legacy
+  `/internal/users/:userId/run` route; runner nudge goes through
+  `/internal/users/:userId/nudge`.
+- Cloudflare has a lease-scoped checkpoint bridge foundation split into
+  composable pieces: one helper snapshots and writes a workspace bundle under
+  the current lease, one helper validates lease before web checkpoint, and the
+  full helper composes both. This shape fits the runtime semantic snapshot
+  builder without double-checkpointing.
+- The legacy deletion map is known, but broad deletion is still blocked by
+  production imports of run-drain/acquire/finalize surfaces.
+
+Remaining critical path:
+
+1. **Wire the runtime workspace-run entrypoint into node/container.**
+   Move `node-runner.ts`, `node-runner-child.ts`, `container-entrypoint.ts`,
+   and `runner-container.ts` from `HostedAssistantRuntimeJobInput.request.runDrain`
+   to `HostedWorkspaceRunRequest`. The child should receive only runtime config
+   plus the short-lived bridge token, not run tokens, web signing credentials,
+   or direct web route authority. Use the Cloudflare bridge split as:
+   `createCheckpointSnapshot` snapshots/writes the local workspace bundle, and
+   `workspacePort.checkpoint` validates lease then calls web CAS.
+2. **Restore or create the local workspace in the workspace job path.**
+   The additive entrypoint currently proves mailbox import/checkpoint semantics
+   but does not yet restore the encrypted snapshot into a full local runtime
+   workspace or run the assistant phase. Add the hosted workspace restore/null
+   bootstrap adapter before making it the active container path.
+3. **Replace `HostedUserRunner` orchestration.**
+   Add `runUntilIdleOrBudget({ reason })` as the active path: acquire local
+   lease, read web workspace, invoke the workspace runner once, clear in-flight
+   state, and schedule the next alarm from latest workspace status. Then remove
+   acquire-loop, committed-seq target, finalize, release-finalize, and
+   run-breadcrumb behavior.
+4. **Simplify Cloudflare DO state.**
+   Replace `runDrainLock` with a generic invocation lock and reduce durable
+   state to lease/in-flight/heartbeat/error/last-run/next-alarm/pending-nudge.
+   Do not keep active run ids, active event ids, attempts, committed snapshot
+   pointers, or bootstrap-completion state once key/bootstrap resolution is
+   independent.
+5. **Complete web producer migration.**
+   Every hosted producer must append one mailbox item in the same product
+   transaction as its control-plane mutation, then best-effort nudge the runner.
+   Remaining producers that still write hosted ingress/run events or depend on
+   run summaries must move to mailbox/workspace status. Rename web helper
+   exports from run wording to runner/mailbox wording in the same producer
+   slices; do not add new compatibility names.
+6. **Replace vault-sync/run-summary coupling.**
+   Vault-sync readiness should be a `vault.sync.import` mailbox item plus
+   `vaultSyncPort` side input fetch/import. It must not depend on queued run ids,
+   queued ingress event ids, or hosted-run commit/finalize summaries.
+7. **Move side effects to local outbox checkpoint semantics.**
+   Before any provider delivery or external mutation, checkpoint the outbox
+   intent/sending state. After the effect, checkpoint receipt, failure,
+   confirmation-pending, retry, reconcile, or abandoned state using the local
+   outbox model. Only then delete hosted-run finalization and committed delivery
+   effects.
+8. **Delete old web and Cloudflare run APIs.**
+   Once active paths no longer import them, delete `apps/web/src/lib/hosted-run/**`,
+   `/api/internal/hosted-run/{acquire,commit,finalize,release-finalize,turn-input/*}`,
+   Cloudflare run-finalization/wake-input/turn-input modules, and run-specific
+   result validation.
+9. **Delete old shared run contracts and docs.**
+   Remove run/cursor/drain exports, parsers, builders, tests, and stale docs
+   after production callers are gone. Historical completed exec plans may keep
+   old terminology, but live architecture docs should not.
+
+Final cutover integration order from this checkout:
+
+1. Add a workspace job envelope for container transport and parse it at every
+   boundary before deleting the old envelope. This keeps failures explicit while
+   central files are edited.
+2. In Cloudflare runner/container code, derive `{ userId, attemptId,
+   leaseGeneration, workspaceVersion }` from the DO lease plus latest web
+   workspace, not from a web run row.
+3. In the child process, restore the local workspace from web `snapshotRef`,
+   call `runHostedWorkspaceRuntimeJobInProcess`, and wire
+   `createCheckpointSnapshot` to the Cloudflare snapshot/write helper.
+4. Wrap `workspacePort.checkpoint` in the parent bridge so every web CAS is
+   lease-validated immediately before the request leaves Cloudflare.
+5. Switch `HostedUserRunner.nudgeHostedRunner`/alarm to invoke the workspace
+   path. Keep old `drainHostedRuns` only until tests no longer need it.
+6. Move producers from hosted ingress/run append helpers to mailbox append
+   helpers, then delete run route tests and old run status expectations.
+7. Delete the old web run APIs, Cloudflare run processors/finalizers, and
+   shared run contracts in one destructive pass after `rg` shows no production
+   imports.
+
+Parallel work lanes that remain safe:
+
+- `apps/web`: migrate remaining producer call-site names to runner/mailbox
+  wording, then migrate producer storage to mailbox rows. Keep schema deletion
+  for the final destructive pass.
+- Docs/tests cleanup can proceed for surfaces already removed from production:
+  control-client `/run` naming and Cloudflare public `/internal/users/:userId/run`
+  route assumptions.
+- `packages/assistant-runtime`: implement the full restore/bootstrap and
+  assistant phase inside the workspace job path, without touching Cloudflare.
+- `apps/cloudflare`: after the central job envelope is in place, a separate
+  pass can reduce DO state from run-drain wording to invocation/lease wording.
+
+Do not parallelize `user-runner.ts`, `node-runner.ts`, `node-runner-child.ts`,
+`container-entrypoint.ts`, and `runner-container.ts` across separate writers.
+Those helper seams now exist, so the next pass may edit that set, but it should
+still be treated as one coordinated integration lane because all five files
+share the job contract.
+
 ### Phase 8: Delete Old Protocol
 
 Delete old files after all call sites are gone:

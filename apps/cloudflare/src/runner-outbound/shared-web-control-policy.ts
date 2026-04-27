@@ -2,6 +2,14 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
 } from "@murphai/device-syncd/hosted-runtime";
+import {
+  HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+  HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+  HOSTED_RUNTIME_SHARE_IMPORT_PATH,
+  HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
+  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+} from "@murphai/hosted-execution/routes";
 
 export {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -12,15 +20,55 @@ export const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usag
 export const HOSTED_WEB_ISSUE_RECORD_PATH = "/api/internal/hosted-execution/issues/record";
 export const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
   "/api/internal/hosted-execution/billing/stripe/customer/resolve";
+export const HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER =
+  "x-hosted-runtime-web-control-user-id";
 
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/providers\/[^/]+\/connect-link$/u;
+const HOSTED_RUNTIME_SHARE_PAYLOAD_PATH =
+  /^\/api\/internal\/hosted-execution\/share\/[^/]+\/payload$/u;
+const HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_PATH =
+  /^\/api\/internal\/hosted-execution\/vault-sync\/[^/]+\/payload$/u;
 
 export function isAllowedHostedRunnerWebControlPath(path: string): boolean {
+  return isAllowedHostedRunnerWebControlRequest({
+    method: "GET",
+    path,
+  }) || isAllowedHostedRunnerWebControlRequest({
+    method: "POST",
+    path,
+  });
+}
+
+export function isAllowedHostedRunnerWebControlRequest(input: {
+  method: string;
+  path: string;
+}): boolean {
+  if (input.method === "GET") {
+    return HOSTED_RUNTIME_SHARE_PAYLOAD_PATH.test(input.path)
+      || HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_PATH.test(input.path);
+  }
+
+  if (input.method !== "POST") {
+    return false;
+  }
+
+  const path = input.path;
   return path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH
     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
+    || path === HOSTED_RUNTIME_LOG_PATH
+    || path === HOSTED_RUNTIME_MAILBOX_FETCH_PATH
+    || path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
+    || path === HOSTED_RUNTIME_SHARE_IMPORT_PATH
+    || path === HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH
+    || path === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     || path === HOSTED_WEB_ISSUE_RECORD_PATH
     || path === HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH
     || path === HOSTED_WEB_USAGE_RECORD_PATH
     || HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(path);
+}
+
+export function allowsHostedRunnerWebControlSignedUserOverride(path: string): boolean {
+  return path === HOSTED_RUNTIME_SHARE_IMPORT_PATH
+    || HOSTED_RUNTIME_SHARE_PAYLOAD_PATH.test(path);
 }

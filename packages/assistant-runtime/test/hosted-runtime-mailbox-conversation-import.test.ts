@@ -205,11 +205,13 @@ describe("hosted mailbox conversation import adapter", () => {
 
     assert.deepEqual(blocked, {
       reasonCode: "payload.decode_unavailable",
-      status: "deferred",
+      retryable: true,
+      status: "blocked",
     });
     assert.deepEqual(mismatched, {
       reasonCode: "payload.decode_mismatch",
-      status: "deferred",
+      retryable: false,
+      status: "blocked",
     });
     assert.equal(importCalls, 0);
   });

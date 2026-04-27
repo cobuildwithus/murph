@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -6,11 +8,11 @@ const mocks = vi.hoisted(() => ({
   lockHostedMemberRow: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-  materializeHostedIngressEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeTx: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
-  materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -47,8 +49,26 @@ describe("hosted onboarding member channel sync", () => {
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
-    mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: {
+        createdAt: "2026-04-15T00:00:00.000Z",
+        dedupeKey: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+        expiresAt: null,
+        id: "mailbox_member_channels_1",
+        kind: "member.channels.updated",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt: "2026-04-15T00:00:00.000Z",
+        payloadBytes: 256,
+        payloadInlineCiphertext: "cipher_member_channels_1",
+        payloadRef: null,
+        payloadSchema: "murph.hosted-mailbox-item.v1",
+        updatedAt: "2026-04-15T00:00:00.000Z",
+        userId: "member_123",
+      },
     });
   });
 
@@ -107,7 +127,7 @@ describe("hosted onboarding member channel sync", () => {
     });
   });
 
-  it("schedules an occurrence-scoped member.channels.updated dispatch with the resolved channel snapshot", async () => {
+  it("appends exactly one occurrence-scoped system mailbox item with the resolved channel snapshot", async () => {
     const tx = {
       label: "test-prisma-tx",
     };
@@ -132,8 +152,9 @@ describe("hosted onboarding member channel sync", () => {
       userId: "member_123",
     });
 
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
-      wake: {
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: {
         eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         kind: "member.channels.updated",
         memberChannels: {
@@ -149,12 +170,30 @@ describe("hosted onboarding member channel sync", () => {
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
   });
 
-  it("accepts a canonical wake append result without changing the returned dispatch", async () => {
+  it("keeps the returned producer envelope stable when the mailbox append is a duplicate", async () => {
     const tx = {
       label: "test-prisma-tx",
     };
-    mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({
-      eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: {
+        createdAt: "2026-04-15T00:00:00.000Z",
+        dedupeKey: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
+        expiresAt: null,
+        id: "mailbox_member_channels_1",
+        kind: "member.channels.updated",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt: "2026-04-15T00:00:00.000Z",
+        payloadBytes: 128,
+        payloadInlineCiphertext: "cipher_first_member_channels_1",
+        payloadRef: null,
+        payloadSchema: "murph.hosted-mailbox-item.v1",
+        updatedAt: "2026-04-15T00:00:00.000Z",
+        userId: "member_123",
+      },
     });
 
     await expect(
@@ -177,8 +216,9 @@ describe("hosted onboarding member channel sync", () => {
       userId: "member_123",
     });
 
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
         eventId: "member.channels.updated:settings.phone.sync:member_123:2026-04-15T00:00:00.000Z",
         kind: "member.channels.updated",
         memberChannels: {
@@ -189,6 +229,16 @@ describe("hosted onboarding member channel sync", () => {
       }),
       tx,
     });
+  });
+
+  it("does not reintroduce old run-control terms in the migrated producer path", () => {
+    const source = readFileSync(
+      new URL("../src/lib/hosted-onboarding/member-channel-sync.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).not.toMatch(/\b(?:HostedRun|hostedRun|finalizeRequired|source_cursor|turn-input)\b/u);
+    expect(source).not.toMatch(/\badopt(?:ed|ion)?\b/u);
   });
 });
 

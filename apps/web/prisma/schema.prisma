@@ -201,6 +201,11 @@ model HostedMember {
   hostedIngressEvents        HostedIngressEvent[]
   hostedIngressEventAliases  HostedIngressEventAlias[]
   hostedIngressPayloads      HostedIngressPayload[]
+  hostedMailboxItems         HostedMailboxItem[]
+  hostedMailboxPayloads      HostedMailboxPayload[]
+  hostedMailboxLaneCounters  HostedMailboxLaneCounter[]
+  hostedWorkspace            HostedWorkspace?
+  hostedRuntimeLogs          HostedRuntimeLog[]
   hostedRuns         HostedRun[]
   hostedRunLogs      HostedRunLog[]
   vaultSyncSessions  HostedVaultSyncSession[]
@@ -437,6 +442,100 @@ model HostedIngressPayload {
 
   @@index([userId])
   @@map("hosted_ingress_payload")
+}
+
+model HostedMailboxItem {
+  id                      String                @id
+  userId                  String                @map("user_id")
+  lane                    String
+  laneSeq                 BigInt                @map("lane_seq")
+  dedupeKey               String                @map("dedupe_key")
+  kind                    String
+  occurredAt              DateTime              @map("occurred_at")
+  payloadSchema           String                @map("payload_schema")
+  payloadInlineCiphertext String?               @map("payload_inline_ciphertext")
+  payloadRef              String?               @map("payload_ref")
+  payloadBytes            Int?                  @map("payload_bytes")
+  payloadHash             String?               @map("payload_hash")
+  expiresAt               DateTime?             @map("expires_at")
+  createdAt               DateTime              @default(now()) @map("created_at")
+  updatedAt               DateTime              @updatedAt @map("updated_at")
+  member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payload                 HostedMailboxPayload?
+
+  @@unique([userId, lane, laneSeq])
+  @@unique([userId, dedupeKey])
+  @@index([userId, lane, laneSeq])
+  @@index([userId, kind, createdAt])
+  @@index([userId, expiresAt])
+  @@map("hosted_mailbox_item")
+}
+
+model HostedMailboxPayload {
+  mailboxItemId     String            @id @map("mailbox_item_id")
+  userId            String            @map("user_id")
+  payloadCiphertext String            @map("payload_ciphertext")
+  payloadSchema     String            @map("payload_schema")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  member            HostedMember      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mailboxItem       HostedMailboxItem @relation(fields: [mailboxItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("hosted_mailbox_payload")
+}
+
+model HostedMailboxLaneCounter {
+  userId    String       @map("user_id")
+  lane      String
+  nextSeq   BigInt       @default(1) @map("next_seq")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  member    HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, lane])
+  @@map("hosted_mailbox_lane_counter")
+}
+
+model HostedWorkspace {
+  userId                 String       @id @map("user_id")
+  version                BigInt       @default(0)
+  snapshotRef            Json?        @map("snapshot_ref")
+  browserVaultReplicaRef Json?        @map("browser_vault_replica_ref")
+  nextWakeAt             DateTime?    @map("next_wake_at")
+  nextWakeReason         String?      @map("next_wake_reason")
+  redactedStatusJson     Json?        @map("redacted_status_json")
+  checkpointedAt         DateTime?    @map("checkpointed_at")
+  createdAt              DateTime     @default(now()) @map("created_at")
+  updatedAt              DateTime     @updatedAt @map("updated_at")
+  member                 HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_workspace")
+}
+
+model HostedRuntimeLog {
+  id                String       @id
+  userId            String       @map("user_id")
+  at                DateTime
+  level             String
+  component         String
+  phase             String
+  eventCode         String       @map("event_code")
+  attemptId         String?      @map("attempt_id")
+  leaseGeneration   BigInt?      @map("lease_generation")
+  workspaceVersion  BigInt?      @map("workspace_version")
+  checkpointVersion BigInt?      @map("checkpoint_version")
+  mailboxLane       String?      @map("mailbox_lane")
+  mailboxSeqStart   BigInt?      @map("mailbox_seq_start")
+  mailboxSeqEnd     BigInt?      @map("mailbox_seq_end")
+  outboxIntentRef   String?      @map("outbox_intent_ref")
+  errorCode         String?      @map("error_code")
+  redactedJson      Json?        @map("redacted_json")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, at])
+  @@index([level, at])
+  @@index([component, at])
+  @@map("hosted_runtime_log")
 }
 
 model HostedInvite {

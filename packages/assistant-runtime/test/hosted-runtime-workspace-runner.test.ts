@@ -1,0 +1,925 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import {
+  createAssistantTurnBeforeDeliveryHook,
+  isAssistantTurnRevisionRequiredError,
+  type AssistantTurnInputRefreshResult,
+  type AssistantTurnInputPort,
+} from "@murphai/assistant-engine";
+import type {
+  HostedMailboxFetchRequest,
+  HostedMailboxFetchResponse,
+  HostedMailboxItem,
+  HostedMailboxPayloadFetchRequest,
+  HostedMailboxPayloadFetchResponse,
+  HostedRuntimeRedactedJson,
+  HostedWorkspaceCheckpointRequest,
+  HostedWorkspaceCheckpointResponse,
+  HostedWorkspaceState,
+} from "@murphai/hosted-execution";
+import {
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution";
+import { describe, test } from "vitest";
+
+import {
+  HostedMailboxImportCheckpointConflictError,
+  createHostedWorkspaceCheckpointRequestBuilder,
+  createHostedWorkspaceSnapshotCheckpointRequestBuilder,
+  HostedWorkspaceRunnerUserMismatchError,
+  runHostedWorkspaceUntilIdleOrBudget,
+} from "../src/hosted-runtime.ts";
+import {
+  readHostedMailboxImportState,
+} from "../src/hosted-runtime/mailbox-state.ts";
+import {
+  HostedMailboxUserMismatchError,
+} from "../src/hosted-runtime/mailbox-import.ts";
+import type {
+  HostedRuntimeMailboxPort,
+  HostedRuntimeWorkspacePort,
+} from "../src/hosted-runtime-contracts.ts";
+
+const TEST_NOW = "2026-04-26T00:00:00.000Z";
+const TEST_USER_ID = "member_synthetic_workspace_runner";
+const TEST_BROWSER_VAULT_REPLICA_REF = {
+  byteLength: 256,
+  dataVersion: "2026-04-26",
+  generatedAt: "2026-04-26T00:00:00.000Z",
+  keyId: "key_synthetic_runner",
+  objectKey: "browser-vault/member-synthetic/replica.json",
+  replicaSchema: "murph.browser-vault-replica.v1",
+  schema: "murph.hosted-browser-vault-replica-ref.v1",
+  sourceBundleHash: "bundle_hash_synthetic_runner",
+} as const;
+
+describe("runHostedWorkspaceUntilIdleOrBudget", () => {
+  test("bootstraps empty local mailbox state and checkpoints before the assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_001",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+      async onCheckpoint() {
+        events.push("checkpoint:import");
+        const state = await readHostedMailboxImportState({ vaultRoot });
+        assert.equal(state.watermarks.conversation, "1");
+      },
+    });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_001",
+          browserVaultReplicaRef: TEST_BROWSER_VAULT_REPLICA_REF,
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.laneSeq}`);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort,
+        }),
+        requestId: "request_synthetic_runner_001",
+        async runAssistantPhase(input) {
+          events.push("assistant");
+          assert.equal(input.workspace, null);
+          assert.equal(input.initialMailboxImport.checkpoint?.checkpointed, true);
+          assert.equal(input.platform.refreshMailboxBeforeDelivery !== undefined, true);
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: null,
+      });
+
+      assert.deepEqual(events, ["import:1", "checkpoint:import", "assistant"]);
+      assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.attemptId, "attempt_synthetic_runner_001");
+      assert.equal(checkpointRequests[0]?.leaseGeneration, "1");
+      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
+      assert.equal(checkpointRequests[0]?.reason, "import");
+      assert.deepEqual(checkpointRequests[0]?.browserVaultReplicaRef, TEST_BROWSER_VAULT_REPLICA_REF);
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("creates checkpoint snapshot refs after mailbox import mutates local state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_snapshot_001",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const snapshotWatermarks: string[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+          async createSnapshot(snapshotInput) {
+            const state = await readHostedMailboxImportState({ vaultRoot });
+            snapshotWatermarks.push(state.watermarks.conversation);
+            assert.equal(snapshotInput.state.watermarks.conversation, "1");
+            assert.deepEqual(snapshotInput.redactedStatus, {
+              hostedMailboxBlockedCount: 0,
+              hostedMailboxConversationImportedSeq: "1",
+              hostedMailboxFetchedCount: 1,
+              hostedMailboxImportedCount: 1,
+              hostedMailboxRetryableBlockedCount: 0,
+              hostedMailboxSystemImportedSeq: "0",
+            });
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          metadata: {
+            attemptId: "attempt_synthetic_runner_snapshot",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "5",
+            nextWakeAt: null,
+            nextWakeReason: null,
+          },
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_snapshot",
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+
+      assert.deepEqual(snapshotWatermarks, ["1"]);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.snapshotRef?.key, "users/bundles/member-synthetic/vault/snapshot-after-import.bundle.json");
+      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("before-delivery refresh imports and checkpoints late conversation input before local revision", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+    });
+
+    try {
+      let caught: unknown;
+      try {
+        await runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_runner_revision",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "4",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            return { status: "imported" };
+          },
+          limitPerLane: 10,
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort,
+          }),
+          requestId: "request_synthetic_runner_revision",
+          async runAssistantPhase(input) {
+            items.push(createMailboxItem({
+              id: "mailbox_item_runner_late",
+              laneSeq: "2",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }));
+
+            const turnInputPort: AssistantTurnInputPort = {
+              async refresh(refreshInput) {
+                assert.equal(refreshInput.phase, "before_delivery");
+                const refreshMailbox = input.platform.refreshMailboxBeforeDelivery;
+                if (typeof refreshMailbox !== "function") {
+                  throw new Error("Expected hosted mailbox refresh to be installed.");
+                }
+                return refreshMailbox({
+                  requestId: "request_synthetic_runner_before_delivery",
+                });
+              },
+              async listNewConversationCaptures(query) {
+                return {
+                  captures: importedSeqs.includes("2")
+                    ? [
+                        {
+                          accountId: null,
+                          actorId: "actor_synthetic",
+                          actorIsSelf: false,
+                          actorName: "Sender",
+                          attachmentCount: 0,
+                          captureId: "capture_synthetic_late",
+                          createdAt: "2026-04-26T00:00:02.000Z",
+                          envelopePath: "capture-envelope-redacted",
+                          eventId: "event_synthetic_late",
+                          externalId: "external_synthetic_late",
+                          occurredAt: "2026-04-26T00:00:02.000Z",
+                          promotions: [],
+                          receivedAt: "2026-04-26T00:00:02.100Z",
+                          source: "telegram",
+                          text: null,
+                          threadId: "thread_synthetic",
+                          threadIsDirect: true,
+                          threadTitle: null,
+                        },
+                      ]
+                    : [],
+                  nextCursor: importedSeqs.includes("2")
+                    ? {
+                        captureId: "capture_synthetic_late",
+                        createdAt: "2026-04-26T00:00:02.000Z",
+                        occurredAt: "2026-04-26T00:00:02.000Z",
+                      }
+                    : query.afterCursor,
+                };
+              },
+            };
+            const hook = createAssistantTurnBeforeDeliveryHook({
+              afterCursor: {
+                captureId: "capture_synthetic_initial",
+                createdAt: "2026-04-26T00:00:01.000Z",
+                occurredAt: "2026-04-26T00:00:01.000Z",
+              },
+              conversation: {
+                accountId: null,
+                actorId: "actor_synthetic",
+                actorIsSelf: false,
+                source: "telegram",
+                threadId: "thread_synthetic",
+                threadIsDirect: true,
+              },
+              knownCaptureIds: ["capture_synthetic_initial"],
+              port: turnInputPort,
+            });
+
+            await hook({
+              response: "draft",
+              sessionId: "session_synthetic",
+              turnId: "turn_synthetic",
+              vault: vaultRoot,
+            });
+            return {
+              progressed: true,
+            };
+          },
+          vaultRoot,
+          workspace: createWorkspaceState({ version: "0" }),
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      assert.equal(isAssistantTurnRevisionRequiredError(caught), true);
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "before_delivery_refresh",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.deepEqual(fetchRequests.map((request) => request.lanes[0]), [
+        { importedSeq: "0", lane: "conversation" },
+        { importedSeq: "1", lane: "conversation" },
+      ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("can stop after mailbox import when no later assistant phase is provided", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_idle",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_idle",
+        vaultRoot,
+        workspace: null,
+      });
+
+      assert.equal(result.assistantPhaseResult, null);
+      assert.equal(result.initialMailboxImport.stateChanged, false);
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("summarizes before-delivery refreshes without exposing payload state", async () => {
+    const idle = await runBeforeDeliveryRefreshSummaryScenario({
+      lateItem: null,
+    });
+    assert.deepEqual(idle, {
+      progressed: false,
+      reason: "no_new_input",
+    });
+
+    const retryable = await runBeforeDeliveryRefreshSummaryScenario({
+      lateItem: createMailboxItem({
+        id: "mailbox_item_runner_sidecar_retry",
+        laneSeq: "2",
+        payloadInlineCiphertext: null,
+        payloadRef: "hosted-mailbox-payload:mailbox_item_runner_sidecar_retry",
+      }),
+      payloadsUnavailable: true,
+    });
+    assert.deepEqual(retryable, {
+      progressed: false,
+      reason: "source_unavailable",
+    });
+
+    const quarantined = await runBeforeDeliveryRefreshSummaryScenario({
+      lateItem: createMailboxItem({
+        id: "mailbox_item_runner_quarantine",
+        laneSeq: "2",
+        payloadSchema: "murph.invalid-hosted-mailbox-item.v1",
+      }),
+    });
+    assert.deepEqual(quarantined, {
+      progressed: true,
+      reason: "ingested_input",
+    });
+  });
+
+  test("fails closed when mailbox fetch returns a different user", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      fetchUserId: "member_synthetic_other",
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_mismatch",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    let assistantPhaseCalled = false;
+    let checkpointCalled = false;
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: "attempt_synthetic_runner_mismatch",
+              expectedWorkspaceVersion: "0",
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem() {
+              throw new Error("Import should not run after user mismatch.");
+            },
+            limitPerLane: 10,
+            platform: createPlatform({
+              mailboxPort,
+              workspacePort: {
+                async checkpoint(): Promise<HostedWorkspaceCheckpointResponse> {
+                  checkpointCalled = true;
+                  throw new Error("Checkpoint should not run after user mismatch.");
+                },
+              },
+            }),
+            requestId: "request_synthetic_runner_mismatch",
+            async runAssistantPhase() {
+              assistantPhaseCalled = true;
+              return {};
+            },
+            vaultRoot,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        HostedMailboxUserMismatchError,
+      );
+      assert.equal(checkpointCalled, false);
+      assert.equal(assistantPhaseCalled, false);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("fails closed before mailbox fetch when workspace belongs to another user", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    let mailboxFetchCalled = false;
+    let assistantPhaseCalled = false;
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: "attempt_synthetic_runner_workspace_mismatch",
+              expectedWorkspaceVersion: "0",
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem() {
+              throw new Error("Import should not run after workspace user mismatch.");
+            },
+            limitPerLane: 10,
+            platform: createPlatform({
+              mailboxPort: {
+                async fetch(): Promise<HostedMailboxFetchResponse> {
+                  mailboxFetchCalled = true;
+                  throw new Error("Mailbox fetch should not run after workspace user mismatch.");
+                },
+                async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+                  throw new Error("Payload fetch should not run after workspace user mismatch.");
+                },
+              },
+              workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+            }),
+            requestId: "request_synthetic_runner_workspace_mismatch",
+            async runAssistantPhase() {
+              assistantPhaseCalled = true;
+              return {};
+            },
+            vaultRoot,
+            workspace: createWorkspaceState({
+              userId: "member_synthetic_workspace_other",
+              version: "0",
+            }),
+          }),
+        HostedWorkspaceRunnerUserMismatchError,
+      );
+      assert.equal(mailboxFetchCalled, false);
+      assert.equal(assistantPhaseCalled, false);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("fails closed when the workspace checkpoint is stale", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_stale",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    let assistantPhaseCalled = false;
+    const workspacePort = createWorkspacePort({
+      checkpointed: false,
+      checkpointRequests: [],
+    });
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: "attempt_synthetic_runner_stale",
+              expectedWorkspaceVersion: "7",
+              leaseGeneration: "2",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem() {
+              return { status: "imported" };
+            },
+            limitPerLane: 10,
+            platform: createPlatform({
+              mailboxPort,
+              workspacePort,
+            }),
+            requestId: "request_synthetic_runner_stale",
+            async runAssistantPhase() {
+              assistantPhaseCalled = true;
+              return {};
+            },
+            vaultRoot,
+            workspace: createWorkspaceState({ version: "7" }),
+          }),
+        HostedMailboxImportCheckpointConflictError,
+      );
+      assert.equal(assistantPhaseCalled, false);
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "0",
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("rolls back only the before-delivery mailbox state when the second checkpoint is stale", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_stale_refresh_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({
+      items,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+      checkpointed: (request) => request.reason !== "before_delivery_refresh",
+    });
+
+    try {
+      let caught: unknown;
+      try {
+        await runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_runner_stale_refresh",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "2",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem() {
+            return { status: "imported" };
+          },
+          limitPerLane: 10,
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort,
+          }),
+          requestId: "request_synthetic_runner_stale_refresh",
+          async runAssistantPhase(phaseInput) {
+            items.push(createMailboxItem({
+              id: "mailbox_item_runner_stale_refresh_late",
+              laneSeq: "2",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }));
+            const refreshMailbox = phaseInput.platform.refreshMailboxBeforeDelivery;
+            if (typeof refreshMailbox !== "function") {
+              throw new Error("Expected hosted mailbox refresh to be installed.");
+            }
+            await refreshMailbox({
+              requestId: "request_synthetic_runner_stale_refresh_before_delivery",
+            });
+            return {};
+          },
+          vaultRoot,
+          workspace: createWorkspaceState({ version: "0" }),
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      assert.ok(caught instanceof HostedMailboxImportCheckpointConflictError);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "before_delivery_refresh",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "1",
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+});
+
+function createPlatform(input: {
+  mailboxPort: HostedRuntimeMailboxPort;
+  workspacePort: HostedRuntimeWorkspacePort;
+}) {
+  return {
+    artifactStore: {
+      async get() {
+        return null;
+      },
+      async put() {
+        return undefined;
+      },
+    },
+    effectsPort: {
+      async readRawEmailMessage() {
+        return null;
+      },
+      async sendEmail() {
+        return undefined;
+      },
+    },
+    mailboxPort: input.mailboxPort,
+    workspacePort: input.workspacePort,
+  };
+}
+
+function createMailboxPort(input: {
+  fetchRequests?: HostedMailboxFetchRequest[];
+  fetchUserId?: string;
+  items: HostedMailboxItem[];
+  payloadsUnavailable?: boolean;
+}): {
+  mailboxPort: HostedRuntimeMailboxPort;
+} {
+  const fetchRequests = input.fetchRequests ?? [];
+
+  return {
+    mailboxPort: {
+      async fetch(request): Promise<HostedMailboxFetchResponse> {
+        fetchRequests.push(request);
+        return {
+          fetchedAt: TEST_NOW,
+          items: input.items.filter((item) =>
+            request.lanes.some((lane) =>
+              lane.lane === item.lane && BigInt(item.laneSeq) > BigInt(lane.importedSeq)
+            )
+          ),
+          maxSeqByLane: request.lanes.map((lane) => ({
+            lane: lane.lane,
+            maxSeq: input.items
+              .filter((item) => item.lane === lane.lane)
+              .reduce((maxSeq, item) =>
+                BigInt(item.laneSeq) > BigInt(maxSeq) ? item.laneSeq : maxSeq,
+              lane.importedSeq),
+          })),
+          userId: input.fetchUserId ?? TEST_USER_ID,
+        };
+      },
+      async fetchPayload(request): Promise<HostedMailboxPayloadFetchResponse> {
+        const payloadFetchRequest: HostedMailboxPayloadFetchRequest = request;
+        if (input.payloadsUnavailable) {
+          return {
+            fetchedAt: TEST_NOW,
+            payload: null,
+            unavailable: {
+              code: "not_found",
+              retryable: true,
+            },
+          };
+        }
+
+        return {
+          fetchedAt: TEST_NOW,
+          payload: {
+            createdAt: TEST_NOW,
+            mailboxItemId: payloadFetchRequest.mailboxItemId,
+            payloadCiphertext: "ciphertext_synthetic_sidecar",
+            payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+            userId: TEST_USER_ID,
+          },
+        };
+      },
+    },
+  };
+}
+
+async function runBeforeDeliveryRefreshSummaryScenario(input: {
+  lateItem: HostedMailboxItem | null;
+  payloadsUnavailable?: boolean;
+}) {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+  const items = [
+    createMailboxItem({
+      id: "mailbox_item_runner_summary_initial",
+      laneSeq: "1",
+    }),
+  ];
+  const { mailboxPort } = createMailboxPort({
+    items,
+    payloadsUnavailable: input.payloadsUnavailable,
+  });
+  const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+  let refreshResult: AssistantTurnInputRefreshResult | null = null;
+
+  try {
+    await runHostedWorkspaceUntilIdleOrBudget({
+      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        attemptId: "attempt_synthetic_runner_summary",
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        snapshotRef: null,
+      }),
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      platform: createPlatform({
+        mailboxPort,
+        workspacePort: createWorkspacePort({ checkpointRequests }),
+      }),
+      requestId: "request_synthetic_runner_summary",
+      async runAssistantPhase(phaseInput) {
+        if (input.lateItem) {
+          items.push(input.lateItem);
+        }
+        const refreshMailbox = phaseInput.platform.refreshMailboxBeforeDelivery;
+        if (typeof refreshMailbox !== "function") {
+          throw new Error("Expected hosted mailbox refresh to be installed.");
+        }
+        refreshResult = await refreshMailbox({
+          requestId: "request_synthetic_runner_summary_before_delivery",
+        });
+        return {};
+      },
+      vaultRoot,
+      workspace: createWorkspaceState({ version: "0" }),
+    });
+
+    if (!refreshResult) {
+      throw new Error("Expected before-delivery refresh result.");
+    }
+    return refreshResult;
+  } finally {
+    await rm(vaultRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+}
+
+function createWorkspacePort(input: {
+  checkpointRequests: HostedWorkspaceCheckpointRequest[];
+  checkpointed?: boolean | ((request: HostedWorkspaceCheckpointRequest) => boolean);
+  onCheckpoint?: (
+    request: HostedWorkspaceCheckpointRequest,
+    response: HostedWorkspaceCheckpointResponse,
+  ) => Promise<void> | void;
+}): HostedRuntimeWorkspacePort {
+  return {
+    async checkpoint(request): Promise<HostedWorkspaceCheckpointResponse> {
+      const checkpointed = typeof input.checkpointed === "function"
+        ? input.checkpointed(request)
+        : input.checkpointed ?? true;
+      const response = {
+        checkpointed,
+        workspace: createWorkspaceState({
+          nextWakeAt: request.nextWakeAt ?? null,
+          nextWakeReason: request.nextWakeReason ?? null,
+          redactedStatus: request.redactedStatus ?? null,
+          snapshotRef: request.snapshotRef,
+          version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+        }),
+      };
+      input.checkpointRequests.push(request);
+      await input.onCheckpoint?.(request, response);
+      return response;
+    },
+  };
+}
+
+function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMailboxItem {
+  return {
+    createdAt: TEST_NOW,
+    dedupeKey: `dedupe_${overrides.id ?? "mailbox_item_runner_001"}`,
+    expiresAt: null,
+    id: "mailbox_item_runner_001",
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: "1",
+    occurredAt: TEST_NOW,
+    payloadBytes: 128,
+    payloadInlineCiphertext: "ciphertext_synthetic_inline",
+    payloadRef: null,
+    payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    updatedAt: TEST_NOW,
+    userId: TEST_USER_ID,
+    ...overrides,
+  };
+}
+
+function createWorkspaceState(
+  overrides: Partial<HostedWorkspaceState> = {},
+): HostedWorkspaceState {
+  return {
+    checkpointedAt: TEST_NOW,
+    createdAt: TEST_NOW,
+    nextWakeAt: null,
+    nextWakeReason: null,
+    redactedStatus: null,
+    snapshotRef: null,
+    updatedAt: TEST_NOW,
+    userId: TEST_USER_ID,
+    version: "0",
+    ...overrides,
+  };
+}
+
+function createBundleRef(input: {
+  hash: string;
+  key: string;
+  size: number;
+}): NonNullable<HostedWorkspaceState["snapshotRef"]> {
+  return {
+    hash: input.hash,
+    key: input.key,
+    size: input.size,
+    updatedAt: TEST_NOW,
+  };
+}

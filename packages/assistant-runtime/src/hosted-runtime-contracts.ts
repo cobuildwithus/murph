@@ -5,6 +5,8 @@ export type {
   HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimePreparedJobResult,
   HostedAssistantRuntimeDeviceSyncConfig,
+  HostedAssistantWorkspaceRuntimeJobInput,
+  HostedAssistantWorkspaceRuntimeJobResult,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobRequest,
   HostedAssistantRuntimeJobResult,
@@ -13,18 +15,27 @@ export type {
 } from "./hosted-runtime/models.ts";
 export type {
   HostedRuntimeArtifactStore,
+  HostedRuntimeBeforeDeliveryMailboxRefresh,
+  HostedRuntimeBeforeDeliveryMailboxRefreshInput,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeIssueExportPort,
   HostedRuntimeIssueRecordResponse,
+  HostedRuntimeLogPort,
+  HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
+  HostedRuntimeSharePort,
   HostedRuntimeTurnInputPort,
   HostedRuntimeUsageExportPort,
   HostedRuntimeUsageRecordResponse,
+  HostedRuntimeVaultSyncPort,
+  HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
 export {
   parseHostedAssistantRuntimeConfig,
+  parseHostedAssistantWorkspaceRuntimeJobInput,
+  parseHostedAssistantWorkspaceRuntimeJobRequest,
   parseHostedAssistantRuntimeJobInput,
   parseHostedAssistantRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
@@ -36,6 +47,39 @@ export {
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";
+export type {
+  HostedRuntimeLaunchSpec,
+  HostedRuntimeLaunchSpecInput,
+} from "./hosted-runtime/launch-spec.ts";
+export {
+  buildHostedRuntimeChildEnv,
+  buildHostedRuntimeForwardedEnv,
+  buildHostedRuntimeLaunchSpec,
+  buildHostedRuntimePlatformEnv,
+  buildHostedRuntimeResolvedConfig,
+  HOSTED_RUNTIME_ENV_KEY_NAMES,
+  HOSTED_RUNTIME_ENV_PROFILES_ENV,
+  HOSTED_RUNTIME_ENV_PROFILE_KEYS,
+  HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS,
+  readHostedRuntimeCommitTimeoutConfigValue,
+} from "./hosted-runtime/launch-spec.ts";
+export type {
+  HostedRuntimeEnvProfileName,
+} from "./hosted-runtime/launch-spec.ts";
+export type {
+  HostedWorkspaceCheckpointMetadata,
+  HostedWorkspaceCheckpointRequestBuilder,
+  HostedWorkspaceSnapshotCheckpointBuilder,
+  HostedWorkspaceSnapshotCheckpointMetadata,
+  HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+  HostedWorkspaceSnapshotCheckpointResult,
+  HostedWorkspaceRunnerAssistantPhaseInput,
+  HostedWorkspaceRunnerAssistantPhaseResult,
+  HostedWorkspaceRunnerCheckpointRequestInput,
+  HostedWorkspaceRunnerInput,
+  HostedWorkspaceRunnerPlatform,
+  HostedWorkspaceRunnerResult,
+} from "./hosted-runtime/workspace-runner.ts";
 export {
   computeHostedRunElapsedMs,
 } from "./hosted-runtime/utils.ts";

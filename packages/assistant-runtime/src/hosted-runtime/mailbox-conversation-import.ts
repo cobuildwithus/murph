@@ -73,6 +73,11 @@ export type HostedConversationMailboxImportOutcome =
     }
   | {
       reasonCode: string;
+      retryable: boolean;
+      status: "blocked";
+    }
+  | {
+      reasonCode: string;
       status: "deferred";
     };
 
@@ -130,14 +135,16 @@ export async function importHostedConversationMailboxItem(input: {
         decoded.reasonCode,
         "payload.decode_unavailable",
       ),
-      status: "deferred",
+      retryable: decoded.retryable,
+      status: "blocked",
     };
   }
 
   if (!decodedWakeMatchesMailboxItem(decoded.wake, input.item.item)) {
     return {
       reasonCode: "payload.decode_mismatch",
-      status: "deferred",
+      retryable: false,
+      status: "blocked",
     };
   }
 

@@ -1,0 +1,969 @@
+import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+  ASSISTANT_USAGE_SCHEMA,
+  type AssistantRuntimeIssueRecord,
+  type AssistantUsageRecord,
+} from "@murphai/runtime-state/node";
+
+import {
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_KINDS,
+  HOSTED_MAILBOX_LANES,
+  HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA,
+  HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
+  HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  HOSTED_WORKSPACE_RUN_REASONS,
+  HOSTED_WORKSPACE_RUN_STATUSES,
+  isHostedMailboxKind,
+  isHostedMailboxLane,
+} from "../src/runtime-control.ts";
+import {
+  parseHostedMailboxFetchRequest,
+  parseHostedMailboxFetchResponse,
+  parseHostedMailboxItem,
+  parseHostedRunnerNudgeResult,
+  parseHostedRunnerStatusResponse,
+  parseHostedMailboxLaneCounterState,
+  parseHostedMailboxPayload,
+  parseHostedMailboxPayloadFetchRequest,
+  parseHostedMailboxPayloadFetchResponse,
+  parseHostedRuntimeDeviceSyncBridgeEnvelope,
+  parseHostedRuntimeIssueExportRequest,
+  parseHostedRuntimeIssueExportResponse,
+  parseHostedRuntimeLogEntry,
+  parseHostedRuntimeLogRequest,
+  parseHostedRuntimeLogResponse,
+  parseHostedRuntimeShareImportRequest,
+  parseHostedRuntimeShareImportResponse,
+  parseHostedRuntimeSharePayload,
+  parseHostedRuntimeSharePayloadFetchRequest,
+  parseHostedRuntimeSharePayloadFetchResponse,
+  parseHostedRuntimeUsageExportRequest,
+  parseHostedRuntimeUsageExportResponse,
+  parseHostedRuntimeVaultSyncImportPayload,
+  parseHostedRuntimeVaultSyncImportRequest,
+  parseHostedRuntimeVaultSyncImportResponse,
+  parseHostedRuntimeVaultSyncImportSummary,
+  parseHostedRuntimeVaultSyncPayloadFetchRequest,
+  parseHostedRuntimeVaultSyncPayloadFetchResponse,
+  parseHostedWorkspaceCheckpointRequest,
+  parseHostedWorkspaceCheckpointResponse,
+  parseHostedWorkspaceReadResponse,
+  parseHostedWorkspaceRunRequest,
+  parseHostedWorkspaceRunResult,
+  parseHostedWorkspaceState,
+} from "../src/parsers.ts";
+import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
+
+describe("hosted runtime control contracts", () => {
+  it("freezes the mailbox lanes, item kinds, checkpoint reasons, and log codes", () => {
+    expect(HOSTED_MAILBOX_LANES).toEqual([
+      "conversation",
+      "system",
+    ]);
+    expect(HOSTED_MAILBOX_KINDS).toEqual([
+      "conversation.message",
+      "member.activated",
+      "member.channels.updated",
+      "assistant.notification.requested",
+      "device-sync.wake",
+      "vault.share.accepted",
+      "vault.sync.import",
+    ]);
+    expect(HOSTED_WORKSPACE_CHECKPOINT_REASONS).toEqual([
+      "import",
+      "before_delivery_refresh",
+      "outbox_intent",
+      "outbox_receipt",
+      "maintenance",
+      "idle",
+      "budget_exhausted",
+      "error",
+    ]);
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.imported");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
+    expect(HOSTED_WORKSPACE_RUN_REASONS).toEqual(["nudge", "alarm", "retry", "manual"]);
+    expect(HOSTED_WORKSPACE_RUN_STATUSES).toEqual([
+      "idle",
+      "budget_exhausted",
+      "scheduled",
+      "failed",
+    ]);
+    expect(isHostedMailboxLane("conversation")).toBe(true);
+    expect(isHostedMailboxLane("global")).toBe(false);
+    expect(isHostedMailboxKind("conversation.message")).toBe(true);
+    expect(isHostedMailboxKind("run.acquired")).toBe(false);
+  });
+
+  it("parses workspace-run request and status-only result without run-drain fields", () => {
+    expect(parseHostedWorkspaceRunRequest({
+      attemptId: "attempt_1",
+      budget: {
+        maxMailboxItems: 25,
+        maxRuntimeMs: 30_000,
+      },
+      leaseGeneration: "7",
+      reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).toEqual({
+      attemptId: "attempt_1",
+      budget: {
+        maxMailboxItems: 25,
+        maxRuntimeMs: 30_000,
+      },
+      leaseGeneration: "7",
+      reason: "nudge",
+      userId: "member_123",
+      workspaceVersion: "4",
+    });
+    expect(() => parseHostedWorkspaceRunRequest({
+      attemptId: "attempt_1",
+      leaseGeneration: "7",
+      reason: "nudge",
+      runDrain: {},
+      userId: "member_123",
+      workspaceVersion: "4",
+    })).toThrow("Hosted workspace run request.runDrain is no longer supported.");
+    expect(parseHostedWorkspaceRunResult({
+      nextWakeAt: null,
+      redactedStatus: {
+        count: 1,
+      },
+      status: "idle",
+    })).toEqual({
+      nextWakeAt: null,
+      redactedStatus: {
+        count: 1,
+      },
+      status: "idle",
+    });
+  });
+
+  it("parses mailbox fetch contracts without run ownership fields", () => {
+    const item = createMailboxItem();
+
+    expect(parseHostedMailboxItem(item)).toEqual(item);
+    expect(parseHostedMailboxFetchRequest({
+      lanes: [
+        { importedSeq: "0", lane: "conversation" },
+        { importedSeq: "4", lane: "system" },
+      ],
+      limitPerLane: 25,
+      requestId: "mailbox-fetch-1",
+    })).toEqual({
+      lanes: [
+        { importedSeq: "0", lane: "conversation" },
+        { importedSeq: "4", lane: "system" },
+      ],
+      limitPerLane: 25,
+      requestId: "mailbox-fetch-1",
+    });
+    expect(parseHostedMailboxFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [item],
+      maxSeqByLane: [
+        { lane: "conversation", maxSeq: "11" },
+        { lane: "system", maxSeq: "4" },
+      ],
+      userId: "member_123",
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [item],
+      maxSeqByLane: [
+        { lane: "conversation", maxSeq: "11" },
+        { lane: "system", maxSeq: "4" },
+      ],
+      userId: "member_123",
+    });
+
+    expect(() => parseHostedMailboxItem({
+      ...item,
+      lane: "global",
+    })).toThrow(/Hosted mailbox lane/u);
+    expect(() => parseHostedMailboxItem({
+      ...item,
+      laneSeq: "not-a-seq",
+    })).toThrow(/non-negative base-10 integer string/u);
+    expect(() => parseHostedMailboxItem({
+      ...item,
+      laneSeq: "-1",
+    })).toThrow(/non-negative base-10 integer string/u);
+    expect(() => parseHostedMailboxFetchRequest({
+      lanes: [
+        { importedSeq: "0", lane: "conversation" },
+      ],
+      limitPerLane: 0,
+      requestId: "mailbox-fetch-1",
+    })).toThrow(/positive integer/u);
+    expect(() => parseHostedMailboxFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [],
+      maxSeqByLane: [
+        { lane: "conversation", maxSeq: "0x10" },
+      ],
+      userId: "member_123",
+    })).toThrow(/non-negative base-10 integer string/u);
+  });
+
+  it("parses minimal mailbox records and payload sidecars", () => {
+    const minimalItem = {
+      createdAt: "2026-04-26T00:00:01.000Z",
+      dedupeKey: "system:member_123:activation",
+      id: "mailbox_system_1",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      updatedAt: "2026-04-26T00:00:01.000Z",
+      userId: "member_123",
+    };
+    const nullableItem = {
+      ...minimalItem,
+      expiresAt: null,
+      payloadBytes: null,
+      payloadInlineCiphertext: null,
+      payloadRef: null,
+    };
+    const payload = {
+      createdAt: "2026-04-26T00:00:01.000Z",
+      mailboxItemId: "mailbox_system_1",
+      payloadCiphertext: "ciphertext",
+      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      userId: "member_123",
+    };
+
+    expect(parseHostedMailboxItem(minimalItem)).toEqual(minimalItem);
+    expect(parseHostedMailboxItem(nullableItem)).toEqual(nullableItem);
+    expect(parseHostedMailboxPayload(payload)).toEqual(payload);
+    expect(parseHostedMailboxLaneCounterState({
+      lane: "system",
+      nextSeq: "2",
+      updatedAt: "2026-04-26T00:00:02.000Z",
+      userId: "member_123",
+    })).toEqual({
+      lane: "system",
+      nextSeq: "2",
+      updatedAt: "2026-04-26T00:00:02.000Z",
+      userId: "member_123",
+    });
+  });
+
+  it("parses raw mailbox payload fetches with retryable unavailable states", () => {
+    const payload = {
+      createdAt: "2026-04-26T00:00:01.000Z",
+      mailboxItemId: "mailbox_system_1",
+      payloadCiphertext: "ciphertext",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      userId: "member_123",
+    };
+
+    expect(parseHostedMailboxPayloadFetchRequest({
+      mailboxItemId: "mailbox_system_1",
+      payloadRef: "payload_ref_1",
+      requestId: "payload-fetch-1",
+    })).toEqual({
+      mailboxItemId: "mailbox_system_1",
+      payloadRef: "payload_ref_1",
+      requestId: "payload-fetch-1",
+    });
+    expect(parseHostedMailboxPayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload,
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload,
+    });
+    expect(parseHostedMailboxPayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: true,
+      },
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: true,
+      },
+    });
+    expect(() => parseHostedMailboxPayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload: null,
+    })).toThrow(/requires payload or unavailable/u);
+    expect(() => parseHostedMailboxPayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload,
+      unavailable: {
+        code: "gone",
+        retryable: false,
+      },
+    })).toThrow(/must not include both/u);
+  });
+
+  it("parses share payload fetch and import contracts with contract-owned packs", () => {
+    const payload = {
+      ownerUserId: "member_owner",
+      pack: TEST_HOSTED_SHARE_PACK,
+      payloadSchema: HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA,
+      shareId: "share_123",
+    };
+
+    expect(parseHostedRuntimeSharePayload(payload)).toEqual(payload);
+    expect(parseHostedRuntimeSharePayloadFetchRequest({
+      ownerUserId: "member_owner",
+      requestId: "share-fetch-1",
+      shareId: "share_123",
+    })).toEqual({
+      ownerUserId: "member_owner",
+      requestId: "share-fetch-1",
+      shareId: "share_123",
+    });
+    expect(parseHostedRuntimeSharePayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload,
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload,
+    });
+    expect(parseHostedRuntimeSharePayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload: null,
+      unavailable: {
+        code: "expired",
+        retryable: false,
+      },
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload: null,
+      unavailable: {
+        code: "expired",
+        retryable: false,
+      },
+    });
+    expect(parseHostedRuntimeShareImportRequest({
+      importedAt: "2026-04-26T00:00:05.000Z",
+      ownerUserId: "member_owner",
+      shareId: "share_123",
+      status: "imported",
+    })).toEqual({
+      importedAt: "2026-04-26T00:00:05.000Z",
+      ownerUserId: "member_owner",
+      shareId: "share_123",
+      status: "imported",
+    });
+    expect(parseHostedRuntimeShareImportResponse({
+      recorded: true,
+      shareId: "share_123",
+      status: "imported",
+    })).toEqual({
+      recorded: true,
+      shareId: "share_123",
+      status: "imported",
+    });
+    expect(() => parseHostedRuntimeSharePayload({
+      ...payload,
+      payloadSchema: "wrong",
+    })).toThrow(/payloadSchema/u);
+    expect(() => parseHostedRuntimeShareImportRequest({
+      importedAt: "2026-04-26T00:00:05.000Z",
+      ownerUserId: "member_owner",
+      shareId: "share_123",
+      status: "finalized",
+    })).toThrow(/share import status/u);
+  });
+
+  it("parses vault-sync payload fetch and sanitized import result contracts", () => {
+    const payload = {
+      bundleBase64: "dmF1bHQtc3luYy1idW5kbGU=",
+      localManifestHash: "manifest_hash_123",
+      payloadSchema: HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
+      sessionId: "vsi_123",
+      sourceSchemaVersion: "1",
+    };
+    const summary = {
+      conflictCount: 1,
+      importedJsonlRecords: 2,
+      importedRawFiles: 3,
+      importedTextFiles: 4,
+      skippedDuplicates: 5,
+      skippedExcludedFiles: 6,
+    };
+
+    expect(parseHostedRuntimeVaultSyncImportPayload(payload)).toEqual(payload);
+    expect(parseHostedRuntimeVaultSyncPayloadFetchRequest({
+      requestId: "vault-sync-fetch-1",
+      sessionId: "vsi_123",
+    })).toEqual({
+      requestId: "vault-sync-fetch-1",
+      sessionId: "vsi_123",
+    });
+    expect(parseHostedRuntimeVaultSyncPayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload,
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload,
+    });
+    expect(parseHostedRuntimeVaultSyncPayloadFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload: null,
+      unavailable: {
+        code: "gone",
+        retryable: false,
+      },
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      payload: null,
+      unavailable: {
+        code: "gone",
+        retryable: false,
+      },
+    });
+    expect(parseHostedRuntimeVaultSyncImportSummary(summary)).toEqual(summary);
+    expect(parseHostedRuntimeVaultSyncImportRequest({
+      importedAt: "2026-04-26T00:00:05.000Z",
+      sessionId: "vsi_123",
+      status: "imported_with_conflicts",
+      summary,
+    })).toEqual({
+      importedAt: "2026-04-26T00:00:05.000Z",
+      sessionId: "vsi_123",
+      status: "imported_with_conflicts",
+      summary,
+    });
+    expect(parseHostedRuntimeVaultSyncImportResponse({
+      recorded: true,
+      sessionId: "vsi_123",
+      status: "imported_with_conflicts",
+    })).toEqual({
+      recorded: true,
+      sessionId: "vsi_123",
+      status: "imported_with_conflicts",
+    });
+    expect(() => parseHostedRuntimeVaultSyncImportRequest({
+      importedAt: "2026-04-26T00:00:05.000Z",
+      sessionId: "vsi_123",
+      status: "committed",
+      summary,
+    })).toThrow(/vault-sync import status/u);
+    expect(() => parseHostedRuntimeVaultSyncImportSummary({
+      ...summary,
+      conflictCount: -1,
+    })).toThrow(/non-negative integer/u);
+  });
+
+  it("delegates device-sync bridge envelopes to the device-sync runtime owner", () => {
+    expect(parseHostedRuntimeDeviceSyncBridgeEnvelope({
+      hint: {
+        jobs: [
+          {
+            kind: "reconcile",
+            payload: {
+              windowStart: "2026-04-25T00:00:00.000Z",
+            },
+          },
+        ],
+      },
+      kind: "device-sync.wake",
+      provider: "oura",
+      requestId: "device-sync-wake-1",
+    })).toEqual({
+      hint: {
+        jobs: [
+          {
+            kind: "reconcile",
+            payload: {
+              windowStart: "2026-04-25T00:00:00.000Z",
+            },
+          },
+        ],
+      },
+      kind: "device-sync.wake",
+      provider: "oura",
+      requestId: "device-sync-wake-1",
+    });
+    expect(parseHostedRuntimeDeviceSyncBridgeEnvelope({
+      kind: "device-sync.snapshot",
+      request: {
+        provider: "oura",
+        userId: "member_123",
+      },
+      requestId: "device-sync-snapshot-1",
+    })).toEqual({
+      kind: "device-sync.snapshot",
+      request: {
+        provider: "oura",
+        userId: "member_123",
+      },
+      requestId: "device-sync-snapshot-1",
+    });
+    expect(parseHostedRuntimeDeviceSyncBridgeEnvelope({
+      kind: "device-sync.apply",
+      request: {
+        occurredAt: "2026-04-26T00:00:05.000Z",
+        updates: [],
+        userId: "member_123",
+      },
+      requestId: "device-sync-apply-1",
+    })).toEqual({
+      kind: "device-sync.apply",
+      request: {
+        occurredAt: "2026-04-26T00:00:05.000Z",
+        updates: [],
+        userId: "member_123",
+      },
+      requestId: "device-sync-apply-1",
+    });
+    expect(() => parseHostedRuntimeDeviceSyncBridgeEnvelope({
+      kind: "device-sync.apply",
+      request: {
+        updates: "not-array",
+        userId: "member_123",
+      },
+      requestId: "device-sync-apply-1",
+    })).toThrow(/Hosted device-sync runtime apply request updates/u);
+  });
+
+  it("parses usage and issue exports through their runtime-state owners", () => {
+    const usage = createAssistantUsageRecord();
+    const issue = createAssistantRuntimeIssueRecord();
+
+    expect(parseHostedRuntimeUsageExportRequest({
+      usage: [usage],
+    })).toEqual({
+      usage: [usage],
+    });
+    expect(parseHostedRuntimeUsageExportResponse({
+      recorded: 1,
+      usageIds: [usage.usageId],
+    })).toEqual({
+      recorded: 1,
+      usageIds: [usage.usageId],
+    });
+    expect(parseHostedRuntimeIssueExportRequest({
+      issues: [issue],
+    })).toEqual({
+      issues: [issue],
+    });
+    expect(parseHostedRuntimeIssueExportResponse({
+      issueIds: [issue.issueId],
+      recorded: 1,
+    })).toEqual({
+      issueIds: [issue.issueId],
+      recorded: 1,
+    });
+    expect(() => parseHostedRuntimeUsageExportRequest({
+      usage: [
+        {
+          ...usage,
+          usageId: "wrong",
+        },
+      ],
+    })).toThrow(/usageId must match the canonical turnId\/attemptCount-derived value/u);
+    expect(() => parseHostedRuntimeIssueExportRequest({
+      issues: [
+        {
+          ...issue,
+          issueId: "wrong",
+        },
+      ],
+    })).toThrow(/issueId/u);
+    expect(() => parseHostedRuntimeUsageExportResponse({
+      recorded: -1,
+      usageIds: [usage.usageId],
+    })).toThrow(/non-negative integer/u);
+  });
+
+  it("parses workspace checkpoint contracts as the hosted commit primitive", () => {
+    const workspace = createWorkspaceState();
+
+    expect(parseHostedWorkspaceState(workspace)).toEqual(workspace);
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      workspace,
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      workspace,
+    });
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      workspace: null,
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      workspace: null,
+    });
+    expect(parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {
+        importedConversationSeq: "11",
+        importedSystemSeq: "4",
+      },
+      snapshotRef: null,
+    })).toEqual({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {
+        importedConversationSeq: "11",
+        importedSystemSeq: "4",
+      },
+      snapshotRef: null,
+    });
+    expect(parseHostedWorkspaceCheckpointResponse({
+      checkpointed: true,
+      workspace,
+    })).toEqual({
+      checkpointed: true,
+      workspace,
+    });
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      reason: "finalize",
+      snapshotRef: null,
+    })).toThrow(/Hosted workspace checkpoint reason/u);
+
+    const minimalWorkspace = {
+      createdAt: "2026-04-26T00:00:00.000Z",
+      snapshotRef: null,
+      updatedAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+      version: "0",
+    };
+
+    expect(parseHostedWorkspaceState(minimalWorkspace)).toEqual(minimalWorkspace);
+    expect(parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_2",
+      expectedWorkspaceVersion: "0",
+      leaseGeneration: "10",
+      reason: "idle",
+    })).toEqual({
+      attemptId: "attempt_2",
+      expectedWorkspaceVersion: "0",
+      leaseGeneration: "10",
+      reason: "idle",
+      snapshotRef: null,
+    });
+  });
+
+  it("keeps runtime logs structured and privacy-bounded", () => {
+    const entry = {
+      at: "2026-04-26T00:00:03.000Z",
+      attemptId: "attempt_1",
+      component: "mailbox",
+      eventCode: "mailbox.imported",
+      leaseGeneration: "9",
+      level: "info",
+      mailboxLane: "conversation",
+      mailboxSeqEnd: "11",
+      mailboxSeqStart: "10",
+      phase: "import",
+      redactedJson: {
+        importedCount: 2,
+        retryable: false,
+      },
+      workspaceVersion: "5",
+    };
+
+    expect(parseHostedRuntimeLogEntry(entry)).toEqual(entry);
+    expect(parseHostedRuntimeLogRequest({
+      entries: [entry],
+    })).toEqual({
+      entries: [entry],
+    });
+    expect(parseHostedRuntimeLogResponse({ loggedCount: 1 })).toEqual({ loggedCount: 1 });
+    expect(() => parseHostedRuntimeLogResponse({ loggedCount: 1.5 })).toThrow(
+      /non-negative integer/u,
+    );
+
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      message: 1,
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      errorCode: ["person", "example.test"].join("@"),
+    })).toThrow(/email address/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      outboxIntentRef: "<HOME_DIR>/intent.json",
+    })).toThrow(/local filesystem path/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      attemptId: "attempt with spaces",
+    })).toThrow(/bounded opaque identifier/u);
+    expect(() => parseHostedRuntimeLogRequest({
+      entries: Array.from({ length: 51 }, () => entry),
+    })).toThrow(/at most 50 entries/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        messageText: 1,
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        payload: { nested: true },
+      },
+    })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        source: "<HOME_DIR>/private.txt",
+      },
+    })).toThrow(/local filesystem path/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        source: `sent to ${["person", "example.test"].join("@")}`,
+      },
+    })).toThrow(/email address/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        source: "+1 415 555 0132",
+      },
+    })).toThrow(/phone number/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        source: "authorization: bearer-secret",
+      },
+    })).toThrow(/secret-shaped/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        source: "x".repeat(129),
+      },
+    })).toThrow(/at most 128 characters/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        values: Array.from({ length: 17 }, (_, index) => index),
+      },
+    })).toThrow(/at most 16 redacted values/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        count: Number.POSITIVE_INFINITY,
+      },
+    })).toThrow(/finite redacted value/u);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      redactedJson: {
+        values: [{ nested: true }],
+      },
+    })).toThrow(/shallow redacted scalar/u);
+    expect(parseHostedRuntimeLogEntry({
+      at: "2026-04-26T00:00:03.000Z",
+      component: "runner",
+      eventCode: "runner.idle",
+      level: "debug",
+      phase: "idle",
+      redactedJson: {
+        checks: [true, false, null, "ok", 1],
+      },
+    })).toEqual({
+      at: "2026-04-26T00:00:03.000Z",
+      component: "runner",
+      eventCode: "runner.idle",
+      level: "debug",
+      phase: "idle",
+      redactedJson: {
+        checks: [true, false, null, "ok", 1],
+      },
+    });
+  });
+
+  it("parses runner nudge and status without run identifiers or committed sequence targets", () => {
+    const nudge = {
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: false,
+      inFlight: true,
+      leaseGeneration: "9",
+      nextAlarmAt: "2026-04-26T00:00:05.000Z",
+    };
+    const status = {
+      heartbeatAt: "2026-04-26T00:00:04.000Z",
+      inFlight: true,
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastRunAt: "2026-04-26T00:00:01.000Z",
+      leaseGeneration: "9",
+      mailboxLag: [
+        { importedSeq: "10", lag: "1", lane: "conversation", maxSeq: "11" },
+        { importedSeq: "4", lag: "0", lane: "system", maxSeq: "4" },
+      ],
+      nextAlarmAt: "2026-04-26T00:00:05.000Z",
+      recentLogs: [],
+      userId: "member_123",
+      workspace: createWorkspaceState(),
+    };
+
+    expect(parseHostedRunnerNudgeResult(nudge)).toEqual(nudge);
+    expect(parseHostedRunnerStatusResponse(status)).toEqual(status);
+    expect(parseHostedRunnerNudgeResult(nudge)).not.toHaveProperty("runId");
+    expect(parseHostedRunnerStatusResponse(status)).not.toHaveProperty("committedSeq");
+    expect(() => parseHostedRunnerNudgeResult({
+      ...nudge,
+      leaseGeneration: "-1",
+    })).toThrow(/non-negative base-10 integer string/u);
+    expect(parseHostedRunnerNudgeResult({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: true,
+      inFlight: true,
+      leaseGeneration: "10",
+    })).toEqual({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: true,
+      inFlight: true,
+      leaseGeneration: "10",
+    });
+    expect(parseHostedRunnerStatusResponse({
+      inFlight: false,
+      leaseGeneration: "10",
+      mailboxLag: [],
+      userId: "member_123",
+      workspace: null,
+    })).toEqual({
+      inFlight: false,
+      leaseGeneration: "10",
+      mailboxLag: [],
+      userId: "member_123",
+      workspace: null,
+    });
+  });
+
+  it("publishes the runtime-control subpath without restoring removed client surfaces", async () => {
+    const packageJsonPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "package.json",
+    );
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      exports?: Record<string, unknown>;
+    };
+
+    expect(Object.keys(packageJson.exports ?? {}).sort()).toContain("./runtime-control");
+    await expect(import("@murphai/hosted-execution")).resolves.toMatchObject({
+      HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    });
+  });
+});
+
+function createMailboxItem() {
+  return {
+    createdAt: "2026-04-26T00:00:01.000Z",
+    dedupeKey: "conversation:member_123:message_10",
+    id: "mailbox_10",
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: "10",
+    occurredAt: "2026-04-26T00:00:00.000Z",
+    payloadBytes: 128,
+    payloadInlineCiphertext: "ciphertext",
+    payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    updatedAt: "2026-04-26T00:00:01.000Z",
+    userId: "member_123",
+  };
+}
+
+function createWorkspaceState() {
+  return {
+    checkpointedAt: "2026-04-26T00:00:04.000Z",
+    createdAt: "2026-04-26T00:00:00.000Z",
+    nextWakeAt: null,
+    nextWakeReason: null,
+    redactedStatus: {
+      importedConversationSeq: "11",
+      importedSystemSeq: "4",
+    },
+    snapshotRef: null,
+    updatedAt: "2026-04-26T00:00:04.000Z",
+    userId: "member_123",
+    version: "5",
+  };
+}
+
+function createAssistantUsageRecord(): AssistantUsageRecord {
+  return {
+    apiKeyEnv: null,
+    attemptCount: 1,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: null,
+    gatewayTags: ["hosted-runtime"],
+    inputTokens: 10,
+    memberId: "member_123",
+    occurredAt: "2026-04-26T00:00:06.000Z",
+    outputTokens: 5,
+    provider: "openai",
+    providerName: null,
+    reasoningTokens: null,
+    reportingUserId: "member_123",
+    requestedModel: "model_test",
+    routeId: "hosted-runtime",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: "model_test",
+    sessionId: "session_123",
+    stripeMeterSource: "murph",
+    surface: "hosted-runtime",
+    totalTokens: 15,
+    triggerKind: "conversation.message",
+    turnId: "turn_usage",
+    usageId: "turn_usage.attempt-1",
+  };
+}
+
+function createAssistantRuntimeIssueRecord(): AssistantRuntimeIssueRecord {
+  const fingerprint = "abcdef1234567890abcdef12";
+
+  return {
+    component: "hosted.runtime",
+    details: {
+      retryable: true,
+      statusCode: 503,
+    },
+    environment: "hosted",
+    errorCode: "tool_timeout",
+    fingerprint,
+    issueId: `ari_1234567890abcdef_${fingerprint}`,
+    issueKind: "tool_error",
+    occurredAt: "2026-04-26T00:00:07.000Z",
+    operation: "hosted-runtime.import",
+    phase: "tool_call",
+    schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+    severity: "error",
+    summary: "Assistant runtime issue: tool error during tool_call (hosted-runtime.import).",
+    surface: "hosted-runtime",
+  };
+}

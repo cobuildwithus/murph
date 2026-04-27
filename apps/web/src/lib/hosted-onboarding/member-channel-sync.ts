@@ -6,7 +6,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { materializeHostedIngressEnvelopeTx } from "../hosted-ingress/lifecycle";
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberEmailAuthorization,
@@ -73,8 +73,8 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
     occurredAt: input.occurredAt,
   });
 
-  await materializeHostedIngressEnvelopeTx({
-    wake,
+  await appendHostedMailboxEnvelopeTx({
+    envelope: wake,
     tx: input.prisma,
   });
 

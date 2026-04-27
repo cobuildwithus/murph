@@ -10,7 +10,6 @@ import {
   buildHostedRunnerJobRuntime,
   buildHostedRunnerPlatformEnv,
 } from "./runner-env.ts";
-import { isHostedRunnerProcessControlEnvKey } from "./hosted-env-policy.ts";
 import {
   runHostedExecutionJobIsolatedDetailed,
   type HostedExecutionIsolatedRunnerInput,
@@ -19,12 +18,6 @@ import {
   buildHostedExecutionRuntimePlatform,
 } from "./runtime-platform.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
-
-const hostedExecutionChildControlEnvKeys = new Set([
-  "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS",
-  "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
-  "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
-]);
 
 export type HostedExecutionJobRunMode = "in-process" | "isolated";
 
@@ -52,7 +45,7 @@ export function buildHostedExecutionJobRuntime(
 ): HostedAssistantRuntimeConfig {
   const forwardedEnv = requestedRuntime.forwardedEnv === undefined
     ? buildHostedRunnerAmbientEnv(process.env)
-    : stripChildProcessControlEnvKeys(requestedRuntime.forwardedEnv);
+    : { ...requestedRuntime.forwardedEnv };
   const platformEnv = requestedRuntime.platformEnv === undefined
     ? requestedRuntime.forwardedEnv === undefined
       ? buildHostedRunnerPlatformEnv(process.env)
@@ -134,21 +127,3 @@ export function createHostedExecutionJobRunner(
 }
 
 export const runHostedExecutionJob = createHostedExecutionJobRunner();
-
-function stripChildProcessControlEnvKeys(
-  forwardedEnv: HostedAssistantRuntimeConfig["forwardedEnv"],
-): Record<string, string> {
-  const filtered: Record<string, string> = {};
-
-  for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
-    if (
-      hostedExecutionChildControlEnvKeys.has(key)
-      || isHostedRunnerProcessControlEnvKey(key)
-    ) {
-      continue;
-    }
-    filtered[key] = value;
-  }
-
-  return filtered;
-}

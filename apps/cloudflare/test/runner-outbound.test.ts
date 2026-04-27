@@ -5,6 +5,9 @@ import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
+import {
+  HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER,
+} from "../src/runner-outbound/shared-web-control-policy.ts";
 import { resolveRunnerOutboundUserRunnerStub } from "../src/runner-outbound/shared.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import type {
@@ -44,6 +47,47 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync provider connect-link",
     path: "/api/internal/device-sync/providers/google/connect-link",
+  },
+  {
+    body: {
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      requestId: "request_mailbox_1",
+    },
+    name: "hosted mailbox fetch",
+    path: "/api/internal/hosted-mailbox/fetch",
+  },
+  {
+    body: {
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      reason: "import",
+    },
+    name: "hosted workspace checkpoint",
+    path: "/api/internal/hosted-workspace/checkpoint",
+  },
+  {
+    body: {
+      entries: [
+        {
+          at: "2026-04-26T00:00:03.000Z",
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+          redactedJson: {
+            importedCount: 1,
+          },
+        },
+      ],
+    },
+    name: "hosted runtime log",
+    path: "/api/internal/hosted-runtime/log",
   },
 ] as const;
 
@@ -239,6 +283,238 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
+
+  it("proxies allowlisted hosted web-control GET payload routes without a body", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:06.000Z",
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(
+        "http://web-control.worker/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
+        {
+          headers: createRunnerProxyHeaders(),
+          method: "GET",
+        },
+      ),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      fetchedAt: "2026-04-26T00:00:06.000Z",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the allowlisted web-control GET fetch to run.");
+    }
+    const [url, init] = firstCall;
+    expect(String(url)).toBe(
+      "https://web.example.test/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
+    );
+    expect(init?.method).toBe("GET");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBeNull();
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+  });
+
+  it("allows share payload proxy calls to be signed for the runtime-supplied owner only", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(
+        "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+        {
+          headers: createRunnerProxyHeaders({
+            [HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER]: "member_sender",
+          }),
+          method: "GET",
+        },
+      ),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the share payload web-control fetch to run.");
+    }
+    const [url, init] = firstCall;
+    expect(String(url)).toBe(
+      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+    );
+    expect(init?.method).toBe("GET");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_sender");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("allows share import proxy calls to be signed for the runtime-supplied owner only", async () => {
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> => new Response(JSON.stringify({
+      recorded: true,
+      shareId: "share_123",
+      status: "imported",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-execution/share/import", {
+        body: JSON.stringify({
+          importedAt: "2026-04-26T00:00:05.000Z",
+          ownerUserId: "member_sender",
+          shareId: "share_123",
+          status: "imported",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER]: "member_sender",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the share import web-control fetch to run.");
+    }
+    const [url, init] = firstCall;
+    expect(String(url)).toBe("https://web.example.test/api/internal/hosted-execution/share/import");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({
+      importedAt: "2026-04-26T00:00:05.000Z",
+      ownerUserId: "member_sender",
+      shareId: "share_123",
+      status: "imported",
+    }));
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_sender");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("rejects signed-user overrides on non-share web-control proxy paths", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(
+        "http://web-control.worker/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
+        {
+          headers: createRunnerProxyHeaders({
+            [HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER]: "member_sender",
+          }),
+          method: "GET",
+        },
+      ),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects method mismatches on otherwise allowlisted web-control proxy paths", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const getPostOnlyResponse = await handleRunnerOutboundRequest(
+      new Request("http://web-control.worker/api/internal/hosted-runtime/log", {
+        headers: createRunnerProxyHeaders(),
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+    const postGetOnlyResponse = await handleRunnerOutboundRequest(
+      new Request(
+        "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+        {
+          body: JSON.stringify({
+            requestId: "request_share_1",
+          }),
+          headers: createRunnerProxyHeaders({
+            "content-type": "application/json; charset=utf-8",
+          }),
+          method: "POST",
+        },
+      ),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(getPostOnlyResponse.status).toBe(404);
+    expect(postGetOnlyResponse.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("uses the hosted-web control timeout for turn-input refresh", async () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");

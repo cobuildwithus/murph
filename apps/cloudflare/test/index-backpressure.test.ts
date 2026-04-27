@@ -54,22 +54,23 @@ describe("cloudflare worker queue backpressure routes", () => {
     });
   });
 
-  it("accepts the run nudge route without relying on legacy local queue state", async () => {
+  it("accepts the runner nudge route without relying on legacy local queue state", async () => {
     const harness = createUserRunnerDurableObject({
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
     const stub = {
       bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
-      drainHostedRuns: vi.fn(async () => ({
-        committedSeq: "0",
-        requestedTargetSeq: null,
-        targetReached: true,
-      })),
-      nudgeHostedRun: vi.fn(async () => ({
+      drainHostedRuns: vi.fn(),
+      nudgeHostedRun: vi.fn(),
+      nudgeHostedRunner: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: false,
         alreadyRunning: false,
+        inFlight: false,
+        leaseGeneration: "0",
+        nextAlarmAt: null,
       })),
+      runnerStatus: vi.fn(),
       status: vi.fn(async () => ({
         bundleRef: null,
         inFlight: false,
@@ -89,19 +90,14 @@ describe("cloudflare worker queue backpressure routes", () => {
         },
       },
     };
-    const waitUntil = vi.fn((promise: Promise<unknown>) => {
-      void promise;
-    });
-
     const runResponse = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
         headers: {
           authorization: "Bearer control-token",
         },
         method: "POST",
       })),
       env as never,
-      { waitUntil } as never,
     );
 
     expect(runResponse.status).toBe(202);
@@ -109,10 +105,13 @@ describe("cloudflare worker queue backpressure routes", () => {
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "0",
+      nextAlarmAt: null,
     });
     expect(stub.bootstrapUser).toHaveBeenCalledWith("member_123");
-    expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
-    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
   });
 });
 

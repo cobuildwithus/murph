@@ -10,6 +10,14 @@ import {
   withHostedProcessEnvironment,
 } from "../src/hosted-runtime/environment.ts";
 import {
+  buildHostedRuntimeChildEnv,
+  buildHostedRuntimeForwardedEnv,
+  buildHostedRuntimeLaunchSpec,
+  buildHostedRuntimePlatformEnv,
+  buildHostedRuntimeResolvedConfig,
+  readHostedRuntimeCommitTimeoutConfigValue,
+} from "../src/hosted-runtime/launch-spec.ts";
+import {
   createHostedRuntimeResolvedConfig,
 } from "./hosted-runtime-test-helpers.ts";
 
@@ -67,6 +75,198 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.resolvedConfig, resolvedConfig);
   assert.deepEqual(normalized.userEnv, userEnv);
   assert.notEqual(normalized.userEnv, userEnv);
+});
+
+test("hosted runtime launch spec owns semantic env split and runtime config", () => {
+  const spec = buildHostedRuntimeLaunchSpec({
+    commitTimeoutMs: 45_000,
+    configSource: {
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SEND_READY: "true",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+    },
+    forwardedEnv: {
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      LINQ_API_TOKEN: "linq-token",
+      LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      NODE_OPTIONS: "--require /tmp/injected.js",
+      OPENAI_API_KEY: "worker-openai-secret",
+      TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
+      TELEGRAM_BOT_TOKEN: "evil-telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
+    },
+    platformEnv: {
+      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    },
+    userEnv: {
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      OPENAI_API_KEY: "user-openai-secret",
+      TELEGRAM_BOT_TOKEN: "user-telegram-token",
+    },
+  });
+
+  assert.deepEqual(spec.runtime, {
+    commitTimeoutMs: 45_000,
+    forwardedEnv: {
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      LINQ_API_TOKEN: "linq-token",
+      OPENAI_API_KEY: "worker-openai-secret",
+    },
+    platformEnv: {
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    },
+    resolvedConfig: {
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: true,
+      },
+      deviceSync: null,
+      managedAutoReplyChannels: [
+        {
+          capabilityReady: true,
+          channel: "email",
+          memberChannel: "email",
+        },
+        {
+          capabilityReady: true,
+          channel: "linq",
+          memberChannel: "linq",
+        },
+        {
+          capabilityReady: true,
+          channel: "telegram",
+          memberChannel: "telegram",
+        },
+      ],
+    },
+    userEnv: {
+      OPENAI_API_KEY: "user-openai-secret",
+    },
+  });
+});
+
+test("hosted runtime launch spec derives platform env from forwarded env only when no explicit platform env is supplied", () => {
+  const spec = buildHostedRuntimeLaunchSpec({
+    forwardedEnv: {
+      OPENAI_API_KEY: "worker-openai-secret",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+    },
+  });
+
+  assert.deepEqual(spec.runtime.forwardedEnv, {
+    OPENAI_API_KEY: "worker-openai-secret",
+  });
+  assert.deepEqual(spec.runtime.platformEnv, {
+    TELEGRAM_BOT_TOKEN: "telegram-token",
+  });
+});
+
+test("hosted runtime forwarded env profiles are runtime-owned and transport-mappable", () => {
+  assert.deepEqual(
+    buildHostedRuntimeForwardedEnv({
+      HOSTED_EMAIL: {
+        send: async (_message: unknown) => undefined,
+      },
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
+      LINQ_API_BASE_URL: "http://127.0.0.1:4011",
+      LINQ_API_TOKEN: "linq-token",
+      LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
+      TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
+    }, {
+      mapValue: ({ key, value }) =>
+        key.endsWith("_BASE_URL") ? value.replace("127.0.0.1", "host.internal") : value,
+    }),
+    {
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SEND_READY: "true",
+      LINQ_API_BASE_URL: "http://host.internal:4011",
+      LINQ_API_TOKEN: "linq-token",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
+      NODE_ENV: "production",
+      TELEGRAM_API_BASE_URL: "http://host.internal:4012",
+      TELEGRAM_FILE_BASE_URL: "http://host.internal:4013",
+    },
+  );
+});
+
+test("hosted runtime child env projection is a transport projection of forwarded env only", () => {
+  assert.deepEqual(
+    buildHostedRuntimeChildEnv({
+      forwardedEnv: {
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        OPENAI_API_KEY: "worker-openai-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    }),
+    {
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+      OPENAI_API_KEY: "worker-openai-secret",
+    },
+  );
+});
+
+test("hosted runtime platform env selector and timeout parser are reusable outside Cloudflare", () => {
+  assert.deepEqual(
+    buildHostedRuntimePlatformEnv({
+      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    }),
+    {
+      TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+      TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+    },
+  );
+  assert.equal(readHostedRuntimeCommitTimeoutConfigValue("45000"), 45_000);
+  assert.equal(Number.isNaN(readHostedRuntimeCommitTimeoutConfigValue("45000abc")), true);
+});
+
+test("hosted runtime resolved config derives typed channel and device-sync state", () => {
+  const resolved = buildHostedRuntimeResolvedConfig({
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+    DEVICE_SYNC_SECRET: "secret_123",
+    WHOOP_CLIENT_ID: "whoop-client",
+    WHOOP_CLIENT_SECRET: "whoop-secret",
+    HOSTED_EMAIL_DOMAIN: "mail.example.test",
+    HOSTED_EMAIL_INGRESS_READY: "true",
+    HOSTED_EMAIL_LOCAL_PART: "assistant",
+    HOSTED_EMAIL_SEND_READY: "true",
+    TELEGRAM_BOT_TOKEN: "telegram-token",
+  });
+
+  assert.deepEqual(resolved.channelCapabilities, {
+    emailSendReady: true,
+    telegramBotConfigured: true,
+  });
+  assert.deepEqual(resolved.deviceSync, {
+    providerConfigs: {
+      whoop: {
+        clientId: "whoop-client",
+        clientSecret: "whoop-secret",
+      },
+    },
+    publicBaseUrl: "https://device-sync.example.test",
+    secret: "secret_123",
+  });
 });
 
 test("hosted platform-backed env merges non-secret forwarded env with platform-only secrets", () => {

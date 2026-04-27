@@ -8,6 +8,15 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   emitHostedExecutionStructuredLog,
+  parseHostedMailboxFetchResponse,
+  parseHostedMailboxPayloadFetchResponse,
+  parseHostedRuntimeLogResponse,
+  parseHostedRuntimeShareImportResponse,
+  parseHostedRuntimeSharePayloadFetchResponse,
+  parseHostedRuntimeVaultSyncImportResponse,
+  parseHostedRuntimeVaultSyncPayloadFetchResponse,
+  parseHostedWorkspaceCheckpointResponse,
+  parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -15,6 +24,15 @@ import {
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
+  HOSTED_RUNTIME_LOG_PATH,
+  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+  HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+  HOSTED_RUNTIME_SHARE_IMPORT_PATH,
+  HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
+  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+  HOSTED_RUNTIME_WORKSPACE_PATH,
+  buildHostedRuntimeSharePayloadPath,
+  buildHostedRuntimeVaultSyncPayloadPath,
 } from "@murphai/hosted-execution/routes";
 import {
   parseHostedRuntimeDrainEvent,
@@ -38,6 +56,10 @@ import {
   readScopedLocalInternalProxyRouteUserId,
 } from "./local-internal-proxy-route.ts";
 import {
+  assertHostedLocalInternalProxyBaseUrl,
+} from "./local-loopback-proxy.ts";
+import {
+  HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER,
   HOSTED_WEB_ISSUE_RECORD_PATH,
   HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
   HOSTED_WEB_USAGE_RECORD_PATH,
@@ -128,6 +150,36 @@ export function buildHostedExecutionRuntimePlatform(input: {
     ...(hostedWebControlTransport
       ? {
           billingPort: createHostedWebBillingPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+          }),
+          logPort: createHostedWebRuntimeLogPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+          }),
+          mailboxPort: createHostedWebMailboxPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+          }),
+          sharePort: createHostedWebSharePort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+          }),
+          vaultSyncPort: createHostedWebVaultSyncPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport: hostedWebControlTransport,
+          }),
+          workspacePort: createHostedWebWorkspacePort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,
@@ -361,17 +413,7 @@ function createHostedLocalInternalProxyUrl(
   targetUrl: URL,
   boundUserId: string,
 ): URL {
-  let normalizedBaseUrl: URL;
-  try {
-    normalizedBaseUrl = new URL(baseUrl);
-  } catch {
-    throw new TypeError("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL must be an absolute URL.");
-  }
-
-  if (normalizedBaseUrl.protocol !== "http:" && normalizedBaseUrl.protocol !== "https:") {
-    throw new TypeError("HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL must use http or https.");
-  }
-
+  const normalizedBaseUrl = assertHostedLocalInternalProxyBaseUrl(baseUrl);
   const normalizedBasePath = ensureTrailingSlash(normalizedBaseUrl);
   const scopedUserId = readScopedLocalInternalProxyRouteUserId(normalizedBasePath);
   if (scopedUserId !== null && scopedUserId !== boundUserId) {
@@ -498,6 +540,193 @@ function createHostedWebDeviceSyncPort(input: {
   };
 }
 
+function createHostedWebMailboxPort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}) {
+  return {
+    async fetch(request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetch"]>[0]) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted mailbox fetch",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedMailboxFetchResponse(payload);
+    },
+    async fetchPayload(
+      request: Parameters<NonNullable<HostedRuntimePlatform["mailboxPort"]>["fetchPayload"]>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted mailbox payload fetch",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedMailboxPayloadFetchResponse(payload);
+    },
+  };
+}
+
+function createHostedWebWorkspacePort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}) {
+  return {
+    async read() {
+      const payload = await fetchHostedWebControlPlaneJson({
+        boundUserId: input.boundUserId,
+        description: "Hosted workspace read",
+        fetchImpl: input.fetchImpl,
+        method: "GET",
+        path: HOSTED_RUNTIME_WORKSPACE_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedWorkspaceReadResponse(payload);
+    },
+    async checkpoint(
+      request: Parameters<NonNullable<HostedRuntimePlatform["workspacePort"]>["checkpoint"]>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted workspace checkpoint",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedWorkspaceCheckpointResponse(payload);
+    },
+  };
+}
+
+function createHostedWebRuntimeLogPort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}) {
+  return {
+    async write(request: Parameters<NonNullable<HostedRuntimePlatform["logPort"]>["write"]>[0]) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted runtime log write",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_LOG_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedRuntimeLogResponse(payload);
+    },
+  };
+}
+
+function createHostedWebSharePort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}) {
+  return {
+    async fetchPayload(
+      request: Parameters<NonNullable<HostedRuntimePlatform["sharePort"]>["fetchPayload"]>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        boundUserId: input.boundUserId,
+        description: "Hosted share payload fetch",
+        fetchImpl: input.fetchImpl,
+        method: "GET",
+        path: appendHostedRuntimeRequestIdQuery(
+          buildHostedRuntimeSharePayloadPath(request.shareId),
+          request.requestId,
+        ),
+        signedUserId: request.ownerUserId,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedRuntimeSharePayloadFetchResponse(payload);
+    },
+    async recordImport(
+      request: Parameters<NonNullable<HostedRuntimePlatform["sharePort"]>["recordImport"]>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted share import record",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_SHARE_IMPORT_PATH,
+        signedUserId: request.ownerUserId,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedRuntimeShareImportResponse(payload);
+    },
+  };
+}
+
+function createHostedWebVaultSyncPort(input: {
+  boundUserId: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}) {
+  return {
+    async fetchPayload(
+      request: Parameters<NonNullable<HostedRuntimePlatform["vaultSyncPort"]>["fetchPayload"]>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        boundUserId: input.boundUserId,
+        description: "Hosted vault-sync payload fetch",
+        fetchImpl: input.fetchImpl,
+        method: "GET",
+        path: appendHostedRuntimeRequestIdQuery(
+          buildHostedRuntimeVaultSyncPayloadPath(request.sessionId),
+          request.requestId,
+        ),
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedRuntimeVaultSyncPayloadFetchResponse(payload);
+    },
+    async recordImport(
+      request: Parameters<NonNullable<HostedRuntimePlatform["vaultSyncPort"]>["recordImport"]>[0],
+    ) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted vault-sync import record",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedRuntimeVaultSyncImportResponse(payload);
+    },
+  };
+}
+
 function createHostedWebBillingPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -529,12 +758,13 @@ function createHostedWebBillingPort(input: {
 }
 
 async function fetchHostedWebControlPlaneJson(input: {
-  body?: Record<string, unknown>;
+  body?: unknown;
   boundUserId: string;
   description: string;
   fetchImpl: typeof fetch;
   method?: "GET" | "POST";
   path: string;
+  signedUserId?: string;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
@@ -544,7 +774,7 @@ async function fetchHostedWebControlPlaneJson(input: {
     ? await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: input.transport.webControlBaseUrl,
       body,
-      boundUserId: input.boundUserId,
+      boundUserId: input.signedUserId ?? input.boundUserId,
       callbackSigning: input.transport.callbackSigning,
       fetchImpl: input.fetchImpl,
       method,
@@ -556,15 +786,13 @@ async function fetchHostedWebControlPlaneJson(input: {
       fetchImpl: input.fetchImpl,
       init: {
         ...(body === undefined ? {} : { body }),
-        ...(body === undefined
-          ? {}
-          : {
-            headers: {
-              "content-type": "application/json",
-            },
-          }),
+        headers: createHostedWebControlProxyHeaders({
+          hasJsonBody: body !== undefined,
+          signedUserId: input.signedUserId,
+        }),
         method,
       },
+      logPath: createHostedWebControlLogPath(input.path),
       timeoutMs: input.timeoutMs,
       url: createHostedWebControlProxyUrl(input.path),
     });
@@ -586,7 +814,7 @@ async function fetchHostedWebControlPlaneJson(input: {
       details: {
         description: input.description,
         method,
-        path: input.path,
+        path: createHostedWebControlLogPath(input.path),
         responseOrigin: input.transport.mode === "direct"
           ? new URL(input.transport.webControlBaseUrl).origin
           : CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
@@ -620,6 +848,44 @@ function createHostedWebControlProxyUrl(path: string): URL {
     path.replace(/^\/+/u, ""),
     `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}/`,
   );
+}
+
+function createHostedWebControlLogPath(path: string): string {
+  const url = new URL(path.replace(/^\/+/u, ""), "https://hosted-runtime.invalid/");
+  if (/^\/api\/internal\/hosted-execution\/share\/[^/]+\/payload$/u.test(url.pathname)) {
+    return "/api/internal/hosted-execution/share/:shareId/payload";
+  }
+  if (/^\/api\/internal\/hosted-execution\/vault-sync\/[^/]+\/payload$/u.test(url.pathname)) {
+    return "/api/internal/hosted-execution/vault-sync/:sessionId/payload";
+  }
+
+  return url.pathname;
+}
+
+function createHostedWebControlProxyHeaders(input: {
+  hasJsonBody: boolean;
+  signedUserId?: string;
+}): Headers | undefined {
+  const headers = new Headers();
+  let hasHeaders = false;
+
+  if (input.hasJsonBody) {
+    headers.set("content-type", "application/json");
+    hasHeaders = true;
+  }
+
+  if (input.signedUserId) {
+    headers.set(HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER, input.signedUserId);
+    hasHeaders = true;
+  }
+
+  return hasHeaders ? headers : undefined;
+}
+
+function appendHostedRuntimeRequestIdQuery(path: string, requestId: string): string {
+  const url = new URL(path.replace(/^\/+/u, ""), "https://hosted-runtime.invalid/");
+  url.searchParams.set("requestId", requestId);
+  return `${url.pathname}${url.search}`;
 }
 
 async function fetchHostedJson(input: {
@@ -699,6 +965,7 @@ async function fetchHostedResponse(input: {
   description: string;
   fetchImpl: typeof fetch;
   init?: RequestInit;
+  logPath?: string;
   timeoutMs: number;
   url: URL;
 }): Promise<Response> {
@@ -713,7 +980,7 @@ async function fetchHostedResponse(input: {
       details: {
         description: input.description,
         method: input.init?.method ?? "GET",
-        path: input.url.pathname,
+        path: input.logPath ?? input.url.pathname,
         responseOrigin: input.url.origin,
       },
       error,

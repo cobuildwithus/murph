@@ -1,0 +1,321 @@
+import {
+  readConfiguredDeviceSyncRuntimeConfig,
+} from "@murphai/device-syncd/runtime-config";
+import {
+  HOSTED_AI_USAGE_BILLING_MODE_ENV,
+} from "@murphai/hosted-execution";
+import {
+  readHostedEmailCapabilities,
+} from "@murphai/hosted-execution/hosted-email";
+
+import {
+  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+  HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+} from "@murphai/operator-config/hosted-assistant-config-constants";
+import {
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
+  HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
+} from "../hosted-env-categories.ts";
+import {
+  sanitizeHostedAssistantRuntimeForwardedEnv,
+  sanitizeHostedAssistantRuntimePlatformEnv,
+  sanitizeHostedAssistantRuntimeUserEnv,
+} from "./environment.ts";
+import type {
+  HostedAssistantRuntimeConfig,
+  HostedAssistantRuntimeResolvedConfig,
+} from "./models.ts";
+import {
+  readHostedRunnerCommitTimeoutMs,
+} from "./timeouts.ts";
+
+export const HOSTED_RUNTIME_ENV_PROFILES_ENV =
+  "HOSTED_EXECUTION_RUNNER_ENV_PROFILES";
+
+export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
+  assistant: [
+    ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+    HOSTED_AI_USAGE_BILLING_MODE_ENV,
+    "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
+    "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
+    "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
+    "HOSTED_AI_USAGE_REPORTING_SECRET",
+    "HOSTED_LOG_FINGERPRINT_SECRET",
+    "NODE_ENV",
+    ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  ],
+  "hosted-email": HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.hostedEmailConfigured,
+  // Linq webhook verification stays on the ingress boundary. The runtime only
+  // receives outbound Linq API config.
+  linq: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.linqConfigured,
+  mapbox: [
+    "MAPBOX_ACCESS_TOKEN",
+  ],
+  parsers: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.parserToolingConfigured,
+  telegram: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured,
+  web: [
+    "BRAVE_API_KEY",
+    "MURPH_WEB_FETCH_ENABLED",
+    "MURPH_WEB_SEARCH_MAX_RESULTS",
+    "MURPH_WEB_SEARCH_PROVIDER",
+    "MURPH_WEB_SEARCH_TIMEOUT_MS",
+  ],
+} as const;
+
+export const HOSTED_RUNTIME_ENV_KEY_NAMES: readonly string[] = Array.from(
+  new Set(Object.values(HOSTED_RUNTIME_ENV_PROFILE_KEYS).flatMap((keys) => [...keys])),
+);
+
+export const HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS =
+  HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS;
+
+export type HostedRuntimeEnvProfileName = keyof typeof HOSTED_RUNTIME_ENV_PROFILE_KEYS;
+
+const DEFAULT_HOSTED_RUNTIME_ENV_PROFILE_NAMES = [
+  "assistant",
+  "parsers",
+  "web",
+] as const satisfies readonly HostedRuntimeEnvProfileName[];
+
+type UnknownEnvSource = Readonly<Record<string, unknown>>;
+
+export interface HostedRuntimeLaunchSpec {
+  runtime: HostedAssistantRuntimeConfig;
+}
+
+export interface HostedRuntimeLaunchSpecInput {
+  commitTimeoutMs?: number | null;
+  configSource?: Readonly<Record<string, string | undefined>>;
+  forwardedEnv: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
+  resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
+  userEnv?: Readonly<Record<string, string>>;
+}
+
+export function buildHostedRuntimeLaunchSpec(
+  input: HostedRuntimeLaunchSpecInput,
+): HostedRuntimeLaunchSpec {
+  const splitEnv = splitHostedRuntimeLaunchEnv({
+    forwardedEnv: input.forwardedEnv,
+    platformEnv: input.platformEnv,
+  });
+  const resolvedConfigSource = {
+    ...(input.configSource ?? input.forwardedEnv),
+    ...splitEnv.platformEnv,
+  };
+
+  return {
+    runtime: {
+      commitTimeoutMs: readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null),
+      forwardedEnv: splitEnv.forwardedEnv,
+      ...(Object.keys(splitEnv.platformEnv).length === 0
+        ? {}
+        : { platformEnv: splitEnv.platformEnv }),
+      resolvedConfig:
+        input.resolvedConfig
+        ?? buildHostedRuntimeResolvedConfig(resolvedConfigSource),
+      userEnv: sanitizeHostedAssistantRuntimeUserEnv({
+        forwardedEnv: splitEnv.forwardedEnv,
+        userEnv: input.userEnv ?? {},
+      }),
+    },
+  };
+}
+
+export function buildHostedRuntimeForwardedEnv(
+  source: UnknownEnvSource,
+  options: {
+    mapValue?: (input: {
+      key: string;
+      source: UnknownEnvSource;
+      value: string;
+    }) => string;
+  } = {},
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  const enabledProfileNames = resolveHostedRuntimeEnvProfileNames(source);
+  const allowedKeys = resolveHostedRuntimeEnvKeys(enabledProfileNames);
+
+  for (const [key, value] of Object.entries(source)) {
+    if (
+      typeof value !== "string"
+      || value.length === 0
+      || !allowedKeys.has(key)
+    ) {
+      continue;
+    }
+
+    values[key] = options.mapValue
+      ? options.mapValue({ key, source, value })
+      : value;
+  }
+
+  if (!values.NODE_ENV) {
+    values.NODE_ENV = "production";
+  }
+
+  const emailCapabilities = enabledProfileNames.has("hosted-email")
+    ? readHostedEmailCapabilities(source)
+    : {
+        ingressReady: false,
+        sendReady: false,
+      };
+  values.HOSTED_EMAIL_INGRESS_READY = emailCapabilities.ingressReady ? "true" : "false";
+  values.HOSTED_EMAIL_SEND_READY = emailCapabilities.sendReady ? "true" : "false";
+
+  return values;
+}
+
+export function buildHostedRuntimeChildEnv(input: {
+  forwardedEnv: Readonly<Record<string, string>>;
+}): Record<string, string> {
+  return splitHostedRuntimeLaunchEnv({
+    forwardedEnv: input.forwardedEnv,
+  }).forwardedEnv;
+}
+
+export function buildHostedRuntimePlatformEnv(
+  source: Readonly<Record<string, unknown>>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES) {
+    const value = normalizeHostedRuntimeEnvString(
+      typeof source[key] === "string" ? source[key] : undefined,
+    );
+    if (value) {
+      env[key] = value;
+    }
+  }
+
+  return env;
+}
+
+export function buildHostedRuntimeResolvedConfig(
+  configSource: Readonly<Record<string, string | undefined>>,
+): HostedAssistantRuntimeResolvedConfig {
+  const emailCapabilities = readHostedEmailCapabilities(configSource);
+  const deviceSync = readConfiguredDeviceSyncRuntimeConfig(configSource);
+
+  return {
+    channelCapabilities: {
+      emailSendReady: emailCapabilities.sendReady,
+      telegramBotConfigured:
+        normalizeHostedRuntimeEnvString(configSource.TELEGRAM_BOT_TOKEN) !== null,
+    },
+    deviceSync,
+    managedAutoReplyChannels: [
+      {
+        capabilityReady: emailCapabilities.sendReady,
+        channel: "email",
+        memberChannel: "email",
+      },
+      {
+        capabilityReady: true,
+        channel: "linq",
+        memberChannel: "linq",
+      },
+      {
+        capabilityReady:
+          normalizeHostedRuntimeEnvString(configSource.TELEGRAM_BOT_TOKEN) !== null,
+        channel: "telegram",
+        memberChannel: "telegram",
+      },
+    ],
+  };
+}
+
+export function readHostedRuntimeCommitTimeoutConfigValue(
+  value: string | undefined,
+): number | null {
+  const normalized = normalizeHostedRuntimeEnvString(value);
+  if (normalized === null) {
+    return null;
+  }
+
+  if (!/^[0-9]+$/u.test(normalized)) {
+    return Number.NaN;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : Number.NaN;
+}
+
+function splitHostedRuntimeLaunchEnv(input: {
+  forwardedEnv: Readonly<Record<string, string>>;
+  platformEnv?: Readonly<Record<string, string>>;
+}): {
+  forwardedEnv: Record<string, string>;
+  platformEnv: Record<string, string>;
+} {
+  const forwardedPlatformEnv = buildHostedRuntimePlatformEnv(input.forwardedEnv);
+  const forwardedEnv = sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv);
+  const explicitPlatformEnv =
+    input.platformEnv === undefined
+      ? null
+      : sanitizeHostedAssistantRuntimePlatformEnv(input.platformEnv);
+  const platformEnv = explicitPlatformEnv ? { ...explicitPlatformEnv } : forwardedPlatformEnv;
+
+  return {
+    forwardedEnv,
+    platformEnv,
+  };
+}
+
+function resolveHostedRuntimeEnvProfileNames(
+  source: UnknownEnvSource,
+): Set<HostedRuntimeEnvProfileName> {
+  const enabledProfiles = new Set<HostedRuntimeEnvProfileName>(
+    DEFAULT_HOSTED_RUNTIME_ENV_PROFILE_NAMES,
+  );
+  const configuredProfiles = parseHostedRuntimeEnvCsvList(
+    typeof source[HOSTED_RUNTIME_ENV_PROFILES_ENV] === "string"
+      ? source[HOSTED_RUNTIME_ENV_PROFILES_ENV]
+      : undefined,
+    (entry) => entry.toLowerCase(),
+  );
+
+  for (const profileName of configuredProfiles) {
+    if (isHostedRuntimeEnvProfileName(profileName)) {
+      enabledProfiles.add(profileName);
+    }
+  }
+
+  return enabledProfiles;
+}
+
+function resolveHostedRuntimeEnvKeys(
+  profileNames: ReadonlySet<HostedRuntimeEnvProfileName>,
+): Set<string> {
+  const keys = new Set<string>();
+
+  for (const profileName of profileNames) {
+    for (const key of HOSTED_RUNTIME_ENV_PROFILE_KEYS[profileName]) {
+      keys.add(key);
+    }
+  }
+
+  return keys;
+}
+
+function isHostedRuntimeEnvProfileName(
+  value: string,
+): value is HostedRuntimeEnvProfileName {
+  return Object.hasOwn(HOSTED_RUNTIME_ENV_PROFILE_KEYS, value);
+}
+
+function parseHostedRuntimeEnvCsvList(
+  value: string | undefined,
+  normalize: (entry: string) => string = (entry) => entry.toUpperCase(),
+): string[] {
+  return String(value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => normalize(entry));
+}
+
+function normalizeHostedRuntimeEnvString(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}

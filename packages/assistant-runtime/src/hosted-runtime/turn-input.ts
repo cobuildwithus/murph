@@ -1,5 +1,6 @@
 import {
   createInboxBackedAssistantTurnInputPort,
+  type AssistantTurnInputRefreshResult,
   type AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
 import {
@@ -14,6 +15,9 @@ import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
 import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import type {
+  HostedRuntimeTurnInputPort,
+} from "./platform.ts";
 
 export function createHostedAssistantTurnInputPort(input: {
   inboxServices: Parameters<typeof createInboxBackedAssistantTurnInputPort>[0]["inboxServices"];
@@ -27,7 +31,9 @@ export function createHostedAssistantTurnInputPort(input: {
   wake: HostedRuntimeEvent;
 }): AssistantTurnInputPort | undefined {
   const hostedTurnInputPort = input.runtime.platform.turnInputPort;
-  if (!hostedTurnInputPort) {
+  const refreshMailboxBeforeDelivery =
+    input.runtime.platform.refreshMailboxBeforeDelivery ?? null;
+  if (!hostedTurnInputPort && !refreshMailboxBeforeDelivery) {
     return undefined;
   }
 
@@ -42,27 +48,49 @@ export function createHostedAssistantTurnInputPort(input: {
   return {
     async refresh(refreshInput) {
       let imported = false;
-      let refresh: Awaited<ReturnType<typeof hostedTurnInputPort.refresh>> | null = null;
+      let mailboxRefresh: AssistantTurnInputRefreshResult | null = null;
+      let refresh: Awaited<ReturnType<HostedRuntimeTurnInputPort["refresh"]>> | null = null;
 
-      try {
-        refresh = await hostedTurnInputPort.refresh({
-          ...(lastImportedSeq ? { afterSeq: lastImportedSeq } : {}),
-          phase: refreshInput.phase,
-          requestId: input.requestId,
-        });
-      } catch (error) {
-        emitHostedExecutionStructuredLog({
-          component: "runtime",
-          details: {
+      if (refreshInput.phase === "before_delivery" && refreshMailboxBeforeDelivery) {
+        try {
+          mailboxRefresh = await refreshMailboxBeforeDelivery({
             requestId: input.requestId,
-          },
-          error,
-          level: "warn",
-          message: "Hosted assistant turn-input refresh failed before delivery.",
-          phase: "wake.running",
-          wake: input.wake,
-        });
-        throw error;
+          });
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "runtime",
+            details: {
+              requestId: input.requestId,
+            },
+            error,
+            level: "warn",
+            message: "Hosted assistant mailbox refresh failed before delivery.",
+            phase: "wake.running",
+            wake: input.wake,
+          });
+          throw error;
+        }
+      } else if (hostedTurnInputPort) {
+        try {
+          refresh = await hostedTurnInputPort.refresh({
+            ...(lastImportedSeq ? { afterSeq: lastImportedSeq } : {}),
+            phase: refreshInput.phase,
+            requestId: input.requestId,
+          });
+        } catch (error) {
+          emitHostedExecutionStructuredLog({
+            component: "runtime",
+            details: {
+              requestId: input.requestId,
+            },
+            error,
+            level: "warn",
+            message: "Hosted assistant turn-input refresh failed before delivery.",
+            phase: "wake.running",
+            wake: input.wake,
+          });
+          throw error;
+        }
       }
 
       for (const event of refresh?.events ?? []) {
@@ -96,19 +124,47 @@ export function createHostedAssistantTurnInputPort(input: {
       }
 
       const baseResult = await basePort.refresh(refreshInput);
-      if (imported && !baseResult.progressed) {
-        return {
-          progressed: true,
-          reason: "ingested_input",
-        };
-      }
-
-      return baseResult;
+      return mergeHostedTurnInputRefreshResult({
+        baseResult,
+        imported,
+        mailboxRefresh,
+      });
     },
     listNewConversationCaptures(query) {
       return basePort.listNewConversationCaptures(query);
     },
   };
+}
+
+function mergeHostedTurnInputRefreshResult(input: {
+  baseResult: AssistantTurnInputRefreshResult;
+  imported: boolean;
+  mailboxRefresh: AssistantTurnInputRefreshResult | null;
+}): AssistantTurnInputRefreshResult {
+  if (input.baseResult.progressed) {
+    return input.baseResult;
+  }
+
+  if (input.mailboxRefresh?.progressed) {
+    return input.mailboxRefresh;
+  }
+
+  if (input.imported) {
+    return {
+      progressed: true,
+      reason: "ingested_input",
+    };
+  }
+
+  if (
+    input.mailboxRefresh
+    && input.mailboxRefresh.reason !== "no_new_input"
+    && input.mailboxRefresh.reason !== "no_port"
+  ) {
+    return input.mailboxRefresh;
+  }
+
+  return input.baseResult;
 }
 
 function maxBigIntString(left: string | null, right: string): string {

@@ -31,11 +31,11 @@ describe("nudgeHostedRunBestEffort", () => {
   });
 
   it("swallows nudge failures because the handoff is best-effort", async () => {
-    const nudgeUserRun = vi.fn().mockRejectedValue(new Error("nudge failed"));
+    const nudgeUserRunner = vi.fn().mockRejectedValue(new Error("nudge failed"));
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
-      getStatus: vi.fn(),
-      nudgeUserRun,
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -46,21 +46,23 @@ describe("nudgeHostedRunBestEffort", () => {
     ).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalledWith(
-      "Hosted run nudge failed.",
+      "Hosted runner nudge failed.",
       expect.objectContaining({ message: "nudge failed" }),
     );
   });
 
   it("nudges the user immediately when configured", async () => {
-    const nudgeUserRun = vi.fn().mockResolvedValue({
+    const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "1",
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
-      getStatus: vi.fn(),
-      nudgeUserRun,
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     await nudgeHostedRunBestEffort({
@@ -69,19 +71,21 @@ describe("nudgeHostedRunBestEffort", () => {
       userId: "user-123",
     });
 
-    expect(nudgeUserRun).toHaveBeenCalledWith("user-123");
+    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
   });
 
   it("schedules a deferred webhook nudge without an inline drain wait contract", async () => {
-    const nudgeUserRun = vi.fn().mockResolvedValue({
+    const nudgeUserRunner = vi.fn().mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "1",
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
-      getStatus: vi.fn(),
-      nudgeUserRun,
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
     const deferred: Array<() => Promise<void>> = [];
@@ -99,12 +103,12 @@ describe("nudgeHostedRunBestEffort", () => {
       userId: "user-123",
     });
 
-    expect(nudgeUserRun).not.toHaveBeenCalled();
+    expect(nudgeUserRunner).not.toHaveBeenCalled();
     expect(deferred).toHaveLength(1);
 
     await deferred[0]?.();
 
-    expect(nudgeUserRun).toHaveBeenCalledTimes(1);
-    expect(nudgeUserRun).toHaveBeenCalledWith("user-123");
+    expect(nudgeUserRunner).toHaveBeenCalledTimes(1);
+    expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
   });
 });
