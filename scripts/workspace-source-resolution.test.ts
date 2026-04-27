@@ -31,6 +31,9 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/hosted-email")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/hosted-email.ts"),
     );
+    expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/browser-vault")).toBe(
+      path.join(repoRoot, "packages/hosted-execution/src/browser-vault.ts"),
+    );
     expect(resolveAliasReplacement(aliases, "@murphai/runtime-state/node/assistant-usage")).toBe(
       path.join(repoRoot, "packages/runtime-state/src/node/assistant-usage.ts"),
     );
