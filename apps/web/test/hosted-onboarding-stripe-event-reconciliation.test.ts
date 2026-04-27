@@ -1,4 +1,4 @@
-import { HostedBillingStatus, HostedStripeEventStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedStripeEventStatus, Prisma } from "@prisma/client";
 import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -359,6 +359,7 @@ describe("hosted Stripe event reconciliation", () => {
   it("marks the receipt failed when Stripe event retrieval fails", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockRejectedValue(new Error("Stripe unavailable"));
 
     await recordHostedStripeEvent({
@@ -381,6 +382,75 @@ describe("hosted Stripe event reconciliation", () => {
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       eventId: "evt_invoice_paid_123",
       lastErrorCode: "Error",
+      lastErrorMessage: "[redacted]",
+      status: HostedStripeEventStatus.failed,
+    }));
+    expect(errorSpy).toHaveBeenCalledWith("Hosted Stripe event reconciliation failed.", {
+      attemptCount: 1,
+      errorMessage: "Stripe unavailable",
+      errorName: "Error",
+      eventIdSuffix: "id_123",
+      eventType: "invoice.paid",
+      poisoned: false,
+    });
+  });
+
+  it("logs bounded Prisma diagnostics when Stripe reconciliation fails after retrieval", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeInvoicePaid.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError(
+        "Raw query failed. Code: `42P01`. Message: `relation \"missing_table\" does not exist while reading /tmp/app with token=secret`",
+        {
+          clientVersion: "7.5.0",
+          code: "P2010",
+          meta: {
+            code: "42P01",
+            modelName: "HostedMailboxItem",
+            secretValue: "do-not-log",
+            table: "missing_table",
+          },
+        },
+      ),
+    );
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      eventId: "evt_invoice_paid_123",
+      hostedExecutionEventId: null,
+      status: "failed",
+    });
+
+    expect(errorSpy).toHaveBeenCalledWith("Hosted Stripe event reconciliation failed.", {
+      attemptCount: 1,
+      errorCode: "P2010",
+      errorName: "PrismaClientKnownRequestError",
+      eventIdSuffix: "id_123",
+      eventType: "invoice.paid",
+      poisoned: false,
+      prismaClientVersion: "7.5.0",
+      prismaCode: "P2010",
+      prismaMessage:
+        "Raw query failed. Code: `42P01`. Message: `relation \"missing_table\" does not exist while reading <redacted-path> with token=<redacted-secret>",
+      prismaMeta: {
+        modelName: "HostedMailboxItem",
+        table: "missing_table",
+      },
+    });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      lastErrorCode: "P2010",
       lastErrorMessage: "[redacted]",
       status: HostedStripeEventStatus.failed,
     }));
