@@ -4,8 +4,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  createAssistantTurnBeforeDeliveryHook,
-  isAssistantTurnRevisionRequiredError,
   type AssistantTurnInputRefreshResult,
   type AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
@@ -111,7 +109,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("assistant");
           assert.equal(input.workspace, null);
           assert.equal(input.initialMailboxImport.checkpoint?.checkpointed, true);
-          assert.equal(input.platform.refreshMailboxBeforeDelivery !== undefined, true);
+          assert.equal(input.platform.refreshMailboxForActiveTurnInput !== undefined, true);
           return {
             progressed: false,
           };
@@ -315,7 +313,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("before-delivery refresh imports and checkpoints late conversation input before local revision", async () => {
+  test("active-turn refresh imports and checkpoints late conversation input before continuation admission", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -337,7 +335,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       try {
         await runHostedWorkspaceUntilIdleOrBudget({
           checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-            attemptId: "attempt_synthetic_runner_revision",
+            attemptId: "attempt_synthetic_runner_active_turn",
             expectedWorkspaceVersion: "0",
             leaseGeneration: "4",
             nextWakeAt: null,
@@ -355,9 +353,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             mailboxPort,
             workspacePort,
           }),
-          requestId: "request_synthetic_runner_revision",
+          requestId: "request_synthetic_runner_active_turn",
           runtimeLogContext: {
-            attemptId: "attempt_synthetic_runner_revision",
+            attemptId: "attempt_synthetic_runner_active_turn",
             leaseGeneration: "4",
             workspaceVersion: "0",
           },
@@ -370,13 +368,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
             const turnInputPort: AssistantTurnInputPort = {
               async refresh(refreshInput) {
-                assert.equal(refreshInput.phase, "before_delivery");
-                const refreshMailbox = input.platform.refreshMailboxBeforeDelivery;
+                assert.equal(refreshInput.phase, "after_provider");
+                const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
                 if (typeof refreshMailbox !== "function") {
                   throw new Error("Expected hosted mailbox refresh to be installed.");
                 }
                 return refreshMailbox({
-                  requestId: "request_synthetic_runner_before_delivery",
+                  requestId: "request_synthetic_runner_active_turn_input",
                 });
               },
               async listNewConversationCaptures(query) {
@@ -415,7 +413,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 };
               },
             };
-            const hook = createAssistantTurnBeforeDeliveryHook({
+            await turnInputPort.refresh({
+              phase: "after_provider",
+            });
+            const lateCaptures = await turnInputPort.listNewConversationCaptures({
               afterCursor: {
                 captureId: "capture_synthetic_initial",
                 createdAt: "2026-04-26T00:00:01.000Z",
@@ -430,15 +431,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 threadIsDirect: true,
               },
               knownCaptureIds: ["capture_synthetic_initial"],
-              port: turnInputPort,
             });
-
-            await hook({
-              response: "draft",
-              sessionId: "session_synthetic",
-              turnId: "turn_synthetic",
-              vault: vaultRoot,
-            });
+            assert.equal(lateCaptures.captures.length, 1);
             return {
               progressed: true,
             };
@@ -451,15 +445,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         caught = error;
       }
 
-      assert.equal(isAssistantTurnRevisionRequiredError(caught), true);
+      assert.equal(caught, undefined);
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "before_delivery_refresh",
+        "active_turn_input",
+        "maintenance",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1"],
+        ["0", "1", "2"],
       );
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
@@ -476,7 +471,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       );
       assert.deepEqual(logRequests[1]?.entries[0], {
         at: TEST_NOW,
-        attemptId: "attempt_synthetic_runner_revision",
+        attemptId: "attempt_synthetic_runner_active_turn",
         component: "mailbox",
         eventCode: "mailbox.imported",
         leaseGeneration: "4",
@@ -484,7 +479,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         mailboxLane: "conversation",
         mailboxSeqEnd: "2",
         mailboxSeqStart: "1",
-        phase: "before_delivery",
+        phase: "active_turn_input",
         redactedJson: {
           blockCodes: [],
           blockedCount: 0,
@@ -500,6 +495,86 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           systemSeqStart: "0",
         },
         workspaceVersion: "0",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("checkpoints accepted active-turn input before the assistant samples a continuation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+    });
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_acceptance",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort,
+        }),
+        requestId: "request_synthetic_runner_acceptance",
+        async runAssistantPhase(input) {
+          const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
+          if (typeof checkpointActiveTurnInput !== "function") {
+            throw new Error("Expected hosted active-turn checkpoint to be installed.");
+          }
+          await checkpointActiveTurnInput({
+            acceptedInputIds: ["request-1"],
+            providerRequestOrdinal: 0,
+            requestId: "request_synthetic_runner_acceptance",
+            sessionId: "session_synthetic",
+            turnId: "turn_synthetic",
+            vault: vaultRoot,
+          });
+          return {};
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "active_turn_acceptance",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+        acceptedInputCount: 1,
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+        providerRequestOrdinal: 0,
       });
     } finally {
       await rm(vaultRoot, {
@@ -605,6 +680,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ["0", "1"],
       );
       assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "0",
+        hostedMailboxFetchedCount: 0,
+        hostedMailboxImportedCount: 0,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
         hostedOutboxDeliveryAttempted: 1,
         hostedOutboxDeliverySent: 1,
       });
@@ -616,8 +697,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("summarizes before-delivery refreshes without exposing payload state", async () => {
-    const idle = await runBeforeDeliveryRefreshSummaryScenario({
+  test("summarizes active-turn refreshes without exposing payload state", async () => {
+    const idle = await runActiveTurnRefreshSummaryScenario({
       lateItem: null,
     });
     assert.deepEqual(idle, {
@@ -625,7 +706,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       reason: "no_new_input",
     });
 
-    const retryable = await runBeforeDeliveryRefreshSummaryScenario({
+    const retryable = await runActiveTurnRefreshSummaryScenario({
       lateItem: createMailboxItem({
         id: "mailbox_item_runner_sidecar_retry",
         laneSeq: "2",
@@ -639,7 +720,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       reason: "source_unavailable",
     });
 
-    const quarantined = await runBeforeDeliveryRefreshSummaryScenario({
+    const quarantined = await runActiveTurnRefreshSummaryScenario({
       lateItem: createMailboxItem({
         id: "mailbox_item_runner_quarantine",
         laneSeq: "2",
@@ -829,7 +910,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("rolls back only the before-delivery mailbox state when the second checkpoint is stale", async () => {
+  test("rolls back only the active-turn mailbox state when the second checkpoint is stale", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -843,7 +924,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
-      checkpointed: (request) => request.reason !== "before_delivery_refresh",
+      checkpointed: (request) => request.reason !== "active_turn_input",
     });
 
     try {
@@ -874,12 +955,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               laneSeq: "2",
               occurredAt: "2026-04-26T00:00:02.000Z",
             }));
-            const refreshMailbox = phaseInput.platform.refreshMailboxBeforeDelivery;
+            const refreshMailbox = phaseInput.platform.refreshMailboxForActiveTurnInput;
             if (typeof refreshMailbox !== "function") {
               throw new Error("Expected hosted mailbox refresh to be installed.");
             }
             await refreshMailbox({
-              requestId: "request_synthetic_runner_stale_refresh_before_delivery",
+              requestId: "request_synthetic_runner_stale_refresh_active_turn_input",
             });
             return {};
           },
@@ -893,7 +974,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.ok(caught instanceof HostedMailboxImportCheckpointConflictError);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
-        "before_delivery_refresh",
+        "active_turn_input",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
@@ -1011,7 +1092,7 @@ function createMailboxPort(input: {
   };
 }
 
-async function runBeforeDeliveryRefreshSummaryScenario(input: {
+async function runActiveTurnRefreshSummaryScenario(input: {
   lateItem: HostedMailboxItem | null;
   payloadsUnavailable?: boolean;
 }) {
@@ -1055,12 +1136,12 @@ async function runBeforeDeliveryRefreshSummaryScenario(input: {
         if (input.lateItem) {
           items.push(input.lateItem);
         }
-        const refreshMailbox = phaseInput.platform.refreshMailboxBeforeDelivery;
+        const refreshMailbox = phaseInput.platform.refreshMailboxForActiveTurnInput;
         if (typeof refreshMailbox !== "function") {
           throw new Error("Expected hosted mailbox refresh to be installed.");
         }
         refreshResult = await refreshMailbox({
-          requestId: "request_synthetic_runner_summary_before_delivery",
+          requestId: "request_synthetic_runner_summary_active_turn_input",
         });
         return {};
       },
@@ -1069,7 +1150,7 @@ async function runBeforeDeliveryRefreshSummaryScenario(input: {
     });
 
     if (!refreshResult) {
-      throw new Error("Expected before-delivery refresh result.");
+      throw new Error("Expected active-turn refresh result.");
     }
     return refreshResult;
   } finally {

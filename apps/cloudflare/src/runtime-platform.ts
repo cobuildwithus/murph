@@ -87,6 +87,9 @@ export interface HostedWorkspaceCheckpointBridgeAuthority {
     | HostedRuntimeBridgeCheckpointLease
     | null
     | Promise<HostedRuntimeBridgeCheckpointLease | null>;
+  recordCheckpoint?(input: {
+    workspaceVersion: string;
+  }): Promise<void> | void;
 }
 
 export function buildHostedExecutionRuntimePlatform(input: {
@@ -608,12 +611,18 @@ function createHostedWebWorkspacePort(input: {
         return await checkpointWorkspace(request);
       }
 
-      return await checkpointHostedRuntimeBridgeWebWorkspace({
+      const response = await checkpointHostedRuntimeBridgeWebWorkspace({
         checkpointWorkspace,
         readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
         request,
         userId: input.boundUserId,
       });
+      if (response.checkpointed) {
+        await input.workspaceCheckpointBridge.recordCheckpoint?.({
+          workspaceVersion: response.workspace.version,
+        });
+      }
+      return response;
     },
   };
 }

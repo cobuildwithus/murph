@@ -126,6 +126,7 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK).toContain("generated-x");
     expect(merged.HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL).toBe("http://127.0.0.1:9998");
     expect(merged.HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN).toBe("stale-token");
+    expect(merged.ALLOW_LOCAL_INTERNAL_PROXY).toBe("true");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG).toBe("murph");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME).toBe("murph-web");
     expect(merged.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("development");
@@ -306,6 +307,7 @@ describe("buildWranglerVarArgs", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        ALLOW_LOCAL_INTERNAL_PROXY: "true",
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
@@ -317,6 +319,8 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_WEB_BASE_URL:http://127.0.0.1:3000",
       "--var",
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
+      "--var",
+      "ALLOW_LOCAL_INTERNAL_PROXY:true",
       "--var",
       "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:http://127.0.0.1:8787",
       "--var",

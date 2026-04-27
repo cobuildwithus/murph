@@ -86,6 +86,13 @@ export interface HostedLocalFullStackScenario {
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
+  waitForHostedIdle(
+    userId: string,
+    input?: {
+      pollIntervalMs?: number;
+      timeoutMs?: number;
+    },
+  ): Promise<HostedRunnerStatusResponse>;
   waitForLatestPendingWake(userId: string): Promise<HostedRunnerNudgeResult>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
@@ -159,6 +166,7 @@ export async function startHostedLocalFullStackScenario(input: {
       MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
       MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
       MURPH_DEV_WEB_PORT: String(webPort),
+      MURPH_DEV_WORKER_HOST: "0.0.0.0",
       MURPH_DEV_WORKER_PORT: String(workerPort),
       NEXT_DIST_DIR_MODE: "smoke",
       VERCEL_OIDC_TOKEN: oidcFixture.token,
@@ -280,6 +288,8 @@ export async function startHostedLocalFullStackScenario(input: {
       },
       waitForHostedCompletion: async (userId, waitInput) =>
         await scenarioHarness.waitForHostedCompletion(userId, waitInput),
+      waitForHostedIdle: async (userId, waitInput) =>
+        await scenarioHarness.waitForHostedIdle(userId, waitInput),
       waitForLatestPendingWake: async (userId) =>
         await wakeHostedWorkerForLatestPendingWake({
           harness: scenarioHarness,
