@@ -1,6 +1,5 @@
 import { createRequire } from 'node:module'
 import { Cli } from 'incur'
-import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import {
   createIntegratedVaultServices,
 } from '@murphai/vault-usecases'
@@ -24,9 +23,7 @@ export const CLI_CONFIG_FILES = ['~/.config/murph/config.json'] as const
 
 export function createDefaultVaultServices(): CliVaultServices {
   return ensureCliVaultServices(
-    createIntegratedVaultServices({
-      foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-    }),
+    createIntegratedVaultServices(),
   )
 }
 

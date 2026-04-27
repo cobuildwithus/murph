@@ -56,8 +56,6 @@ tags:
   - breakfast
   - favorite
 note: Typical order includes extra granola and no honey.
-autoLogDaily:
-  time: 08:00
 ---
 # Regular Acai Bowl
 `,
@@ -103,9 +101,6 @@ kind: granola
       "granola",
       "almond butter",
     ]);
-    assert.deepEqual(readById?.entity.autoLogDaily, {
-      time: "08:00",
-    });
     assert.deepEqual(readById?.entity.nutrition, {
       perServing: {
         calories: 540,
@@ -121,9 +116,6 @@ kind: granola
       },
     });
     assert.equal(shownBySlug?.entity.slug, "regular-acai-bowl");
-    assert.deepEqual(shownBySlug?.entity.autoLogDaily, {
-      time: "08:00",
-    });
     assert.equal(shownBySlug?.entity.nutrition?.perServing?.proteinGrams, 18);
     assert.equal(shownByTitle?.entity.id, "food_01JNV4R0R1DVH1YP8KQQD5GQ7X");
   } finally {

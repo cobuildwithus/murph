@@ -10,7 +10,6 @@ import type {
 import type {
   CanonicalAssistantCronJobRecord,
 } from '../src/assistant/cron/canonical-jobs.ts'
-import type { CanonicalFoodAssistantCronJobRecord } from '../src/assistant/cron/food-auto-log.ts'
 import type {
   AssistantCronCanonicalRuntimeRecord,
   AssistantCronCanonicalRuntimeStore,
@@ -20,7 +19,6 @@ import type { AssistantCronStore } from '../src/assistant/cron/store.ts'
 import type { AssistantStatePaths } from '../src/assistant/store/paths.ts'
 
 const cronMutationMocks = vi.hoisted(() => ({
-  clearCanonicalFoodAutoLogSchedule: vi.fn(),
   executeScheduledLogOccurrence: vi.fn(),
   loadVault: vi.fn(),
   setScheduledLogStatus: vi.fn(),
@@ -33,19 +31,6 @@ vi.mock('@murphai/core', () => ({
   setScheduledLogStatus: cronMutationMocks.setScheduledLogStatus,
   upsertAutomation: cronMutationMocks.upsertAutomation,
 }))
-
-vi.mock('../src/assistant/cron/food-auto-log.js', async () => {
-  const actual =
-    await vi.importActual<typeof import('../src/assistant/cron/food-auto-log.ts')>(
-      '../src/assistant/cron/food-auto-log.js',
-    )
-
-  return {
-    ...actual,
-    clearCanonicalFoodAutoLogSchedule:
-      cronMutationMocks.clearCanonicalFoodAutoLogSchedule,
-  }
-})
 
 import {
   assertResolvedAssistantCronJobNotRunning,
@@ -72,7 +57,6 @@ import { createTempVaultContext } from './test-helpers.js'
 const tempRoots: string[] = []
 
 afterEach(async () => {
-  cronMutationMocks.clearCanonicalFoodAutoLogSchedule.mockReset()
   cronMutationMocks.executeScheduledLogOccurrence.mockReset()
   cronMutationMocks.loadVault.mockReset()
   cronMutationMocks.setScheduledLogStatus.mockReset()
@@ -91,12 +75,9 @@ afterEach(async () => {
 describe('assistant cron mutation helpers', () => {
   it('mutates local cron jobs through filtered lookup, removal, re-enable, and running guards', async () => {
     const { paths, vaultRoot } = await createAssistantPaths('assistant-cron-mutations-local-')
-    const foodJob = createCronJob({
-      foodAutoLog: {
-        foodId: 'food_1',
-      },
+    const localJob = createCronJob({
       jobId: 'cron_food',
-      name: 'Daily Food',
+      name: 'Daily local job',
     })
     const nextJob = createCronJob({
       jobId: 'cron_next',
@@ -104,19 +85,15 @@ describe('assistant cron mutation helpers', () => {
     })
     const store: AssistantCronStore = {
       version: 1,
-      jobs: [foodJob, nextJob],
+      jobs: [localJob, nextJob],
     }
 
-    expect(
-      tryResolveLocalAssistantCronJob(store, 'Daily Food', {
-        allowFoodAutoLog: false,
-      }),
-    ).toBeNull()
+    expect(tryResolveLocalAssistantCronJob(store, 'Daily local job')).toBe(localJob)
 
     await writeAssistantCronStore(paths, store)
     const removed = await removeResolvedLocalAssistantCronJob({
       kind: 'local',
-      job: foodJob,
+      job: localJob,
       localJobIndex: 0,
       paths,
       store,
@@ -131,7 +108,7 @@ describe('assistant cron mutation helpers', () => {
     await expect(
       removeResolvedLocalAssistantCronJob({
         kind: 'local',
-        job: foodJob,
+        job: localJob,
         localJobIndex: 4,
         paths,
         store: {
@@ -142,7 +119,7 @@ describe('assistant cron mutation helpers', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
-      message: 'Assistant cron job "Daily Food" was not found.',
+      message: 'Assistant cron job "Daily local job" was not found.',
     })
 
     const disabledEveryJob = createCronJob({
@@ -193,7 +170,7 @@ describe('assistant cron mutation helpers', () => {
     ).toThrowError(/already running/u)
   })
 
-  it('covers canonical scheduled-log, food-auto-log, and unsupported target mutations', async () => {
+  it('covers canonical scheduled-log and unsupported target mutations', async () => {
     const { paths, vaultRoot } = await createAssistantPaths(
       'assistant-cron-mutations-canonical-',
     )
@@ -254,24 +231,6 @@ describe('assistant cron mutation helpers', () => {
       retryAfterAt: null,
     })
 
-    const foodResolved = createCanonicalResolved({
-      paths,
-      source: createFoodAutoLogSource(),
-      vault: vaultRoot,
-    })
-
-    await expect(
-      setResolvedCanonicalAssistantCronSourceEnabled({
-        enabled: false,
-        now: new Date('2026-04-08T12:00:00.000Z'),
-        resolved: foodResolved,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CRON_INVALID_STATE',
-      message:
-        'Recurring food auto-log job "Daily Food" is controlled by the canonical food record, not assistant cron enable/disable.',
-    })
-
     await expect(
       updateResolvedCanonicalAssistantCronAutomationTarget({
         now: '2026-04-08T12:00:00.000Z',
@@ -287,23 +246,6 @@ describe('assistant cron mutation helpers', () => {
         'Canonical auto-log job "Daily scheduled log" does not support assistant delivery targeting.',
     })
 
-    cronMutationMocks.clearCanonicalFoodAutoLogSchedule.mockResolvedValue(undefined)
-    await removeResolvedCanonicalAssistantCronSource({
-      ...foodResolved,
-      runtimeStore: {
-        version: 1,
-        jobs: [foodResolved.runtimeState],
-      },
-      store: {
-        version: 1,
-        jobs: [],
-      },
-    })
-
-    expect(cronMutationMocks.clearCanonicalFoodAutoLogSchedule).toHaveBeenCalledWith(
-      vaultRoot,
-      'food_1',
-    )
   })
 })
 
@@ -338,7 +280,6 @@ function createCronTarget(
 
 function createCronJob(input: {
   enabled?: boolean
-  foodAutoLog?: AssistantCronJob['foodAutoLog']
   jobId: string
   name: string
   nextRunAt?: string | null
@@ -351,7 +292,6 @@ function createCronJob(input: {
   return {
     createdAt: '2026-04-08T07:00:00.000Z',
     enabled: input.enabled ?? true,
-    foodAutoLog: input.foodAutoLog,
     jobId: input.jobId,
     keepAfterRun: true,
     name: input.name,
@@ -400,25 +340,17 @@ function createCanonicalResolved(input: {
             scheduledLogId: input.source.scheduledLogId,
           },
         })
-      : input.source.kind === 'foodAutoLog'
-        ? createCronJob({
-            foodAutoLog: {
-              foodId: input.source.foodId,
-            },
-            jobId: input.source.jobId,
-            name: 'Daily Food',
-          })
-        : createCronJob({
-            jobId: input.source.automationId,
-            name: input.source.title,
-            target: createCronTarget({
-              channel: input.source.route.channel,
-              deliveryTarget: input.source.route.deliveryTarget,
-              identityId: input.source.route.identityId,
-              participantId: input.source.route.participantId,
-              threadId: input.source.route.threadId,
-            }),
-          })
+      : createCronJob({
+          jobId: input.source.automationId,
+          name: input.source.title,
+          target: createCronTarget({
+            channel: input.source.route.channel,
+            deliveryTarget: input.source.route.deliveryTarget,
+            identityId: input.source.route.identityId,
+            participantId: input.source.route.participantId,
+            threadId: input.source.route.threadId,
+          }),
+        })
   const runtimeState = createRuntimeRecord(job.jobId)
   const runtimeStore: AssistantCronCanonicalRuntimeStore = {
     version: 1,
@@ -455,20 +387,5 @@ function createScheduledLogSource(): CanonicalScheduledLogAssistantCronJobRecord
     timeZone: null,
     title: 'Daily scheduled log',
     updatedAt: '2026-04-08T07:00:00.000Z',
-  }
-}
-
-function createFoodAutoLogSource(): CanonicalFoodAssistantCronJobRecord {
-  return {
-    foodId: 'food_1',
-    jobId: 'cron_food_1',
-    kind: 'foodAutoLog',
-    schedule: {
-      kind: 'dailyLocal',
-      localTime: '08:00',
-    },
-    slug: 'daily-food',
-    timeZone: 'UTC',
-    title: 'Food',
   }
 }

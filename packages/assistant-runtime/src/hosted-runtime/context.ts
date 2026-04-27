@@ -8,7 +8,6 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
-  createAssistantFoodAutoLogHooks,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import type { AssistantModelTarget } from "@murphai/operator-config/assistant-backend";
@@ -116,9 +115,7 @@ export async function bootstrapHostedMemberContext(
   wake: HostedExecutionWake,
 ): Promise<HostedMemberBootstrapResult> {
   const requestId = wake.eventId;
-  const vaultServices = createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  });
+  const vaultServices = createIntegratedVaultServices();
   const vaultMetadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
   const vaultCreated = !existsSync(vaultMetadataPath);
 

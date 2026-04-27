@@ -35,7 +35,6 @@ export type {
   AllergyQueryRecord,
   ConditionQueryRecord,
   FamilyQueryRecord,
-  FoodAutoLogDailyQueryRule,
   FoodQueryEntity,
   FoodQueryRecord,
   GeneticsQueryRecord,

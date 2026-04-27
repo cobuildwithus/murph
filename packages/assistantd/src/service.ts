@@ -18,7 +18,6 @@ import {
   sendAssistantMessage,
   setAssistantCronJobTarget,
   updateAssistantSessionOptions,
-  createAssistantFoodAutoLogHooks,
 } from '@murphai/assistant-engine'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
@@ -361,9 +360,7 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
             ((input?.once ?? true) ? false : true),
           vault,
           vaultServices: allowCanonicalWrites
-            ? createIntegratedVaultServices({
-                foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-              })
+            ? createIntegratedVaultServices()
             : null,
         })
       }),

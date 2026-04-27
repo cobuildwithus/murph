@@ -903,6 +903,11 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       slug?: string
     },
   ): Promise<FoodAddDailyResult>
+  unscheduleDailyFood(
+    input: CommandContext & {
+      lookup: string
+    },
+  ): Promise<ShowResult>
   scaffoldEvent(
     input: CommandContext & {
       kind: string

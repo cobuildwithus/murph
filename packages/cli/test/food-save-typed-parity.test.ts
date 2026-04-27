@@ -3,7 +3,6 @@ import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { parseFrontmatterDocument } from '@murphai/core'
-import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { test, vi } from 'vitest'
@@ -57,9 +56,7 @@ function createFoodCli() {
   })
   cli.use(incurErrorBridge)
 
-  const services = createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  })
+  const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
   registerFoodCommands(cli, services)
 
@@ -125,7 +122,6 @@ test('food save schema exposes typed parity fields without requiring raw input',
     'ingredient',
     'tag',
     'note',
-    'autoLogDailyTime',
     'attachedRegimenId',
     'linkRelatedRegimenId',
   ]) {
@@ -137,7 +133,6 @@ test('food save payload builder maps every raw food import-json payload field', 
   const payload = buildFoodSavePayload({
     alias: ['usual acai bowl'],
     attachedRegimenId: ['reg_01234567890123456789012345'],
-    autoLogDailyTime: '08:00',
     brand: 'House Brand',
     calories: 540,
     carbsGrams: 68,
@@ -165,7 +160,6 @@ test('food save payload builder maps every raw food import-json payload field', 
   assert.deepEqual(Object.keys(payload).sort(), [
     'aliases',
     'attachedRegimenIds',
-    'autoLogDaily',
     'brand',
     'foodId',
     'ingredients',
@@ -196,7 +190,6 @@ test('food save payload builder maps every raw food import-json payload field', 
       sourceDetail: 'Menu board plus saved toppings.',
     },
   })
-  assert.deepEqual(payload.autoLogDaily, { time: '08:00' })
   assert.deepEqual(payload.attachedRegimenIds, [
     'reg_01234567890123456789012345',
     'reg_01234567890123456789012346',
@@ -321,8 +314,6 @@ test('food save persists typed fields and can update an existing food id', async
       'favorite',
       '--note',
       'Typical order includes extra granola.',
-      '--auto-log-daily-time',
-      '08:00',
       '--attached-regimen-id',
       'reg_01234567890123456789012345',
       '--link-related-regimen-id',
@@ -350,7 +341,7 @@ test('food save persists typed fields and can update an existing food id', async
     assert.deepEqual(document.attributes.ingredients, ['acai base', 'banana'])
     assert.deepEqual(document.attributes.tags, ['breakfast', 'favorite'])
     assert.equal(document.attributes.note, 'Typical order includes extra granola.')
-    assert.deepEqual(document.attributes.autoLogDaily, { time: '08:00' })
+    assert.equal('autoLogDaily' in document.attributes, false)
     assert.deepEqual(document.attributes.attachedRegimenIds, [
       'reg_01234567890123456789012345',
       'reg_01234567890123456789012346',

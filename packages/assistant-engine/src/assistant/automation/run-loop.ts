@@ -4,7 +4,6 @@ import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
-import { createAssistantFoodAutoLogHooks } from '../food-auto-log-hooks.js'
 import {
   getAssistantCronStatus,
   processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
@@ -273,9 +272,7 @@ export async function runAssistantAutomationPass(
           vault: input.vault,
         }))
   const vaultServices = applyCanonicalWrites
-    ? input.vaultServices ?? createIntegratedVaultServices({
-        foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-      })
+    ? input.vaultServices ?? createIntegratedVaultServices()
     : undefined
 
   maybeThrowInjectedAssistantFault({

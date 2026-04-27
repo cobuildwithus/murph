@@ -120,6 +120,29 @@ export interface ExecuteScheduledLogOccurrenceResult {
   skipped: boolean;
 }
 
+export interface UpsertDailyFoodScheduledLogInput {
+  foodId: string;
+  localTime: string;
+  now?: Date;
+  vaultRoot: string;
+}
+
+export interface DailyFoodScheduledLogResult {
+  created: boolean;
+  record: ScheduledLogRecord;
+}
+
+export interface ArchiveDailyFoodScheduledLogInput {
+  foodId: string;
+  now?: Date;
+  vaultRoot: string;
+}
+
+export interface ArchiveDailyFoodScheduledLogResult {
+  archived: ScheduledLogRecord[];
+}
+
+
 function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -180,6 +203,15 @@ function normalizeScheduledLogSummary(value: unknown): string | null {
 function normalizeScheduledLogBody(value: unknown): string {
   if (value === undefined || value === null) return "";
   return requireString(value, "body", 40_000).replace(/\s+$/u, "");
+}
+
+function normalizeDailyFoodLocalTime(value: string): string {
+  const parsed = scheduleIntentSchema.safeParse({ kind: "dailyLocal", localTime: value });
+  if (!parsed.success || parsed.data.kind !== "dailyLocal") {
+    throw new VaultError("VAULT_INVALID_INPUT", "localTime must use 24-hour HH:MM form.");
+  }
+
+  return parsed.data.localTime;
 }
 
 function buildScheduleFrontmatter(schedule: ScheduleIntent): FrontmatterObject {
@@ -275,6 +307,42 @@ function matchesScheduledLogStatus(value: string | null | undefined, status: str
   const candidates = Array.isArray(status) ? status : [status];
   const normalized = candidates.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim().toLowerCase());
   return normalized.length === 0 ? true : Boolean(value && normalized.includes(value.toLowerCase()));
+}
+
+function buildDailyFoodScheduledLogSlug(food: Pick<FoodRecord, "slug">): string {
+  return normalizeSlug(`auto-log-${food.slug}`, "slug");
+}
+
+function buildDailyFoodScheduledLogTitle(food: Pick<FoodRecord, "title">): string {
+  return `Auto-log ${food.title}`;
+}
+
+function buildDailyFoodScheduledLogSummary(food: Pick<FoodRecord, "title">): string {
+  return `Auto-log saved food "${food.title}" as a derived meal.`;
+}
+
+function buildDailyFoodScheduledLogBody(food: Pick<FoodRecord, "title" | "serving" | "summary">): string {
+  const lines = [
+    `Writes a derived meal from saved food "${food.title}".`,
+    food.serving ? `Serving: ${food.serving}` : null,
+    food.summary,
+  ].filter((line): line is string => typeof line === "string" && line.trim().length > 0);
+
+  return lines.join("\n\n");
+}
+
+function isGeneratedDailyFoodScheduledLog(record: ScheduledLogRecord, foodId: string): boolean {
+  return record.action.kind === "meal.add" &&
+    record.action.foodId === foodId &&
+    (record.slug.startsWith("auto-log-") || record.title.startsWith("Auto-log "));
+}
+
+async function findGeneratedDailyFoodScheduledLogs(input: {
+  foodId: string;
+  vaultRoot: string;
+}): Promise<ScheduledLogRecord[]> {
+  const records = await loadScheduledLogRecords(input.vaultRoot);
+  return records.filter((record) => isGeneratedDailyFoodScheduledLog(record, input.foodId));
 }
 
 export function scaffoldScheduledLogPayload(): ScheduledLogScaffoldPayload {
@@ -399,6 +467,64 @@ export async function setScheduledLogStatus(input: SetScheduledLogStatusInput): 
     body: existing.body,
     now: input.now,
   });
+}
+
+export async function upsertDailyFoodScheduledLog(
+  input: UpsertDailyFoodScheduledLogInput,
+): Promise<DailyFoodScheduledLogResult> {
+  const localTime = normalizeDailyFoodLocalTime(input.localTime);
+  const food = await readFood({ vaultRoot: input.vaultRoot, foodId: input.foodId });
+  const existing = (await findGeneratedDailyFoodScheduledLogs({
+    vaultRoot: input.vaultRoot,
+    foodId: food.foodId,
+  }))[0] ?? null;
+  const result = await upsertScheduledLog({
+    vaultRoot: input.vaultRoot,
+    scheduledLogId: existing?.scheduledLogId,
+    slug: existing?.slug ?? buildDailyFoodScheduledLogSlug(food),
+    title: buildDailyFoodScheduledLogTitle(food),
+    status: "active",
+    summary: buildDailyFoodScheduledLogSummary(food),
+    schedule: { kind: "dailyLocal", localTime },
+    action: {
+      kind: "meal.add",
+      foodId: food.foodId,
+    },
+    tags: ["food", "scheduled"],
+    body: buildDailyFoodScheduledLogBody(food),
+    now: input.now,
+  });
+
+  return {
+    created: result.created,
+    record: result.record,
+  };
+}
+
+export async function archiveDailyFoodScheduledLog(
+  input: ArchiveDailyFoodScheduledLogInput,
+): Promise<ArchiveDailyFoodScheduledLogResult> {
+  const records = await findGeneratedDailyFoodScheduledLogs({
+    vaultRoot: input.vaultRoot,
+    foodId: input.foodId,
+  });
+  const archived: ScheduledLogRecord[] = [];
+
+  for (const record of records) {
+    if (record.status === "archived") {
+      continue;
+    }
+
+    const result = await setScheduledLogStatus({
+      vaultRoot: input.vaultRoot,
+      scheduledLogId: record.scheduledLogId,
+      status: "archived",
+      now: input.now,
+    });
+    archived.push(result.record);
+  }
+
+  return { archived };
 }
 
 export function buildScheduledLogMarkdownPreview(input: ScheduledLogScaffoldPayload): string {

@@ -13,10 +13,6 @@ import {
   type AssistantCronSchedule,
   type AssistantCronTarget,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  buildDailyFoodCronJobName,
-  buildDailyFoodCronPrompt,
-} from '@murphai/vault-usecases/records'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantCronCanonicalRuntimeRecord,
@@ -26,10 +22,6 @@ import {
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import { computeAssistantCronNextRunAt } from './schedule.js'
-import {
-  listCanonicalFoodAutoLogRecords,
-  type CanonicalFoodAssistantCronJobRecord,
-} from './food-auto-log.js'
 import {
   normalizeCanonicalScheduledLogCronRecord,
   type CanonicalScheduledLogAssistantCronJobRecord,
@@ -60,7 +52,6 @@ export interface CanonicalAutomationAssistantCronJobRecord {
 
 export type CanonicalAssistantCronJobRecord =
   | CanonicalAutomationAssistantCronJobRecord
-  | CanonicalFoodAssistantCronJobRecord
   | CanonicalScheduledLogAssistantCronJobRecord
 
 export type ResolvedAssistantCronJob =
@@ -80,14 +71,13 @@ export async function listCanonicalAssistantCronRecords(
   status: ReadonlyArray<'active' | 'paused'> = ['active', 'paused'],
 ): Promise<CanonicalAssistantCronJobRecord[]> {
   const timeZone = await resolveAssistantCronDefaultTimeZone(vault)
-  const [automationRecords, scheduledLogRecords, foodRecords] = await Promise.all([
+  const [automationRecords, scheduledLogRecords] = await Promise.all([
     listCanonicalAutomations(vault, {
       status: [...status],
     }),
     listCanonicalScheduledLogs(vault, {
       status: [...status],
     }),
-    listCanonicalFoodAutoLogRecords(vault, timeZone),
   ])
 
   return [
@@ -99,7 +89,6 @@ export async function listCanonicalAssistantCronRecords(
       const normalized = normalizeCanonicalScheduledLogCronRecord(record, timeZone)
       return normalized ? [normalized] : []
     }),
-    ...(status.includes('active') ? foodRecords : []),
   ]
 }
 
@@ -198,12 +187,6 @@ export function projectCanonicalAssistantCronJob(input: {
     prompt: buildCanonicalAssistantCronJobPrompt(input.source),
     schedule: input.source.schedule,
     target,
-    foodAutoLog:
-      input.source.kind === 'foodAutoLog'
-        ? {
-            foodId: input.source.foodId,
-          }
-        : undefined,
     scheduledLog:
       input.source.kind === 'scheduledLog'
         ? {
@@ -225,8 +208,6 @@ export function resolveCanonicalAssistantCronJobId(
       return source.automationId
     case 'scheduledLog':
       return source.scheduledLogId
-    case 'foodAutoLog':
-      return source.jobId
   }
 }
 
@@ -237,8 +218,6 @@ export function isCanonicalAssistantCronSourceEnabled(
     case 'automation':
     case 'scheduledLog':
       return source.status === 'active'
-    case 'foodAutoLog':
-      return true
   }
 }
 
@@ -338,31 +317,10 @@ export function buildCanonicalAutomationUpsertInput(input: {
   }
 }
 
-export function buildCanonicalFoodIdSet(
-  records: readonly CanonicalAssistantCronJobRecord[],
-): Set<string> {
-  return new Set(
-    records.flatMap((record) =>
-      record.kind === 'foodAutoLog' ? [record.foodId] : [],
-    ),
-  )
-}
-
 export function buildVisibleLocalAssistantCronStore(
   store: AssistantCronStore,
-  canonicalFoodIds: ReadonlySet<string>,
 ): AssistantCronStore {
-  if (canonicalFoodIds.size === 0) {
-    return store
-  }
-
-  return {
-    ...store,
-    jobs: store.jobs.filter(
-      (job) =>
-        !job.foodAutoLog || !canonicalFoodIds.has(job.foodAutoLog.foodId),
-    ),
-  }
+  return store
 }
 
 export async function resolveAssistantCronDefaultTimeZone(
@@ -427,8 +385,6 @@ function resolveCanonicalAssistantCronJobLookupKeys(
       return [record.automationId, record.slug, record.title]
     case 'scheduledLog':
       return [record.scheduledLogId, record.slug, record.title]
-    case 'foodAutoLog':
-      return [record.jobId, buildDailyFoodCronJobName(record.slug)]
   }
 }
 
@@ -449,8 +405,6 @@ function buildCanonicalAssistantCronJobName(
     case 'automation':
     case 'scheduledLog':
       return source.title
-    case 'foodAutoLog':
-      return buildDailyFoodCronJobName(source.slug)
   }
 }
 
@@ -462,8 +416,6 @@ function buildCanonicalAssistantCronJobPrompt(
       return source.instructions
     case 'scheduledLog':
       return `Auto-log scheduled log "${source.title}" as ${source.actionKind}.`
-    case 'foodAutoLog':
-      return buildDailyFoodCronPrompt(source.title)
   }
 }
 
@@ -471,18 +423,14 @@ function resolveCanonicalAssistantCronCreatedAt(input: {
   source: CanonicalAssistantCronJobRecord
   runtimeState: AssistantCronCanonicalRuntimeRecord
 }): string {
-  return input.source.kind === 'foodAutoLog'
-    ? input.runtimeState.createdAt
-    : input.source.createdAt
+  return input.source.createdAt
 }
 
 function resolveCanonicalAssistantCronUpdatedAt(input: {
   source: CanonicalAssistantCronJobRecord
   runtimeState: AssistantCronCanonicalRuntimeRecord
 }): string {
-  return input.source.kind === 'foodAutoLog'
-    ? input.runtimeState.updatedAt
-    : input.source.updatedAt
+  return input.source.updatedAt
 }
 
 function projectCanonicalAssistantCronJobState(input: {

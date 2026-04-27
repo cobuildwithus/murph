@@ -147,7 +147,6 @@ function uniqueArray<TSchema extends z.ZodTypeAny>(
 }
 
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
-const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 const GROUP_PATTERN = "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$";
 const SHARE_ENTITY_REF_PATTERN = "^[a-z][a-z0-9:._-]{1,79}$";
@@ -166,12 +165,6 @@ export const attachedRegimenIdsSchema = uniqueArray(regimenIdSchema, {
   maxItems: 32,
   uniqueItems: true,
 }).optional();
-
-export const foodAutoLogDailySchema = z
-  .object({
-    time: patternedString(DAILY_TIME_PATTERN),
-  })
-  .strict();
 
 export const supplementIngredientPayloadSchema = z
   .object({
@@ -202,7 +195,6 @@ export const foodUpsertPayloadSchema = withContractMetadata(
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       tags: uniqueArray(slugSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
-      autoLogDaily: foodAutoLogDailySchema.optional(),
       attachedRegimenIds: attachedRegimenIdsSchema,
       links: uniqueArray(foodRelationLinkSchema, { uniqueItems: true }).optional(),
     })

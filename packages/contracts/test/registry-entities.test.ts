@@ -410,9 +410,6 @@ describe("bank registry seam", () => {
           ingredients: ["acai", " banana "],
           tags: [" breakfast ", "post-workout"],
           attachedRegimenIds: [" regimen_sleep ", "regimen_sleep"],
-          autoLogDaily: {
-            time: " 08:30 ",
-          },
         },
         helpers: projectionHelpers,
         relativePath: "bank/foods/acai-bowl.md",
@@ -443,33 +440,6 @@ describe("bank registry seam", () => {
       tags: ["breakfast", "post-workout"],
       note: null,
       attachedRegimenIds: ["regimen_sleep"],
-      autoLogDaily: {
-        time: "08:30",
-      },
-    });
-
-    expect(
-      getBankEntityRegistryProjectionMetadata("food").transform({
-        attributes: {
-          autoLogDaily: null,
-        },
-        helpers: projectionHelpers,
-        relativePath: "bank/foods/missing-auto-log.md",
-      }),
-    ).toMatchObject({
-      autoLogDaily: null,
-    });
-
-    expect(
-      getBankEntityRegistryProjectionMetadata("food").transform({
-        attributes: {
-          autoLogDaily: {},
-        },
-        helpers: projectionHelpers,
-        relativePath: "bank/foods/blank-auto-log.md",
-      }),
-    ).toMatchObject({
-      autoLogDaily: null,
     });
   });
 

@@ -25,7 +25,6 @@ import {
 } from './cron/store.ts'
 import { readAssistantCronCanonicalRuntimeStore } from './cron/runtime-state.ts'
 import {
-  buildCanonicalFoodIdSet,
   buildVisibleLocalAssistantCronStore,
   findCanonicalAssistantCronRecordInList,
   listCanonicalAssistantCronRecords,
@@ -148,11 +147,7 @@ async function projectResolvedAssistantCronJob(
     listCanonicalAssistantCronRecords(vault),
     readAssistantCronCanonicalRuntimeStore(paths),
   ])
-  const canonicalFoodIds = buildCanonicalFoodIdSet(canonicalRecords)
-  const visibleLocalStore = buildVisibleLocalAssistantCronStore(
-    localStore,
-    canonicalFoodIds,
-  )
+  const visibleLocalStore = buildVisibleLocalAssistantCronStore(localStore)
   const localJob = tryResolveLocalAssistantCronJob(visibleLocalStore, lookup)
   if (localJob) {
     return {
@@ -191,10 +186,8 @@ export async function listAssistantCronJobs(
     listCanonicalAssistantCronRecords(vault),
     readAssistantCronCanonicalRuntimeStore(paths),
   ])
-  const canonicalFoodIds = buildCanonicalFoodIdSet(canonicalRecords)
-
   return sortAssistantCronJobs([
-    ...buildVisibleLocalAssistantCronStore(localStore, canonicalFoodIds).jobs,
+    ...buildVisibleLocalAssistantCronStore(localStore).jobs,
     ...canonicalRecords.map((source) =>
       projectCanonicalAssistantCronJob({
         source,

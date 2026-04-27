@@ -1072,9 +1072,6 @@ test("foods use first-class markdown registry reads for regular meals and staple
     ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola.",
-    autoLogDaily: {
-      time: "08:00",
-    },
   });
   const renamedFood = await upsertFood({
     vaultRoot,
@@ -1103,9 +1100,6 @@ test("foods use first-class markdown registry reads for regular meals and staple
     ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola.",
-    autoLogDaily: {
-      time: "08:00",
-    },
   });
   const secondFood = await upsertFood({
     vaultRoot,
@@ -1153,24 +1147,18 @@ test("foods use first-class markdown registry reads for regular meals and staple
       sourceDetail: "Menu board plus saved toppings.",
     },
   });
-  assert.deepEqual(readFoodById.autoLogDaily, {
-    time: "08:00",
-  });
   assert.equal(readFoodBySlug.foodId, createdFood.record.foodId);
   assert.equal(readFoodBySlug.title, "Usual Acai Bowl");
   assert.equal(readFoodBySlug.nutrition?.perServing?.calories, 540);
-  assert.deepEqual(readFoodBySlug.autoLogDaily, {
-    time: "08:00",
-  });
   assert.equal(listedFoods[0]?.foodId, secondFood.record.foodId);
   assert.equal(listedFoods[1]?.foodId, createdFood.record.foodId);
   assert.match(foodMarkdown, /foodId:/u);
-  assert.match(foodMarkdown, /autoLogDaily:/u);
+  assert.doesNotMatch(foodMarkdown, /autoLogDaily:/u);
   assert.match(foodMarkdown, /nutrition:/u);
   assert.match(foodMarkdown, /## Aliases/u);
   assert.match(foodMarkdown, /## Ingredients/u);
   assert.match(foodMarkdown, /## Nutrition per serving/u);
-  assert.match(foodMarkdown, /Auto-log daily/u);
+  assert.doesNotMatch(foodMarkdown, /Auto-log daily/u);
   assert.doesNotMatch(foodMarkdown, /^attachedRegimenRefs:/mu);
 
   await assert.rejects(

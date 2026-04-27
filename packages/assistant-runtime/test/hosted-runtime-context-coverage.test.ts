@@ -11,7 +11,6 @@ import {
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
-  createAssistantFoodAutoLogHooks: vi.fn(() => ({ kind: "food-hooks" })),
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   ensureHostedAssistantOperatorDefaults: vi.fn(),
@@ -34,17 +33,6 @@ vi.mock("@murphai/contracts", async () => {
       ...actual.VAULT_LAYOUT,
       metadata: "vault.json",
     },
-  };
-});
-
-vi.mock("@murphai/assistant-engine", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
-    "@murphai/assistant-engine",
-  );
-
-  return {
-    ...actual,
-    createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
   };
 });
 

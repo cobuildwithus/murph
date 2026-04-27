@@ -64,9 +64,6 @@ test("share packs export one food with attached supplement regimens and import t
       collagen.record.entity.regimenId,
       fiber.record.entity.regimenId,
     ],
-    autoLogDaily: {
-      time: "08:00",
-    },
   });
 
   const pack = await buildSharePackFromVault({
@@ -84,7 +81,6 @@ test("share packs export one food with attached supplement regimens and import t
   const exportedFood = pack.entities.find((entity) => entity.kind === "food");
   assert.ok(exportedFood);
   assert.equal(exportedFood?.payload.title, "Morning Smoothie");
-  assert.equal(exportedFood?.payload.autoLogDaily?.time, "08:00");
   assert.deepEqual(
     [...(exportedFood?.payload.attachedRegimenRefs ?? [])].sort(),
     pack.entities
@@ -108,7 +104,6 @@ test("share packs export one food with attached supplement regimens and import t
     foodId: imported.foods[0]?.foodId,
   });
   assert.equal(importedFood.title, "Morning Smoothie");
-  assert.equal(importedFood.autoLogDaily?.time, "08:00");
   assert.equal(importedFood.attachedRegimenIds?.length, 3);
 });
 
@@ -580,9 +575,6 @@ test("share packs reuse bank payload projections for regimen, recipe, and food e
     ingredients: ["salmon", "rice", "broccoli"],
     tags: ["lunch", "favorite"],
     note: "Usually add lemon.",
-    autoLogDaily: {
-      time: "12:30",
-    },
     attachedRegimenIds: [regimen.record.entity.regimenId],
   });
 
@@ -682,9 +674,6 @@ test("share packs reuse bank payload projections for regimen, recipe, and food e
         targetId: regimen.record.entity.regimenId,
       },
     ],
-    autoLogDaily: {
-      time: "12:30",
-    },
     attachedRegimenRefs: exportedRegimen ? [exportedRegimen.ref] : [],
   });
 });

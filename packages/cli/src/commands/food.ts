@@ -97,7 +97,6 @@ function nonnegativeNumberOptionSchema(description: string) {
 export interface FoodSavePayloadInput {
   alias?: string[]
   attachedRegimenId?: string[]
-  autoLogDailyTime?: string
   brand?: string
   calories?: number
   carbsGrams?: number
@@ -125,7 +124,6 @@ export interface FoodSavePayloadInput {
 interface FoodSaveCommandOptions {
   alias?: string[]
   attachedRegimenId?: string[]
-  autoLogDailyTime?: string
   brand?: string
   calories?: number
   carbsGrams?: number
@@ -221,11 +219,6 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodUpsertPay
   if (input.serving !== undefined) payload.serving = input.serving
   if (nutrition !== undefined) payload.nutrition = nutrition
   if (input.note !== undefined) payload.note = input.note
-  if (input.autoLogDailyTime !== undefined) {
-    payload.autoLogDaily = {
-      time: input.autoLogDailyTime,
-    }
-  }
   const aliases = normalizeRepeatableFlagOption(input.alias, 'alias')
   if (aliases !== undefined) payload.aliases = aliases
   const ingredients = normalizeRepeatableFlagOption(input.ingredient, 'ingredient')
@@ -278,7 +271,6 @@ function createFoodSaveCommandConfig(services: VaultServices) {
         description: 'Save a remembered food without a JSON payload file.',
         options: {
           alias: ['usual acai bowl'],
-          autoLogDailyTime: '08:00',
           calories: 540,
           serving: '1 bowl',
           vault: './vault',
@@ -326,9 +318,6 @@ function createFoodSaveCommandConfig(services: VaultServices) {
         'Optional lowercase tag slug. Repeat --tag for multiple values.',
       ),
       note: z.string().min(1).max(4000).optional().describe('Optional food note.'),
-      autoLogDailyTime: dailyFoodTimeSchema
-        .optional()
-        .describe('Optional daily local time in HH:MM form for recurring auto-log meal creation.'),
       attachedRegimenId: z
         .array(regimenIdSchema)
         .optional()
@@ -348,7 +337,6 @@ function createFoodSaveCommandConfig(services: VaultServices) {
       const payload = buildFoodSavePayload({
         alias: context.options.alias,
         attachedRegimenId: context.options.attachedRegimenId,
-        autoLogDailyTime: context.options.autoLogDailyTime,
         brand: context.options.brand,
         calories: context.options.calories,
         carbsGrams: context.options.carbsGrams,
@@ -476,7 +464,7 @@ function createFoodUnscheduleCommandConfig(services: VaultServices) {
       id: z.string().min(1).describe('Food id or slug to unschedule.'),
     }),
     description: 'Unschedule one remembered food from daily auto-log meal creation.',
-    hint: 'This clears the recurring auto-log setting and removes the scheduled assistant job while keeping the food record.',
+    hint: 'This archives the generated scheduled-log while keeping the food record.',
     options: withBaseOptions({}),
     output: showResultSchema,
     async run(context: {
@@ -488,11 +476,10 @@ function createFoodUnscheduleCommandConfig(services: VaultServices) {
         requestId?: string
       }
     }) {
-      return services.core.editFood({
+      return services.core.unscheduleDailyFood({
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
         lookup: context.args.id,
-        clear: ['autoLogDaily'],
       })
     },
   }
@@ -589,7 +576,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       ingredient: repeatedTextOptionSchema('Replace ingredients. Repeat --ingredient for multiple values.', 4000),
       tag: repeatedTextOptionSchema('Replace tags. Repeat --tag for multiple values.'),
       note: z.string().min(1).max(4000).optional().describe('Replace food note.'),
-      autoLogDailyTime: dailyFoodTimeSchema.optional().describe('Replace recurring auto-log time in HH:MM form.'),
       attachedRegimenId: z.array(regimenIdSchema).optional().describe('Replace attached regimen ids. Repeat --attached-regimen-id for multiple values.'),
       linkRelatedRegimenId: z.array(regimenIdSchema).optional().describe('Replace related regimen links. Repeat --link-related-regimen-id for multiple links.'),
       clearSummary: z.boolean().optional().describe('Clear food summary.'),
@@ -603,7 +589,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       clearIngredients: z.boolean().optional().describe('Clear ingredients.'),
       clearTags: z.boolean().optional().describe('Clear tags.'),
       clearNote: z.boolean().optional().describe('Clear food note.'),
-      clearAutoLogDaily: z.boolean().optional().describe('Clear recurring auto-log settings.'),
       clearAttachedRegimenIds: z.boolean().optional().describe('Clear attached regimen ids.'),
       clearLinks: z.boolean().optional().describe('Clear food links.'),
     },
@@ -631,10 +616,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       appendTypedSet(set, 'ingredients', stringArrayOption(options.ingredient))
       appendTypedSet(set, 'tags', stringArrayOption(options.tag))
       appendTypedSet(set, 'note', stringOption(options.note))
-      const autoLogDailyTime = stringOption(options.autoLogDailyTime)
-      if (autoLogDailyTime !== undefined) {
-        appendTypedSet(set, 'autoLogDaily', { time: autoLogDailyTime })
-      }
       appendTypedSet(set, 'attachedRegimenIds', stringArrayOption(options.attachedRegimenId))
       const relatedRegimenIds = stringArrayOption(options.linkRelatedRegimenId)
       if (relatedRegimenIds !== undefined) {
@@ -654,7 +635,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       appendTypedClear(clear, 'ingredients', options.clearIngredients === true)
       appendTypedClear(clear, 'tags', options.clearTags === true)
       appendTypedClear(clear, 'note', options.clearNote === true)
-      appendTypedClear(clear, 'autoLogDaily', options.clearAutoLogDaily === true)
       appendTypedClear(clear, 'attachedRegimenIds', options.clearAttachedRegimenIds === true)
       appendTypedClear(clear, 'links', options.clearLinks === true)
       return {

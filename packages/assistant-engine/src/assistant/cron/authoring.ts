@@ -1,19 +1,16 @@
 import { upsertAutomation } from '@murphai/core'
 import { showAutomation as showCanonicalAutomation } from '@murphai/query'
 import {
-  assistantCronJobSchema,
   assistantCronScheduleSchema,
   type AssistantCronJob,
   type AssistantCronPreset,
   type AssistantCronSchedule,
   type AssistantCronScheduleInput,
-  type AssistantCronTarget,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '../shared.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from '../store/paths.js'
 import {
-  ASSISTANT_CRON_JOB_SCHEMA,
   buildCanonicalAutomationRoute,
   buildCanonicalAutomationUpsertInput,
   projectCanonicalAssistantCronJob,
@@ -34,12 +31,10 @@ import { computeAssistantCronNextRunAt } from './schedule.js'
 import {
   assertAssistantCronJobNameIsAvailable,
   buildAssistantCronTarget,
-  createAssistantCronJobId,
   ensureAssistantCronState,
   normalizeRequiredAssistantCronText,
   readAssistantCronStore,
   type AssistantCronTargetInput,
-  writeAssistantCronStore,
 } from './store.js'
 import {
   resolveAssistantCronTargetDefaults,
@@ -59,17 +54,7 @@ export interface AssistantCronJobCreationBaseInput {
 export interface AddAssistantCronJobInput
   extends AssistantCronJobCreationBaseInput,
     AssistantCronTargetInput {
-  foodAutoLog?: {
-    foodId: string
-  }
   resolveTargetDefaults?: boolean
-}
-
-export interface AddAssistantFoodAutoLogCronJobInput
-  extends AssistantCronJobCreationBaseInput {
-  foodAutoLog: {
-    foodId: string
-  }
 }
 
 export interface InstallAssistantCronPresetInput extends AssistantCronTargetInput {
@@ -129,21 +114,6 @@ export async function addAssistantCronJob(
     input.resolveTargetDefaults === false
       ? input
       : await resolveAssistantCronTargetDefaults(input)
-  const { foodAutoLog } = resolvedInput
-  if (foodAutoLog) {
-    return addAssistantFoodAutoLogCronJob({
-      vault: resolvedInput.vault,
-      name: resolvedInput.name,
-      prompt: resolvedInput.prompt,
-      schedule: resolvedInput.schedule,
-      now: resolvedInput.now,
-      enabled: resolvedInput.enabled,
-      keepAfterRun: resolvedInput.keepAfterRun,
-      foodAutoLog,
-      target: buildAssistantCronTarget(resolvedInput),
-    })
-  }
-
   const resolvedCreation = await resolveAssistantCronJobCreationInput(resolvedInput)
   const target = validateAssistantCronDeliveryTarget(resolvedInput)
 
@@ -198,48 +168,6 @@ export async function addAssistantCronJob(
       source,
       runtimeState,
     })
-  })
-}
-
-export async function addAssistantFoodAutoLogCronJob(
-  input: AddAssistantFoodAutoLogCronJobInput & {
-    target: AssistantCronTarget
-  },
-): Promise<AssistantCronJob> {
-  const resolvedCreation = await resolveAssistantCronJobCreationInput(input)
-
-  return withAssistantCronWriteLock(resolvedCreation.paths, async () => {
-    const store = await readAssistantCronStore(resolvedCreation.paths)
-    assertAssistantCronJobNameIsAvailable(store, resolvedCreation.name)
-
-    const timestamp = resolvedCreation.now.toISOString()
-    const job = assistantCronJobSchema.parse({
-      schema: ASSISTANT_CRON_JOB_SCHEMA,
-      jobId: createAssistantCronJobId(),
-      name: resolvedCreation.name,
-      enabled: resolvedCreation.enabled,
-      keepAfterRun: resolvedCreation.keepAfterRun,
-      prompt: resolvedCreation.prompt,
-      schedule: resolvedCreation.schedule,
-      target: input.target,
-      foodAutoLog: input.foodAutoLog,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      state: {
-        nextRunAt: resolvedCreation.nextRunAt,
-        lastRunAt: null,
-        lastSucceededAt: null,
-        lastFailedAt: null,
-        consecutiveFailures: 0,
-        lastError: null,
-        runningAt: null,
-        runningPid: null,
-      },
-    })
-
-    store.jobs.push(job)
-    await writeAssistantCronStore(resolvedCreation.paths, store)
-    return job
   })
 }
 

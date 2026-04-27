@@ -43,7 +43,6 @@ const groupingMocks = vi.hoisted(() => ({
 const runLoopMocks = vi.hoisted(() => ({
   acquireAssistantAutomationRunLock: vi.fn(),
   buildAssistantOutboxSummary: vi.fn(),
-  createAssistantFoodAutoLogHooks: vi.fn(),
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   drainAssistantOutbox: vi.fn(),
@@ -145,10 +144,6 @@ vi.mock('@murphai/inbox-services', () => ({
 
 vi.mock('@murphai/vault-usecases/vault-services', () => ({
   createIntegratedVaultServices: runLoopMocks.createIntegratedVaultServices,
-}))
-
-vi.mock('../src/assistant/food-auto-log-hooks.ts', () => ({
-  createAssistantFoodAutoLogHooks: runLoopMocks.createAssistantFoodAutoLogHooks,
 }))
 
 vi.mock('../src/assistant/cron.ts', () => ({
@@ -643,9 +638,6 @@ beforeEach(() => {
 
   runLoopMocks.acquireAssistantAutomationRunLock.mockReset().mockResolvedValue({
     release: vi.fn().mockResolvedValue(undefined),
-  })
-  runLoopMocks.createAssistantFoodAutoLogHooks.mockReset().mockReturnValue({
-    onMealLogged: vi.fn(),
   })
   runLoopMocks.createIntegratedInboxServices.mockReset()
   runLoopMocks.createIntegratedVaultServices.mockReset().mockReturnValue({})
@@ -5150,11 +5142,7 @@ describe('assistant automation run loop', () => {
 
     expect(result.reason).toBe('signal')
     expect(runLoopMocks.createIntegratedInboxServices).toHaveBeenCalledOnce()
-    expect(runLoopMocks.createIntegratedVaultServices).toHaveBeenCalledWith({
-      foodAutoLogHooks: {
-        onMealLogged: expect.any(Function),
-      },
-    })
+    expect(runLoopMocks.createIntegratedVaultServices).toHaveBeenCalledWith()
     expect(runLoopMocks.saveAssistantAutomationState).toHaveBeenCalledWith(
       '/tmp/assistant-automation-vault',
       expect.objectContaining({

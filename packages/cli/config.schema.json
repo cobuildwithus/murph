@@ -6773,11 +6773,6 @@
                           "minLength": 1,
                           "maxLength": 4000
                         },
-                        "autoLogDailyTime": {
-                          "description": "Optional daily local time in HH:MM form for recurring auto-log meal creation.",
-                          "type": "string",
-                          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
-                        },
                         "attachedRegimenId": {
                           "description": "Optional attached regimen id. Repeat --attached-regimen-id for multiple values.",
                           "type": "array",
@@ -7052,11 +7047,6 @@
                           "minLength": 1,
                           "maxLength": 4000
                         },
-                        "autoLogDailyTime": {
-                          "description": "Replace recurring auto-log time in HH:MM form.",
-                          "type": "string",
-                          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
-                        },
                         "attachedRegimenId": {
                           "description": "Replace attached regimen ids. Repeat --attached-regimen-id for multiple values.",
                           "type": "array",
@@ -7115,10 +7105,6 @@
                         },
                         "clearNote": {
                           "description": "Clear food note.",
-                          "type": "boolean"
-                        },
-                        "clearAutoLogDaily": {
-                          "description": "Clear recurring auto-log settings.",
                           "type": "boolean"
                         },
                         "clearAttachedRegimenIds": {
@@ -13917,30 +13903,7 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "scaffold": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "import-json": {
+                "list": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -13959,9 +13922,17 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
+                        "limit": {
+                          "default": 50,
+                          "description": "Maximum number of results to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
+                        },
+                        "status": {
+                          "description": "Optional supplement status to filter by.",
                           "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
+                          "minLength": 1
                         }
                       }
                     }
@@ -13985,41 +13956,6 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "list": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "status": {
-                          "description": "Optional supplement status to filter by.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "limit": {
-                          "default": 50,
-                          "description": "Maximum number of results to return.",
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
                         }
                       }
                     }
@@ -14205,40 +14141,6 @@
                             "type": "string",
                             "minLength": 1
                           }
-                        }
-                      }
-                    }
-                  }
-                },
-                "rename": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "title": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 160,
-                          "description": "New supplement title."
-                        },
-                        "slug": {
-                          "description": "Optional stable slug override for the renamed supplement record.",
-                          "type": "string",
-                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                         }
                       }
                     }

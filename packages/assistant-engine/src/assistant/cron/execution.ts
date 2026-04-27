@@ -25,10 +25,8 @@ import {
   type AssistantCronCanonicalRuntimeState,
 } from './runtime-state.js'
 import { computeAssistantCronNextRunAt } from './schedule.js'
-import { runFoodAutoLogCronJob } from './food-auto-log.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
-  buildCanonicalFoodIdSet,
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
   isCanonicalAssistantCronSourceEnabled,
@@ -146,11 +144,7 @@ export async function claimNextDueAssistantCronJob(
       readAssistantCronCanonicalRuntimeStore(paths),
     ])
     const now = new Date().toISOString()
-    const canonicalFoodIds = buildCanonicalFoodIdSet(canonicalRecords)
-    const visibleLocalStore = buildVisibleLocalAssistantCronStore(
-      store,
-      canonicalFoodIds,
-    )
+    const visibleLocalStore = buildVisibleLocalAssistantCronStore(store)
     const canonicalEntries = canonicalRecords.map((source) => {
       const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
       return {
@@ -248,12 +242,6 @@ export async function executeClaimedAssistantCronJob(input: {
       response = await runScheduledLogCronJob({
         vault: input.vault,
         scheduledLogId: input.job.source.scheduledLogId,
-        occurrenceAt,
-      })
-    } else if (claimedJob.foodAutoLog) {
-      response = await runFoodAutoLogCronJob({
-        vault: input.vault,
-        foodId: claimedJob.foodAutoLog.foodId,
         occurrenceAt,
       })
     } else {

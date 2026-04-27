@@ -487,10 +487,6 @@ export type GeneticsQueryRecord = RegistryStoredDocument<GeneticsQueryEntity>;
 export const geneticsRegistryDefinition: RegistryDefinition<GeneticsQueryEntity> =
   createBankEntityRegistryDefinition("genetics");
 
-export interface FoodAutoLogDailyQueryRule {
-  time: string;
-}
-
 export interface FoodNutritionQueryValue {
   perServing: NutritionData | null;
   provenance: NutritionProvenance | null;
@@ -509,7 +505,6 @@ export interface FoodQueryEntity extends RegistryQueryEntity {
   tags: string[];
   note: string | null;
   attachedRegimenIds: string[];
-  autoLogDaily: FoodAutoLogDailyQueryRule | null;
 }
 
 export type FoodQueryRecord = RegistryStoredDocument<FoodQueryEntity>;
