@@ -57,7 +57,7 @@ interface AuthenticatedStateProps {
 
 interface HostedPhoneAuthScaffoldProps extends AuthenticatedStateProps {
   errorMessage: string | null;
-  children: ReactNode;
+  children?: ReactNode;
 }
 
 export function HostedPhoneAuthScaffold({
@@ -236,12 +236,15 @@ export function HostedAuthenticatedPhoneAuthState({
         </AlertTitle>
         <AlertDescription>{description}</AlertDescription>
         <div className="mt-3 flex flex-wrap gap-3">
-          <HostedUseDifferentNumberButton
-            disabled={disabled}
-            pendingAction={pendingAction}
-            size={secondaryActionSize}
+          <Button
+            type="button"
             onClick={onUseDifferentNumber}
-          />
+            disabled={disabled}
+            size="lg"
+            className="w-full"
+          >
+            {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
+          </Button>
         </div>
       </Alert>
     );
