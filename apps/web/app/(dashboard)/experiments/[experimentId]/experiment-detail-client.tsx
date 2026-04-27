@@ -93,7 +93,9 @@ function ExperimentDetailClientContent({
   return (
     <div className="flex flex-col gap-8">
       {experiment.status !== "finished" && (
-        <ExperimentHero image={experiment.image} title={experiment.title} />
+        <div className="-mt-4 md:-mt-6">
+          <ExperimentHero image={experiment.image} />
+        </div>
       )}
 
       <ExperimentHeader

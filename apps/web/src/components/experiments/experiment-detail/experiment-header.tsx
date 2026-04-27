@@ -43,10 +43,9 @@ export function ExperimentHeader({
   const protocolDay = day == null ? null : Math.max(1, day - baselineDays);
 
   return (
-    <div className="relative z-10 -mx-6 flex flex-col gap-7 rounded-t-3xl bg-background px-6 pt-10 md:-mx-14 md:px-14 md:pt-14">
+    <div className="relative z-10 flex flex-col gap-7">
       <div className="flex items-start justify-between gap-10">
         <div className="flex max-w-[700px] flex-col gap-3.5">
-          {/* Metadata line */}
           <div className="flex items-center gap-3">
             <span className="shrink-0 font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
               {category.toUpperCase()}
@@ -118,12 +117,10 @@ export function ExperimentHeader({
             )}
           </div>
 
-          {/* Title */}
           <h1 className="font-serif text-[38px] font-semibold leading-[110%] tracking-[-0.03em] text-foreground">
             {title}
           </h1>
 
-          {/* Description */}
           {sanitizedDescription && (
             <p className="text-[16px] leading-[160%] text-muted-foreground">
               {sanitizedDescription}
@@ -131,7 +128,6 @@ export function ExperimentHeader({
           )}
         </div>
 
-        {/* CTA or completion ring */}
         {status === "upcoming" && (
           <div className="flex shrink-0 flex-col items-center gap-2">
             <Button
