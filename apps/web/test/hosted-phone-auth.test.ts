@@ -273,6 +273,38 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
+  it("keeps recovery action errors visible on the manual-resume card", async () => {
+    const { HostedPhoneAuthScaffold } = await import(
+      "@/src/components/hosted-onboarding/hosted-phone-auth-views"
+    );
+
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        HostedPhoneAuthScaffold,
+        {
+          body: "Keep this tab open.",
+          description: "Continue or sign out.",
+          disabled: false,
+          errorMessage: "We could not sign you out cleanly.",
+          intent: "signin",
+          pendingAction: null,
+          secondaryActionSize: "lg",
+          title: "Signing you in...",
+          view: "manual-resume",
+          onContinue: () => {},
+          onUseDifferentNumber: () => {},
+        },
+        React.createElement("div", null, "Phone entry"),
+      ),
+    );
+
+    assert.match(markup, /Unable to continue/);
+    assert.match(markup, /We could not sign you out cleanly\./);
+    assert.match(markup, /You already started signing in\./);
+    assert.match(markup, /Continue sign in/);
+    assert.match(markup, /Use a different number/);
+  });
+
   it("renders invite signup as manual phone entry without exposing the phone hint", async () => {
     const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
 
@@ -970,6 +1002,366 @@ describe("HostedPhoneAuth", () => {
       vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
       vi.resetModules();
       vi.unstubAllGlobals();
+    }
+  });
+
+  it("switches from manual resume to sign-out recovery when the Privy account conflicts", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            latest_verified_at: 1741194420,
+            phone_number: "+14155552671",
+            type: "phone",
+          },
+          {
+            address: "0x0000000000000000000000000000000000000001",
+            chain_type: "ethereum",
+            connector_type: "embedded",
+            wallet_client: "privy",
+            type: "wallet",
+          },
+        ],
+      },
+    });
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+14155552671",
+          type: "phone",
+        },
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          wallet_client: "privy",
+          type: "wallet",
+        },
+      ],
+    });
+    const fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        error: {
+          code: "PRIVY_USER_MISMATCH",
+          message: "This phone number is already linked to a different Privy account.",
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 409,
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        intent: "signin",
+      }),
+    );
+
+    try {
+      assert.match(container.textContent ?? "", /You already started signing in\./);
+
+      const continueButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Continue sign in") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(continueButton);
+
+      await act(async () => {
+        continueButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
+      assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
+      assert.doesNotMatch(container.textContent ?? "", /Continue sign in/);
+      assert.match(container.textContent ?? "", /This browser needs a fresh phone sign-in\./);
+      assert.match(container.textContent ?? "", /cannot use that phone number/);
+
+      const resetButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Use a different number") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(resetButton);
+
+      await act(async () => {
+        resetButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.logout).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("switches from manual resume to sign-out recovery when the wallet conflicts", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            latest_verified_at: 1741194420,
+            phone_number: "+14155552671",
+            type: "phone",
+          },
+          {
+            address: "0x0000000000000000000000000000000000000001",
+            chain_type: "ethereum",
+            connector_type: "embedded",
+            wallet_client: "privy",
+            type: "wallet",
+          },
+        ],
+      },
+    });
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+14155552671",
+          type: "phone",
+        },
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          wallet_client: "privy",
+          type: "wallet",
+        },
+      ],
+    });
+    const fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        error: {
+          code: "PRIVY_WALLET_MISMATCH",
+          message: "This phone number is already linked to a different Privy account.",
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 409,
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        intent: "signin",
+      }),
+    );
+
+    try {
+      assert.match(container.textContent ?? "", /You already started signing in\./);
+
+      const continueButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Continue sign in") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(continueButton);
+
+      await act(async () => {
+        continueButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
+      assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
+      assert.doesNotMatch(container.textContent ?? "", /Continue sign in/);
+      assert.match(container.textContent ?? "", /This browser needs a fresh phone sign-in\./);
+      assert.match(container.textContent ?? "", /cannot use that phone number/);
+
+      const resetButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Use a different number") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(resetButton);
+
+      await act(async () => {
+        resetButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.logout).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("switches to sign-out recovery when account conflict follows SMS code verification", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", async () => {
+      const actual = await vi.importActual<
+        typeof import("@/src/components/hosted-onboarding/hosted-phone-auth-views")
+      >("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+      return {
+        ...actual,
+        HostedPhoneAuthFlow(props: {
+          activeAttempt: { maskedPhoneNumber: string } | null;
+          onCodeChange: (value: string) => void;
+          onPhoneNumberChange: (value: string) => void;
+          onSubmitPhoneEntry: () => void;
+          onVerifyCode: () => void;
+        }) {
+          if (props.activeAttempt) {
+            return React.createElement(
+              "div",
+              null,
+              React.createElement("p", null, props.activeAttempt.maskedPhoneNumber),
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => props.onCodeChange("123456"),
+                },
+                "Enter code",
+              ),
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  onClick: props.onVerifyCode,
+                },
+                "Verify code",
+              ),
+            );
+          }
+
+          return React.createElement(
+            "div",
+            null,
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                onClick: () => props.onPhoneNumberChange("4155552671"),
+              },
+              "Enter phone",
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                onClick: () => props.onSubmitPhoneEntry(),
+              },
+              "Text me a code",
+            ),
+          );
+        },
+      };
+    });
+    mocks.usePrivy.mockReturnValue({
+      authenticated: false,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: null,
+    });
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+14155552671",
+          type: "phone",
+        },
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          wallet_client: "privy",
+          type: "wallet",
+        },
+      ],
+    });
+    mocks.sendCode.mockResolvedValue(undefined);
+    mocks.loginWithCode.mockResolvedValue(undefined);
+    const fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        error: {
+          code: "PRIVY_USER_MISMATCH",
+          message: "This phone number is already linked to a different Privy account.",
+        },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 409,
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        intent: "signin",
+      }),
+    );
+
+    try {
+      const enterPhoneButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Enter phone") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(enterPhoneButton);
+
+      await act(async () => {
+        enterPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      const sendCodeButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Text me a code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(sendCodeButton);
+
+      await act(async () => {
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      const enterCodeButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Enter code") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(enterCodeButton);
+
+      await act(async () => {
+        enterCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mocks.loginWithCode).toHaveBeenCalledWith({ code: "123456" });
+      assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
+      assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
+      assert.doesNotMatch(container.textContent ?? "", /Continue sign in/);
+      assert.match(container.textContent ?? "", /This browser needs a fresh phone sign-in\./);
+      assert.match(container.textContent ?? "", /cannot use that phone number/);
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.unstubAllGlobals();
+      vi.resetModules();
     }
   });
 

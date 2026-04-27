@@ -66,6 +66,10 @@ type HostedPhoneResendTarget =
 const HOSTED_INVITE_SEND_CONFIRM_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY = "murph.hosted-onboarding.invite-phone-code-mutation";
 const HOSTED_SIGNIN_MEMBER_NOT_FOUND_CODE = "HOSTED_SIGNIN_MEMBER_NOT_FOUND";
+const HOSTED_PRIVY_ACCOUNT_CONFLICT_CODES = new Set([
+  "PRIVY_USER_MISMATCH",
+  "PRIVY_WALLET_MISMATCH",
+]);
 
 export function isHostedSignInMemberNotFoundError(input: {
   error: unknown;
@@ -75,6 +79,14 @@ export function isHostedSignInMemberNotFoundError(input: {
     input.intent === "signin"
     && input.error instanceof HostedOnboardingApiError
     && input.error.code === HOSTED_SIGNIN_MEMBER_NOT_FOUND_CODE
+  );
+}
+
+export function isHostedPrivyAccountConflictError(error: unknown): boolean {
+  return (
+    error instanceof HostedOnboardingApiError
+    && error.code !== null
+    && HOSTED_PRIVY_ACCOUNT_CONFLICT_CODES.has(error.code)
   );
 }
 
