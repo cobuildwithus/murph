@@ -224,11 +224,14 @@ describe("runner bundle runtime artifact staging", () => {
       throw new Error("Health Commons tarball was not packed.");
     }
 
-    const { stdout } = await execFileAsync(
-      "tar",
-      ["-tzf", healthCommonsTarball],
-      { maxBuffer: 8 * 1024 * 1024 },
-    );
+    const { stdout } = await execFileAsync("tar", [
+      "-tzf",
+      healthCommonsTarball,
+      "package/dist/index.js",
+      "package/dist/runtime.js",
+      "package/generated/catalog.json",
+      "package/package.json",
+    ]);
     const entries = stdout.split("\n");
 
     expect(entries).toContain("package/dist/index.js");
@@ -236,10 +239,18 @@ describe("runner bundle runtime artifact staging", () => {
     expect(entries).toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
 
-    const { stdout: catalogRaw } = await execFileAsync(
-      "tar",
-      ["-xOf", healthCommonsTarball, "package/generated/catalog.json"],
-      { maxBuffer: 32 * 1024 * 1024 },
+    const extractDir = path.join(tarballsDir, "health-commons-extract");
+    await mkdir(extractDir, { recursive: true });
+    await execFileAsync("tar", [
+      "-xzf",
+      healthCommonsTarball,
+      "-C",
+      extractDir,
+      "package/generated/catalog.json",
+    ]);
+    const catalogRaw = await readFile(
+      path.join(extractDir, "package", "generated", "catalog.json"),
+      "utf8",
     );
     const catalog: unknown = JSON.parse(catalogRaw);
 
@@ -267,11 +278,13 @@ describe("runner bundle runtime artifact staging", () => {
       throw new Error("Contracts tarball was not packed.");
     }
 
-    const { stdout } = await execFileAsync(
-      "tar",
-      ["-tzf", contractsTarball],
-      { maxBuffer: 8 * 1024 * 1024 },
-    );
+    const { stdout } = await execFileAsync("tar", [
+      "-tzf",
+      contractsTarball,
+      "package/dist/index.js",
+      "package/dist/schemas.js",
+      "package/package.json",
+    ]);
     const entries = stdout.split("\n");
 
     expect(entries).toContain("package/dist/index.js");
