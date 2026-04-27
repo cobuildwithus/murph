@@ -124,9 +124,9 @@ function ExperimentDetailClientContent({
         <div ref={sentinelRef} aria-hidden="true" className="h-px" />
         <div className="sticky top-0 z-20 -mx-6 flex items-center gap-4 bg-background/95 px-6 py-2 backdrop-blur-md md:-mx-14 md:px-14">
           <TabsList>
-            <TabsTrigger value="protocol">Protocol</TabsTrigger>
-            <TabsTrigger value="research">Research</TabsTrigger>
-            <TabsTrigger value="results">Your Results</TabsTrigger>
+            <TabsTrigger value="protocol" className="px-3 sm:px-5">Protocol</TabsTrigger>
+            <TabsTrigger value="research" className="px-3 sm:px-5">Research</TabsTrigger>
+            <TabsTrigger value="results" className="px-3 sm:px-5">Your Results</TabsTrigger>
           </TabsList>
           <span
             aria-hidden={!isTabsSticky}

@@ -438,7 +438,7 @@ export function ProtocolTab({ experiment, onJumpToResearch }: ProtocolTabProps) 
 
       {protocolTips.length > 0 && (
         <section className="flex flex-col gap-6 rounded-xl border border-secondary/25 bg-card/90 p-7">
-          <div className="flex items-baseline justify-between gap-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
             <SectionLabel>Good practices</SectionLabel>
             <p className="font-mono text-[10px]/3 uppercase tracking-[0.12em] text-muted-foreground">
               To keep results clean
@@ -907,7 +907,7 @@ function ProtocolShapeRail({
   return (
     <div className="flex flex-col gap-1.5">
       {effectiveLabels && labelTotal > 0 && (
-        <div className="flex gap-px">
+        <div className="hidden gap-px sm:flex">
           {effectiveLabels.map((entry, i) => {
             const color =
               entry.kind === "primary"
@@ -947,6 +947,29 @@ function ProtocolShapeRail({
           <span key={i}>{tick}</span>
         ))}
       </div>
+      {effectiveLabels && labelTotal > 0 && (
+        <ul role="list" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 sm:hidden">
+          {effectiveLabels
+            .filter((entry) => entry.text)
+            .map((entry, i) => {
+              const dotCls =
+                entry.kind === "primary"
+                  ? "bg-primary"
+                  : entry.kind === "secondary"
+                    ? "bg-primary/30"
+                    : "bg-secondary";
+              return (
+                <li
+                  key={i}
+                  className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground"
+                >
+                  <span aria-hidden="true" className={`size-1.5 rounded-full ${dotCls}`} />
+                  <span>{entry.text}</span>
+                </li>
+              );
+            })}
+        </ul>
+      )}
     </div>
   );
 }
