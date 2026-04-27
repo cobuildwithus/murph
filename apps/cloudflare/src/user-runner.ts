@@ -181,18 +181,12 @@ export class HostedUserRunner {
         webStatus.workspace?.nextWakeAt ?? null,
         nowMs,
       );
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: {
-          pendingNudge: record.pendingNudge,
-          runnerNextWakePresent: record.nextWakeAt !== null,
-          workspaceNextWakePresent: (webStatus.workspace?.nextWakeAt ?? null) !== null,
-          workspaceWakeDue,
-        },
-        message: "Hosted runner alarm evaluated wake state.",
-        phase: "wake.running",
-        userId: record.userId,
-      });
+      const alarmDecisionDetails = {
+        pendingNudge: record.pendingNudge,
+        runnerNextWakePresent: record.nextWakeAt !== null,
+        workspaceNextWakePresent: (webStatus.workspace?.nextWakeAt ?? null) !== null,
+        workspaceWakeDue,
+      };
       if (
         !record.pendingNudge
         && !workspaceWakeDue
@@ -202,9 +196,7 @@ export class HostedUserRunner {
         });
         emitHostedExecutionStructuredLog({
           component: "hosted.runner",
-          details: {
-            workspaceNextWakePresent: (webStatus.workspace?.nextWakeAt ?? null) !== null,
-          },
+          details: alarmDecisionDetails,
           message: "Hosted runner alarm skipped because no wake is due.",
           phase: "scheduled",
           userId: record.userId,
@@ -214,10 +206,7 @@ export class HostedUserRunner {
 
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
-        details: {
-          pendingNudge: record.pendingNudge,
-          workspaceWakeDue,
-        },
+        details: alarmDecisionDetails,
         message: "Hosted runner alarm starting workspace invocation.",
         phase: "wake.running",
         userId: record.userId,

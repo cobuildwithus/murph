@@ -186,8 +186,7 @@ export async function appendHostedMailboxItemTx(
       userId,
     });
     await recordHostedMailboxAppendLogTx({
-      duplicate: true,
-      inserted: false,
+      outcome: "duplicate",
       item: existing,
       payloadStorage: existing.payloadRef ? "ref" : "inline",
       tx: input.tx,
@@ -299,8 +298,7 @@ export async function appendHostedMailboxItemTx(
       userId,
     });
     await recordHostedMailboxAppendLogTx({
-      duplicate: true,
-      inserted: false,
+      outcome: "duplicate",
       item: concurrentExisting,
       payloadStorage: concurrentExisting.payloadRef ? "ref" : "inline",
       tx: input.tx,
@@ -329,8 +327,7 @@ export async function appendHostedMailboxItemTx(
   }
 
   await recordHostedMailboxAppendLogTx({
-    duplicate: false,
-    inserted: true,
+    outcome: "inserted",
     item,
     payloadStorage: payloadStorage.storage,
     tx: input.tx,
@@ -636,13 +633,13 @@ export async function allocateHostedMailboxLaneSeqTx(input: {
 }
 
 async function recordHostedMailboxAppendLogTx(input: {
-  duplicate: boolean;
-  inserted: boolean;
+  outcome: "duplicate" | "inserted";
   item: HostedMailboxItemRow;
   payloadStorage: "inline" | "ref";
   tx: HostedMailboxMutationTx;
   userId: string;
 }): Promise<void> {
+  const inserted = input.outcome === "inserted";
   await recordHostedRuntimeLogTx({
     component: "mailbox",
     eventCode: "mailbox.appended",
@@ -654,8 +651,8 @@ async function recordHostedMailboxAppendLogTx(input: {
     redacted: {
       bytes: input.item.payloadBytes ?? null,
       dedupeKeyPresent: true,
-      duplicate: input.duplicate,
-      inserted: input.inserted,
+      duplicate: !inserted,
+      inserted,
       kind: input.item.kind,
       schema: input.item.payloadSchema,
       storage: input.payloadStorage,
