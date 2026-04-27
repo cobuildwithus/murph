@@ -156,8 +156,8 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata).toMatchInlineSnapshot(`
       {
-        "dynamicContextStartsAfterStaticCore": 20874,
-        "stableRouteCapabilityPromptHash": "7af2c2042259d7f99f1af7d0dc1fa6eb58a16439a0168927812b3e673ef1dc84",
+        "dynamicContextStartsAfterStaticCore": 20974,
+        "stableRouteCapabilityPromptHash": "15c0a30f00f54e74a2cb87fd612ed42177dab87e1c095b19eb47c370a240e144",
         "staticPromptHash": "ee411cd5984a0ea4bd72a58d31446957eb38b809346373bcf9632d381e5802fc",
         "toolSchemaHash": "assistant-tool-schema-common-openai-test",
       }
@@ -266,7 +266,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('accepted scalar flags')
     expect(prompt).toContain('set up the default/required measurement path first')
     expect(prompt).toContain('Do not ask detailed ROI, color, texture, photo, or imaging fields by default')
+    expect(prompt).toContain('Do not read raw revision hashes, field names, or test-plan ids aloud')
     expect(prompt).not.toContain('scaffold and update the experiment record')
+    expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
   })
 })
 
