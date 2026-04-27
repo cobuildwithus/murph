@@ -8,11 +8,9 @@ export function HostedTelegramSettingsContent(props: {
   currentTelegram: HostedPrivyTelegramAccount | null;
   isBusy: boolean;
   isLinkingTelegram: boolean;
-  isSyncingTelegram: boolean;
   onLinkTelegram: () => Promise<void>;
-  onSyncTelegram: () => Promise<void>;
 }) {
-  const { botLink, currentTelegram, isBusy, isLinkingTelegram, isSyncingTelegram } = props;
+  const { botLink, currentTelegram, isBusy, isLinkingTelegram } = props;
 
   const telegramValue = currentTelegram
     ? currentTelegram.username
@@ -39,14 +37,6 @@ export function HostedTelegramSettingsContent(props: {
             <>
               <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy}>
                 {isLinkingTelegram ? "Relinking..." : "Relink"}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void props.onSyncTelegram()}
-                disabled={isBusy}
-                variant="outline"
-              >
-                {isSyncingTelegram ? "Saving..." : "Save connection"}
               </Button>
               {botLink ? (
                 <Button
