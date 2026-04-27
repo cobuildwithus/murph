@@ -872,6 +872,11 @@ function isWeeklyDigestDueOnDate(frontmatter: ExperimentFrontmatter, date: strin
     return false;
   }
 
+  const interventionEnd = frontmatter.runPlan?.interventionEnd;
+  if (interventionEnd && date > interventionEnd) {
+    return false;
+  }
+
   return daysBetweenInclusive(interventionStart, date) % 7 === 0;
 }
 

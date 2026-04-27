@@ -1011,12 +1011,18 @@ test("experiment follow-up due evaluates weekly digest enablement", () => {
     kind: "weekly-digest",
     date: "2026-04-14",
   });
+  const afterInterventionDecision = decideExperimentFollowupDue(vault, "sauna-rhr", {
+    kind: "weekly-digest",
+    date: "2026-04-28",
+  });
 
   assert.equal(earlyDecision.action, "skip");
   assert.equal(earlyDecision.reason, "weekly_digest_not_due");
   assert.equal(decision.action, "notify");
   assert.equal(decision.reason, "weekly_digest_due");
   assert.equal(decision.dedupeKey.endsWith(":weekly-digest:2026-04-14"), true);
+  assert.equal(afterInterventionDecision.action, "skip");
+  assert.equal(afterInterventionDecision.reason, "weekly_digest_not_due");
 });
 
 test("experiment outcome reports sparse primary data as medium-confidence incomplete evidence", () => {

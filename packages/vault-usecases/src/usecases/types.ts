@@ -357,7 +357,6 @@ export interface ExperimentProgressResult {
 }
 
 export interface ExperimentFollowupDueResult {
-  vault: string
   experimentId: string
   lookupId: string
   slug: string
