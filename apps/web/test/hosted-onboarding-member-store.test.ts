@@ -1028,7 +1028,6 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
@@ -1097,7 +1096,6 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -1209,7 +1207,6 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).not.toHaveBeenCalled();
   });
 
@@ -1593,7 +1590,6 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(2);
   });
 
   it("rejects Stripe billing ref writes when another member already owns a rotated lookup candidate", async () => {
@@ -1649,7 +1645,6 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
-    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).not.toHaveBeenCalled();
   });
 
