@@ -414,7 +414,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request(
-        "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
+        "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&eventId=event_accepted_123&ownerUserId=member_sender",
         {
           headers: createRunnerProxyHeaders(),
           method: "GET",
@@ -435,7 +435,7 @@ describe("handleRunnerOutboundRequest", () => {
     }
     const [url, init] = firstCall;
     expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
+      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&eventId=event_accepted_123&ownerUserId=member_sender",
     );
     expect(init?.method).toBe("GET");
     const headers = new Headers(init?.headers);
@@ -461,6 +461,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://web-control.worker/api/internal/hosted-execution/share/import", {
         body: JSON.stringify({
+          eventId: "event_accepted_123",
           importedAt: "2026-04-26T00:00:05.000Z",
           ownerUserId: "member_sender",
           shareId: "share_123",
@@ -488,6 +489,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(String(url)).toBe("https://web.example.test/api/internal/hosted-execution/share/import");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({
+      eventId: "event_accepted_123",
       importedAt: "2026-04-26T00:00:05.000Z",
       ownerUserId: "member_sender",
       shareId: "share_123",

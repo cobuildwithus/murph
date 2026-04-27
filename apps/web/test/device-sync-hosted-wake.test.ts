@@ -551,6 +551,26 @@ describe("appendHostedDeviceSyncWake", () => {
         userId: "user-123",
       }),
     );
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "dsc_123",
+        status: "disconnected",
+      }),
+      mocks.prismaTx,
+    );
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      externalAccountId: "acct_sensitive",
+      provider: "oura",
+      tokenBundle: null,
+      tx: mocks.prismaTx,
+    });
+    expect(mocks.syncDurableConnectionState.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+    );
+    expect(mocks.persistStoredConnectionTokenBundle.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+    );
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );

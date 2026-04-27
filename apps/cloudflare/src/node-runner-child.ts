@@ -80,8 +80,8 @@ export async function runHostedExecutionChild(
         hostedAssistantBaseUrl: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_BASE_URL ?? null,
         hostedAssistantModel: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_MODEL ?? null,
         hostedAssistantProvider: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_PROVIDER ?? null,
+        hasLocalInternalProxyBaseUrl: Boolean(input.localInternalProxyBaseUrl),
         linqApiBaseUrl: input.job.runtime?.forwardedEnv?.LINQ_API_BASE_URL ?? null,
-        localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
       },
     });
     const result = await runWorkspaceChildJob({

@@ -19,19 +19,17 @@ export const POST = withJsonError(async (request: Request) => {
     select: {
       acceptedByMemberId: true,
       id: true,
-      lastEventId: true,
       senderMemberId: true,
     },
     where: {
       acceptedByMemberId: runnerUserId,
       id: body.shareId,
+      lastEventId: body.eventId,
       senderMemberId: body.ownerUserId,
     },
   });
 
-  const eventId = share?.lastEventId ?? null;
-
-  if (!share || !eventId) {
+  if (!share) {
     return jsonOk({
       recorded: false,
       shareId: body.shareId,
@@ -41,13 +39,13 @@ export const POST = withJsonError(async (request: Request) => {
 
   const recorded = body.status === "imported"
     ? (await finalizeHostedShareAcceptance({
-        eventId,
+        eventId: body.eventId,
         memberId: runnerUserId,
         prisma,
         shareId: share.id,
       })).finalized
     : await releaseHostedShareAcceptance({
-        eventId,
+        eventId: body.eventId,
         memberId: runnerUserId,
         prisma,
         shareId: share.id,

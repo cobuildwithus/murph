@@ -69,7 +69,7 @@ describe("hosted retention cleanup", () => {
       },
       where: {
         expiresAt: { lte: now },
-        status: { in: ["pending", "exchanged", "uploaded", "queued"] },
+        status: { in: ["pending", "exchanged", "uploaded"] },
       },
     });
     expect(hostedVaultSyncPayloadDeleteMany).toHaveBeenNthCalledWith(1, {
@@ -77,6 +77,7 @@ describe("hosted retention cleanup", () => {
         session: {
           is: {
             expiresAt: { lte: now },
+            status: { in: ["pending", "exchanged", "uploaded"] },
           },
         },
       },

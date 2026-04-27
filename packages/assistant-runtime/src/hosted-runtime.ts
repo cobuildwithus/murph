@@ -46,9 +46,6 @@ import {
   type HostedWorkspaceRuntimeAssistantPhase,
 } from "./hosted-runtime/workspace-assistant-phase.ts";
 import {
-  importHostedVaultSyncMailboxItem,
-} from "./hosted-runtime/vault-sync-mailbox-import.ts";
-import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
@@ -146,12 +143,6 @@ export {
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
   runHostedWorkspaceUntilIdleOrBudget,
-};
-export type {
-  HostedVaultSyncMailboxImportInput,
-} from "./hosted-runtime/vault-sync-mailbox-import.ts";
-export {
-  importHostedVaultSyncMailboxItem,
 };
 export {
   createHostedConversationMailboxImportItem,

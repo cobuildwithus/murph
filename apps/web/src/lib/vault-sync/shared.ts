@@ -186,12 +186,10 @@ function hostedVaultSyncSecretHashesEqual(left: string, right: string): boolean 
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-export async function upsertHostedVaultSyncPayload(input: {
+function buildHostedVaultSyncPayloadEncrypted(input: {
   memberId: string;
   payload: HostedExecutionRunnerVaultSyncImport;
-  prisma: VaultSyncClient;
-  sessionId: string;
-}): Promise<void> {
+}): string {
   const payloadEncrypted = encryptHostedWebNullableString({
     field: HOSTED_VAULT_SYNC_PAYLOAD_FIELD,
     memberId: input.memberId,
@@ -200,17 +198,22 @@ export async function upsertHostedVaultSyncPayload(input: {
   if (!payloadEncrypted) {
     throw new TypeError("Hosted vault sync payload must not be empty.");
   }
-  await input.prisma.hostedVaultSyncPayload.upsert({
-    where: { sessionId: input.sessionId },
-    create: {
+  return payloadEncrypted;
+}
+
+export async function createHostedVaultSyncPayload(input: {
+  memberId: string;
+  payload: HostedExecutionRunnerVaultSyncImport;
+  prisma: VaultSyncClient;
+  sessionId: string;
+}): Promise<void> {
+  const payloadEncrypted = buildHostedVaultSyncPayloadEncrypted(input);
+  await input.prisma.hostedVaultSyncPayload.create({
+    data: {
       payloadEncrypted,
       payloadSchema: HOSTED_VAULT_SYNC_PAYLOAD_SCHEMA,
       sessionId: input.sessionId,
       memberId: input.memberId,
-    },
-    update: {
-      payloadEncrypted,
-      payloadSchema: HOSTED_VAULT_SYNC_PAYLOAD_SCHEMA,
     },
   });
 }

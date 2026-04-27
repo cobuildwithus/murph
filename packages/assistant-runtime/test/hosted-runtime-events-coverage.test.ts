@@ -218,7 +218,6 @@ describe("hosted runtime event coverage", () => {
 
     expect(mocks.handleHostedShareAcceptedWake).toHaveBeenCalledWith({
       wake,
-      sharePort: null,
       sharePack,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
     });

@@ -278,7 +278,7 @@ describe("vault sync mailbox producer", () => {
     }).hostedIngressEvent.findUnique).not.toHaveBeenCalled();
   });
 
-  it("updates the upload session and appends the vault-sync mailbox item in one transaction before nudging", async () => {
+  it("claims the upload session and appends the vault-sync mailbox item in one transaction before nudging", async () => {
     const order: string[] = [];
     const session = buildVaultSyncAgentSession({
       agentTokenHash: hashHostedVaultSyncSecret("vst_test_agent_token"),
@@ -331,19 +331,24 @@ describe("vault sync mailbox producer", () => {
       status: "queued",
     }));
 
-    expect(tx.hostedVaultSyncSession.update).toHaveBeenCalledWith({
+    expect(tx.hostedVaultSyncSession.updateMany).toHaveBeenCalledWith({
       data: expect.objectContaining({
         localManifestHash: "manifest-hash",
         status: "queued",
       }),
-      where: { id: "vsi_123" },
+      where: expect.objectContaining({
+        agentTokenHash: hashHostedVaultSyncSecret("vst_test_agent_token"),
+        id: "vsi_123",
+        memberId: "member_123",
+        status: "exchanged",
+      }),
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "vault-sync.import",
       userId: "member_123",
     });
-    expect(order).toEqual(["payload", "session", "mailbox", "commit", "nudge"]);
+    expect(order).toEqual(["session", "payload", "mailbox", "commit", "nudge"]);
   });
 
   it("does not append a vault-sync mailbox item or nudge when the product mutation fails", async () => {
@@ -372,7 +377,52 @@ describe("vault sync mailbox producer", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
-    expect(order).toEqual(["payload", "session"]);
+    expect(order).toEqual(["session"]);
+  });
+
+  it("does not recreate side input or mailbox rows when a concurrent upload already queued the session", async () => {
+    const order: string[] = [];
+    const session = buildVaultSyncAgentSession({
+      agentTokenHash: hashHostedVaultSyncSecret("vst_test_agent_token"),
+    });
+    const queuedSession = {
+      ...session,
+      localManifestHash: "manifest-hash",
+      queuedAt: new Date("2026-04-21T00:01:00.000Z"),
+      status: "queued",
+      uploadedAt: new Date("2026-04-21T00:01:00.000Z"),
+    };
+    const tx = buildVaultSyncUploadTx({
+      onPayload: () => order.push("payload"),
+      onSessionUpdate: () => order.push("session"),
+      session,
+      sessionUpdateCount: 0,
+      staleClaimSession: queuedSession,
+    });
+    const prisma = buildVaultSyncUploadPrisma({ session, tx, order });
+    mocks.encryptHostedWebNullableString.mockReturnValue("encrypted-vault-sync-payload");
+    mocks.nudgeHostedRunnerBestEffort.mockImplementation(async () => {
+      order.push("nudge");
+    });
+
+    await expect(completeHostedVaultSyncAgentUpload({
+      bundleBase64: "AQID",
+      localManifestHash: "manifest-hash",
+      prisma,
+      request: buildVaultSyncAgentRequest("vst_test_agent_token"),
+      sessionId: "vsi_123",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "vsi_123",
+      status: "queued",
+    }));
+
+    expect(tx.hostedVaultSyncPayload.create).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
+      context: "vault-sync.import",
+      userId: "member_123",
+    });
+    expect(order).toEqual(["session", "commit", "nudge"]);
   });
 
   it("records runtime import completion and deletes the vault-sync side input in one transaction", async () => {
@@ -525,21 +575,31 @@ function buildVaultSyncUploadTx(input: {
   onPayload: () => void;
   onSessionUpdate: () => void;
   session: ReturnType<typeof buildVaultSyncAgentSession>;
+  sessionUpdateCount?: number;
+  staleClaimSession?: object | null;
 }) {
   return {
     hostedVaultSyncPayload: {
-      upsert: vi.fn(async () => {
+      create: vi.fn(async () => {
         input.onPayload();
       }),
     },
     hostedVaultSyncSession: {
-      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      findFirst: vi.fn(async () => input.staleClaimSession ?? null),
+      findUniqueOrThrow: vi.fn(async () => ({
+        ...input.session,
+        localManifestHash: "manifest-hash",
+        queuedAt: new Date("2026-04-21T00:01:00.000Z"),
+        sourceSchemaVersion: "murph.vault.v1",
+        sourceVaultId: "vault_local",
+        sourceVaultTitle: "Local Vault",
+        status: "queued",
+        updatedAt: new Date("2026-04-21T00:01:00.000Z"),
+        uploadedAt: new Date("2026-04-21T00:01:00.000Z"),
+      })),
+      updateMany: vi.fn(async () => {
         input.onSessionUpdate();
-        return {
-          ...input.session,
-          ...data,
-          updatedAt: new Date("2026-04-21T00:01:00.000Z"),
-        };
+        return { count: input.sessionUpdateCount ?? 1 };
       }),
     },
   };

@@ -132,6 +132,7 @@ export interface HostedRuntimeSharePayload {
 }
 
 export interface HostedRuntimeSharePayloadFetchRequest {
+  eventId: string;
   ownerUserId: string;
   requestId: string;
   shareId: string;
@@ -154,6 +155,7 @@ export type HostedRuntimeShareImportStatus =
 
 export interface HostedRuntimeShareImportRequest {
   errorCode?: string | null;
+  eventId: string;
   importedAt: string;
   ownerUserId: string;
   shareId: string;

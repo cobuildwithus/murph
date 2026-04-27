@@ -870,6 +870,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const result = await platform.sharePort!.fetchPayload({
+      eventId: "event_accepted_123",
       ownerUserId: "member_sender",
       requestId: "request_share_1",
       shareId: "share_123",
@@ -883,7 +884,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "share payload fetch");
     expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
+      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&eventId=event_accepted_123&ownerUserId=member_sender",
     );
     expect(init?.method).toBe("GET");
     expect(init?.body).toBeUndefined();
@@ -910,6 +911,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(platform.sharePort!.fetchPayload({
+      eventId: "event_accepted_123",
       ownerUserId: "member_sender",
       requestId: "request_share_1",
       shareId: "share_123",
@@ -946,6 +948,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const result = await platform.sharePort!.fetchPayload({
+      eventId: "event_accepted_123",
       ownerUserId: "member_sender",
       requestId: "request_share_1",
       shareId: "share_123",
@@ -955,7 +958,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "proxied share payload fetch");
     expect(request.url).toBe(
-      "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
+      "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&eventId=event_accepted_123&ownerUserId=member_sender",
     );
     expect(request.method).toBe("GET");
     expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
@@ -975,6 +978,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(platform.sharePort!.fetchPayload({
+      eventId: "event_accepted_123",
       ownerUserId: "member_sender",
       requestId: "request_share_1",
       shareId: "share_123",
