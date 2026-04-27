@@ -12,7 +12,7 @@ import type {
   CommandContext,
   EntityLookupInput as ShowCommandContext,
   HealthListInput as ListCommandContext,
-  JsonFileInput as UpsertCommandContext,
+  JsonFileInput as JsonImportCommandContext,
 } from '@murphai/vault-usecases'
 import {
   type CommandExamples,
@@ -28,14 +28,14 @@ interface CrudDescriptions {
   list: string
   scaffold: string
   show: string
-  upsert: string
+  importJson: string
 }
 
 interface CrudHints {
   list?: string
   scaffold?: string
   show?: string
-  upsert?: string
+  importJson?: string
 }
 
 export type HealthCrudListFilterCapability = 'date-range' | 'kind' | 'status'
@@ -47,7 +47,7 @@ interface CrudExamples {
   list?: CommandExamples
   scaffold?: CommandExamples
   show?: CommandExamples
-  upsert?: CommandExamples
+  importJson?: CommandExamples
 }
 
 interface CrudOutputs<
@@ -59,7 +59,7 @@ interface CrudOutputs<
   list: z.ZodType<TList>
   scaffold: z.ZodType<TScaffold>
   show: z.ZodType<TShow>
-  upsert: z.ZodType<TUpsert>
+  importJson: z.ZodType<TUpsert>
 }
 
 interface CrudServices<
@@ -71,7 +71,7 @@ interface CrudServices<
   list(input: ListCommandContext): Promise<TList>
   scaffold(input: CommandContext): Promise<TScaffold>
   show(input: ShowCommandContext): Promise<TShow>
-  upsert(input: UpsertCommandContext): Promise<TUpsert>
+  importJson(input: JsonImportCommandContext): Promise<TUpsert>
 }
 
 interface HealthCrudConfig<
@@ -87,17 +87,15 @@ interface HealthCrudConfig<
   hints?: CrudHints
   listFilterCapabilities?: readonly HealthCrudListFilterCapability[]
   listStatusDescription?: string
-  jsonImportCommandName?: string
   noun: string
   outputs: CrudOutputs<TScaffold, TUpsert, TShow, TList>
   payloadFile: string
   pluralNoun: string
-  registerUpsert?: boolean
   services: CrudServices<TScaffold, TUpsert, TShow, TList>
   showId: {
     description: string
     example: string
-    fromUpsert(result: TUpsert): string
+    fromImportJsonResult(result: TUpsert): string
   }
 }
 
@@ -136,7 +134,6 @@ interface CrudServiceMethodNames<
 
 interface CrudPresentationContext {
   groupName: string
-  jsonImportCommandName?: string
   noun: string
   payloadFile: string
   pluralNoun: string
@@ -183,10 +180,10 @@ const defaultExamplesByCommand: Record<
       },
     ]
   },
-  upsert(config) {
+  importJson(config) {
     return [
       {
-        description: `Upsert one ${config.noun} from a JSON payload file.`,
+        description: `Import one ${config.noun} from a JSON payload file.`,
         options: {
           input: `@${config.payloadFile}`,
           vault: './vault',
@@ -203,10 +200,10 @@ const defaultHintsByCommand: Partial<
     return 'Use --limit to cap results.'
   },
   scaffold(config) {
-    const importCommand = `${config.groupName} ${config.jsonImportCommandName ?? 'upsert'}`
+    const importCommand = `${config.groupName} import-json`
     return `Edit the emitted payload, save it as ${config.payloadFile}, then import it with ${importCommand} --input @${config.payloadFile} or pipe it to --input -. The scaffold output is the current canonical field shape for this command.`
   },
-  upsert(config) {
+  importJson(config) {
     return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} scaffold first if you need the current canonical field shape.`
   },
 }
@@ -231,11 +228,7 @@ function jsonImportExamplesFor<
 >(
   config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>,
 ) {
-  const examples = examplesFor(config, 'upsert')
-
-  if ((config.jsonImportCommandName ?? 'upsert') === 'upsert') {
-    return examples
-  }
+  const examples = examplesFor(config, 'importJson')
 
   return examples.map((example) => {
     if (typeof example.description !== 'string') {
@@ -269,11 +262,13 @@ function jsonImportDescriptionFor<
 >(
   config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>,
 ) {
-  if ((config.jsonImportCommandName ?? 'upsert') === 'upsert') {
-    return config.descriptions.upsert
-  }
+  const description = config.descriptions.importJson
+    .replace(/^Upsert one /u, 'Import one ')
+    .replace(/^Upsert /u, 'Import ')
 
-  return `Import one ${config.noun} from a JSON payload file or stdin.`
+  return description.startsWith('Import ')
+    ? description
+    : `Import one ${config.noun} from a JSON payload file or stdin.`
 }
 
 function bindServiceMethod<
@@ -295,7 +290,7 @@ export function bindHealthCrudServices<
   TCore extends object,
   TQuery extends object,
   TScaffoldName extends HealthCommandServiceMethodName<TCore, CommandContext>,
-  TUpsertName extends HealthCommandServiceMethodName<TCore, UpsertCommandContext>,
+  TUpsertName extends HealthCommandServiceMethodName<TCore, JsonImportCommandContext>,
   TShowName extends HealthCommandServiceMethodName<TQuery, ShowCommandContext>,
   TListName extends HealthCommandServiceMethodName<TQuery, ListCommandContext>,
 >(
@@ -321,7 +316,7 @@ export function bindHealthCrudServices<
     list: bindServiceMethod(services.query, methodNames.list),
     scaffold: bindServiceMethod(services.core, methodNames.scaffold),
     show: bindServiceMethod(services.query, methodNames.show),
-    upsert: bindServiceMethod(services.core, methodNames.upsert),
+    importJson: bindServiceMethod(services.core, methodNames.upsert),
   }
 }
 
@@ -349,12 +344,12 @@ export function createHealthCrudGroup<
 function createCrudScaffoldCta(
   config: Pick<
     HealthCrudConfig<unknown, object, unknown, unknown>,
-    'groupName' | 'jsonImportCommandName' | 'noun' | 'payloadFile'
+    'groupName' | 'noun' | 'payloadFile'
   >,
 ) {
   return suggestedCommandsCta([
     {
-      command: `${config.groupName} ${config.jsonImportCommandName ?? 'upsert'}`,
+      command: `${config.groupName} import-json`,
       description: `Apply the edited ${config.noun} payload.`,
       options: {
         input: `@${config.payloadFile}`,
@@ -364,7 +359,7 @@ function createCrudScaffoldCta(
   ])
 }
 
-function createCrudUpsertCta<TUpsert extends object>(
+function createCrudImportJsonCta<TUpsert extends object>(
   config: Pick<
     HealthCrudConfig<unknown, TUpsert, unknown, unknown>,
     'groupName' | 'noun' | 'pluralNoun' | 'showId'
@@ -375,7 +370,7 @@ function createCrudUpsertCta<TUpsert extends object>(
     {
       command: `${config.groupName} show`,
       args: {
-        id: config.showId.fromUpsert(result),
+        id: config.showId.fromImportJsonResult(result),
       },
       description: `Show the saved ${config.noun}.`,
       options: {
@@ -398,8 +393,6 @@ export function registerHealthCrudCommands<
   TShow,
   TList,
 >(config: HealthCrudConfig<TScaffold, TUpsert, TShow, TList>) {
-  const jsonInputCommandName = config.jsonImportCommandName ?? 'upsert'
-
   config.group.command('scaffold', {
     args: emptyArgsSchema,
     description: config.descriptions.scaffold,
@@ -419,29 +412,27 @@ export function registerHealthCrudCommands<
     },
   })
 
-  if (config.registerUpsert !== false || config.jsonImportCommandName !== undefined) {
-    config.group.command(jsonInputCommandName, {
-      args: emptyArgsSchema,
-      description: jsonImportDescriptionFor(config),
-      examples: jsonImportExamplesFor(config),
-      hint: hintFor(config, 'upsert'),
-      options: withBaseOptions({
-        input: inputFileOptionSchema,
-      }),
-      output: config.outputs.upsert,
-      async run(context) {
-        const result = await config.services.upsert({
-          input: normalizeInputFileOption(context.options.input),
-          requestId: requestIdFromOptions(context.options),
-          vault: context.options.vault,
-        })
+  config.group.command('import-json', {
+    args: emptyArgsSchema,
+    description: jsonImportDescriptionFor(config),
+    examples: jsonImportExamplesFor(config),
+    hint: hintFor(config, 'importJson'),
+    options: withBaseOptions({
+      input: inputFileOptionSchema,
+    }),
+    output: config.outputs.importJson,
+    async run(context) {
+      const result = await config.services.importJson({
+        input: normalizeInputFileOption(context.options.input),
+        requestId: requestIdFromOptions(context.options),
+        vault: context.options.vault,
+      })
 
-        return context.ok(result, {
-          cta: createCrudUpsertCta(config, result),
-        })
-      },
-    })
-  }
+      return context.ok(result, {
+        cta: createCrudImportJsonCta(config, result),
+      })
+    },
+  })
 
   config.group.command('show', {
     args: z.object({

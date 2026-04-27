@@ -101,8 +101,7 @@ test('workout format save schema exposes typed routine-template parity fields', 
   const schema = await readCommandSchema(cli, ['workout', 'format', 'save'])
 
   assert.deepEqual(schema.args.required ?? [], [])
-  assert.equal('input' in schema.options.properties, true)
-  assert.equal(schema.options.required?.includes('input') ?? false, false)
+  assert.equal('input' in schema.options.properties, false)
 
   for (const field of [
     'workoutFormatId',
@@ -121,6 +120,14 @@ test('workout format save schema exposes typed routine-template parity fields', 
   ]) {
     assert.equal(field in schema.options.properties, true, field)
   }
+})
+
+test('workout format import-json schema exposes the structured template escape hatch', async () => {
+  const cli = createWorkoutFormatCli()
+  const schema = await readCommandSchema(cli, ['workout', 'format', 'import-json'])
+
+  assert.equal('input' in schema.options.properties, true)
+  assert.equal(schema.options.required?.includes('input') ?? false, true)
 })
 
 test.sequential('workout format save typed fields persist the same first-class document shape as JSON input', async () => {
@@ -187,7 +194,7 @@ test.sequential('workout format save typed fields persist the same first-class d
   const jsonSave = await runInProcessJsonCli<WorkoutFormatSaveResult>(cli, [
     'workout',
     'format',
-    'save',
+    'import-json',
     '--input',
     `@${payloadPath}`,
     '--vault',
@@ -351,7 +358,7 @@ test.sequential('workout format save supports metadata-only typed templates with
   assert.deepEqual(attributes.template, { exercises: [] })
 })
 
-test.sequential('workout format save rejects typed fields combined with raw input', async () => {
+test.sequential('workout format save rejects raw input because JSON imports are explicit', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-workout-format-input-mix-',
   )
@@ -388,8 +395,7 @@ test.sequential('workout format save rejects typed fields combined with raw inpu
   assert.equal(result.exitCode, 1)
   assert.equal(result.envelope.ok, false)
   if (!result.envelope.ok) {
-    assert.equal(result.envelope.error.code, 'invalid_option')
-    assert.match(result.envelope.error.message ?? '', /cannot combine --input with --slug/u)
+    assert.match(result.envelope.error.message ?? '', /input/u)
   }
 })
 

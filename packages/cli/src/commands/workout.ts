@@ -329,24 +329,6 @@ function hasWorkoutSessionOptions(options: WorkoutAddTypedOptions): boolean {
   return workoutAddSessionOptionKeys.some((key) => options[key] !== undefined)
 }
 
-function rejectWorkoutAddInputWithTypedSessionOptions(
-  options: WorkoutAddTypedOptions & { input?: unknown },
-) {
-  if (options.input === undefined) {
-    return
-  }
-
-  const unsupportedOptions = workoutAddSessionOptionKeys
-    .filter((key) => options[key] !== undefined)
-    .map((key) => `--${key.replace(/[A-Z]/gu, (match) => `-${match.toLowerCase()}`)}`)
-
-  if (unsupportedOptions.length > 0) {
-    invalidWorkoutAddOption(
-      `workout add cannot combine --input with ${unsupportedOptions.join(', ')}. Put those fields in the structured input payload or omit --input.`,
-    )
-  }
-}
-
 function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutSession | undefined {
   if (!hasWorkoutSessionOptions(options)) {
     return undefined
@@ -426,7 +408,7 @@ export function registerWorkoutCommands(
 
   workout.command('add', {
     description:
-      'Record one workout from typed fields, freeform text, or an advanced structured JSON payload.',
+      'Record one workout from typed fields or freeform text.',
     args: z.object({
       text: z
         .string()
@@ -434,7 +416,7 @@ export function registerWorkoutCommands(
         .max(4000)
         .optional()
         .describe(
-          'Optional freeform workout text such as "Went for a 30-minute run." Omit it when using --input.',
+          'Optional freeform workout text such as "Went for a 30-minute run."',
         ),
     }),
     examples: [
@@ -444,14 +426,6 @@ export function registerWorkoutCommands(
           text: 'Went for a 30-minute run around the neighborhood.',
         },
         options: {
-          vault: './vault',
-        },
-      },
-      {
-        description: 'Capture a structured workout payload from disk.',
-        args: {},
-        options: {
-          input: '@workout.json',
           vault: './vault',
         },
       },
@@ -469,11 +443,8 @@ export function registerWorkoutCommands(
       },
     ],
     hint:
-      'Use typed flags for one workout record. Keep --input @workout.json for bulk/import payloads or advanced nested fields outside the typed surface.',
+      'Use typed flags for one workout record. Use workout import-json --input @workout.json for bulk/import payloads or advanced nested fields outside the typed surface.',
     options: withBaseOptions({
-      input: inputFileOptionSchema
-        .optional()
-        .describe('Optional advanced structured workout payload in @file.json form or - for stdin.'),
       note: z
         .string()
         .min(1)
@@ -493,7 +464,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Optional duration override in minutes when the note or structured payload is missing or ambiguous.',
+          'Optional duration override in minutes when the note is missing or ambiguous.',
         ),
       type: z
         .string()
@@ -572,16 +543,10 @@ export function registerWorkoutCommands(
     output: workoutAddResultSchema,
     async run({ args, options }) {
       const text = resolveWorkoutAddText(args.text, options.note)
-      rejectWorkoutAddInputWithTypedSessionOptions(options)
-      const inputFile =
-        typeof options.input === 'string'
-          ? normalizeInputFileOption(options.input)
-          : undefined
       const workout = buildWorkoutFromTypedOptions(options)
       return addWorkoutRecord({
         vault: options.vault,
         text,
-        inputFile,
         durationMinutes: options.duration,
         activityType:
           typeof options.type === 'string' ? options.type : undefined,
@@ -602,6 +567,109 @@ export function registerWorkoutCommands(
           ? options.media.filter((entry): entry is string => typeof entry === 'string')
           : undefined,
         workout,
+      })
+    },
+  })
+
+  workout.command('import-json', {
+    description:
+      'Import one workout from an advanced structured JSON payload file or stdin.',
+    args: z.object({
+      text: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional freeform workout text used when the payload omits note text.'),
+    }),
+    examples: [
+      {
+        description: 'Capture a structured workout payload from disk.',
+        args: {},
+        options: {
+          input: '@workout.json',
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      '--input accepts @file.json or - for stdin. The payload retains the full structured workout import surface, including source fields, media/raw refs, exercises, and sets.',
+    options: withBaseOptions({
+      input: inputFileOptionSchema.describe('Advanced structured workout payload in @file.json form or - for stdin.'),
+      note: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional workout note when omitting positional text.'),
+      title: z
+        .string()
+        .min(1)
+        .max(240)
+        .optional()
+        .describe('Optional explicit workout title.'),
+      duration: z
+        .number()
+        .int()
+        .positive()
+        .max(24 * 60)
+        .optional()
+        .describe(
+          'Optional duration override in minutes when the payload is missing or ambiguous.',
+        ),
+      type: z
+        .string()
+        .min(1)
+        .max(120)
+        .optional()
+        .describe(
+          'Optional workout type override such as "run" or "strength training".',
+        ),
+      distanceKm: z
+        .number()
+        .positive()
+        .max(1_000)
+        .optional()
+        .describe('Optional workout distance override in kilometers.'),
+      occurredAt: occurredAtOptionSchema
+        .optional()
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
+      source: eventSourceSchema
+        .optional()
+        .describe(
+          'Optional event source (`manual`, `import`, `device`, or `derived`).',
+        ),
+      media: z
+        .array(pathSchema)
+        .optional()
+        .describe('Optional workout photo or video file paths to copy into raw/workouts/** and attach to the workout event.'),
+    }),
+    output: workoutAddResultSchema,
+    async run({ args, options }) {
+      const text = resolveWorkoutAddText(args.text, options.note)
+      return addWorkoutRecord({
+        vault: options.vault,
+        text,
+        inputFile: normalizeInputFileOption(options.input),
+        durationMinutes: options.duration,
+        activityType:
+          typeof options.type === 'string' ? options.type : undefined,
+        distanceKm:
+          typeof options.distanceKm === 'number'
+            ? options.distanceKm
+            : undefined,
+        title: typeof options.title === 'string' ? options.title : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
+        source: typeof options.source === 'string' ? options.source : undefined,
+        mediaPaths: Array.isArray(options.media)
+          ? options.media.filter((entry): entry is string => typeof entry === 'string')
+          : undefined,
       })
     },
   })
@@ -989,26 +1057,6 @@ export function registerWorkoutCommands(
         || options.distanceKm !== undefined)
   }
 
-  function rejectWorkoutFormatTypedOptionsWithInput(options: WorkoutFormatTypedOptions) {
-    const unsupportedOptions: string[] = []
-    for (const key of workoutFormatPayloadOptionKeys) {
-      const value = options[key]
-      if (Array.isArray(value) ? value.length > 0 : value !== undefined) {
-        unsupportedOptions.push(`--${key.replace(/[A-Z]/gu, (match) => `-${match.toLowerCase()}`)}`)
-      }
-    }
-
-    if (options.duration !== undefined) unsupportedOptions.push('--duration')
-    if (options.type !== undefined) unsupportedOptions.push('--type')
-    if (options.distanceKm !== undefined) unsupportedOptions.push('--distance-km')
-
-    if (unsupportedOptions.length > 0) {
-      invalidWorkoutFormatOption(
-        `workout format save cannot combine --input with ${unsupportedOptions.join(', ')}. Put those fields in the structured input payload or omit --input.`,
-      )
-    }
-  }
-
   function formatWorkoutFormatSchemaIssues(
     issues: readonly { path: PropertyKey[]; message: string }[],
   ): string {
@@ -1112,7 +1160,7 @@ export function registerWorkoutCommands(
 
   format.command('save', {
     description:
-      'Save or update one reusable workout format from a name plus freeform text, or from a structured JSON payload.',
+      'Save or update one reusable workout format from typed routine-template fields or freeform text.',
     args: z.object({
       name: z
         .string()
@@ -1138,21 +1186,10 @@ export function registerWorkoutCommands(
           vault: './vault',
         },
       },
-      {
-        description: 'Save a structured routine template from disk.',
-        args: {},
-        options: {
-          input: '@routine.json',
-          vault: './vault',
-        },
-      },
     ],
     hint:
-      'Saved workout formats now support a structured template payload for routine exercises, planned sets, grouping, and persistent notes. Freeform text still works and is converted into a simple template when possible.',
+      'Saved workout formats support typed routine exercises, planned sets, grouping, and persistent notes. Use workout format import-json --input @routine.json for the structured JSON escape hatch.',
     options: withBaseOptions({
-      input: inputFileOptionSchema
-        .optional()
-        .describe('Optional structured workout format payload in @file.json form or - for stdin.'),
       workoutFormatId: z
         .string()
         .regex(/^wfmt_[0-9A-Za-z]+$/u)
@@ -1210,7 +1247,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Optional default duration override in minutes when the saved note or payload is missing or ambiguous.',
+          'Optional default duration override in minutes when the saved note is missing or ambiguous.',
         ),
       type: z
         .string()
@@ -1229,37 +1266,26 @@ export function registerWorkoutCommands(
     }),
     output: workoutFormatSaveResultSchema,
     async run({ args, options }) {
-      const inputFile =
-        typeof options.input === 'string'
-          ? normalizeInputFileOption(options.input)
-          : undefined
       const name = typeof args.name === 'string' ? args.name : undefined
       const text = typeof args.text === 'string' ? args.text : undefined
-      if (inputFile) {
-        rejectWorkoutFormatTypedOptionsWithInput(options)
+      const payload = buildWorkoutFormatPayloadFromOptions({
+        name,
+        text,
+        options,
+      })
+
+      if (!name) {
+        throw new VaultCliError(
+          'contract_invalid',
+          'Workout format name is required.',
+        )
       }
-      const payload = inputFile
-        ? undefined
-        : buildWorkoutFormatPayloadFromOptions({
-            name,
-            text,
-            options,
-          })
 
-      if (!inputFile) {
-        if (!name) {
-          throw new VaultCliError(
-            'contract_invalid',
-            'Workout format name is required when --input is not provided.',
-          )
-        }
-
-        if (!text && !payload) {
-          throw new VaultCliError(
-            'contract_invalid',
-            'Workout format text is required when --input is not provided unless typed routine template fields are provided.',
-          )
-        }
+      if (!text && !payload) {
+        throw new VaultCliError(
+          'contract_invalid',
+          'Workout format text is required unless typed routine template fields are provided.',
+        )
       }
 
       return saveWorkoutFormat({
@@ -1267,7 +1293,6 @@ export function registerWorkoutCommands(
         name,
         text,
         payload,
-        inputFile,
         durationMinutes: options.duration,
         activityType:
           typeof options.type === 'string' ? options.type : undefined,
@@ -1275,6 +1300,51 @@ export function registerWorkoutCommands(
           typeof options.distanceKm === 'number'
             ? options.distanceKm
             : undefined,
+      })
+    },
+  })
+
+  format.command('import-json', {
+    description:
+      'Import one reusable workout format from a structured JSON payload file or stdin.',
+    args: z.object({
+      name: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Optional saved workout format name override such as "Push Day A".'),
+      text: z
+        .string()
+        .min(1)
+        .max(4000)
+        .optional()
+        .describe('Optional saved workout text override.'),
+    }),
+    examples: [
+      {
+        description: 'Import a structured routine template from disk.',
+        args: {},
+        options: {
+          input: '@routine.json',
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      '--input accepts @file.json or - for stdin. The payload retains the full workout-format template surface, including routine exercises, planned sets, grouping, tags, and persistent notes.',
+    options: withBaseOptions({
+      input: inputFileOptionSchema.describe('Structured workout format payload in @file.json form or - for stdin.'),
+    }),
+    output: workoutFormatSaveResultSchema,
+    async run({ args, options }) {
+      const name = typeof args.name === 'string' ? args.name : undefined
+      const text = typeof args.text === 'string' ? args.text : undefined
+      return saveWorkoutFormat({
+        vault: options.vault,
+        name,
+        text,
+        inputFile: normalizeInputFileOption(options.input),
       })
     },
   })

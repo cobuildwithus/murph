@@ -197,10 +197,7 @@ export function registerConditionCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const condition = createHealthEntityCrudGroup(services, "condition", {
-    jsonImportCommandName: "import-json",
-    registerUpsert: false,
-  });
+  const condition = createHealthEntityCrudGroup(services, "condition");
   registerConditionSaveCommand(condition);
   cli.command(condition);
 }

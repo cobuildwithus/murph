@@ -486,12 +486,17 @@ test('capture descriptor exposes the add, show, list, and manifest leaves', () =
 
   assert.deepEqual([...descriptionsByPath.keys()], [
     'capture add',
+    'capture import-json',
     'capture show',
     'capture list',
     'capture manifest',
   ])
   assert.equal(descriptionsByPath.get('capture add')?.description, captureCommandDescriptions.add)
   assert.equal(descriptionsByPath.get('capture add')?.hint, captureCommandDescriptions.addHint)
+  assert.equal(
+    descriptionsByPath.get('capture import-json')?.description,
+    captureCommandDescriptions.importJson,
+  )
   assert.equal(descriptionsByPath.get('capture show')?.description, captureCommandDescriptions.show)
   assert.equal(descriptionsByPath.get('capture list')?.description, captureCommandDescriptions.list)
   assert.equal(

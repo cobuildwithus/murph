@@ -62,6 +62,17 @@ When you need to read from the vault, use this chooser:
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
 
+Canonical CLI writes expose typed args and options. Raw structured payloads use explicitly named JSON escape hatches instead of hiding behind canonical add/save commands:
+
+```bash
+vault-cli capture add --media ./left-forearm.jpg --label mole-left-forearm --vault ./vault
+vault-cli capture import-json --input @captures.json --vault ./vault
+vault-cli meal import-json --input @meal.json --vault ./vault
+vault-cli measurement import-json --input @measurement.json --vault ./vault
+vault-cli workout import-json --input @workout.json --vault ./vault
+vault-cli workout format import-json --input @routine.json --vault ./vault
+```
+
 When you need route distance or duration between two points for a run, walk, ride, or hike, use:
 
 ```bash

@@ -169,15 +169,13 @@ async function showWorkout(cli: Cli.Cli, vaultRoot: string, id: string) {
   return requireData(shown.envelope)
 }
 
-test('workout add schema exposes typed fields while keeping --input as fallback', async () => {
+test('workout add schema exposes typed fields without raw input fallback', async () => {
   const cli = createWorkoutCli()
 
   const schema = await readCommandSchema(cli, ['workout', 'add'])
   assert.deepEqual(schema.args.required ?? [], [])
-  assert.equal(schema.options.required?.includes('input') ?? false, false)
 
   for (const field of [
-    'input',
     'note',
     'title',
     'duration',
@@ -196,6 +194,29 @@ test('workout add schema exposes typed fields while keeping --input as fallback'
     'workoutMedia',
     'workoutExercise',
     'workoutSet',
+  ]) {
+    assert.equal(field in schema.options.properties, true, `missing ${field}`)
+  }
+  assert.equal('input' in schema.options.properties, false)
+})
+
+test('workout import-json schema exposes the structured payload escape hatch', async () => {
+  const cli = createWorkoutCli()
+
+  const schema = await readCommandSchema(cli, ['workout', 'import-json'])
+  assert.deepEqual(schema.args.required ?? [], [])
+  assert.equal(schema.options.required?.includes('input') ?? false, true)
+
+  for (const field of [
+    'input',
+    'note',
+    'title',
+    'duration',
+    'type',
+    'distanceKm',
+    'occurredAt',
+    'source',
+    'media',
   ]) {
     assert.equal(field in schema.options.properties, true, `missing ${field}`)
   }
@@ -222,7 +243,7 @@ test('workout add typed fields persist the same structured strength workout as J
 
   const jsonCreated = await runInProcessJsonCli<WorkoutAddResult>(cli, [
     'workout',
-    'add',
+    'import-json',
     '--input',
     `@${payloadPath}`,
     '--vault',
@@ -418,6 +439,6 @@ test('workout add rejects incomplete or ambiguous typed workout input', async ()
   assert.equal(mixedInputAndNestedSessionFlag.envelope.ok, false)
   assert.match(
     mixedInputAndNestedSessionFlag.envelope.error.message ?? '',
-    /cannot combine --input with --workout-source-app/u,
+    /input/u,
   )
 })

@@ -518,10 +518,7 @@ export function registerBloodTestCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const bloodTest = createHealthEntityCrudGroup(services, "blood-test", {
-    jsonImportCommandName: "import-json",
-    registerUpsert: false,
-  });
+  const bloodTest = createHealthEntityCrudGroup(services, "blood-test");
 
   bloodTest.command("save", {
     args: z.object({

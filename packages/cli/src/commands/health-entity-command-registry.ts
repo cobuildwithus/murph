@@ -37,10 +37,10 @@ function requireHealthCommandDescriptor(commandName: string): HealthCommandDescr
   return descriptor;
 }
 
-export function createHealthUpsertResultSchema(
+export function createHealthJsonImportResultSchema(
   descriptor: HealthCommandDescriptorEntry,
 ) {
-  const baseShape = createHealthUpsertResultBaseShape(descriptor);
+  const baseShape = createHealthJsonImportResultBaseShape(descriptor);
 
   if (healthCoreHasResultCapability(descriptor, "ledger-file")) {
     return z.object({
@@ -55,7 +55,7 @@ export function createHealthUpsertResultSchema(
   });
 }
 
-function createHealthUpsertResultBaseShape(
+function createHealthJsonImportResultBaseShape(
   descriptor: HealthCommandDescriptorEntry,
 ) {
   return {
@@ -94,42 +94,53 @@ function bindCrudServices(
 function createHealthEntityCrudConfig(
   services: VaultServices,
   descriptor: HealthCommandDescriptorEntry,
-  options: HealthEntityCrudGroupOptions = {},
 ) {
   return {
     commandName: descriptor.command.commandName,
     description: descriptor.command.description,
-    descriptions: descriptor.command.descriptions,
-    examples: descriptor.command.examples,
-    hints: descriptor.command.hints,
+    descriptions: {
+      list: descriptor.command.descriptions.list,
+      scaffold: descriptor.command.descriptions.scaffold,
+      show: descriptor.command.descriptions.show,
+      importJson: descriptor.command.descriptions.upsert,
+    },
+    examples: descriptor.command.examples
+      ? {
+          list: descriptor.command.examples.list,
+          scaffold: descriptor.command.examples.scaffold,
+          show: descriptor.command.examples.show,
+          importJson: descriptor.command.examples.upsert,
+        }
+      : undefined,
+    hints: descriptor.command.hints
+      ? {
+          list: descriptor.command.hints.list,
+          scaffold: descriptor.command.hints.scaffold,
+          show: descriptor.command.hints.show,
+          importJson: descriptor.command.hints.upsert,
+        }
+      : undefined,
     listFilterCapabilities: descriptor.query.genericListFilterCapabilities,
     listStatusDescription: descriptor.command.listStatusDescription,
-    jsonImportCommandName: options.jsonImportCommandName,
     noun: descriptor.noun,
     outputs: {
       list: healthListResultSchema,
       scaffold: createHealthScaffoldResultSchema(descriptor.core.scaffoldNoun),
       show: healthShowResultSchema,
-      upsert: createHealthUpsertResultSchema(descriptor),
+      importJson: createHealthJsonImportResultSchema(descriptor),
     },
     payloadFile: descriptor.command.payloadFile,
     pluralNoun: descriptor.plural,
-    registerUpsert: options.registerUpsert,
     services: bindCrudServices(services, descriptor),
     showId: {
       ...descriptor.command.showId,
-      fromUpsert(result: object) {
+      fromImportJsonResult(result: object) {
         return String(
           (result as Record<string, unknown>)[descriptor.core.resultIdField] ?? "",
         );
       },
     },
   };
-}
-
-interface HealthEntityCrudGroupOptions {
-  jsonImportCommandName?: string;
-  registerUpsert?: boolean;
 }
 
 export function registerHealthEntityCrudGroup(
@@ -143,8 +154,7 @@ export function registerHealthEntityCrudGroup(
 export function createHealthEntityCrudGroup(
   services: VaultServices,
   commandName: string,
-  options: HealthEntityCrudGroupOptions = {},
 ) {
   const descriptor = requireHealthCommandDescriptor(commandName);
-  return createHealthCrudGroup(createHealthEntityCrudConfig(services, descriptor, options));
+  return createHealthCrudGroup(createHealthEntityCrudConfig(services, descriptor));
 }

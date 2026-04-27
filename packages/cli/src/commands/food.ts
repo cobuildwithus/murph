@@ -509,7 +509,7 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
-    upsert: {
+    importJson: {
       description: 'Import or bulk update one food Markdown record from a JSON payload file or stdin.',
       hint: 'Prefer `food save` for canonical typed create/update. Keep `food import-json --input` for bulk import and advanced JSON fallback payloads.',
       output: foodUpsertResultSchema,
@@ -521,8 +521,6 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
-    jsonImportCommandName: 'import-json',
-    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one food by canonical id or slug.',
       argName: 'id',

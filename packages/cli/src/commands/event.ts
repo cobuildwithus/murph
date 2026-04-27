@@ -306,7 +306,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
-    upsert: {
+    importJson: {
       description: 'Append one canonical event from a JSON payload file or stdin.',
       output: eventUpsertResultSchema,
       async run(input) {
@@ -317,7 +317,6 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         })
       },
     },
-    includeLegacyJsonUpsert: false,
     show: {
       description: 'Show one canonical event by event id.',
       argName: 'id',

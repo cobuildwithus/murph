@@ -261,9 +261,6 @@ const canonicalTypedCommands = [
       'threadId',
     ],
   },
-] as const satisfies readonly CommandGuard[]
-
-const typedCommandsWithInputFallback = [
   {
     label: 'capture add',
     commandNames: ['capture add'],
@@ -341,42 +338,18 @@ test('canonical agent write commands expose typed schemas without primary JSON i
   assert.deepEqual(failures, [], failures.join('\n'))
 })
 
-test('hybrid typed write commands keep JSON input optional and expose field parity', async () => {
-  const commands = await loadFullLlmCommands()
-  const failures: string[] = []
-
-  for (const guard of typedCommandsWithInputFallback) {
-    const command = findManifestCommand(commands, guard)
-
-    if (!command) {
-      failures.push(formatMissingManifestCommand(commands, guard))
-      continue
-    }
-
-    collectAssertionFailure(failures, `${command.name} llms schema`, () => {
-      assertHybridTypedInputFallbackSchema(command.name, command.schema, guard.fieldHints)
-    })
-
-    try {
-      const schema = await loadCommandSchema(command.name)
-      collectAssertionFailure(failures, `${command.name} direct schema`, () => {
-        assertHybridTypedInputFallbackSchema(command.name, schema, guard.fieldHints)
-      })
-    } catch (error) {
-      failures.push(`${command.name} direct schema: ${errorMessage(error)}`)
-    }
-  }
-
-  assert.deepEqual(failures, [], failures.join('\n'))
-})
-
 test('explicit JSON fallback commands remain separate from the canonical typed surfaces', async () => {
   const commands = await loadFullLlmCommands()
   const commandNames = new Set(commands.map((command) => command.name))
 
   for (const [typedName, jsonName, typedHint] of [
+    ['capture add', 'capture import-json', 'media'],
     ['samples add', 'samples import-json', 'stream'],
     ['event note add', 'event import-json', 'note'],
+    ['meal add', 'meal import-json', 'ingredient'],
+    ['measurement add', 'measurement import-json', 'metric'],
+    ['workout add', 'workout import-json', 'text'],
+    ['workout format save', 'workout format import-json', 'name'],
     ['goal save', 'goal import-json', 'title'],
     ['condition save', 'condition import-json', 'title'],
     ['allergy save', 'allergy import-json', 'title'],
@@ -458,7 +431,7 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'allergy import-json',
     'automation import-json',
     'blood-test import-json',
-    'capture add',
+    'capture import-json',
     'condition import-json',
     'document edit',
     'event edit',
@@ -474,9 +447,9 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'genetics import-json',
     'goal import-json',
     'intervention edit',
-    'meal add',
     'meal edit',
-    'measurement add',
+    'meal import-json',
+    'measurement import-json',
     'protocol import-json',
     'provider edit',
     'provider import-json',
@@ -486,9 +459,9 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'samples import-json',
     'scheduled-log import-json',
     'supplement import-json',
-    'workout add',
     'workout edit',
-    'workout format save',
+    'workout format import-json',
+    'workout import-json',
   ].sort()
 
   const inputCommands = commands
@@ -670,42 +643,6 @@ function assertCanonicalTypedSchema(
     typedFieldNames.length,
     0,
     `${commandName} should expose at least one concrete typed arg or option`,
-  )
-  assert.equal(
-    fieldHints.some((fieldName) => typedFieldNames.includes(fieldName)),
-    true,
-    `${commandName} should expose one of: ${fieldHints.join(', ')}`,
-  )
-}
-
-function assertHybridTypedInputFallbackSchema(
-  commandName: string,
-  schema: JsonRecord,
-  fieldHints: readonly string[],
-) {
-  assert.equal(
-    schemaIncludesProperty(schema, 'input'),
-    true,
-    `${commandName} should expose --input as an explicit fallback`,
-  )
-  assert.equal(
-    requiredFields(schema, 'args').includes('input'),
-    false,
-    `${commandName} must not require a positional input payload`,
-  )
-  assert.equal(
-    requiredFields(schema, 'options').includes('input'),
-    false,
-    `${commandName} must keep --input optional`,
-  )
-
-  const typedFieldNames = commandFieldNames(schema).filter(
-    (fieldName) => !BASE_OPTION_NAMES.has(fieldName) && fieldName !== 'input',
-  )
-  assert.notEqual(
-    typedFieldNames.length,
-    0,
-    `${commandName} should expose concrete typed args or options besides --input`,
   )
   assert.equal(
     fieldHints.some((fieldName) => typedFieldNames.includes(fieldName)),

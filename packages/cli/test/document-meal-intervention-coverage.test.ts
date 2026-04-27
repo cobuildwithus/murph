@@ -639,7 +639,6 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
   const mealAdd = await getGroupCommandRun<{
     options: {
       vault?: string
-      input?: string
       photo?: string
       audio?: string
       note?: string
@@ -647,6 +646,15 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
       source?: string
     }
   }>(cli, 'meal', 'add')
+  const mealImportJson = await getGroupCommandRun<{
+    options: {
+      vault?: string
+      input?: string
+      note?: string
+      occurredAt?: string
+      source?: string
+    }
+  }>(cli, 'meal', 'import-json')
 
   const addMealMock = vi.fn(async (input: Record<string, unknown>) => ({
     mealId: 'meal_01JNV422Y2M5ZBV64ZP4N1DRB1',
@@ -763,7 +771,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     }),
   )
 
-  const structuredMealResult = await mealAdd({
+  const structuredMealResult = await mealImportJson({
     options: {
       vault: vaultRoot,
       input: `@${mealPayloadPath}`,

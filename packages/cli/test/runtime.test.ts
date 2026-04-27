@@ -283,7 +283,7 @@ test(
         } | null
       }>([
         'meal',
-        'add',
+        'import-json',
         '--input',
         `@${mealPayloadPath}`,
         '--note',

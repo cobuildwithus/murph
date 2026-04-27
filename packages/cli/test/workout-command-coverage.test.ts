@@ -288,7 +288,7 @@ test('canonical measurement capture and workout unit preferences round-trip thro
         note: string | null
       }>(cli, [
         'measurement',
-        'add',
+        'import-json',
         '--input',
         `@${measurementPayloadPath}`,
         '--vault',
@@ -827,7 +827,7 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
         manifestFile: string | null
       }>(cli, [
         'workout',
-        'add',
+        'import-json',
         'Structured workout payload.',
         '--input',
         `@${workoutPayloadPath}`,
@@ -910,7 +910,7 @@ test('workout format save, show, list, and log handle structured input and media
       }>(cli, [
         'workout',
         'format',
-        'save',
+        'import-json',
         '--input',
         `@${payloadPath}`,
         '--vault',

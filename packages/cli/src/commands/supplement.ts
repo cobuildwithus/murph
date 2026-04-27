@@ -291,7 +291,7 @@ export function registerSupplementCommands(
         })
       },
     },
-    upsert: {
+    importJson: {
       description: 'Upsert one supplement from a JSON payload file or stdin.',
       examples: [
         {
@@ -308,7 +308,6 @@ export function registerSupplementCommands(
         return services.core.upsertSupplement(input)
       },
     },
-    includeLegacyJsonUpsert: false,
     show: {
       argName: 'id',
       argSchema: z.string().min(1),

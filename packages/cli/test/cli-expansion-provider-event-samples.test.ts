@@ -283,7 +283,7 @@ test('workout format save rejects structured payloads that omit canonical templa
     const saved = await runSliceCli([
       'workout',
       'format',
-      'save',
+      'import-json',
       'ignored-name',
       'ignored-text',
       '--input',
