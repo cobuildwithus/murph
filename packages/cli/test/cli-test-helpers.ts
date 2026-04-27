@@ -81,8 +81,6 @@ const forwardedCliEnvKeys = [
 const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
   path.join(repoRoot, 'packages/contracts/dist/index.d.ts'),
-  path.join(repoRoot, 'packages/contracts/dist/command-capabilities.js'),
-  path.join(repoRoot, 'packages/contracts/dist/command-capabilities.d.ts'),
   path.join(repoRoot, 'packages/hosted-execution/dist/index.js'),
   path.join(repoRoot, 'packages/hosted-execution/dist/index.d.ts'),
   path.join(repoRoot, 'packages/messaging-ingress/dist/linq-webhook.js'),

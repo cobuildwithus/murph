@@ -1,9 +1,6 @@
 import {
-  commandNounCapabilityByNoun,
   healthEntityDefinitions,
   type JsonObject,
-  type CommandCapability,
-  type CommandCapabilityBundleId,
   type HealthEntityDefinition,
   type HealthEntityKind,
 } from "@murphai/contracts";
@@ -58,8 +55,6 @@ export interface HealthQueryDescriptor {
 }
 
 export interface HealthEntityCommandDescriptor {
-  additionalCapabilities?: readonly CommandCapability[];
-  capabilityBundles: readonly CommandCapabilityBundleId[];
   commandName: string;
   description: string;
   descriptions: {
@@ -88,10 +83,7 @@ export interface HealthEntityCommandDescriptor {
   };
 }
 
-type HealthEntityCommandDescriptorExtension = Omit<
-  HealthEntityCommandDescriptor,
-  "additionalCapabilities" | "capabilityBundles"
->;
+type HealthEntityCommandDescriptorExtension = HealthEntityCommandDescriptor;
 
 export interface HealthEntityDescriptor extends HealthEntityDefinition {
   command?: HealthEntityCommandDescriptor;
@@ -304,15 +296,12 @@ function buildHealthEntityDescriptor(
   const extension = checkedHealthEntityDescriptorExtensions[
     definition.kind
   ] as HealthEntityDescriptorExtension;
-  const commandCapabilityDefinition = commandNounCapabilityByNoun.get(definition.kind);
 
   return {
     ...definition,
     command: extension.command
       ? {
           ...extension.command,
-          additionalCapabilities: commandCapabilityDefinition?.additionalCapabilities,
-          capabilityBundles: commandCapabilityDefinition?.bundles ?? [],
         }
       : undefined,
     core: extension.core
