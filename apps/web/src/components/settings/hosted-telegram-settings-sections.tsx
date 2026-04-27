@@ -1,6 +1,8 @@
 import { Button } from "@/src/components/ui/button";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
+import { ConnectedAccountCard } from "./connected-account-card";
+
 export function HostedTelegramSettingsContent(props: {
   botLink: string | null;
   currentTelegram: HostedPrivyTelegramAccount | null;
@@ -12,53 +14,68 @@ export function HostedTelegramSettingsContent(props: {
 }) {
   const { botLink, currentTelegram, isBusy, isLinkingTelegram, isSyncingTelegram } = props;
 
+  const telegramValue = currentTelegram
+    ? currentTelegram.username
+      ? `@${currentTelegram.username}`
+      : `Telegram user ${currentTelegram.telegramUserId}`
+    : null;
+
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold tracking-tight text-stone-900">Telegram</h2>
-        <p className="text-sm leading-relaxed text-stone-500">
-          Connect your Telegram account so Murph can message you there.
-        </p>
-      </div>
-
-      {currentTelegram ? (
-        <dl className="grid gap-4 rounded border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700 md:grid-cols-2">
-          <div className="space-y-1">
-            <dt className="font-semibold text-stone-500">Account</dt>
-            <dd>
-              {currentTelegram.username
-                ? `@${currentTelegram.username}`
-                : `Telegram user ${currentTelegram.telegramUserId}`}
-            </dd>
-          </div>
-          <div className="space-y-1">
-            <dt className="font-semibold text-stone-500">User ID</dt>
-            <dd className="break-all">{currentTelegram.telegramUserId}</dd>
-          </div>
-        </dl>
-      ) : null}
-
-      <div className="flex flex-wrap gap-3">
-        <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy}>
-          {isLinkingTelegram ? "Linking..." : currentTelegram ? "Relink Telegram" : "Link Telegram"}
-        </Button>
-        {currentTelegram ? (
-          <Button
-            type="button"
-            onClick={() => void props.onSyncTelegram()}
-            disabled={isBusy}
-            variant="outline"
-          >
-            {isSyncingTelegram ? "Saving..." : "Save connection"}
-          </Button>
-        ) : null}
-        {botLink ? (
-          <Button render={<a href={botLink} target="_blank" rel="noreferrer" />} nativeButton={false} variant="outline">
-            Open Telegram bot
-          </Button>
+        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Telegram</h2>
+        {!currentTelegram ? (
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Connect your Telegram account so Murph can message you there.
+          </p>
         ) : null}
       </div>
 
+      {currentTelegram && telegramValue ? (
+        <ConnectedAccountCard
+          label="Telegram"
+          value={telegramValue}
+          action={
+            <>
+              <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy}>
+                {isLinkingTelegram ? "Relinking..." : "Relink"}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void props.onSyncTelegram()}
+                disabled={isBusy}
+                variant="outline"
+              >
+                {isSyncingTelegram ? "Saving..." : "Save connection"}
+              </Button>
+              {botLink ? (
+                <Button
+                  render={<a href={botLink} target="_blank" rel="noreferrer" />}
+                  nativeButton={false}
+                  variant="outline"
+                >
+                  Open bot
+                </Button>
+              ) : null}
+            </>
+          }
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy}>
+            {isLinkingTelegram ? "Linking..." : "Link Telegram"}
+          </Button>
+          {botLink ? (
+            <Button
+              render={<a href={botLink} target="_blank" rel="noreferrer" />}
+              nativeButton={false}
+              variant="outline"
+            >
+              Open bot
+            </Button>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

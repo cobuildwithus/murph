@@ -12,8 +12,8 @@ export function HostedBillingSettings(props: { authenticated: boolean }) {
   }
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-stone-500">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <p className="text-sm text-muted-foreground">
         Manage your plan and payment details.
       </p>
       <HostedBillingSettingsAction />
