@@ -25,11 +25,6 @@ export function HostedTelegramSettingsContent(props: {
     <div className="space-y-5">
       <div className="space-y-2">
         <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Telegram</h2>
-        {!currentTelegram ? (
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Connect your Telegram account so Murph can message you there.
-          </p>
-        ) : null}
       </div>
 
       {currentTelegram && telegramValue ? (
@@ -62,29 +57,43 @@ export function HostedTelegramSettingsContent(props: {
           }
         />
       ) : (
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy}>
-            {isLinkingTelegram ? "Linking..." : "Link Telegram"}
-          </Button>
-          {botLink ? (
-            <Button
-              render={<a href={botLink} target="_blank" rel="noreferrer" />}
-              nativeButton={false}
-              variant="outline"
-            >
-              Open bot
-            </Button>
-          ) : null}
-        </div>
+        <ConnectedAccountCard
+          value="Not connected"
+          variant="empty"
+          action={
+            <>
+              <Button
+                type="button"
+                onClick={() => void props.onLinkTelegram()}
+                disabled={isBusy}
+                size="sm"
+              >
+                {isLinkingTelegram ? "Linking..." : "Link Telegram"}
+              </Button>
+              {botLink ? (
+                <Button
+                  render={<a href={botLink} target="_blank" rel="noreferrer" />}
+                  nativeButton={false}
+                  variant="outline"
+                  size="sm"
+                >
+                  Open bot
+                </Button>
+              ) : null}
+            </>
+          }
+        />
       )}
 
-      <SettingsContactLink
-        href={MURPH_TELEGRAM_BOT_URL}
-        label={`Message @${MURPH_TELEGRAM_BOT_USERNAME} on Telegram`}
-        external
-      >
-        Message @{MURPH_TELEGRAM_BOT_USERNAME}
-      </SettingsContactLink>
+      {currentTelegram ? (
+        <SettingsContactLink
+          href={MURPH_TELEGRAM_BOT_URL}
+          label={`Message @${MURPH_TELEGRAM_BOT_USERNAME} on Telegram`}
+          external
+        >
+          Message @{MURPH_TELEGRAM_BOT_USERNAME}
+        </SettingsContactLink>
+      ) : null}
     </div>
   );
 }
