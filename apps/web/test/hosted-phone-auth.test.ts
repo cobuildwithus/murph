@@ -828,6 +828,254 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
+  it("shows a direct no-account state after a verified sign-in method misses Murph membership", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", async () => {
+      const actual = await vi.importActual<
+        typeof import("@/src/components/hosted-onboarding/hosted-phone-auth-views")
+      >("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+      return {
+        ...actual,
+        HostedPhoneAuthFlow() {
+          return React.createElement("div", { "data-phone-flow": "true" });
+        },
+      };
+    });
+
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            latest_verified_at: 1741194420,
+            phone_number: "+14155552671",
+            type: "phone",
+          },
+          {
+            address: "0x0000000000000000000000000000000000000001",
+            chain_type: "ethereum",
+            connector_type: "embedded",
+            wallet_client: "privy",
+            type: "wallet",
+          },
+        ],
+      },
+    });
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+14155552671",
+          type: "phone",
+        },
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          wallet_client: "privy",
+          type: "wallet",
+        },
+      ],
+    });
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const payload = typeof init?.body === "string"
+        ? JSON.parse(init.body) as { intent?: string }
+        : {};
+
+      if (payload.intent === "signin") {
+        return new Response(JSON.stringify({
+          error: {
+            code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
+            message: "No Murph account found.",
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 403,
+        });
+      }
+
+      if (payload.intent === "signup") {
+        return new Response(JSON.stringify({
+          activationPending: false,
+          inviteCode: "invite-code",
+          joinUrl: "/join/invite-code",
+          messagingSetupRequired: false,
+          stage: "active",
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+
+      throw new Error(`Unexpected payload ${JSON.stringify(payload)}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { cleanup, container, assign } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        intent: "signin",
+      }),
+    );
+
+    try {
+      assert.match(container.textContent ?? "", /You already started signing in\./);
+
+      const continueButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Continue sign in") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(continueButton);
+
+      await act(async () => {
+        continueButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.match(container.textContent ?? "", /No Murph account found/);
+      assert.match(container.textContent ?? "", /Sign up instead/);
+      assert.match(container.textContent ?? "", /Try another sign-in method/);
+      assert.doesNotMatch(container.textContent ?? "", /You already started signing in\./);
+      expect(mocks.logout).not.toHaveBeenCalled();
+
+      const signupButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Sign up instead") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(signupButton);
+
+      await act(async () => {
+        signupButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const payloads = fetch.mock.calls.map(([, init]) =>
+        typeof init?.body === "string" ? JSON.parse(init.body) : {},
+      );
+      assert.deepEqual(payloads.map((payload) => payload.intent), [
+        "signin",
+        "signup",
+      ]);
+      expect(assign).toHaveBeenCalledWith("/settings");
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.resetModules();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("uses the sign-out path when the no-account secondary action is used", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [
+          {
+            latest_verified_at: 1741194420,
+            phone_number: "+14155552671",
+            type: "phone",
+          },
+          {
+            address: "0x0000000000000000000000000000000000000001",
+            chain_type: "ethereum",
+            connector_type: "embedded",
+            wallet_client: "privy",
+            type: "wallet",
+          },
+        ],
+      },
+    });
+    mocks.refreshUser.mockResolvedValue({
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+14155552671",
+          type: "phone",
+        },
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          wallet_client: "privy",
+          type: "wallet",
+        },
+      ],
+    });
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const payload = typeof init?.body === "string"
+        ? JSON.parse(init.body) as { intent?: string }
+        : {};
+
+      if (payload.intent === "signin") {
+        return new Response(JSON.stringify({
+          error: {
+            code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
+            message: "No Murph account found.",
+          },
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 403,
+        });
+      }
+
+      throw new Error(`Unexpected payload ${JSON.stringify(payload)}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        intent: "signin",
+      }),
+    );
+
+    try {
+      const continueButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Continue sign in") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(continueButton);
+
+      await act(async () => {
+        continueButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const resetButton = [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Try another sign-in method") as
+          | HTMLButtonElement
+          | undefined;
+      assert.ok(resetButton);
+
+      await act(async () => {
+        resetButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.doesNotMatch(container.textContent ?? "", /No Murph account found/);
+      expect(mocks.logout).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
   it("suppresses the phone-only restart banner while an alternate Privy method is active", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -1211,6 +1459,37 @@ describe("HostedPhoneAuth", () => {
         intent: "signup",
         inviteCode: "invite-code",
       },
+    );
+  });
+
+  it("classifies only lookup-only sign-in misses as no-account sign-in errors", async () => {
+    const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
+    const { isHostedSignInMemberNotFoundError } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+    const error = new HostedOnboardingApiError({
+      code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
+      message: "No Murph account found.",
+    });
+
+    assert.equal(
+      isHostedSignInMemberNotFoundError({
+        error,
+        intent: "signin",
+      }),
+      true,
+    );
+    assert.equal(
+      isHostedSignInMemberNotFoundError({
+        error,
+        intent: "signup",
+      }),
+      false,
+    );
+    assert.equal(
+      isHostedSignInMemberNotFoundError({
+        error: new Error("No Murph account found."),
+        intent: "signin",
+      }),
+      false,
     );
   });
 
