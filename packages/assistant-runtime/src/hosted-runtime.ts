@@ -250,6 +250,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           workspacePort,
         },
         requestId: `hosted-workspace-invocation:${input.request.attemptId}`,
+        runtimeLogContext: {
+          attemptId: input.request.attemptId,
+          leaseGeneration: input.request.leaseGeneration,
+          workspaceVersion: input.request.workspaceVersion,
+        },
         runAssistantPhase: (phaseInput) =>
           (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
             ...phaseInput,
