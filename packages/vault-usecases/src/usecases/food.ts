@@ -25,10 +25,6 @@ import {
   toVaultCliError,
 } from './vault-usecase-helpers.js'
 
-interface FoodAutoLogDailyReadModel {
-  time: string
-}
-
 interface FoodReadModel {
   foodId: string
   slug: string
@@ -48,31 +44,8 @@ interface FoodReadModel {
   tags?: string[]
   note?: string
   attachedRegimenIds?: string[]
-  autoLogDaily?: FoodAutoLogDailyReadModel | null
   relativePath: string
   markdown: string
-}
-
-export interface FoodAutoLogSyncRecord {
-  foodId: string
-  slug: string
-  title: string
-  autoLogDaily?: FoodAutoLogDailyReadModel | null
-}
-
-export interface FoodAutoLogSyncJob {
-  jobId: string
-  name: string
-  state: {
-    nextRunAt: string | null
-  }
-}
-
-export interface FoodAutoLogHooks {
-  syncRecurringFood(input: {
-    food: FoodAutoLogSyncRecord
-    vault: string
-  }): Promise<FoodAutoLogSyncJob | null>
 }
 
 interface FoodCoreRuntime {
@@ -102,13 +75,36 @@ interface FoodCoreRuntime {
     tags?: string[]
     note?: string
     attachedRegimenIds?: string[]
-    autoLogDaily?: FoodAutoLogDailyReadModel | null
   }): Promise<{
     created: boolean
     record: {
       foodId: string
       relativePath: string
     }
+  }>
+  upsertDailyFoodScheduledLog(input: {
+    vaultRoot: string
+    foodId: string
+    localTime: string
+  }): Promise<{
+    created: boolean
+    record: {
+      scheduledLogId: string
+      title: string
+      slug: string
+      relativePath: string
+    }
+  }>
+  archiveDailyFoodScheduledLog(input: {
+    vaultRoot: string
+    foodId: string
+  }): Promise<{
+    archived: Array<{
+      scheduledLogId: string
+      title: string
+      slug: string
+      relativePath: string
+    }>
   }>
   listFoods(vaultRoot: string): Promise<FoodReadModel[]>
   deleteFood(input: {
@@ -178,19 +174,12 @@ export async function upsertFoodRecord(input: {
   payload: FoodPayload
   clearedFields?: ReadonlySet<string>
   allowSlugRename?: boolean
-  hooks?: FoodAutoLogHooks
 }) {
   const core = await loadFoodCoreRuntime()
-  const existingFood = await findFoodForPersist(core, input.vault, {
-    foodId: input.payload.foodId,
-    slug: input.payload.slug,
-  })
 
   try {
     const persisted = await persistFoodRecord({
       core,
-      hooks: input.hooks,
-      previousFood: existingFood,
       vault: input.vault,
       payload: buildFoodCoreInput({
         vault: input.vault,
@@ -225,7 +214,6 @@ export async function upsertFoodRecord(input: {
 export async function upsertFoodRecordFromInput(input: {
   vault: string
   inputFile: string
-  hooks?: FoodAutoLogHooks
 }) {
   const payload = parseFoodPayload(
     await loadJsonInputFile(input.inputFile, 'food payload'),
@@ -233,7 +221,6 @@ export async function upsertFoodRecordFromInput(input: {
 
   return upsertFoodRecord({
     vault: input.vault,
-    hooks: input.hooks,
     payload,
   })
 }
@@ -244,7 +231,6 @@ export async function editFoodRecord(input: {
   inputFile?: string
   set?: string[]
   clear?: string[]
-  hooks?: FoodAutoLogHooks
 }) {
   const food = await requireFoodRecord(input.vault, input.lookup)
   const patched = await preparePatchedUpsertPayload({
@@ -263,7 +249,6 @@ export async function editFoodRecord(input: {
     payload: patched.payload,
     clearedFields: patched.clearedFields,
     allowSlugRename: patched.allowSlugRename,
-    hooks: input.hooks,
   })
 
   return showFoodRecord(input.vault, food.foodId)
@@ -272,7 +257,6 @@ export async function editFoodRecord(input: {
 export async function deleteFoodRecord(input: {
   vault: string
   lookup: string
-  hooks?: FoodAutoLogHooks
 }) {
   const food = await requireFoodRecord(input.vault, input.lookup)
   const normalizedLookup = input.lookup.trim()
@@ -286,6 +270,10 @@ export async function deleteFoodRecord(input: {
         : food.foodId,
       slug: normalizedLookup,
     })
+    await core.archiveDailyFoodScheduledLog({
+      vaultRoot: input.vault,
+      foodId: food.foodId,
+    })
   } catch (error) {
     throw toVaultCliError(error, {
       VAULT_FOOD_MISSING: {
@@ -296,27 +284,6 @@ export async function deleteFoodRecord(input: {
         code: 'contract_invalid',
       },
     })
-  }
-
-  try {
-    await syncRecurringFoodAutoLog({
-      food: {
-        foodId: food.foodId,
-        slug: food.slug,
-        title: food.title,
-        autoLogDaily: null,
-      },
-      hooks: input.hooks,
-      vault: input.vault,
-    })
-  } catch (error) {
-    await rollbackFoodDeletionAfterRecurringCronFailure({
-      core,
-      food,
-      hooks: input.hooks,
-      vault: input.vault,
-    })
-    throw error
   }
 
   return {
@@ -334,7 +301,6 @@ export async function renameFoodRecord(input: {
   lookup: string
   title: string
   slug?: string
-  hooks?: FoodAutoLogHooks
 }) {
   const core = await loadFoodCoreRuntime()
   const existing = await requireFoodRecord(input.vault, input.lookup)
@@ -350,8 +316,6 @@ export async function renameFoodRecord(input: {
   try {
     const persisted = await persistFoodRecord({
       core,
-      hooks: input.hooks,
-      previousFood: existing,
       vault: input.vault,
       payload: {
         vaultRoot: input.vault,
@@ -372,7 +336,6 @@ export async function renameFoodRecord(input: {
         tags: existing.tags,
         note: existing.note,
         attachedRegimenIds: existing.attachedRegimenIds,
-        autoLogDaily: existing.autoLogDaily ?? undefined,
       },
     })
 
@@ -404,7 +367,6 @@ export async function addDailyFoodRecord(input: {
   time: string
   note?: string
   slug?: string
-  hooks?: FoodAutoLogHooks
 }) {
   const core = await loadFoodCoreRuntime()
   const title = input.title.trim()
@@ -424,8 +386,6 @@ export async function addDailyFoodRecord(input: {
     })
     const persisted = await persistFoodRecord({
       core,
-      hooks: input.hooks,
-      previousFood: existingFood,
       vault: input.vault,
       payload: {
         vaultRoot: input.vault,
@@ -433,18 +393,13 @@ export async function addDailyFoodRecord(input: {
         slug: existingFood?.slug ?? slug,
         title,
         note,
-        autoLogDaily: {
-          time,
-        },
       },
     })
-    const job = persisted.job
-    if (!job) {
-      throw new VaultCliError(
-        'ASSISTANT_CRON_INVALID_STATE',
-        `Food "${persisted.food.title}" still lacks a recurring auto-log job after scheduling.`,
-      )
-    }
+    const scheduledLog = await core.upsertDailyFoodScheduledLog({
+      vaultRoot: input.vault,
+      foodId: persisted.food.foodId,
+      localTime: time,
+    })
 
     return {
       vault: input.vault,
@@ -453,22 +408,16 @@ export async function addDailyFoodRecord(input: {
       path: persisted.food.relativePath,
       created: persisted.created,
       time,
-      jobId: job.jobId,
-      jobName: job.name,
-      nextRunAt: job.state.nextRunAt,
+      jobId: scheduledLog.record.scheduledLogId,
+      jobName: scheduledLog.record.title,
+      nextRunAt: null,
     }
   } catch (error) {
     throw toVaultCliError(error, {
-      ASSISTANT_CRON_INVALID_INPUT: {
+      VAULT_INVALID_SCHEDULED_LOG: {
         code: 'contract_invalid',
       },
-      ASSISTANT_CRON_INVALID_SCHEDULE: {
-        code: 'contract_invalid',
-      },
-      ASSISTANT_CRON_INVALID_STATE: {
-        code: 'conflict',
-      },
-      ASSISTANT_CRON_JOB_EXISTS: {
+      VAULT_SCHEDULED_LOG_CONFLICT: {
         code: 'conflict',
       },
       VAULT_INVALID_INPUT: {
@@ -484,11 +433,32 @@ export async function addDailyFoodRecord(input: {
   }
 }
 
+export async function unscheduleDailyFoodRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  const food = await requireFoodRecord(input.vault, input.lookup)
+  const core = await loadFoodCoreRuntime()
+
+  try {
+    await core.archiveDailyFoodScheduledLog({
+      vaultRoot: input.vault,
+      foodId: food.foodId,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      VAULT_INVALID_SCHEDULED_LOG: {
+        code: 'contract_invalid',
+      },
+    })
+  }
+
+  return showFoodRecord(input.vault, food.foodId)
+}
+
 async function persistFoodRecord(input: {
   core: FoodCoreRuntime
-  hooks?: FoodAutoLogHooks
   payload: FoodCoreUpsertInput
-  previousFood?: FoodReadModel | null
   vault: string
 }) {
   const result = await input.core.upsertFood(input.payload)
@@ -497,28 +467,9 @@ async function persistFoodRecord(input: {
     foodId: result.record.foodId,
   })
 
-  let job: FoodAutoLogSyncJob | null = null
-  try {
-    job = await syncRecurringFoodAutoLog({
-      food,
-      hooks: input.hooks,
-      vault: input.vault,
-    })
-  } catch (error) {
-    await rollbackFoodRecordAfterRecurringCronFailure({
-      core: input.core,
-      food,
-      hooks: input.hooks,
-      previousFood: input.previousFood ?? null,
-      vault: input.vault,
-    })
-    throw error
-  }
-
   return {
     created: result.created,
     food,
-    job,
   }
 }
 
@@ -622,7 +573,6 @@ interface FoodCoreUpsertInput {
   tags?: string[]
   note?: string
   attachedRegimenIds?: string[]
-  autoLogDaily?: FoodAutoLogDailyReadModel | null
 }
 
 function buildFoodCoreInput(input: {
@@ -654,7 +604,6 @@ function buildFoodCoreInput(input: {
     attachedRegimenIds: clearedFields.has('attachedRegimenIds')
       ? []
       : input.payload.attachedRegimenIds,
-    autoLogDaily: clearedFields.has('autoLogDaily') ? null : input.payload.autoLogDaily,
   }) as FoodCoreUpsertInput
 }
 
@@ -717,122 +666,6 @@ async function findFoodForDailyAdd(
 
   const foods = await core.listFoods(input.vault)
   return foods.find((food) => food.title === input.title) ?? null
-}
-
-async function findFoodForPersist(
-  core: FoodCoreRuntime,
-  vault: string,
-  input: {
-    foodId?: string
-    slug?: string
-  },
-): Promise<FoodReadModel | null> {
-  if (input.foodId) {
-    try {
-      return await core.readFood({
-        vaultRoot: vault,
-        foodId: input.foodId,
-      })
-    } catch {
-      return null
-    }
-  }
-
-  if (input.slug) {
-    try {
-      return await core.readFood({
-        vaultRoot: vault,
-        slug: input.slug,
-      })
-    } catch {
-      return null
-    }
-  }
-
-  return null
-}
-
-async function rollbackFoodRecordAfterRecurringCronFailure(input: {
-  core: FoodCoreRuntime
-  food: FoodReadModel
-  hooks?: FoodAutoLogHooks
-  previousFood: FoodReadModel | null
-  vault: string
-}) {
-  if (input.previousFood) {
-    await input.core.upsertFood(
-      buildFoodCoreInput({
-        vault: input.vault,
-        payload: buildFoodPayload(input.previousFood),
-        allowSlugRename: true,
-      }),
-    )
-    const restoredFood = await input.core.readFood({
-      vaultRoot: input.vault,
-      foodId: input.previousFood.foodId,
-    })
-    await syncRecurringFoodAutoLog({
-      food: restoredFood,
-      hooks: input.hooks,
-      vault: input.vault,
-    })
-    return
-  }
-
-  await input.core.upsertFood(
-    buildFoodCoreInput({
-      vault: input.vault,
-      payload: buildFoodPayload(input.food),
-      clearedFields: new Set(['autoLogDaily']),
-      allowSlugRename: true,
-    }),
-  )
-}
-
-async function syncRecurringFoodAutoLog(input: {
-  food: FoodAutoLogSyncRecord
-  hooks?: FoodAutoLogHooks
-  vault: string
-}) {
-  if (!input.hooks) {
-    return null
-  }
-
-  return input.hooks.syncRecurringFood({
-    food: {
-      foodId: input.food.foodId,
-      slug: input.food.slug,
-      title: input.food.title,
-      autoLogDaily: input.food.autoLogDaily ?? null,
-    },
-    vault: input.vault,
-  })
-}
-
-async function rollbackFoodDeletionAfterRecurringCronFailure(input: {
-  core: FoodCoreRuntime
-  food: FoodReadModel
-  hooks?: FoodAutoLogHooks
-  vault: string
-}) {
-  await input.core.upsertFood(
-    buildFoodCoreInput({
-      vault: input.vault,
-      payload: buildFoodPayload(input.food),
-      allowSlugRename: true,
-    }),
-  )
-
-  const restoredFood = await input.core.readFood({
-    vaultRoot: input.vault,
-    foodId: input.food.foodId,
-  })
-
-  await syncRecurringFoodAutoLog({
-    food: restoredFood,
-    hooks: input.hooks,
-    vault: input.vault,
-  })
 }
 
 function mergeFoodAliases(

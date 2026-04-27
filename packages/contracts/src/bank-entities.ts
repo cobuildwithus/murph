@@ -92,18 +92,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function projectFoodAutoLogDaily(
-  value: unknown,
-  helpers: BankEntityRegistryProjectionHelpers,
-): { time: string } | null {
-  if (!isPlainObject(value)) {
-    return null;
-  }
-
-  const time = helpers.firstString(value, ["time"]);
-  return time ? { time } : null;
-}
-
 function projectNutritionData(
   value: unknown,
   helpers: BankEntityRegistryProjectionHelpers,
@@ -225,7 +213,6 @@ const checkedBankEntityDefinitions = [
             tags: helpers.firstStringArray(attributes, ["tags"]),
             note: helpers.firstString(attributes, ["note"]),
             attachedRegimenIds: helpers.firstStringArray(attributes, ["attachedRegimenIds"]),
-            autoLogDaily: projectFoodAutoLogDaily(attributes.autoLogDaily, helpers),
           };
         },
       },

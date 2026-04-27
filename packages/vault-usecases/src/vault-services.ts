@@ -27,10 +27,7 @@ type AsyncMethodKeys<TServiceGroup> = {
   [TKey in keyof TServiceGroup]-?:
     TServiceGroup[TKey] extends AsyncServiceMethod ? TKey : never
 }[keyof TServiceGroup] & string
-type IntegratedServicesModule = typeof import("./usecases/integrated-services.js")
-type IntegratedVaultServiceDependencies = Parameters<
-  IntegratedServicesModule["createIntegratedVaultServices"]
->[0]
+type IntegratedVaultServiceDependencies = Record<string, unknown>
 
 const coreServiceMethodNames = [
   "init",
@@ -68,6 +65,7 @@ const coreServiceMethodNames = [
   "editFood",
   "deleteFood",
   "addDailyFood",
+  "unscheduleDailyFood",
   "scaffoldEvent",
   "upsertEvent",
   "addSamples",
@@ -182,14 +180,12 @@ function createUnwiredServiceGroup<
   return services
 }
 
-function createIntegratedServicesLoader(
-  dependencies: IntegratedVaultServiceDependencies = {},
-): () => Promise<VaultServices> {
+function createIntegratedServicesLoader(): () => Promise<VaultServices> {
   let servicesPromise: Promise<VaultServices> | null = null
 
   return async () => {
     servicesPromise ??= import("./usecases/integrated-services.js")
-      .then(({ createIntegratedVaultServices }) => createIntegratedVaultServices(dependencies))
+      .then(({ createIntegratedVaultServices }) => createIntegratedVaultServices())
       .catch((error) => {
         servicesPromise = null
         throw error
@@ -200,9 +196,9 @@ function createIntegratedServicesLoader(
 }
 
 export function createIntegratedVaultServices(
-  dependencies: IntegratedVaultServiceDependencies = {},
+  _dependencies: IntegratedVaultServiceDependencies = {},
 ): VaultServices {
-  const loadServices = createIntegratedServicesLoader(dependencies)
+  const loadServices = createIntegratedServicesLoader()
 
   return {
     core: createLoaderBackedServiceGroup<CoreWriteServices, keyof CoreWriteServices & string>(

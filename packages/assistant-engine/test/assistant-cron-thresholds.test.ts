@@ -1,7 +1,10 @@
 import { rm } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 
-import type { AssistantCronSchedule } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantCronJobSchema,
+  type AssistantCronSchedule,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -134,6 +137,7 @@ import {
   readAssistantCronStore,
   writeAssistantCronStore,
 } from '../src/assistant/cron/store.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -207,9 +211,7 @@ beforeEach(() => {
       sessionId: 'session-default',
     },
   })
-  cronMocks.loadRuntimeModule.mockReset().mockResolvedValue({
-    ...buildFoodAutoLogCoreRuntime(),
-  })
+  cronMocks.loadRuntimeModule.mockReset().mockResolvedValue({})
   cronMocks.loadImporterRuntime.mockReset().mockResolvedValue({
     addMeal: vi.fn(),
   })
@@ -523,128 +525,6 @@ describe('assistant cron runtime threshold coverage', () => {
     }
   })
 
-  it('removes successful local one-shot food auto-log jobs after the run completes', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext('assistant-cron-local-one-shot-')
-
-    cronMocks.loadRuntimeModule.mockResolvedValueOnce({
-      ...buildFoodAutoLogCoreRuntime({
-        findEventByExternalRef: vi.fn(async () => null),
-        readFood: vi.fn(async () => ({
-          foodId: 'food-1',
-          title: 'Daily Oats',
-        })),
-      }),
-    })
-    cronMocks.loadImporterRuntime.mockResolvedValueOnce({
-      addMeal: vi.fn(async () => ({
-        mealId: 'meal-1',
-      })),
-    })
-    cronMocks.renderAutoLoggedFoodMealNote.mockReturnValueOnce('Meal note for Daily Oats')
-
-    const job = await addAssistantCronJob({
-      foodAutoLog: {
-        foodId: 'food-1',
-      },
-      name: 'local-one-shot',
-      now: new Date('2026-04-08T08:00:00.000Z'),
-      prompt: 'Auto-log breakfast.',
-      schedule: {
-        at: '2026-04-08T09:00:00.000Z',
-        kind: 'at',
-      },
-      vault: vaultRoot,
-    })
-
-    const result = await runAssistantCronJobNow({
-      job: job.jobId,
-      vault: vaultRoot,
-    })
-
-    expect(result.run.status).toBe('succeeded')
-    expect(result.removedAfterRun).toBe(true)
-    await expect(getAssistantCronJob(vaultRoot, job.jobId)).rejects.toMatchObject({
-      code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
-    })
-  })
-
-  it('carries saved-food nutrition into recurring food auto-log meal writes when available', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext('assistant-cron-food-nutrition-')
-    const nutrition = {
-      perServing: {
-        calories: 420,
-        proteinGrams: 28,
-      },
-      provenance: {
-        source: 'estimated',
-        confidence: 'medium',
-      },
-    }
-    const addMeal = vi.fn(async () => ({
-      mealId: 'meal-nutrition',
-    }))
-
-    cronMocks.loadRuntimeModule.mockResolvedValueOnce({
-      ...buildFoodAutoLogCoreRuntime({
-        findEventByExternalRef: vi.fn(async () => null),
-        readFood: vi.fn(async () => ({
-          foodId: 'food-nutrition',
-          nutrition,
-          title: 'Protein Oats',
-        })),
-      }),
-    })
-    cronMocks.loadImporterRuntime.mockResolvedValueOnce({
-      addMeal,
-    })
-    cronMocks.renderAutoLoggedFoodMealNote.mockReturnValueOnce(
-      'Meal note for Protein Oats',
-    )
-
-    const job = await addAssistantCronJob({
-      foodAutoLog: {
-        foodId: 'food-nutrition',
-      },
-      name: 'nutrition-carry-through',
-      now: new Date('2026-04-08T08:00:00.000Z'),
-      prompt: 'Auto-log oats.',
-      schedule: {
-        at: '2026-04-08T09:00:00.000Z',
-        kind: 'at',
-      },
-      vault: vaultRoot,
-    })
-
-    const result = await runAssistantCronJobNow({
-      job: job.jobId,
-      vault: vaultRoot,
-    })
-
-    expect(result.run.status).toBe('succeeded')
-    expect(addMeal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        note: 'Meal note for Protein Oats',
-        nutrition: {
-          totals: {
-            calories: 420,
-            proteinGrams: 28,
-          },
-          provenance: {
-            source: 'inherited',
-            confidence: 'medium',
-            sourceDetail: 'Copied from saved food "Protein Oats".',
-          },
-        },
-        source: 'derived',
-        vaultRoot,
-      }),
-    )
-  })
-
   it('records aborted manual runs before any cron work starts', async () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-aborted-run-')
     const job = await addAssistantCronJob({
@@ -677,34 +557,42 @@ describe('assistant cron runtime threshold coverage', () => {
     vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
     const { vaultRoot } = await createRuntimeContext('assistant-cron-local-race-')
 
-    cronMocks.loadRuntimeModule.mockResolvedValueOnce({
-      ...buildFoodAutoLogCoreRuntime({
-        findEventByExternalRef: vi.fn(async () => null),
-        readFood: vi.fn(async () => ({
-          foodId: 'food-race',
-          title: 'Race Oats',
-        })),
-      }),
-    })
-    cronMocks.loadImporterRuntime.mockResolvedValueOnce({
-      addMeal: vi.fn(async () => ({
-        mealId: 'meal-race',
-      })),
-    })
-    cronMocks.renderAutoLoggedFoodMealNote.mockReturnValueOnce('Meal note for Race Oats')
-
-    const job = await addAssistantCronJob({
-      foodAutoLog: {
-        foodId: 'food-race',
-      },
+    const job = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:00:00.000Z',
+      enabled: true,
+      jobId: 'local-race-job',
+      keepAfterRun: true,
       name: 'local-race-job',
-      now: new Date('2026-04-08T08:00:00.000Z'),
-      prompt: 'Auto-log during a race.',
+      prompt: 'Send reminder during a race.',
       schedule: {
         kind: 'dailyLocal',
         localTime: '09:00',
       },
-      vault: vaultRoot,
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T09:00:00.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    await writeAssistantCronStore(resolveAssistantStatePaths(vaultRoot), {
+      version: 1,
+      jobs: [job],
     })
 
     let lockInvocationCount = 0
@@ -1553,20 +1441,6 @@ async function createRuntimeContext(prefix: string) {
   const context = await createTempVaultContext(prefix)
   tempRoots.push(context.parentRoot)
   return context
-}
-
-function buildFoodAutoLogCoreRuntime(overrides: Record<string, unknown> = {}) {
-  return {
-    acquireCanonicalWriteLock: vi.fn(async () => ({
-      release: vi.fn(async () => undefined),
-    })),
-    findEventByExternalRef: vi.fn(async () => null),
-    readFood: vi.fn(),
-    withCanonicalWriteLockScope: vi.fn(
-      async (_vaultRoot: string, run: () => Promise<unknown>) => await run(),
-    ),
-    ...overrides,
-  }
 }
 
 async function loadWebFetchModule(input?: {

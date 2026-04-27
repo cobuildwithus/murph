@@ -27,7 +27,6 @@ import {
   type readAssistantFailoverState,
   type ResolvedAssistantFailoverRoute,
 } from '../failover.js'
-import { createAssistantFoodAutoLogHooks } from '../food-auto-log-hooks.js'
 import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
@@ -217,9 +216,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
     sessionBinding: input.resolvedSession.binding,
     sessionId: input.resolvedSession.sessionId,
     vault: input.input.vault,
-    vaultServices: createIntegratedVaultServices({
-      foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-    }),
+    vaultServices: createIntegratedVaultServices(),
     workingDirectory: input.plan.requestedWorkingDirectory,
   })
   const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)

@@ -18,7 +18,6 @@ import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWearablesCommands } from '../src/commands/wearables.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
-import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -36,9 +35,7 @@ function createSliceCli() {
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
-  const services = createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  })
+  const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
   registerReadCommands(cli, services)
@@ -755,9 +752,6 @@ test.sequential(
         entity: {
           id: string
           data: {
-            autoLogDaily?: {
-              time: string
-            } | null
             note?: string
           }
         }
@@ -776,14 +770,11 @@ test.sequential(
       assert.equal(requireData(foodSchedule).path, 'bank/foods/morning-smoothie.md')
       assert.equal(requireData(foodSchedule).created, true)
       assert.equal(requireData(foodSchedule).time, '08:00')
-      assert.equal(requireData(foodSchedule).jobName, 'food-daily:morning-smoothie')
-      assert.equal(requireData(foodSchedule).nextRunAt !== null, true)
+      assert.equal(requireData(foodSchedule).jobName, 'Auto-log Morning Smoothie')
+      assert.equal(requireData(foodSchedule).nextRunAt, null)
 
       assert.equal(foodShow.ok, true)
       assert.equal(requireData(foodShow).entity.id, requireData(foodSchedule).foodId)
-      assert.deepEqual(requireData(foodShow).entity.data.autoLogDaily, {
-        time: '08:00',
-      })
       assert.equal(
         requireData(foodShow).entity.data.note,
         'Bone broth protein, inulin, prebiotic GOS, creatine, and coconut water.',
@@ -791,20 +782,19 @@ test.sequential(
 
       assert.equal(jobs.length, 1)
       assert.equal(jobs[0]?.jobId, requireData(foodSchedule).jobId)
-      assert.equal(jobs[0]?.name, 'food-daily:morning-smoothie')
+      assert.equal(jobs[0]?.name, 'Auto-log Morning Smoothie')
       assert.equal(jobs[0]?.schedule.kind, 'dailyLocal')
       assert.equal(jobs[0]?.schedule.localTime, '08:00')
-      assert.deepEqual(jobs[0]?.foodAutoLog, {
-        foodId: requireData(foodSchedule).foodId,
+      assert.deepEqual(jobs[0]?.scheduledLog, {
+        actionKind: 'meal.add',
+        scheduledLogId: requireData(foodSchedule).jobId,
       })
 
       const foodMarkdown = await readFile(
         path.join(vaultRoot, requireData(foodSchedule).path),
         'utf8',
       )
-      assert.match(foodMarkdown, /autoLogDaily:/u)
-      assert.match(foodMarkdown, /time: ['"]?08:00['"]?/u)
-      assert.match(foodMarkdown, /Auto-log daily/u)
+      assert.doesNotMatch(foodMarkdown, /autoLogDaily:/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -836,9 +826,7 @@ test.sequential(
       const foodUnschedule = await runSliceCli<{
         entity: {
           id: string
-          data: {
-            autoLogDaily?: unknown
-          }
+          data: Record<string, unknown>
         }
       }>([
         'food',
@@ -850,9 +838,7 @@ test.sequential(
       const foodShow = await runSliceCli<{
         entity: {
           id: string
-          data: {
-            autoLogDaily?: unknown
-          }
+          data: Record<string, unknown>
         }
       }>([
         'food',
@@ -866,11 +852,9 @@ test.sequential(
       assert.equal(foodUnschedule.ok, true, JSON.stringify(foodUnschedule))
       assert.equal(foodUnschedule.meta?.command, 'food unschedule')
       assert.equal(requireData(foodUnschedule).entity.id, requireData(foodSchedule).foodId)
-      assert.equal(requireData(foodUnschedule).entity.data.autoLogDaily, undefined)
 
       assert.equal(foodShow.ok, true)
       assert.equal(requireData(foodShow).entity.id, requireData(foodSchedule).foodId)
-      assert.equal(requireData(foodShow).entity.data.autoLogDaily, undefined)
 
       assert.equal(jobs.length, 0)
 
@@ -2064,9 +2048,6 @@ test.sequential(
           aliases: ['regular acai bowl', 'usual acai bowl'],
           tags: ['breakfast'],
           note: 'Typical order.',
-          autoLogDaily: {
-            time: '08:00',
-          },
         }),
         'utf8',
       )
@@ -2170,7 +2151,6 @@ test.sequential(
         'protein',
         '--alias',
         'usual acai bowl',
-        '--clear-auto-log-daily',
         '--vault',
         vaultRoot,
       ])
@@ -2179,7 +2159,6 @@ test.sequential(
       assert.equal(requireData(foodEdit).entity.data.note, 'Now with chia seeds.')
       assert.deepEqual(requireData(foodEdit).entity.data.aliases, ['usual acai bowl'])
       assert.deepEqual(requireData(foodEdit).entity.data.tags, ['breakfast', 'protein'])
-      assert.equal(requireData(foodEdit).entity.data.autoLogDaily, undefined)
 
       const recipeEdit = await runSliceCli<{
         entity: {

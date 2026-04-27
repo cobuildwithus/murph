@@ -111,7 +111,7 @@ test("bank registry definitions reuse the contracts projection owner for every f
   }
 });
 
-test("food auto-log projection metadata stays owned by contracts", () => {
+test("food projection metadata stays owned by contracts", () => {
   const projection = getBankEntityRegistryProjectionMetadata("food");
 
   assert.deepEqual(
@@ -128,9 +128,6 @@ test("food auto-log projection metadata stays owned by contracts", () => {
         tags: ["breakfast"],
         note: "Seasonal fruit works too.",
         attachedRegimenIds: ["regimen_123"],
-        autoLogDaily: {
-          time: "08:00",
-        },
       },
       helpers: registryProjectionHelpers,
       relativePath: "bank/foods/acai-bowl.md",
@@ -148,9 +145,6 @@ test("food auto-log projection metadata stays owned by contracts", () => {
       note: "Seasonal fruit works too.",
       nutrition: null,
       attachedRegimenIds: ["regimen_123"],
-      autoLogDaily: {
-        time: "08:00",
-      },
     },
   );
 });
@@ -867,9 +861,6 @@ test("bank entity projections normalize food and workout format metadata through
         status: "active",
         serving: "1 bowl",
         tags: ["breakfast"],
-        autoLogDaily: {
-          time: "08:00",
-        },
         attachedRegimenIds: ["reg_01JNY0B2W4VG5C2A0G9S8M7R6S"],
       },
     },
@@ -879,7 +870,6 @@ test("bank entity projections normalize food and workout format metadata through
   assert.ok(foodRecord);
   assert.equal(foodRecord?.entity.serving, "1 bowl");
   assert.deepEqual(foodRecord?.entity.tags, ["breakfast"]);
-  assert.deepEqual(foodRecord?.entity.autoLogDaily, { time: "08:00" });
 
   const foodEntity = projectRegistryEntity("food", foodRecord!);
   assert.equal(foodEntity.recordClass, "bank");
@@ -889,7 +879,6 @@ test("bank entity projections normalize food and workout format metadata through
 
   const roundTrippedFood = foodRecordFromEntity(foodEntity);
   assert.ok(roundTrippedFood);
-  assert.deepEqual(roundTrippedFood?.entity.autoLogDaily, { time: "08:00" });
   assert.deepEqual(roundTrippedFood?.entity.attachedRegimenIds, [
     "reg_01JNY0B2W4VG5C2A0G9S8M7R6S",
   ]);

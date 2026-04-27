@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   closeHostedRuntimeDeviceSyncService: vi.fn(),
-  createAssistantFoodAutoLogHooks: vi.fn(),
   createInboxBackedAssistantTurnInputPort: vi.fn(),
   createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
@@ -38,7 +37,6 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
-  createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
   createInboxBackedAssistantTurnInputPort: mocks.createInboxBackedAssistantTurnInputPort,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
@@ -111,7 +109,6 @@ beforeEach(() => {
       reason: "no_new_input",
     })),
   });
-  mocks.createAssistantFoodAutoLogHooks.mockReturnValue(Symbol("food-auto-log-hooks"));
   mocks.createIntegratedVaultServices.mockReturnValue(Symbol("vault-services"));
   mocks.readHostedAssistantRuntimeState.mockResolvedValue({
     assistantActiveProfileId: null,

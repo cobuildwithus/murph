@@ -3,7 +3,6 @@ import {
   type FoodUpsertPayload,
 } from "@murphai/contracts";
 
-import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
 import {
   normalizeFoodNutrition,
@@ -30,7 +29,6 @@ import {
   normalizeUpsertSelectorSlug,
   optionalEnum,
   optionalString,
-  requireObject,
   requireMatchingDocType,
   requireString,
   resolveOptionalUpsertValue,
@@ -43,7 +41,6 @@ import type { FrontmatterObject } from "../types.ts";
 import type {
   DeleteFoodInput,
   DeleteFoodResult,
-  FoodAutoLogDailyRule,
   FoodLink,
   FoodLinkType,
   FoodRecord,
@@ -53,30 +50,8 @@ import type {
   UpsertFoodResult,
 } from "./types.ts";
 
-const DAILY_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
-
 function normalizeFoodStatus(value: unknown): FoodStatus {
   return optionalEnum(value, FOOD_STATUSES, "status") ?? "active";
-}
-
-function normalizeFoodAutoLogDailyRule(
-  value: unknown,
-): FoodAutoLogDailyRule | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  const object = requireObject(value, "autoLogDaily");
-  const time = requireString(object.time, "autoLogDaily.time", 5);
-
-  if (!DAILY_TIME_PATTERN.test(time)) {
-    throw new VaultError(
-      "VAULT_INVALID_INPUT",
-      "autoLogDaily.time must use 24-hour HH:MM form.",
-    );
-  }
-
-  return { time };
 }
 
 function buildBody(record: FoodRecord): string {
@@ -124,7 +99,6 @@ function buildBody(record: FoodRecord): string {
       ["Vendor", record.vendor],
       ["Location", record.location],
       ["Serving", record.serving],
-      ["Auto-log daily", record.autoLogDaily?.time],
     ]),
     sections,
   );
@@ -238,7 +212,6 @@ function parseFoodRecord(
     note: optionalString(attributes.note, "note", 4000),
     attachedRegimenIds: relations.attachedRegimenIds,
     links: relations.links,
-    autoLogDaily: normalizeFoodAutoLogDailyRule(attributes.autoLogDaily),
     relativePath,
     markdown,
   });
@@ -264,7 +237,6 @@ export function foodRecordToBasePayload(record: FoodRecord): Omit<FoodUpsertPayl
     note: record.note,
     attachedRegimenIds: relations.attachedRegimenIds,
     links: frontmatterLinkObjects(relations.links),
-    autoLogDaily: record.autoLogDaily,
   }) as Omit<FoodUpsertPayload, "foodId">;
 }
 
@@ -389,11 +361,6 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
           ),
           attachedRegimenIds: relations.attachedRegimenIds,
           links: relations.links,
-          autoLogDaily: resolveOptionalUpsertValue(
-            input.autoLogDaily,
-            existingRecord?.autoLogDaily,
-            (value) => normalizeFoodAutoLogDailyRule(value),
-          ),
         }) as FoodRecord,
       );
 

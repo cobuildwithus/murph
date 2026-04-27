@@ -59,7 +59,6 @@ const wrapperCases = [
     assistantCron,
     [
       'addAssistantCronJob',
-      'createAssistantFoodAutoLogHooks',
       'getAssistantCronPresetDefinition',
     ],
   ],

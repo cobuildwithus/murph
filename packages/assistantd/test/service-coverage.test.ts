@@ -7,7 +7,6 @@ const gatewayAdapters = vi.hoisted(() => ({
 }))
 
 const mocks = vi.hoisted(() => ({
-  createAssistantFoodAutoLogHooks: vi.fn(() => ({ kind: 'food-hooks' })),
   createIntegratedInboxServices: vi.fn(() => ({ kind: 'inbox-services' })),
   createIntegratedVaultServices: vi.fn(() => ({ kind: 'vault-services' })),
   createLocalGatewayService: vi.fn(() => ({ kind: 'gateway-service' })),
@@ -52,7 +51,6 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@murphai/assistant-engine', () => ({
-  createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
   drainAssistantOutbox: mocks.drainAssistantOutbox,
   getAssistantCronJob: mocks.getAssistantCronJob,
   getAssistantCronJobTarget: mocks.getAssistantCronJobTarget,
@@ -118,7 +116,6 @@ test('createAssistantLocalService wires the local integrations and forwards assi
 
   assert.equal(process.env[ASSISTANTD_DISABLE_CLIENT_ENV], '1')
   assert.deepEqual(mocks.createIntegratedInboxServices.mock.calls, [[]])
-  assert.deepEqual(mocks.createAssistantFoodAutoLogHooks.mock.calls, [])
   assert.deepEqual(mocks.createIntegratedVaultServices.mock.calls, [])
   assert.deepEqual(mocks.createLocalGatewayService.mock.calls, [
     [
@@ -301,10 +298,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       vaultServices: null,
     },
   ])
-  assert.deepEqual(mocks.createAssistantFoodAutoLogHooks.mock.calls, [[]])
-  assert.deepEqual(mocks.createIntegratedVaultServices.mock.calls, [
-    [{ foodAutoLogHooks: { kind: 'food-hooks' } }],
-  ])
+  assert.deepEqual(mocks.createIntegratedVaultServices.mock.calls, [[]])
   assert.deepEqual(mocks.sendAssistantMessage.mock.calls[0], [
     {
       operatorAuthority: 'direct-operator',

@@ -10,7 +10,6 @@ import type { AssistantStatePaths } from '../store/paths.js'
 import {
   buildCanonicalAutomationRoute,
   buildCanonicalAutomationUpsertInput,
-  buildCanonicalFoodIdSet,
   buildVisibleLocalAssistantCronStore,
   findCanonicalAssistantCronRecordInList,
   listCanonicalAssistantCronRecords,
@@ -23,7 +22,6 @@ import {
   type CanonicalAssistantCronJobRecord,
   type CanonicalAutomationAssistantCronJobRecord,
 } from './canonical-jobs.js'
-import { clearCanonicalFoodAutoLogSchedule } from './food-auto-log.js'
 import {
   readAssistantCronCanonicalRuntimeStore,
   removeAssistantCronCanonicalRuntimeRecord,
@@ -73,17 +71,9 @@ export interface ResolvedCanonicalAssistantCronJobMutation {
 export function tryResolveLocalAssistantCronJob(
   store: AssistantCronStore,
   lookup: string,
-  options: {
-    allowFoodAutoLog?: boolean
-  } = {},
 ): AssistantCronJob | null {
   try {
-    const resolved = resolveAssistantCronJobFromStore(store, lookup)
-    if (options.allowFoodAutoLog === false && resolved.foodAutoLog) {
-      return null
-    }
-
-    return resolved
+    return resolveAssistantCronJobFromStore(store, lookup)
   } catch {
     return null
   }
@@ -120,10 +110,7 @@ export async function resolveAssistantCronJobForMutation(input: {
   const localJob =
     localVisibility === 'visible'
       ? tryResolveLocalAssistantCronJob(
-          buildVisibleLocalAssistantCronStore(
-            store,
-            buildCanonicalFoodIdSet(canonicalRecords),
-          ),
+          buildVisibleLocalAssistantCronStore(store),
           input.job,
         )
       : null
@@ -250,18 +237,6 @@ export async function removeResolvedCanonicalAssistantCronSource(
         status: 'archived',
       })
       break
-    case 'foodAutoLog': {
-      const foodId = resolved.source.foodId
-      await clearCanonicalFoodAutoLogSchedule(resolved.vault, foodId)
-      const nextLocalJobs = resolved.store.jobs.filter(
-        (entry) => entry.foodAutoLog?.foodId !== foodId,
-      )
-      if (nextLocalJobs.length !== resolved.store.jobs.length) {
-        resolved.store.jobs = nextLocalJobs
-        await writeAssistantCronStore(resolved.paths, resolved.store)
-      }
-      break
-    }
   }
 
   await writeResolvedCanonicalAssistantCronRuntimeState({
@@ -309,13 +284,6 @@ export async function setResolvedCanonicalAssistantCronSourceEnabled(input: {
   runtimeState: AssistantCronCanonicalRuntimeRecord
   source: CanonicalAssistantCronJobRecord
 }> {
-  if (input.resolved.source.kind === 'foodAutoLog') {
-    throw new VaultCliError(
-      'ASSISTANT_CRON_INVALID_STATE',
-      `Recurring food auto-log job "${input.resolved.job.name}" is controlled by the canonical food record, not assistant cron enable/disable.`,
-    )
-  }
-
   const nextRunAt = input.enabled
     ? computeAssistantCronNextRunAt(
         resolveAssistantCronResolvedSchedule({

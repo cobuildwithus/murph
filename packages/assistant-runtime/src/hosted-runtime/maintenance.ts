@@ -3,7 +3,6 @@ import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
   type AssistantExecutionContext,
   type AssistantRunEvent,
-  createAssistantFoodAutoLogHooks,
   readAssistantAutomationState,
   runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
@@ -159,9 +158,7 @@ export async function runHostedAssistantAutomation(
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
 }> {
   const inboxServices = createIntegratedInboxServices();
-  const vaultServices = createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  });
+  const vaultServices = createIntegratedVaultServices();
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;

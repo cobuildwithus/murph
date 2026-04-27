@@ -84,10 +84,6 @@ export type StoredMarkdownRegistryEntity<TEntity> = ContractStoredMarkdownDocume
   MarkdownRegistryDocumentEnvelope
 >;
 
-export interface FoodAutoLogDailyRule {
-  time: string;
-}
-
 export interface WorkoutFormatRecord {
   schemaVersion: typeof WORKOUT_FORMAT_SCHEMA_VERSION;
   docType: typeof WORKOUT_FORMAT_DOC_TYPE;
@@ -163,7 +159,6 @@ export interface FoodRecord {
   note?: string;
   attachedRegimenIds?: string[];
   links: FoodLink[];
-  autoLogDaily?: FoodAutoLogDailyRule;
   relativePath: string;
   markdown: string;
 }
@@ -188,7 +183,6 @@ export interface UpsertFoodInput {
   note?: string;
   attachedRegimenIds?: string[];
   links?: FoodLink[];
-  autoLogDaily?: FoodAutoLogDailyRule | null;
 }
 
 export interface UpsertFoodResult {

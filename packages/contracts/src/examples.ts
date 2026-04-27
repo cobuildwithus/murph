@@ -872,9 +872,6 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     ],
     tags: ["breakfast", "favorite"],
     note: "Typical order includes extra granola and no honey.",
-    autoLogDaily: {
-      time: "08:00",
-    },
   },
   provider: {
     schemaVersion: "murph.frontmatter.provider.v1",
@@ -1350,8 +1347,6 @@ tags:
   - breakfast
   - favorite
 note: Typical order includes extra granola and no honey.
-autoLogDaily:
-  time: 08:00
 ---
 
 # Regular Acai Bowl

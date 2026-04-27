@@ -121,7 +121,6 @@ const SINGLE_PATH_SEGMENT_PATTERN = "^[A-Za-z0-9._-]+$";
 const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SHA256_DIGEST_PATTERN = "^sha256:[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
-const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
 const EXPERIMENT_SIGNAL_DIRECTIONS = ["increase", "decrease", "stabilize"] as const;
@@ -1473,12 +1472,6 @@ export const foodFrontmatterSchema = withContractMetadata(
         uniqueItems: true,
       }).optional(),
       links: uniqueArray(foodRelationLinkSchema, { uniqueItems: true }).optional(),
-      autoLogDaily: z
-        .object({
-          time: patternedString(DAILY_TIME_PATTERN),
-        })
-        .strict()
-        .optional(),
     })
     .strict(),
   "@murphai/contracts/frontmatter-food.schema.json",

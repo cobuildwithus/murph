@@ -67,11 +67,11 @@ import {
   addDailyFoodRecord,
   deleteFoodRecord,
   editFoodRecord,
-  type FoodAutoLogHooks,
   listFoodRecords,
   renameFoodRecord,
   scaffoldFoodPayload,
   showFoodRecord,
+  unscheduleDailyFoodRecord,
   upsertFoodRecordFromInput,
 } from "./food.js"
 import {
@@ -149,13 +149,7 @@ function isJsonObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-interface IntegratedVaultServiceDependencies {
-  foodAutoLogHooks?: FoodAutoLogHooks
-}
-
-function createIntegratedCoreServices(
-  dependencies: IntegratedVaultServiceDependencies = {},
-): CoreWriteServices {
+function createIntegratedCoreServices(): CoreWriteServices {
   return {
     async init(input: CommandContext & {
       timezone?: string
@@ -409,20 +403,14 @@ function createIntegratedCoreServices(
     async upsertFood(input: CommandContext & {
       inputFile: string
     }) {
-      return upsertFoodRecordFromInput({
-        ...input,
-        hooks: dependencies.foodAutoLogHooks,
-      })
+      return upsertFoodRecordFromInput(input)
     },
     async renameFood(input: CommandContext & {
       lookup: string
       title: string
       slug?: string
     }) {
-      return renameFoodRecord({
-        ...input,
-        hooks: dependencies.foodAutoLogHooks,
-      })
+      return renameFoodRecord(input)
     },
     async editFood(input: CommandContext & {
       lookup: string
@@ -430,18 +418,12 @@ function createIntegratedCoreServices(
       set?: string[]
       clear?: string[]
     }) {
-      return editFoodRecord({
-        ...input,
-        hooks: dependencies.foodAutoLogHooks,
-      })
+      return editFoodRecord(input)
     },
     async deleteFood(input: CommandContext & {
       lookup: string
     }) {
-      return deleteFoodRecord({
-        ...input,
-        hooks: dependencies.foodAutoLogHooks,
-      })
+      return deleteFoodRecord(input)
     },
     async addDailyFood(input: CommandContext & {
       title: string
@@ -449,10 +431,12 @@ function createIntegratedCoreServices(
       note?: string
       slug?: string
     }) {
-      return addDailyFoodRecord({
-        ...input,
-        hooks: dependencies.foodAutoLogHooks,
-      })
+      return addDailyFoodRecord(input)
+    },
+    async unscheduleDailyFood(input: CommandContext & {
+      lookup: string
+    }) {
+      return unscheduleDailyFoodRecord(input)
     },
     async scaffoldEvent(input: CommandContext & {
       kind: string
@@ -1202,11 +1186,9 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function createIntegratedVaultServiceGroups(
-  dependencies: IntegratedVaultServiceDependencies = {},
-): VaultServices {
+function createIntegratedVaultServiceGroups(): VaultServices {
   return {
-    core: createIntegratedCoreServices(dependencies),
+    core: createIntegratedCoreServices(),
     importers: createIntegratedImporterServices(),
     query: createIntegratedQueryServices(),
   }
@@ -1232,15 +1214,15 @@ function createUnwiredServiceGroup<
 }
 
 export function createIntegratedVaultServices(
-  dependencies: IntegratedVaultServiceDependencies = {},
+  _dependencies: Record<string, unknown> = {},
 ): VaultServices {
-  return createIntegratedVaultServiceGroups(dependencies)
+  return createIntegratedVaultServiceGroups()
 }
 
 export function createUnwiredVaultServices(
-  dependencies: IntegratedVaultServiceDependencies = {},
+  _dependencies: Record<string, unknown> = {},
 ): VaultServices {
-  const integratedServices = createIntegratedVaultServiceGroups(dependencies)
+  const integratedServices = createIntegratedVaultServiceGroups()
 
   return {
     core: createUnwiredServiceGroup("core", integratedServices.core),

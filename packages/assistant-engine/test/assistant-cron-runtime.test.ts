@@ -306,7 +306,7 @@ afterEach(async () => {
 describe('assistant cron runtime orchestration', () => {
   it('lists mixed local and canonical jobs and computes status from both stores', async () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-list-')
-    const localJob = await createLocalFoodJob(vaultRoot, 'food-local')
+    const localJob = await createLocalJob(vaultRoot, 'food-local')
     const canonicalJob = await createCanonicalJob(vaultRoot, 'daily-check-in')
 
     await updateLocalJob(vaultRoot, localJob.jobId, (job) => ({
@@ -346,18 +346,42 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-local-enable-',
     )
-    const localJob = await addAssistantCronJob({
-      foodAutoLog: {
-        foodId: 'food-1',
-      },
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:00:00.000Z',
+      enabled: true,
+      jobId: 'local-one-shot',
+      keepAfterRun: false,
       name: 'local-one-shot',
-      now: new Date('2026-04-08T08:00:00.000Z'),
-      prompt: 'auto-log breakfast',
+      prompt: 'send breakfast reminder',
       schedule: {
         at: '2026-04-08T09:00:00.000Z',
         kind: 'at',
       },
-      vault: vaultRoot,
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T09:00:00.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    await writeAssistantCronStore(resolveAssistantStatePaths(vaultRoot), {
+      version: 1,
+      jobs: [localJob],
     })
 
     const disabled = await setAssistantCronJobEnabled(vaultRoot, localJob.jobId, false)
@@ -397,7 +421,7 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-local-target-',
     )
-    const localJob = await createLocalFoodJob(vaultRoot, 'local-target')
+    const localJob = await createLocalJob(vaultRoot, 'local-target')
 
     const dryRun = await setAssistantCronJobTarget({
       channel: 'telegram',
@@ -575,7 +599,7 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-process-due-',
     )
-    const localJob = await createLocalFoodJob(vaultRoot, 'local-due')
+    const localJob = await createLocalJob(vaultRoot, 'local-due')
     const canonicalJob = await createCanonicalJob(vaultRoot, 'canonical-due')
 
     await updateLocalJob(vaultRoot, localJob.jobId, (job) => ({
@@ -617,12 +641,12 @@ describe('assistant cron runtime orchestration', () => {
     )
 
     const updatedLocal = await getAssistantCronJob(vaultRoot, localJob.jobId)
-    expect(updatedLocal.state.lastSucceededAt).not.toBeNull()
+    expect(updatedLocal.state.consecutiveFailures).toBe(1)
+    expect(updatedLocal.state.lastError).toBe('scheduled send failed')
     expect(updatedLocal.state.runningAt).toBeNull()
 
     const updatedCanonical = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
-    expect(updatedCanonical.state.consecutiveFailures).toBe(1)
-    expect(updatedCanonical.state.lastError).toBe('scheduled send failed')
+    expect(updatedCanonical.state.lastSucceededAt).not.toBeNull()
     expect(updatedCanonical.state.runningAt).toBeNull()
   })
 })
@@ -654,23 +678,49 @@ async function createRuntimeContext(prefix: string) {
   return context
 }
 
-async function createLocalFoodJob(
+async function createLocalJob(
   vaultRoot: string,
   name: string,
 ): Promise<AssistantCronJob> {
-  return addAssistantCronJob({
-    foodAutoLog: {
-      foodId: `${name}-food`,
-    },
+  const now = '2026-04-08T08:00:00.000Z'
+  const job = assistantCronJobSchema.parse({
+    createdAt: now,
+    enabled: true,
+    jobId: `local-${name}`,
+    keepAfterRun: true,
     name,
-    now: new Date('2026-04-08T08:00:00.000Z'),
-    prompt: `Auto-log ${name}`,
+    prompt: `Check in for ${name}`,
     schedule: {
       kind: 'dailyLocal',
       localTime: '09:30',
     },
-    vault: vaultRoot,
+    schema: 'murph.assistant-cron-job.v1',
+    state: {
+      consecutiveFailures: 0,
+      lastError: null,
+      lastFailedAt: null,
+      lastRunAt: null,
+      lastSucceededAt: null,
+      nextRunAt: '2026-04-08T09:30:00.000Z',
+      runningAt: null,
+      runningPid: null,
+    },
+    target: {
+      alias: null,
+      channel: null,
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      sessionId: null,
+      threadId: null,
+    },
+    updatedAt: now,
   })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const store = await readAssistantCronStore(paths)
+  store.jobs.push(job)
+  await writeAssistantCronStore(paths, store)
+  return job
 }
 
 async function createCanonicalJob(

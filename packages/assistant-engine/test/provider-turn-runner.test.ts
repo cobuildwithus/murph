@@ -19,7 +19,6 @@ const runnerMocks = vi.hoisted(() => ({
   buildAssistantSystemPromptWithCacheMetadata: vi.fn(),
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata: vi.fn(),
   buildAssistantVaultOverviewBlock: vi.fn(),
-  createAssistantFoodAutoLogHooks: vi.fn(),
   createAssistantMemoryTurnContextEnv: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   createProviderTurnAssistantToolCatalog: vi.fn(),
@@ -151,10 +150,6 @@ vi.mock('@murphai/vault-usecases/vault-services', () => ({
   createIntegratedVaultServices: runnerMocks.createIntegratedVaultServices,
 }))
 
-vi.mock('../src/assistant/food-auto-log-hooks.ts', () => ({
-  createAssistantFoodAutoLogHooks: runnerMocks.createAssistantFoodAutoLogHooks,
-}))
-
 import { executeProviderTurnWithRecovery } from '../src/assistant/provider-turn-runner.ts'
 
 describe('executeProviderTurnWithRecovery', () => {
@@ -217,9 +212,6 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.buildAssistantVaultOverviewBlock
       .mockReset()
       .mockResolvedValue('Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.')
-    runnerMocks.createAssistantFoodAutoLogHooks.mockReset().mockReturnValue({
-      kind: 'food-hooks',
-    })
     runnerMocks.createAssistantMemoryTurnContextEnv
       .mockReset()
       .mockReturnValue({

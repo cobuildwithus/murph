@@ -904,12 +904,6 @@ export const assistantCronJobStateSchema = z
   })
   .strict()
 
-export const assistantCronFoodAutoLogSchema = z
-  .object({
-    foodId: z.string().min(1),
-  })
-  .strict()
-
 export const assistantCronScheduledLogSchema = z
   .object({
     scheduledLogId: z.string().min(1),
@@ -927,7 +921,6 @@ export const assistantCronJobSchema = z
     prompt: z.string().min(1),
     schedule: assistantCronScheduleSchema,
     target: assistantCronTargetSchema,
-    foodAutoLog: assistantCronFoodAutoLogSchema.optional(),
     scheduledLog: assistantCronScheduledLogSchema.optional(),
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
@@ -1295,7 +1288,6 @@ export type AssistantCronTarget = Omit<AutomationRoute, 'channel' | 'threadId'> 
   threadId: string | null
 }
 export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
-export type AssistantCronFoodAutoLog = z.infer<typeof assistantCronFoodAutoLogSchema>
 export type AssistantCronScheduledLog = z.infer<typeof assistantCronScheduledLogSchema>
 export type AssistantCronJob = z.infer<typeof assistantCronJobSchema>
 export type AssistantCronRunRecord = z.infer<
