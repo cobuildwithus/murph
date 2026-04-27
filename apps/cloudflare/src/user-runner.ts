@@ -361,6 +361,10 @@ export class HostedUserRunner {
     try {
       const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
       this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
+      await this.provisionUserCryptoForWorkspaceBootstrapIfNeeded({
+        userId: initialRecord.userId,
+        workspace: workspaceRead.workspace,
+      });
       const workspaceVersion = workspaceRead.workspace?.version ?? "0";
       lease = await this.stateStore.bindInvocationWorkspaceVersion({
         lease,
@@ -480,6 +484,25 @@ export class HostedUserRunner {
     if (workspace && workspace.userId !== userId) {
       throw new Error("Hosted workspace read returned a different user.");
     }
+  }
+
+  private async provisionUserCryptoForWorkspaceBootstrapIfNeeded(input: {
+    userId: string;
+    workspace: HostedWorkspaceState | null;
+  }): Promise<void> {
+    if (!hostedWorkspaceNeedsActivationBootstrapCrypto(input.workspace)) {
+      return;
+    }
+
+    await this.withUserKeyEnvelopeLock(async () => {
+      const status = await this.userKeyStore.provisionManagedUserCryptoAtActivation(
+        input.userId,
+        { reason: "member-activation-workspace-bootstrap" },
+      );
+      if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === input.userId) {
+        this.runnerStores = null;
+      }
+    });
   }
 
   private async invokeWorkspaceRunner(input: {
@@ -650,4 +673,11 @@ function hostedWorkspaceWakeIsDue(
 
   const parsedMs = Date.parse(nextWakeAt);
   return Number.isFinite(parsedMs) && parsedMs <= nowMs;
+}
+
+function hostedWorkspaceNeedsActivationBootstrapCrypto(
+  workspace: HostedWorkspaceState | null,
+): boolean {
+  return workspace === null
+    || (workspace.version === "0" && workspace.snapshotRef === null);
 }
