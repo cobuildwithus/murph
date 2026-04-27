@@ -1323,7 +1323,6 @@ export async function showExperimentFollowupDue(input: {
   })
 
   return {
-    vault: input.vault,
     experimentId: entity.entityId,
     lookupId: entity.entityId,
     slug,

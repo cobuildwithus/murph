@@ -1,6 +1,6 @@
 # Add deterministic experiment follow-up due primitive
 
-Status: in_progress
+Status: implementation_verified_locally
 Created: 2026-04-27
 Updated: 2026-04-27
 
@@ -48,16 +48,18 @@ Updated: 2026-04-27
 ## Tasks
 
 1. Completed: inspect existing experiment progress, assistant support, automation, and cron notification surfaces.
-2. In progress: add the query/usecase/CLI due primitive.
-3. Pending: add focused query and CLI coverage.
-4. Pending: update assistant/product guidance for default-on confirmed experiment follow-ups.
-5. Pending: run scoped verification, required audit passes, and close/commit or document blockers.
+2. Completed: add the query/usecase/CLI due primitive.
+3. Completed: add focused query and CLI coverage.
+4. Completed: update assistant/product guidance for default-on confirmed experiment follow-ups.
+5. In progress: run scoped verification, required audit passes, and close/commit or document blockers.
 
 ## Decisions
 
 - Do not include suggested copy in the primitive; the result should be a machine-readable due decision only.
 - Keep delivery on existing canonical automation/cron notification primitives.
 - Treat `remindersEnabled: true` plus `missedLogFollowup !== "never"` as enough for a confirmed experiment follow-up; `never` remains the opt-out.
+- Bound weekly digest notifications to the intervention window so an active experiment left in review-due state does not keep emitting weekly digest due decisions.
+- Do not include the local vault path in `experiment followup due` results; callers already know the vault they invoked and notification decisions should not carry filesystem details.
 
 ## Verification
 
@@ -69,4 +71,7 @@ Updated: 2026-04-27
 - `git diff --check -- <touched paths>`
 - required `security-privacy-review`, `coverage-write`, and `task-finish-review` passes
 - Current outcomes:
-- Pending.
+- `pnpm exec vitest run packages/query/test/experiment-analysis.test.ts --config vitest.config.ts --no-coverage` passed.
+- `pnpm --dir packages/cli gen:config-schema` passed.
+- `pnpm build` passed and refreshed the local `vault-cli` shim target.
+- Direct built CLI proof passed: `experiment followup due daily-sauna-2026-04-27 --kind weekly-digest --date 2026-05-18` returns `skip` / `weekly_digest_not_due` and no top-level `vault` key.

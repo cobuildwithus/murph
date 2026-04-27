@@ -292,7 +292,6 @@ const experimentFollowupDueDecisionSchema = z.object({
 })
 
 const experimentFollowupDueResultSchema = z.object({
-  vault: pathSchema,
   experimentId: z.string().min(1),
   lookupId: z.string().min(1),
   slug: slugSchema,
