@@ -1,8 +1,8 @@
 # Run Digital Sunset Health Commons research
 
-Status: research package complete; content landing pending explicit decision
+Status: content landed; current verification passed
 Created: 2026-04-24
-Updated: 2026-04-25
+Updated: 2026-04-27
 
 ## Goal
 
@@ -61,7 +61,7 @@ Updated: 2026-04-25
 - Use `digital-sunset` as the stable workspace/protocol slug for the starter screen-curfew variant.
 - Use `evening-screen-curfew` as the provisional family slug unless the charter produces a better canonical split.
 - Treat `experiment_family:evening-light-reduction` as related context, not automatically the parent, because screen curfews can act through light, arousal, displacement, and routine effects.
-- Keep the completed research package as a patch bundle until a separate landing step explicitly applies it to `packages/health-commons/content/**`.
+- The completed research package has already landed in `packages/health-commons/content/**`; later Health Commons hard-cut migrations changed the file shape after landing, so the original final reducer patch should not be reapplied over the current content.
 
 ## Verification
 
@@ -75,7 +75,9 @@ Updated: 2026-04-25
 
 ## Outcome
 
-- Final reducer harvested on 2026-04-25 with a patch bundle rather than direct repo edits.
+- Final reducer harvested on 2026-04-25 with a patch bundle.
+- Content is already landed in the current repo history; `git apply --check` for the original reducer patch now fails because the target files already exist.
+- Current package proof should use the migrated repo content and Health Commons checks rather than the original reducer file hashes, because later source-identity/private-protocol migrations intentionally changed the content after the final reducer package was produced.
 - Final package artifacts:
   - `output-packages/research/digital-sunset/responses/34-final-landing-reducer.md`
   - `output-packages/research/digital-sunset/downloads/34-final-landing-reducer/downloads/digital-sunset-final.patch`
@@ -88,7 +90,13 @@ Updated: 2026-04-25
   - `git apply --check output-packages/research/digital-sunset/downloads/34-final-landing-reducer/downloads/digital-sunset-final.patch`
   - `unzip -t output-packages/research/digital-sunset/downloads/34-final-landing-reducer/downloads/digital-sunset-final-repo-patch-files.zip`
   - raw home path and account username scans over `output-packages/research/digital-sunset` returned zero matches.
-- Remaining landing checks after applying the patch:
-  - `pnpm --filter @murphai/health-commons generate`
-  - `pnpm --filter @murphai/health-commons generate:check`
-  - `pnpm --filter @murphai/health-commons artifacts:r2:dry-run`
+- Current landing verification on 2026-04-27:
+  - `pnpm --filter @murphai/health-commons generate` passed.
+  - `pnpm --filter @murphai/health-commons generate:check` passed.
+  - `pnpm --filter @murphai/health-commons artifacts:r2:dry-run` exited successfully; the command reports rights-blocked artifacts by design and did not fail.
+  - `pnpm --filter @murphai/health-commons typecheck` passed.
+  - `pnpm --filter @murphai/health-commons test` passed with 10 files and 35 tests.
+- Browser recovery note on 2026-04-27:
+  - ChatGPT conversation `69ec305e-09a0-839d-965e-92ed12427e86` belongs to `output-packages/research/digital-sunset`, seam `12-source-extraction-008`.
+  - That original seam was already replaced by completed seams `12-source-extraction-008a` and `12-source-extraction-008b`; do not keep reharvesting the original `008` thread.
+  - A stale harvest attempt for original `008` was marked stopped because live `phlebas` CDP did not show the conversation and the replacement seams already hold the extracted artifacts.

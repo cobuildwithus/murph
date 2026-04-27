@@ -78,6 +78,8 @@ export type QueryExperimentProgressSummary =
   ReturnType<QueryRuntimeModule['summarizeExperimentProgress']>
 export type QueryExperimentOutcomeSummary =
   ReturnType<QueryRuntimeModule['analyzeExperimentOutcome']>
+export type QueryExperimentFollowupDueDecision =
+  ReturnType<QueryRuntimeModule['decideExperimentFollowupDue']>
 export type QueryExperimentMetricResult =
   QueryExperimentOutcomeSummary['metricResults'][number]
 export type QueryExperimentMetricPeriodSummary =

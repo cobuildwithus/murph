@@ -26,11 +26,13 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 }));
 
 type SettingsDeviceSyncRouteModule = typeof import("../app/api/settings/device-sync/route");
+type SettingsDeviceSyncSidebarStatusRouteModule = typeof import("../app/api/settings/device-sync/sidebar-status/route");
 type SettingsDeviceSyncConnectRouteModule = typeof import("../app/api/settings/device-sync/providers/[provider]/connect/route");
 type SettingsDeviceSyncDisconnectRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
 type SettingsDeviceSyncStatusRouteModule = typeof import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
 
 let settingsDeviceSyncRoute: SettingsDeviceSyncRouteModule;
+let settingsDeviceSyncSidebarStatusRoute: SettingsDeviceSyncSidebarStatusRouteModule;
 let settingsDeviceSyncConnectRoute: SettingsDeviceSyncConnectRouteModule;
 let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
@@ -38,6 +40,7 @@ let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
 describe("device sync settings routes", () => {
   beforeAll(async () => {
     settingsDeviceSyncRoute = await import("../app/api/settings/device-sync/route");
+    settingsDeviceSyncSidebarStatusRoute = await import("../app/api/settings/device-sync/sidebar-status/route");
     settingsDeviceSyncConnectRoute = await import("../app/api/settings/device-sync/providers/[provider]/connect/route");
     settingsDeviceSyncDisconnectRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/disconnect/route");
     settingsDeviceSyncStatusRoute = await import("../app/api/settings/device-sync/connections/[connectionId]/status/route");
@@ -150,6 +153,25 @@ describe("device sync settings routes", () => {
           tone: "calm",
         },
       ],
+    });
+  });
+
+  it("returns a minimized sidebar status summary for the authenticated hosted member", async () => {
+    const response = await settingsDeviceSyncSidebarStatusRoute.GET(
+      new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+    await expect(response.json()).resolves.toEqual({
+      generatedAt: "2026-04-03T12:00:00.000Z",
+      ok: true,
+      status: {
+        message: "Oura connected",
+        tone: "connected",
+      },
     });
   });
 

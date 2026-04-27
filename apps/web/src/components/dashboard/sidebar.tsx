@@ -4,14 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { ChevronsUpDown } from "lucide-react";
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
+import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
 import {
@@ -23,10 +23,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/src/components/ui/sidebar";
+import type {
+  SidebarAccountStatus,
+  SidebarAccountStatusTone,
+  SidebarDeviceSyncStatusResponse,
+} from "@/src/lib/device-sync/sidebar-status";
 import { cn } from "@/src/lib/utils";
 
 const navItems = [
-  { label: "Overview", href: "/overview" },
   {
     label: "Biomarkers",
     href: "/biomarkers/resting-heart-rate",
@@ -56,15 +60,52 @@ function BrandMark() {
 function AccountMenu() {
   const { user } = useUser();
   const { logout } = usePrivy();
+  const [deviceSyncStatusState, setDeviceSyncStatusState] =
+    useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
+  const userKey = user?.id ?? null;
 
   const primaryLabel =
     user?.email?.address ?? user?.phone?.number ?? "Account";
   const initials =
     primaryLabel.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "M";
+  const deviceSyncStatus =
+    deviceSyncStatusState?.userKey === userKey ? deviceSyncStatusState.status : null;
 
-  // TODO: wire lastSyncAt + onSync from Oura/device-sync integration state.
-  const lastSyncLabel = "2m ago";
-  const onSync = () => {};
+  useEffect(() => {
+    if (!userKey) {
+      setDeviceSyncStatusState(null);
+      return;
+    }
+
+    const activeUserKey = userKey;
+    let cancelled = false;
+
+    async function loadDeviceSyncStatus() {
+      try {
+        const response =
+          await requestHostedOnboardingJson<SidebarDeviceSyncStatusResponse>({
+            url: "/api/settings/device-sync/sidebar-status",
+          });
+
+        if (!cancelled) {
+          setDeviceSyncStatusState({
+            status: response.status,
+            userKey: activeUserKey,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setDeviceSyncStatusState(null);
+        }
+      }
+    }
+
+    void loadDeviceSyncStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userKey]);
 
   return (
     <SidebarMenu>
@@ -87,21 +128,21 @@ function AccountMenu() {
               <span className="truncate text-xs font-medium text-white/90">
                 {primaryLabel}
               </span>
-              <span className="mt-0.5 flex items-center gap-1.5 text-[0.6875rem] text-white/50">
-                <span className="size-1.5 shrink-0 rounded-full bg-green-400" />
-                <span className="truncate">Oura connected</span>
-              </span>
+              {deviceSyncStatus ? (
+                <span className="mt-0.5 flex items-center gap-1.5 text-[0.6875rem] text-white/50">
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      accountStatusDotClass(deviceSyncStatus.tone),
+                    )}
+                  />
+                  <span className="truncate">{deviceSyncStatus.message}</span>
+                </span>
+              ) : null}
             </div>
             <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" className="min-w-56">
-            <DropdownMenuItem onClick={onSync}>
-              Sync data
-              <span className="ml-auto text-xs text-muted-foreground">
-                {lastSyncLabel}
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => void logout()}>
               Sign out
             </DropdownMenuItem>
@@ -110,6 +151,18 @@ function AccountMenu() {
       </SidebarMenuItem>
     </SidebarMenu>
   );
+}
+
+function accountStatusDotClass(tone: SidebarAccountStatusTone): string {
+  if (tone === "attention") {
+    return "bg-[#c4a882]";
+  }
+
+  if (tone === "connected") {
+    return "bg-[#7a8c6e]";
+  }
+
+  return "bg-white/30";
 }
 
 export function Sidebar() {
@@ -134,9 +187,7 @@ export function Sidebar() {
           {navItems.map((item) => {
             const activePrefix = item.matchPrefix ?? item.href;
             const isActive =
-              pathname === item.href ||
-              (activePrefix !== "/overview" &&
-                pathname.startsWith(activePrefix));
+              pathname === item.href || pathname.startsWith(activePrefix);
 
             return (
               <SidebarMenuItem key={item.href}>

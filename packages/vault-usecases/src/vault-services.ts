@@ -107,6 +107,7 @@ const queryServiceMethodNames = [
   "showExperiment",
   "listExperiments",
   "showExperimentProgress",
+  "showExperimentFollowupDue",
   "analyzeExperimentOutcome",
   "showJournal",
   "listJournals",

@@ -36,6 +36,7 @@ import type {
 } from "../health-cli-method-types.js"
 import type {
   QueryCanonicalEntity,
+  QueryExperimentFollowupDueDecision,
   QueryExperimentOutcomeSummary,
   QueryExperimentProgressSummary,
   QueryMealNutritionDayTotal,
@@ -353,6 +354,16 @@ export interface ExperimentProgressResult {
   slug: string
   asOf: string
   progress: QueryExperimentProgressSummary
+}
+
+export interface ExperimentFollowupDueResult {
+  vault: string
+  experimentId: string
+  lookupId: string
+  slug: string
+  kind: "missed-log" | "weekly-digest"
+  date: string
+  decision: QueryExperimentFollowupDueDecision
 }
 
 export interface ExperimentOutcomeResult {
@@ -1102,6 +1113,13 @@ export interface QueryServices extends HealthQueryServiceMethods {
       asOf?: string
     },
   ): Promise<ExperimentProgressResult>
+  showExperimentFollowupDue(
+    input: CommandContext & {
+      lookup: string
+      kind: "missed-log" | "weekly-digest"
+      date?: string
+    },
+  ): Promise<ExperimentFollowupDueResult>
   analyzeExperimentOutcome(
     input: CommandContext & {
       lookup: string

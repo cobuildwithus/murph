@@ -66,11 +66,16 @@ export type {
 } from "./overview.ts";
 export {
   analyzeExperimentOutcome,
+  decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "./experiments.ts";
 export type {
   ExperimentAdherenceStatus,
   ExperimentCoverageStatus,
+  ExperimentFollowupAction,
+  ExperimentFollowupDueDecision,
+  ExperimentFollowupKind,
+  ExperimentFollowupReason,
   ExperimentMetricResult,
   ExperimentOutcomeConfidenceLevel,
   ExperimentOutcomeSummary,

@@ -102,16 +102,19 @@ Completed:
   snapshot/write and web-CAS validation helpers so the runtime snapshot builder
   can compose with a lease-validated `workspacePort.checkpoint` without double
   checkpointing.
+- Cloudflare runner transport/container/node-runner surfaces in Worker G's
+  scope now accept workspace-run jobs/results only, reject explicit non-workspace
+  job kinds at the parse boundary, and no longer import the legacy run-drain
+  result validation module.
 - `migration.md` has been updated with the final remaining cutover sequence
   from the current checkout.
 - Legacy protocol deletion readiness is mapped below.
 
 Now:
 
-- Replace the container/node runtime job contract with the workspace-run shape
-  in one coordinated Cloudflare integration pass across `user-runner.ts`,
-  `node-runner.ts`, `node-runner-child.ts`, `container-entrypoint.ts`, and
-  `runner-container.ts`.
+- Required completion audit subagents for the Cloudflare runner hard cut are
+  blocked by the local Codex usage limit; implementation and focused
+  verification are otherwise complete for Worker G's ownership.
 
 Next:
 
@@ -122,7 +125,8 @@ Next:
 - Run focused tests for assistant-runtime, apps/web mailbox/workspace, and
   Cloudflare runtime platform/job path after the bridge/job cutover slice.
 - Run required security/privacy, coverage, simplify, and finish-review passes
-  before handoff.
+  once local Codex subagent capacity is available, then close/commit the scoped
+  Cloudflare runner hard-cut work.
 
 ## Deletion Readiness Map
 
@@ -164,7 +168,7 @@ Test-only blockers mirror those clusters in `apps/cloudflare/test/**`,
 old protocol include `ARCHITECTURE.md`, `README.md`,
 `docs/hosted-hard-cut-migration-guide.md`, `docs/architecture.md`,
 `docs/cloudflare-hosted-idempotency-followup.md`, package/app READMEs, and
-`agent-docs/references/hosted-run-protocol.md`; completed exec plans are
+`agent-docs/references/hosted-runtime-protocol.md`; completed exec plans are
 history and should not drive deletion.
 
 Minimal deletion order after the workspace-run job path is active:

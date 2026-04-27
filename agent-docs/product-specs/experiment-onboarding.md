@@ -1,6 +1,6 @@
 # Experiment Onboarding
 
-Last verified: 2026-04-22
+Last verified: 2026-04-27
 
 ## Current State
 
@@ -18,7 +18,7 @@ Experiment onboarding is planning by default.
 - Private run creation still happens only in the user vault after explicit confirmation.
 - The richer downstream loop is: onboarding plan -> private run -> outcome card -> optional sharing or contribution. Onboarding owns only the planning step.
 - Safety-screen positives or uncertainty are guardrails for unsupervised setup, not diagnoses.
-- Reminder automations are opt-in and should use neutral language that records what happened rather than implying failure.
+- Assistant follow-ups should never be created before the user confirms the experiment plan. After confirmation, follow-ups included in the agreed plan may default on with a clear opt-out, and should use neutral language that records what happened rather than implying failure.
 
 ## Contract Shape
 
@@ -54,7 +54,9 @@ Before Murph writes a private run, it should already know the exact Health Commo
 
 ## Reminder Policy
 
-- Reminders are opt-in support, not hidden compliance machinery.
+- Reminders are experiment support that belong in the confirmed plan, not hidden compliance machinery.
+- Once a user agrees to a run plan with assistant support, missed-log checks may be default-on and opt-out.
+- Scheduled checks should call deterministic product logic, such as `vault-cli experiment followup due <id> --kind missed-log --format json`, before deciding whether an outbound message is due.
 - Missed-log follow-up should be neutral, at most once per planned session, and easy to decline.
 - Weekly summaries are preferred over daily coaching by default.
 
@@ -88,7 +90,7 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 1. A protocol page can declare a machine-readable onboarding block without creating private user state.
 2. Assistants can use that block to review context, ask the right safety and setup questions, and summarize the plan consistently.
 3. `runSpecRevisionId` changes when onboarding semantics that affect a runnable protocol change.
-4. A user must explicitly confirm before Murph creates an active experiment or reminder automation.
+4. A user must explicitly confirm before Murph creates an active experiment; any assistant follow-ups included in that confirmed plan must remain easy to opt out of.
 5. High-caution protocols can steer users toward clinician guidance, lower-intensity alternatives, or postponement without pretending that Murph diagnosed them.
 6. Protocol-specific read hints stay on the public protocol page so assistants do not need a second protocol-by-protocol prompt fork to know which CLI reads matter.
 7. Completed runs remain traceable to exact protocol revisions so outcome cards, comparisons, and later cohort summaries mean the same thing.

@@ -1254,10 +1254,10 @@ function resolveExperimentContextLogKind(input: {
   return 'note'
 }
 
-export async function showExperimentProgress(input: {
-  vault: string
+async function resolveExperimentQueryTarget(input: {
+  invalidSlugMessage: string
   lookup: string
-  asOf?: string
+  vault: string
 }) {
   const query = await loadExperimentJournalVaultQueryRuntime()
   const readModel = await readExperimentJournalVault(input.vault)
@@ -1269,8 +1269,27 @@ export async function showExperimentProgress(input: {
 
   const slug = entity.experimentSlug ?? stringOrNull(entity.attributes.slug)
   if (!slug) {
-    throw new VaultCliError('invalid_payload', 'Experiment progress requires a canonical slug.')
+    throw new VaultCliError('invalid_payload', input.invalidSlugMessage)
   }
+
+  return {
+    entity,
+    query,
+    readModel,
+    slug,
+  }
+}
+
+export async function showExperimentProgress(input: {
+  vault: string
+  lookup: string
+  asOf?: string
+}) {
+  const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
+    invalidSlugMessage: 'Experiment progress requires a canonical slug.',
+    lookup: input.lookup,
+    vault: input.vault,
+  })
 
   const progress = query.summarizeExperimentProgress(readModel, slug, {
     asOf: input.asOf,
@@ -1286,23 +1305,44 @@ export async function showExperimentProgress(input: {
   }
 }
 
+export async function showExperimentFollowupDue(input: {
+  vault: string
+  lookup: string
+  kind: 'missed-log' | 'weekly-digest'
+  date?: string
+}) {
+  const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
+    invalidSlugMessage: 'Experiment follow-up requires a canonical slug.',
+    lookup: input.lookup,
+    vault: input.vault,
+  })
+
+  const decision = query.decideExperimentFollowupDue(readModel, slug, {
+    kind: input.kind,
+    date: input.date,
+  })
+
+  return {
+    vault: input.vault,
+    experimentId: entity.entityId,
+    lookupId: entity.entityId,
+    slug,
+    kind: decision.kind,
+    date: decision.date,
+    decision,
+  }
+}
+
 export async function analyzeExperimentOutcomeRecord(input: {
   vault: string
   lookup: string
   asOf?: string
 }) {
-  const query = await loadExperimentJournalVaultQueryRuntime()
-  const readModel = await readExperimentJournalVault(input.vault)
-  const entity = query.lookupEntityById(readModel, input.lookup)
-
-  if (!entity || entity.family !== 'experiment') {
-    throw new VaultCliError('not_found', `No experiment found for "${input.lookup}".`)
-  }
-
-  const slug = entity.experimentSlug ?? stringOrNull(entity.attributes.slug)
-  if (!slug) {
-    throw new VaultCliError('invalid_payload', 'Experiment outcome analysis requires a canonical slug.')
-  }
+  const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
+    invalidSlugMessage: 'Experiment outcome analysis requires a canonical slug.',
+    lookup: input.lookup,
+    vault: input.vault,
+  })
 
   const outcome = query.analyzeExperimentOutcome(readModel, slug, {
     asOf: input.asOf,

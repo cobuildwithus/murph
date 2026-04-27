@@ -6,6 +6,7 @@ import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/model.ts";
 import {
   analyzeExperimentOutcome,
+  decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "../src/index.ts";
 
@@ -852,6 +853,170 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
   assert.equal(progress.signals[5]?.completeness, "insufficient");
   assert.deepEqual(progress.confounders, ["Late caffeine on 2026-05-04"]);
   assert.equal(progress.protocolRef, null);
+});
+
+test("experiment follow-up due notifies for an unlogged daily missed-log date", () => {
+  const experiment = makeExperiment("active", {
+    runPlan: {
+      baselineStart: "2026-04-01",
+      baselineEnd: "2026-04-07",
+      interventionStart: "2026-04-08",
+      interventionEnd: "2026-04-21",
+      sessionsPerWeek: 7,
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-due",
+    metadata: { timezone: "Asia/Singapore" },
+    entities: [experiment],
+  });
+
+  const decision = decideExperimentFollowupDue(vault, "sauna-rhr", {
+    kind: "missed-log",
+    date: "2026-04-10",
+  });
+
+  assert.equal(decision.action, "notify");
+  assert.equal(decision.reason, "planned_session_log_missing");
+  assert.equal(decision.window.sessionDate, "2026-04-10");
+  assert.equal(
+    decision.dedupeKey,
+    "experiment-followup:exp_01JNV4458HYPP53JDQCBP1QJFM:missed-log:2026-04-10",
+  );
+});
+
+test("experiment follow-up due skips missed-log when the date already has any session log", () => {
+  const experiment = makeExperiment("active", {
+    runPlan: {
+      baselineStart: "2026-04-01",
+      baselineEnd: "2026-04-07",
+      interventionStart: "2026-04-08",
+      interventionEnd: "2026-04-21",
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const skippedSession = makeSession({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2BA",
+    occurredAt: "2026-04-10T19:00:00.000Z",
+    sessionStatus: "skipped",
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-logged",
+    metadata: null,
+    entities: [experiment, skippedSession],
+  });
+
+  const decision = decideExperimentFollowupDue(vault, "sauna-rhr", {
+    kind: "missed-log",
+    date: "2026-04-10",
+  });
+
+  assert.equal(decision.action, "skip");
+  assert.equal(decision.reason, "session_already_logged");
+});
+
+test("experiment follow-up due skips missed-log for opt-out and unsupported schedules", () => {
+  const optedOut = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-opt-out",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-07",
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-21",
+          targetSessions: 14,
+          minimumUsefulSessions: 10,
+        },
+        assistantSupport: {
+          remindersEnabled: true,
+          missedLogFollowup: "never",
+          weeklyDigestEnabled: false,
+        },
+      }),
+    ],
+  });
+  const nonDaily = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-nondaily",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-07",
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-21",
+          sessionsPerWeek: 3,
+          targetSessions: 6,
+          minimumUsefulSessions: 4,
+        },
+        assistantSupport: {
+          remindersEnabled: true,
+          missedLogFollowup: "default_on",
+          weeklyDigestEnabled: false,
+        },
+      }),
+    ],
+  });
+
+  assert.equal(
+    decideExperimentFollowupDue(optedOut, "sauna-rhr", {
+      kind: "missed-log",
+      date: "2026-04-10",
+    }).reason,
+    "missed_log_followup_disabled",
+  );
+  assert.equal(
+    decideExperimentFollowupDue(nonDaily, "sauna-rhr", {
+      kind: "missed-log",
+      date: "2026-04-10",
+    }).reason,
+    "unsupported_session_schedule",
+  );
+});
+
+test("experiment follow-up due evaluates weekly digest enablement", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-weekly-digest",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        assistantSupport: {
+          remindersEnabled: false,
+          weeklyDigestEnabled: true,
+        },
+      }),
+    ],
+  });
+
+  const earlyDecision = decideExperimentFollowupDue(vault, "sauna-rhr", {
+    kind: "weekly-digest",
+    date: "2026-04-10",
+  });
+  const decision = decideExperimentFollowupDue(vault, "sauna-rhr", {
+    kind: "weekly-digest",
+    date: "2026-04-14",
+  });
+
+  assert.equal(earlyDecision.action, "skip");
+  assert.equal(earlyDecision.reason, "weekly_digest_not_due");
+  assert.equal(decision.action, "notify");
+  assert.equal(decision.reason, "weekly_digest_due");
+  assert.equal(decision.dedupeKey.endsWith(":weekly-digest:2026-04-14"), true);
 });
 
 test("experiment outcome reports sparse primary data as medium-confidence incomplete evidence", () => {

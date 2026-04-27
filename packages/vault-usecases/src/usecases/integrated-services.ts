@@ -94,6 +94,7 @@ import {
   listExperimentRecords,
   listJournalRecords,
   planExperimentRecord,
+  showExperimentFollowupDue,
   showExperimentProgress,
   showExperimentRecord,
   showJournalRecord,
@@ -689,6 +690,13 @@ function createIntegratedQueryServices(): QueryServices {
       asOf?: string
     }) {
       return showExperimentProgress(input)
+    },
+    async showExperimentFollowupDue(input: CommandContext & {
+      lookup: string
+      kind: 'missed-log' | 'weekly-digest'
+      date?: string
+    }) {
+      return showExperimentFollowupDue(input)
     },
     async analyzeExperimentOutcome(input: CommandContext & {
       lookup: string

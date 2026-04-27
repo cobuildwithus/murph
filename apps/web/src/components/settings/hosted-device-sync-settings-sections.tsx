@@ -1,12 +1,7 @@
+import type { ReactNode } from "react";
+
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/src/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +15,7 @@ import {
 } from "@/src/components/settings/hosted-device-sync-settings-time";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 
+import { ConnectedAccountCard } from "./connected-account-card";
 import { badgeClasses, sourceCardKey, sourceKey } from "./hosted-device-sync-settings-utils";
 
 export function HostedDeviceSyncSettingsContent(props: {
@@ -33,31 +29,29 @@ export function HostedDeviceSyncSettingsContent(props: {
 }) {
   return (
     <>
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight text-stone-900">Wearables</h2>
+          <div className="flex flex-col gap-1">
+            <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Wearables</h2>
             <p className="text-sm leading-relaxed text-stone-500">
-              Connect your wearables. Disconnect or reconnect any time.
+              Connect, refresh, or disconnect wearable sources.
             </p>
           </div>
           <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing} variant="outline">
-            {props.isRefreshing ? "Refreshing..." : "Refresh status"}
+            {props.isRefreshing ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
       </div>
 
       {props.sources.length === 0 ? (
-        <Card className="shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg text-stone-900">No wearables available yet</CardTitle>
-            <CardDescription className="text-sm leading-relaxed text-stone-500">
-              Wearable integrations will appear here once they&apos;re enabled for your account.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <ConnectedAccountCard
+          label="Wearables"
+          value="No sources available"
+          meta="Wearable integrations will appear here once they're enabled for your account."
+          variant="empty"
+        />
       ) : (
-        <div className="space-y-4">
+        <div className="flex flex-col gap-3">
           {props.sources.map((source) => (
             <HostedDeviceSyncSourceCard
               key={sourceCardKey(source)}
@@ -82,21 +76,18 @@ export function HostedDeviceSyncSettingsStatusCard(props: {
   onAction?: (() => Promise<void>) | undefined;
 }) {
   return (
-    <Card className="shadow-sm">
-      <CardHeader>
-        <CardTitle className="text-lg text-stone-900">{props.title}</CardTitle>
-        <CardDescription className="text-sm leading-relaxed text-stone-500">
-          {props.description}
-        </CardDescription>
-      </CardHeader>
-      {props.actionLabel && props.onAction ? (
-        <CardContent>
+    <ConnectedAccountCard
+      value={props.title}
+      meta={props.description}
+      variant="empty"
+      action={
+        props.actionLabel && props.onAction ? (
           <Button type="button" onClick={() => void props.onAction?.()} disabled={props.disabled} variant="outline">
             {props.disabled ? "Refreshing..." : props.actionLabel}
           </Button>
-        </CardContent>
-      ) : null}
-    </Card>
+        ) : null
+      }
+    />
   );
 }
 
@@ -109,44 +100,26 @@ function HostedDeviceSyncSourceCard(props: {
 }) {
   const connectBusy = props.pendingActionKey === sourceKey(props.source, "connect");
   const disconnectBusy = props.pendingActionKey === sourceKey(props.source, "disconnect");
+  const displayName = props.source.displayName
+    ? `${props.source.providerLabel} - ${props.source.displayName}`
+    : props.source.providerLabel;
 
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <CardTitle className="text-xl text-stone-900">
-              {props.source.providerLabel}
-              {props.source.displayName ? (
-                <span className="text-base font-normal text-stone-500"> {"—"} {props.source.displayName}</span>
-              ) : null}
-            </CardTitle>
-            <CardDescription className="text-sm text-stone-500">{props.source.headline}</CardDescription>
-          </div>
+    <ConnectedAccountCard
+      label={props.source.headline}
+      value={displayName}
+      meta={<SourceMeta source={props.source} />}
+      action={
+        <>
           <Badge className={badgeClasses(props.source.tone)} variant="outline">
             {props.source.statusLabel}
           </Badge>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <p className="text-sm leading-relaxed text-stone-700">{props.source.detail}</p>
-          <p className="text-sm leading-relaxed text-stone-500">{props.source.guidance}</p>
-        </div>
-
-        <dl className="grid gap-3 rounded-lg border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700 md:grid-cols-3">
-          <TimestampStat emptyLabel="No successful sync yet" label="Last successful sync" value={props.source.lastSuccessfulSyncAt} />
-          <TimestampStat emptyLabel="No recent activity yet" label="Last activity" value={props.source.lastActivityAt} />
-          <TimestampStat emptyLabel="Nothing scheduled yet" label="Next background check" value={props.source.nextReconcileAt} />
-        </dl>
-
-        <div className="flex flex-wrap gap-3">
           {props.source.primaryAction ? (
             <Button
               type="button"
               onClick={() => void props.onConnect(props.source)}
               disabled={connectBusy || disconnectBusy}
+              size="sm"
             >
               {connectBusy ? `${props.source.primaryAction.label}...` : props.source.primaryAction.label}
             </Button>
@@ -156,14 +129,26 @@ function HostedDeviceSyncSourceCard(props: {
               type="button"
               onClick={() => props.onDisconnectTargetChange(props.source)}
               disabled={connectBusy || disconnectBusy}
+              size="sm"
               variant="outline"
             >
               {disconnectBusy ? "Disconnecting..." : props.source.secondaryAction.label}
             </Button>
           ) : null}
-        </div>
-      </CardContent>
-    </Card>
+        </>
+      }
+    />
+  );
+}
+
+function SourceMeta(props: { source: HostedDeviceSyncSettingsSource }) {
+  const timing = renderSourceTiming(props.source);
+
+  return (
+    <span className="flex flex-col gap-1">
+      <span>{props.source.detail}</span>
+      {timing}
+    </span>
   );
 }
 
@@ -195,23 +180,39 @@ export function HostedDeviceSyncDisconnectDialog(props: {
   );
 }
 
-function TimestampStat(input: {
-  emptyLabel: string;
-  label: string;
-  value: string | null;
-}) {
-  return (
-    <div className="space-y-1">
-      <dt className="font-semibold text-stone-500">{input.label}</dt>
-      <dd>
-        {input.value ? (
-          <time dateTime={input.value} title={formatAbsoluteTime(input.value)}>
-            {formatRelativeTime(input.value)}
-          </time>
-        ) : (
-          input.emptyLabel
-        )}
-      </dd>
-    </div>
-  );
+function renderSourceTiming(source: HostedDeviceSyncSettingsSource): ReactNode {
+  if (source.lastSuccessfulSyncAt) {
+    return (
+      <span>
+        Last sync{" "}
+        <time dateTime={source.lastSuccessfulSyncAt} title={formatAbsoluteTime(source.lastSuccessfulSyncAt)}>
+          {formatRelativeTime(source.lastSuccessfulSyncAt)}
+        </time>
+      </span>
+    );
+  }
+
+  if (source.lastActivityAt) {
+    return (
+      <span>
+        Last activity{" "}
+        <time dateTime={source.lastActivityAt} title={formatAbsoluteTime(source.lastActivityAt)}>
+          {formatRelativeTime(source.lastActivityAt)}
+        </time>
+      </span>
+    );
+  }
+
+  if (source.nextReconcileAt) {
+    return (
+      <span>
+        Next check{" "}
+        <time dateTime={source.nextReconcileAt} title={formatAbsoluteTime(source.nextReconcileAt)}>
+          {formatRelativeTime(source.nextReconcileAt)}
+        </time>
+      </span>
+    );
+  }
+
+  return null;
 }

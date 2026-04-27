@@ -48,6 +48,20 @@ const experimentSafetyDispositionSchema = z.enum(
 const experimentMissedLogFollowupSchema = z.enum(
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
 )
+const experimentFollowupKindSchema = z.enum(['missed-log', 'weekly-digest'])
+const experimentFollowupActionSchema = z.enum(['notify', 'skip'])
+const experimentFollowupReasonSchema = z.enum([
+  'experiment_not_active',
+  'not_in_intervention_window',
+  'missed_log_followup_disabled',
+  'reminders_disabled',
+  'session_already_logged',
+  'planned_session_log_missing',
+  'unsupported_session_schedule',
+  'weekly_digest_disabled',
+  'weekly_digest_not_due',
+  'weekly_digest_due',
+])
 const sha256RevisionOptionSchema = z
   .string()
   .regex(
@@ -253,6 +267,38 @@ const experimentProgressResultSchema = z.object({
   slug: slugSchema,
   asOf: localDateSchema,
   progress: experimentProgressSnapshotSchema,
+})
+
+const experimentFollowupDueDecisionSchema = z.object({
+  schema: z.literal('murph.experiment-followup-due.v1'),
+  kind: experimentFollowupKindSchema,
+  action: experimentFollowupActionSchema,
+  reason: experimentFollowupReasonSchema,
+  date: localDateSchema,
+  dedupeKey: z.string().min(1),
+  experiment: z.object({
+    id: z.string().min(1),
+    slug: slugSchema,
+    status: experimentStatusSchema,
+    title: z.string().min(1),
+  }),
+  window: z.object({
+    sessionDate: localDateSchema.nullable(),
+    baselineStart: localDateSchema.nullable(),
+    baselineEnd: localDateSchema.nullable(),
+    interventionStart: localDateSchema.nullable(),
+    interventionEnd: localDateSchema.nullable(),
+  }),
+})
+
+const experimentFollowupDueResultSchema = z.object({
+  vault: pathSchema,
+  experimentId: z.string().min(1),
+  lookupId: z.string().min(1),
+  slug: slugSchema,
+  kind: experimentFollowupKindSchema,
+  date: localDateSchema,
+  decision: experimentFollowupDueDecisionSchema,
 })
 
 const experimentOutcomeResultSchema = z.object({
@@ -744,6 +790,29 @@ export function registerExperimentCommands(
     },
   })
 
+  const followup = Cli.create('followup', {
+    description: 'Experiment follow-up decision commands.',
+  })
+
+  followup.command('due', {
+    description: 'Return the deterministic follow-up due decision for one experiment.',
+    args: experimentLookupArgSchema,
+    options: withBaseOptions({
+      kind: experimentFollowupKindSchema.describe('Follow-up kind to evaluate.'),
+      date: localDateSchema.optional().describe('Optional local session date in YYYY-MM-DD form.'),
+    }),
+    output: experimentFollowupDueResultSchema,
+    async run({ args, options }) {
+      return services.query.showExperimentFollowupDue({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        lookup: args.id,
+        kind: options.kind,
+        date: options.date,
+      })
+    },
+  })
+
   const session = Cli.create('session', {
     description: 'Experiment session logging commands.',
   })
@@ -993,6 +1062,7 @@ export function registerExperimentCommands(
   experiment.command(session)
   experiment.command(context)
   experiment.command(outcome)
+  experiment.command(followup)
 
   cli.command(experiment)
 }
