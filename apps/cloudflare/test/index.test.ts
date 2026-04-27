@@ -51,6 +51,11 @@ const TEST_VERCEL_OIDC_SUBJECT =
   `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:${TEST_VERCEL_OIDC_PROJECT_NAME}:environment:production`;
 const TEST_VERCEL_OIDC_JWKS_URL = `${TEST_VERCEL_OIDC_ISSUER}/.well-known/jwks`;
 const TEST_VERCEL_OIDC_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+const ACTIVE_INVOCATION_LEASE_HEADERS = {
+  "x-hosted-runtime-attempt-id": "attempt_current",
+  "x-hosted-runtime-lease-generation": "9",
+  "x-hosted-runtime-workspace-version": "workspace_current",
+} as const;
 const TEST_VERCEL_OIDC_PUBLIC_JWK = {
   ...(createPublicKey(TEST_VERCEL_OIDC_PRIVATE_KEY).export({ format: "jwk" }) as JsonWebKey),
   alg: "RS256",
@@ -786,6 +791,7 @@ describe("cloudflare worker routes", () => {
         body: artifactBytes,
         headers: {
           "content-type": "application/octet-stream",
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
         },
         method: "PUT",
       }),
@@ -822,6 +828,7 @@ describe("cloudflare worker routes", () => {
         body: Buffer.from("wrong-payload\n", "utf8"),
         headers: {
           "content-type": "application/octet-stream",
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
         },
         method: "PUT",
       }),
@@ -846,6 +853,7 @@ describe("cloudflare worker routes", () => {
         body: artifactBytes,
         headers: {
           "content-type": "application/octet-stream",
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
         },
         method: "PUT",
       }),

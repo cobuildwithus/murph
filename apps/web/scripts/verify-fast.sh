@@ -151,8 +151,8 @@ list_descendant_pids() {
         parent = queue[head]
         head++
         child_count = split(children[parent], child_pids, " ")
-        for (index = 1; index <= child_count; index++) {
-          child_pid = child_pids[index]
+        for (child_index = 1; child_index <= child_count; child_index++) {
+          child_pid = child_pids[child_index]
           if (child_pid == "") {
             continue
           }
