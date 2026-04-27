@@ -155,6 +155,41 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
+  it("keeps a resolved app member match active even when the raw Privy identity has no matching lookup key", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity({
+              phoneLookupKey: null,
+              privyUserLookupKey: null,
+              walletAddressLookupKey: null,
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        authenticatedSessionIdentity: createSessionIdentity({
+          userId: "did:privy:unmatched",
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      session: {
+        authenticated: true,
+        matchesInvite: true,
+      },
+      stage: "active",
+    });
+  });
+
   it("returns only the masked phone hint for a verify-stage invite", async () => {
     const prisma = {
       hostedInvite: {

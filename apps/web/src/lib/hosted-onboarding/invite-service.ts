@@ -122,12 +122,14 @@ export async function getHostedInviteStatus(input: {
     };
   }
 
-  const sessionMatchesInvite = input.authenticatedSessionIdentity
+  const memberMatchesInvite = input.authenticatedMember?.id === invite.memberId;
+  const identityMatchesInvite = input.authenticatedSessionIdentity
     ? resolveHostedInviteSessionMatchesInvite(
         input.authenticatedSessionIdentity,
         invite.member.identity,
       )
-    : input.authenticatedMember?.id === invite.memberId;
+    : false;
+  const sessionMatchesInvite = memberMatchesInvite || identityMatchesInvite;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
   const activationPending = sessionMatchesInvite
     ? await isHostedMemberActivationPending({

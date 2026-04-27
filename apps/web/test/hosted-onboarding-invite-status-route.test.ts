@@ -3,7 +3,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedInviteStatus: vi.fn(),
   getPrivyMemberAuth: vi.fn(),
-  getPrivySession: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -12,7 +11,6 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   getPrivyMemberAuth: mocks.getPrivyMemberAuth,
-  getPrivySession: mocks.getPrivySession,
 }));
 
 type HostedOnboardingInviteStatusRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/status/route");
@@ -26,7 +24,7 @@ describe("hosted onboarding invite-status route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getPrivySession.mockResolvedValue({
+    mocks.getPrivyMemberAuth.mockResolvedValue({
       identity: {
         phone: {
           number: "+14155552671",
@@ -41,6 +39,15 @@ describe("hosted onboarding invite-status route", () => {
         },
       },
       linkedAccounts: [],
+      member: {
+        billingStatus: "active",
+        createdAt: new Date("2026-04-19T12:00:00.000Z"),
+        id: "member_123",
+        pendingActivationTimeZone: null,
+        suspendedAt: null,
+        updatedAt: new Date("2026-04-19T12:00:00.000Z"),
+      },
+      memberLookup: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -69,7 +76,7 @@ describe("hosted onboarding invite-status route", () => {
     });
   });
 
-  it("uses the verified Privy session without member lookup", async () => {
+  it("uses the resolved Privy member auth snapshot for invite status", async () => {
     const response = await hostedOnboardingInviteStatusRoute.GET(
       new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/status"),
       {
@@ -80,9 +87,11 @@ describe("hosted onboarding invite-status route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getPrivySession).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.getPrivyMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.getPrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      authenticatedMember: expect.objectContaining({
+        id: "member_123",
+      }),
       authenticatedSessionIdentity: expect.objectContaining({
         phone: expect.objectContaining({
           number: "+14155552671",
