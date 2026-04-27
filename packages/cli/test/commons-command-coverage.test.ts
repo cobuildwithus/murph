@@ -124,6 +124,237 @@ test("commons protocol list and show expose protocol revisions distinctly from p
   assert.ok(showData.protocol.testPlans.length > 0);
 });
 
+test("commons protocol explore expands sauna matches into family variants and a starter candidate", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    filters: {
+      query: string | null;
+    };
+    groups: Array<{
+      matchedProtocol: {
+        key: string;
+      };
+      parentFamilies: Array<{
+        key: string;
+      }>;
+      relatedProtocolVariants: Array<{
+        protocol: {
+          key: string;
+          revision: {
+            pageRevisionId: string;
+            runSpecRevisionId: string | null;
+          };
+        };
+        traits: {
+          externalProtocol: boolean;
+          murphCanonical: boolean;
+          sourceAttributed: boolean;
+        };
+      }>;
+      starterCandidate: {
+        protocol: {
+          key: string;
+        };
+      } | null;
+      traits: {
+        externalProtocol: boolean;
+        highCaution: boolean;
+        murphCanonical: boolean;
+        sourceAttributed: boolean;
+      };
+    }>;
+    starterCandidate: {
+      protocol: {
+        key: string;
+        revision: {
+          pageRevisionId: string;
+          runSpecRevisionId: string | null;
+        };
+      };
+      traits: {
+        murphCanonical: boolean;
+      };
+    } | null;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "explore",
+    "sauna",
+    "--limit",
+    "5",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.filters.query, null);
+  assert.equal(
+    data.starterCandidate?.protocol.key,
+    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  );
+  assert.equal(data.starterCandidate?.traits.murphCanonical, true);
+  assert.match(data.starterCandidate?.protocol.revision.pageRevisionId ?? "", /^sha256:/u);
+  assert.match(data.starterCandidate?.protocol.revision.runSpecRevisionId ?? "", /^sha256:/u);
+
+  const bryanGroup = data.groups.find(
+    (group) => group.matchedProtocol.key === "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+  );
+  assert.ok(bryanGroup);
+  assert.equal(bryanGroup.traits.externalProtocol, true);
+  assert.equal(bryanGroup.traits.sourceAttributed, true);
+  assert.equal(bryanGroup.traits.highCaution, true);
+  assert.ok(
+    bryanGroup.parentFamilies.some(
+      (family) => family.key === "experiment_family:dry-sauna",
+    ),
+  );
+  assert.ok(
+    bryanGroup.relatedProtocolVariants.some(
+      (variant) =>
+        variant.protocol.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week" &&
+        variant.traits.murphCanonical,
+    ),
+  );
+  assert.equal(
+    bryanGroup.starterCandidate?.protocol.key,
+    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  );
+});
+
+test("commons protocol explore accepts an experiment family and includes inverse parent-family variants", async () => {
+  const cli = createCommonsSliceCli();
+  const result = await runInProcessJsonCli<{
+    groups: Array<{
+      matchReason: string;
+      matchedProtocol: {
+        key: string;
+      };
+    }>;
+    matchedEntity: {
+      entityType: string;
+      key: string;
+    } | null;
+    starterCandidate: {
+      protocol: {
+        key: string;
+      };
+    } | null;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "explore",
+    "dry-sauna",
+  ]);
+
+  assert.equal(result.envelope.ok, true);
+  const data = requireData(result.envelope);
+  assert.equal(data.matchedEntity?.entityType, "experiment_family");
+  assert.equal(data.matchedEntity?.key, "experiment_family:dry-sauna");
+  assert.equal(
+    data.starterCandidate?.protocol.key,
+    "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+  );
+  assert.ok(data.groups.every((group) => group.matchReason === "direct_family"));
+  assert.ok(
+    data.groups.some(
+      (group) => group.matchedProtocol.key === "protocol_variant:dry-sauna/bryan-johnson-blueprint",
+    ),
+  );
+  assert.ok(
+    data.groups.some(
+      (group) =>
+        group.matchedProtocol.key === "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    ),
+  );
+});
+
+test("commons protocol explore distinguishes direct protocol lookup from query fallback", async () => {
+  const cli = createCommonsSliceCli();
+
+  const directResult = await runInProcessJsonCli<{
+    filters: {
+      query: string | null;
+    };
+    groups: Array<{
+      matchReason: string;
+      matchedProtocol: {
+        key: string;
+      };
+    }>;
+    matchedEntity: {
+      entityType: string;
+      key: string;
+    } | null;
+    starterCandidate: {
+      protocol: {
+        key: string;
+      };
+    } | null;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "explore",
+    "protocol_variant:norwegian-4x4/norwegian-4x4",
+  ]);
+
+  assert.equal(directResult.envelope.ok, true);
+  const directData = requireData(directResult.envelope);
+  assert.equal(directData.filters.query, null);
+  assert.equal(directData.matchedEntity?.entityType, "protocol_variant");
+  assert.equal(
+    directData.matchedEntity?.key,
+    "protocol_variant:norwegian-4x4/norwegian-4x4",
+  );
+  assert.deepEqual(
+    directData.groups.map((group) => group.matchReason),
+    ["direct_protocol"],
+  );
+  assert.equal(
+    directData.starterCandidate?.protocol.key,
+    "protocol_variant:norwegian-4x4/norwegian-4x4",
+  );
+
+  const queryResult = await runInProcessJsonCli<{
+    filters: {
+      query: string | null;
+    };
+    groups: Array<{
+      matchReason: string;
+      matchedProtocol: {
+        key: string;
+      };
+    }>;
+    matchedEntity: unknown | null;
+    starterCandidate: {
+      protocol: {
+        key: string;
+      };
+    } | null;
+  }>(cli, [
+    "commons",
+    "protocol",
+    "explore",
+    "norwegian",
+    "--limit",
+    "3",
+  ]);
+
+  assert.equal(queryResult.envelope.ok, true);
+  const queryData = requireData(queryResult.envelope);
+  assert.equal(queryData.filters.query, "norwegian");
+  assert.equal(queryData.matchedEntity, null);
+  assert.ok(queryData.groups.length > 0);
+  assert.ok(queryData.groups.every((group) => group.matchReason === "query_match"));
+  assert.ok(
+    queryData.groups.some(
+      (group) => group.matchedProtocol.key === "protocol_variant:norwegian-4x4/norwegian-4x4",
+    ),
+  );
+  assert.equal(
+    queryData.starterCandidate?.protocol.key,
+    "protocol_variant:norwegian-4x4/norwegian-4x4",
+  );
+});
+
 test("commons get inspects generic entities and accepts measurement method disambiguation", async () => {
   const cli = createCommonsSliceCli();
 

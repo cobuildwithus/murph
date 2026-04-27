@@ -2578,6 +2578,25 @@
                         "show": {
                           "type": "object",
                           "additionalProperties": false
+                        },
+                        "explore": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "limit": {
+                                  "default": 10,
+                                  "description": "Maximum number of matched protocol groups to return before family expansion.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 100
+                                }
+                              }
+                            }
+                          }
                         }
                       }
                     }

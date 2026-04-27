@@ -42,6 +42,7 @@ declare module 'incur' {
       'capture show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean } }
       'commons get': { args: { key: string }; options: { type?: string } }
+      'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }
       'commons search': { args: { query?: string }; options: { text?: string; type?: string[]; limit: number } }
