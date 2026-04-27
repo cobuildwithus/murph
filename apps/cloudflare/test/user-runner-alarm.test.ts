@@ -229,10 +229,54 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
     );
   });
 
+  it("provisions managed user crypto before invoking when the web workspace is absent", async () => {
+    const { invoke, runner } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        job: expect.objectContaining({
+          request: expect.objectContaining({
+            userId: "member_123",
+            workspaceVersion: "0",
+          }),
+        }),
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.user-key-store",
+        message: "root-key-bootstrap: member-activation-workspace-bootstrap",
+        userId: "member_123",
+      }),
+    );
+  });
+
   it("keeps missing crypto fail-closed for version-0 workspaces with a snapshot", async () => {
     const { invoke, runner } = createRunnerBootstrapHarness(createWorkspaceState({
       snapshotRef: createBundleRef("checkpointed"),
       version: "0",
+    }));
+    await runner.bindUser("member_123");
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).rejects.toMatchObject({
+      name: "HostedUserCryptoRepairNeededError",
+      reason: "missing-envelope",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expectBootstrapAuditLogNotEmitted();
+  });
+
+  it("keeps missing crypto fail-closed for nonzero workspace versions with a snapshot", async () => {
+    const { invoke, runner } = createRunnerBootstrapHarness(createWorkspaceState({
+      snapshotRef: createBundleRef("checkpointed"),
+      version: "1",
     }));
     await runner.bindUser("member_123");
 
