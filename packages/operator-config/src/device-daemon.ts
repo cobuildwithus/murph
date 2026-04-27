@@ -111,19 +111,26 @@ export async function getManagedDeviceSyncDaemonStatus(input: {
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
   const state = await readDeviceDaemonState(paths, dependencies)
   const managedToken = readManagedControlToken(vault)
-  const healthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, managedToken)
   const managed = state !== null && state.baseUrl === baseUrl
+  const stateProcessAlive =
+    managed && state !== null ? dependencies.isProcessAlive(state.pid) : false
+  const controlPlaneReachable = await isDeviceDaemonControlPlaneReachable(
+    baseUrl,
+    dependencies.fetchImpl,
+  )
+  const healthy = stateProcessAlive && managedToken
+    ? await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, managedToken)
+    : false
   const running =
     managed &&
     state !== null &&
-    dependencies.isProcessAlive(state.pid) &&
     healthy
   let message: string | null = null
 
-  if (managed && state !== null && !dependencies.isProcessAlive(state.pid)) {
+  if (managed && !stateProcessAlive) {
     message =
       'Stale device-sync daemon state found; recorded PID is no longer running.'
-  } else if (healthy && !managed) {
+  } else if (controlPlaneReachable && !managed) {
     message =
       'Device sync control plane is reachable at the target base URL, but it is not managed by this Murph vault.'
   } else if (!healthy) {
@@ -157,10 +164,24 @@ export async function startManagedDeviceSyncDaemon(input: {
   const paths = resolveDeviceDaemonPaths(vault)
   const state = await readDeviceDaemonState(paths, dependencies)
   const existingToken = readManagedControlToken(vault)
-  const existingHealthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, existingToken)
+  const explicitControlToken = resolveDeviceSyncControlToken(undefined, env)
+  const stateProcessAlive =
+    state !== null && state.baseUrl === baseUrl
+      ? dependencies.isProcessAlive(state.pid)
+      : false
+  const managedHealthy =
+    stateProcessAlive &&
+    existingToken
+    ? await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, existingToken)
+    : false
+  const managedTokenUnavailable =
+    state !== null &&
+    state.baseUrl === baseUrl &&
+    !existingToken &&
+    !explicitControlToken
 
   if (state !== null && state.baseUrl === baseUrl) {
-    if (dependencies.isProcessAlive(state.pid) && existingHealthy) {
+    if (stateProcessAlive && managedHealthy) {
       return buildDeviceDaemonStartResult({
         vault,
         paths,
@@ -174,7 +195,15 @@ export async function startManagedDeviceSyncDaemon(input: {
       })
     }
 
-    if (dependencies.isProcessAlive(state.pid) && !existingHealthy) {
+    if (stateProcessAlive && managedTokenUnavailable) {
+      throw new VaultCliError(
+        'DEVICE_SYNC_DAEMON_CONFLICT',
+        `The tracked device sync daemon process is still running, but this vault no longer has its managed token. Stop it with \`murph device daemon stop --vault <path>\` or retry with \`DEVICE_SYNC_PORT=<free-port>\`.`,
+        { pid: state.pid, baseUrl },
+      )
+    }
+
+    if (stateProcessAlive && !managedHealthy) {
       throw new VaultCliError(
         'DEVICE_SYNC_DAEMON_UNHEALTHY',
         'The managed device sync daemon process is running but not healthy. Stop it with `murph device daemon stop --vault <path>` and retry.',
@@ -183,32 +212,16 @@ export async function startManagedDeviceSyncDaemon(input: {
     }
   }
 
-  if (existingHealthy) {
-    const explicitControlToken = resolveDeviceSyncControlToken(undefined, env)
-    if (explicitControlToken) {
-      return buildDeviceDaemonStartResult({
-        vault,
-        paths,
-        baseUrl,
-        state: null,
-        managed: false,
-        running: true,
-        healthy: true,
-        message:
-          'A device sync control plane is already reachable at this base URL. Murph is using the explicitly configured token instead of taking ownership of that process.',
-        started: false,
-      })
-    }
-
+  if (await isDeviceDaemonControlPlaneReachable(baseUrl, dependencies.fetchImpl)) {
     throw new VaultCliError(
       'DEVICE_SYNC_DAEMON_CONFLICT',
-      'A device sync control plane is already reachable at this base URL, but Murph does not own it. Set DEVICE_SYNC_CONTROL_TOKEN to reuse it or stop the conflicting process first.',
+      buildUnmanagedReachableDeviceDaemonMessage(baseUrl),
       { baseUrl },
     )
   }
 
   const controlToken =
-    resolveDeviceSyncControlToken(undefined, env) ?? generateDeviceSyncControlToken()
+    explicitControlToken ?? generateDeviceSyncControlToken()
   const child = await dependencies.spawnProcess({
     command: process.execPath,
     args: [resolveDeviceSyncDaemonBinPath(dependencies)],
@@ -254,6 +267,13 @@ export async function startManagedDeviceSyncDaemon(input: {
       paths.stderrLogPath,
       dependencies,
     )
+    if (startupLogSnippet && isAddressInUseStartupFailure(startupLogSnippet)) {
+      throw new VaultCliError(
+        'DEVICE_SYNC_DAEMON_CONFLICT',
+        buildUnmanagedReachableDeviceDaemonMessage(baseUrl),
+        { baseUrl, pid: child.pid },
+      )
+    }
     throw new VaultCliError(
       'DEVICE_SYNC_DAEMON_START_FAILED',
       startupLogSnippet
@@ -431,6 +451,51 @@ function assertLoopbackBaseUrl(baseUrl: string): void {
     { baseUrl },
   )
 }
+
+async function isDeviceDaemonControlPlaneReachable(
+  baseUrl: string,
+  fetchImpl: typeof fetch,
+): Promise<boolean> {
+  try {
+    const response = await fetchImpl(new URL('healthz', `${baseUrl}/`), {
+      signal: AbortSignal.timeout(750),
+    })
+    return response.ok || response.status === 401 || response.status === 403
+  } catch {
+    return false
+  }
+}
+
+function isAddressInUseStartupFailure(message: string): boolean {
+  return /\bEADDRINUSE\b|address already in use/iu.test(message)
+}
+
+function buildUnmanagedReachableDeviceDaemonMessage(baseUrl: string): string {
+  const port = readBaseUrlPort(baseUrl)
+  const portHint = port
+    ? ` Stop the listener on port ${port} (for example: \`lsof -nP -iTCP:${port} -sTCP:LISTEN\`, then \`kill <pid>\`) or retry with \`DEVICE_SYNC_PORT=<free-port>\`.`
+    : ' Stop the listener on that port or retry with `DEVICE_SYNC_PORT=<free-port>`.'
+
+  return `A device sync daemon is already listening at ${baseUrl}, but this vault is not managing it. This can happen after deleting \`.runtime\` while the old daemon is still running.${portHint}`
+}
+
+function readBaseUrlPort(baseUrl: string): string | null {
+  const url = new URL(baseUrl)
+  if (url.port) {
+    return url.port
+  }
+
+  if (url.protocol === 'http:') {
+    return '80'
+  }
+
+  if (url.protocol === 'https:') {
+    return '443'
+  }
+
+  return null
+}
+
 function generateDeviceSyncControlToken(): string {
   return randomBytes(24).toString('hex')
 }

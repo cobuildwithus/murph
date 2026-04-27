@@ -83,6 +83,17 @@ function requireSpawnedProcess(
   return value
 }
 
+function deviceSyncAuthResponse(status: number): ResponseInit {
+  return status === 401 || status === 403
+    ? {
+        status,
+        headers: {
+          'WWW-Authenticate': 'Bearer realm="device-syncd-control-plane"',
+        },
+      }
+    : { status }
+}
+
 test.sequential(
   'startManagedDeviceSyncDaemon keeps launcher state non-secret and persists the managed bearer separately',
   async () => {
@@ -202,15 +213,18 @@ test.sequential(
         vault: vaultRoot,
         dependencies: {
           fetchImpl: async (input, init) => {
+            const authorization = readAuthorizationHeader(init?.headers)
             healthCheckUrls.push(readRequestUrl(input))
-            healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
+            healthCheckAuthorizations.push(authorization)
             return (
               new Response(
                 JSON.stringify({
-                  ok: healthy,
+                  ok: authorization === 'Bearer control-token-for-tests',
                 }),
                 {
-                  status: healthy ? 200 : 503,
+                  ...deviceSyncAuthResponse(
+                    authorization === 'Bearer control-token-for-tests' ? 200 : 401,
+                  ),
                 },
               )
             )
@@ -232,6 +246,269 @@ test.sequential(
         'http://localhost:8788/healthz',
         'http://localhost:8788/healthz',
       ])
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'startManagedDeviceSyncDaemon fails closed when launcher state is missing but a daemon is reachable',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    const healthCheckAuthorizations: Array<string | null> = []
+    let healthy = false
+    let spawnCalls = 0
+
+    try {
+      await startManagedDeviceSyncDaemon({
+        vault: vaultRoot,
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+        },
+        dependencies: {
+          fetchImpl: async (input, init) => {
+            healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
+            return new Response(
+              JSON.stringify({
+                ok: healthy,
+              }),
+              { status: healthy ? 200 : 503 },
+            )
+          },
+          isProcessAlive(pid) {
+            return pid === 8181
+          },
+          resolveDeviceSyncPackageEntry() {
+            return '/virtual/device-syncd/dist/index.js'
+          },
+          async spawnProcess() {
+            spawnCalls += 1
+            healthy = true
+            return { pid: 8181 }
+          },
+        },
+      })
+
+      await rm(
+        path.join(vaultRoot, '.runtime/operations/device-sync/launcher.json'),
+        { force: true },
+      )
+
+      await assert.rejects(
+        () =>
+          startManagedDeviceSyncDaemon({
+            vault: vaultRoot,
+            dependencies: {
+              fetchImpl: async (_input, init) => {
+                healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
+                return new Response(
+                  JSON.stringify({ ok: false }),
+                  deviceSyncAuthResponse(401),
+                )
+              },
+              isProcessAlive() {
+                return false
+              },
+              async spawnProcess() {
+                spawnCalls += 1
+                throw new Error('spawnProcess should not be called')
+              },
+            },
+          }),
+        (error) =>
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+          /this vault is not managing it/u.test(error.message) &&
+          /lsof -nP -iTCP:8788 -sTCP:LISTEN/u.test(error.message),
+      )
+
+      assert.equal(spawnCalls, 1)
+      assert.deepEqual(healthCheckAuthorizations, [
+        null,
+        'Bearer control-token-for-tests',
+        null,
+      ])
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'startManagedDeviceSyncDaemon fails closed when a daemon is reachable but the managed token was wiped',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    let spawnCalls = 0
+
+    try {
+      await assert.rejects(
+        () =>
+          startManagedDeviceSyncDaemon({
+            vault: vaultRoot,
+            dependencies: {
+              fetchImpl: async () =>
+                new Response(
+                  JSON.stringify({
+                    error: {
+                      code: 'UNAUTHORIZED',
+                    },
+                  }),
+                  { status: 401 },
+                ),
+              async spawnProcess() {
+                spawnCalls += 1
+                throw new Error('spawnProcess should not be called')
+              },
+            },
+          }),
+        (error) =>
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+          /this vault is not managing it/u.test(error.message) &&
+          /lsof -nP -iTCP:8788 -sTCP:LISTEN/u.test(error.message),
+      )
+
+      assert.equal(spawnCalls, 0)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'startManagedDeviceSyncDaemon does not send managed tokens to reachable listeners after launcher state is missing',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    const healthCheckAuthorizations: Array<string | null> = []
+    let healthy = false
+    let spawnCalls = 0
+
+    try {
+      await startManagedDeviceSyncDaemon({
+        vault: vaultRoot,
+        env: {
+          DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+        },
+        dependencies: {
+          fetchImpl: async (_input, init) => {
+            const authorization = readAuthorizationHeader(init?.headers)
+            healthCheckAuthorizations.push(authorization)
+            return new Response(
+              JSON.stringify({ ok: healthy && authorization === 'Bearer control-token-for-tests' }),
+              { status: healthy && authorization === 'Bearer control-token-for-tests' ? 200 : 503 },
+            )
+          },
+          async spawnProcess() {
+            spawnCalls += 1
+            healthy = true
+            return { pid: 8282 }
+          },
+          resolveDeviceSyncPackageEntry() {
+            return '/virtual/device-syncd/dist/index.js'
+          },
+        },
+      })
+
+      await rm(
+        path.join(vaultRoot, '.runtime/operations/device-sync/launcher.json'),
+        { force: true },
+      )
+      healthCheckAuthorizations.length = 0
+
+      await assert.rejects(
+        () =>
+          startManagedDeviceSyncDaemon({
+            vault: vaultRoot,
+            dependencies: {
+              fetchImpl: async (_input, init) => {
+                healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
+                return new Response(JSON.stringify({ ok: false }), deviceSyncAuthResponse(401))
+              },
+              async spawnProcess() {
+                spawnCalls += 1
+                throw new Error('spawnProcess should not be called')
+              },
+            },
+          }),
+        (error) =>
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'DEVICE_SYNC_DAEMON_CONFLICT',
+      )
+
+      assert.equal(spawnCalls, 1)
+      assert.deepEqual(healthCheckAuthorizations, [null])
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'startManagedDeviceSyncDaemon maps address-in-use startup logs to a daemon conflict',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    let nowValue = 0
+    let signaledPid: number | null = null
+
+    try {
+      await assert.rejects(
+        () =>
+          startManagedDeviceSyncDaemon({
+            vault: vaultRoot,
+            env: {
+              DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+            },
+            dependencies: {
+              now() {
+                return new Date(nowValue)
+              },
+              sleep: async (milliseconds) => {
+                nowValue += milliseconds
+              },
+              fetchImpl: async () =>
+                new Response(
+                  JSON.stringify({
+                    ok: false,
+                  }),
+                  { status: 503 },
+                ),
+              isProcessAlive(pid) {
+                return pid === 9191
+              },
+              killProcess(pid) {
+                signaledPid = pid
+              },
+              readFile: async (filePath) => {
+                if (filePath.endsWith('stderr.log')) {
+                  return 'Error: listen EADDRINUSE: address already in use 127.0.0.1:8788'
+                }
+
+                return await readFile(filePath, 'utf8')
+              },
+              resolveDeviceSyncPackageEntry() {
+                return '/virtual/device-syncd/dist/index.js'
+              },
+              async spawnProcess() {
+                return { pid: 9191 }
+              },
+            },
+          }),
+        (error) => {
+          assert.equal(signaledPid, 9191)
+          return (
+            error instanceof Error &&
+            'code' in error &&
+            error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+            /already listening at http:\/\/localhost:8788/u.test(error.message) &&
+            /lsof -nP -iTCP:8788 -sTCP:LISTEN/u.test(error.message) &&
+            !/Murph could not start/u.test(error.message)
+          )
+        },
+      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -482,7 +759,7 @@ test.sequential(
         'Stale device-sync daemon state found; recorded PID is no longer running.',
       )
       assert.equal(status.statePath, '.runtime/operations/device-sync/launcher.json')
-      assert.deepEqual(healthCheckAuthorizations, ['Bearer control-token-for-tests'])
+      assert.deepEqual(healthCheckAuthorizations, [null])
       assert.deepEqual(healthCheckUrls, ['http://localhost:8788/healthz'])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
