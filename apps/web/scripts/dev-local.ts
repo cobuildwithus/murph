@@ -109,6 +109,10 @@ async function main(): Promise<void> {
     process.env,
   );
   const releaseOwnerWatchdog = installHostedWebDevOwnerWatchdog(process.env);
+  const releaseSignalShutdown = installHostedWebDevSignalShutdown(
+    releaseLock,
+    releaseOwnerWatchdog,
+  );
   process.argv = [
     process.execPath,
     nextBinPath,
@@ -118,7 +122,11 @@ async function main(): Promise<void> {
   try {
     await pruneOversizedHostedWebDevArtifacts(runtimePaths, process.env);
     await import(pathToFileURL(nextBinPath).href);
+    // The Next CLI returns after booting dev, while the server keeps the event loop alive.
+    // Keep this wrapper alive so its lock and signal cleanup remain active.
+    await new Promise<never>(() => {});
   } finally {
+    releaseSignalShutdown();
     releaseOwnerWatchdog();
     await releaseLock();
   }
@@ -177,8 +185,11 @@ async function acquireHostedWebDevServerLock(
     }
 
     released = true;
-    process.off("exit", releaseExitHandler);
-    await rm(runtimePaths.lockPath, { force: true, recursive: true });
+    try {
+      await rm(runtimePaths.lockPath, { force: true, recursive: true });
+    } finally {
+      process.off("exit", releaseExitHandler);
+    }
   };
 }
 
@@ -220,6 +231,44 @@ function installHostedWebDevOwnerWatchdog(
   };
 }
 
+function installHostedWebDevSignalShutdown(
+  releaseLock: () => Promise<void>,
+  releaseOwnerWatchdog: () => void,
+): () => void {
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
+  let shuttingDown = false;
+
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+    releaseHandlers();
+    releaseOwnerWatchdog();
+    terminateCurrentProcessDescendants("SIGKILL");
+    void releaseLock().finally(() => {
+      process.exit(resolveHostedWebDevSignalExitCode(signal));
+    });
+  };
+
+  const handlers = new Map<NodeJS.Signals, () => void>(
+    signals.map((signal) => [signal, () => shutdown(signal)]),
+  );
+
+  for (const [signal, handler] of handlers) {
+    process.once(signal, handler);
+  }
+
+  function releaseHandlers(): void {
+    for (const [signal, handler] of handlers) {
+      process.off(signal, handler);
+    }
+  }
+
+  return releaseHandlers;
+}
+
 function terminateCurrentProcessDescendants(signal: NodeJS.Signals): void {
   for (const pid of listDescendantProcessIds(process.pid).reverse()) {
     try {
@@ -227,6 +276,17 @@ function terminateCurrentProcessDescendants(signal: NodeJS.Signals): void {
     } catch {
       // Best-effort cleanup only.
     }
+  }
+}
+
+function resolveHostedWebDevSignalExitCode(signal: NodeJS.Signals): number {
+  switch (signal) {
+    case "SIGINT":
+      return 130;
+    case "SIGTERM":
+      return 143;
+    default:
+      return 1;
   }
 }
 

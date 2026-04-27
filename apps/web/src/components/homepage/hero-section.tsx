@@ -20,7 +20,7 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
           <h1 className="font-serif text-[clamp(2.5rem,5.2vw,4.5rem)] font-semibold leading-[0.95] tracking-[-0.04em] text-white lg:text-balance">
             <span className="block lg:whitespace-nowrap">You measure your health.</span>
             <span className="block text-[#d4b87a] lg:whitespace-nowrap">
-              Now experiment with it.
+              Now let&apos;s experiment with it.
             </span>
           </h1>
 
