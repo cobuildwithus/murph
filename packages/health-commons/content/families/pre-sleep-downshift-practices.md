@@ -25,6 +25,9 @@ canonicalMechanism: pre_sleep_arousal_downshift
 relations:
   -
     type: related_protocol
+    target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
+  -
+    type: related_protocol
     target: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
   -
     type: primary_biomarker
@@ -42,6 +45,7 @@ researchCoverage:
   auditCutoff: 2026-04-26
   sourceDirectory: packages/health-commons/content/sources/pre-sleep-downshift-practices
   artifactManifest: packages/health-commons/content/artifacts/pre-sleep-downshift-practices/research-artifacts.json
+  silentMeditationSourceLedger: output-packages/research/pre-sleep-silent-meditation/downloads/11-source-ledger-reducer/canonical_source_ledger_v1.json
 ---
 
 Pre-sleep downshift practices are low-intensity routines used near bedtime to reduce the feeling of being wired, keyed-up, cognitively activated, or physiologically revved before sleep. This family includes gentle slow or resonance-like breathing, silent meditation, and other simple wind-down routines only when they can be tested without collapsing materially different interventions together.
