@@ -22,6 +22,9 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
+import type {
+  AssistantProviderTurnContinuityPolicy,
+} from './provider-turn/planning.js'
 
 export function resolveAssistantResumeStateFromProviderTurn(input: {
   providerSessionId: string | null
@@ -39,8 +42,8 @@ export async function persistAssistantTurnAndSession(input: {
   plan: AssistantTurnSharedPlan
   persistUserPromptToTranscript?: boolean
   providerResult: ExecutedAssistantProviderTurnResult
-  resumeStatePolicy?: 'clear' | 'update'
   session: AssistantSession
+  turnContinuityPolicy?: AssistantProviderTurnContinuityPolicy
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantSession> {
@@ -48,7 +51,9 @@ export async function persistAssistantTurnAndSession(input: {
   const persistUserPromptToTranscript = input.persistUserPromptToTranscript ?? true
   const assistantTranscriptText = input.assistantTranscriptText
     ?? input.providerResult.response
-  const resumeStatePolicy = input.resumeStatePolicy ?? 'update'
+  const shouldPersistProviderResumeState =
+    (input.turnContinuityPolicy ?? 'continuous-provider-thread') ===
+      'continuous-provider-thread'
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     await state.transcripts.append(
@@ -98,7 +103,7 @@ export async function persistAssistantTurnAndSession(input: {
   const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
   const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
   const nextResumeState =
-    resumeStatePolicy === 'clear'
+    !shouldPersistProviderResumeState
       ? null
       : resolveAssistantResumeStateFromProviderTurn({
           providerSessionId: input.providerResult.providerSessionId,

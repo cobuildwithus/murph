@@ -95,6 +95,72 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(stopTyping.mock.calls.length, 1)
 })
 
+test('sendAssistantMessageLocal keeps manual chat on continuous provider-thread continuity', async () => {
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    prompt: 'Continue the chat',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  assert.deepEqual(
+    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
+    {
+      turnContinuityPolicy: 'continuous-provider-thread',
+    },
+  )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.turnContinuityPolicy,
+    'continuous-provider-thread',
+  )
+})
+
+test('sendAssistantMessageLocal keeps auto-reply turns on Murph history only', async () => {
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Reply to the inbound message',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+
+  assert.deepEqual(
+    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
+    {
+      turnContinuityPolicy: 'murph-history-only',
+    },
+  )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.turnContinuityPolicy,
+    'murph-history-only',
+  )
+})
+
+test('sendAssistantMessageLocal keeps automation cron turns on Murph history only', async () => {
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Run the scheduled automation',
+    turnTrigger: 'automation-cron',
+    vault: '/vaults/test',
+  })
+
+  assert.deepEqual(
+    mocks.executeProviderTurnWithRecovery.mock.calls[0]?.[0]?.profile,
+    {
+      turnContinuityPolicy: 'murph-history-only',
+    },
+  )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.turnContinuityPolicy,
+    'murph-history-only',
+  )
+})
+
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
   const hostedDefaultTarget: AssistantSession['target'] = {
     adapter: 'openai-compatible',
@@ -1054,9 +1120,21 @@ async function loadLocalServiceModule(input?: {
       }),
     ),
     dispatchAssistantReply: vi.fn(async () => deliveryOutcome),
-    executeProviderTurnWithRecovery: vi.fn(async () => providerOutcome),
+    executeProviderTurnWithRecovery: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/provider-turn-runner.js').executeProviderTurnWithRecovery
+        >[0],
+      ) => providerOutcome,
+    ),
     extractRecoveredAssistantSession: vi.fn(() => input?.recoveredSession ?? null),
-    finalizeAssistantTurnArtifacts: vi.fn(async () => session),
+    finalizeAssistantTurnArtifacts: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/turn-finalizer.js').persistAssistantTurnAndSession
+        >[0],
+      ) => session,
+    ),
     finalizeAssistantTurnReceipt: vi.fn(
       async (
         _input: Parameters<
@@ -1298,6 +1376,13 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+    resolveAssistantProviderTurnContinuityPolicy: vi.fn(
+      (input: { turnTrigger?: string | null }) =>
+        input.turnTrigger === 'automation-auto-reply' ||
+        input.turnTrigger === 'automation-cron'
+          ? 'murph-history-only'
+          : 'continuous-provider-thread',
+    ),
   }))
   vi.doMock('../src/assistant/service-result.js', () => ({
     normalizeAssistantAskResultForReturn: mocks.normalizeAssistantAskResultForReturn,

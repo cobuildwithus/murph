@@ -11,7 +11,7 @@ import { resolveAssistantSessionForMessage } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import {
   executeProviderTurnWithRecovery,
-  type AssistantProviderTurnExecutionProfile,
+  type AssistantProviderTurnContinuityProfile,
 } from './provider-turn-runner.js'
 import type { ResolvedAssistantFailoverRoute } from './failover.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
@@ -65,10 +65,12 @@ const assistantNotificationDecisionSchema = z.discriminatedUnion('kind', [
   assistantNotificationSendDecisionSchema,
 ])
 
-const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<AssistantProviderTurnExecutionProfile> = {
-  nativeResumePolicy: 'disabled',
+const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
+  Omit<AssistantProviderTurnContinuityProfile, 'nativeResumePolicy'>
+> = {
   promptProfile: 'notification-decision',
   toolProfile: 'notification-turn',
+  turnContinuityPolicy: 'murph-history-only',
 }
 
 export type AssistantNotificationDecision = z.infer<
@@ -252,8 +254,8 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           persistUserPromptToTranscript: false,
           providerResult,
-          resumeStatePolicy: 'clear',
           session: providerResult.session,
+          turnContinuityPolicy: 'murph-history-only',
           turnCreatedAt,
           turnId,
         })

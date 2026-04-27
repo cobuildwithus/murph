@@ -4,6 +4,7 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   resolveAssistantOnboardingCompletionFallbackReason,
+  resolveAssistantProviderTurnContinuityPolicy,
   resolveAssistantProviderTurnContinuityPlan,
 } from '../src/assistant/provider-turn-runner.js'
 import {
@@ -27,6 +28,57 @@ import {
 } from '../src/assistant/turn-plan.js'
 
 describe('assistant provider continuity planning', () => {
+  it('resolves turn continuity policy from manual, auto-reply, and notification turns', () => {
+    expect(resolveAssistantProviderTurnContinuityPolicy({})).toBe(
+      'continuous-provider-thread',
+    )
+    expect(
+      resolveAssistantProviderTurnContinuityPolicy({
+        turnTrigger: 'manual-ask',
+      }),
+    ).toBe('continuous-provider-thread')
+    expect(
+      resolveAssistantProviderTurnContinuityPolicy({
+        turnTrigger: 'automation-auto-reply',
+      }),
+    ).toBe('murph-history-only')
+    expect(
+      resolveAssistantProviderTurnContinuityPolicy({
+        turnTrigger: 'automation-cron',
+      }),
+    ).toBe('murph-history-only')
+    expect(
+      resolveAssistantProviderTurnContinuityPolicy({
+        profile: {
+          turnContinuityPolicy: 'continuous-provider-thread',
+        },
+        turnTrigger: 'automation-auto-reply',
+      }),
+    ).toBe('murph-history-only')
+    expect(
+      resolveAssistantProviderTurnContinuityPolicy({
+        profile: {
+          promptProfile: 'notification-decision',
+          turnContinuityPolicy: 'continuous-provider-thread',
+        },
+      }),
+    ).toBe('murph-history-only')
+    expect(
+      resolveAssistantProviderTurnContinuityPolicy({
+        profile: {
+          nativeResumePolicy: 'disabled',
+        },
+      }),
+    ).toBe('murph-history-only')
+    expect(
+      resolveAssistantProviderTurnContinuityPolicy({
+        profile: {
+          turnContinuityPolicy: 'murph-history-only',
+        },
+      }),
+    ).toBe('murph-history-only')
+  })
+
   it('keeps native resume ahead of bootstrap overlays while leaving onboarding guidance on', () => {
     expect(
       resolveAssistantProviderTurnContinuityPlan({
