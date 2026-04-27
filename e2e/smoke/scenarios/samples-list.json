@@ -1,6 +1,6 @@
 {
   "id": "samples-list",
-  "command": "vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/samples/heart-rate.csv",

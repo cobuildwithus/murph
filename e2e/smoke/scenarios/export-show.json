@@ -1,6 +1,6 @@
 {
   "id": "export-show",
-  "command": "vault-cli export pack show <id> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli export pack show <id> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/exports/README.md",

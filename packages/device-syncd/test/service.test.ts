@@ -2669,8 +2669,8 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
-      receivedAt: "2026-03-27T00:00:00.000Z",
-      processingExpiresAt: "2026-03-27T00:05:00.000Z",
+      receivedAt: "2099-03-27T00:00:00.000Z",
+      processingExpiresAt: "2099-03-27T00:05:00.000Z",
     }),
     "claimed",
   );
@@ -2678,8 +2678,8 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
-      receivedAt: "2026-03-27T00:01:00.000Z",
-      processingExpiresAt: "2026-03-27T00:06:00.000Z",
+      receivedAt: "2099-03-27T00:01:00.000Z",
+      processingExpiresAt: "2099-03-27T00:06:00.000Z",
     }),
     "processing",
   );
@@ -2689,8 +2689,8 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-processing",
-      receivedAt: "2026-03-27T00:02:00.000Z",
-      processingExpiresAt: "2026-03-27T00:07:00.000Z",
+      receivedAt: "2099-03-27T00:02:00.000Z",
+      processingExpiresAt: "2099-03-27T00:07:00.000Z",
     }),
     "processed",
   );
@@ -2699,8 +2699,8 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-release",
-      receivedAt: "2026-03-27T00:03:00.000Z",
-      processingExpiresAt: "2026-03-27T00:08:00.000Z",
+      receivedAt: "2099-03-27T00:03:00.000Z",
+      processingExpiresAt: "2099-03-27T00:08:00.000Z",
     }),
     "claimed",
   );
@@ -2709,8 +2709,8 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-release",
-      receivedAt: "2026-03-27T00:04:00.000Z",
-      processingExpiresAt: "2026-03-27T00:09:00.000Z",
+      receivedAt: "2099-03-27T00:04:00.000Z",
+      processingExpiresAt: "2099-03-27T00:09:00.000Z",
     }),
     "claimed",
   );
@@ -2719,8 +2719,8 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-stale",
-      receivedAt: "2026-03-27T00:05:00.000Z",
-      processingExpiresAt: "2026-03-27T00:06:00.000Z",
+      receivedAt: "2099-03-27T00:05:00.000Z",
+      processingExpiresAt: "2099-03-27T00:06:00.000Z",
     }),
     "claimed",
   );
@@ -2728,8 +2728,8 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-stale",
-      receivedAt: "2026-03-27T00:07:00.000Z",
-      processingExpiresAt: "2026-03-27T00:12:00.000Z",
+      receivedAt: "2099-03-27T00:07:00.000Z",
+      processingExpiresAt: "2099-03-27T00:12:00.000Z",
     }),
     "claimed",
   );
@@ -2739,15 +2739,15 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     traceId: "trace-legacy",
     externalAccountId: "demo-legacy",
     eventType: "demo.updated",
-    receivedAt: "2026-03-27T00:08:00.000Z",
+    receivedAt: "2099-03-27T00:08:00.000Z",
     payloadJson: JSON.stringify({ resourceId: "resource-legacy" }),
   });
   assert.equal(
     store.claimWebhookTrace({
       ...baseTrace,
       traceId: "trace-legacy",
-      receivedAt: "2026-03-27T00:09:00.000Z",
-      processingExpiresAt: "2026-03-27T00:14:00.000Z",
+      receivedAt: "2099-03-27T00:09:00.000Z",
+      processingExpiresAt: "2099-03-27T00:14:00.000Z",
     }),
     "processed",
   );
@@ -2768,12 +2768,12 @@ test("sqlite store persists the webhook trace claim lifecycle", async () => {
     {
       trace_id: "trace-release",
       status: "processing",
-      processing_expires_at: "2026-03-27T00:09:00.000Z",
+      processing_expires_at: "2099-03-27T00:09:00.000Z",
     },
     {
       trace_id: "trace-stale",
       status: "processing",
-      processing_expires_at: "2026-03-27T00:12:00.000Z",
+      processing_expires_at: "2099-03-27T00:12:00.000Z",
     },
   ]);
 

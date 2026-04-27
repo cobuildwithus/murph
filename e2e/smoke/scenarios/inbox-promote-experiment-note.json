@@ -1,6 +1,6 @@
 {
   "id": "inbox-promote-experiment-note",
-  "command": "vault-cli inbox promote experiment-note <captureId> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli inbox promote experiment-note <captureId> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/raw/README.md",

@@ -1,6 +1,6 @@
 {
   "id": "export-materialize",
-  "command": "vault-cli export pack materialize <id> --vault <path> [--out <dir>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli export pack materialize <id> --vault <path> [--out <dir>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/exports/README.md",

@@ -1,6 +1,6 @@
 {
   "id": "experiment-create",
-  "command": "vault-cli experiment create <slug> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli experiment create <slug> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/experiments/baseline-observation.md"

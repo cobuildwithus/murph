@@ -1816,73 +1816,37 @@ test("goal list preserves status filters after explicit adapter migration", asyn
 
 test("supplement commands expose product metadata and a rolled-up compound ledger", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const primaryPayloadPath = path.join(vaultRoot, "supplement-primary.json");
-  const secondaryPayloadPath = path.join(vaultRoot, "supplement-secondary.json");
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      primaryPayloadPath,
-      JSON.stringify({
-        title: "Liposomal Vitamin C",
-        kind: "supplement",
-        status: "active",
-        startedOn: "2026-03-01",
-        brand: "LivOn Labs",
-        manufacturer: "LivOn Laboratories",
-        servingSize: "1 packet",
-        ingredients: [
-          {
-            compound: "Vitamin C",
-            label: "Ascorbic acid",
-            amount: 500,
-            unit: "mg",
-          },
-          {
-            compound: "Phosphatidylcholine",
-            amount: 1200,
-            unit: "mg",
-          },
-        ],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      secondaryPayloadPath,
-      JSON.stringify({
-        title: "Electrolyte C Mix",
-        status: "active",
-        startedOn: "2026-03-02",
-        ingredients: [
-          {
-            compound: "Vitamin C",
-            amount: 250,
-            unit: "mg",
-          },
-        ],
-        schedule: "post-training",
-      }),
-      "utf8",
-    );
 
-    const scaffoldResult = await runCli<{
-      noun: string;
-      payload: {
-        ingredients?: Array<Record<string, unknown>>;
-      };
-    }>([
-      "supplement",
-      "scaffold",
-      "--vault",
-      vaultRoot,
-    ]);
     const primaryUpsert = await runCli<{
       regimenId: string;
     }>([
       "supplement",
-      "import-json",
-      "--input",
-      `@${primaryPayloadPath}`,
+      "save",
+      "Daily Liposomal C",
+      "--slug",
+      "daily-liposomal-c",
+      "--status",
+      "active",
+      "--started-on",
+      "2026-03-01",
+      "--brand",
+      "LivOn Labs",
+      "--manufacturer",
+      "LivOn Laboratories",
+      "--serving-size",
+      "1 packet",
+      "--compound",
+      "Vitamin C",
+      "--amount",
+      "500",
+      "--unit",
+      "mg",
+      "--ingredient-active",
+      "--schedule",
+      "with breakfast",
       "--vault",
       vaultRoot,
     ]);
@@ -1890,9 +1854,20 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
       regimenId: string;
     }>([
       "supplement",
-      "import-json",
-      "--input",
-      `@${secondaryPayloadPath}`,
+      "save",
+      "Electrolyte C Mix",
+      "--status",
+      "active",
+      "--started-on",
+      "2026-03-02",
+      "--compound",
+      "Vitamin C",
+      "--amount",
+      "250",
+      "--unit",
+      "mg",
+      "--schedule",
+      "post-training",
       "--vault",
       vaultRoot,
     ]);
@@ -1998,10 +1973,6 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
       vaultRoot,
     ]);
 
-    assert.equal(scaffoldResult.ok, true);
-    assert.equal(requireData(scaffoldResult).noun, "supplement");
-    assert.equal(Array.isArray(requireData(scaffoldResult).payload.ingredients), true);
-
     assert.equal(showResult.ok, true);
     assert.equal(requireData(showResult).entity.id, primarySupplementId);
     assert.equal(requireData(showResult).entity.kind, "supplement");
@@ -2024,7 +1995,7 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
     assert.equal(compoundListResult.ok, true);
     assert.deepEqual(
       requireData(compoundListResult).items.map((item) => item.lookupId),
-      ["phosphatidylcholine", "vitamin-c"],
+      ["vitamin-c"],
     );
 
     assert.equal(compoundShowResult.ok, true);
@@ -2046,9 +2017,9 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
     );
     assert.deepEqual(
       requireData(compoundShowResult).compound.sources.map((source) => source.supplementId),
-      [secondarySupplementId, primarySupplementId],
+      [primarySupplementId, secondarySupplementId],
     );
-    assert.equal(requireData(compoundShowResult).compound.sources[1]?.brand, "LivOn Labs");
+    assert.equal(requireData(compoundShowResult).compound.sources[0]?.brand, "LivOn Labs");
 
     assert.equal(stopResult.ok, true);
     assert.equal(requireData(stopResult).regimenId, primarySupplementId);
@@ -2065,15 +2036,6 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
         })),
       })),
       [
-        {
-          lookupId: "phosphatidylcholine",
-          totals: [
-            {
-              unit: "mg",
-              totalAmount: 1200,
-            },
-          ],
-        },
         {
           lookupId: "vitamin-c",
           totals: [

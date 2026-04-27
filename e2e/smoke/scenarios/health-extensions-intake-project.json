@@ -1,6 +1,6 @@
 {
   "id": "health-extensions-intake-project",
-  "command": "vault-cli intake project <id> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli intake project <id> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/vault-overlay/ledger/assessments/2026/2026-03.jsonl",

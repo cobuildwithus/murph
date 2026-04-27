@@ -1,6 +1,6 @@
 {
   "id": "health-extensions-intake-import",
-  "command": "vault-cli intake import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--imported-at <ts>] [--source <source>] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli intake import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--imported-at <ts>] [--source <source>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/sample-imports/intake/initial-intake.json",

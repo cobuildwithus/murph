@@ -1,6 +1,6 @@
 {
   "id": "init",
-  "command": "vault-cli init --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli init --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [],
   "goldenOutput": "fixtures/golden-outputs/init",

@@ -1,6 +1,6 @@
 {
   "id": "journal-show",
-  "command": "vault-cli journal show <date> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli journal show <date> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/journal/2026/2026-03-10.md",

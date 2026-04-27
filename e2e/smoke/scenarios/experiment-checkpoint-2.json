@@ -1,0 +1,10 @@
+{
+  "id": "experiment-checkpoint-2",
+  "command": "vault-cli experiment checkpoint <lookup> --vault <path> [--occurred-at <ts>] [--title <title>] [--note <text>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/experiment-create",
+  "purpose": "Documents the frozen command surface entry for release fixture coverage."
+}

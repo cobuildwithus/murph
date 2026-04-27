@@ -1,6 +1,6 @@
 {
   "id": "provider-scaffold",
-  "command": "vault-cli provider scaffold --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli provider scaffold --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/providers/README.md",

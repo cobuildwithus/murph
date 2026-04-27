@@ -1,6 +1,6 @@
 {
   "id": "experiment-update",
-  "command": "vault-cli experiment update <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--format json|md] [--request-id <id>]",
+  "command": "vault-cli experiment update <id> --vault <path> [--title <title>] [--hypothesis <text>] [--started-on <date>] [--status <status>] [--body <markdown>] [--tag <tag> ...] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/experiments/baseline-observation.md",

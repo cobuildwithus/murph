@@ -1,6 +1,6 @@
 {
   "id": "experiment-show",
-  "command": "vault-cli experiment show <id> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli experiment show <id> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/bank/experiments/baseline-observation.md",

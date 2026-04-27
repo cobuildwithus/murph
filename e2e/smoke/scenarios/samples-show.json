@@ -1,6 +1,6 @@
 {
   "id": "samples-show",
-  "command": "vault-cli samples show <id> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli samples show <id> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/samples/glucose.csv",
