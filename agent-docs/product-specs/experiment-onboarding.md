@@ -79,6 +79,7 @@ Chat is the interface. The onboarding block and the saved run are the source of 
 - Keep setup lightweight: ask only the slots that materially affect safety, logistics, measurement fidelity, or assistant support, and prefer one or two questions per turn.
 - Before any write, summarize the exact protocol reference, dates, schedule, modality or dose, logging expectations, stop conditions, and reminder policy.
 - That summary should be crisp enough that a later outcome card or share artifact can clearly point back to what was actually run.
+- Keep the confirmation summary human-readable. Raw revision hashes, internal field names, and selected test-plan identifiers are lineage data for the saved run record, not default onboarding copy; mention them only when the user asks for technical provenance.
 - Create the private run only after explicit confirmation.
 
 ## Success Criteria
