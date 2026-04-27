@@ -62,6 +62,27 @@ describe("appendHostedMailboxItemTx", () => {
       }),
     });
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
+    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        component: "mailbox",
+        eventCode: "mailbox.appended",
+        level: "info",
+        mailboxLane: "conversation",
+        mailboxSeqEnd: 1n,
+        mailboxSeqStart: 1n,
+        phase: "import",
+        redactedJson: expect.objectContaining({
+          bytes: 64,
+          dedupeKeyPresent: true,
+          duplicate: false,
+          inserted: true,
+          kind: "conversation.message",
+          schema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+          storage: "inline",
+        }),
+        userId: "member_mailbox_1",
+      }),
+    });
   });
 
   it("stores oversized opaque payload ciphertext in the payload table", async () => {
@@ -152,6 +173,24 @@ describe("appendHostedMailboxItemTx", () => {
         redactedJson: expect.objectContaining({
           existingKind: "conversation.message",
           requestedKind: "member.activated",
+        }),
+        userId: "member_mailbox_1",
+      }),
+    });
+    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        component: "mailbox",
+        eventCode: "mailbox.appended",
+        level: "info",
+        mailboxLane: "conversation",
+        mailboxSeqEnd: 1n,
+        mailboxSeqStart: 1n,
+        phase: "import",
+        redactedJson: expect.objectContaining({
+          duplicate: true,
+          inserted: false,
+          kind: "conversation.message",
+          storage: "inline",
         }),
         userId: "member_mailbox_1",
       }),

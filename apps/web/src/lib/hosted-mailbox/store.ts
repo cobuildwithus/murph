@@ -185,6 +185,14 @@ export async function appendHostedMailboxItemTx(
       tx: input.tx,
       userId,
     });
+    await recordHostedMailboxAppendLogTx({
+      duplicate: true,
+      inserted: false,
+      item: existing,
+      payloadStorage: existing.payloadRef ? "ref" : "inline",
+      tx: input.tx,
+      userId,
+    });
 
     return {
       duplicate: true,
@@ -290,6 +298,14 @@ export async function appendHostedMailboxItemTx(
       tx: input.tx,
       userId,
     });
+    await recordHostedMailboxAppendLogTx({
+      duplicate: true,
+      inserted: false,
+      item: concurrentExisting,
+      payloadStorage: concurrentExisting.payloadRef ? "ref" : "inline",
+      tx: input.tx,
+      userId,
+    });
 
     return {
       duplicate: true,
@@ -311,6 +327,15 @@ export async function appendHostedMailboxItemTx(
       },
     });
   }
+
+  await recordHostedMailboxAppendLogTx({
+    duplicate: false,
+    inserted: true,
+    item,
+    payloadStorage: payloadStorage.storage,
+    tx: input.tx,
+    userId,
+  });
 
   return {
     duplicate: false,
@@ -608,6 +633,36 @@ export async function allocateHostedMailboxLaneSeqTx(input: {
   }
 
   return rows[0].seq;
+}
+
+async function recordHostedMailboxAppendLogTx(input: {
+  duplicate: boolean;
+  inserted: boolean;
+  item: HostedMailboxItemRow;
+  payloadStorage: "inline" | "ref";
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<void> {
+  await recordHostedRuntimeLogTx({
+    component: "mailbox",
+    eventCode: "mailbox.appended",
+    level: "info",
+    mailboxLane: input.item.lane,
+    mailboxSeqEnd: input.item.laneSeq,
+    mailboxSeqStart: input.item.laneSeq,
+    phase: "import",
+    redacted: {
+      bytes: input.item.payloadBytes ?? null,
+      dedupeKeyPresent: true,
+      duplicate: input.duplicate,
+      inserted: input.inserted,
+      kind: input.item.kind,
+      schema: input.item.payloadSchema,
+      storage: input.payloadStorage,
+    },
+    tx: input.tx,
+    userId: input.userId,
+  });
 }
 
 async function recordHostedMailboxDedupeConflictLogTx(input: {

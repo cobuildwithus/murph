@@ -14,8 +14,20 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
 const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
 }));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 vi.mock("../src/web-control-plane.ts", async () => {
   const actual = await vi.importActual<typeof import("../src/web-control-plane.ts")>(
@@ -49,6 +61,7 @@ class TestHostedUserRunner extends HostedUserRunner {
 describe("HostedUserRunner alarm routing", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
@@ -72,6 +85,26 @@ describe("HostedUserRunner alarm routing", () => {
     );
     expect(runner.runCalls).toEqual([]);
     expect(alarms).toEqual([FUTURE_WAKE_AT]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          pendingNudge: false,
+          workspaceWakeDue: false,
+        }),
+        message: "Hosted runner alarm evaluated wake state.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        message: "Hosted runner alarm skipped because no wake is due.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
   });
 
   it("treats a stored pending nudge as immediate work even when the web wake is in the future", async () => {
@@ -95,6 +128,44 @@ describe("HostedUserRunner alarm routing", () => {
     );
     expect(runner.runCalls).toEqual(["alarm"]);
     expect(alarms).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          pendingNudge: true,
+          workspaceWakeDue: false,
+        }),
+        message: "Hosted runner alarm starting workspace invocation.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("logs accepted nudges with scheduling state", async () => {
+    const { runner } = createRunnerHarness();
+    await runner.bindUser("member_123");
+    mocks.emitHostedExecutionStructuredLog.mockReset();
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      inFlight: false,
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          alarmScheduled: true,
+          alreadyRunning: false,
+          pendingNudge: false,
+        }),
+        message: "Hosted runner nudge accepted.",
+        phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
   });
 });
 

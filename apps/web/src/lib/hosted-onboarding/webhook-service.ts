@@ -82,14 +82,36 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     }
 
     const prisma = input.prisma ?? getPrisma();
-    const plan = await runHostedOnboardingWebhookTransaction(
-      prisma,
-      (transaction) =>
-        planHostedOnboardingLinqWebhook({
-          event,
-          prisma: transaction,
-        }),
+    const planTiming = startHostedOnboardingTiming(
+      "hosted-onboarding.webhook.linq.plan",
+      {
+        eventIdSuffix: toHostedWebhookLogIdSuffix(event.event_id),
+        eventType: event.event_type,
+      },
     );
+    let plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+    try {
+      plan = await runHostedOnboardingWebhookTransaction(
+        prisma,
+        (transaction) =>
+          planHostedOnboardingLinqWebhook({
+            event,
+            prisma: transaction,
+          }),
+      );
+    } catch (error) {
+      finishHostedOnboardingTiming(planTiming, "failed", {
+        errorName: deriveHostedOnboardingTimingErrorName(error),
+      });
+      throw error;
+    }
+    finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
+      desiredSideEffectCount: plan.desiredSideEffects.length,
+      duplicate: Boolean(plan.response.duplicate),
+      ingressTypingRequested: Boolean(plan.ingressTypingChatId),
+      ok: plan.response.ok,
+      wakeUserPresent: Boolean(plan.wakeUserId),
+    });
 
     if (plan.desiredSideEffects.length > 0) {
       await drainHostedLinqSideEffectsDirect({
@@ -225,4 +247,13 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
   return typeof prisma.$transaction === "function"
     ? prisma.$transaction(callback)
     : callback(prisma as Prisma.TransactionClient);
+}
+
+function toHostedWebhookLogIdSuffix(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return trimmed.slice(-6);
 }

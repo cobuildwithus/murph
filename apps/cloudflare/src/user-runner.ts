@@ -135,6 +135,12 @@ export class HostedUserRunner {
 
   async bindUser(userId: string): Promise<{ userId: string }> {
     await this.stateStore.bindUser(userId);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      message: "Hosted runner bound user.",
+      phase: "runtime.starting",
+      userId,
+    });
     return { userId };
   }
 
@@ -171,16 +177,51 @@ export class HostedUserRunner {
 
     try {
       const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
+      const workspaceWakeDue = hostedWorkspaceWakeIsDue(
+        webStatus.workspace?.nextWakeAt ?? null,
+        nowMs,
+      );
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          pendingNudge: record.pendingNudge,
+          runnerNextWakePresent: record.nextWakeAt !== null,
+          workspaceNextWakePresent: (webStatus.workspace?.nextWakeAt ?? null) !== null,
+          workspaceWakeDue,
+        },
+        message: "Hosted runner alarm evaluated wake state.",
+        phase: "wake.running",
+        userId: record.userId,
+      });
       if (
         !record.pendingNudge
-        && !hostedWorkspaceWakeIsDue(webStatus.workspace?.nextWakeAt ?? null, nowMs)
+        && !workspaceWakeDue
       ) {
         await this.runtimeAlarmScheduler.syncNextWake({
           preferredWakeAt: webStatus.workspace?.nextWakeAt ?? null,
         });
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            workspaceNextWakePresent: (webStatus.workspace?.nextWakeAt ?? null) !== null,
+          },
+          message: "Hosted runner alarm skipped because no wake is due.",
+          phase: "scheduled",
+          userId: record.userId,
+        });
         return;
       }
 
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          pendingNudge: record.pendingNudge,
+          workspaceWakeDue,
+        },
+        message: "Hosted runner alarm starting workspace invocation.",
+        phase: "wake.running",
+        userId: record.userId,
+      });
       await this.runUntilIdleOrBudget({ reason: "alarm" });
     } catch (error) {
       emitHostedExecutionStructuredLog({
@@ -220,6 +261,17 @@ export class HostedUserRunner {
       : await this.runtimeAlarmScheduler.syncNextWake({
           preferredWakeAt: new Date().toISOString(),
         });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        alarmScheduled: record.nextWakeAt !== null,
+        alreadyRunning,
+        pendingNudge: record.pendingNudge,
+      },
+      message: "Hosted runner nudge accepted.",
+      phase: "scheduled",
+      userId: runningRecord.userId,
+    });
 
     return {
       accepted: true,
@@ -253,6 +305,15 @@ export class HostedUserRunner {
   }): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
       const record = await this.markPendingNudgeAndApplyAlarm();
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          reason: input.reason,
+        },
+        message: "Hosted runner invocation already active; scheduled another wake.",
+        phase: "scheduled",
+        userId: record.userId,
+      });
       return {
         nextWakeAt: record.nextWakeAt,
         status: "scheduled",
@@ -300,6 +361,17 @@ export class HostedUserRunner {
       reason: input.reason,
       userId: initialRecord.userId,
     });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        workspaceAttemptId: lease.attemptId,
+        workspaceLeaseGeneration: lease.leaseGeneration,
+        workspaceReason: input.reason,
+      },
+      message: "Hosted runner workspace invocation started.",
+      phase: "wake.running",
+      userId: initialRecord.userId,
+    });
 
     try {
       const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
@@ -323,12 +395,34 @@ export class HostedUserRunner {
         fallbackNextWakeAt: result.nextWakeAt ?? null,
         userId: initialRecord.userId,
       });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          nextWakePresent: result.nextWakeAt !== null,
+          workspaceAttemptId: lease.attemptId,
+          workspaceStatus: result.status,
+        },
+        message: "Hosted runner workspace invocation completed.",
+        phase: "checkpoint",
+        userId: initialRecord.userId,
+      });
       return result;
     } catch (error) {
       await this.stateStore.failInvocation({
         error,
         finishedAt: new Date().toISOString(),
         lease,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          workspaceAttemptId: lease.attemptId,
+        },
+        error,
+        level: "warn",
+        message: "Hosted runner workspace invocation failed.",
+        phase: "failed",
+        userId: initialRecord.userId,
       });
       await this.scheduleHostedWakeRetryAlarm();
       throw error;
@@ -466,12 +560,31 @@ export class HostedUserRunner {
       await this.runtimeAlarmScheduler.syncNextWake({
         preferredWakeAt: new Date().toISOString(),
       });
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          pendingNudge: true,
+        },
+        message: "Hosted runner scheduled immediate alarm for pending nudge.",
+        phase: "scheduled",
+        userId: input.userId,
+      });
       return;
     }
 
     const latestWorkspace = await this.readHostedWorkspaceForStatus(input.userId);
     await this.runtimeAlarmScheduler.syncNextWake({
       preferredWakeAt: latestWorkspace?.nextWakeAt ?? input.fallbackNextWakeAt,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        fallbackNextWakePresent: input.fallbackNextWakeAt !== null,
+        workspaceNextWakePresent: (latestWorkspace?.nextWakeAt ?? null) !== null,
+      },
+      message: "Hosted runner synced next workspace alarm.",
+      phase: "scheduled",
+      userId: input.userId,
     });
   }
 
