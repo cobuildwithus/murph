@@ -92,6 +92,7 @@ describe("hosted runtime control contracts", () => {
       "error",
     ]);
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.imported");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.appended");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.dedupe_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");

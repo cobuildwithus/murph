@@ -72,7 +72,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     eventId = event.event_id;
     eventType = event.event_type;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
-      eventId,
+      eventIdSuffix: toHostedWebhookLogIdSuffix(eventId),
       eventType,
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
@@ -136,7 +136,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     finishHostedOnboardingTiming(timing, "completed", {
       duplicate: Boolean(plan.response.duplicate),
-      eventId,
+      eventIdSuffix: toHostedWebhookLogIdSuffix(eventId),
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
@@ -145,7 +145,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
-      eventId,
+      eventIdSuffix: toHostedWebhookLogIdSuffix(eventId),
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
