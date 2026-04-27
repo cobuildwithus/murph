@@ -245,11 +245,7 @@ export class HostedUserRunner {
     const runningRecord = await this.stateStore.readState();
     const alreadyRunning = this.invocationLock !== null
       || runningRecord.inFlight;
-    const record = alreadyRunning
-      ? await this.markPendingNudgeAndApplyAlarm()
-      : await this.runtimeAlarmScheduler.syncNextWake({
-          preferredWakeAt: new Date().toISOString(),
-        });
+    const record = await this.markPendingNudgeAndApplyAlarm();
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
