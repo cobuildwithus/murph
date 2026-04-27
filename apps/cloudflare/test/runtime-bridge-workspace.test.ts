@@ -18,6 +18,7 @@ const HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD = "hosted-mailbox-inline-payload";
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(cleanupPaths.splice(0).map((target) =>
     rm(target, {
       force: true,
@@ -176,6 +177,165 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       reasonCode: "system_mailbox.queued",
       status: "imported",
     });
+  });
+
+  it("reads mailbox encryption from runtime platform env instead of process env", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    const key = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 1));
+    const wrongProcessKey = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 101));
+    vi.stubEnv("HOSTED_WAKE_ENCRYPTION_KEY", Buffer.from(wrongProcessKey).toString("base64url"));
+    const occurredAt = "2026-04-21T00:00:00.000Z";
+    const wake = buildHostedExecutionVaultSyncImportWake({
+      eventId: "vault-sync.import:vsi_platform_env",
+      memberId: "member_123",
+      occurredAt,
+      vaultSync: {
+        localManifestHash: "sha256:manifest",
+        sessionId: "vsi_platform_env",
+        sourceSchemaVersion: "murph.vault.v1",
+      },
+    });
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({ putArtifact: vi.fn(async () => {}) }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_123",
+        workspaceVersion: "7",
+      },
+      runtime: {
+        platformEnv: {
+          HOSTED_WAKE_ENCRYPTION_KEY: Buffer.from(key).toString("base64url"),
+          HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "v1",
+        },
+      },
+      vaultRoot,
+    });
+    const payloadCiphertext = await encryptHostedMailboxPayload({
+      key,
+      userId: "member_123",
+      value: wake,
+    });
+
+    const result = await options.importItem({
+      item: {
+        createdAt: occurredAt,
+        dedupeKey: wake.eventId,
+        expiresAt: null,
+        id: "mailbox_item_1",
+        kind: "vault.sync.import",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt,
+        payloadBytes: payloadCiphertext.length,
+        payloadInlineCiphertext: payloadCiphertext,
+        payloadRef: null,
+        payloadSchema: "murph.hosted-mailbox-item.v1",
+        updatedAt: occurredAt,
+        userId: "member_123",
+      },
+      payload: {
+        payloadCiphertext,
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        requestId: null,
+        source: "inline",
+        status: "resolved",
+      },
+      route: {
+        action: "import-vault-sync",
+        advanceProgress: true,
+        itemRef: {
+          id: "mailbox_item_1",
+          kind: "vault.sync.import",
+          lane: "system",
+          laneSeq: "1",
+        },
+        state: "route",
+      },
+    });
+
+    expect(result).toEqual({
+      reasonCode: "system_mailbox.queued",
+      status: "imported",
+    });
+  });
+
+  it("fails closed when a runtime envelope omits mailbox platform env", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
+    cleanupPaths.push(vaultRoot);
+    const key = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 1));
+    vi.stubEnv("HOSTED_WAKE_ENCRYPTION_KEY", Buffer.from(key).toString("base64url"));
+    const occurredAt = "2026-04-21T00:00:00.000Z";
+    const wake = buildHostedExecutionVaultSyncImportWake({
+      eventId: "vault-sync.import:vsi_missing_platform_env",
+      memberId: "member_123",
+      occurredAt,
+      vaultSync: {
+        localManifestHash: "sha256:manifest",
+        sessionId: "vsi_missing_platform_env",
+        sourceSchemaVersion: "murph.vault.v1",
+      },
+    });
+    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform: createPlatform({ putArtifact: vi.fn(async () => {}) }),
+      request: {
+        attemptId: "attempt_1",
+        leaseGeneration: "4",
+        reason: "nudge",
+        userId: "member_123",
+        workspaceVersion: "7",
+      },
+      runtime: {
+        forwardedEnv: {
+          OPENAI_API_KEY: "openai-secret",
+        },
+      },
+      vaultRoot,
+    });
+    const payloadCiphertext = await encryptHostedMailboxPayload({
+      key,
+      userId: "member_123",
+      value: wake,
+    });
+
+    await expect(options.importItem({
+      item: {
+        createdAt: occurredAt,
+        dedupeKey: wake.eventId,
+        expiresAt: null,
+        id: "mailbox_item_1",
+        kind: "vault.sync.import",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt,
+        payloadBytes: payloadCiphertext.length,
+        payloadInlineCiphertext: payloadCiphertext,
+        payloadRef: null,
+        payloadSchema: "murph.hosted-mailbox-item.v1",
+        updatedAt: occurredAt,
+        userId: "member_123",
+      },
+      payload: {
+        payloadCiphertext,
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        requestId: null,
+        source: "inline",
+        status: "resolved",
+      },
+      route: {
+        action: "import-vault-sync",
+        advanceProgress: true,
+        itemRef: {
+          id: "mailbox_item_1",
+          kind: "vault.sync.import",
+          lane: "system",
+          laneSeq: "1",
+        },
+        state: "route",
+      },
+    })).rejects.toThrow(/HOSTED_WAKE_ENCRYPTION_KEY is required/u);
   });
 
   it("blocks decrypted mailbox payloads that do not match the item dedupe key", async () => {

@@ -76,6 +76,11 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
   const readCurrentLease = input.readCurrentLease
     ?? (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.request));
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, input.platform);
+  const readEncryptionEnvironment = input.readEncryptionEnvironment
+    ?? createHostedMailboxEncryptionEnvironmentReader({
+      allowAmbientFallback: isAmbientHostedRuntimeEnvelope(input.runtime),
+      platformEnv: runtime.platformEnv,
+    });
 
   return {
     createCheckpointSnapshot: async (checkpointInput) => ({
@@ -101,13 +106,36 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
       }),
     }),
     importItem: createHostedWorkspaceBridgeMailboxImporter({
-      readEncryptionEnvironment: input.readEncryptionEnvironment ?? readHostedMailboxEncryptionEnvironment,
+      readEncryptionEnvironment,
       runtime,
       vaultRoot,
     }),
     platform: input.platform,
     vaultRoot,
   };
+}
+
+function createHostedMailboxEncryptionEnvironmentReader(
+  input: {
+    allowAmbientFallback: boolean;
+    platformEnv: Readonly<Record<string, string>>;
+  },
+): () => HostedMailboxEncryptionEnvironment {
+  return () => {
+    if (input.platformEnv.HOSTED_WAKE_ENCRYPTION_KEY || !input.allowAmbientFallback) {
+      return readHostedMailboxEncryptionEnvironment(input.platformEnv);
+    }
+
+    return readHostedMailboxEncryptionEnvironment();
+  };
+}
+
+function isAmbientHostedRuntimeEnvelope(runtime: HostedAssistantRuntimeConfig): boolean {
+  return runtime.commitTimeoutMs === undefined
+    && runtime.forwardedEnv === undefined
+    && runtime.platformEnv === undefined
+    && runtime.resolvedConfig === undefined
+    && runtime.userEnv === undefined;
 }
 
 export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
