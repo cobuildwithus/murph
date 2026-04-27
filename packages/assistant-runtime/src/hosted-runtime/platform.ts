@@ -28,6 +28,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantActiveTurnInputCheckpointInput,
   AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
 import type {
@@ -105,13 +106,22 @@ export interface HostedRuntimeLogPort {
   write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
 }
 
-export interface HostedRuntimeBeforeDeliveryMailboxRefreshInput {
+export interface HostedRuntimeActiveTurnInputMailboxRefreshInput {
   requestId: string;
 }
 
-export type HostedRuntimeBeforeDeliveryMailboxRefresh = (
-  input: HostedRuntimeBeforeDeliveryMailboxRefreshInput,
+export type HostedRuntimeActiveTurnInputMailboxRefresh = (
+  input: HostedRuntimeActiveTurnInputMailboxRefreshInput,
 ) => Promise<AssistantTurnInputRefreshResult>;
+
+export interface HostedRuntimeActiveTurnInputCheckpointInput
+  extends AssistantActiveTurnInputCheckpointInput {
+  requestId: string;
+}
+
+export type HostedRuntimeActiveTurnInputCheckpoint = (
+  input: HostedRuntimeActiveTurnInputCheckpointInput,
+) => Promise<void>;
 
 export interface HostedRuntimeSharePort {
   fetchPayload(
@@ -139,7 +149,8 @@ export interface HostedRuntimePlatform {
   issueExportPort?: HostedRuntimeIssueExportPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
-  refreshMailboxBeforeDelivery?: HostedRuntimeBeforeDeliveryMailboxRefresh | null;
+  checkpointActiveTurnInput?: HostedRuntimeActiveTurnInputCheckpoint | null;
+  refreshMailboxForActiveTurnInput?: HostedRuntimeActiveTurnInputMailboxRefresh | null;
   sharePort?: HostedRuntimeSharePort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
   vaultSyncPort?: HostedRuntimeVaultSyncPort | null;

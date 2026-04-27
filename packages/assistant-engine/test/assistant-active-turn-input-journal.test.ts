@@ -436,6 +436,60 @@ describe('assistant accepted active-turn input journal', () => {
     ).rejects.toThrow(/provider request/u)
   })
 
+  it('rejects provider request metadata that skips an earlier accepted input prefix', async () => {
+    const { paths, vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-corrupt-provider-prefix-',
+    )
+
+    await appendAssistantAcceptedTurnInputItems({
+      inputs: [
+        {
+          id: 'input_initial',
+          source: 'initial',
+        },
+        {
+          id: 'input_late',
+          source: 'manual',
+        },
+      ],
+      now: new Date('2026-04-22T10:00:00.000Z'),
+      sessionId: 'session_corrupt_provider_prefix',
+      turnId: 'turn_corrupt_provider_prefix',
+      vault: vaultRoot,
+    })
+    const journal = await recordAssistantAcceptedTurnInputProviderRequest({
+      now: new Date('2026-04-22T10:01:00.000Z'),
+      ordinal: 0,
+      turnId: 'turn_corrupt_provider_prefix',
+      vault: vaultRoot,
+    })
+    if (!journal) {
+      throw new Error('expected provider request journal')
+    }
+
+    const journalPath = resolveAssistantAcceptedTurnInputJournalPath(
+      paths,
+      'turn_corrupt_provider_prefix',
+    )
+    await writeFile(
+      journalPath,
+      JSON.stringify({
+        ...journal,
+        providerRequests: [
+          {
+            ...journal.providerRequests[0],
+            acceptedInputIds: ['input_late'],
+          },
+        ],
+      }),
+      'utf8',
+    )
+
+    await expect(
+      readAssistantAcceptedTurnInputJournal(vaultRoot, 'turn_corrupt_provider_prefix'),
+    ).rejects.toThrow(/provider request/u)
+  })
+
   it('exposes the journal through the runtime state service turns surface', async () => {
     const { vaultRoot } = await createAssistantPaths(
       'assistant-active-turn-input-service-',

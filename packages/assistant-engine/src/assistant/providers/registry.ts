@@ -197,6 +197,7 @@ export async function executeAssistantProviderTurn(
 
   return await executeAssistantProviderTurnWithDefinition({
     abortSignal: input.abortSignal,
+    activeTurnMessages: input.activeTurnMessages,
     continuityContext: input.continuityContext,
     conversationMessages: input.conversationMessages,
     env: input.env,
@@ -223,6 +224,7 @@ export async function executeAssistantProviderTurnAttempt(
 
   return await executeAssistantProviderTurnAttemptWithDefinition({
     abortSignal: input.abortSignal,
+    activeTurnMessages: input.activeTurnMessages,
     continuityContext: input.continuityContext,
     conversationMessages: input.conversationMessages,
     env: input.env,

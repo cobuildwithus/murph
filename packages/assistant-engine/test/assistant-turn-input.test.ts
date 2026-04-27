@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
-  createAssistantTurnBeforeDeliveryHook,
   createInboxBackedAssistantTurnInputPort,
   createNoopAssistantTurnInputPort,
-  isAssistantTurnRevisionRequiredError,
 } from '../src/assistant/turn-input.ts'
 
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
@@ -506,117 +504,5 @@ describe('createNoopAssistantTurnInputPort', () => {
       captures: [],
       nextCursor: afterCursor,
     })
-  })
-})
-
-describe('createAssistantTurnBeforeDeliveryHook', () => {
-  it('blocks delivery when late same-conversation captures appear', async () => {
-    const lateCapture = createCaptureSummary({
-      captureId: 'cap_late',
-      externalId: 'ext_late',
-      eventId: 'evt_late',
-      occurredAt: '2026-04-22T10:05:00.000Z',
-      createdAt: '2026-04-22T10:05:01.000Z',
-      text: 'late follow up',
-    })
-    const hook = createAssistantTurnBeforeDeliveryHook({
-      afterCursor: {
-        captureId: 'cap_1',
-        createdAt: '2026-04-22T10:00:02.000Z',
-        occurredAt: '2026-04-22T10:00:00.000Z',
-      },
-      conversation: {
-        accountId: lateCapture.accountId,
-        actorId: lateCapture.actorId,
-        actorIsSelf: lateCapture.actorIsSelf,
-        source: lateCapture.source,
-        threadId: lateCapture.threadId,
-        threadIsDirect: lateCapture.threadIsDirect,
-      },
-      knownCaptureIds: ['cap_1'],
-      port: {
-        async refresh() {
-          return {
-            progressed: true,
-            reason: 'ingested_input',
-          }
-        },
-        async listNewConversationCaptures() {
-          return {
-            captures: [lateCapture],
-            nextCursor: {
-              captureId: lateCapture.captureId,
-              createdAt: lateCapture.createdAt ?? null,
-              occurredAt: lateCapture.occurredAt,
-            },
-          }
-        },
-      },
-    })
-
-    let caught: unknown
-    try {
-      await hook({
-        response: 'draft response',
-        sessionId: 'sess_1',
-        turnId: 'turn_1',
-        vault: '/vault',
-      })
-    } catch (error) {
-      caught = error
-    }
-
-    expect(isAssistantTurnRevisionRequiredError(caught)).toBe(true)
-    if (!isAssistantTurnRevisionRequiredError(caught)) {
-      throw new Error('expected AssistantTurnRevisionRequiredError')
-    }
-    expect(caught.captures).toEqual([lateCapture])
-    expect(caught.nextCursor).toEqual({
-      captureId: lateCapture.captureId,
-      createdAt: lateCapture.createdAt ?? null,
-      occurredAt: lateCapture.occurredAt,
-    })
-  })
-
-  it('returns quietly when no late captures exist', async () => {
-    const hook = createAssistantTurnBeforeDeliveryHook({
-      afterCursor: {
-        captureId: 'cap_1',
-        createdAt: '2026-04-22T10:00:02.000Z',
-        occurredAt: '2026-04-22T10:00:00.000Z',
-      },
-      conversation: {
-        accountId: 'acct_1',
-        actorId: 'actor_1',
-        actorIsSelf: false,
-        source: 'telegram',
-        threadId: 'thread_1',
-        threadIsDirect: true,
-      },
-      knownCaptureIds: ['cap_1'],
-      port: {
-        async refresh() {
-          return {
-            progressed: false,
-            reason: 'no_new_input',
-          }
-        },
-        async listNewConversationCaptures(input) {
-          return {
-            captures: [],
-            nextCursor: input.afterCursor,
-          }
-        },
-      },
-    })
-
-    await expect(
-      hook({
-        response: 'draft response',
-        sessionId: 'sess_1',
-        turnId: 'turn_1',
-        vault: '/vault',
-      }),
-    ).resolves.toBeUndefined()
   })
 })

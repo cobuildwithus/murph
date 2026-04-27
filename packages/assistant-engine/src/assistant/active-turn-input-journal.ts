@@ -196,6 +196,7 @@ export const assistantAcceptedTurnInputJournalSchema = z
     }
 
     let previousProviderRequestOrdinal = -1
+    let previousProviderRequestInputCount = -1
     for (let requestIndex = 0; requestIndex < journal.providerRequests.length; requestIndex += 1) {
       const request = journal.providerRequests[requestIndex]
       if (!request) {
@@ -209,6 +210,15 @@ export const assistantAcceptedTurnInputJournalSchema = z
         })
       }
       previousProviderRequestOrdinal = request.ordinal
+      if (request.acceptedInputIds.length < previousProviderRequestInputCount) {
+        context.addIssue({
+          code: 'custom',
+          message:
+            'provider request acceptedInputIds must be nondecreasing accepted-input prefixes.',
+          path: ['providerRequests', requestIndex, 'acceptedInputIds'],
+        })
+      }
+      previousProviderRequestInputCount = request.acceptedInputIds.length
 
       const requestInputIds = new Set<string>()
       let previousRequestInputIndex = -1
@@ -218,12 +228,13 @@ export const assistantAcceptedTurnInputJournalSchema = z
         if (
           acceptedInputIndex === undefined ||
           requestInputIds.has(inputId) ||
-          acceptedInputIndex <= previousRequestInputIndex
+          acceptedInputIndex <= previousRequestInputIndex ||
+          journal.inputIds[inputIndex] !== inputId
         ) {
           context.addIssue({
             code: 'custom',
             message:
-              'provider request acceptedInputIds must be unique accepted journal inputs in accepted order.',
+              'provider request acceptedInputIds must be unique accepted journal inputs in accepted prefix order.',
             path: ['providerRequests', requestIndex, 'acceptedInputIds', inputIndex],
           })
         }

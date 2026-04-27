@@ -374,13 +374,13 @@ export function JoinInviteActivePanel({
       </div>
 
       <Button
-        render={<Link href="/settings" />}
+        render={<Link href="/experiments" />}
         nativeButton={false}
         variant="link"
         size="sm"
         className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-[#2d3436]"
       >
-        Manage settings
+        View experiments
       </Button>
     </div>
   );

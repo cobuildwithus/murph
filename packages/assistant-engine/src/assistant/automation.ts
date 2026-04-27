@@ -20,16 +20,14 @@ export {
   scanAssistantInboxOnce,
 } from './automation/routing.js'
 export {
-  createAssistantTurnBeforeDeliveryHook,
   createInboxBackedAssistantTurnInputPort,
   createNoopAssistantTurnInputPort,
-  isAssistantTurnRevisionRequiredError,
-  type AssistantTurnBeforeDeliveryHook,
+  type AssistantActiveTurnInputCheckpointHook,
+  type AssistantActiveTurnInputCheckpointInput,
   type AssistantTurnConversationCaptureBatch,
   type AssistantTurnConversationCaptureQuery,
   type AssistantTurnInputPort,
   type AssistantTurnInputRefreshInput,
   type AssistantTurnInputRefreshPhase,
   type AssistantTurnInputRefreshResult,
-  AssistantTurnRevisionRequiredError,
 } from './turn-input.js'

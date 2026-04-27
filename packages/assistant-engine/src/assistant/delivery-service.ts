@@ -44,7 +44,7 @@ export async function deliverAssistantReply(input: {
     bindingDelivery: audience?.bindingDelivery ?? input.session.binding.delivery,
     explicitTarget: audience?.explicitTarget ?? input.input.deliveryTarget ?? null,
     replyToMessageId:
-      audience?.replyToMessageId ?? input.input.deliveryReplyToMessageId ?? null,
+      input.input.deliveryReplyToMessageId ?? audience?.replyToMessageId ?? null,
     subject: input.input.deliverySubject ?? null,
     dependencies: undefined,
     dispatchMode: input.input.deliveryDispatchMode,

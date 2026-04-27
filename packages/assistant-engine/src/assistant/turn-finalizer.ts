@@ -38,6 +38,7 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
 
 export async function persistAssistantTurnAndSession(input: {
   assistantTranscriptText?: string | null
+  activeTurnUsedExplicitHistory?: boolean
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   persistUserPromptToTranscript?: boolean
@@ -52,7 +53,8 @@ export async function persistAssistantTurnAndSession(input: {
   const assistantTranscriptText = input.assistantTranscriptText
     ?? input.providerResult.response
   const shouldPersistProviderResumeState =
-    input.turnContinuityPolicy === 'continuous-provider-thread'
+    input.turnContinuityPolicy === 'continuous-provider-thread' &&
+    input.activeTurnUsedExplicitHistory !== true
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     await state.transcripts.append(

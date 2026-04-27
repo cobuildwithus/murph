@@ -164,6 +164,10 @@ function requireAssistantProviderUserPrompt(
 function hasAssistantProviderUsableNativeResume(
   input: AssistantProviderTurnExecutionInput,
 ): boolean {
+  if ((input.activeTurnMessages?.length ?? 0) > 0) {
+    return false
+  }
+
   const resumeProviderSessionId = normalizeNullableString(
     input.resumeProviderSessionId,
   )
@@ -193,10 +197,6 @@ export function resolveAssistantProviderHistoryMode(
 ): AssistantProviderHistoryMode {
   if (hasAssistantProviderUsableNativeResume(input)) {
     return 'none'
-  }
-
-  if (isAssistantResponsesTargetConfig(input.providerConfig)) {
-    return 'text-bootstrap'
   }
 
   return 'structured-messages'
@@ -278,6 +278,26 @@ function resolveAssistantProviderFlatPromptTranscriptSection(
     : null
 }
 
+function resolveAssistantProviderFlatPromptActiveTurnSection(
+  input: AssistantProviderTurnExecutionInput,
+): string | null {
+  const activeTurnLines = (input.activeTurnMessages ?? []).flatMap((message) => {
+    const content = Array.isArray(message.content)
+      ? serializeAssistantConversationContent(message.content)
+      : message.content.trim()
+    if (content.length === 0) {
+      return []
+    }
+
+    const label = message.role === 'assistant' ? 'Assistant' : 'User'
+    return [`${label}:\n${content}`]
+  })
+
+  return activeTurnLines.length > 0
+    ? `Active turn so far:\n${activeTurnLines.join('\n\n')}`
+    : null
+}
+
 function serializeAssistantConversationContent(
   content: readonly AssistantUserMessageContentPart[],
 ): string {
@@ -335,6 +355,7 @@ export function resolveAssistantProviderPrompt(
   return [
     systemPrompt,
     resolveAssistantProviderFlatPromptTranscriptSection(input),
+    resolveAssistantProviderFlatPromptActiveTurnSection(input),
     resolveAssistantProviderComposedUserContent(input, {
       labelUserPrompt: true,
     }),
@@ -377,24 +398,31 @@ export function buildAssistantProviderMessages(
 function buildAssistantProviderHistoryMessages(
   input: AssistantProviderTurnExecutionInput,
 ): ModelMessage[] {
+  const appendActiveTurnMessages = (messages: ModelMessage[]): ModelMessage[] => [
+    ...messages,
+    ...sanitizeAssistantProviderConversationMessages(input.activeTurnMessages),
+  ]
+
   switch (resolveAssistantProviderHistoryMode(input)) {
     case 'none':
-      return []
+      return appendActiveTurnMessages([])
     case 'text-bootstrap': {
       const transcriptSection =
         resolveAssistantProviderFlatPromptTranscriptSection(input)
-      return transcriptSection
+      return appendActiveTurnMessages(transcriptSection
         ? [
             {
               role: 'user',
               content: transcriptSection,
             } satisfies UserModelMessage,
           ]
-        : []
+        : [])
     }
     case 'structured-messages':
-      return sanitizeAssistantProviderConversationMessages(
-        input.conversationMessages,
+      return appendActiveTurnMessages(
+        sanitizeAssistantProviderConversationMessages(
+          input.conversationMessages,
+        ),
       )
   }
 }

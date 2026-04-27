@@ -653,9 +653,12 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
       messages: [
         {
-          content:
-            'Conversation so far:\nUser:\nEarlier question\n\nAssistant:\nEarlier answer',
+          content: 'Earlier question',
           role: 'user',
+        },
+        {
+          content: 'Earlier answer',
+          role: 'assistant',
         },
         {
           content: 'Recovered bootstrap context.\n\nPlease reply now.',

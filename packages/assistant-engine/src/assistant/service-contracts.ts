@@ -30,9 +30,10 @@ import type {
 import type { ConversationRef } from './conversation-ref.js'
 import type { AssistantExecutionContext } from './execution-context.js'
 import type {
+  AssistantActiveTurnInputCheckpointHook,
   AssistantActiveTurnInputAdmissionHook,
-  AssistantTurnBeforeDeliveryHook,
 } from './turn-input.js'
+import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import type {
   ResolvedAssistantFailoverRoute,
   readAssistantFailoverState,
@@ -74,8 +75,11 @@ export interface AssistantSessionResolutionFields {
 
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   abortSignal?: AbortSignal
+  acceptedTurnInput?: {
+    initialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
+  } | null
+  activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
-  beforeDelivery?: AssistantTurnBeforeDeliveryHook
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
@@ -118,7 +122,7 @@ export interface AssistantTurnSharedPlan {
 export interface AssistantRouteTurnPlan {
   cliEnv: NodeJS.ProcessEnv
   conversationMessages?: ReadonlyArray<{
-    content: string
+    content: string | AssistantUserMessageContentPart[]
     role: 'assistant' | 'user'
   }>
   continuityContext: string | null
@@ -140,6 +144,7 @@ export interface PersistedUserTurn {
 
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   attemptCount: number
+  nonReplayableProviderWork?: boolean
   onboardingCompletionFallbackReason?: AssistantOnboardingCompletionReason | null
   onboardingGuidanceInjected?: boolean
   providerOptions: AssistantProviderSessionOptions

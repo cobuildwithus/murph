@@ -4,6 +4,7 @@ import type {
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantUserMessageContentPart } from '../model-harness.js'
+import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
 import {
   conversationCaptureRefFromCapture,
   isSameAssistantConversationCapture,
@@ -19,7 +20,7 @@ export type AssistantTurnInputRefreshPhase =
   | 'before_provider'
   | 'after_tool_result'
   | 'after_provider'
-  | 'before_delivery'
+  | 'commit_barrier'
 
 export interface AssistantTurnInputRefreshInput {
   phase: AssistantTurnInputRefreshPhase
@@ -49,6 +50,9 @@ export interface AssistantTurnConversationCaptureBatch {
 }
 
 export interface AssistantTurnInputPort {
+  checkpointAcceptedInput?(
+    input: AssistantActiveTurnInputCheckpointInput,
+  ): Promise<void>
   refresh(
     input: AssistantTurnInputRefreshInput,
   ): Promise<AssistantTurnInputRefreshResult>
@@ -57,19 +61,16 @@ export interface AssistantTurnInputPort {
   ): Promise<AssistantTurnConversationCaptureBatch>
 }
 
-export interface AssistantTurnBeforeDeliveryInput {
+export interface AssistantActiveTurnInputAdmissionBaseInput {
   response: string
   sessionId: string
   turnId: string
   vault: string
 }
 
-export type AssistantTurnBeforeDeliveryHook = (
-  input: AssistantTurnBeforeDeliveryInput,
-) => Promise<void>
-
 export interface AssistantActiveTurnInputAdmissionInput
-  extends AssistantTurnBeforeDeliveryInput {
+  extends AssistantActiveTurnInputAdmissionBaseInput {
+  phase: 'request_boundary' | 'commit_barrier'
   providerRequestOrdinal: number
 }
 
@@ -78,9 +79,11 @@ export type AssistantActiveTurnInputAdmissionResult =
       kind: 'no-new-input'
     }
   | {
+      acceptedInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
       deliveryReplyToMessageId?: string | null
       prompt: string
       receiptMetadata?: Record<string, string> | null
+      transcriptText?: string | null
       userMessageContent?: AssistantUserMessageContentPart[] | null
       kind: 'accepted'
     }
@@ -89,39 +92,38 @@ export type AssistantActiveTurnInputAdmissionHook = (
   input: AssistantActiveTurnInputAdmissionInput,
 ) => Promise<AssistantActiveTurnInputAdmissionResult>
 
-export class AssistantTurnRevisionRequiredError extends Error {
-  readonly captures: readonly AssistantInboxCaptureSummary[]
-  readonly nextCursor: AssistantAutomationCursor
-
-  constructor(input: {
-    captures: readonly AssistantInboxCaptureSummary[]
-    message?: string
-    nextCursor: AssistantAutomationCursor
-  }) {
-    super(
-      input.message ??
-        'New same-conversation captures arrived before delivery, so the pending draft must be revised.',
-    )
-    this.name = 'AssistantTurnRevisionRequiredError'
-    this.captures = [...input.captures]
-    this.nextCursor = input.nextCursor
-  }
+export interface AssistantActiveTurnInputCheckpointInput {
+  acceptedInputIds: readonly string[]
+  providerRequestOrdinal: number
+  sessionId: string
+  signal?: AbortSignal
+  turnId: string
+  vault: string
 }
+
+export type AssistantActiveTurnInputCheckpointHook = (
+  input: AssistantActiveTurnInputCheckpointInput,
+) => Promise<void>
 
 export class AssistantActiveTurnInputBudgetExceededError extends Error {
   constructor(message?: string) {
     super(
       message ??
-        'Active turn input kept arriving before delivery; retry the expanded turn later.',
+        'Active turn input kept arriving during the turn; retry the expanded turn later.',
     )
     this.name = 'AssistantActiveTurnInputBudgetExceededError'
   }
 }
 
-export function isAssistantTurnRevisionRequiredError(
-  value: unknown,
-): value is AssistantTurnRevisionRequiredError {
-  return value instanceof AssistantTurnRevisionRequiredError
+export class AssistantActiveTurnInputUnavailableError extends
+  AssistantActiveTurnInputBudgetExceededError {
+  constructor(message?: string) {
+    super(
+      message ??
+        'Active turn input source is temporarily unavailable; retry the turn later.',
+    )
+    this.name = 'AssistantActiveTurnInputUnavailableError'
+  }
 }
 
 export function isAssistantActiveTurnInputBudgetExceededError(
@@ -131,6 +133,16 @@ export function isAssistantActiveTurnInputBudgetExceededError(
     value instanceof AssistantActiveTurnInputBudgetExceededError ||
     (value instanceof Error &&
       value.name === 'AssistantActiveTurnInputBudgetExceededError')
+  )
+}
+
+export function isAssistantActiveTurnInputUnavailableError(
+  value: unknown,
+): value is AssistantActiveTurnInputUnavailableError {
+  return (
+    value instanceof AssistantActiveTurnInputUnavailableError ||
+    (value instanceof Error &&
+      value.name === 'AssistantActiveTurnInputUnavailableError')
   )
 }
 
@@ -148,33 +160,6 @@ export function createNoopAssistantTurnInputPort(): AssistantTurnInputPort {
         nextCursor: input.afterCursor,
       }
     },
-  }
-}
-
-export function createAssistantTurnBeforeDeliveryHook(input: {
-  afterCursor: AssistantAutomationCursor
-  conversation: AssistantConversationCaptureRef
-  knownCaptureIds: readonly string[]
-  port: AssistantTurnInputPort
-}): AssistantTurnBeforeDeliveryHook {
-  return async () => {
-    await input.port.refresh({
-      phase: 'before_delivery',
-    })
-
-    const lateCaptures = await input.port.listNewConversationCaptures({
-      afterCursor: input.afterCursor,
-      conversation: input.conversation,
-      knownCaptureIds: input.knownCaptureIds,
-    })
-    if (lateCaptures.captures.length === 0) {
-      return
-    }
-
-    throw new AssistantTurnRevisionRequiredError({
-      captures: lateCaptures.captures,
-      nextCursor: lateCaptures.nextCursor,
-    })
   }
 }
 

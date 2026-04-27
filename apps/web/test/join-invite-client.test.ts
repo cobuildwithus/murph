@@ -543,8 +543,8 @@ test("active invite state renders message and settings actions with client navig
   assert.match(markup, /Text Murph/);
   assert.ok(markup.includes('download="Murph.vcf"'));
   assert.match(markup, /Add Murph to Contacts/);
-  assert.ok(markup.includes('href="/settings"'));
-  assert.match(markup, /Manage settings/);
+  assert.ok(markup.includes('href="/experiments"'));
+  assert.match(markup, /View experiments/);
 });
 
 test("active invite state omits Murph contact actions when no assigned number is available", () => {
@@ -567,7 +567,7 @@ test("active invite state omits Murph contact actions when no assigned number is
 
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /Add Murph to Contacts/);
-  assert.ok(markup.includes('href="/settings"'));
+  assert.ok(markup.includes('href="/experiments"'));
 });
 
 test("activating invite state explains when vault and assistant setup is still running", () => {

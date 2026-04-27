@@ -3,12 +3,9 @@ import assert from 'node:assert/strict'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
-import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
-import {
-  createAssistantTurnBeforeDeliveryHook,
-} from '../src/assistant/turn-input.js'
+import type { AssistantActiveTurnInputCheckpointInput } from '../src/assistant/turn-input.js'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -41,6 +38,7 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/service-turn-routes.js')
   vi.doUnmock('../src/assistant/service-usage.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
+  vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
 })
 
@@ -340,101 +338,13 @@ test('sendAssistantMessageLocal forwards onboarding fallback completion metadata
   })
 })
 
-test('sendAssistantMessageLocal marks delivery as blocked when a late capture requires revision', async () => {
-  const lateCapture: InboxListResult['items'][number] = {
-    captureId: 'capture-late',
-    source: 'telegram',
-    accountId: null,
-    externalId: 'external-late',
-    threadId: 'thread-1',
-    threadTitle: null,
-    threadIsDirect: true,
-    actorId: 'actor-1',
-    actorName: 'Sender',
-    actorIsSelf: false,
-    occurredAt: '2026-04-08T12:00:06.000Z',
-    receivedAt: '2026-04-08T12:00:07.000Z',
-    text: 'late follow up',
-    attachmentCount: 0,
-    envelopePath: 'inbox/telegram/capture-late.json',
-    eventId: 'event-late',
-    createdAt: '2026-04-08T12:00:08.000Z',
-    promotions: [],
-  }
-  const beforeDelivery = createAssistantTurnBeforeDeliveryHook({
-    afterCursor: {
-      captureId: 'capture-1',
-      createdAt: '2026-04-08T12:00:01.000Z',
-      occurredAt: '2026-04-08T12:00:00.000Z',
-    },
-    conversation: {
-      accountId: null,
-      actorId: 'actor-1',
-      actorIsSelf: false,
-      source: 'telegram',
-      threadId: 'thread-1',
-      threadIsDirect: true,
-    },
-    knownCaptureIds: ['capture-1'],
-    port: {
-      async refresh() {
-        return {
-          progressed: true,
-          reason: 'ingested_input',
-        }
-      },
-      async listNewConversationCaptures(input) {
-        assert.deepEqual(input.knownCaptureIds, ['capture-1'])
-        return {
-          captures: [lateCapture],
-          nextCursor: {
-            captureId: lateCapture.captureId,
-            createdAt: lateCapture.createdAt,
-            occurredAt: lateCapture.occurredAt,
-          },
-        }
-      },
+test('sendAssistantMessageLocal admits active-turn input and continues inside one receipt', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
     },
   })
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
-    providerOutcome: {
-      kind: 'succeeded',
-      providerTurn: {
-        onboardingGuidanceInjected: true,
-        response: 'draft response',
-        session: createAssistantSession({
-          sessionId: 'session-revision',
-        }),
-      },
-    },
-  })
-
-  await assert.rejects(
-    () =>
-      sendAssistantMessageLocal({
-        beforeDelivery,
-        deliverResponse: true,
-        prompt: 'Summarize my inbox',
-        vault: '/vaults/test',
-      }),
-    (error) => error instanceof Error && error.name === 'AssistantTurnRevisionRequiredError',
-  )
-
-  assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls.length, 1)
-  assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]?.status, 'blocked')
-  assert.equal(
-    mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]?.deliveryDisposition,
-    'blocked',
-  )
-  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 2)
-  assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls[1]?.[0]?.kind, 'turn.blocked')
-  assert.equal(mocks.persistPendingAssistantUsageEvent.mock.calls.length, 0)
-  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 0)
-  assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
-})
-
-test('sendAssistantMessageLocal admits active-turn input before delivery and continues inside one receipt', async () => {
-  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
   mocks.executeProviderTurnWithRecovery
     .mockResolvedValueOnce({
       kind: 'succeeded',
@@ -456,17 +366,22 @@ test('sendAssistantMessageLocal admits active-turn input before delivery and con
     input.providerRequestOrdinal === 0
       ? {
           kind: 'accepted' as const,
-          prompt: 'Initial prompt\n\nLate follow up',
+          prompt: 'Late follow up',
           receiptMetadata: {
             captureIds: 'capture-1,capture-2',
           },
+          transcriptText: 'Late follow up',
         }
       : {
           kind: 'no-new-input' as const,
-        },
+      },
+  )
+  const activeTurnCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
   )
 
   const result = await sendAssistantMessageLocal({
+    activeTurnCheckpoint,
     activeTurnInput,
     deliverResponse: true,
     prompt: 'Initial prompt',
@@ -476,18 +391,188 @@ test('sendAssistantMessageLocal admits active-turn input before delivery and con
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
   assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls.length, 0)
   assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(mocks.runtimeState.turns.acceptedInputs.append.mock.calls.length, 2)
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.append.mock.calls[0]?.[0]?.inputs,
+  ).toEqual([
+      expect.objectContaining({
+        id: 'initial',
+        promptFallbackReason: 'manual-input',
+        source: 'manual',
+      }),
+    ])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.append.mock.calls[1]?.[0]?.inputs,
+  ).toEqual([
+      expect.objectContaining({
+        id: 'request-1',
+        promptFallbackReason: 'manual-input',
+        source: 'manual',
+      }),
+    ])
+  assert.deepEqual(activeTurnCheckpoint.mock.calls[0]?.[0], {
+    acceptedInputIds: ['initial', 'request-1'],
+    providerRequestOrdinal: 0,
+    sessionId: session.sessionId,
+    signal: undefined,
+    turnId: 'turn-1',
+    vault: '/vaults/test',
+  })
+  assert.ok(
+    mocks.runtimeState.turns.acceptedInputs.append.mock.invocationCallOrder[1]!
+      < mocks.appendAssistantTranscriptEntries.mock.invocationCallOrder[0]!,
+  )
+  assert.ok(
+    mocks.appendAssistantTranscriptEntries.mock.invocationCallOrder[1]!
+      < activeTurnCheckpoint.mock.invocationCallOrder[0]!,
+  )
+  assert.ok(
+    activeTurnCheckpoint.mock.invocationCallOrder[0]!
+      < mocks.executeProviderTurnWithRecovery.mock.invocationCallOrder[1]!,
+  )
+  assert.deepEqual(
+    mocks.runtimeState.turns.acceptedInputs.recordProviderRequest.mock.calls.map(
+      (call) => call[0]?.ordinal,
+    ),
+    [0, 1],
+  )
   assert.equal(
     mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
-    'Initial prompt\n\nLate follow up',
+    'Late follow up',
+  )
+  assert.deepEqual(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.activeTurnHistory
+      ?.messages,
+    [
+      {
+        content: 'Initial prompt',
+        role: 'user',
+      },
+      {
+        content: 'draft before late input',
+        role: 'assistant',
+      },
+    ],
+  )
+  assert.deepEqual(
+    mocks.persistPendingAssistantUsageEvent.mock.calls.map(
+      (call) => call[0]?.providerRequestOrdinal,
+    ),
+    [0, 1],
+  )
+  assert.equal(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock.calls[0]?.[0]
+      ?.admissionState,
+    'commit-started',
   )
   assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 1)
   assert.equal(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.input.prompt,
-    'Initial prompt\n\nLate follow up',
+    'Late follow up',
   )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.activeTurnUsedExplicitHistory,
+    true,
+  )
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.persistUserPromptToTranscript,
+    false,
+  )
+  assert.equal(mocks.appendAssistantTranscriptEntries.mock.calls.length, 2)
+  assert.equal(
+    mocks.appendAssistantTranscriptEntries.mock.calls[0]?.[2]?.[0]?.kind,
+    'user',
+  )
+  assert.equal(
+    mocks.appendAssistantTranscriptEntries.mock.calls[0]?.[2]?.[0]?.text,
+    'Initial prompt',
+  )
+  assert.equal(
+    typeof mocks.appendAssistantTranscriptEntries.mock.calls[0]?.[2]?.[0]
+      ?.createdAt,
+    'string',
+  )
+  assert.deepEqual(mocks.appendAssistantTranscriptEntries.mock.calls[1]?.[2], [
+    {
+      kind: 'user',
+      text: 'Late follow up',
+    },
+  ])
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
-  assert.equal(result.prompt, 'Initial prompt\n\nLate follow up')
+  assert.equal(result.prompt, 'Late follow up')
   assert.equal(result.response, 'final after late input')
+})
+
+test('sendAssistantMessageLocal steers explicit same-session input into an active manual turn', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+  })
+  const firstProviderTurn = createDeferred<Awaited<
+    ReturnType<typeof mocks.executeProviderTurnWithRecovery>
+  >>()
+  mocks.executeProviderTurnWithRecovery
+    .mockImplementationOnce(async () => firstProviderTurn.promise)
+    .mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        response: 'final after steered input',
+        session,
+      },
+    })
+
+  const firstResultPromise = sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(mocks.executeProviderTurnWithRecovery).toHaveBeenCalledTimes(1)
+  })
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      sessionId: session.sessionId,
+    },
+    prompt: 'Follow-up while running',
+    vault: '/vaults/test',
+  })
+
+  firstProviderTurn.resolve({
+    kind: 'succeeded',
+    providerTurn: {
+      onboardingGuidanceInjected: true,
+      response: 'draft before steered input',
+      session,
+    },
+  })
+
+  const [firstResult, steeredResult] = await Promise.all([
+    firstResultPromise,
+    steeredResultPromise,
+  ])
+
+  assert.equal(firstResult.response, 'final after steered input')
+  assert.equal(steeredResult.response, 'final after steered input')
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    'Follow-up while running',
+  )
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.append.mock.calls[1]?.[0]?.inputs,
+  ).toEqual([
+    expect.objectContaining({
+      id: 'manual-1',
+      promptFallbackReason: 'manual-input',
+      source: 'manual',
+    }),
+  ])
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
@@ -1151,14 +1236,26 @@ async function loadLocalServiceModule(input?: {
       kind: 'sent' as const,
       session,
     }
+  const acceptedInputIds: string[] = []
 
   const mocks = {
-    appendAssistantTranscriptEntries: vi.fn(async () =>
-      input?.transcriptEntries ?? [
-        {
-          createdAt: '2026-04-08T12:00:00.000Z',
-        },
-      ],
+    appendAssistantTranscriptEntries: vi.fn(
+      async (
+        _vault: Parameters<
+          typeof import('../src/assistant/store.js').appendAssistantTranscriptEntries
+        >[0],
+        _sessionId: Parameters<
+          typeof import('../src/assistant/store.js').appendAssistantTranscriptEntries
+        >[1],
+        _entries: Parameters<
+          typeof import('../src/assistant/store.js').appendAssistantTranscriptEntries
+        >[2],
+      ) =>
+        input?.transcriptEntries ?? [
+          {
+            createdAt: '2026-04-08T12:00:00.000Z',
+          },
+        ],
     ),
     appendAssistantTurnReceiptEvent: vi.fn(
       async (
@@ -1232,7 +1329,43 @@ async function loadLocalServiceModule(input?: {
         >[0],
       ) => undefined,
     ),
-    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    persistPendingAssistantUsageEvent: vi.fn(
+      async (_input: { providerRequestOrdinal?: number }) => undefined,
+    ),
+    runtimeState: {
+      turns: {
+        acceptedInputs: {
+          append: vi.fn(
+            async (appendInput: {
+              inputs: readonly { id: string }[]
+            }) => {
+              for (const acceptedInput of appendInput.inputs) {
+                if (!acceptedInputIds.includes(acceptedInput.id)) {
+                  acceptedInputIds.push(acceptedInput.id)
+                }
+              }
+              return {
+                admissionState: 'current-turn-open' as const,
+                inputIds: [...acceptedInputIds],
+                inputs: [],
+                providerRequests: [],
+              }
+            },
+          ),
+          recordProviderRequest: vi.fn(
+            async (_input: { ordinal: number }) => ({
+              admissionState: 'current-turn-open' as const,
+              inputIds: [...acceptedInputIds],
+              inputs: [],
+              providerRequests: [],
+            }),
+          ),
+          updateAdmissionState: vi.fn(
+            async (_input: { admissionState: string }) => null,
+          ),
+        },
+      },
+    },
     recordAssistantDiagnosticEvent: vi.fn(
       async (
         _input: Parameters<
@@ -1454,19 +1587,19 @@ async function loadLocalServiceModule(input?: {
   vi.doMock('../src/assistant/service-usage.js', () => ({
     persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
   }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: vi.fn(() => mocks.runtimeState),
+  }))
   vi.doMock('../src/assistant/channel-adapters.js', () => ({
     getAssistantChannelAdapter: mocks.getAssistantChannelAdapter,
   }))
   vi.doMock('../src/assistant/turn-input.js', () => ({
     AssistantActiveTurnInputBudgetExceededError: class AssistantActiveTurnInputBudgetExceededError extends Error {
       constructor() {
-        super('Active turn input kept arriving before delivery; retry the expanded turn later.')
+        super('Active turn input kept arriving during the turn; retry the expanded turn later.')
         this.name = 'AssistantActiveTurnInputBudgetExceededError'
       }
     },
-    isAssistantTurnRevisionRequiredError: (value: unknown) =>
-      value instanceof Error &&
-      value.name === 'AssistantTurnRevisionRequiredError',
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,

@@ -48,10 +48,11 @@ assistant cursors, or checkpoint recovery truth.
 The runtime reads `HostedWorkspace`, restores the encrypted local workspace,
 fetches mailbox rows after its checkpointed per-lane watermarks, imports them
 into local runtime state, and checkpoints immediately after import. Late
-same-conversation input is supported by the hosted mailbox-backed turn-input
-refresh: before delivery, the runtime refreshes mailbox rows, imports any new
-items, checkpoints, and lets the existing local turn-revision loop rerun the
-reply.
+same-conversation input is supported by the hosted mailbox-backed active-turn
+input refresh: at provider request boundaries and at the final commit barrier,
+the runtime refreshes mailbox rows, imports any new items, checkpoints accepted
+input state, and continues the same logical assistant turn before outbox intent
+creation.
 
 ## Ownership Rules
 

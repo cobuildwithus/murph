@@ -80,7 +80,8 @@ describe("hosted runtime control contracts", () => {
     ]);
     expect(HOSTED_WORKSPACE_CHECKPOINT_REASONS).toEqual([
       "import",
-      "before_delivery_refresh",
+      "active_turn_input",
+      "active_turn_acceptance",
       "outbox_intent",
       "outbox_sending",
       "outbox_receipt",
@@ -602,7 +603,9 @@ describe("hosted runtime control contracts", () => {
           usageId: "wrong",
         },
       ],
-    })).toThrow(/usageId must match the canonical turnId\/attemptCount-derived value/u);
+    })).toThrow(
+      /usageId must match the canonical turnId\/providerRequestOrdinal\/attemptCount-derived value/u,
+    );
     expect(() => parseHostedRuntimeIssueExportRequest({
       issues: [
         {

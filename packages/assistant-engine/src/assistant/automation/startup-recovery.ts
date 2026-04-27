@@ -340,28 +340,46 @@ async function loadAutoReplyRecoveryContext(input: {
 function readAutoReplyReceiptMetadata(
   receipt: AssistantTurnReceipt,
 ): { captureIds: readonly string[]; primaryCaptureId: string } | null {
-  const startedEvent = receipt.timeline.find((event) => event.kind === 'turn.started')
-  if (!startedEvent) {
-    return null
+  const captureIds: string[] = []
+  let primaryCaptureId: string | null = null
+
+  for (const event of receipt.timeline) {
+    if (
+      event.kind !== 'turn.started' &&
+      event.kind !== 'turn.input.accepted'
+    ) {
+      continue
+    }
+
+    const groupedCaptureIds = event.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0) ?? []
+    const eventPrimaryCaptureId =
+      event.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]?.trim() ||
+      groupedCaptureIds[0] ||
+      null
+    if (eventPrimaryCaptureId && !captureIds.includes(eventPrimaryCaptureId)) {
+      captureIds.push(eventPrimaryCaptureId)
+    }
+    for (const captureId of groupedCaptureIds) {
+      if (!captureIds.includes(captureId)) {
+        captureIds.push(captureId)
+      }
+    }
+    if (primaryCaptureId === null && eventPrimaryCaptureId !== null) {
+      primaryCaptureId = eventPrimaryCaptureId
+    }
   }
 
-  const groupedCaptureIds = startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
-    ?.split(',')
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0) ?? []
-  const primaryCaptureId =
-    startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]?.trim() ||
-    groupedCaptureIds[0] ||
-    null
-  if (!primaryCaptureId) {
-    return null
-  }
-
-  return {
-    captureIds:
-      groupedCaptureIds.length > 0 ? groupedCaptureIds : [primaryCaptureId],
-    primaryCaptureId,
-  }
+  const resolvedPrimaryCaptureId = primaryCaptureId ?? captureIds[0] ?? null
+  return resolvedPrimaryCaptureId
+    ? {
+        captureIds:
+          captureIds.length > 0 ? captureIds : [resolvedPrimaryCaptureId],
+        primaryCaptureId: resolvedPrimaryCaptureId,
+      }
+    : null
 }
 
 function hasUnsafeDeliveryEvidence(receipt: AssistantTurnReceipt): boolean {

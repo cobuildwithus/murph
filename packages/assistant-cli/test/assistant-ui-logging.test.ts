@@ -329,37 +329,22 @@ test('assistant CLI foreground logging summarizes provider progress for each top
   assert.equal(
     formatAssistantRunEventForTerminal({
       captureId: 'cap_status_revision',
-      details:
-        'new input arrived before delivery; revising reply with 1 additional capture(s)',
+      details: 'new input accepted into active turn with 1 additional capture(s)',
       providerKind: 'status',
       providerState: 'running',
       type: 'capture.reply-progress',
     }),
-    'reply-progress cap_status_revision: new message arrived before send; revising reply with 1 additional message',
+    'reply-progress cap_status_revision: new input accepted into active turn with 1 additional capture(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
       captureId: 'cap_status_revision_group',
-      details:
-        'new input arrived before delivery; revising reply with 3 additional capture(s)',
+      details: 'new input accepted into active turn with 3 additional capture(s)',
       providerKind: 'status',
       providerState: 'running',
       type: 'capture.reply-progress',
     }),
-    'reply-progress cap_status_revision_group: new message arrived before send; revising reply with 3 additional messages',
-  )
-  assert.equal(
-    formatAssistantRunEventForTerminal({
-      captureId: 'cap_status_revision_unsafe',
-      details:
-        'new input arrived before delivery; revising reply with 2 additional capture(s)',
-      providerKind: 'status',
-      providerState: 'running',
-      type: 'capture.reply-progress',
-    }, {
-      unsafeDetails: true,
-    }),
-    'reply-progress cap_status_revision_unsafe: new input arrived before delivery; revising reply with 2 additional capture(s)',
+    'reply-progress cap_status_revision_group: new input accepted into active turn with 3 additional capture(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({

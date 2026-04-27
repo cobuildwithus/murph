@@ -129,16 +129,118 @@ hard cut, not as a blocker for it:
 - Added a budget-exceeded active-turn error so automation defers instead of
   failing if input keeps arriving across continuation boundaries.
 
-Remaining planned work after this follow-up:
+2026-04-28 active-turn journal/runtime slice:
 
 - Persist initial and accepted active-turn items from the service loop into the
-  accepted-input journal, then build provider history from that journal plus
-  provider outputs instead of prompt replacement alone.
-- Add provider request/continuation ordinals to usage accounting so every model
-  request in a multi-request logical turn is billable/auditable without id
-  collisions.
-- Wire hosted/Cloudflare active-turn admission after the mailbox/checkpoint hard
-  cut stabilizes; current hosted rows in `migration.md` still own that surface.
+  accepted-input journal before each provider request. Initial manual turns use
+  coarse prompt fallback buckets; auto-reply turns provide inbox capture refs and
+  cursor effects.
+- Record accepted-input journal provider request ordinals before every provider
+  request, using explicit structured history as the default continuation mode.
+- Move usage persistence to each successful provider request and add
+  `providerRequestOrdinal` to canonical usage ids/records so same logical turns
+  can bill/audit multiple successful provider calls without id collisions.
+- Rename hosted mailbox refresh from a before-delivery hook to the neutral
+  `refreshMailboxForActiveTurnInput` port. Hosted runtime now imports and
+  checkpoints conversation mailbox input at the assistant engine
+  `after_provider` request-boundary refresh, with checkpoint/log reason
+  `active_turn_input`.
+- Keep Cloudflare/web as thin mailbox/workspace/control-plane adapters. No
+  Cloudflare-local active-turn queue, peek/adopt protocol, or provider-specific
+  steering semantics were added.
+
+2026-04-28 provider-neutral history slice:
+
+- Added an in-memory, provider-neutral active-turn history overlay for the
+  current logical turn. When late input is accepted, the next provider request
+  receives the prior accepted user content plus the prior provider draft as
+  neutral `user`/`assistant` messages before the new current user prompt.
+- Kept the accepted-input journal metadata-first. It remains the durable
+  admission/order/audit record and does not persist raw prompt text or interim
+  provider drafts.
+- Wired the overlay through provider planning and provider helpers rather than
+  provider adapters. Message providers receive neutral active-turn messages;
+  flat-prompt providers receive an `Active turn so far` section.
+- Disabled native resume for active-turn continuation requests until a provider
+  can prove strict same-turn extension semantics. Explicit structured history is
+  the cross-provider correctness path.
+- Fixed auto-reply accepted-input cursor effects to use the pre-acceptance cursor
+  as `from`, instead of the already-advanced accepted group cursor.
+
+2026-04-28 hosted checkpoint barrier slice:
+
+- Added a provider-neutral `checkpointAcceptedInput` active-turn port hook and
+  `activeTurnCheckpoint` service hook.
+- The local assistant turn loop now awaits that hook after accepted input is
+  journaled and before building the continuation provider input, so hosted can
+  durably checkpoint accepted input before provider-visible continuation
+  sampling.
+- Hosted runtime implements the hook as a workspace checkpoint with
+  `active_turn_acceptance`, separate from mailbox refresh checkpoints
+  (`active_turn_input`). The checkpoint status carries only counts and request
+  ordinal metadata, not raw prompt content.
+
+2026-04-28 durable transcript slice:
+
+- Matched Codex's canonical-history behavior: each accepted active-turn user
+  input is recorded as an ordered `user` transcript entry before the next
+  provider request is built.
+- Kept the accepted-input journal as the metadata/order/idempotency record, not
+  a second durable conversation history. The journal continues to store refs,
+  cursor effects, input ids, and coarse fallback buckets; durable transcript
+  rows carry the replayable user text.
+- When an auto-reply turn deferred the initial user transcript until finalizer
+  time, the active-turn loop now persists that initial user prompt before the
+  accepted late input, then disables finalizer-time prompt persistence to avoid
+  writing the combined continuation prompt as a duplicate user row.
+- Auto-reply accepted-input transcript text is scoped to the newly accepted
+  capture summaries. Text captures use their message text; attachment-only or
+  textless captures use neutral input placeholders instead of falling back to
+  the full merged provider prompt.
+- Manual `manual-ask`/`manual-deliver` triggers now classify accepted-input
+  fallback metadata as manual input, matching the implicit manual default.
+- Hosted checkpointing now sits after the accepted-input journal append and the
+  transcript append, and still before continuation sampling, so hosted snapshots
+  contain the same canonical state the provider is about to consume.
+
+2026-04-28 hard-cut completion slice:
+
+- Removed the legacy `before_delivery` refresh phase,
+  `createAssistantTurnBeforeDeliveryHook`, and revision-required exception from
+  the assistant-engine contract/export/test surface.
+- Replaced final pre-outbox polling with an explicit active-turn
+  `commit_barrier` admission phase. Hosted runtime refreshes the mailbox during
+  both provider request-boundary and commit-barrier admission.
+- Added a zero-accepted-input commit-barrier checkpoint so hosted can durably
+  persist the final mailbox refresh/import state before outbox commit even when
+  no additional input is accepted.
+- Changed auto-reply late input to materialize only the newly accepted captures
+  as the continuation prompt/content, while final delivery metadata and cursor
+  effects derive from the final accepted capture set.
+- Delivery now prefers the current active-turn input reply target over the
+  initial shared-plan audience reply target, so a late Telegram message can
+  become the final reply target without a bespoke Cloudflare branch.
+- Receipt duplicate/recovery logic now considers both `turn.started` and
+  `turn.input.accepted` metadata, so late accepted capture ids participate in
+  duplicate detection and recovery grouping.
+- Active-turn transcript persistence now stores each accepted input item as a
+  separate user transcript row when item-level fallback text is available,
+  keeping the transcript as canonical replayable history and the journal as the
+  metadata/idempotency ledger.
+- Provider continuation hard-cut behavior is in place: active continuations skip
+  transcript replay while active-turn overlay history is present, native resume
+  stays disabled for active-turn continuations, and failover freezes to the
+  current route after non-replayable tool/provider work.
+
+Remaining planned work after this slice:
+
+- Add provider-turn id fencing when a provider exposes a stable active-turn id.
+  Murph receipt `turnId` continues to fence product/runtime admission; provider
+  ids should not be collapsed into session or receipt ids.
+- Decide whether crash recovery for an interrupted active-turn continuation
+  should persist privacy-bounded interim assistant draft refs. Current hard-cut
+  behavior keeps interim drafts in in-memory active-turn overlay only; durable
+  restart reconstructs from accepted user transcript plus journal metadata.
 
 ## Codex Reference Model
 

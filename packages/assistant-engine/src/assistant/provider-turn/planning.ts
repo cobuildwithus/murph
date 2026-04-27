@@ -65,6 +65,11 @@ import {
 } from '../system-prompt.js'
 import { buildAssistantVaultOverviewBlock } from '../vault-overview.js'
 import {
+  hasAssistantActiveTurnProviderHistory,
+  type AssistantActiveTurnProviderHistory,
+  type AssistantActiveTurnProviderHistoryMessage,
+} from '../active-turn-history.js'
+import {
   resolveAssistantOnboardingCompletionFallbackReason,
 } from './onboarding-fallback.js'
 
@@ -73,9 +78,10 @@ export interface AssistantRouteTurnPlan {
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
   conversationMessages?: ReadonlyArray<{
-    content: string
+    content: string | AssistantActiveTurnProviderHistoryMessage['content']
     role: 'assistant' | 'user'
   }>
+  activeTurnMessages?: readonly AssistantActiveTurnProviderHistoryMessage[]
   continuityContext: string | null
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingCompletionFallbackReason: AssistantOnboardingCompletionReason | null
@@ -142,6 +148,7 @@ export interface AssistantProviderTurnContinuityPlan {
 }
 
 export interface AssistantProviderTurnExecutionPlan {
+  activeTurnHistory: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
@@ -228,6 +235,7 @@ export function resolveAssistantProviderTurnContinuityPolicy(input: {
 }
 
 export async function buildAssistantProviderTurnExecutionPlan(input: {
+  activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
@@ -271,6 +279,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
 
   return {
     executionContext,
+    activeTurnHistory: input.activeTurnHistory ?? null,
     input: input.input,
     memoryTurnEnv,
     profile,
@@ -296,10 +305,13 @@ export async function resolveAssistantProviderAttemptPlan(input: {
     ),
     userMessageContent: input.executionPlan.input.userMessageContent,
   })
-  const prioritizedRoutes = prioritizeAssistantFailoverRoutes(
-    remainingRoutes,
-    input.failoverState,
-  )
+  const prioritizedRoutes =
+    input.executionPlan.activeTurnHistory?.nonReplayableProviderWork === true
+      ? remainingRoutes
+      : prioritizeAssistantFailoverRoutes(
+          remainingRoutes,
+          input.failoverState,
+        )
   const route = prioritizedRoutes[0] ?? null
   if (!route) {
     return null
@@ -315,6 +327,7 @@ export async function resolveAssistantProviderAttemptPlan(input: {
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
       executionContext: input.executionPlan.executionContext,
+      activeTurnHistory: input.executionPlan.activeTurnHistory,
       input: input.executionPlan.input,
       profile: input.executionPlan.profile,
       promptTimeContext: input.executionPlan.promptTimeContext,
@@ -328,6 +341,7 @@ export async function resolveAssistantProviderAttemptPlan(input: {
 }
 
 export async function resolveAssistantRouteTurnPlan(input: {
+  activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   input: AssistantMessageInput
@@ -345,8 +359,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
     ...input.route.providerOptions,
   })
+  const activeTurnHistory = input.activeTurnHistory ?? null
+  const activeTurnHistoryPresent =
+    hasAssistantActiveTurnProviderHistory(activeTurnHistory)
   const nativeResumeEnabled =
-    input.profile.turnContinuityPolicy === 'continuous-provider-thread'
+    input.profile.turnContinuityPolicy === 'continuous-provider-thread' &&
+    !activeTurnHistoryPresent
   const candidateResumeProviderSessionId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
@@ -380,10 +398,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
     supportsToolRuntime,
     toolCatalog: input.toolCatalog,
   })
-  const transcriptReplayLimit = shouldPrepareBootstrapContext
+  const transcriptReplayLimit = shouldPrepareBootstrapContext && !activeTurnHistoryPresent
     ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
     : null
-  const conversationMessages = transcriptReplayLimit
+  const transcriptConversationMessages = transcriptReplayLimit
     ? removeTrailingCurrentUserPrompt(
         await loadAssistantConversationMessages({
           limit: transcriptReplayLimit,
@@ -393,6 +411,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.prompt,
       )
     : undefined
+  const conversationMessages =
+    transcriptConversationMessages && transcriptConversationMessages.length > 0
+      ? transcriptConversationMessages
+      : undefined
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
     providerCapabilities,
@@ -477,6 +499,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     assistantCliContract,
     cliEnv: input.sharedPlan.cliAccess.env,
     conversationMessages,
+    activeTurnMessages: activeTurnHistory?.messages ?? undefined,
     continuityContext: null,
     diagnosticsPolicy,
     onboardingCompletionFallbackReason:

@@ -1286,6 +1286,213 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
+  it('uses explicit active-turn history instead of native resume for active continuations', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'provider-session-primary',
+      resumeRouteId: 'route-primary',
+      turnCount: 1,
+    })
+    const route = createRoute({
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
+      routeId: 'route-primary',
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'bound-tools',
+      requestFormat: 'messages',
+      supportsNativeResume: true,
+      supportsToolRuntime: true,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.resumeState,
+    )
+    runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue(
+      'provider-session-primary',
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-next',
+        response: 'Final response after late input',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      activeTurnHistory: {
+        acceptedInputIds: ['initial'],
+        messages: [
+          {
+            content: 'Initial active-turn prompt',
+            role: 'user',
+          },
+          {
+            content: 'Draft response before late input',
+            role: 'assistant',
+          },
+        ],
+        nonReplayableProviderWork: false,
+      },
+      input: createMessageInput({
+        prompt: 'Late active-turn follow-up',
+      }),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-active-continuation-history',
+    })
+
+    expect(runnerMocks.resolveAssistantProviderResumeKey).not.toHaveBeenCalled()
+    expect(runnerMocks.listAssistantTranscriptEntries).not.toHaveBeenCalled()
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeTurnMessages: [
+          {
+            content: 'Initial active-turn prompt',
+            role: 'user',
+          },
+          {
+            content: 'Draft response before late input',
+            role: 'assistant',
+          },
+        ],
+        conversationMessages: undefined,
+        resumeProviderSessionId: null,
+        userPrompt: 'Late active-turn follow-up',
+      }),
+    )
+  })
+
+  it('does not fail over active continuations after prior non-replayable work', async () => {
+    const primaryRoute = createRoute({
+      label: 'Primary',
+      routeId: 'route-primary',
+    })
+    const backupRoute = createRoute({
+      label: 'Backup',
+      routeId: 'route-backup',
+    })
+    const retryableError = createError('retryable upstream failure', 'RATE_LIMIT', {
+      retryable: true,
+    })
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createFailedAttemptResult({
+        error: retryableError,
+        executedToolCount: 0,
+        providerActionCount: 0,
+      }),
+    )
+    runnerMocks.recordAssistantFailoverRouteFailure.mockResolvedValue(
+      createFailoverState({
+        routeId: primaryRoute.routeId,
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      activeTurnHistory: {
+        acceptedInputIds: ['initial'],
+        messages: [
+          {
+            content: 'Initial active-turn prompt',
+            role: 'user',
+          },
+          {
+            content: 'Draft after tool work',
+            role: 'assistant',
+          },
+        ],
+        nonReplayableProviderWork: true,
+      },
+      input: createMessageInput({
+        prompt: 'Late active-turn follow-up',
+      }),
+      plan: createTurnPlan({}),
+      resolvedSession: createAssistantSession(),
+      routes: [primaryRoute, backupRoute],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-active-continuation-freeze',
+    })
+
+    expect(outcome).toEqual({
+      kind: 'failed_terminal',
+      error: retryableError,
+      route: primaryRoute,
+      session: createAssistantSession(),
+    })
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledTimes(1)
+    expect(runnerMocks.recordAssistantDiagnosticEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'provider.failover.applied',
+      }),
+    )
+    expect(extractReceiptKinds()).toEqual([
+      'provider.attempt.started',
+      'provider.attempt.failed',
+    ])
+  })
+
+  it('keeps active continuations on the primary route even when cooldown would normally prefer a backup', async () => {
+    const primaryRoute = createRoute({
+      label: 'Primary',
+      routeId: 'route-primary',
+    })
+    const backupRoute = createRoute({
+      label: 'Backup',
+      routeId: 'route-backup',
+    })
+
+    runnerMocks.isAssistantFailoverRouteCoolingDown.mockImplementation(
+      ({ route }: { route: ResolvedAssistantFailoverRoute }) =>
+        route.routeId === primaryRoute.routeId,
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-primary',
+        response: 'Primary continuation answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      activeTurnHistory: {
+        acceptedInputIds: ['initial'],
+        messages: [
+          {
+            content: 'Initial active-turn prompt',
+            role: 'user',
+          },
+          {
+            content: 'Draft after tool work',
+            role: 'assistant',
+          },
+        ],
+        nonReplayableProviderWork: true,
+      },
+      input: createMessageInput({
+        prompt: 'Late active-turn follow-up',
+      }),
+      plan: createTurnPlan({}),
+      resolvedSession: createAssistantSession(),
+      routes: [primaryRoute, backupRoute],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-active-continuation-cooldown-freeze',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        route: primaryRoute,
+      },
+    })
+    expect(extractReceiptKinds()).toEqual([
+      'provider.attempt.started',
+      'provider.attempt.succeeded',
+    ])
+  })
+
   it('settles a narrow onboarding completion fallback when no command surface is available', async () => {
     const route = createRoute({
       routeId: 'route-no-command-surface',
