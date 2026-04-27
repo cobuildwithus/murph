@@ -133,14 +133,20 @@ async function runWorkspaceChildJob(input: {
   localInternalProxyBaseUrl: string | null;
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
 }) {
+  let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request);
   const platform = buildHostedExecutionRuntimePlatform({
     boundUserId: readHostedExecutionRunnerJobUserId(input.job),
     commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
     internalWorkerProxyToken: input.internalWorkerProxyToken,
     localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
     workspaceCheckpointBridge: {
-      readCurrentLease: () =>
-        createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request),
+      readCurrentLease: () => currentLease,
+      recordCheckpoint: ({ workspaceVersion }) => {
+        currentLease = {
+          ...currentLease,
+          workspaceVersion,
+        };
+      },
     },
   });
 

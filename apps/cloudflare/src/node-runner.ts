@@ -155,11 +155,17 @@ function createHostedWorkspaceCheckpointBridgeAuthority(input: {
   input: HostedExecutionWorkspaceInvocationJobInput;
   readWorkspaceBridgeLease: HostedWorkspaceInvocationRunnerDependencies["readWorkspaceBridgeLease"];
 }): HostedWorkspaceCheckpointBridgeAuthority {
-  const staticLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.input.request);
+  let currentLease = createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.input.request);
   return {
     readCurrentLease: async () =>
       await (input.readWorkspaceBridgeLease
         ? input.readWorkspaceBridgeLease(input.input)
-        : staticLease),
+        : currentLease),
+    recordCheckpoint: ({ workspaceVersion }) => {
+      currentLease = {
+        ...currentLease,
+        workspaceVersion,
+      };
+    },
   };
 }

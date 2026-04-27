@@ -691,6 +691,77 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it("advances artifact upload lease headers after a successful workspace checkpoint", async () => {
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
+        return new Response(JSON.stringify({
+          checkpointed: true,
+          workspace: {
+            checkpointedAt: "2026-04-26T00:00:04.000Z",
+            createdAt: "2026-04-26T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: {},
+            snapshotRef: null,
+            updatedAt: "2026-04-26T00:00:04.000Z",
+            userId: "member_123",
+            version: "5",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(null, { status: 200 });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint: ({ workspaceVersion }) => {
+          currentLease = {
+            ...currentLease,
+            workspaceVersion,
+          };
+        },
+      },
+    });
+
+    await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {},
+      snapshotRef: null,
+    });
+    await platform.artifactStore.put({
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const artifactRequest = requireFetchRequest(fetchMock.mock.calls[1], "artifact upload");
+    expect(artifactRequest.url).toBe(`http://artifacts.worker/objects/${"a".repeat(64)}`);
+    expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+  });
+
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       checkpointed: true,
