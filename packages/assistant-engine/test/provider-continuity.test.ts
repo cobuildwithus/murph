@@ -220,6 +220,31 @@ describe('flat prompt native resume', () => {
     expect(prompt).toBe('User message:\nCurrent user turn')
   })
 
+  it('disables native resume when active-turn history is present for flat-prompt providers', () => {
+    const prompt = resolveAssistantProviderPrompt({
+      activeTurnMessages: [
+        { role: 'user', content: 'Initial active turn prompt' },
+        { role: 'assistant', content: 'Draft before late input' },
+      ],
+      continuityContext: 'Bootstrap context for explicit continuation.',
+      conversationMessages: [],
+      providerConfig: codexConfig,
+      resumeProviderSessionId: 'codex-session-1',
+      systemPrompt: 'System/bootstrap instructions.',
+      userPrompt: 'Late active turn follow-up',
+      workingDirectory: '/tmp',
+    })
+
+    expect(prompt).toBe(
+      [
+        'System/bootstrap instructions.',
+        'Active turn so far:\nUser:\nInitial active turn prompt\n\nAssistant:\nDraft before late input',
+        'Bootstrap context for explicit continuation.',
+        'User message:\nLate active turn follow-up',
+      ].join('\n\n'),
+    )
+  })
+
   it('restores bootstrap prompt and transcript when a flat-prompt resume falls back fresh', () => {
     const prompt = resolveAssistantProviderPrompt({
       continuityContext: 'Fresh bootstrap context.',
@@ -250,7 +275,7 @@ describe('provider message history modes', () => {
     provider: 'openai-compatible',
   })
 
-  it('serializes OpenAI Responses fallback history as text bootstrap context', () => {
+  it('serializes OpenAI Responses fallback history as structured messages', () => {
     const input = {
       conversationMessages: [
         { role: 'user' as const, content: 'Earlier user turn' },
@@ -262,12 +287,15 @@ describe('provider message history modes', () => {
       workingDirectory: '/tmp',
     }
 
-    expect(resolveAssistantProviderHistoryMode(input)).toBe('text-bootstrap')
+    expect(resolveAssistantProviderHistoryMode(input)).toBe('structured-messages')
     expect(buildAssistantProviderMessages(input)).toEqual([
       {
         role: 'user',
-        content:
-          'Conversation so far:\nUser:\nEarlier user turn\n\nAssistant:\nEarlier assistant turn',
+        content: 'Earlier user turn',
+      },
+      {
+        role: 'assistant',
+        content: 'Earlier assistant turn',
       },
       {
         role: 'user',
@@ -288,11 +316,10 @@ describe('provider message history modes', () => {
       workingDirectory: '/tmp',
     }
 
-    expect(resolveAssistantProviderHistoryMode(input)).toBe('text-bootstrap')
+    expect(resolveAssistantProviderHistoryMode(input)).toBe('structured-messages')
     expect(buildAssistantProviderMessages(input)[0]).toEqual({
       role: 'user',
-      content:
-        'Conversation so far:\nUser:\nEarlier user turn\n\nAssistant:\nEarlier assistant turn',
+      content: 'Earlier user turn',
     })
   })
 
@@ -313,6 +340,36 @@ describe('provider message history modes', () => {
       {
         role: 'user',
         content: 'Current user turn',
+      },
+    ])
+  })
+
+  it('uses explicit active-turn messages instead of OpenAI Responses native resume', () => {
+    const input = {
+      activeTurnMessages: [
+        { role: 'user' as const, content: 'Initial active turn prompt' },
+        { role: 'assistant' as const, content: 'Draft before late input' },
+      ],
+      conversationMessages: [],
+      providerConfig: responsesConfig,
+      resumeProviderSessionId: 'resp_123',
+      userPrompt: 'Late active turn follow-up',
+      workingDirectory: '/tmp',
+    }
+
+    expect(resolveAssistantProviderHistoryMode(input)).toBe('structured-messages')
+    expect(buildAssistantProviderMessages(input)).toEqual([
+      {
+        role: 'user',
+        content: 'Initial active turn prompt',
+      },
+      {
+        role: 'assistant',
+        content: 'Draft before late input',
+      },
+      {
+        role: 'user',
+        content: 'Late active turn follow-up',
       },
     ])
   })

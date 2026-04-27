@@ -313,16 +313,6 @@ test('canUseAssistantDaemonForMessage rejects local-only hooks and missing daemo
     canUseAssistantDaemonForMessage(
       {
         ...TEST_MESSAGE_INPUT,
-        beforeDelivery: async () => undefined,
-      },
-      TEST_ENV,
-    ),
-    false,
-  )
-  assert.equal(
-    canUseAssistantDaemonForMessage(
-      {
-        ...TEST_MESSAGE_INPUT,
         executionContext: {
           hosted: null,
         },

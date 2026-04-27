@@ -3,9 +3,14 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import {
-  nudgeHostedRunnerBestEffort,
+  nudgeHostedRunnerUserBestEffortResult,
 } from "../hosted-runner/control";
 import { hostedOnboardingError } from "./errors";
+import {
+  finishHostedOnboardingTiming,
+  startHostedOnboardingTiming,
+  toHostedOnboardingLogIdSuffix,
+} from "./logging";
 import {
   requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
@@ -54,6 +59,7 @@ export async function handleHostedStripeWebhook(input: {
   await reconcileHostedStripeWebhookEvent({
     duplicate: recorded.duplicate,
     eventId: event.id,
+    eventType: recorded.type,
     prisma,
   });
 
@@ -67,6 +73,7 @@ export async function handleHostedStripeWebhook(input: {
 async function reconcileHostedStripeWebhookEvent(input: {
   duplicate: boolean;
   eventId: string;
+  eventType: string;
   prisma: PrismaClient;
 }): Promise<void> {
   if (input.duplicate) {
@@ -110,9 +117,29 @@ async function reconcileHostedStripeWebhookEvent(input: {
     return;
   }
 
-  await nudgeHostedRunnerBestEffort({
+  const nudgeTiming = startHostedOnboardingTiming(
+    "hosted-onboarding.stripe.runner-nudge",
+    {
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      eventType: input.eventType,
+      hostedExecutionEventIdPresent: true,
+      hostedExecutionEventIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionEventId),
+      hostedExecutionMemberIdPresent: true,
+      hostedExecutionMemberIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionMemberId),
+    },
+  );
+  const result = await nudgeHostedRunnerUserBestEffortResult({
     context: "stripe.webhook",
     userId: hostedExecutionMemberId,
+  });
+  finishHostedOnboardingTiming(nudgeTiming, result.accepted ? "accepted" : "not-accepted", {
+    accepted: result.accepted,
+    alarmScheduled: result.alarmScheduled,
+    alreadyRunning: result.alreadyRunning,
+    configured: result.configured,
+    errorCode: result.errorCode,
+    inFlight: result.inFlight,
+    nextAlarmAtPresent: result.nextAlarmAtPresent,
   });
 }
 

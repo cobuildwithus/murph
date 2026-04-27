@@ -27,6 +27,10 @@ export type {
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
 export type {
+  AssistantActiveTurnInputCheckpointHook,
+  AssistantActiveTurnInputCheckpointInput,
+} from './turn-input.js'
+export type {
   AssistantNotificationDecision,
   AssistantNotificationFirstContactPolicy,
   AssistantNotificationInput,

@@ -30,10 +30,6 @@ import type {
   AssistantTurnInputRefreshResult,
   AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
-import {
-  createAssistantTurnBeforeDeliveryHook,
-  isAssistantTurnRevisionRequiredError,
-} from "@murphai/assistant-engine";
 import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -42,7 +38,8 @@ import {
   createHostedAssistantTurnInputPort,
 } from "../src/hosted-runtime/turn-input.ts";
 import type {
-  HostedRuntimeBeforeDeliveryMailboxRefresh,
+  HostedRuntimeActiveTurnInputCheckpoint,
+  HostedRuntimeActiveTurnInputMailboxRefresh,
 } from "../src/hosted-runtime/platform.ts";
 
 type InboxServicesInput = Parameters<
@@ -91,8 +88,9 @@ function createCaptureSummary(
 }
 
 function createPort(input: {
+  activeTurnInputCheckpoint?: HostedRuntimeActiveTurnInputCheckpoint;
   basePort: AssistantTurnInputPort;
-  beforeDeliveryRefresh?: HostedRuntimeBeforeDeliveryMailboxRefresh;
+  activeTurnInputRefresh?: HostedRuntimeActiveTurnInputMailboxRefresh;
 }): AssistantTurnInputPort | undefined {
   const inboxServices = {} as InboxServicesInput;
   mocks.createInboxBackedAssistantTurnInputPort.mockReturnValueOnce(input.basePort);
@@ -111,8 +109,11 @@ function createPort(input: {
           readRawEmailMessage: vi.fn(async () => null),
           sendEmail: vi.fn(async () => undefined),
         },
-        ...(input.beforeDeliveryRefresh
-          ? { refreshMailboxBeforeDelivery: input.beforeDeliveryRefresh }
+        ...(input.activeTurnInputCheckpoint
+          ? { checkpointActiveTurnInput: input.activeTurnInputCheckpoint }
+          : {}),
+        ...(input.activeTurnInputRefresh
+          ? { refreshMailboxForActiveTurnInput: input.activeTurnInputRefresh }
           : {}),
       },
       platformEnv: {},
@@ -152,7 +153,46 @@ describe("createHostedAssistantTurnInputPort", () => {
     expect(mocks.createInboxBackedAssistantTurnInputPort).not.toHaveBeenCalled();
   });
 
-  it("runs the hosted mailbox refresh before delivery and leaves revision to the local hook", async () => {
+  it("forwards accepted active-turn input checkpoints with the hosted request id", async () => {
+    const basePort: AssistantTurnInputPort = {
+      async refresh() {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      },
+      async listNewConversationCaptures(input) {
+        return {
+          captures: [],
+          nextCursor: input.afterCursor,
+        };
+      },
+    };
+    const checkpointActiveTurnInput = vi.fn(async () => undefined);
+    const port = createPort({
+      activeTurnInputCheckpoint: checkpointActiveTurnInput,
+      basePort,
+    });
+
+    await port?.checkpointAcceptedInput?.({
+      acceptedInputIds: ["request-1"],
+      providerRequestOrdinal: 0,
+      sessionId: "session_123",
+      turnId: "turn_123",
+      vault: "/tmp/vault-root",
+    });
+
+    expect(checkpointActiveTurnInput).toHaveBeenCalledWith({
+      acceptedInputIds: ["request-1"],
+      providerRequestOrdinal: 0,
+      requestId: "req_turn_input",
+      sessionId: "session_123",
+      turnId: "turn_123",
+      vault: "/tmp/vault-root",
+    });
+  });
+
+  it("runs the hosted mailbox refresh during active turn input admission before listing captures", async () => {
     const events: string[] = [];
     const lateCapture = createCaptureSummary();
     const baseRefresh = vi.fn<AssistantTurnInputPort["refresh"]>(async (input) => {
@@ -181,7 +221,7 @@ describe("createHostedAssistantTurnInputPort", () => {
       refresh: baseRefresh,
       listNewConversationCaptures: baseListNewConversationCaptures,
     };
-    const beforeDeliveryRefresh = vi.fn<HostedRuntimeBeforeDeliveryMailboxRefresh>(
+    const activeTurnInputRefresh = vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(
       async () => {
         events.push("mailbox");
         return {
@@ -192,52 +232,74 @@ describe("createHostedAssistantTurnInputPort", () => {
     );
     const port = createPort({
       basePort,
-      beforeDeliveryRefresh,
+      activeTurnInputRefresh,
     });
     expect(port).toBeDefined();
 
-    const hook = createAssistantTurnBeforeDeliveryHook({
-      afterCursor: {
-        captureId: "cap_previous",
-        createdAt: "2026-04-23T00:00:01.000Z",
-        occurredAt: "2026-04-23T00:00:00.000Z",
+    await expect(port?.refresh({ phase: "after_provider" })).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    await expect(
+      port?.listNewConversationCaptures({
+        afterCursor: {
+          captureId: "cap_previous",
+          createdAt: "2026-04-23T00:00:01.000Z",
+          occurredAt: "2026-04-23T00:00:00.000Z",
+        },
+        conversation: {
+          accountId: lateCapture.accountId,
+          actorId: lateCapture.actorId,
+          actorIsSelf: lateCapture.actorIsSelf,
+          source: lateCapture.source,
+          threadId: lateCapture.threadId,
+          threadIsDirect: lateCapture.threadIsDirect,
+        },
+        knownCaptureIds: ["cap_previous"],
+      }),
+    ).resolves.toEqual({
+      captures: [lateCapture],
+      nextCursor: {
+        captureId: lateCapture.captureId,
+        createdAt: lateCapture.createdAt ?? null,
+        occurredAt: lateCapture.occurredAt,
       },
-      conversation: {
-        accountId: lateCapture.accountId,
-        actorId: lateCapture.actorId,
-        actorIsSelf: lateCapture.actorIsSelf,
-        source: lateCapture.source,
-        threadId: lateCapture.threadId,
-        threadIsDirect: lateCapture.threadIsDirect,
-      },
-      knownCaptureIds: ["cap_previous"],
-      port: port!,
+    });
+    expect(events).toEqual(["mailbox", "base:after_provider", "list"]);
+    expect(activeTurnInputRefresh).toHaveBeenCalledWith({
+      requestId: "req_turn_input",
+    });
+  });
+
+  it("runs hosted mailbox refresh during the commit-barrier phase", async () => {
+    const basePort: AssistantTurnInputPort = {
+      refresh: vi.fn<AssistantTurnInputPort["refresh"]>(async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      })),
+      listNewConversationCaptures: vi.fn<
+        AssistantTurnInputPort["listNewConversationCaptures"]
+      >(async (query) => ({
+        captures: [],
+        nextCursor: query.afterCursor,
+      })),
+    };
+    const activeTurnInputRefresh = vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(
+      async () => ({
+        progressed: true,
+        reason: "ingested_input",
+      }),
+    );
+    const port = createPort({
+      basePort,
+      activeTurnInputRefresh,
     });
 
-    let caught: unknown;
-    try {
-      await hook({
-        response: "draft",
-        sessionId: "sess_hosted",
-        turnId: "turn_hosted",
-        vault: "/tmp/vault-root",
-      });
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(isAssistantTurnRevisionRequiredError(caught)).toBe(true);
-    if (!isAssistantTurnRevisionRequiredError(caught)) {
-      throw new Error("expected AssistantTurnRevisionRequiredError");
-    }
-    expect(caught.captures).toEqual([lateCapture]);
-    expect(caught.nextCursor).toEqual({
-      captureId: lateCapture.captureId,
-      createdAt: lateCapture.createdAt ?? null,
-      occurredAt: lateCapture.occurredAt,
+    await expect(port?.refresh({ phase: "commit_barrier" })).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
     });
-    expect(events).toEqual(["mailbox", "base:before_delivery", "list"]);
-    expect(beforeDeliveryRefresh).toHaveBeenCalledWith({
+    expect(activeTurnInputRefresh).toHaveBeenCalledWith({
       requestId: "req_turn_input",
     });
   });
@@ -255,27 +317,27 @@ describe("createHostedAssistantTurnInputPort", () => {
         nextCursor: query.afterCursor,
       })),
     };
-    const beforeDeliveryResult: AssistantTurnInputRefreshResult = {
+    const activeTurnInputResult: AssistantTurnInputRefreshResult = {
       progressed: true,
       reason: "ingested_input",
     };
-    const beforeDeliveryRefresh = vi.fn<HostedRuntimeBeforeDeliveryMailboxRefresh>(
-      async () => beforeDeliveryResult,
+    const activeTurnInputRefresh = vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(
+      async () => activeTurnInputResult,
     );
     const port = createPort({
       basePort,
-      beforeDeliveryRefresh,
+      activeTurnInputRefresh,
     });
 
-    await expect(port?.refresh({ phase: "before_delivery" })).resolves.toEqual(
-      beforeDeliveryResult,
+    await expect(port?.refresh({ phase: "after_provider" })).resolves.toEqual(
+      activeTurnInputResult,
     );
-    expect(beforeDeliveryRefresh).toHaveBeenCalledWith({
+    expect(activeTurnInputRefresh).toHaveBeenCalledWith({
       requestId: "req_turn_input",
     });
   });
 
-  it("logs and rethrows when hosted mailbox refresh fails before delivery", async () => {
+  it("logs and rethrows when hosted mailbox refresh fails during active turn input admission", async () => {
     vi.clearAllMocks();
 
     const baseRefresh = vi.fn<AssistantTurnInputPort["refresh"]>();
@@ -287,18 +349,18 @@ describe("createHostedAssistantTurnInputPort", () => {
       listNewConversationCaptures: baseListNewConversationCaptures,
     };
     const hostedError = new Error("hosted mailbox refresh failed");
-    const beforeDeliveryRefresh = vi
-      .fn<HostedRuntimeBeforeDeliveryMailboxRefresh>()
+    const activeTurnInputRefresh = vi
+      .fn<HostedRuntimeActiveTurnInputMailboxRefresh>()
       .mockRejectedValueOnce(hostedError);
 
-    const port = createPort({ basePort, beforeDeliveryRefresh });
+    const port = createPort({ basePort, activeTurnInputRefresh });
     expect(port).toBeDefined();
 
-    await expect(port?.refresh({ phase: "before_delivery" })).rejects.toThrow(
+    await expect(port?.refresh({ phase: "after_provider" })).rejects.toThrow(
       "hosted mailbox refresh failed",
     );
 
-    expect(beforeDeliveryRefresh).toHaveBeenCalledWith({
+    expect(activeTurnInputRefresh).toHaveBeenCalledWith({
       requestId: "req_turn_input",
     });
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(1);
@@ -309,7 +371,8 @@ describe("createHostedAssistantTurnInputPort", () => {
       },
       error: hostedError,
       level: "warn",
-      message: "Hosted assistant mailbox refresh failed before delivery.",
+      message:
+        "Hosted assistant mailbox refresh failed during active turn input admission.",
       phase: "wake.running",
       wake: TIMER_WAKE,
     });

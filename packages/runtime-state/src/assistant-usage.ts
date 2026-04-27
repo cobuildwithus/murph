@@ -55,6 +55,7 @@ export interface AssistantUsageRecord {
   outputTokens: number | null;
   provider: string;
   providerName: string | null;
+  providerRequestOrdinal?: number;
   reasoningTokens: number | null;
   reportingUserId: string | null;
   requestedModel: string | null;
@@ -77,12 +78,19 @@ export interface PendingAssistantUsageRecordParseFailure {
 
 export function createAssistantUsageId(input: {
   attemptCount: number;
+  providerRequestOrdinal?: number;
   turnId: string;
 }): string {
   const attemptCount = normalizeRequiredInteger(input.attemptCount, "attemptCount");
+  const providerRequestOrdinal = normalizeOptionalInteger(
+    input.providerRequestOrdinal,
+    "providerRequestOrdinal",
+  ) ?? 0;
   const turnId = normalizeRequiredString(input.turnId, "turnId");
 
-  return `${turnId}.attempt-${attemptCount}`;
+  return providerRequestOrdinal === 0
+    ? `${turnId}.attempt-${attemptCount}`
+    : `${turnId}.request-${providerRequestOrdinal}.attempt-${attemptCount}`;
 }
 
 export function resolvePendingAssistantUsagePath(
@@ -185,9 +193,12 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
   const inputTokens = normalizeOptionalInteger(record.inputTokens, "inputTokens");
   const occurredAt = normalizeRequiredString(record.occurredAt, "occurredAt");
   const outputTokens = normalizeOptionalInteger(record.outputTokens, "outputTokens");
+  const providerRequestOrdinal =
+    normalizeOptionalInteger(record.providerRequestOrdinal, "providerRequestOrdinal") ?? 0;
   const turnId = normalizeRequiredString(record.turnId, "turnId");
   const usageId = normalizeCanonicalAssistantUsageId({
     attemptCount,
+    providerRequestOrdinal,
     turnId,
     usageId: normalizeRequiredString(record.usageId, "usageId"),
   });
@@ -207,6 +218,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     outputTokens,
     provider: normalizeRequiredString(record.provider, "provider"),
     providerName: normalizeOptionalString(record.providerName, "providerName"),
+    ...(record.providerRequestOrdinal === undefined ? {} : { providerRequestOrdinal }),
     reasoningTokens: normalizeOptionalInteger(record.reasoningTokens, "reasoningTokens"),
     reportingUserId: normalizeOptionalString(record.reportingUserId, "reportingUserId"),
     requestedModel: normalizeOptionalString(record.requestedModel, "requestedModel"),
@@ -397,17 +409,19 @@ function normalizeRequiredInteger(value: unknown, label: string): number {
 
 function normalizeCanonicalAssistantUsageId(input: {
   attemptCount: number;
+  providerRequestOrdinal: number;
   turnId: string;
   usageId: string;
 }): string {
   const canonicalUsageId = createAssistantUsageId({
     attemptCount: input.attemptCount,
+    providerRequestOrdinal: input.providerRequestOrdinal,
     turnId: input.turnId,
   });
 
   if (input.usageId !== canonicalUsageId) {
     throw new TypeError(
-      `usageId must match the canonical turnId/attemptCount-derived value ${canonicalUsageId}.`,
+      `usageId must match the canonical turnId/providerRequestOrdinal/attemptCount-derived value ${canonicalUsageId}.`,
     );
   }
 

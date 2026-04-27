@@ -161,8 +161,15 @@ beforeEach(() => {
   seamMocks.createAssistantUsageId
     .mockReset()
     .mockImplementation(
-      ({ attemptCount, turnId }: { attemptCount: number; turnId: string }) =>
-        `${turnId}:${attemptCount}`
+      ({
+        attemptCount,
+        providerRequestOrdinal,
+        turnId,
+      }: {
+        attemptCount: number;
+        providerRequestOrdinal?: number;
+        turnId: string;
+      }) => `${turnId}:${providerRequestOrdinal ?? 0}:${attemptCount}`
     );
   seamMocks.isAssistantSessionNotFoundError
     .mockReset()
@@ -609,6 +616,7 @@ describe("assistant pending usage seam", () => {
 
     expect(seamMocks.createAssistantUsageId).toHaveBeenCalledWith({
       attemptCount: 3,
+      providerRequestOrdinal: 0,
       turnId: "turn-usage",
     });
     expect(
@@ -636,6 +644,7 @@ describe("assistant pending usage seam", () => {
         outputTokens: 13,
         provider: "openai-compatible",
         providerName: "Runtime Provider",
+        providerRequestOrdinal: 0,
         reasoningTokens: 17,
         reportingUserId: null,
         requestedModel: "gpt-5",
@@ -648,7 +657,7 @@ describe("assistant pending usage seam", () => {
         totalTokens: 41,
         triggerKind: null,
         turnId: "turn-usage",
-        usageId: "turn-usage:3",
+        usageId: "turn-usage:0:3",
       },
     });
   });
@@ -869,7 +878,7 @@ describe("assistant delivery orchestration seam", () => {
       explicitTarget: "explicit-audience-target",
       identityId: "audience-identity",
       message: "reply body",
-      replyToMessageId: "reply-audience",
+      replyToMessageId: "reply-input",
       sessionId: session.sessionId,
       subject: null,
       threadId: "audience-thread",
@@ -1594,6 +1603,53 @@ describe("assistant turn finalizer seam", () => {
         resumeState: null,
         turnCount: 3,
         updatedAt: "2026-04-08T15:45:00.000Z",
+      })
+    );
+    expect(saved.resumeState).toBeNull();
+  });
+
+  it("does not persist provider resume state after explicit active-turn continuation history", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:50:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        providerSessionId: "provider-session-existing",
+        resumeRouteId: "route-existing",
+      },
+      turnCount: 2,
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      activeTurnUsedExplicitHistory: true,
+      input: {
+        prompt: "Late active-turn follow-up.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      providerResult: createProviderResult({
+        providerSessionId: "provider-session-new",
+        response: "Here is the revised answer.",
+        route: createRoute({ routeId: "route-active-continuation" }),
+        session,
+      }),
+      session,
+      turnContinuityPolicy: "continuous-provider-thread",
+      turnCreatedAt: "2026-04-08T15:49:00.000Z",
+      turnId: "turn-finalizer-active-continuation",
+    });
+
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastTurnAt: "2026-04-08T15:50:00.000Z",
+        resumeState: null,
+        turnCount: 3,
+        updatedAt: "2026-04-08T15:50:00.000Z",
       })
     );
     expect(saved.resumeState).toBeNull();

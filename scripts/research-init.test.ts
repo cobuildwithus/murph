@@ -759,8 +759,8 @@ exit 64
       expect(helperScript).toContain("murph-workspace");
       expect(helperScript).toContain('$0 send <label> <prompt-file>');
       expect(helperScript).toContain('$0 harvest <label> [response-file|-]');
-      expect(helperScript).toContain('match(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/u)');
-      expect(helperScript).toContain('matchAll(/https:\\/\\/chatgpt\\.com\\/c\\/\\S+/gu)');
+      expect(helperScript).toContain('match(/https:\\/\\/chatgpt\\.com\\/c\\/[A-Za-z0-9-]+/u)');
+      expect(helperScript).toContain('matchAll(chatUrlPattern)');
       expect(helperScript).toContain('managed_browser_port');
 
       assertResearchReviewGptSupportFiles(outDir);

@@ -370,16 +370,8 @@ function isSafeAssistantDetail(details: string): boolean {
 }
 
 function formatSafeAssistantReplyStatusDetail(details: string): string | null {
-  const revisionMatch = details.match(
-    /^new input arrived before delivery; revising reply with (\d+) additional capture\(s\)$/u,
-  )
-  if (revisionMatch) {
-    const count = Number.parseInt(revisionMatch[1] ?? '0', 10)
-    const noun = count === 1 ? 'message' : 'messages'
-    return `new message arrived before send; revising reply with ${count} additional ${noun}`
-  }
-
   if (
+    details.startsWith('new input accepted into active turn with ') ||
     details.startsWith('assistant still running after ') ||
     details.startsWith('assistant provider stalled after ')
   ) {

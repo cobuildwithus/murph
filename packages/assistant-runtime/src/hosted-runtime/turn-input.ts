@@ -19,9 +19,11 @@ export function createHostedAssistantTurnInputPort(input: {
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): AssistantTurnInputPort | undefined {
-  const refreshMailboxBeforeDelivery =
-    input.runtime.platform.refreshMailboxBeforeDelivery ?? null;
-  if (!refreshMailboxBeforeDelivery) {
+  const refreshMailboxForActiveTurnInput =
+    input.runtime.platform.refreshMailboxForActiveTurnInput ?? null;
+  const checkpointActiveTurnInput =
+    input.runtime.platform.checkpointActiveTurnInput ?? null;
+  if (!refreshMailboxForActiveTurnInput && !checkpointActiveTurnInput) {
     return undefined;
   }
 
@@ -32,12 +34,29 @@ export function createHostedAssistantTurnInputPort(input: {
   });
 
   return {
+    async checkpointAcceptedInput(checkpointInput) {
+      if (!checkpointActiveTurnInput) {
+        return;
+      }
+
+      await checkpointActiveTurnInput({
+        ...checkpointInput,
+        requestId: input.requestId,
+      });
+    },
     async refresh(refreshInput) {
       let mailboxRefresh: AssistantTurnInputRefreshResult | null = null;
 
-      if (refreshInput.phase === "before_delivery") {
+      if (
+        refreshInput.phase === "after_provider"
+        || refreshInput.phase === "commit_barrier"
+      ) {
+        const refreshMailbox = refreshMailboxForActiveTurnInput;
+        if (!refreshMailbox) {
+          return basePort.refresh(refreshInput);
+        }
         try {
-          mailboxRefresh = await refreshMailboxBeforeDelivery({
+          mailboxRefresh = await refreshMailbox({
             requestId: input.requestId,
           });
         } catch (error) {
@@ -48,7 +67,7 @@ export function createHostedAssistantTurnInputPort(input: {
             },
             error,
             level: "warn",
-            message: "Hosted assistant mailbox refresh failed before delivery.",
+            message: "Hosted assistant mailbox refresh failed during active turn input admission.",
             phase: "wake.running",
             wake: input.wake,
           });

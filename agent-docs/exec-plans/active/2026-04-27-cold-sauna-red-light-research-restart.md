@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-04-27
-Updated: 2026-04-27
+Updated: 2026-04-28
 
 ## Goal
 
@@ -47,8 +47,8 @@ Out of scope for startup:
 4. Send each `01-charter` through named managed browser lanes. Done.
 5. Harvest charters and validate boundaries before materialization. Done.
 6. Materialize discovery seams after each coherent charter. Done.
-7. Send and harvest discovery fanout. Running.
-8. Continue discovery, snowball, source-ledger, extraction, synthesis, page-builder, evidence QA, safety QA, and final reducer phases when prior artifacts validate. Running for Bryan Johnson Sauna extraction; pending for the other three until discovery is fully harvested.
+7. Send and harvest discovery fanout. Done.
+8. Continue snowball, source-ledger, extraction, synthesis, page-builder, evidence QA, safety QA, and final reducer phases when prior artifacts validate. Running for Bryan Johnson Sauna section synthesis, Finnish dry sauna source-ledger next step, and guarded cold plunge / red-light glasses / Bryan 26 retries.
 
 ## Current State
 
@@ -63,22 +63,30 @@ Fresh restart workspaces:
 
 Current thread state:
 
-- Cold plunge: `01-charter` is harvested and succeeded on `eragon`; discovery prompts are materialized. Discovery sends are recorded for `02` through `11`. Discovery `02` through `10` have harvested successfully; `11` has a saved `mountain` URL pending harvest.
-- Bryan Johnson Sauna: `01-charter` is harvested and succeeded on `phlebas`; all 10 discovery shards, `12-snowball-gap-fill`, and `11-source-ledger-reducer` have harvested successfully. The reducer produced 294 canonical source records and 11 extraction batches. Concrete extraction prompts/commands exist for all batches. `12-source-extraction-batch-001`, `12-source-extraction-batch-002`, `12-source-extraction-batch-003`, and `12-source-extraction-batch-004` harvested successfully on `vonneumann`. Batches `005` through `010` have been sent on `vonneumann` and have saved URLs. Batches `005` through `007` are queued behind the active `vonneumann` lane wake, batches `008-01`/`008-02` are queued behind `005` through `007`, and batches `009`/`010` are queued behind `008-01`/`008-02`.
-- Finnish Dry Sauna: `01-charter` is harvested and succeeded on `mountain`; discovery prompts are materialized. Discovery sends are recorded for `02` through `11`; `02`, `03`, `04`, `05`, `06`, `07`, `09`, and `10` have harvested successfully, while saved `08` and `11` are pending harvest.
-- Red light glasses before bed: the first send used the wrong provisional protocol namespace and was moved aside under `state/abandoned/`. The corrected charter has harvested successfully and materialized. Discovery `02`, `03`, `04`, `05`, `06`, `07`, `08`, and `10` have harvested successfully. Shard `07` succeeded on `phlebas` after a shallow no-artifact `mountain` answer; shard `09` is waiting with the exact saved URL visible in `mountain`.
+- Cold plunge: `01-charter` is harvested and succeeded on `eragon`; discovery prompts are materialized. Discovery sends are recorded for `02` through `11`, and all discovery shards `02` through `11` have harvested successfully. `10-snowball-gap-fill` is materialized. A clean Vonneumann retry is sent and actively harvesting with URL validation.
+- Bryan Johnson Sauna: `01-charter` is harvested and succeeded on `phlebas`; all 10 discovery shards, `12-snowball-gap-fill`, `11-source-ledger-reducer`, and all 11 extraction batches (`001` through `010`, including split batch `008-01`/`008-02`) have harvested successfully. The reducer produced 294 canonical source records and the extracted corpus is in section synthesis. Section synthesis prompts and wrappers are materialized for seams `20` through `29`. Clean section harvests have succeeded for `20`, `21`, `22`, `23`, `24`, `25`, `27`, `28`, and `29`. Seam `26-section-synthesis-outcomes-measurement` remains pending; recent Eragon, Phlebas, Hercules, Mountain, and Vonneumann retries either collided with unrelated active workflows or failed to record a usable URL and were quarantined.
+- Finnish Dry Sauna: `01-charter` is harvested and succeeded on `mountain`; discovery prompts are materialized. Discovery sends are recorded for `02` through `11`, and all discovery shards `02` through `11` have harvested successfully. `10-snowball-gap-fill` is harvested successfully on a clean Mountain conversation after the contaminated Phlebas send state was quarantined. `11-source-ledger-reducer` prompt and command wrappers are materialized, cleanly sent on Phlebas, and actively harvesting.
+- Red light glasses before bed: the first send used the wrong provisional protocol namespace and was moved aside under `state/abandoned/`. The corrected charter has harvested successfully and materialized. Discovery `02`, `03`, `04`, `05`, `06`, `07`, `08`, `09`, and `10` have harvested successfully. Shard `07` succeeded on `phlebas` after a shallow no-artifact `mountain` answer. `10-snowball-gap-fill` is cleanly sent on Vonneumann and actively harvesting.
 
 Active restart queues:
 
-- `restart_mountain_ordered_current4`: waits for active `mountain` wakes to clear, then harvests red-light `09`, cold plunge `11`, Finnish dry sauna `08`, and Finnish dry sauna `11` in that order on their recorded lane.
-- `bryan_harvest_batches_005_007_after_002_004`: waits for active `vonneumann` wakes to clear, then harvests Bryan Johnson Sauna extraction batches `005` through `007`.
-- `bryan_harvest_batches_008_after_005_007`: waits for the `005` through `007` queue to finish, then harvests Bryan Johnson Sauna extraction batches `008-01` and `008-02`.
-- `bryan_harvest_batches_009_010_after_008`: waits for the `008-01`/`008-02` queue to finish, then harvests Bryan Johnson Sauna extraction batches `009` and `010`.
+- `restart_cold_snowball_harvest_only_vonneumann_20260428`: actively harvests cold plunge `10-snowball-gap-fill` on its clean Vonneumann URL.
+- `red_snowball_vonneumann_harvest_recorded`: actively harvests red-light glasses `10-snowball-gap-fill` on its clean Vonneumann URL.
+- `finn_ledger_harvest_phlebas_recorded_20260428`: actively harvests Finnish dry sauna `11-source-ledger-reducer` on its clean Phlebas URL.
+
+Recent queues that should not be treated as active:
+
+- `restart_snowball_retry_clean_lanes` exited after starting only the Finnish clean retry; Finnish later harvested successfully through the replacement Mountain watcher.
+- `bryan_hc22_26_direct_recovery5` harvested Bryan `22` successfully but did not leave a valid active Bryan `26` run.
+- `bryan_page_builder_after_sections` and `bryan_qa_final_after_page_builder` are not listed as active. If restarted, do not use Eragon for Pro sends until that profile exposes the required Pro model again.
+- Bryan `26-section-synthesis-outcomes-measurement` still needs a clean send. Recent attempts were abandoned because they produced no URL, reused the known Eragon `69ef65ba...` conversation, or resolved to active Finnish/prolonged-fasting URLs.
 
 Important browser notes:
 
 - User-reported conversation `69ec305e-09a0-839d-965e-92ed12427e86` belongs to an older `digital-sunset` seam, not this restart, so it is intentionally ignored for this workflow.
 - Live `phlebas` conversation `69ef4fd8-4c0c-8398-b231-f01268a42f57` belongs to the separate pre-sleep silent meditation row and is not part of this restart.
+- Bryan Johnson Sauna `22-section-synthesis-dose-implementation` conversation `69ef0665-c5c4-839e-b629-1a377c5cee22` was accidentally reused by the new prolonged-fasting charter send on `hercules`. The local watcher for that seam was stopped to prevent harvesting mixed-thread output. A later clean `22` resend exists on Hercules and is the only active `22` harvest target.
+- Contaminated retry states from 2026-04-28 for cold plunge snowball, red-light glasses snowball, Bryan `26`, and Finnish `11-source-ledger-reducer` were moved under each workspace's `state/abandoned/` folder after their saved URLs matched unrelated active workflows or failed to produce a valid URL.
 
 ## Verification
 
@@ -100,6 +108,8 @@ Results so far:
 - Privacy scan over the tracked plan/ledger changes and new charter prompts found no local identifier matches.
 - Charter status readback found cold plunge, Bryan Johnson Sauna, Finnish Dry Sauna, and the corrected red-light glasses charter harvested successfully and materialized.
 - Discovery sends are now fully recorded for cold plunge `02` through `11`, Bryan Johnson Sauna `02` through `11`, Finnish Dry Sauna `02` through `11`, and red-light glasses `02` through `10`. No restart discovery send process remains active.
-- Harvest-only lane queues are active for eragon, vonneumann, mountain, and phlebas saved restart threads. They wait for recorded-lane wake counts to clear before harvesting and do not send new prompts.
-- Current downloaded restart artifacts include all four corrected charters, all Bryan Johnson Sauna discovery shards plus `12-snowball-gap-fill`, cold plunge `02` through `08` plus `10`, Finnish Dry Sauna `02` through `07` plus `10`, and red-light discovery `02`, `04`, `06`, `08`, and `10`.
-- Bryan Johnson Sauna `11-source-ledger-reducer` is sent on `hercules` and queued for harvest. Do not start extraction until `canonical_source_ledger_v1.json` and `source_extraction_batches_v1.json` validate under `downloads/11-source-ledger-reducer/`.
+- Previous harvest-only lane queues for discovery shards have either completed or been stopped after the discovery phase finished.
+- Current downloaded restart artifacts include all four corrected charters, all cold plunge discovery shards `02` through `11`, all Bryan Johnson Sauna discovery shards plus `12-snowball-gap-fill`, all Finnish Dry Sauna discovery shards `02` through `11` plus `10-snowball-gap-fill`, and all red-light discovery shards `02` through `10`.
+- Bryan Johnson Sauna extraction batches `001` through `010` all harvested successfully. Section synthesis seams `20`, `21`, `22`, `23`, `24`, `25`, `27`, `28`, and `29` have harvested successfully; `26-section-synthesis-outcomes-measurement` remains the only missing section synthesis seam. Next phases are page builder, evidence QA, safety QA, and final reducer after all section synthesis seams validate.
+- Bryan Johnson Sauna downstream prompt and command wrappers are materialized for `30-page-builder`, `31-evidence-qa`, `32-safety-qa`, and `34-final-landing-reducer`; the page-builder controller will not send until all section synthesis seams validate.
+- Finnish dry sauna `10-snowball-gap-fill` harvested successfully on Mountain. The Finnish source-ledger reducer prompt and wrappers are materialized and the reducer harvest is active on Phlebas.

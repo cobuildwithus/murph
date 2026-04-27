@@ -152,13 +152,21 @@ beforeEach(() => {
 
 describe("runHostedAssistantAutomation", () => {
   it("wraps hosted mailbox refreshes through the local inbox-backed port", async () => {
-    const refreshMailboxBeforeDelivery = vi.fn(async () => ({
+    const checkpointActiveTurnInput = vi.fn(async () => undefined);
+    const refreshMailboxForActiveTurnInput = vi.fn(async () => ({
       progressed: true,
       reason: "ingested_input" as const,
     }));
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       await input.turnInputPort?.refresh({
-        phase: "before_delivery",
+        phase: "after_provider",
+      });
+      await input.turnInputPort?.checkpointAcceptedInput?.({
+        acceptedInputIds: ["request-1"],
+        providerRequestOrdinal: 0,
+        sessionId: "session_123",
+        turnId: "turn_123",
+        vault: "/tmp/vault-root",
       });
       return {
         nextWakeAt: null,
@@ -195,7 +203,8 @@ describe("runHostedAssistantAutomation", () => {
               readRawEmailMessage: vi.fn(async () => null),
               sendEmail: vi.fn(async () => undefined),
             },
-            refreshMailboxBeforeDelivery,
+            checkpointActiveTurnInput,
+            refreshMailboxForActiveTurnInput,
           },
           platformEnv: {},
         },
@@ -206,8 +215,16 @@ describe("runHostedAssistantAutomation", () => {
       redactedLogEntries: expect.any(Array),
     });
 
-    expect(refreshMailboxBeforeDelivery).toHaveBeenCalledWith({
+    expect(refreshMailboxForActiveTurnInput).toHaveBeenCalledWith({
       requestId: "req_turn_input",
+    });
+    expect(checkpointActiveTurnInput).toHaveBeenCalledWith({
+      acceptedInputIds: ["request-1"],
+      providerRequestOrdinal: 0,
+      requestId: "req_turn_input",
+      sessionId: "session_123",
+      turnId: "turn_123",
+      vault: "/tmp/vault-root",
     });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({

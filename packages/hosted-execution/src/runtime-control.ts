@@ -291,7 +291,8 @@ export interface HostedWorkspaceReadResponse {
 
 export const HOSTED_WORKSPACE_CHECKPOINT_REASONS = [
   "import",
-  "before_delivery_refresh",
+  "active_turn_input",
+  "active_turn_acceptance",
   "outbox_intent",
   "outbox_sending",
   "outbox_receipt",
@@ -348,7 +349,7 @@ export type HostedRuntimeLogComponent =
   (typeof HOSTED_RUNTIME_LOG_COMPONENTS)[number];
 
 export const HOSTED_RUNTIME_LOG_PHASES = [
-  "before_delivery",
+  "active_turn_input",
   "checkpoint",
   "error",
   "fetch",

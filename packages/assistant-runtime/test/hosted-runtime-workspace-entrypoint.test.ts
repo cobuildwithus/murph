@@ -909,6 +909,12 @@ describe("hosted workspace runtime entrypoint", () => {
         redactedStatus: {
           hostedAssistantNextWakeAt: null,
           hostedAssistantProgressed: true,
+          hostedMailboxBlockedCount: 0,
+          hostedMailboxConversationImportedSeq: "0",
+          hostedMailboxFetchedCount: 0,
+          hostedMailboxImportedCount: 0,
+          hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemImportedSeq: "0",
           hostedOutboxPendingDeliveryEffects: 0,
           hostedOutboxTerminalizedSending: 0,
           hostedSystemMailboxPrepared: 0,

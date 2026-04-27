@@ -21,6 +21,15 @@ test("assistant usage ids validate and normalize turn ids before formatting", ()
   assert.equal(
     createAssistantUsageId({
       attemptCount: 3,
+      providerRequestOrdinal: 2,
+      turnId: " turn_123 ",
+    }),
+    "turn_123.request-2.attempt-3",
+  );
+
+  assert.equal(
+    createAssistantUsageId({
+      attemptCount: 3,
       turnId: " turn_123 ",
     }),
     "turn_123.attempt-3",
@@ -380,7 +389,7 @@ test("assistant usage parsing rejects non-canonical usage ids", () => {
         turnId: "turn_123",
         usageId: "turn_123.unexpected-1",
       }),
-    /usageId must match the canonical turnId\/attemptCount-derived value turn_123\.attempt-1/u,
+    /usageId must match the canonical turnId\/providerRequestOrdinal\/attemptCount-derived value turn_123\.attempt-1/u,
   );
 });
 

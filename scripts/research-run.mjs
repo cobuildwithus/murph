@@ -5,7 +5,9 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -251,6 +253,10 @@ function readChatUrl(workspaceDir, seam) {
   return readFileSync(chatUrlPath, "utf8").trim();
 }
 
+function chatUrlPathFor(workspaceDir, seam) {
+  return path.join(workspaceDir, "state", "chat-urls", `${seam}.txt`);
+}
+
 function normalizeEndpointUrl(endpoint) {
   return endpoint.replace(/\/+$/u, "");
 }
@@ -267,6 +273,70 @@ function extractChatConversationId(chatUrl) {
       : "";
   } catch {
     return "";
+  }
+}
+
+function clearChatUrl(workspaceDir, seam) {
+  const chatUrlPath = chatUrlPathFor(workspaceDir, seam);
+  if (existsSync(chatUrlPath)) {
+    unlinkSync(chatUrlPath);
+  }
+}
+
+function findActiveChatUrlOwners(chatUrl, currentWorkspaceDir, currentSeam) {
+  const owners = [];
+  if (!existsSync(researchRoot)) {
+    return owners;
+  }
+
+  for (const workspaceName of readdirSync(researchRoot)) {
+    const workspaceDir = path.join(researchRoot, workspaceName);
+    const seamsDir = path.join(workspaceDir, "state", "seams");
+    if (!existsSync(seamsDir) || !lstatSync(seamsDir).isDirectory()) {
+      continue;
+    }
+
+    for (const fileName of readdirSync(seamsDir)) {
+      if (!fileName.endsWith(".json")) {
+        continue;
+      }
+      const ownerSeam = fileName.slice(0, -".json".length);
+      const isCurrentSeam =
+        path.resolve(workspaceDir) === path.resolve(currentWorkspaceDir) &&
+        ownerSeam === currentSeam;
+      if (isCurrentSeam) {
+        continue;
+      }
+
+      const state = readJsonFile(path.join(seamsDir, fileName));
+      if (readStateString(state, "chatUrl") === chatUrl) {
+        owners.push(`${toPosixRelative(workspaceDir)}:${ownerSeam}`);
+      }
+    }
+  }
+
+  return owners;
+}
+
+function validateSendChatUrl(workspaceDir, seam) {
+  const chatUrl = readChatUrl(workspaceDir, seam);
+  if (!chatUrl) {
+    return;
+  }
+  if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9-]+$/u.test(chatUrl)) {
+    clearChatUrl(workspaceDir, seam);
+    throw new Error(`Refusing to record malformed ChatGPT URL for ${seam}: ${chatUrl}`);
+  }
+
+  const owners = findActiveChatUrlOwners(chatUrl, workspaceDir, seam);
+  if (owners.length > 0) {
+    clearChatUrl(workspaceDir, seam);
+    throw new Error(
+      [
+        `Refusing to record ChatGPT URL for ${seam} because it is already owned by another active research seam: ${chatUrl}`,
+        ...owners.map((owner) => `- ${owner}`),
+      ].join("\n"),
+    );
   }
 }
 
@@ -588,7 +658,16 @@ function main(argv) {
     workspaceDir,
   });
 
-  const exitCode = runLaneCommand(profileHelper, lane, commandPath);
+  let exitCode = runLaneCommand(profileHelper, lane, commandPath);
+
+  if (action === "send" && exitCode === 0) {
+    try {
+      validateSendChatUrl(workspaceDir, seam);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      exitCode = 69;
+    }
+  }
 
   writeRunState({
     action,

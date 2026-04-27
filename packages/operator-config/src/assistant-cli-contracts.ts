@@ -104,6 +104,7 @@ export const assistantTurnReceiptStatusValues = [
 export const assistantTurnTimelineEventKindValues = [
   'turn.started',
   'user.persisted',
+  'turn.input.accepted',
   'provider.attempt.started',
   'provider.attempt.succeeded',
   'provider.attempt.failed',

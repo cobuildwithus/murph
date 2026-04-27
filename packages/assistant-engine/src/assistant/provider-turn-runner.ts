@@ -49,6 +49,7 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
+import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
 import {
   recordProviderAttemptFailed,
   recordProviderAttemptStarted,
@@ -118,6 +119,7 @@ export type AssistantProviderTurnRecoveryOutcome =
     }
 
 export async function executeProviderTurnWithRecovery(input: {
+  activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
@@ -354,6 +356,7 @@ async function executeAssistantProviderAttempt(input: {
       webSearch: attemptPlan.route.providerOptions.webSearch,
       zeroDataRetention:
         attemptPlan.route.providerOptions.zeroDataRetention ?? null,
+      activeTurnMessages: attemptPlan.routePlan.activeTurnMessages,
       conversationMessages: attemptPlan.routePlan.conversationMessages,
       onEvent: executionPlan.input.onProviderEvent ?? undefined,
       profile: attemptPlan.route.providerOptions.profile,
@@ -390,6 +393,9 @@ async function executeAssistantProviderAttempt(input: {
       result: {
         ...result,
         attemptCount: attemptPlan.attemptCount,
+        nonReplayableProviderWork:
+          attemptMetadata.executedToolCount > 0 ||
+          attemptMetadata.providerActionCount > 0,
         onboardingCompletionFallbackReason:
           attemptPlan.routePlan.onboardingCompletionFallbackReason,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
@@ -448,14 +454,17 @@ async function executeAssistantProviderAttempt(input: {
     })
 
     const nextRoute =
-      prioritizeAssistantFailoverRoutes(
-        attemptPlan.remainingRoutes,
-        nextFailoverState,
-      )[0] ?? null
+      executionPlan.activeTurnHistory?.nonReplayableProviderWork === true
+        ? null
+        : prioritizeAssistantFailoverRoutes(
+            attemptPlan.remainingRoutes,
+            nextFailoverState,
+          )[0] ?? null
     const outcomeKind = classifyAssistantProviderAttemptFailure({
       abortSignal: executionPlan.input.abortSignal,
       error,
       nonReplayableProviderWork:
+        executionPlan.activeTurnHistory?.nonReplayableProviderWork === true ||
         attemptMetadata.executedToolCount > 0 ||
         attemptMetadata.providerActionCount > 0 ||
         readAssistantProviderErrorActionCount(error) > 0,
@@ -530,6 +539,7 @@ function emitHostedProviderRequestDebugTrace(input: {
     const providerOptions = attemptPlan.route.providerOptions
     const systemPrompt = attemptPlan.routePlan.systemPrompt ?? null
     const promptCacheMetadata = attemptPlan.routePlan.promptCacheMetadata
+    const activeTurnMessages = attemptPlan.routePlan.activeTurnMessages ?? []
     const conversationMessages = attemptPlan.routePlan.conversationMessages ?? []
     const toolNames = listAssistantToolCatalogNames(executionPlan.toolCatalog)
 
@@ -540,6 +550,8 @@ function emitHostedProviderRequestDebugTrace(input: {
         type: 'assistant.provider.request.debug',
         attemptCount: attemptPlan.attemptCount,
         channel: executionPlan.input.channel ?? attemptPlan.session.binding.channel,
+        activeTurnMessageCount: activeTurnMessages.length,
+        activeTurnMessageRoles: activeTurnMessages.map((message) => message.role),
         conversationMessageCount: conversationMessages.length,
         conversationMessageRoles: conversationMessages.map((message) => message.role),
         deliveryDispatchMode: executionPlan.input.deliveryDispatchMode ?? null,

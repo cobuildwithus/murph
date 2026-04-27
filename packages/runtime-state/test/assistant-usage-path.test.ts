@@ -14,7 +14,9 @@ import {
 import { resolveAssistantStatePaths } from "../src/assistant-state.js";
 
 function createUsageRecord(usageId: string): AssistantUsageRecord {
-  const match = usageId.match(/^(?<turnId>.+)\.attempt-(?<attemptCount>\d+)$/u);
+  const match = usageId.match(
+    /^(?<turnId>.+?)(?:\.request-(?<providerRequestOrdinal>\d+))?\.attempt-(?<attemptCount>\d+)$/u,
+  );
 
   if (!match?.groups) {
     throw new Error(`Test usage id ${usageId} must be canonical.`);
@@ -35,6 +37,9 @@ function createUsageRecord(usageId: string): AssistantUsageRecord {
     outputTokens: 20,
     provider: "openai-compatible",
     providerName: "OpenAI",
+    ...(match.groups.providerRequestOrdinal === undefined
+      ? {}
+      : { providerRequestOrdinal: Number(match.groups.providerRequestOrdinal) }),
     reasoningTokens: null,
     reportingUserId: null,
     requestedModel: "gpt-test",

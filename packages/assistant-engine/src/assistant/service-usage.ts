@@ -10,6 +10,7 @@ import { normalizeNullableString } from './shared.js'
 
 export async function persistPendingAssistantUsageEvent(input: {
   executionContext: AssistantExecutionContext
+  providerRequestOrdinal?: number
   providerResult: ExecutedAssistantProviderTurnResult
   turnId: string
   vault: string
@@ -31,12 +32,14 @@ export async function persistPendingAssistantUsageEvent(input: {
       schema: ASSISTANT_USAGE_SCHEMA,
       usageId: createAssistantUsageId({
         attemptCount: input.providerResult.attemptCount,
+        providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
         turnId: input.turnId,
       }),
       memberId: hostedMemberId,
       sessionId: input.providerResult.session.sessionId,
       turnId: input.turnId,
       attemptCount: input.providerResult.attemptCount,
+      providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
       occurredAt: new Date().toISOString(),
       provider: input.providerResult.provider,
       routeId: input.providerResult.route.routeId,

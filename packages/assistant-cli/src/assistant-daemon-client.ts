@@ -66,7 +66,6 @@ export function canUseAssistantDaemonForMessage(
 
   return (
     input.abortSignal === undefined &&
-    input.beforeDelivery === undefined &&
     input.executionContext === undefined &&
     input.onProviderEvent === undefined &&
     input.onTraceEvent === undefined
@@ -583,11 +582,10 @@ function serializeAssistantMessageInput(
   input: AssistantMessageInput,
 ): Omit<
   AssistantMessageInput,
-  'abortSignal' | 'beforeDelivery' | 'onProviderEvent' | 'onTraceEvent'
+  'abortSignal' | 'onProviderEvent' | 'onTraceEvent'
 > {
   const {
     abortSignal: _abortSignal,
-    beforeDelivery: _beforeDelivery,
     onProviderEvent: _onProviderEvent,
     onTraceEvent: _onTraceEvent,
     ...serializableInput

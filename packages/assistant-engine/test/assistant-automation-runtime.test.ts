@@ -2270,6 +2270,7 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
+    console.error('source unavailable result', result)
 
     expect(result).toMatchObject({
       advanceCursor: false,
@@ -3012,11 +3013,28 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('retries a draft when a late same-conversation capture arrives before delivery', async () => {
+  it('continues a draft with only newly accepted late same-conversation input', async () => {
     const lateCapture = createCaptureSummary({
+      attachmentCount: 1,
       captureId: 'capture-late',
       occurredAt: '2026-04-08T00:03:00.000Z',
+      text: null,
     })
+    replyMocks.prepareAssistantAutoReplyInput.mockImplementation(
+      async (captures: readonly { capture: { captureId: string } }[]) => {
+        const captureIds = captures.map((entry) => entry.capture.captureId)
+        return {
+          kind: 'ready',
+          prompt: `reply prompt for ${captureIds.join(',')}`,
+          userMessageContent: [
+            {
+              text: `content for ${captureIds.join(',')}`,
+              type: 'text',
+            },
+          ],
+        }
+      },
+    )
     const inboxServices = createInboxServices({
       show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
         createShowResult(
@@ -3080,6 +3098,7 @@ describe('assistant auto-reply runtime', () => {
       async (input: {
         activeTurnInput?: (
           value: {
+            phase: 'request_boundary' | 'commit_barrier'
             providerRequestOrdinal: number
             response: string
             sessionId: string
@@ -3090,14 +3109,18 @@ describe('assistant auto-reply runtime', () => {
           | { kind: 'no-new-input' }
           | {
               kind: 'accepted'
+              acceptedInputs?: readonly unknown[] | null
               prompt: string
               receiptMetadata?: Record<string, string> | null
+              transcriptText?: string | null
+              userMessageContent?: readonly unknown[] | null
             }
         >
         receiptMetadata?: { autoReplyCaptureIds?: string }
         response?: string
       }) => {
         const admitted = await input.activeTurnInput?.({
+          phase: 'request_boundary',
           providerRequestOrdinal: 0,
           response: 'draft response',
           sessionId: 'session-1',
@@ -3107,6 +3130,39 @@ describe('assistant auto-reply runtime', () => {
         if (admitted?.kind !== 'accepted') {
           throw new Error('expected active input admission')
         }
+        expect(admitted.prompt).toBe('reply prompt for capture-late')
+        expect(admitted.userMessageContent).toEqual([
+          {
+            text: 'content for capture-late',
+            type: 'text',
+          },
+        ])
+        expect(admitted.receiptMetadata).toEqual({
+          autoReplyCaptureId: 'capture-1',
+          autoReplyCaptureIds: 'capture-1,capture-late',
+        })
+        expect(admitted.acceptedInputs).toEqual([
+          expect.objectContaining({
+            captureIds: ['capture-late'],
+            cursorEffects: [
+              expect.objectContaining({
+                captureIds: ['capture-late'],
+                from: {
+                  captureId: 'capture-1',
+                  createdAt: '2026-04-08T00:00:01.000Z',
+                  occurredAt: '2026-04-08T00:02:00.000Z',
+                },
+                to: {
+                  captureId: 'capture-late',
+                  createdAt: '2026-04-08T00:00:01.000Z',
+                  occurredAt: '2026-04-08T00:03:00.000Z',
+                },
+              }),
+            ],
+            id: 'inbox:capture-late',
+          }),
+        ])
+        expect(admitted.transcriptText).toBe('User sent an attachment.')
 
         return Promise.resolve({
           delivery: {
@@ -3149,6 +3205,15 @@ describe('assistant auto-reply runtime', () => {
       stopScanning: false,
     })
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.prompt).toBe(
+      'reply prompt for capture-1',
+    )
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.userMessageContent).toEqual([
+      {
+        text: 'content for capture-1',
+        type: 'text',
+      },
+    ])
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.receiptMetadata).toEqual(
       expect.objectContaining({
         autoReplyCaptureIds: 'capture-1',
@@ -3164,6 +3229,30 @@ describe('assistant auto-reply runtime', () => {
       providerKind: 'status',
       providerState: 'running',
     })
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
+      1,
+      [expect.objectContaining({
+        capture: expect.objectContaining({ captureId: 'capture-1' }),
+      })],
+      '/tmp/assistant-automation-vault',
+    )
+    expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
+      2,
+      [expect.objectContaining({
+        capture: expect.objectContaining({ captureId: 'capture-late' }),
+      })],
+      '/tmp/assistant-automation-vault',
+    )
+    expect(replyMocks.writeAssistantAutoReplyGroupOutcomeArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureIds: ['capture-1', 'capture-late'],
+      }),
+    )
+    expect(replyMocks.writeAssistantChatResultArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureIds: ['capture-1', 'capture-late'],
+      }),
+    )
   })
 
   it('defers delivery when the active-turn input budget is exhausted', async () => {
@@ -3254,6 +3343,91 @@ describe('assistant auto-reply runtime', () => {
       type: 'capture.reply-skipped',
       captureId: 'capture-1',
     })
+  })
+
+  it('defers delivery when hosted active-turn mailbox refresh is unavailable', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
+        createShowResult(
+          createCaptureDetail({
+            captureId: input.captureId,
+            occurredAt: '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const turnInputPort = {
+      async refresh() {
+        return {
+          progressed: false,
+          reason: 'source_unavailable' as const,
+        }
+      },
+      async listNewConversationCaptures(input: AssistantTurnConversationCaptureQuery) {
+        return {
+          captures: [],
+          nextCursor: input.afterCursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        phase: 'request_boundary' | 'commit_barrier'
+        providerRequestOrdinal: number
+        response: string
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await input.activeTurnInput?.({
+        phase: 'commit_barrier',
+        providerRequestOrdinal: 0,
+        response: 'draft response',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      throw new Error('expected active-turn admission to defer')
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      turnInputPort,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
   })
 
   it('does not create a default turn-input port for hosted automation passes', async () => {

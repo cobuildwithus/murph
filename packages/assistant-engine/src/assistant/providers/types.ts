@@ -79,6 +79,10 @@ export interface AssistantProviderToolRuntime {
 }
 
 export interface AssistantProviderTurnInput {
+  activeTurnMessages?: ReadonlyArray<{
+    content: string | AssistantUserMessageContentPart[]
+    role: 'assistant' | 'user'
+  }>
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
@@ -120,6 +124,10 @@ export interface AssistantProviderTurnInput {
 }
 
 export interface AssistantProviderTurnExecutionInput {
+  activeTurnMessages?: ReadonlyArray<{
+    content: string | AssistantUserMessageContentPart[]
+    role: 'assistant' | 'user'
+  }>
   abortSignal?: AbortSignal
   continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{
