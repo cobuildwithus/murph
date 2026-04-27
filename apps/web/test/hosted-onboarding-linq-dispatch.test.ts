@@ -377,6 +377,26 @@ https://join.example.test/join/code_first_text`);
         prisma,
       });
       expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+        "hosted-onboarding.webhook.linq.plan",
+        expect.objectContaining({
+          eventIdSuffix: "vt_123",
+          eventType: "message.received",
+        }),
+      );
+      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+        expect.objectContaining({
+          step: "hosted-onboarding.webhook.linq.plan",
+        }),
+        "wake-appended-active-member",
+        expect.objectContaining({
+          desiredSideEffectCount: 0,
+          duplicate: false,
+          ingressTypingRequested: true,
+          ok: true,
+          wakeUserPresent: true,
+        }),
+      );
+      expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
         "hosted-onboarding.webhook.linq.verify-request",
         expect.objectContaining({
           signaturePresent: false,
@@ -394,7 +414,7 @@ https://join.example.test/join/code_first_text`);
         "completed",
         expect.objectContaining({
           duplicate: false,
-          eventId: "evt_123",
+          eventIdSuffix: "vt_123",
           eventType: "message.received",
           responseReason: "wake-appended-active-member",
           signalAbortedBeforeReturn: false,
@@ -409,11 +429,36 @@ https://join.example.test/join/code_first_text`);
       ).toBe(true);
       expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
         expect.objectContaining({
+          step: "hosted-onboarding.webhook.linq.wake-nudge",
+        }),
+        "accepted",
+        expect.objectContaining({
+          accepted: true,
+          alarmScheduled: false,
+          alreadyRunning: false,
+          configured: true,
+          errorCode: null,
+          inFlight: false,
+          nextAlarmAtPresent: false,
+        }),
+      );
+      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+        expect.objectContaining({
           step: "hosted-onboarding.webhook.linq.wake-handoff",
         }),
         "completed",
         expect.objectContaining({
           deferred: false,
+        }),
+      );
+      expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+        "hosted-onboarding.webhook.linq.wake-handoff",
+        expect.objectContaining({
+          deferred: false,
+          eventIdSuffix: "vt_123",
+          responseReason: "wake-appended-active-member",
+          userIdPresent: true,
+          userIdSuffix: "er_123",
         }),
       );
     },
@@ -468,6 +513,16 @@ https://join.example.test/join/code_first_text`);
       context: "webhook:linq",
       userId: "member_123",
     });
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.wake-handoff",
+      expect.objectContaining({
+        deferred: true,
+        eventIdSuffix: "spatch",
+        responseReason: "wake-appended-active-member",
+        userIdPresent: true,
+        userIdSuffix: "er_123",
+      }),
+    );
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.wake-handoff",
