@@ -10,9 +10,6 @@ import {
   type HostedRuntimePlatform,
   type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
-import type {
-  AssistantExecutionContext,
-} from "@murphai/assistant-engine";
 import {
   parseHostedExecutionWake,
   type HostedExecutionBundleRef,
@@ -82,6 +79,8 @@ type HostedRuntimeBridgeNormalizedRuntime = Pick<
   ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
   "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 >;
+type HostedRuntimeBridgeExecutionContext =
+  Parameters<typeof executeHostedMailboxEvent>[0]["executionContext"];
 
 export interface HostedWorkspaceRuntimeBridgeOptionsInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
@@ -322,7 +321,7 @@ async function executeHostedSystemWakeFromMailbox(input: {
       status: "deferred",
     };
   }
-  const executionContext: AssistantExecutionContext = {
+  const executionContext: HostedRuntimeBridgeExecutionContext = {
     hosted: {
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
         forwardedEnv: input.runtime.forwardedEnv,
