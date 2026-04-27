@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
@@ -25,11 +25,15 @@ export function HostedTelegramSettings(props: {
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   onSynced?: (payload: HostedTelegramSyncResult) => Promise<void> | void;
 }) {
+  const { authenticated, initialLinkedAccounts, onSynced } = props;
   const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser, user } = useUser();
+  const autoSyncedTelegramUserIdRef = useRef<string | null>(null);
+  const syncRequestSequenceRef = useRef(0);
   const [botLink, setBotLink] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLinkingTelegram, setIsLinkingTelegram] = useState(false);
+  const [isQuietSyncingTelegram, setIsQuietSyncingTelegram] = useState(false);
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [syncedTelegramOverride, setSyncedTelegramOverride] = useState<HostedTelegramSyncOverride | null>(null);
@@ -37,18 +41,90 @@ export function HostedTelegramSettings(props: {
   const displayState = resolveHostedTelegramSettingsDisplayState({
     syncedTelegramOverride,
     user: user ?? {
-      linkedAccounts: props.initialLinkedAccounts,
+      linkedAccounts: initialLinkedAccounts,
     },
   });
   const currentTelegram = displayState.currentTelegram;
-  const canManageTelegram = props.authenticated;
-  const isBusy = isLinkingTelegram || isSyncingTelegram;
+  const canManageTelegram = authenticated;
+  const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
+
+  const syncLinkedTelegram = useCallback(async (
+    mode: "link" | "resync",
+    expectedTelegramUserId: string | null,
+    options?: { quietSuccess?: boolean },
+  ) => {
+    if (!expectedTelegramUserId) {
+      setErrorMessage("Telegram was linked but the account details aren't available yet. Try again.");
+      return;
+    }
+
+    autoSyncedTelegramUserIdRef.current = expectedTelegramUserId;
+    const syncRequestSequence = syncRequestSequenceRef.current + 1;
+    syncRequestSequenceRef.current = syncRequestSequence;
+    setIsQuietSyncingTelegram(options?.quietSuccess === true);
+    setIsSyncingTelegram(true);
+
+    try {
+      const syncPresentation = await syncHostedLinkedTelegram({
+        expectedTelegramUserId,
+        mode,
+      });
+
+      if (syncRequestSequenceRef.current !== syncRequestSequence) {
+        return;
+      }
+
+      setSuccessMessage(options?.quietSuccess ? null : syncPresentation.successMessage);
+      setErrorMessage(syncPresentation.errorMessage);
+
+      const { syncResult } = syncPresentation;
+
+      if (syncResult) {
+        setBotLink(syncResult.botLink);
+        setSyncedTelegramOverride({
+          telegramUserId: syncResult.telegramUserId,
+          username: syncResult.telegramUsername,
+        });
+
+        try {
+          await onSynced?.(syncResult);
+        } catch (error) {
+          setErrorMessage(toErrorMessage(error, "Telegram was linked, but we could not refresh the page state yet."));
+        }
+      }
+    } finally {
+      if (syncRequestSequenceRef.current === syncRequestSequence) {
+        setIsQuietSyncingTelegram(false);
+        setIsSyncingTelegram(false);
+      }
+    }
+  }, [onSynced]);
+
+  useEffect(() => {
+    if (!authenticated || isLinkingTelegram || isSyncingTelegram) {
+      return;
+    }
+
+    const telegramUserId = currentTelegram?.telegramUserId ?? null;
+
+    if (!telegramUserId || autoSyncedTelegramUserIdRef.current === telegramUserId) {
+      return;
+    }
+
+    void syncLinkedTelegram("resync", telegramUserId, { quietSuccess: true });
+  }, [
+    currentTelegram?.telegramUserId,
+    authenticated,
+    isLinkingTelegram,
+    isSyncingTelegram,
+    syncLinkedTelegram,
+  ]);
 
   async function handleLinkTelegram() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!props.authenticated) {
+    if (!authenticated) {
       setErrorMessage("Please sign in first to link Telegram.");
       return;
     }
@@ -65,7 +141,7 @@ export function HostedTelegramSettings(props: {
       const refreshedUser = await refreshUser().catch(() => null);
       const refreshedTelegram = resolveHostedTelegramSettingsDisplayState({
         user: refreshedUser ?? user ?? {
-          linkedAccounts: props.initialLinkedAccounts,
+          linkedAccounts: initialLinkedAccounts,
         },
       }).currentTelegram;
 
@@ -76,55 +152,6 @@ export function HostedTelegramSettings(props: {
       setIsLinkingTelegram(false);
     }
   }
-
-  async function handleSyncTelegram() {
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    if (!currentTelegram?.telegramUserId) {
-      setErrorMessage("Link Telegram in Privy before you try to sync it.");
-      return;
-    }
-
-    await syncLinkedTelegram("resync", currentTelegram.telegramUserId);
-  }
-
-  async function syncLinkedTelegram(mode: "link" | "resync", expectedTelegramUserId: string | null) {
-    if (!expectedTelegramUserId) {
-      setErrorMessage("Telegram was linked but the account details aren't available yet. Try again.");
-      return;
-    }
-
-    setIsSyncingTelegram(true);
-
-    try {
-      const syncPresentation = await syncHostedLinkedTelegram({
-        expectedTelegramUserId,
-        mode,
-      });
-      setSuccessMessage(syncPresentation.successMessage);
-      setErrorMessage(syncPresentation.errorMessage);
-
-      const { syncResult } = syncPresentation;
-
-      if (syncResult) {
-        setBotLink(syncResult.botLink);
-        setSyncedTelegramOverride({
-          telegramUserId: syncResult.telegramUserId,
-          username: syncResult.telegramUsername,
-        });
-
-        try {
-          await props.onSynced?.(syncResult);
-        } catch (error) {
-          setErrorMessage(toErrorMessage(error, "Telegram was linked, but we could not refresh the page state yet."));
-        }
-      }
-    } finally {
-      setIsSyncingTelegram(false);
-    }
-  }
-
   return (
     <div className="space-y-5">
       {successMessage ? (
@@ -141,7 +168,7 @@ export function HostedTelegramSettings(props: {
         </Alert>
       ) : null}
 
-      {isSyncingTelegram ? (
+      {isSyncingTelegram && !isQuietSyncingTelegram ? (
         <Alert className="border-stone-200 bg-stone-50">
           <AlertTitle>Finishing Telegram sync</AlertTitle>
           <AlertDescription>
@@ -161,9 +188,7 @@ export function HostedTelegramSettings(props: {
           currentTelegram={currentTelegram}
           isBusy={isBusy}
           isLinkingTelegram={isLinkingTelegram}
-          isSyncingTelegram={isSyncingTelegram}
           onLinkTelegram={handleLinkTelegram}
-          onSyncTelegram={handleSyncTelegram}
         />
       )}
     </div>
