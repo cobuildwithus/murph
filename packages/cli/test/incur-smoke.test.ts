@@ -1611,9 +1611,8 @@ test('health command help surfaces examples and hints through Incur metadata', a
   const goalImportJsonHelp = await runRawCli(['goal', 'import-json', '--help'])
   const journalLinkHelp = await runRawCli(['journal', 'link', '--help'])
   const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
-  const supplementImportJsonHelp = await runRawCli(['supplement', 'import-json', '--help'])
+  const supplementSaveHelp = await runRawCli(['supplement', 'save', '--help'])
   const supplementStopHelp = await runRawCli(['supplement', 'stop', '--help'])
-  const supplementRenameHelp = await runRawCli(['supplement', 'rename', '--help'])
   const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
   const regimenStopHelp = await runRawCli(['regimen', 'stop', '--help'])
 
@@ -1642,8 +1641,8 @@ test('health command help surfaces examples and hints through Incur metadata', a
     /The previous food title is kept as an alias automatically so older operator language still resolves in the saved record\./u,
   )
   assert.match(
-    supplementImportJsonHelp,
-    /--input accepts @file\.json or - so the CLI can load a supplement payload with product metadata and ingredients\./u,
+    supplementSaveHelp,
+    /Supplements are saved as regimen records with kind supplement\./u,
   )
   assert.match(
     supplementStopHelp,
@@ -1653,10 +1652,6 @@ test('health command help surfaces examples and hints through Incur metadata', a
   assert.match(
     supplementStopHelp,
     /--stopped-on <string>\s+Optional calendar day when the supplement stopped\. Defaults to today\./u,
-  )
-  assert.match(
-    supplementRenameHelp,
-    /Use the canonical supplement id or current slug; the CLI reuses the existing supplement record instead of creating a new one\./u,
   )
   assert.match(
     supplementCompoundListHelp,

@@ -268,18 +268,12 @@ test('generic show and list forward canonical read filters through the shared qu
   ])
 })
 
-test('supplement stop, rename, and compound commands forward arguments and keep follow-up CTAs intact', async () => {
+test('supplement stop and compound commands forward arguments and keep follow-up CTAs intact', async () => {
   const stopCalls: Array<{
+    group?: string
     regimenId: string
     requestId: string | null
     stoppedOn?: string
-    vault: string
-  }> = []
-  const renameCalls: Array<{
-    lookup: string
-    requestId: string | null
-    slug?: string
-    title: string
     vault: string
   }> = []
   const compoundListCalls: Array<{
@@ -312,8 +306,9 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
     '--request-id',
     'req-stop-01',
   ], (services) => {
-    services.core.stopSupplement = async (input) => {
+    services.core.stopRegimen = async (input) => {
       stopCalls.push({
+        group: input.group,
         regimenId: input.regimenId,
         stoppedOn: input.stoppedOn,
         vault: input.vault,
@@ -326,24 +321,6 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
         lookupId: input.regimenId,
         stoppedOn: input.stoppedOn ?? null,
         status: 'stopped',
-      }
-    }
-
-    services.core.renameSupplement = async (input) => {
-      renameCalls.push({
-        lookup: input.lookup,
-        title: input.title,
-        slug: input.slug,
-        vault: input.vault,
-        requestId: input.requestId,
-      })
-
-      return {
-        vault: input.vault,
-        regimenId: 'reg_magnesium',
-        lookupId: input.slug ?? 'magnesium-glycinate',
-        path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
-        created: false,
       }
     }
 
@@ -442,79 +419,6 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
     }
   })
 
-  const renameResult = await runSliceCli<{
-    vault: string
-    regimenId: string
-    lookupId: string
-    path?: string
-    created: boolean
-  }>([
-    'supplement',
-    'rename',
-    'reg_magnesium',
-    '--title',
-    'Magnesium Glycinate 200',
-    '--slug',
-    'magnesium-glycinate-200',
-    '--vault',
-    vaultRoot,
-    '--request-id',
-    'req-rename-01',
-  ], (services) => {
-    services.core.stopSupplement = async (input) => ({
-      vault: input.vault,
-      regimenId: input.regimenId,
-      lookupId: input.regimenId,
-      stoppedOn: input.stoppedOn ?? null,
-      status: 'stopped',
-    })
-
-    services.core.renameSupplement = async (input) => {
-      renameCalls.push({
-        lookup: input.lookup,
-        title: input.title,
-        slug: input.slug,
-        vault: input.vault,
-        requestId: input.requestId,
-      })
-
-      return {
-        vault: input.vault,
-        regimenId: 'reg_magnesium',
-        lookupId: input.slug ?? 'magnesium-glycinate',
-        path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
-        created: false,
-      }
-    }
-
-    services.query.listSupplementCompounds = async (input) => ({
-      vault: input.vault,
-      filters: {
-        status: input.status ?? 'active',
-        limit: input.limit,
-      },
-      items: [],
-      count: 0,
-      nextCursor: null,
-    })
-
-    services.query.showSupplementCompound = async (input) => ({
-      vault: input.vault,
-      filters: {
-        status: input.status ?? 'active',
-        limit: undefined,
-      },
-      compound: {
-        compound: 'Magnesium Glycinate',
-        lookupId: 'magnesium-glycinate',
-        totals: [],
-        supplementCount: 0,
-        supplementIds: [],
-        sources: [],
-      },
-    })
-  })
-
   const compoundListResult = await runSliceCli<{
     vault: string
     filters: {
@@ -541,20 +445,12 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
     '--request-id',
     'req-compound-list-01',
   ], (services) => {
-    services.core.stopSupplement = async (input) => ({
+    services.core.stopRegimen = async (input) => ({
       vault: input.vault,
       regimenId: input.regimenId,
       lookupId: input.regimenId,
       stoppedOn: input.stoppedOn ?? null,
       status: 'stopped',
-    })
-
-    services.core.renameSupplement = async (input) => ({
-      vault: input.vault,
-      regimenId: 'reg_magnesium',
-      lookupId: input.slug ?? 'magnesium-glycinate',
-      path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
-      created: false,
     })
 
     services.query.listSupplementCompounds = async (input) => {
@@ -626,20 +522,12 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
     '--request-id',
     'req-compound-show-01',
   ], (services) => {
-    services.core.stopSupplement = async (input) => ({
+    services.core.stopRegimen = async (input) => ({
       vault: input.vault,
       regimenId: input.regimenId,
       lookupId: input.regimenId,
       stoppedOn: input.stoppedOn ?? null,
       status: 'stopped',
-    })
-
-    services.core.renameSupplement = async (input) => ({
-      vault: input.vault,
-      regimenId: 'reg_magnesium',
-      lookupId: input.slug ?? 'magnesium-glycinate',
-      path: 'bank/regimens/supplements/magnesium-glycinate-200.md',
-      created: false,
     })
 
     services.query.listSupplementCompounds = async (input) => ({
@@ -683,10 +571,11 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
   assert.equal(stopResult.meta?.command, 'supplement stop')
   assert.equal(requireData(stopResult).status, 'stopped')
   assert.deepEqual(stopCalls, [
-    {
-      regimenId: 'reg_magnesium',
-      stoppedOn: '2026-03-12',
-      vault: vaultRoot,
+      {
+        group: 'supplement',
+        regimenId: 'reg_magnesium',
+        stoppedOn: '2026-03-12',
+        vault: vaultRoot,
       requestId: 'req-stop-01',
     },
   ])
@@ -698,19 +587,6 @@ test('supplement stop, rename, and compound commands forward arguments and keep 
     {
       command: 'vault-cli supplement list --status stopped --vault <vault>',
       description: 'List stopped supplements.',
-    },
-  ])
-
-  assert.equal(renameResult.ok, true)
-  assert.equal(renameResult.meta?.command, 'supplement rename')
-  assert.equal(requireData(renameResult).lookupId, 'magnesium-glycinate-200')
-  assert.deepEqual(renameCalls, [
-    {
-      lookup: 'reg_magnesium',
-      title: 'Magnesium Glycinate 200',
-      slug: 'magnesium-glycinate-200',
-      vault: vaultRoot,
-      requestId: 'req-rename-01',
     },
   ])
 

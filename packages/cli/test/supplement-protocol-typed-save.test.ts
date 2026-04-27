@@ -90,7 +90,7 @@ function requireSavedPath(result: SaveResult): string {
   return result.path
 }
 
-test('supplement and regimen save schemas expose typed fields while JSON import remains explicit', async () => {
+test('supplement and regimen save schemas expose typed fields while regimen JSON import remains explicit', async () => {
   const cli = createTypedSaveCli()
 
   const supplementSave = await readCommandSchema(cli, ['supplement', 'save'])
@@ -142,11 +142,6 @@ test('supplement and regimen save schemas expose typed fields while JSON import 
   ]) {
     assert.equal(field in regimenSave.options.properties, true, field)
   }
-
-  const supplementJsonFallback = await readCommandSchema(cli, ['supplement', 'import-json'])
-  assert.equal('input' in supplementJsonFallback.options.properties, true)
-  assert.equal(supplementJsonFallback.options.required?.includes('input') ?? false, true)
-  assert.deepEqual(supplementJsonFallback.args.required ?? [], [])
 
   const regimenJsonFallback = await readCommandSchema(cli, ['regimen', 'import-json'])
   assert.equal('input' in regimenJsonFallback.options.properties, true)
@@ -293,11 +288,10 @@ test('typed save commands write supplement and regimen records without JSON payl
   }
 })
 
-test('supplement and regimen import-json commands accept explicit JSON payload files', async () => {
+test('regimen import-json accepts explicit JSON payload files', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-regimen-import-',
+    'murph-cli-regimen-import-',
   )
-  const supplementPayloadPath = path.join(parentRoot, 'supplement.json')
   const regimenPayloadPath = path.join(parentRoot, 'regimen.json')
 
   try {
@@ -310,70 +304,6 @@ test('supplement and regimen import-json commands accept explicit JSON payload f
     ])
     assert.equal(initResult.exitCode, null)
     assert.equal(requireData(initResult.envelope).created, true)
-
-    await writeFile(
-      supplementPayloadPath,
-      JSON.stringify(
-        {
-          title: 'Liposomal Vitamin C',
-          kind: 'supplement',
-          status: 'active',
-          startedOn: '2026-03-01',
-          schedule: 'with breakfast',
-          brand: 'LivOn Labs',
-          manufacturer: 'LivOn Laboratories',
-          servingSize: '1 packet',
-          ingredients: [
-            {
-              compound: 'Vitamin C',
-              label: 'Ascorbic acid',
-              amount: 500,
-              unit: 'mg',
-              note: 'Use with breakfast.',
-            },
-          ],
-        },
-        null,
-        2,
-      ),
-      'utf8',
-    )
-    const supplementImport = await runInProcessJsonCli<SaveResult>(cli, [
-      'supplement',
-      'import-json',
-      '--input',
-      `@${supplementPayloadPath}`,
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(supplementImport.exitCode, null)
-    const savedSupplement = requireData(supplementImport.envelope)
-    assert.equal(savedSupplement.created, true)
-    const supplementPath = requireSavedPath(savedSupplement)
-
-    const supplementMarkdown = await readFile(
-      path.join(vaultRoot, supplementPath),
-      'utf8',
-    )
-    const supplementDocument = parseFrontmatterDocument(supplementMarkdown)
-    assert.equal(supplementDocument.attributes.title, 'Liposomal Vitamin C')
-    assert.equal(supplementDocument.attributes.kind, 'supplement')
-    assert.equal(supplementDocument.attributes.status, 'active')
-    assert.equal(supplementDocument.attributes.startedOn, '2026-03-01')
-    assert.equal(supplementDocument.attributes.schedule, 'with breakfast')
-    assert.equal(supplementDocument.attributes.brand, 'LivOn Labs')
-    assert.equal(supplementDocument.attributes.manufacturer, 'LivOn Laboratories')
-    assert.equal(supplementDocument.attributes.servingSize, '1 packet')
-    assert.deepEqual(supplementDocument.attributes.ingredients, [
-      {
-        compound: 'Vitamin C',
-        label: 'Ascorbic acid',
-        amount: 500,
-        unit: 'mg',
-        note: 'Use with breakfast.',
-      },
-    ])
 
     await writeFile(
       regimenPayloadPath,

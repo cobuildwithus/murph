@@ -76,10 +76,6 @@ const coreServiceMethodNames = [
   "scaffoldRegimen",
   "upsertRegimen",
   "stopRegimen",
-  "scaffoldSupplement",
-  "upsertSupplement",
-  "renameSupplement",
-  "stopSupplement",
   ...healthCoreServiceMethodNames,
 ] satisfies ReadonlyArray<keyof CoreWriteServices & string>
 

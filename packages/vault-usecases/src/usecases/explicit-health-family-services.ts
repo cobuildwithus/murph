@@ -22,7 +22,6 @@ import type {
   QueryRuntimeModule,
   QueryServices,
   StopRegimenInput,
-  StopSupplementInput,
 } from "./types.js";
 import {
   healthRegistryFamilies,
@@ -40,7 +39,6 @@ import {
   requirePayloadObjectField,
   toListEntity,
 } from "./shared.js";
-import { toVaultCliError } from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -113,25 +111,6 @@ const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "body",
 ]);
 
-const SUPPLEMENT_SCAFFOLD_PAYLOAD = Object.freeze({
-  title: "Magnesium glycinate",
-  kind: "supplement",
-  status: "active",
-  startedOn: "2026-03-12",
-  schedule: "nightly",
-  brand: "Thorne",
-  manufacturer: "Thorne Health",
-  servingSize: "2 capsules",
-  ingredients: [
-    {
-      compound: "Magnesium",
-      label: "Magnesium glycinate chelate",
-      amount: 200,
-      unit: "mg",
-    },
-  ],
-}) as JsonObject;
-
 const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
   "id",
   "regimenId",
@@ -144,7 +123,6 @@ const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
   "attributes",
 ]);
 
-const REGIMEN_ID_PATTERN = /^reg_[0-9A-Za-z]+$/u;
 const REGIMEN_ENTITY_OMIT_KEYS = new Set([
   "id",
   "regimenId",
@@ -680,85 +658,6 @@ function toPrivateProtocolSummary(
   };
 }
 
-async function renameSupplementRecord(
-  loadRuntime: () => Promise<{ core: CoreRuntimeModule }>,
-  input: CommandContext & {
-    lookup: string;
-    slug?: string;
-    title: string;
-  },
-) {
-  const lookup = input.lookup.trim();
-  const title = input.title.trim();
-  const slug =
-    typeof input.slug === "string" ? input.slug.trim() || undefined : undefined;
-
-  if (!title) {
-    throw new VaultCliError("contract_invalid", "title must be a non-empty string.");
-  }
-  const { core } = await loadRuntime();
-
-  try {
-    const isRegimenId = REGIMEN_ID_PATTERN.test(lookup);
-    const existing = await core.readRegimen({
-      vaultRoot: input.vault,
-      ...(isRegimenId ? { regimenId: lookup } : { slug: lookup }),
-      group: "supplement",
-    });
-
-    if (existing.entity.kind !== "supplement") {
-      throw new VaultCliError("not_found", `No supplement found for "${input.lookup}".`);
-    }
-
-    const result = await core.upsertRegimen({
-      vaultRoot: input.vault,
-      regimenId: existing.entity.regimenId,
-      ...(slug ? { slug } : {}),
-      allowSlugRename: true,
-      title,
-      kind: existing.entity.kind,
-      status: existing.entity.status,
-      startedOn: existing.entity.startedOn,
-      stoppedOn: existing.entity.stoppedOn,
-      substance: existing.entity.substance,
-      dose: existing.entity.dose,
-      unit: existing.entity.unit,
-      schedule: existing.entity.schedule,
-      brand: existing.entity.brand,
-      manufacturer: existing.entity.manufacturer,
-      servingSize: existing.entity.servingSize,
-      ingredients: existing.entity.ingredients,
-      relatedGoalIds: existing.entity.relatedGoalIds,
-      relatedConditionIds: existing.entity.relatedConditionIds,
-      group: existing.entity.group,
-    });
-
-    return {
-      vault: input.vault,
-      regimenId: String(result.record.entity.regimenId),
-      lookupId: String(result.record.entity.regimenId),
-      path: recordPath(result.record),
-      created: Boolean(result.created),
-    };
-  } catch (error) {
-    throw toVaultCliError(error, {
-      VAULT_REGIMEN_MISSING: {
-        code: "not_found",
-        message: `No supplement found for "${input.lookup}".`,
-      },
-      VAULT_INVALID_INPUT: {
-        code: "contract_invalid",
-      },
-      VAULT_INVALID_REGIMEN: {
-        code: "contract_invalid",
-      },
-      VAULT_REGIMEN_CONFLICT: {
-        code: "conflict",
-      },
-    });
-  }
-}
-
 function createRegistryDocCoreServices(
   loadRuntime: () => Promise<{ core: CoreRuntimeModule }>,
 ): Pick<CoreWriteServices, RegistryCoreServiceMethodName> {
@@ -858,32 +757,6 @@ export function createExplicitHealthCoreServices(
 
       return buildEventLedgerUpsertResult(input.vault, result);
     },
-    async scaffoldSupplement(input: CommandContext) {
-      return {
-        vault: input.vault,
-        noun: "supplement" as const,
-        payload: SUPPLEMENT_SCAFFOLD_PAYLOAD,
-      };
-    },
-    async upsertSupplement(input: CommandContext & { input: string }) {
-      const payload = await readJsonPayload(input.input);
-      assertNoReservedPayloadKeys(payload);
-      const { core } = await loadRuntime();
-      const result = await core.upsertRegimen({
-        ...payload,
-        kind: payload.kind ?? "supplement",
-        vaultRoot: input.vault,
-      });
-      const regimenId = String(result.record.entity.regimenId);
-
-      return {
-        vault: input.vault,
-        regimenId,
-        lookupId: regimenId,
-        path: recordPath(result.record),
-        created: Boolean(result.created),
-      };
-    },
     async scaffoldRegimen(input: CommandContext) {
       return {
         vault: input.vault,
@@ -908,15 +781,6 @@ export function createExplicitHealthCoreServices(
         path: recordPath(result.record),
         created: Boolean(result.created),
       };
-    },
-    async renameSupplement(
-      input: CommandContext & {
-        lookup: string;
-        slug?: string;
-        title: string;
-      },
-    ) {
-      return renameSupplementRecord(loadRuntime, input);
     },
     async upsertPrivateProtocol(input) {
       const { core } = await loadRuntime();
@@ -947,23 +811,7 @@ export function createExplicitHealthCoreServices(
       const result = await core.stopRegimen({
         vaultRoot: input.vault,
         regimenId: input.regimenId,
-        stoppedOn: input.stoppedOn,
-      });
-      const regimenId = String(result.record.entity.regimenId);
-
-      return {
-        vault: input.vault,
-        regimenId,
-        lookupId: regimenId,
-        stoppedOn: result.record.entity.stoppedOn ?? null,
-        status: String(result.record.entity.status),
-      };
-    },
-    async stopSupplement(input: StopSupplementInput) {
-      const { core } = await loadRuntime();
-      const result = await core.stopRegimen({
-        vaultRoot: input.vault,
-        regimenId: input.regimenId,
+        group: input.group,
         stoppedOn: input.stoppedOn,
       });
       const regimenId = String(result.record.entity.regimenId);
@@ -992,12 +840,8 @@ export function createExplicitHealthCoreServices(
     | "upsertFamilyMember"
     | "scaffoldGeneticVariant"
     | "upsertGeneticVariant"
-    | "scaffoldSupplement"
-    | "upsertSupplement"
-    | "renameSupplement"
     | "upsertPrivateProtocol"
     | "stopRegimen"
-    | "stopSupplement"
   >;
 }
 

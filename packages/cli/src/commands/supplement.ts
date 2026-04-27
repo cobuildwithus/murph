@@ -6,16 +6,10 @@ import {
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import { requestIdFromOptions, withBaseOptions } from "@murphai/operator-config/command-helpers"
 import {
-  createHealthScaffoldResultSchema,
   healthListResultSchema,
   healthShowResultSchema,
-  inputFileOptionSchema,
-  normalizeInputFileOption,
   normalizeRepeatableFlagOption,
 } from "@murphai/vault-usecases"
-import {
-  createRegistryDocEntityGroup,
-} from "./entity-command-groups.js"
 import {
   commonListLimitOptionSchema,
   suggestedCommandsCta,
@@ -267,136 +261,63 @@ export function registerSupplementCommands(
   cli: Cli.Cli,
   services: VaultServices,
 ) {
-  const supplement = createRegistryDocEntityGroup({
-    commandName: 'supplement',
+  const supplement = Cli.create('supplement', {
     description: 'Supplement product commands plus a derived active-compound ledger.',
-    scaffold: {
-      name: 'scaffold',
-      args: z.object({}),
-      description: 'Emit a payload template for one supplement product.',
-      examples: [
-        {
-          description: 'Print a template supplement payload.',
-          options: {
-            vault: './vault',
-          },
-        },
-      ],
-      hint: 'The supplement payload supports product metadata plus an ingredients array for compound rollups.',
-      output: createHealthScaffoldResultSchema('supplement'),
-      async run({ options, requestId }) {
-        return services.core.scaffoldSupplement({
-          vault: options.vault,
-          requestId,
-        })
-      },
-    },
-    importJson: {
-      description: 'Upsert one supplement from a JSON payload file or stdin.',
-      examples: [
-        {
-          description: 'Upsert one supplement product from a JSON payload file.',
-          options: {
-            input: '@supplement.json',
-            vault: './vault',
-          },
-        },
-      ],
-      hint: '--input accepts @file.json or - so the CLI can load a supplement payload with product metadata and ingredients.',
-      output: supplementUpsertResultSchema,
-      async run(input) {
-        return services.core.upsertSupplement(input)
-      },
-    },
-    show: {
-      argName: 'id',
-      argSchema: z.string().min(1),
-      description: 'Show one supplement by canonical id or slug.',
-      examples: [
-        {
-          args: {
-            id: '<supplement-id>',
-          },
-          description: 'Show one saved supplement product.',
-          options: {
-            vault: './vault',
-          },
-        },
-      ],
-      hint: 'Use the canonical supplement id or the supplement slug.',
-      output: healthShowResultSchema,
-      async run(input) {
-        return services.query.showSupplement(input)
-      },
-    },
-    list: {
-      description: 'List supplements through the health read model.',
-      examples: [
-        {
-          description: 'List active supplements with a smaller page size.',
-          options: {
-            limit: 10,
-            status: 'active',
-            vault: './vault',
-          },
-        },
-      ],
-      hint: 'Use --status active to focus on current supplements or --limit to cap results.',
-      output: healthListResultSchema,
-      statusOption: statusOptionSchema,
-      async run(input) {
-        return services.query.listSupplements({
-          ...input,
-          limit: input.limit ?? 50,
-        })
-      },
-    },
   })
 
-  supplement.command('import-json', {
+  supplement.command('list', {
     args: z.object({}),
-    description: 'Import one supplement from an explicit JSON payload file or stdin.',
+    description: 'List supplements through the health read model.',
     examples: [
       {
-        description: 'Import one supplement product from a JSON payload file.',
+        description: 'List active supplements with a smaller page size.',
         options: {
-          input: '@supplement.json',
+          limit: 10,
+          status: 'active',
           vault: './vault',
         },
       },
     ],
-    hint: '--input accepts @file.json or - so the CLI can load a supplement payload with product metadata and ingredients.',
+    hint: 'Use --status active to focus on current supplements or --limit to cap results.',
     options: withBaseOptions({
-      input: inputFileOptionSchema,
+      limit: commonListLimitOptionSchema,
+      status: statusOptionSchema,
     }),
-    output: supplementUpsertResultSchema,
+    output: healthListResultSchema,
     async run(context) {
-      const result = await services.core.upsertSupplement({
-        vault: context.options.vault,
+      return services.query.listSupplements({
+        limit: context.options.limit ?? 50,
         requestId: requestIdFromOptions(context.options),
-        input: normalizeInputFileOption(context.options.input),
+        status: context.options.status,
+        vault: context.options.vault,
       })
+    },
+  })
 
-      return context.ok(result, {
-        cta: suggestedCommandsCta([
-          {
-            command: 'supplement show',
-            args: {
-              id: result.regimenId,
-            },
-            description: 'Show the imported supplement record.',
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: 'supplement list',
-            description: 'List supplements.',
-            options: {
-              vault: true,
-            },
-          },
-        ]),
+  supplement.command('show', {
+    args: z.object({
+      id: z.string().min(1).describe('Canonical supplement id or slug.'),
+    }),
+    description: 'Show one supplement by canonical id or slug.',
+    examples: [
+      {
+        args: {
+          id: '<supplement-id>',
+        },
+        description: 'Show one saved supplement product.',
+        options: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint: 'Use the canonical supplement id or the supplement slug.',
+    options: withBaseOptions({}),
+    output: healthShowResultSchema,
+    async run(context) {
+      return services.query.showSupplement({
+        id: context.args.id,
+        requestId: requestIdFromOptions(context.options),
+        vault: context.options.vault,
       })
     },
   })
@@ -427,7 +348,7 @@ export function registerSupplementCommands(
         },
       },
     ],
-    hint: 'Use the canonical supplement id so the stop event is attached to the existing supplement record.',
+    hint: 'Use the canonical supplement id so the stop event is attached to the existing supplement regimen record.',
     options: withBaseOptions({
       stoppedOn: localDateSchema
         .optional()
@@ -435,8 +356,9 @@ export function registerSupplementCommands(
     }),
     output: stopResultSchema,
     async run(context) {
-      const result = await services.core.stopSupplement({
+      const result = await services.core.stopRegimen({
         regimenId: context.args.id,
+        group: 'supplement',
         stoppedOn: context.options.stoppedOn,
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
@@ -487,7 +409,7 @@ export function registerSupplementCommands(
         },
       },
     ],
-    hint: 'Use supplement import-json only when importing an advanced JSON payload from @file.json or stdin.',
+    hint: 'Supplements are saved as regimen records with kind supplement.',
     options: withBaseOptions({
       id: z
         .string()
@@ -643,42 +565,6 @@ export function registerSupplementCommands(
             },
           },
         ]),
-      })
-    },
-  })
-
-  supplement.command('rename', {
-    args: z.object({
-      lookup: z.string().min(1).describe('Supplement id or slug to rename.'),
-    }),
-    description: 'Rename one supplement product while preserving its canonical id.',
-    examples: [
-      {
-        args: {
-          lookup: '<supplement-id>',
-        },
-        description: 'Rename a supplement and let the slug move with the new title.',
-        options: {
-          title: 'Morning Protein Drink',
-          vault: './vault',
-        },
-      },
-    ],
-    hint: 'Use the canonical supplement id or current slug; the CLI reuses the existing supplement record instead of creating a new one.',
-    options: withBaseOptions({
-      title: z.string().min(1).max(160).describe('New supplement title.'),
-      slug: supplementSlugSchema
-        .optional()
-        .describe('Optional stable slug override for the renamed supplement record.'),
-    }),
-    output: supplementUpsertResultSchema,
-    async run(context) {
-      return services.core.renameSupplement({
-        lookup: context.args.lookup,
-        title: context.options.title,
-        slug: context.options.slug,
-        vault: context.options.vault,
-        requestId: requestIdFromOptions(context.options),
       })
     },
   })

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { localParallelCliTest as test } from "./local-parallel-test.js";
@@ -2090,89 +2090,6 @@ test("supplement commands expose product metadata and a rolled-up compound ledge
   }
 }, 60_000);
 
-test("supplement rename moves the product record to the new slug while preserving the id", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-supplement-rename-"));
-  const payloadPath = path.join(vaultRoot, "supplement.json");
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        title: "Morning Supplement Mix",
-        kind: "supplement",
-        status: "active",
-        startedOn: "2026-03-10",
-        brand: "HB",
-        manufacturer: "Murph",
-      }),
-      "utf8",
-    );
-
-    const created = await runCli<{
-      regimenId: string;
-      path?: string;
-    }>([
-      "supplement",
-      "import-json",
-      "--input",
-      `@${payloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(created.ok, true);
-
-    const renamed = await runCli<{
-      regimenId: string;
-      path?: string;
-      created: boolean;
-    }>([
-      "supplement",
-      "rename",
-      requireData(created).regimenId,
-      "--title",
-      "Morning Protein Drink",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(renamed.ok, true);
-    assert.equal(requireData(renamed).regimenId, requireData(created).regimenId);
-    assert.equal(requireData(renamed).created, false);
-    assert.match(requireData(renamed).path ?? "", /morning-protein-drink\.md$/u);
-
-    const renamedPath = requireData(renamed).path;
-    assert.equal(typeof renamedPath, "string");
-
-    await access(path.join(vaultRoot, String(renamedPath)));
-
-    const renamedMarkdown = await readFile(
-      path.join(vaultRoot, String(renamedPath)),
-      "utf8",
-    );
-    assert.match(renamedMarkdown, /title: "Morning Protein Drink"/u);
-
-    const showResult = await runCli<{
-      entity: {
-        id: string;
-        title: string | null;
-      };
-    }>([
-      "supplement",
-      "show",
-      "morning-protein-drink",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(showResult.ok, true);
-    assert.equal(requireData(showResult).entity.id, requireData(created).regimenId);
-    assert.equal(requireData(showResult).entity.title, "Morning Protein Drink");
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
 
 test("goal import-json rejects malformed payloads instead of coercing them into saved records", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
