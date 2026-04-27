@@ -251,6 +251,111 @@ function readChatUrl(workspaceDir, seam) {
   return readFileSync(chatUrlPath, "utf8").trim();
 }
 
+function normalizeEndpointUrl(endpoint) {
+  return endpoint.replace(/\/+$/u, "");
+}
+
+function extractChatConversationId(chatUrl) {
+  try {
+    const parsed = new URL(chatUrl);
+    if (parsed.hostname !== "chatgpt.com") {
+      return "";
+    }
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    return segments.length === 2 && segments[0] === "c" && segments[1]
+      ? decodeURIComponent(segments[1])
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function readBrowserTargets(browserEndpoint) {
+  const endpoint = normalizeEndpointUrl(browserEndpoint);
+  const script = `
+const endpoint = process.argv[1];
+const urls = [endpoint + "/json/list", endpoint + "/json"];
+const timeoutMs = 2500;
+async function readTargets() {
+  let lastError = "";
+  for (const url of urls) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        lastError = "HTTP " + response.status + " from " + url;
+        continue;
+      }
+      const parsed = await response.json();
+      if (Array.isArray(parsed)) {
+        process.stdout.write(JSON.stringify(parsed));
+        return;
+      }
+      lastError = "non-array target list from " + url;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  process.stderr.write(lastError || "unable to read browser target list");
+  process.exit(1);
+}
+readTargets();
+`;
+  const result = spawnSync(process.execPath, ["-e", script, endpoint], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: process.env,
+    timeout: 8000,
+  });
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+  if (result.status !== 0) {
+    const details = result.stderr.trim() || result.stdout.trim();
+    throw new Error(`Unable to inspect browser targets at ${browserEndpoint}: ${details}`);
+  }
+
+  const parsed = JSON.parse(result.stdout || "[]");
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function assertExploratoryConversationVisible({
+  browserEndpoint,
+  chatUrl,
+  lane,
+  recordedLane,
+  seam,
+}) {
+  const conversationId = extractChatConversationId(chatUrl);
+  if (!conversationId) {
+    throw new Error(
+      `Refusing exploratory harvest for ${seam} on ${lane}: no saved ChatGPT conversation URL was found.`,
+    );
+  }
+
+  const targets = readBrowserTargets(browserEndpoint);
+  const visibleTarget = targets.find((target) => {
+    if (!target || typeof target !== "object") {
+      return false;
+    }
+    const targetUrl = typeof target.url === "string" ? target.url : "";
+    return extractChatConversationId(targetUrl) === conversationId;
+  });
+
+  if (!visibleTarget) {
+    throw new Error(
+      [
+        `Refusing exploratory harvest for ${seam} on ${lane}: ChatGPT conversation ${conversationId} is not visible in that browser profile.`,
+        `This seam was sent on ${recordedLane}; run without --lane to use the recorded lane, or visibly load the saved conversation in ${lane} before retrying with --explore-lane.`,
+      ].join("\n"),
+    );
+  }
+}
+
 function resolveBrowserEndpoint(profileHelper, lane) {
   const result = spawnSync("bash", [profileHelper, "browser-endpoint", lane], {
     cwd: repoRoot,
@@ -456,6 +561,14 @@ function main(argv) {
     const recordedEndpoint = readRecordedSendEndpoint(existingState);
     const recordedLane = normalizeLane(readRecordedSendLane(existingState));
     const recordedSuffix = recordedEndpoint ? ` (${recordedEndpoint})` : "";
+    const chatUrl = readStateString(existingState, "chatUrl") || readChatUrl(workspaceDir, seam);
+    assertExploratoryConversationVisible({
+      browserEndpoint,
+      chatUrl,
+      lane,
+      recordedLane,
+      seam,
+    });
     console.warn(
       `Exploratory harvest override for ${seam}: sent on ${recordedLane}${recordedSuffix}, trying ${lane} (${browserEndpoint}).`,
     );

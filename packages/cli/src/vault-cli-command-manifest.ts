@@ -1245,6 +1245,7 @@ export const vaultCliCommandDescriptors = [
         'showExperiment',
         'listExperiments',
         'showExperimentProgress',
+        'showExperimentFollowupDue',
         'analyzeExperimentOutcome',
       ],
     },

@@ -5,6 +5,7 @@ import {
   experimentOutcomeSchema,
   experimentProgressSnapshotSchema,
   safeParseContract,
+  toLocalDayKey,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
   type ExperimentProgressMetricSignal,
@@ -43,6 +44,19 @@ export type ExperimentCoverageStatus =
   | "ready_for_review";
 export type ExperimentRecommendationAction = "skip" | "remind" | "summary" | "review";
 export type ExperimentOutcomeConfidenceLevel = "low" | "medium" | "high";
+export type ExperimentFollowupKind = "missed-log" | "weekly-digest";
+export type ExperimentFollowupAction = "notify" | "skip";
+export type ExperimentFollowupReason =
+  | "experiment_not_active"
+  | "not_in_intervention_window"
+  | "missed_log_followup_disabled"
+  | "reminders_disabled"
+  | "session_already_logged"
+  | "planned_session_log_missing"
+  | "unsupported_session_schedule"
+  | "weekly_digest_disabled"
+  | "weekly_digest_not_due"
+  | "weekly_digest_due";
 
 export interface ExperimentMetricPeriodSummary {
   daysWithData: number;
@@ -147,6 +161,28 @@ export interface ExperimentOutcomeSummary extends ExperimentOutcome {
   metricResults: ExperimentMetricResult[];
   protocolRef: ExperimentProtocolProjectionFields["protocolRef"];
   windows: ExperimentProgressSummary["windows"];
+}
+
+export interface ExperimentFollowupDueDecision {
+  schema: "murph.experiment-followup-due.v1";
+  kind: ExperimentFollowupKind;
+  action: ExperimentFollowupAction;
+  reason: ExperimentFollowupReason;
+  date: string;
+  dedupeKey: string;
+  experiment: {
+    id: string;
+    slug: string;
+    status: ExperimentFrontmatter["status"];
+    title: string;
+  };
+  window: {
+    sessionDate: string | null;
+    baselineStart: string | null;
+    baselineEnd: string | null;
+    interventionStart: string | null;
+    interventionEnd: string | null;
+  };
 }
 
 interface ExperimentSummaryContext {
@@ -297,6 +333,25 @@ export function analyzeExperimentOutcome(
     effectiveProtocolSnapshot: context.frontmatter.effectiveProtocolSnapshot ?? null,
     protocolRef: context.frontmatter.protocolRef ?? null,
   } as ExperimentOutcomeSummary;
+}
+
+export function decideExperimentFollowupDue(
+  vault: VaultReadModel,
+  slug: string,
+  options: {
+    date?: string;
+    kind: ExperimentFollowupKind;
+    now?: string | number | Date;
+  },
+): ExperimentFollowupDueDecision {
+  const date = options.date ?? resolveVaultLocalDate(vault, options.now ?? new Date());
+  const context = buildExperimentSummaryContext(vault, slug, { asOf: date });
+
+  if (options.kind === "weekly-digest") {
+    return decideWeeklyDigestDue(context, date);
+  }
+
+  return decideMissedLogDue(context, date);
 }
 
 function buildExperimentSummaryContext(
@@ -661,6 +716,189 @@ function buildWindowSummary(
   };
 }
 
+function buildFollowupBase(
+  context: ExperimentSummaryContext,
+  date: string,
+  kind: ExperimentFollowupKind,
+  reason: ExperimentFollowupReason,
+  action: ExperimentFollowupAction,
+  sessionDate: string | null,
+): ExperimentFollowupDueDecision {
+  const windows = buildWindowSummary(context.frontmatter);
+
+  return {
+    schema: "murph.experiment-followup-due.v1",
+    kind,
+    action,
+    reason,
+    date,
+    dedupeKey: [
+      "experiment-followup",
+      context.frontmatter.experimentId,
+      kind,
+      sessionDate ?? date,
+    ].join(":"),
+    experiment: {
+      id: context.frontmatter.experimentId,
+      slug: context.frontmatter.slug,
+      status: context.frontmatter.status,
+      title: context.frontmatter.title,
+    },
+    window: {
+      sessionDate,
+      ...windows,
+    },
+  };
+}
+
+function decideMissedLogDue(
+  context: ExperimentSummaryContext,
+  date: string,
+): ExperimentFollowupDueDecision {
+  const assistantSupport = context.frontmatter.assistantSupport;
+
+  if (context.frontmatter.status !== "active") {
+    return buildFollowupBase(context, date, "missed-log", "experiment_not_active", "skip", null);
+  }
+
+  if (context.progressPhase !== "intervention") {
+    return buildFollowupBase(context, date, "missed-log", "not_in_intervention_window", "skip", null);
+  }
+
+  if (assistantSupport?.remindersEnabled !== true) {
+    return buildFollowupBase(context, date, "missed-log", "reminders_disabled", "skip", null);
+  }
+
+  if (assistantSupport.missedLogFollowup === "never") {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "missed_log_followup_disabled",
+      "skip",
+      null,
+    );
+  }
+
+  if (!isDailyInterventionSchedule(context.frontmatter)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "unsupported_session_schedule",
+      "skip",
+      null,
+    );
+  }
+
+  if (hasSessionLogForDate(context.events, date)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "session_already_logged",
+      "skip",
+      date,
+    );
+  }
+
+  return buildFollowupBase(
+    context,
+    date,
+    "missed-log",
+    "planned_session_log_missing",
+    "notify",
+    date,
+  );
+}
+
+function decideWeeklyDigestDue(
+  context: ExperimentSummaryContext,
+  date: string,
+): ExperimentFollowupDueDecision {
+  if (context.frontmatter.status !== "active") {
+    return buildFollowupBase(context, date, "weekly-digest", "experiment_not_active", "skip", null);
+  }
+
+  if (
+    context.progressPhase !== "intervention" &&
+    context.progressPhase !== "review_due"
+  ) {
+    return buildFollowupBase(
+      context,
+      date,
+      "weekly-digest",
+      "not_in_intervention_window",
+      "skip",
+      null,
+    );
+  }
+
+  if (context.frontmatter.assistantSupport?.weeklyDigestEnabled !== true) {
+    return buildFollowupBase(
+      context,
+      date,
+      "weekly-digest",
+      "weekly_digest_disabled",
+      "skip",
+      null,
+    );
+  }
+
+  if (!isWeeklyDigestDueOnDate(context.frontmatter, date)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "weekly-digest",
+      "weekly_digest_not_due",
+      "skip",
+      null,
+    );
+  }
+
+  return buildFollowupBase(
+    context,
+    date,
+    "weekly-digest",
+    "weekly_digest_due",
+    "notify",
+    date,
+  );
+}
+
+function isWeeklyDigestDueOnDate(frontmatter: ExperimentFrontmatter, date: string): boolean {
+  const interventionStart = frontmatter.runPlan?.interventionStart;
+  if (!interventionStart || date < interventionStart) {
+    return false;
+  }
+
+  return daysBetweenInclusive(interventionStart, date) % 7 === 0;
+}
+
+function hasSessionLogForDate(events: readonly CanonicalEntity[], date: string): boolean {
+  return events.some((event) => event.kind === "intervention_session" && event.date === date);
+}
+
+function isDailyInterventionSchedule(frontmatter: ExperimentFrontmatter): boolean {
+  const runPlan = frontmatter.runPlan;
+  if (!runPlan?.interventionStart || !runPlan.interventionEnd) {
+    return false;
+  }
+
+  const totalDays = daysBetweenInclusive(runPlan.interventionStart, runPlan.interventionEnd);
+  if (totalDays <= 0) {
+    return false;
+  }
+
+  const targetSessions = runPlan.targetSessions;
+  const sessionsPerWeek = runPlan.sessionsPerWeek;
+
+  return (
+    (typeof targetSessions === "number" && targetSessions >= totalDays) ||
+    (typeof sessionsPerWeek === "number" && sessionsPerWeek >= 7)
+  );
+}
+
 function countDatesWithWearableData(
   dates: readonly string[],
   summariesByDate: ReadonlyMap<string, WearableDaySummary | null>,
@@ -934,6 +1172,20 @@ function normalizeAsOfDate(value: string | undefined): string {
   }
 
   return value;
+}
+
+function resolveVaultLocalDate(vault: VaultReadModel, value: string | number | Date): string {
+  return toLocalDayKey(value, resolveVaultTimeZone(vault));
+}
+
+function resolveVaultTimeZone(vault: VaultReadModel): string {
+  const metadata = vault.metadata;
+  const timezone =
+    metadata && typeof metadata === "object" && typeof metadata.timezone === "string"
+      ? metadata.timezone
+      : null;
+
+  return timezone ?? "UTC";
 }
 
 function classifyMetricCompleteness(

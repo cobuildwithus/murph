@@ -83,6 +83,16 @@ vi.mock("@/src/components/ui/dropdown-menu", () => ({
 }));
 
 import { Sidebar } from "../src/components/dashboard/sidebar";
+import type { HostedDeviceSyncSettingsSource } from "../src/lib/device-sync/settings-surface";
+import { summarizeSidebarDeviceSyncStatus } from "../src/lib/device-sync/sidebar-status";
+
+test("Sidebar does not render the Overview page as a navigation item", () => {
+  mocks.usePathname.mockReturnValue("/experiments");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.doesNotMatch(markup, />Overview<\/a>/);
+});
 
 test("Sidebar renders an active Biomarkers tab for the live RHR page", () => {
   mocks.usePathname.mockReturnValue("/biomarkers/resting-heart-rate");
@@ -116,10 +126,111 @@ test("Sidebar renders account menu with signed-in user label", () => {
   assert.match(markup, /Sign out/);
 });
 
-test("Sidebar shows Oura connected status", () => {
+test("Sidebar does not render a hardcoded wearable connection status", () => {
   mocks.usePathname.mockReturnValue("/overview");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(markup, /Oura connected/);
+  assert.doesNotMatch(markup, /Oura connected/);
 });
+
+test("summarizeSidebarDeviceSyncStatus reflects connected source state", () => {
+  assert.deepEqual(
+    summarizeSidebarDeviceSyncStatus([
+      createDeviceSyncSource({
+        providerLabel: "WHOOP",
+        statusLabel: "Connected",
+        state: "active",
+        tone: "calm",
+      }),
+    ]),
+    {
+      message: "WHOOP connected",
+      tone: "connected",
+    },
+  );
+});
+
+test("summarizeSidebarDeviceSyncStatus prioritizes reconnect and disconnected states", () => {
+  assert.deepEqual(
+    summarizeSidebarDeviceSyncStatus([
+      createDeviceSyncSource({
+        providerLabel: "Garmin",
+        statusLabel: "Connected",
+        state: "active",
+        tone: "calm",
+      }),
+      createDeviceSyncSource({
+        providerLabel: "WHOOP",
+        statusLabel: "Needs reconnect",
+        state: "reauthorization_required",
+        tone: "attention",
+      }),
+    ]),
+    {
+      message: "WHOOP needs reconnect",
+      tone: "attention",
+    },
+  );
+
+  assert.deepEqual(
+    summarizeSidebarDeviceSyncStatus([
+      createDeviceSyncSource({
+        providerLabel: "WHOOP",
+        statusLabel: "Disconnected",
+        state: "disconnected",
+        tone: "muted",
+      }),
+    ]),
+    {
+      message: "WHOOP disconnected",
+      tone: "muted",
+    },
+  );
+});
+
+test("summarizeSidebarDeviceSyncStatus preserves unavailable connected state", () => {
+  assert.deepEqual(
+    summarizeSidebarDeviceSyncStatus([
+      createDeviceSyncSource({
+        providerLabel: "Garmin",
+        statusLabel: "Unavailable",
+        state: "unavailable",
+        tone: "muted",
+      }),
+    ]),
+    {
+      message: "Garmin unavailable",
+      tone: "muted",
+    },
+  );
+});
+
+function createDeviceSyncSource(
+  overrides: Partial<HostedDeviceSyncSettingsSource>,
+): HostedDeviceSyncSettingsSource {
+  const providerLabel = overrides.providerLabel ?? "Wearable";
+
+  return {
+    connectionId: "conn_123",
+    connectedAt: "2026-04-27T00:00:00.000Z",
+    detail: "",
+    displayName: null,
+    guidance: "",
+    headline: "",
+    lastActivityAt: null,
+    lastSuccessfulSyncAt: null,
+    lastWebhookAt: null,
+    nextReconcileAt: null,
+    primaryAction: null,
+    provider: providerLabel.toLowerCase(),
+    providerConfigured: true,
+    providerLabel,
+    secondaryAction: null,
+    state: "active",
+    statusLabel: "Connected",
+    tone: "calm",
+    updatedAt: null,
+    ...overrides,
+  };
+}

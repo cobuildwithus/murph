@@ -90,6 +90,7 @@ declare module 'incur' {
       'experiment context log': { args: { lookup: string }; options: { vault: string; requestId?: string; kind?: "experiment_context" | "note" | "supplement_intake"; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; contextType?: string; severity?: "info" | "potential_confounder" | "safety" | "blocking"; tag?: string[]; supplementName?: string; dose?: number; unit?: string } }
       'experiment context log-json': { args: { id: string }; options: { vault: string; requestId?: string; input: string } }
       'experiment create': { args: { slug: string }; options: { vault: string; requestId?: string; title?: string; hypothesis?: string; startedOn?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
+      'experiment followup due': { args: { id: string }; options: { vault: string; requestId?: string; kind: "missed-log" | "weekly-digest"; date?: string } }
       'experiment list': { args: {}; options: { vault: string; requestId?: string; limit: number; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
       'experiment outcome analyze': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }
       'experiment outcome write': { args: { id: string }; options: { vault: string; requestId?: string; asOf?: string } }

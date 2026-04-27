@@ -7,15 +7,9 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/src/components/ui/card";
 import type { HostedVaultSyncSessionView } from "@/src/lib/vault-sync/shared";
+
+import { ConnectedAccountCard } from "./connected-account-card";
 
 interface HostedVaultSyncSessionsResponse {
   ok: true;
@@ -81,14 +75,24 @@ export function HostedVaultSyncSettingsClient(props: {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Sync local vault</CardTitle>
-        <CardDescription>
-          Upload your local Murph vault into this hosted account. Sync adds missing local records, preserves hosted data, and saves conflicts for review.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
+      <ConnectedAccountCard
+        label="Sync local vault"
+        value="Local-to-hosted import"
+        meta="Adds missing local records while preserving hosted data."
+        action={
+          <>
+            <Button disabled={pending || refreshPending} onClick={startSync} type="button">
+              {pending ? "Starting..." : "Start sync"}
+            </Button>
+            <Button disabled={pending || refreshPending} onClick={() => void refreshSessions()} type="button" variant="outline">
+              {refreshPending ? "Refreshing..." : "Refresh"}
+            </Button>
+          </>
+        }
+      />
+
+      <div className="flex flex-col gap-3">
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         {latest?.agentCommand ? (
           <div className="rounded-lg bg-muted p-3">
@@ -101,20 +105,8 @@ export function HostedVaultSyncSettingsClient(props: {
           <p className="text-sm text-muted-foreground">
             Latest sync session: <span className="font-medium text-foreground">{latest.status}</span>
           </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Start a one-way local-to-hosted import. The uploaded local pack is merged into the current hosted vault; it is not committed as a replacement snapshot.
-          </p>
-        )}
-      </CardContent>
-      <CardFooter className="flex-wrap gap-2">
-        <Button disabled={pending || refreshPending} onClick={startSync} type="button">
-          {pending ? "Starting..." : "Start sync"}
-        </Button>
-        <Button disabled={pending || refreshPending} onClick={() => void refreshSessions()} type="button" variant="outline">
-          {refreshPending ? "Refreshing..." : "Refresh"}
-        </Button>
-      </CardFooter>
-    </Card>
+        ) : null}
+      </div>
+    </div>
   );
 }

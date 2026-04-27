@@ -46,6 +46,89 @@ function runResearchRun(args: string[], env: NodeJS.ProcessEnv = process.env) {
   });
 }
 
+async function startFakeCdpServer(visibleTargets: string[]) {
+  const fakeBrowserServer = spawn(
+    process.execPath,
+    [
+      "-e",
+      `
+const http = require("node:http");
+const visibleTargets = JSON.parse(process.argv[1]);
+const server = http.createServer((request, response) => {
+  if (request.url === "/json/list" || request.url === "/json") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(visibleTargets.map((target, index) => ({
+      id: "target-" + index,
+      type: "page",
+      url: target.startsWith("http") ? target : "https://chatgpt.com/c/" + target,
+    }))));
+    return;
+  }
+
+  if (request.url && request.url.startsWith("/json/close/")) {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("Target is closing");
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "text/plain" });
+  response.end("not found");
+});
+server.listen(0, "127.0.0.1", () => {
+  const address = server.address();
+  console.log("http://127.0.0.1:" + address.port);
+});
+process.on("SIGTERM", () => {
+  server.close(() => process.exit(0));
+});
+	`,
+      JSON.stringify(visibleTargets),
+    ],
+    {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  const endpoint = await new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out starting fake CDP server.")), 5000);
+    let stderr = "";
+    fakeBrowserServer.stderr.setEncoding("utf8");
+    fakeBrowserServer.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    fakeBrowserServer.stdout.setEncoding("utf8");
+    fakeBrowserServer.stdout.on("data", (chunk) => {
+      clearTimeout(timer);
+      resolve(chunk.trim());
+    });
+    fakeBrowserServer.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    fakeBrowserServer.on("exit", (code) => {
+      if (code !== 0) {
+        clearTimeout(timer);
+        reject(new Error(stderr.trim() || `Fake CDP server exited with ${code}.`));
+      }
+    });
+  });
+
+  return {
+    endpoint,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        if (fakeBrowserServer.exitCode !== null) {
+          resolve();
+          return;
+        }
+        fakeBrowserServer.once("exit", () => resolve());
+        fakeBrowserServer.once("error", reject);
+        fakeBrowserServer.kill("SIGTERM");
+      }),
+  };
+}
+
 function runResearchPackageScript(
   packageScriptPath: string,
   outDir: string,
@@ -223,10 +306,16 @@ describe("research init scaffold", () => {
     expect(packageJson.scripts?.["research:run"]).toBe("node scripts/research-run.mjs");
   });
 
-  it("runs generated seam commands through a named lane and reuses it for harvest", () => {
+  it("runs generated seam commands through a named lane and reuses it for harvest", async () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-"));
     const outDir = path.join(tempRoot, "lane-state");
+    const phlebasBrowser = await startFakeCdpServer(["research-run-test"]);
+    const herculesBrowser = await startFakeCdpServer(["research-run-test"]);
+    const mountainBrowser = await startFakeCdpServer([
+      "https://example.com/c/research-run-test",
+      "https://chatgpt.com/c/research-run-test-suffix",
+    ]);
 
     try {
       expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
@@ -239,8 +328,9 @@ set -euo pipefail
 
 endpoint_for_lane() {
   case "$1" in
-    phlebas) printf '%s\\n' 'http://127.0.0.1:17777' ;;
-    hercules) printf '%s\\n' 'http://127.0.0.1:17778' ;;
+    phlebas) printf '%s\\n' '${phlebasBrowser.endpoint}' ;;
+    hercules) printf '%s\\n' '${herculesBrowser.endpoint}' ;;
+    mountain) printf '%s\\n' '${mountainBrowser.endpoint}' ;;
     *) exit 65 ;;
   esac
 }
@@ -372,7 +462,7 @@ exit 64
       expect(sendResult.stderr).toBe("");
       expect(readFileSync(path.join(outDir, "state", "send-lane.txt"), "utf8")).toBe("phlebas\n");
       expect(readFileSync(path.join(outDir, "state", "send-endpoint.txt"), "utf8")).toBe(
-        "http://127.0.0.1:17777\n",
+        `${phlebasBrowser.endpoint}\n`,
       );
 
       const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
@@ -385,7 +475,7 @@ exit 64
       };
       expect(sendState.schemaVersion).toBe("murph.research.seam-run.v1");
       expect(sendState.lane).toBe("phlebas");
-      expect(sendState.browserEndpoint).toBe("http://127.0.0.1:17777");
+      expect(sendState.browserEndpoint).toBe(phlebasBrowser.endpoint);
       expect(sendState.chatUrl).toBe("https://chatgpt.com/c/research-run-test");
       expect(sendState.send.command).toBe(`${workspaceArg}/commands/01-charter.send.sh`);
       expect(sendState.send.status).toBe("completed");
@@ -396,7 +486,7 @@ exit 64
         `${JSON.stringify(
           {
             ...sendState,
-            browserEndpoint: "http://127.0.0.1:17778",
+            browserEndpoint: herculesBrowser.endpoint,
             lane: "hercules",
           },
           null,
@@ -435,11 +525,11 @@ exit 64
         "phlebas\n",
       );
       expect(readFileSync(path.join(outDir, "state", "harvest-endpoint.txt"), "utf8")).toBe(
-        "http://127.0.0.1:17777\n",
+        `${phlebasBrowser.endpoint}\n`,
       );
       expect(
         readFileSync(path.join(outDir, "state", "harvest-browser-endpoint-arg.txt"), "utf8"),
-      ).toBe("http://127.0.0.1:17777\n");
+      ).toBe(`${phlebasBrowser.endpoint}\n`);
 
       const harvestState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
         browserEndpoint: string;
@@ -447,12 +537,38 @@ exit 64
         lane: string;
       };
       expect(harvestState.lane).toBe("phlebas");
-      expect(harvestState.browserEndpoint).toBe("http://127.0.0.1:17777");
+      expect(harvestState.browserEndpoint).toBe(phlebasBrowser.endpoint);
       expect(harvestState.harvest.lane).toBe("phlebas");
       expect(harvestState.harvest.status).toBe("completed");
       expect(harvestState.harvest.exitCode).toBe(0);
       expect(readFileSync(path.join(outDir, "responses", "01-charter.md"), "utf8")).toContain(
         "Recovered charter response",
+      );
+
+      const invisibleExploratoryResult = runResearchRun(
+        [
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "harvest",
+          "--lane",
+          "mountain",
+          "--explore-lane",
+        ],
+        env,
+      );
+
+      expect(invisibleExploratoryResult.status).toBe(1);
+      expect(invisibleExploratoryResult.stderr).toContain(
+        "Refusing exploratory harvest for 01-charter on mountain",
+      );
+      expect(invisibleExploratoryResult.stderr).toContain(
+        "ChatGPT conversation research-run-test is not visible",
+      );
+      expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
+        "phlebas\n",
       );
 
       const exploratoryResult = runResearchRun(
@@ -481,9 +597,9 @@ exit 64
         lane: string;
       };
       expect(exploratoryState.lane).toBe("phlebas");
-      expect(exploratoryState.browserEndpoint).toBe("http://127.0.0.1:17777");
+      expect(exploratoryState.browserEndpoint).toBe(phlebasBrowser.endpoint);
       expect(exploratoryState.harvest.lane).toBe("hercules");
-      expect(exploratoryState.harvest.browserEndpoint).toBe("http://127.0.0.1:17778");
+      expect(exploratoryState.harvest.browserEndpoint).toBe(herculesBrowser.endpoint);
 
       const resendResult = runResearchRun(
         [
@@ -509,6 +625,11 @@ exit 64
       expect("harvest" in resendState).toBe(false);
       expect("harvestedAt" in resendState).toBe(false);
     } finally {
+      await Promise.all([
+        phlebasBrowser.close(),
+        herculesBrowser.close(),
+        mountainBrowser.close(),
+      ]);
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });

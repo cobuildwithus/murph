@@ -4,9 +4,6 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import {
-  pathSchema,
-} from '@murphai/operator-config/vault-cli-contracts'
-import {
   buildVaultSyncImportPack,
 } from '@murphai/core'
 import {
@@ -17,13 +14,11 @@ const DEFAULT_HOSTED_APP_URL = 'https://app.murph.ai'
 
 export const syncPushResultSchema = z.object({
   dryRun: z.boolean(),
-  vault: pathSchema,
   host: z.string().min(1).nullable(),
   sessionId: z.string().min(1).nullable(),
   status: z.string().min(1),
   localManifestHash: z.string().min(1),
   sourceVaultId: z.string().min(1).nullable(),
-  sourceVaultTitle: z.string().min(1).nullable(),
   sourceSchemaVersion: z.string().min(1).nullable(),
   includedFiles: z.number().int().nonnegative(),
   excludedFiles: z.number().int().nonnegative(),
@@ -66,16 +61,14 @@ export function registerSyncCommands(cli: Cli.Cli) {
       if (options.dryRun) {
         return {
           dryRun: true,
-          vault: options.vault,
           host: normalizeHostedAppUrl(options.host),
           sessionId: null,
           status: 'dry_run',
           localManifestHash: pack.manifestHash,
           sourceVaultId: pack.sourceVaultId,
-          sourceVaultTitle: pack.sourceVaultTitle,
           sourceSchemaVersion: pack.sourceSchemaVersion,
           includedFiles: pack.manifest.files.length,
-          excludedFiles: pack.manifest.excluded.length,
+          excludedFiles: countManifestExcludedFiles(pack.manifest.excluded),
           bundleBytes: pack.bundle.byteLength,
         }
       }
@@ -101,16 +94,14 @@ export function registerSyncCommands(cli: Cli.Cli) {
 
       return {
         dryRun: false,
-        vault: options.vault,
         host,
         sessionId: complete.session.id,
         status: complete.session.status,
         localManifestHash: pack.manifestHash,
         sourceVaultId: pack.sourceVaultId,
-        sourceVaultTitle: pack.sourceVaultTitle,
         sourceSchemaVersion: pack.sourceSchemaVersion,
         includedFiles: pack.manifest.files.length,
-        excludedFiles: pack.manifest.excluded.length,
+        excludedFiles: countManifestExcludedFiles(pack.manifest.excluded),
         bundleBytes: pack.bundle.byteLength,
       }
     },
@@ -133,6 +124,10 @@ interface HostedVaultSyncExchangeResponse {
 interface HostedVaultSyncCompleteResponse {
   ok: boolean
   session: HostedVaultSyncSessionView
+}
+
+function countManifestExcludedFiles(excluded: readonly { count: number }[]): number {
+  return excluded.reduce((total, entry) => total + entry.count, 0)
 }
 
 function normalizeHostedAppUrl(value: string): string {
