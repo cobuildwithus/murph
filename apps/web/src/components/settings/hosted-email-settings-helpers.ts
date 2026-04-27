@@ -132,12 +132,12 @@ function formatHostedEmailSyncSuccessMessage(
   if (mode === "verify") {
     return syncResult.runTriggered
       ? `Email verified and connected: ${syncResult.emailAddress}`
-      : `Email verified and saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it on the next hosted run.`;
+      : `Email verified and saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it shortly.`;
   }
 
   return syncResult.runTriggered
     ? `Hosted email synced: ${syncResult.emailAddress}`
-    : `Verified email saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it on the next hosted run.`;
+    : `Verified email saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it shortly.`;
 }
 
 async function syncHostedEmailConnection(

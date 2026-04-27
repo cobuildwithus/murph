@@ -1,4 +1,4 @@
-import type { HostedExecutionBundleRef } from "@murphai/hosted-execution";
+import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -40,7 +40,7 @@ export interface RunnerStateRecord {
   lastError: string | null;
   lastErrorAt: string | null;
   lastErrorCode: string | null;
-  lastRunAt: string | null;
+  lastInvocationAt: string | null;
   leaseGeneration: number;
   nextWakeAt: string | null;
   pendingNudge: boolean;

@@ -7,6 +7,18 @@ export interface WorkerSendEmailBindingLike {
 
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
+  ownsActiveInvocationLease?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean>;
+  recordActiveInvocationWorkspaceCheckpoint?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{ recorded: boolean }>;
 }
 
 export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {

@@ -19,7 +19,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       in_flight INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
       last_error_code TEXT,
-      last_run_at TEXT,
+      last_invocation_at TEXT,
       next_wake_at TEXT,
       pending_nudge INTEGER NOT NULL DEFAULT 0
     )
@@ -53,7 +53,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "in_flight",
       "last_error_at",
       "last_error_code",
-      "last_run_at",
+      "last_invocation_at",
       "next_wake_at",
       "pending_nudge",
     ],

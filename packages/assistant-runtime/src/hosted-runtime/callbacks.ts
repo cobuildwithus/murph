@@ -11,10 +11,9 @@ import {
   type HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution/side-effects";
 import {
-  createAssistantDeliveryAmbiguousError,
+  beginAssistantOutboxIntentMirrorDispatch,
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
-  markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
@@ -37,9 +36,10 @@ import type {
 } from "./platform.ts";
 import { buildHostedPlatformBackedRuntimeEnv } from "./environment.ts";
 
-const HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS = 20;
-const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_finalize";
+const HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS = 1;
+const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
+const HOSTED_IDEMPOTENT_SENDING_RETRY_MS = 10 * 60 * 1000;
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
@@ -49,21 +49,124 @@ export async function collectHostedAssistantDeliverySideEffects(
   const now = new Date();
   const intents = await listAssistantOutboxIntents(vaultRoot);
 
-  return intents
-    .filter((intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]) =>
-      shouldDispatchAssistantOutboxIntent(intent, now),
-    )
-    .slice(0, HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS)
-    .map((intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]) =>
-      buildHostedAssistantDeliveryEffect({
-        dedupeKey: intent.dedupeKey,
-        effectId: intent.intentId,
-        payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
-      }),
-    );
+  const effects: HostedAssistantDeliveryEffect[] = [];
+  for (const intent of intents) {
+    if (intent.status === "sending") {
+      const mirrorState = await readAssistantOutboxIntentMirrorState({
+        intentId: intent.intentId,
+        now,
+        sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
+        vault: vaultRoot,
+      });
+      if (!mirrorState.sendingPastGraceWindow) {
+        continue;
+      }
+      if (!intent.deliveryTransportIdempotent) {
+        continue;
+      }
+    }
+
+    if (
+      intent.status === "retryable"
+      && !intent.deliveryTransportIdempotent
+      && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+    ) {
+      continue;
+    }
+
+    if (!shouldDispatchAssistantOutboxIntent(intent, now)) {
+      continue;
+    }
+
+    effects.push(buildHostedAssistantDeliveryEffect({
+      dedupeKey: intent.dedupeKey,
+      effectId: intent.intentId,
+      payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
+    }));
+  }
+
+  return effects.slice(0, HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS);
+}
+
+export async function resolveHostedAssistantOutboxNextWakeAt(input: {
+  now?: Date;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const now = input.now ?? new Date();
+  const intents = await listAssistantOutboxIntents(input.vaultRoot);
+  let wakeAt: string | null = null;
+
+  for (const intent of intents) {
+    const candidate = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
+    if (!candidate) {
+      continue;
+    }
+    if (!wakeAt || candidate < wakeAt) {
+      wakeAt = candidate;
+    }
+  }
+
+  return wakeAt;
+}
+
+function resolveHostedAssistantOutboxIntentWakeAt(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): string | null {
+  switch (intent.status) {
+    case "pending":
+    case "retryable": {
+      if (
+        intent.status === "retryable"
+        && !intent.deliveryTransportIdempotent
+        && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+      ) {
+        return null;
+      }
+      const nextAttemptMs = intent.nextAttemptAt ? Date.parse(intent.nextAttemptAt) : Number.NaN;
+      if (!Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime()) {
+        return now.toISOString();
+      }
+      return new Date(nextAttemptMs).toISOString();
+    }
+    case "sending": {
+      const startedAtMs = intent.lastAttemptAt ? Date.parse(intent.lastAttemptAt) : Number.NaN;
+      if (!Number.isFinite(startedAtMs)) {
+        return intent.deliveryTransportIdempotent ? now.toISOString() : null;
+      }
+      const delayMs = intent.deliveryTransportIdempotent
+        ? HOSTED_IDEMPOTENT_SENDING_RETRY_MS
+        : HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS;
+      const wakeMs = startedAtMs + delayMs;
+      if (wakeMs <= now.getTime() && !intent.deliveryTransportIdempotent) {
+        return null;
+      }
+      return new Date(Math.max(wakeMs, now.getTime())).toISOString();
+    }
+    default:
+      return null;
+  }
+}
+
+export async function prepareHostedAssistantDeliverySideEffectsForCheckpoint(input: {
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  now?: () => string;
+  vaultRoot: string;
+}): Promise<void> {
+  const startedAt = (input.now ?? (() => new Date().toISOString()))();
+  for (const effect of input.assistantDeliveryEffects) {
+    await beginAssistantOutboxIntentMirrorDispatch({
+      deliveryIdempotencyKey: effect.payload.idempotencyKey,
+      deliveryTransportIdempotent: effect.payload.transportIdempotent,
+      intentId: effect.effectId,
+      startedAt,
+      vault: input.vaultRoot,
+    });
+  }
 }
 
 export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: {
+  allowPreparedSending?: boolean;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   forwardedEnv?: Readonly<Record<string, string>>;
@@ -92,6 +195,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
     outcomes.push(await deliverHostedCommittedAssistantDelivery({
       wake: input.wake,
       effectsPort: input.effectsPort,
+      allowPreparedSending: input.allowPreparedSending === true,
       assistantDeliveryEffect,
       telegramEnv,
       userId: input.wake.userId,
@@ -103,6 +207,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }
 
 async function deliverHostedCommittedAssistantDelivery(input: {
+  allowPreparedSending: boolean;
   wake: HostedRuntimeEvent;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
@@ -119,6 +224,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
   });
   try {
     const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
+      allowPreparedSending: input.allowPreparedSending,
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       mirrorState,
       now,
@@ -158,6 +264,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
       },
       intentId: input.assistantDeliveryEffect.effectId,
       now,
+      ...(input.allowPreparedSending ? { allowPreparedSending: true } : {}),
       vault: input.vaultRoot,
     });
     return await buildHostedAssistantDeliveryDispatchResult({
@@ -186,7 +293,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
       }),
       wake: input.wake,
       error: enrichedError,
-      message: "Hosted assistant delivery threw during post-commit delivery.",
+      message: "Hosted assistant delivery threw.",
       phase: "outbox",
       userId: input.userId,
     });
@@ -195,6 +302,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
 }
 
 async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
+  allowPreparedSending?: boolean;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   now: Date;
@@ -271,12 +379,10 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
     }
     case "abandoned": {
-      const ambiguousError = createAssistantDeliveryAmbiguousError(
-        intent.lastError ?? {
-          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-          message: "The assistant outbox mirror recorded an abandoned delivery attempt.",
-        },
-      );
+      const ambiguousError = normalizeHostedAssistantDeliveryMirrorFailure({
+        fallbackMessage: "The assistant outbox mirror recorded an abandoned delivery attempt.",
+        lastError: intent.lastError,
+      });
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: ambiguousError,
         deliveryStatus: "failed_ambiguous",
@@ -319,6 +425,9 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
       });
     }
     case "sending": {
+      if (input.allowPreparedSending === true) {
+        return null;
+      }
       if (!input.mirrorState.sendingPastGraceWindow) {
         emitHostedAssistantDeliveryDispatchOutcome({
           deliveryError: null,
@@ -339,35 +448,26 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
         return null;
       }
 
-      const ambiguousError = createAssistantDeliveryAmbiguousError(
-        intent.lastError ?? {
-          code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-          message:
-            "The assistant outbox mirror remained in sending state past the confirmation grace window.",
-        },
-      );
-      await syncHostedAssistantDeliveryTerminalMirror({
-        effect: input.assistantDeliveryEffect,
-        error: ambiguousError,
-        status: "abandoned",
-        userId: input.userId,
-        vaultRoot: input.vaultRoot,
+      const confirmationPending = normalizeHostedAssistantDeliveryMirrorFailure({
+        fallbackMessage:
+          "The assistant outbox mirror remained in sending state past the confirmation grace window.",
+        lastError: intent.lastError,
       });
       emitHostedAssistantDeliveryDispatchOutcome({
-        deliveryError: ambiguousError,
-        deliveryStatus: "failed_ambiguous",
+        deliveryError: confirmationPending,
+        deliveryStatus: "sending",
         wake: input.wake,
         effect: input.assistantDeliveryEffect,
-        retryable: false,
+        retryable: true,
         userId: input.userId,
       });
       return buildHostedAssistantDeliveryOutcome({
-        deliveryErrorCode: ambiguousError.code,
-        deliveryErrorMessage: ambiguousError.message,
-        deliveryStatus: "failed_ambiguous",
+        deliveryErrorCode: confirmationPending.code,
+        deliveryErrorMessage: confirmationPending.message,
+        deliveryStatus: "sending",
         delivery: intent.delivery ?? null,
         effect: input.assistantDeliveryEffect,
-        retryable: false,
+        retryable: true,
       });
     }
     default:
@@ -396,7 +496,7 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
       userId: input.userId,
     }),
     wake: input.wake,
-    message: "Hosted assistant delivery sent successfully during post-commit delivery.",
+    message: "Hosted assistant delivery sent successfully.",
     phase: "outbox",
     userId: input.userId,
   });
@@ -431,7 +531,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
     }),
     wake: input.wake,
     level: input.retryable ? "warn" : "error",
-    message: `Hosted assistant delivery finished with ${input.deliveryStatus} status during post-commit delivery.`,
+    message: `Hosted assistant delivery finished with ${input.deliveryStatus} status.`,
     phase: "outbox",
     userId: input.userId,
   });
@@ -459,39 +559,6 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
     return buildHostedAssistantDeliveryOutcome({
       delivery,
       deliveryStatus: "sent",
-      effect: assistantDeliveryEffect,
-      retryable: false,
-    });
-  }
-
-  if (
-    dispatchResult.intent.status === "retryable"
-    && !isHostedDeliveryTransportIdempotent(assistantDeliveryEffect)
-    && dispatchResult.intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
-  ) {
-    const ambiguousError = createAssistantDeliveryAmbiguousError(
-      dispatchResult.deliveryError ?? dispatchResult.intent.lastError,
-    );
-    await syncHostedAssistantDeliveryTerminalMirror({
-      effect: assistantDeliveryEffect,
-      error: ambiguousError,
-      status: "abandoned",
-      userId: input.userId,
-      vaultRoot: input.vaultRoot,
-    });
-    emitHostedAssistantDeliveryDispatchOutcome({
-      deliveryError: ambiguousError,
-      deliveryStatus: "failed_ambiguous",
-      wake: input.wake,
-      effect: assistantDeliveryEffect,
-      retryable: false,
-      userId: input.userId,
-    });
-    return buildHostedAssistantDeliveryOutcome({
-      deliveryErrorCode: ambiguousError.code,
-      deliveryErrorMessage: ambiguousError.message,
-      deliveryStatus: "failed_ambiguous",
-      delivery,
       effect: assistantDeliveryEffect,
       retryable: false,
     });
@@ -570,7 +637,10 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
         retryable: true,
       });
     case "abandoned": {
-      const ambiguousError = createAssistantDeliveryAmbiguousError(dispatchResult.intent.lastError);
+      const ambiguousError = normalizeHostedAssistantDeliveryMirrorFailure({
+        fallbackMessage: "The assistant outbox mirror recorded an abandoned delivery attempt.",
+        lastError: dispatchResult.intent.lastError,
+      });
       emitHostedAssistantDeliveryDispatchOutcome({
         deliveryError: ambiguousError,
         deliveryStatus: "failed_ambiguous",
@@ -645,58 +715,6 @@ function isHostedDeliveryTransportIdempotent(
   effect: Pick<HostedAssistantDeliveryEffect, "payload">,
 ): boolean {
   return effect.payload.transportIdempotent;
-}
-
-async function syncHostedAssistantDeliveryTerminalMirror(input: {
-  effect: HostedAssistantDeliveryEffect;
-  error: unknown;
-  status: "abandoned" | "failed";
-  userId: string;
-  vaultRoot: string;
-}): Promise<void> {
-  await bestEffortHostedAssistantDeliveryMirror({
-    effect: input.effect,
-    step: input.status,
-    userId: input.userId,
-    work: async () => {
-      await markAssistantOutboxIntentMirrorTerminalById({
-        error: input.error,
-        intentId: input.effect.effectId,
-        status: input.status,
-        vault: input.vaultRoot,
-      });
-    },
-  });
-}
-
-async function bestEffortHostedAssistantDeliveryMirror(input: {
-  effect: HostedAssistantDeliveryEffect;
-  step: string;
-  userId: string;
-  work: () => Promise<void>;
-}): Promise<void> {
-  try {
-    await input.work();
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: buildHostedAssistantDeliveryDetails({
-        effectFingerprint: input.effect.fingerprint,
-        effectId: input.effect.effectId,
-        extra: {
-          failureDomain: "mirror",
-          mirrorStep: input.step,
-          retryable: true,
-        },
-        userId: input.userId,
-      }),
-      error,
-      level: "warn",
-      message: "Hosted assistant delivery local mirror update failed.",
-      phase: "outbox",
-      userId: input.userId,
-    });
-  }
 }
 
 function attachHostedAssistantDeliveryDispatchDetails(

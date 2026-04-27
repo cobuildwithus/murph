@@ -5,7 +5,7 @@ import {
 } from "@murphai/hosted-execution/routes";
 import type {
   HostedRuntimeWebStatusResponse,
-  HostedWorkspaceRunReason,
+  HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -33,10 +33,10 @@ const FUTURE_WAKE_AT = "2099-01-01T00:05:00.000Z";
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 
 class TestHostedUserRunner extends HostedUserRunner {
-  public readonly runCalls: HostedWorkspaceRunReason[] = [];
+  public readonly runCalls: HostedWorkspaceInvocationReason[] = [];
 
   override async runUntilIdleOrBudget(input: {
-    reason: HostedWorkspaceRunReason;
+    reason: HostedWorkspaceInvocationReason;
   }) {
     this.runCalls.push(input.reason);
     return {

@@ -7,23 +7,20 @@ import type {
 
 import {
   buildHostedExecutionJobRuntime,
-  createHostedExecutionJobRunner,
+  createHostedWorkspaceInvocationRunner,
 } from "../src/node-runner.ts";
-import type { HostedExecutionWorkspaceRunJobInput } from "../src/runner-job-transport.ts";
+import type { HostedExecutionWorkspaceInvocationJobInput } from "../src/runner-job-transport.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
-describe("createHostedExecutionJobRunner", () => {
+describe("createHostedWorkspaceInvocationRunner", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
-  it("routes workspace-run jobs through the workspace runtime without run authority", async () => {
+  it("routes workspace-invocation jobs through the workspace runtime without run authority", async () => {
     const request = createWorkspaceRequest("member_workspace_node");
     const result = createWorkspaceResult();
-    const readEnvironment = vi.fn(() => {
-      throw new Error("Expected worker-proxy workspace jobs to avoid direct hosted env reads.");
-    });
     const buildRuntime = vi.fn((runtime: HostedAssistantRuntimeConfig) => ({
       ...runtime,
       forwardedEnv: {
@@ -31,15 +28,14 @@ describe("createHostedExecutionJobRunner", () => {
       },
     }));
     const runWorkspaceInProcess = vi.fn(async () => result);
-    const runHostedExecutionJob = createHostedExecutionJobRunner({
+    const runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner({
       buildRuntime,
-      readEnvironment,
       runMode: "in-process",
       runWorkspaceInProcess,
     });
 
-    await expect(runHostedExecutionJob({
-      kind: "workspace-run",
+    await expect(runHostedWorkspaceInvocation({
+      kind: "workspace-invocation",
       request,
       runtime: {
         forwardedEnv: {
@@ -51,7 +47,6 @@ describe("createHostedExecutionJobRunner", () => {
       localInternalProxyBaseUrl: "http://127.0.0.1:8787",
     })).resolves.toEqual(result);
 
-    expect(readEnvironment).not.toHaveBeenCalled();
     expect(buildRuntime).toHaveBeenCalledWith({
       forwardedEnv: {
         HOSTED_ASSISTANT_MODEL: "gpt-test",
@@ -82,17 +77,14 @@ describe("createHostedExecutionJobRunner", () => {
     const result = createWorkspaceResult();
     const controller = new AbortController();
     const runIsolated = vi.fn(async () => result);
-    const runHostedExecutionJob = createHostedExecutionJobRunner({
+    const runHostedWorkspaceInvocation = createHostedWorkspaceInvocationRunner({
       buildRuntime: (runtime) => runtime,
-      readEnvironment: vi.fn(() => {
-        throw new Error("Expected worker-proxy isolated jobs to avoid direct hosted env reads.");
-      }),
       runIsolated,
       runMode: "isolated",
     });
 
-    await expect(runHostedExecutionJob({
-      kind: "workspace-run",
+    await expect(runHostedWorkspaceInvocation({
+      kind: "workspace-invocation",
       request,
       runtime: {
         forwardedEnv: {
@@ -108,7 +100,7 @@ describe("createHostedExecutionJobRunner", () => {
       expect.objectContaining({
         internalWorkerProxyToken: "proxy-token",
         job: {
-          kind: "workspace-run",
+          kind: "workspace-invocation",
           request,
           runtime: {
             forwardedEnv: {
@@ -162,7 +154,7 @@ describe("buildHostedExecutionJobRuntime", () => {
 
 function createWorkspaceRequest(
   userId: string,
-): HostedExecutionWorkspaceRunJobInput["request"] {
+): HostedExecutionWorkspaceInvocationJobInput["request"] {
   return {
     attemptId: `attempt_${userId}`,
     budget: {

@@ -65,7 +65,7 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
     ...(record.budget === undefined || record.budget === null
       ? {}
       : {
-          budget: parseHostedWorkspaceRunBudget(
+          budget: parseHostedWorkspaceInvocationBudget(
             record.budget,
             "Hosted assistant workspace runtime job request.budget",
           ),
@@ -74,7 +74,7 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
       record.leaseGeneration,
       "Hosted assistant workspace runtime job request.leaseGeneration",
     ),
-    reason: parseHostedWorkspaceRunReason(
+    reason: parseHostedWorkspaceInvocationReason(
       record.reason,
       "Hosted assistant workspace runtime job request.reason",
     ),
@@ -300,7 +300,7 @@ function requireNonNegativeBigIntString(value: unknown, label: string): string {
   return raw;
 }
 
-function parseHostedWorkspaceRunBudget(
+function parseHostedWorkspaceInvocationBudget(
   value: unknown,
   label: string,
 ): NonNullable<HostedAssistantWorkspaceRuntimeJobInput["request"]["budget"]> {
@@ -324,7 +324,7 @@ function parseHostedWorkspaceRunBudget(
   };
 }
 
-function parseHostedWorkspaceRunReason(
+function parseHostedWorkspaceInvocationReason(
   value: unknown,
   label: string,
 ): HostedAssistantWorkspaceRuntimeJobInput["request"]["reason"] {

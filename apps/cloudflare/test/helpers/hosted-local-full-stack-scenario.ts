@@ -5,7 +5,7 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
-import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution";
+import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
 import {
   DEFAULT_DATABASE_URL,

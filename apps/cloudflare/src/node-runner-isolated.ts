@@ -21,30 +21,30 @@ import {
   assertHostedExecutionRunnerJobResult,
   formatHostedExecutionRunnerChildResult,
   parseHostedExecutionRunnerChildResult,
-  type HostedExecutionWorkspaceRunJobInput,
+  type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
-  job: HostedExecutionWorkspaceRunJobInput;
+  job: HostedExecutionWorkspaceInvocationJobInput;
 }
 
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 
-export function runHostedExecutionJobIsolatedDetailed(
-  input: HostedExecutionIsolatedRunnerInput & { job: HostedExecutionWorkspaceRunJobInput },
+export function runHostedWorkspaceInvocationIsolatedDetailed(
+  input: HostedExecutionIsolatedRunnerInput & { job: HostedExecutionWorkspaceInvocationJobInput },
   options?: {
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
-export function runHostedExecutionJobIsolatedDetailed(
+export function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
     signal?: AbortSignal;
   },
 ): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
-export async function runHostedExecutionJobIsolatedDetailed(
+export async function runHostedWorkspaceInvocationIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
     signal?: AbortSignal;

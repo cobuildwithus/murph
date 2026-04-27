@@ -1,9 +1,9 @@
 import type {
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
-  HostedWorkspaceRunReason,
-  HostedWorkspaceRunResult,
-} from "@murphai/hosted-execution";
+  HostedWorkspaceInvocationReason,
+  HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
@@ -18,7 +18,19 @@ import type {
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;
   nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
-  runUntilIdleOrBudget(input: { reason: HostedWorkspaceRunReason }): Promise<HostedWorkspaceRunResult>;
+  ownsActiveInvocationLease(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean>;
+  recordActiveInvocationWorkspaceCheckpoint(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{ recorded: boolean }>;
+  runUntilIdleOrBudget(input: { reason: HostedWorkspaceInvocationReason }): Promise<HostedWorkspaceInvocationResult>;
   runnerStatus(): Promise<HostedRunnerStatusResponse>;
 }
 

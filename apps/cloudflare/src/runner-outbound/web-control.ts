@@ -1,13 +1,24 @@
 import { type readHostedExecutionEnvironment } from "../env.ts";
-import { methodNotAllowed, notFound } from "../json.ts";
+import { methodNotAllowed, notFound, unauthorized } from "../json.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import {
-  allowsHostedRunnerWebControlSignedUserOverride,
-  HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER,
+  parseHostedWorkspaceCheckpointRequest,
+  parseHostedWorkspaceCheckpointResponse,
+} from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+} from "@murphai/hosted-execution/routes";
+import {
   isAllowedHostedRunnerWebControlRequest,
 } from "./shared-web-control-policy.ts";
+import {
+  requireRunnerOutboundUserStubMethod,
+  resolveRunnerOutboundUserRunnerStub,
+  type RunnerOutboundEnvironmentSource,
+} from "./shared.ts";
 
 export async function handleRunnerWebControlRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
@@ -24,50 +35,97 @@ export async function handleRunnerWebControlRequest(input: {
     return notFound();
   }
 
-  const signedUserId = resolveHostedRunnerWebControlSignedUserId({
-    path: input.url.pathname,
-    request: input.request,
-    userId: input.userId,
-  });
-  if (!signedUserId) {
-    return notFound();
-  }
-
   const body = input.request.method === "POST"
     ? await readOptionalHostedRunnerWebControlBody(input.request)
     : undefined;
+  const checkpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
+    && input.request.method === "POST"
+    ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
+    : null;
 
-  return await fetchHostedExecutionWebControlPlaneResponse({
+  if (checkpointRequest) {
+    const hasLease = await runnerOwnsActiveInvocationLease({
+      attemptId: checkpointRequest.attemptId,
+      env: input.env,
+      leaseGeneration: checkpointRequest.leaseGeneration,
+      userId: input.userId,
+      workspaceVersion: checkpointRequest.expectedWorkspaceVersion,
+    });
+    if (!hasLease) {
+      return unauthorized();
+    }
+  }
+
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl: input.environment.hostedWebBaseUrl,
     body,
-    boundUserId: signedUserId,
+    boundUserId: input.userId,
     callbackSigning: input.environment.webCallbackSigning,
     method: input.request.method,
     path: input.url.pathname,
     search: input.url.search || null,
     timeoutMs: input.environment.webControlTimeoutMs,
   });
+  if (checkpointRequest && response.ok) {
+    const checkpointResponse = parseHostedWorkspaceCheckpointResponse(
+      await response.clone().json(),
+    );
+    if (checkpointResponse.checkpointed) {
+      const recorded = await recordRunnerActiveInvocationWorkspaceCheckpoint({
+        attemptId: checkpointRequest.attemptId,
+        env: input.env,
+        leaseGeneration: checkpointRequest.leaseGeneration,
+        userId: input.userId,
+        workspaceVersion: checkpointResponse.workspace.version,
+      });
+      if (!recorded) {
+        return unauthorized();
+      }
+    }
+  }
+
+  return response;
 }
 
-function resolveHostedRunnerWebControlSignedUserId(input: {
-  path: string;
-  request: Request;
+async function runnerOwnsActiveInvocationLease(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
   userId: string;
-}): string | null {
-  const override = input.request.headers.get(HOSTED_RUNNER_WEB_CONTROL_SIGNED_USER_ID_HEADER);
-  if (override === null) {
-    return input.userId;
-  }
-
-  if (!allowsHostedRunnerWebControlSignedUserOverride(input.path)) {
-    return null;
-  }
-
-  return isValidHostedRunnerWebControlUserId(override) ? override : null;
+  workspaceVersion: string;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
+    stub,
+    "ownsActiveInvocationLease",
+  );
+  return await ownsActiveInvocationLease({
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
+    userId: input.userId,
+    workspaceVersion: input.workspaceVersion,
+  });
 }
 
-function isValidHostedRunnerWebControlUserId(value: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u.test(value);
+async function recordRunnerActiveInvocationWorkspaceCheckpoint(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  userId: string;
+  workspaceVersion: string;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const recordActiveInvocationWorkspaceCheckpoint = requireRunnerOutboundUserStubMethod(
+    stub,
+    "recordActiveInvocationWorkspaceCheckpoint",
+  );
+  const response = await recordActiveInvocationWorkspaceCheckpoint({
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
+    userId: input.userId,
+    workspaceVersion: input.workspaceVersion,
+  });
+  return response.recorded;
 }
 
 async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {

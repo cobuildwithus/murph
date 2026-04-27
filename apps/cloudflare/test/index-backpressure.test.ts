@@ -65,7 +65,6 @@ describe("cloudflare worker queue backpressure routes", () => {
         alarmScheduled: false,
         alreadyRunning: false,
         inFlight: false,
-        leaseGeneration: "0",
         nextAlarmAt: null,
       })),
       runUntilIdleOrBudget: vi.fn(async () => ({
@@ -98,7 +97,6 @@ describe("cloudflare worker queue backpressure routes", () => {
       alarmScheduled: false,
       alreadyRunning: false,
       inFlight: false,
-      leaseGeneration: "0",
       nextAlarmAt: null,
     });
     expect(stub.bindUser).toHaveBeenCalledWith("member_123");

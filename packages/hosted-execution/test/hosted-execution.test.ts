@@ -216,14 +216,16 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
+    expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
-    expect(runtimeControlModule.HOSTED_WORKSPACE_RUN_REASONS).toEqual([
+    expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual([
       "nudge",
       "alarm",
       "retry",
       "manual",
     ]);
-    expect(runtimeControlModule.HOSTED_WORKSPACE_RUN_STATUSES).toEqual([
+    expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
       "budget_exhausted",
       "scheduled",

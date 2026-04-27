@@ -15,7 +15,15 @@ export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ shareId: string }> },
 ) => {
-  const ownerUserId = await requireHostedCloudflareCallbackRequest(request);
+  const runnerUserId = await requireHostedCloudflareCallbackRequest(request);
+  const ownerUserId = new URL(request.url).searchParams.get("ownerUserId");
+  if (!ownerUserId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_SHARE_PAYLOAD_NOT_FOUND",
+      message: "That shared bundle is no longer available.",
+      httpStatus: 404,
+    });
+  }
   const shareId = await resolveDecodedRouteParam(context.params, "shareId");
   const prisma = getPrisma();
   const record = await prisma.hostedSharePayload.findUnique({
@@ -42,7 +50,7 @@ export const GET = withJsonError(async (
     record !== null
     && record.share.senderMemberId === ownerUserId
     && record.share.acceptedAt
-    && record.share.acceptedByMemberId
+    && record.share.acceptedByMemberId === runnerUserId
     && !payloadExpired
     && !payloadConsumed,
   );

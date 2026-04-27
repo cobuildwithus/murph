@@ -20,7 +20,7 @@ import {
   formatHostedExecutionRunnerChildResult,
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
-  type HostedExecutionWorkspaceRunJobInput,
+  type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
 
 interface HostedExecutionChildDependencies {
@@ -34,7 +34,7 @@ interface HostedExecutionChildDependencies {
 interface HostedExecutionChildInput {
   internalWorkerProxyToken: string | null;
   localInternalProxyBaseUrl: string | null;
-  job: HostedExecutionWorkspaceRunJobInput;
+  job: HostedExecutionWorkspaceInvocationJobInput;
 }
 
 export async function runHostedExecutionChild(
@@ -129,7 +129,7 @@ export async function runHostedExecutionChild(
 
 async function runWorkspaceChildJob(input: {
   internalWorkerProxyToken: string | null;
-  job: HostedExecutionWorkspaceRunJobInput;
+  job: HostedExecutionWorkspaceInvocationJobInput;
   localInternalProxyBaseUrl: string | null;
   runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
 }) {

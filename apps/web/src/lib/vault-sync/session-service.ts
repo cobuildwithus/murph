@@ -1,9 +1,11 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionVaultSyncImportWake,
-  type HostedRuntimeVaultSyncImportRequest,
-  type HostedRuntimeVaultSyncImportStatus,
 } from "@murphai/hosted-execution";
+import type {
+  HostedRuntimeVaultSyncImportRequest,
+  HostedRuntimeVaultSyncImportStatus,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";

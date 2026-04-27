@@ -149,7 +149,7 @@ export async function startHostedContainerEntrypoint(input: {
 
       if (
         request.method !== "POST"
-        || requestUrl.pathname !== "/internal/run"
+        || requestUrl.pathname !== "/internal/workspace-invocation"
       ) {
         response.statusCode = 404;
         response.end("Not found");
@@ -188,7 +188,7 @@ export async function startHostedContainerEntrypoint(input: {
         emitHostedExecutionStructuredLog({
           component: "container",
           level: "warn",
-          message: "Hosted container entrypoint rejected a concurrent run request.",
+          message: "Hosted container entrypoint rejected a concurrent invocation request.",
           phase: "failed",
         });
         writeJsonResponse(response, 409, {
@@ -200,8 +200,8 @@ export async function startHostedContainerEntrypoint(input: {
       claimedRunnerSlot = true;
 
       try {
-        const requestBody: unknown = JSON.parse(await readHostedContainerRunRequestBody(request));
-        const parsed = await parseHostedExecutionContainerRunRequest(
+        const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
+        const parsed = await parseHostedExecutionContainerInvocationRequest(
           requestBody,
           runtime,
         );
@@ -232,7 +232,7 @@ export async function startHostedContainerEntrypoint(input: {
         userId: readHostedExecutionRunnerJobUserId(job),
       });
 
-      const result = await runHostedExecutionJobWithProcessIsolation(job, runtime, {
+      const result = await runHostedWorkspaceInvocationWithProcessIsolation(job, runtime, {
         internalWorkerProxyToken,
         localInternalProxyBaseUrl: localBridge.localInternalProxyBaseUrl,
         signal: requestAbort.signal,
@@ -325,7 +325,7 @@ export async function startHostedContainerEntrypoint(input: {
   return server;
 }
 
-async function parseHostedExecutionContainerRunRequest(
+async function parseHostedExecutionContainerInvocationRequest(
   value: unknown,
   runtime: HostedContainerRuntimeDependencies,
 ): Promise<{
@@ -427,7 +427,7 @@ function readBearerAuthorizationToken(value: string | undefined): string | null 
   return token.length > 0 ? token : null;
 }
 
-async function readHostedContainerRunRequestBody(request: IncomingMessage): Promise<string> {
+async function readHostedContainerInvocationRequestBody(request: IncomingMessage): Promise<string> {
   const declaredLength = readContentLengthBytes(request.headers["content-length"]);
 
   if (
@@ -828,7 +828,7 @@ async function readHostedRunnerBundleManifestSummary(
   };
 }
 
-async function runHostedExecutionJob(
+async function runHostedWorkspaceInvocation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
@@ -836,12 +836,12 @@ async function runHostedExecutionJob(
     localInternalProxyBaseUrl?: string | null;
     signal?: AbortSignal;
   },
-): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedExecutionJob"]>>> {
+): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
   const nodeRunner = await runtime.loadNodeRunner();
-  return await nodeRunner.runHostedExecutionJob(input, options);
+  return await nodeRunner.runHostedWorkspaceInvocation(input, options);
 }
 
-async function runHostedExecutionJobWithProcessIsolation(
+async function runHostedWorkspaceInvocationWithProcessIsolation(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
@@ -849,9 +849,9 @@ async function runHostedExecutionJobWithProcessIsolation(
     localInternalProxyBaseUrl?: string | null;
     signal?: AbortSignal;
   },
-): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedExecutionJob"]>>> {
+): Promise<Awaited<ReturnType<typeof import("./node-runner.js")["runHostedWorkspaceInvocation"]>>> {
   try {
-    return await runHostedExecutionJob(input, runtime, options);
+    return await runHostedWorkspaceInvocation(input, runtime, options);
   } finally {
     if (runtime.processIsolation) {
       await enforceHostedContainerProcessIsolation(runtime.processApi);

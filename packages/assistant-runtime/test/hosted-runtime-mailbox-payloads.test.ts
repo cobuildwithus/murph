@@ -9,11 +9,11 @@ import type {
   HostedMailboxPayload,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import type {
   HostedRuntimeMailboxPort,

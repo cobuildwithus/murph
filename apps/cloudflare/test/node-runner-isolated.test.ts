@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedExecutionWorkspaceRunJobInput } from "../src/runner-job-transport.ts";
+import type { HostedExecutionWorkspaceInvocationJobInput } from "../src/runner-job-transport.ts";
 
 const spawnMock = vi.fn();
 
@@ -11,15 +11,15 @@ vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
-describe("runHostedExecutionJobIsolatedDetailed", () => {
+describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
   afterEach(() => {
     spawnMock.mockReset();
     vi.restoreAllMocks();
   });
 
-  function createWorkspaceJob(eventId: string): HostedExecutionWorkspaceRunJobInput {
+  function createWorkspaceJob(eventId: string): HostedExecutionWorkspaceInvocationJobInput {
     return {
-      kind: "workspace-run",
+      kind: "workspace-invocation",
       request: {
         attemptId: `attempt_${eventId}`,
         leaseGeneration: "1",
@@ -65,7 +65,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       return child;
     });
 
-    const result = await module.runHostedExecutionJobIsolatedDetailed({
+    const result = await module.runHostedWorkspaceInvocationIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_cleanup"),
     });
@@ -133,7 +133,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       return child;
     });
 
-    await module.runHostedExecutionJobIsolatedDetailed({
+    await module.runHostedWorkspaceInvocationIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: {
         ...createWorkspaceJob("evt_child_env"),
@@ -194,10 +194,10 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       return child;
     });
 
-    await expect(module.runHostedExecutionJobIsolatedDetailed({
+    await expect(module.runHostedWorkspaceInvocationIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: createWorkspaceJob("evt_child_legacy_result"),
-    })).rejects.toThrow("Hosted workspace run result");
+    })).rejects.toThrow("Hosted workspace invocation result");
 
     expect(processKillSpy).toHaveBeenCalledWith(-4246, "SIGKILL");
   });

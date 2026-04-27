@@ -3,10 +3,10 @@ import { randomUUID } from "node:crypto";
 import type {
   HostedMailboxItem,
   HostedRuntimeSideInputUnavailableCode,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import type {
   HostedRuntimeMailboxPort,

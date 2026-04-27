@@ -8,12 +8,12 @@ import {
   parseHostedUserRecipientPublicKeyJwk,
   wrapHostedBrowserSessionKey,
 } from "@murphai/runtime-state";
-import {
-  type HostedRunnerNudgeResult,
-  type HostedRunnerStatusResponse,
-  type HostedWorkspaceRunReason,
-  type HostedWorkspaceRunResult,
-} from "@murphai/hosted-execution";
+import type {
+  HostedRunnerNudgeResult,
+  HostedRunnerStatusResponse,
+  HostedWorkspaceInvocationReason,
+  HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -246,9 +246,27 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.nudgeHostedRunner();
   }
 
+  async ownsActiveInvocationLease(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean> {
+    return this.runner.ownsActiveInvocationLease(input);
+  }
+
+  async recordActiveInvocationWorkspaceCheckpoint(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{ recorded: boolean }> {
+    return this.runner.recordActiveInvocationWorkspaceCheckpoint(input);
+  }
+
   async runUntilIdleOrBudget(input: {
-    reason: HostedWorkspaceRunReason;
-  }): Promise<HostedWorkspaceRunResult> {
+    reason: HostedWorkspaceInvocationReason;
+  }): Promise<HostedWorkspaceInvocationResult> {
     return this.runner.runUntilIdleOrBudget(input);
   }
 

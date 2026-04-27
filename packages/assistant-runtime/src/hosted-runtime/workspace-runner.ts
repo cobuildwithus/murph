@@ -4,7 +4,7 @@ import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
@@ -237,6 +237,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     initialMailboxImport,
     workspacePort: input.platform.workspacePort,
   });
+  if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
+    throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a committed checkpoint.");
+  }
   const postCheckpoint = await assistantPhaseResult.afterCheckpoint?.();
   if (postCheckpoint) {
     await checkpointHostedWorkspacePostAssistantPhase({

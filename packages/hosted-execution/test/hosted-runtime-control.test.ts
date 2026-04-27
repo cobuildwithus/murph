@@ -19,8 +19,8 @@ import {
   HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
-  HOSTED_WORKSPACE_RUN_REASONS,
-  HOSTED_WORKSPACE_RUN_STATUSES,
+  HOSTED_WORKSPACE_INVOCATION_REASONS,
+  HOSTED_WORKSPACE_INVOCATION_STATUSES,
   isHostedMailboxKind,
   isHostedMailboxLane,
 } from "../src/runtime-control.ts";
@@ -47,6 +47,7 @@ import {
   parseHostedRuntimeSharePayloadFetchResponse,
   parseHostedRuntimeUsageExportRequest,
   parseHostedRuntimeUsageExportResponse,
+  parseHostedRuntimeWebStatusResponse,
   parseHostedRuntimeVaultSyncImportPayload,
   parseHostedRuntimeVaultSyncImportRequest,
   parseHostedRuntimeVaultSyncImportResponse,
@@ -56,8 +57,8 @@ import {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
-  parseHostedWorkspaceRunRequest,
-  parseHostedWorkspaceRunResult,
+  parseHostedWorkspaceInvocationRequest,
+  parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceState,
 } from "../src/parsers.ts";
 import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
@@ -81,7 +82,10 @@ describe("hosted runtime control contracts", () => {
       "import",
       "before_delivery_refresh",
       "outbox_intent",
+      "outbox_sending",
       "outbox_receipt",
+      "system_mailbox_sending",
+      "system_mailbox_receipt",
       "maintenance",
       "idle",
       "budget_exhausted",
@@ -92,8 +96,8 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
-    expect(HOSTED_WORKSPACE_RUN_REASONS).toEqual(["nudge", "alarm", "retry", "manual"]);
-    expect(HOSTED_WORKSPACE_RUN_STATUSES).toEqual([
+    expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual(["nudge", "alarm", "retry", "manual"]);
+    expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
       "budget_exhausted",
       "scheduled",
@@ -105,8 +109,8 @@ describe("hosted runtime control contracts", () => {
     expect(isHostedMailboxKind("run.acquired")).toBe(false);
   });
 
-  it("parses workspace-run request and status-only result without run-drain fields", () => {
-    expect(parseHostedWorkspaceRunRequest({
+  it("parses workspace invocation request and status-only result without invocation-drain fields", () => {
+    expect(parseHostedWorkspaceInvocationRequest({
       attemptId: "attempt_1",
       budget: {
         maxMailboxItems: 25,
@@ -143,16 +147,16 @@ describe("hosted runtime control contracts", () => {
       "targetReached",
       "wake",
     ]) {
-      expect(() => parseHostedWorkspaceRunRequest({
+      expect(() => parseHostedWorkspaceInvocationRequest({
         attemptId: "attempt_1",
         leaseGeneration: "7",
         reason: "nudge",
         [field]: field === "events" ? [] : "legacy",
         userId: "member_123",
         workspaceVersion: "4",
-      })).toThrow(`Hosted workspace run request.${field} is no longer supported.`);
+      })).toThrow(`Hosted workspace invocation request.${field} is no longer supported.`);
     }
-    expect(parseHostedWorkspaceRunResult({
+    expect(parseHostedWorkspaceInvocationResult({
       nextWakeAt: null,
       redactedStatus: {
         count: 1,
@@ -825,7 +829,6 @@ describe("hosted runtime control contracts", () => {
       alarmScheduled: true,
       alreadyRunning: false,
       inFlight: true,
-      leaseGeneration: "9",
       nextAlarmAt: "2026-04-26T00:00:05.000Z",
     };
     const status = {
@@ -833,8 +836,7 @@ describe("hosted runtime control contracts", () => {
       inFlight: true,
       lastErrorAt: null,
       lastErrorCode: null,
-      lastRunAt: "2026-04-26T00:00:01.000Z",
-      leaseGeneration: "9",
+      lastInvocationAt: "2026-04-26T00:00:01.000Z",
       mailboxLag: [
         { importedSeq: "10", lag: "1", lane: "conversation", maxSeq: "11" },
         { importedSeq: "4", lag: "0", lane: "system", maxSeq: "4" },
@@ -854,30 +856,38 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/must not include legacy committedSeq/u);
     expect(() => parseHostedRunnerNudgeResult({
       ...nudge,
-      leaseGeneration: "-1",
-    })).toThrow(/non-negative base-10 integer string/u);
+      leaseGeneration: "9",
+    })).toThrow(/leaseGeneration has been removed/u);
+    expect(() => parseHostedRuntimeWebStatusResponse({
+      mailboxLag: [],
+      userId: "member_123",
+      workspace: null,
+      lastRunAt: "2026-04-26T00:00:01.000Z",
+    })).toThrow(/lastRunAt has been renamed to lastInvocationAt/u);
+    expect(() => parseHostedRuntimeWebStatusResponse({
+      mailboxLag: [],
+      userId: "member_123",
+      workspace: null,
+      leaseGeneration: "9",
+    })).toThrow(/leaseGeneration has been removed/u);
     expect(parseHostedRunnerNudgeResult({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: true,
       inFlight: true,
-      leaseGeneration: "10",
     })).toEqual({
       accepted: true,
       alarmScheduled: false,
       alreadyRunning: true,
       inFlight: true,
-      leaseGeneration: "10",
     });
     expect(parseHostedRunnerStatusResponse({
       inFlight: false,
-      leaseGeneration: "10",
       mailboxLag: [],
       userId: "member_123",
       workspace: null,
     })).toEqual({
       inFlight: false,
-      leaseGeneration: "10",
       mailboxLag: [],
       userId: "member_123",
       workspace: null,
@@ -895,9 +905,12 @@ describe("hosted runtime control contracts", () => {
     };
 
     expect(Object.keys(packageJson.exports ?? {}).sort()).toContain("./runtime-control");
-    await expect(import("@murphai/hosted-execution")).resolves.toMatchObject({
+    const rootModule = await import("@murphai/hosted-execution") as Record<string, unknown>;
+    const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control");
+    expect(rootModule.HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA).toBeUndefined();
+    expect(runtimeControlModule.HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA).toBe(
       HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-    });
+    );
   });
 });
 

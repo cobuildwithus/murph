@@ -5,11 +5,9 @@ import type {
 } from "@murphai/hosted-execution";
 
 import type { HostedMailboxEffect } from "../models.ts";
-import type { HostedRuntimeSharePort } from "../platform.ts";
 
 export async function handleHostedShareAcceptedWake(input: {
   wake: Extract<HostedExecutionWake, { kind: "vault.share.accepted" }>;
-  sharePort?: HostedRuntimeSharePort | null;
   sharePack: HostedExecutionRunnerSharePack;
   vaultRoot: string;
 }): Promise<HostedMailboxEffect> {
@@ -26,15 +24,6 @@ export async function handleHostedShareAcceptedWake(input: {
     pack,
     vaultRoot: input.vaultRoot,
   });
-
-  if (input.sharePort) {
-    await input.sharePort.recordImport({
-      importedAt: new Date().toISOString(),
-      ownerUserId: input.wake.share.ownerUserId,
-      shareId: input.wake.share.shareId,
-      status: "imported",
-    });
-  }
 
   return {
     conversationMetrics: null,

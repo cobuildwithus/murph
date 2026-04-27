@@ -1,6 +1,6 @@
 import {
   parseHostedRuntimeShareImportRequest,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -11,17 +11,9 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
-  const ownerUserId = await requireHostedCloudflareCallbackRequest(request);
+  const runnerUserId = await requireHostedCloudflareCallbackRequest(request);
   const body = parseHostedRuntimeShareImportRequest(await readOptionalJsonObject(request));
   const prisma = getPrisma();
-
-  if (body.ownerUserId !== ownerUserId) {
-    return jsonOk({
-      recorded: false,
-      shareId: body.shareId,
-      status: body.status,
-    });
-  }
 
   const share = await prisma.hostedShareLink.findFirst({
     select: {
@@ -31,15 +23,15 @@ export const POST = withJsonError(async (request: Request) => {
       senderMemberId: true,
     },
     where: {
+      acceptedByMemberId: runnerUserId,
       id: body.shareId,
-      senderMemberId: ownerUserId,
+      senderMemberId: body.ownerUserId,
     },
   });
 
-  const memberId = share?.acceptedByMemberId ?? null;
   const eventId = share?.lastEventId ?? null;
 
-  if (!share || !memberId || !eventId) {
+  if (!share || !eventId) {
     return jsonOk({
       recorded: false,
       shareId: body.shareId,
@@ -50,13 +42,13 @@ export const POST = withJsonError(async (request: Request) => {
   const recorded = body.status === "imported"
     ? (await finalizeHostedShareAcceptance({
         eventId,
-        memberId,
+        memberId: runnerUserId,
         prisma,
         shareId: share.id,
       })).finalized
     : await releaseHostedShareAcceptance({
         eventId,
-        memberId,
+        memberId: runnerUserId,
         prisma,
         shareId: share.id,
       });

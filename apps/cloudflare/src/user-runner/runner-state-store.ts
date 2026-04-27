@@ -1,7 +1,9 @@
 import {
   deriveHostedExecutionErrorCode,
-  type HostedWorkspaceRunReason,
 } from "@murphai/hosted-execution";
+import type {
+  HostedWorkspaceInvocationReason,
+} from "@murphai/hosted-execution/runtime-control";
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
   createDefaultRunnerMetaRow,
@@ -19,7 +21,7 @@ type RunnerMetaBundleRow = RunnerMetaRow;
 export interface RunnerInvocationLease {
   attemptId: string;
   leaseGeneration: string;
-  reason: HostedWorkspaceRunReason;
+  reason: HostedWorkspaceInvocationReason;
   startedAt: string;
   userId: string;
   workspaceVersion: string | null;
@@ -70,7 +72,7 @@ export class RunnerStateStore {
   }
 
   async beginInvocation(input: {
-    reason: HostedWorkspaceRunReason;
+    reason: HostedWorkspaceInvocationReason;
     userId: string;
   }): Promise<RunnerInvocationLease> {
     await this.bindUser(input.userId);
@@ -124,7 +126,7 @@ export class RunnerStateStore {
     const meta = this.requireMetaRowSync();
     this.clearActiveInvocationLeaseSync(meta, input.lease);
     this.clearLastErrorMetaSync(meta);
-    meta.last_run_at = input.finishedAt ?? new Date().toISOString();
+    meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta);
@@ -157,6 +159,49 @@ export class RunnerStateStore {
 
   async readActiveInvocationLease(): Promise<RunnerInvocationLease | null> {
     return this.readActiveInvocationLeaseSync(this.requireMetaRowSync());
+  }
+
+  async ownsActiveInvocationLease(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion?: string | null;
+  }): Promise<boolean> {
+    const lease = await this.readActiveInvocationLease();
+    if (
+      !lease
+      || lease.attemptId !== input.attemptId
+      || lease.leaseGeneration !== input.leaseGeneration
+      || lease.userId !== input.userId
+    ) {
+      return false;
+    }
+
+    return input.workspaceVersion === undefined
+      || input.workspaceVersion === null
+      || lease.workspaceVersion === input.workspaceVersion;
+  }
+
+  async recordActiveInvocationWorkspaceCheckpoint(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<{ recorded: boolean }> {
+    const meta = this.requireMetaRowSync();
+    const lease = this.readActiveInvocationLeaseSync(meta);
+    if (
+      !lease
+      || lease.attemptId !== input.attemptId
+      || lease.leaseGeneration !== input.leaseGeneration
+      || lease.userId !== input.userId
+    ) {
+      return { recorded: false };
+    }
+
+    meta.active_workspace_version = input.workspaceVersion;
+    this.writeMetaRowSync(meta);
+    return { recorded: true };
   }
 
   async clearStaleInvocationIfExpired(input: {
@@ -269,7 +314,7 @@ export class RunnerStateStore {
         in_flight,
         last_error_at,
         last_error_code,
-        last_run_at,
+        last_invocation_at,
         next_wake_at,
         pending_nudge
       FROM runner_meta
@@ -296,7 +341,7 @@ export class RunnerStateStore {
         in_flight,
         last_error_at,
         last_error_code,
-        last_run_at,
+        last_invocation_at,
         next_wake_at,
         pending_nudge
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -310,7 +355,7 @@ export class RunnerStateStore {
       meta.in_flight,
       meta.last_error_at,
       meta.last_error_code,
-      meta.last_run_at,
+      meta.last_invocation_at,
       meta.next_wake_at,
       meta.pending_nudge,
     );
@@ -358,7 +403,7 @@ export class RunnerStateStore {
     if (
       !meta.active_invocation_id
       || !meta.active_invocation_started_at
-      || !isHostedWorkspaceRunReasonValue(meta.active_invocation_reason)
+      || !isHostedWorkspaceInvocationReasonValue(meta.active_invocation_reason)
     ) {
       return null;
     }
@@ -387,8 +432,8 @@ function normalizeLeaseGeneration(value: number | null): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
-function isHostedWorkspaceRunReasonValue(
+function isHostedWorkspaceInvocationReasonValue(
   value: unknown,
-): value is HostedWorkspaceRunReason {
+): value is HostedWorkspaceInvocationReason {
   return value === "nudge" || value === "alarm" || value === "retry" || value === "manual";
 }

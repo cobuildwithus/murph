@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionVaultSyncImportWake,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
   type HostedMailboxItem,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 
 import type {
   HostedMailboxResolvedImportItem,

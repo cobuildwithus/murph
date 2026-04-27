@@ -5,7 +5,7 @@ import {
 } from "../src/index.ts";
 import {
   parseHostedExecutionWake,
-} from "../src/index.ts";
+} from "../src/parsers.ts";
 
 describe("vault.share.accepted wake contract", () => {
   it("preserves the tiny share ref in the wake payload", () => {

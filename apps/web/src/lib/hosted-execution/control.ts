@@ -1,6 +1,6 @@
 import {
   createCloudflareHostedControlClient,
-  type CloudflareHostedRunnerControlClient,
+  type CloudflareHostedControlClient,
 } from "@murphai/cloudflare-hosted-control/client";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
@@ -11,7 +11,7 @@ import {
 
 export function readHostedExecutionControlClientIfConfigured(
   timeoutMs?: number,
-): CloudflareHostedRunnerControlClient | null {
+): CloudflareHostedControlClient | null {
   const { controlTimeoutMs } = readHostedExecutionControlEnvironment();
   const baseUrl = readHostedExecutionControlBaseUrl();
 

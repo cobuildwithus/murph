@@ -53,6 +53,7 @@ const HOSTED_RESPONSES_REQUEST_DEBUG_TYPE = "assistant.responses.request.debug";
 export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
+  forceQueueOnlyAssistantNotification?: boolean;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -74,6 +75,7 @@ export async function executeHostedMailboxEvent(input: {
   const mailboxEffect = await handleHostedMailboxEvent({
     wake: input.wake,
     executionContext: bootstrappedExecutionContext,
+    forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     runtime: input.runtime,
     sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
@@ -94,6 +96,7 @@ export async function executeHostedMailboxEvent(input: {
 async function handleHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
+  forceQueueOnlyAssistantNotification: boolean;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -113,6 +116,7 @@ async function handleHostedMailboxEvent(input: {
   return executeHostedSystemWake({
     wake: input.wake,
     executionContext: input.executionContext,
+    forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     runtime: input.runtime,
     sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
@@ -143,6 +147,7 @@ async function executeHostedConversationWake(input: {
 async function executeHostedSystemWake(input: {
   wake: HostedExecutionSystemWake;
   executionContext: AssistantExecutionContext;
+  forceQueueOnlyAssistantNotification: boolean;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "resolvedConfig"
@@ -166,6 +171,7 @@ async function executeHostedSystemWake(input: {
       return executeHostedAssistantNotificationWake({
         wake: input.wake,
         executionContext: input.executionContext,
+        forceQueueOnly: input.forceQueueOnlyAssistantNotification,
         vaultRoot: input.vaultRoot,
       });
     case "device-sync.wake":
@@ -187,7 +193,6 @@ async function executeHostedSystemWake(input: {
       return {
         ...(await handleHostedShareAcceptedWake({
           wake: input.wake,
-          sharePort: input.runtime.platform.sharePort ?? null,
           sharePack: input.sharePack,
           vaultRoot: input.vaultRoot,
         })),
@@ -219,6 +224,7 @@ async function executeHostedSystemWake(input: {
 export async function executeHostedAssistantNotificationWake(input: {
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
+  forceQueueOnly?: boolean;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
@@ -234,6 +240,7 @@ export async function executeHostedAssistantNotificationWake(input: {
       buildAssistantNotificationInput(
         input.wake,
         input.executionContext,
+        input.forceQueueOnly === true,
         input.vaultRoot,
         (entry) => {
           redactedLogEntries.push(entry);
@@ -650,6 +657,7 @@ function readHostedProviderDebugStringArray(
 function buildAssistantNotificationInput(
   wake: HostedExecutionAssistantNotificationRequestedWake,
   executionContext: AssistantExecutionContext,
+  forceQueueOnly: boolean,
   vault: string,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
 ): Parameters<typeof sendAssistantNotification>[0] {
@@ -660,7 +668,9 @@ function buildAssistantNotificationInput(
     actorId: route.actorId,
     channel: route.channel,
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
-    deliveryDispatchMode: wake.notification.deliveryDispatchMode ?? undefined,
+    deliveryDispatchMode: forceQueueOnly
+      ? "queue-only"
+      : wake.notification.deliveryDispatchMode ?? undefined,
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
     deliveryKind: delivery.kind === "explicit" ? null : delivery.kind,
     deliverySource: delivery.source ?? null,

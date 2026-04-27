@@ -19,10 +19,10 @@ import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceState,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, test } from "vitest";
 
 import {

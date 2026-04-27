@@ -248,10 +248,7 @@ Callback auth contract:
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
   boundary; the isolated execution child talks back through the worker-owned
   `web-control.worker` proxy instead of receiving the signing key directly
-- `apps/web` also mints short-lived hosted wake run tokens with
-  defaults to `v1`
-  `{ keyId: encodedKey }` verification keyring for staged wake-proof rotation
-- hosted wake payload ciphertext uses the separate
+- `apps/web` also encrypts hosted mailbox payloads with the
   `HOSTED_WAKE_ENCRYPTION_*` key lane, while member/share private fields remain
   on the web-only `HOSTED_WEB_ENCRYPTION_*` lane
 

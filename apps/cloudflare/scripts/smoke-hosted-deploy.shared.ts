@@ -13,7 +13,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   parseOptionalStrictInteger,
   readBooleanEnv,

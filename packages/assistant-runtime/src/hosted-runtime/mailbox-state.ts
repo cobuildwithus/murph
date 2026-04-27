@@ -4,10 +4,10 @@ import path from "node:path";
 import {
   HOSTED_MAILBOX_LANES,
   isHostedMailboxLane,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedMailboxLane,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   parseVersionedJsonStateEnvelope,
   readVersionedJsonStateFile,

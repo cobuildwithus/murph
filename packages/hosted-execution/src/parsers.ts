@@ -110,8 +110,8 @@ export {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
-  parseHostedWorkspaceRunRequest,
-  parseHostedWorkspaceRunResult,
+  parseHostedWorkspaceInvocationRequest,
+  parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
 
@@ -399,7 +399,7 @@ function parseHostedExecutionLogLevelValue(
   if (isHostedExecutionLogLevel(level)) {
     return level;
   }
-  throw new TypeError(`${label} must be a valid hosted execution run level.`);
+  throw new TypeError(`${label} must be a valid hosted execution log level.`);
 }
 
 export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent {

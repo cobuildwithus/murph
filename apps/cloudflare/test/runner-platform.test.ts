@@ -845,7 +845,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
-  it("signs hosted share payload callbacks for the runtime-supplied owner user", async () => {
+  it("signs hosted share payload callbacks as the bound runner and carries the owner query", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       fetchedAt: "2026-04-26T00:00:05.000Z",
       payload: null,
@@ -883,12 +883,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "share payload fetch");
     expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
     );
     expect(init?.method).toBe("GET");
     expect(init?.body).toBeUndefined();
     const headers = new Headers(init?.headers);
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_sender");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
@@ -955,13 +955,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const request = requireFetchRequest(fetchMock.mock.calls[0], "proxied share payload fetch");
     expect(request.url).toBe(
-      "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+      "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&ownerUserId=member_sender",
     );
     expect(request.method).toBe("GET");
     expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
-    expect(request.headers.get("x-hosted-runtime-web-control-user-id")).toBe("member_sender");
+    expect(request.headers.get("x-hosted-runtime-web-control-user-id")).toBeNull();
   });
 
   it("omits hosted side-input identifiers from proxied request failure logs", async () => {

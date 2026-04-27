@@ -26,8 +26,8 @@ import {
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
-  HOSTED_WORKSPACE_RUN_REASONS,
-  HOSTED_WORKSPACE_RUN_STATUSES,
+  HOSTED_WORKSPACE_INVOCATION_REASONS,
+  HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
@@ -78,11 +78,11 @@ import {
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceReadResponse,
-  type HostedWorkspaceRunBudget,
-  type HostedWorkspaceRunReason,
-  type HostedWorkspaceRunRequest,
-  type HostedWorkspaceRunResult,
-  type HostedWorkspaceRunStatus,
+  type HostedWorkspaceInvocationBudget,
+  type HostedWorkspaceInvocationReason,
+  type HostedWorkspaceInvocationRequest,
+  type HostedWorkspaceInvocationResult,
+  type HostedWorkspaceInvocationStatus,
   type HostedWorkspaceState,
 } from "../runtime-control.ts";
 import {
@@ -119,7 +119,7 @@ const FORBIDDEN_REDACTED_KEY_PARTS = [
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 24;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 128;
-const HOSTED_WORKSPACE_RUN_REMOVED_FIELDS = [
+const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
   "committedSeq",
   "events",
   "finalizeRequired",
@@ -910,6 +910,9 @@ export function parseHostedRuntimeLogResponse(value: unknown): HostedRuntimeLogR
 
 export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeResult {
   const record = requireObject(value, "Hosted runner nudge result");
+  if ("leaseGeneration" in record) {
+    throw new TypeError("Hosted runner nudge result leaseGeneration has been removed.");
+  }
 
   return {
     accepted: requireBoolean(record.accepted, "Hosted runner nudge result accepted"),
@@ -922,10 +925,6 @@ export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeR
       "Hosted runner nudge result alreadyRunning",
     ),
     inFlight: requireBoolean(record.inFlight, "Hosted runner nudge result inFlight"),
-    leaseGeneration: requireNonNegativeBigIntString(
-      record.leaseGeneration,
-      "Hosted runner nudge result leaseGeneration",
-    ),
     ...(record.nextAlarmAt === undefined
       ? {}
       : {
@@ -944,6 +943,12 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
     "Hosted runner status response",
     Object.fromEntries(HOSTED_RUNNER_STATUS_REMOVED_FIELDS.map((field) => [field, "runtime-control status"])),
   );
+  if ("leaseGeneration" in record) {
+    throw new TypeError("Hosted runner status response leaseGeneration has been removed.");
+  }
+  if ("lastRunAt" in record) {
+    throw new TypeError("Hosted runner status response lastRunAt has been renamed to lastInvocationAt.");
+  }
 
   return {
     ...(record.heartbeatAt === undefined
@@ -971,18 +976,14 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
             "Hosted runner status response lastErrorCode",
           ),
         }),
-    ...(record.lastRunAt === undefined
+    ...(record.lastInvocationAt === undefined
       ? {}
       : {
-          lastRunAt: readNullableString(
-            record.lastRunAt,
-            "Hosted runner status response lastRunAt",
+          lastInvocationAt: readNullableString(
+            record.lastInvocationAt,
+            "Hosted runner status response lastInvocationAt",
           ),
         }),
-    leaseGeneration: requireNonNegativeBigIntString(
-      record.leaseGeneration,
-      "Hosted runner status response leaseGeneration",
-    ),
     mailboxLag: requireArray(record.mailboxLag, "Hosted runner status response mailboxLag")
       .map((entry, index) => parseHostedMailboxLaneLag(
         entry,
@@ -1014,6 +1015,12 @@ export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRunti
     "Hosted runtime web status response",
     Object.fromEntries(HOSTED_RUNNER_STATUS_REMOVED_FIELDS.map((field) => [field, "runner status"])),
   );
+  if ("leaseGeneration" in record) {
+    throw new TypeError("Hosted runtime web status response leaseGeneration has been removed.");
+  }
+  if ("lastRunAt" in record) {
+    throw new TypeError("Hosted runtime web status response lastRunAt has been renamed to lastInvocationAt.");
+  }
 
   return {
     mailboxLag: requireArray(record.mailboxLag, "Hosted runtime web status response mailboxLag")
@@ -1032,38 +1039,38 @@ export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRunti
   };
 }
 
-export function parseHostedWorkspaceRunRequest(value: unknown): HostedWorkspaceRunRequest {
-  const record = requireObject(value, "Hosted workspace run request");
+export function parseHostedWorkspaceInvocationRequest(value: unknown): HostedWorkspaceInvocationRequest {
+  const record = requireObject(value, "Hosted workspace invocation request");
 
-  for (const field of HOSTED_WORKSPACE_RUN_REMOVED_FIELDS) {
-    rejectHostedWorkspaceRunRemovedField(record, field);
+  for (const field of HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS) {
+    rejectHostedWorkspaceInvocationRemovedField(record, field);
   }
 
   return {
-    attemptId: requireString(record.attemptId, "Hosted workspace run request attemptId"),
+    attemptId: requireString(record.attemptId, "Hosted workspace invocation request attemptId"),
     ...(record.budget === undefined || record.budget === null
       ? {}
       : {
-          budget: parseHostedWorkspaceRunBudget(
+          budget: parseHostedWorkspaceInvocationBudget(
             record.budget,
-            "Hosted workspace run request budget",
+            "Hosted workspace invocation request budget",
           ),
         }),
     leaseGeneration: requireNonNegativeBigIntString(
       record.leaseGeneration,
-      "Hosted workspace run request leaseGeneration",
+      "Hosted workspace invocation request leaseGeneration",
     ),
-    reason: parseHostedWorkspaceRunReason(record.reason),
-    userId: requireString(record.userId, "Hosted workspace run request userId"),
+    reason: parseHostedWorkspaceInvocationReason(record.reason),
+    userId: requireString(record.userId, "Hosted workspace invocation request userId"),
     workspaceVersion: requireNonNegativeBigIntString(
       record.workspaceVersion,
-      "Hosted workspace run request workspaceVersion",
+      "Hosted workspace invocation request workspaceVersion",
     ),
   };
 }
 
-export function parseHostedWorkspaceRunResult(value: unknown): HostedWorkspaceRunResult {
-  const record = requireObject(value, "Hosted workspace run result");
+export function parseHostedWorkspaceInvocationResult(value: unknown): HostedWorkspaceInvocationResult {
+  const record = requireObject(value, "Hosted workspace invocation result");
 
   return {
     ...(record.nextWakeAt === undefined
@@ -1071,7 +1078,7 @@ export function parseHostedWorkspaceRunResult(value: unknown): HostedWorkspaceRu
       : {
           nextWakeAt: readNullableString(
             record.nextWakeAt,
-            "Hosted workspace run result nextWakeAt",
+            "Hosted workspace invocation result nextWakeAt",
           ),
         }),
     ...(record.redactedStatus === undefined
@@ -1079,10 +1086,10 @@ export function parseHostedWorkspaceRunResult(value: unknown): HostedWorkspaceRu
       : {
           redactedStatus: parseHostedRuntimeRedactedJson(
             record.redactedStatus,
-            "Hosted workspace run result redactedStatus",
+            "Hosted workspace invocation result redactedStatus",
           ),
         }),
-    status: parseHostedWorkspaceRunStatus(record.status),
+    status: parseHostedWorkspaceInvocationStatus(record.status),
   };
 }
 
@@ -1104,10 +1111,10 @@ function parseHostedWorkspaceCheckpointReason(
   );
 }
 
-function parseHostedWorkspaceRunBudget(
+function parseHostedWorkspaceInvocationBudget(
   value: unknown,
   label: string,
-): HostedWorkspaceRunBudget {
+): HostedWorkspaceInvocationBudget {
   const record = requireObject(value, label);
 
   return {
@@ -1128,28 +1135,28 @@ function parseHostedWorkspaceRunBudget(
   };
 }
 
-function parseHostedWorkspaceRunReason(value: unknown): HostedWorkspaceRunReason {
+function parseHostedWorkspaceInvocationReason(value: unknown): HostedWorkspaceInvocationReason {
   return parseAllowedString(
     value,
-    "Hosted workspace run request reason",
-    HOSTED_WORKSPACE_RUN_REASONS,
+    "Hosted workspace invocation request reason",
+    HOSTED_WORKSPACE_INVOCATION_REASONS,
   );
 }
 
-function parseHostedWorkspaceRunStatus(value: unknown): HostedWorkspaceRunStatus {
+function parseHostedWorkspaceInvocationStatus(value: unknown): HostedWorkspaceInvocationStatus {
   return parseAllowedString(
     value,
-    "Hosted workspace run result status",
-    HOSTED_WORKSPACE_RUN_STATUSES,
+    "Hosted workspace invocation result status",
+    HOSTED_WORKSPACE_INVOCATION_STATUSES,
   );
 }
 
-function rejectHostedWorkspaceRunRemovedField(
+function rejectHostedWorkspaceInvocationRemovedField(
   record: Record<string, unknown>,
   field: string,
 ): void {
   if (record[field] !== undefined) {
-    throw new TypeError(`Hosted workspace run request.${field} is no longer supported.`);
+    throw new TypeError(`Hosted workspace invocation request.${field} is no longer supported.`);
   }
 }
 

@@ -485,7 +485,6 @@ describe("createCloudflareHostedControlClient", () => {
       accepted: true,
       alreadyRunning: true,
       inFlight: true,
-      leaseGeneration: "7",
     });
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
@@ -608,7 +607,6 @@ function createRunnerNudgeResult(
     alarmScheduled: boolean;
     alreadyRunning: boolean;
     inFlight: boolean;
-    leaseGeneration: string;
     nextAlarmAt: string | null;
   }> = {},
 ) {
@@ -617,7 +615,6 @@ function createRunnerNudgeResult(
     alarmScheduled: input.alarmScheduled ?? false,
     alreadyRunning: input.alreadyRunning ?? false,
     inFlight: input.inFlight ?? false,
-    leaseGeneration: input.leaseGeneration ?? "1",
     nextAlarmAt: input.nextAlarmAt ?? null,
   };
 }
@@ -628,8 +625,7 @@ function createRunnerStatus(
     inFlight: boolean;
     lastErrorAt: string | null;
     lastErrorCode: string | null;
-    lastRunAt: string | null;
-    leaseGeneration: string;
+    lastInvocationAt: string | null;
     nextAlarmAt: string | null;
     userId: string;
   }> = {},
@@ -639,8 +635,7 @@ function createRunnerStatus(
     inFlight: input.inFlight ?? false,
     lastErrorAt: input.lastErrorAt ?? null,
     lastErrorCode: input.lastErrorCode ?? null,
-    lastRunAt: input.lastRunAt ?? null,
-    leaseGeneration: input.leaseGeneration ?? "3",
+    lastInvocationAt: input.lastInvocationAt ?? null,
     mailboxLag: [
       {
         importedSeq: "2",

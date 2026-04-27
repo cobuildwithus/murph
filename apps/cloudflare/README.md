@@ -2,7 +2,7 @@
 
 Cloudflare-hosted execution plane for the hosted Murph path.
 
-`apps/web` is the canonical owner of onboarding, billing, auth, share facts, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated nudge/control requests, restores encrypted runtime state, runs workspace-runtime work, and writes the next encrypted workspace checkpoint through hosted-runtime callbacks.
+`apps/web` is the canonical owner of onboarding, billing, auth, share facts, device-sync authority, usage reconciliation, and other hosted product facts. `apps/cloudflare` is the execution-only edge/runtime layer that accepts authenticated nudge/control requests, restores encrypted runtime state, invokes workspace-runtime work, and writes the next encrypted workspace checkpoint through hosted-runtime callbacks.
 
 ## What This App Owns
 

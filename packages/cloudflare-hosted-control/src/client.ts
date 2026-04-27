@@ -8,13 +8,17 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/contracts";
+import {
   parseHostedRunnerNudgeResult,
   parseHostedRunnerStatusResponse,
   parseHostedBrowserVaultReplicaRef,
-  type HostedBrowserVaultReplicaRef,
-  type HostedRunnerNudgeResult,
-  type HostedRunnerStatusResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRunnerNudgeResult,
+  HostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
 import {
@@ -51,8 +55,6 @@ export interface CloudflareHostedControlClient {
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserRunner(userId: string): Promise<HostedRunnerNudgeResult>;
 }
-
-export type CloudflareHostedRunnerControlClient = CloudflareHostedControlClient;
 
 export interface CloudflareHostedControlClientOptions {
   allowHttpHosts?: readonly string[];

@@ -6,7 +6,7 @@ import type {
   HostedMailboxItem,
   HostedMailboxKind,
   HostedMailboxLane,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import {
   createHostedMailboxRoutingPlan,
   resolveExpectedLaneForHostedMailboxKind,

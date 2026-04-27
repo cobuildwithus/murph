@@ -20,7 +20,7 @@ import type {
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { describe, expect, test, vi } from "vitest";
+import { describe, test } from "vitest";
 
 import {
   initializeVault,
@@ -81,59 +81,6 @@ describe("handleHostedShareAcceptedWake", () => {
       assert.equal(importedFood.title, "Overnight oats");
       assert.equal(importedFood.kind, "smoothie");
       assert.equal(importedFood.status, "active");
-    } finally {
-      await cleanup();
-    }
-  });
-
-  test("records successful hosted share imports through the share port", async () => {
-    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
-      "murph-hosted-share-record-",
-    );
-
-    try {
-      await initializeVault({
-        createdAt: "2026-04-06T00:00:00.000Z",
-        vaultRoot,
-      });
-
-      const pack = buildSharePack();
-      const recordImport = vi.fn(async () => ({
-        recorded: true,
-        shareId: "hshare_123",
-        status: "imported" as const,
-      }));
-
-      await handleHostedShareAcceptedWake({
-        wake: buildHostedExecutionVaultShareAcceptedWake({
-          eventId: "evt_share_accepted",
-          memberId: "member_123",
-          occurredAt: "2026-04-06T00:00:00.000Z",
-          share: {
-            ownerUserId: "member_sender",
-            shareId: "hshare_123",
-          },
-        }),
-        sharePack: {
-          ownerUserId: "member_sender",
-          pack,
-          shareId: "hshare_123",
-        },
-        sharePort: {
-          async fetchPayload() {
-            throw new Error("fetchPayload should not be used by hydrated share imports.");
-          },
-          recordImport,
-        },
-        vaultRoot,
-      });
-
-      expect(recordImport).toHaveBeenCalledWith({
-        importedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
-        ownerUserId: "member_sender",
-        shareId: "hshare_123",
-        status: "imported",
-      });
     } finally {
       await cleanup();
     }

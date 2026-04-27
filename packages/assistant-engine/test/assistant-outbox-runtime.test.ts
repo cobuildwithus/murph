@@ -21,6 +21,7 @@ import {
 } from '../src/assistant/first-contact.ts'
 import {
   buildAssistantOutboxSummary,
+  beginAssistantOutboxIntentMirrorDispatch,
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   drainAssistantOutboxLocal,
@@ -1198,6 +1199,53 @@ describe('assistant outbox runtime', () => {
     expect(ambiguous.intent.lastError?.code).toBe(
       'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
     )
+  })
+
+  it('dispatches a checkpoint-prepared sending intent only when explicitly allowed', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-sending-')
+    const seeded = await createIntent(vaultRoot, {
+      explicitTarget: '123',
+      sessionId: 'session-prepared-sending',
+      turnId: 'turn-prepared-sending',
+    })
+    await beginAssistantOutboxIntentMirrorDispatch({
+      deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+      deliveryTransportIdempotent: false,
+      intentId: seeded.intentId,
+      startedAt: '2026-04-08T05:00:00.000Z',
+      vault: vaultRoot,
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: {
+        channel: 'telegram',
+        idempotencyKey: `assistant-outbox:${seeded.intentId}`,
+        messageLength: seeded.message.length,
+        providerMessageId: 'provider-prepared',
+        providerThreadId: 'thread-prepared',
+        sentAt: '2026-04-08T05:00:02.000Z',
+        target: '123',
+        targetKind: 'explicit',
+      },
+      deliveryDeduplicated: false,
+      outboxIntentId: null,
+    })
+
+    const skipped = await dispatchAssistantOutboxIntent({
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T05:00:01.000Z'),
+      vault: vaultRoot,
+    })
+    expect(skipped.intent.status).toBe('sending')
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      allowPreparedSending: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T05:00:01.000Z'),
+      vault: vaultRoot,
+    })
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent.delivery?.providerMessageId).toBe('provider-prepared')
   })
 
   it('marks Telegram partial-send ambiguity as abandoned and preserves sent chunk metadata', async () => {

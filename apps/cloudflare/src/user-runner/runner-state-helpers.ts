@@ -24,7 +24,7 @@ export interface RunnerMetaRow {
   in_flight: number;
   last_error_at: string | null;
   last_error_code: string | null;
-  last_run_at: string | null;
+  last_invocation_at: string | null;
   next_wake_at: string | null;
   pending_nudge: number;
   user_id: string;
@@ -44,7 +44,7 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
     in_flight: 0,
     last_error_at: null,
     last_error_code: null,
-    last_run_at: null,
+    last_invocation_at: null,
     next_wake_at: null,
     pending_nudge: 0,
     user_id: userId,
@@ -66,7 +66,7 @@ export function projectRunnerStateRecord(input: {
       lastError: nextLastError,
       lastErrorAt: input.meta.last_error_at,
       lastErrorCode: input.meta.last_error_code,
-      lastRunAt: input.meta.last_run_at,
+      lastInvocationAt: input.meta.last_invocation_at,
       leaseGeneration: input.meta.lease_generation,
       nextWakeAt: input.meta.next_wake_at,
       pendingNudge: input.meta.pending_nudge === 1,

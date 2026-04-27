@@ -584,8 +584,7 @@ describe("cloudflare worker routes", () => {
     const stub = createUserRunnerStub({
       runnerStatus: vi.fn(async () => ({
         inFlight: false,
-        lastRunAt: "2026-04-16T10:05:00.000Z",
-        leaseGeneration: "7",
+        lastInvocationAt: "2026-04-16T10:05:00.000Z",
         mailboxLag: [],
         nextAlarmAt: null,
         recentLogs: [],
@@ -603,7 +602,6 @@ describe("cloudflare worker routes", () => {
 
     expect(statusResponse.status).toBe(200);
     await expect(statusResponse.json()).resolves.toMatchObject({
-      leaseGeneration: "7",
       mailboxLag: [],
       userId: "member_123",
       workspace: null,
@@ -715,7 +713,6 @@ describe("cloudflare worker routes", () => {
         alarmScheduled: true,
         alreadyRunning: false,
         inFlight: false,
-        leaseGeneration: "7",
         nextAlarmAt: "2026-04-26T00:00:00.000Z",
       })),
     });
@@ -737,7 +734,6 @@ describe("cloudflare worker routes", () => {
       alarmScheduled: true,
       alreadyRunning: false,
       inFlight: false,
-      leaseGeneration: "7",
       nextAlarmAt: "2026-04-26T00:00:00.000Z",
     });
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
@@ -1314,8 +1310,11 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       alarmScheduled: true,
       alreadyRunning: false,
       inFlight: false,
-      leaseGeneration: "0",
       nextAlarmAt: null,
+    })),
+    ownsActiveInvocationLease: vi.fn(async () => true),
+    recordActiveInvocationWorkspaceCheckpoint: vi.fn(async () => ({
+      recorded: true,
     })),
     runUntilIdleOrBudget: vi.fn(async () => ({
       nextWakeAt: null,
@@ -1323,7 +1322,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     })),
     runnerStatus: vi.fn(async () => ({
       inFlight: false,
-      leaseGeneration: "0",
       mailboxLag: [],
       nextAlarmAt: null,
       recentLogs: [],
