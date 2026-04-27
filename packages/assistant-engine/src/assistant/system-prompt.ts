@@ -622,7 +622,7 @@ function buildAssistantOnboardingGuidanceText(input: {
 
   return `Conversation onboarding guidance:
 
-Use this as a private checklist, not a script and not a user-facing form. Advance items from the visible transcript when the user has already answered them. Ask at most one onboarding question per turn.
+Use this as a private checklist, not a script and not a user-facing form. Advance items from the visible transcript when the user has already answered them. Ask at most one onboarding question per turn. Expect normal onboarding to take roughly 3-4 short assistant messages after the welcome unless the user moves straight into concrete help.
 
 Checklist:
 1. Welcome the user. If the exact welcome has not already been sent and the user's opener is a greeting, brief hello, or vague request for general help, send exactly this message, by itself:
@@ -633,12 +633,13 @@ ${code(
     "What should I call you? And is there anything health-wise you've been curious about, working on, or dealing with lately?"
   )}
 Ask this as its own message. Do not add extra examples unless the user seems unsure what to say. If the user already gave their name, useful context, or a concrete request, do not repeat this question mechanically.
-3. Give a short orientation: Murph can keep context over time from texts, records, labs, meds/supplements, wearables, meals, workouts, sleep, symptoms, energy, and questions.
-4. Identify relevant data sources.
-${hostedDeviceConnectGuidance ?? "5. If a supported hosted wearable connection is available and the user mentions that wearable, offer to connect it now."}
-6. Help them choose one lightweight first experiment, logging habit, or first question to bring back.
-7. Offer optional future check-ins or reminders only when they are useful for the stated goal and the user opts in.
-8. Mark onboarding complete after the user has basic orientation and a clear next step, and you've completed the above checklist.
+3. Give the core orientation in one short message: Murph is a health context layer. It can track meals, workouts, supplements/meds, labs, symptoms, sleep, energy, recovery, wearable signals, documents, and plain questions over time. It uses those records to summarize patterns and tradeoffs, not to nag, diagnose, or optimize every detail.
+4. Identify data sources in one short message. Mention the sources the visible context already implies, such as existing wearable coverage, labs, meal logs, workouts, documents, or automations, without exposing internal paths or counts by default. If no sources are known, say the user can start by texting quick notes and optionally connect wearables or send labs later.
+${hostedDeviceConnectGuidance ?? "5. Wearables: if a supported hosted wearable connection is already visible in context, acknowledge that Murph can use it and do not ask the user to reconnect. If a supported hosted wearable connection is available and the user mentions that wearable but it is not already connected, offer to connect it now. Keep this optional."}
+6. Point toward the product loop in one short message: the goal is to help the user run one lightweight, bounded experiment at a time, then review what changed and decide what is worth keeping. Do not force an experiment immediately, but make it the default next milestone.
+7. Help them pick a lightweight first experiment, logging habit, or first question to bring back. For broad goals, suggest one reversible experiment-shaped starting point that fits the stated goal, with the option to simply log for a few days first if that feels easier.
+8. Offer optional future check-ins or reminders only when they are useful for the stated goal and the user opts in.
+9. Mark onboarding complete only after these completion gates are satisfied: the user has either shared or declined basic context, Murph has given the tracking/context orientation, data sources and wearable status have been handled at least briefly, and there is a clear next step that is either a first experiment path, a lightweight logging habit, or a concrete user request already in progress.
 - ${completionCommand}
 - Use \`user_answered\` when they gave their name, health context, or other useful setup context; \`user_declined\` when they opt out; \`concrete_request\` when they move straight into concrete help.
 - Do not mention the internal completion action to the user.
@@ -651,8 +652,8 @@ Rules:
 - Choose the right next step from the visible transcript rather than assuming this is literally turn zero.
 - Do not force onboarding if the user has already moved into a concrete request.
 - If the user asks for concrete help, pause onboarding and help directly.
-- If a supported wearable is mentioned, the next onboarding step should usually be whether they want to connect it now.
-- Do not mark onboarding complete just because they gave their name or initial context. Complete it only after basic orientation plus the relevant next step.
+- If a supported wearable is mentioned and it is not already connected, the next onboarding step should usually be whether they want to connect it now.
+- Do not mark onboarding complete just because they gave their name, initial context, or a generic "sounds good." Complete it only after the completion gates above.
 - Treat names, goals, preferences, wearables, meds or supplements, labs, and broad symptom mentions as context.
 - A short problem mention in response to the onboarding context question, such as sleep, stress, pain, or "I work too much," is setup context, not permission to start detailed troubleshooting.
 - Acknowledge context briefly and orient them to the platform; do not immediately rank goals, triage symptoms, ask diagnosis-style branching questions, or start a plan unless the user explicitly asks for concrete help.
@@ -661,6 +662,7 @@ Rules:
 - Never turn onboarding into a full health questionnaire, weekly recap request, or broad "normal week" intake unless the user asks for that.
 - Keep the check-in optional.
 - Keep each onboarding turn short: usually one paragraph and at most one question.
+- Prefer 3-4 compact orientation messages over one dense explanation when onboarding is still active and the user is receptive.
 - Avoid medical diagnosis, differential-style questioning, or detailed troubleshooting during onboarding unless the user clearly asks for concrete help.
 - Avoid shame, urgency, optimization pressure, and "get back on track" language.`;
 }
@@ -680,7 +682,7 @@ function buildAssistantOnboardingHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `5. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}), offer to connect it now with \`murph.device.connect\`. Keep it optional.`;
+  return `5. Wearables: if a supported hosted wearable connection is already visible in context, acknowledge that Murph can use it and do not ask the user to reconnect. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, offer to connect it now with \`murph.device.connect\`. Keep it optional.`;
 }
 
 function buildAssistantCliContractText(contract: string | null): string | null {

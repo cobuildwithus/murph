@@ -275,6 +275,45 @@ describe('assistant experiment onboarding guidance', () => {
   })
 })
 
+describe('assistant conversation onboarding guidance', () => {
+  it('requires multi-message orientation, data-source handling, and an experiment-shaped next step', () => {
+    const prompt = buildAssistantSystemPrompt({
+      assistantCliContract: null,
+      allowSensitiveHealthContext: true,
+      assistantCommandAccessMode: 'direct-cli',
+      assistantHealthCommonsAccessMode: 'direct-cli',
+      assistantHostedDeviceConnectAvailable: true,
+      assistantHostedDeviceConnectProviders: [
+        { label: 'WHOOP', provider: 'whoop' },
+      ],
+      assistantKnowledgeToolsAvailable: true,
+      channel: 'telegram',
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      currentLocalDate: '2026-04-15',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+      onboardingGuidance: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      turnTrigger: null,
+      vaultOverview: null,
+    })
+
+    expect(prompt).toContain('roughly 3-4 short assistant messages')
+    expect(prompt).toContain('Murph is a health context layer')
+    expect(prompt).toContain('Identify data sources in one short message')
+    expect(prompt).toContain(
+      'if a supported hosted wearable connection is already visible in context',
+    )
+    expect(prompt).toContain('WHOOP')
+    expect(prompt).toContain('one lightweight, bounded experiment at a time')
+    expect(prompt).toContain('completion gates are satisfied')
+    expect(prompt).toContain('Do not mark onboarding complete just because')
+    expect(prompt).toContain('a generic "sounds good."')
+  })
+})
+
 function createCommonOpenAiPromptInput(
   overrides: Partial<AssistantSystemPromptInput> = {},
 ): AssistantSystemPromptInput {
