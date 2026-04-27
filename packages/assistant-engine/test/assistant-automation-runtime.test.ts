@@ -13,7 +13,10 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
-import type { AssistantTurnConversationCaptureQuery } from '../src/assistant/turn-input.ts'
+import {
+  AssistantActiveTurnInputBudgetExceededError,
+  type AssistantTurnConversationCaptureQuery,
+} from '../src/assistant/turn-input.ts'
 
 function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value))
@@ -3073,38 +3076,36 @@ describe('assistant auto-reply runtime', () => {
       },
     }
 
-    let attempt = 0
     replyMocks.sendAssistantMessage.mockImplementation(
       async (input: {
-        beforeDelivery?: (
+        activeTurnInput?: (
           value: {
+            providerRequestOrdinal: number
             response: string
             sessionId: string
             turnId: string
             vault: string
-          },
-        ) => Promise<void>
+          }
+        ) => Promise<
+          | { kind: 'no-new-input' }
+          | {
+              kind: 'accepted'
+              prompt: string
+              receiptMetadata?: Record<string, string> | null
+            }
+        >
         receiptMetadata?: { autoReplyCaptureIds?: string }
         response?: string
       }) => {
-        attempt += 1
-        if (attempt === 1) {
-          await input.beforeDelivery?.({
-            response: 'draft response',
-            sessionId: 'session-1',
-            turnId: 'turn-1',
-            vault: '/tmp/assistant-automation-vault',
-          })
-          return {
-            delivery: null,
-            deliveryDeferred: false,
-            deliveryError: null,
-            deliveryIntentId: null,
-            response: 'draft response',
-            session: {
-              sessionId: 'session-1',
-            },
-          }
+        const admitted = await input.activeTurnInput?.({
+          providerRequestOrdinal: 0,
+          response: 'draft response',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          vault: '/tmp/assistant-automation-vault',
+        })
+        if (admitted?.kind !== 'accepted') {
+          throw new Error('expected active input admission')
         }
 
         return Promise.resolve({
@@ -3147,27 +3148,25 @@ describe('assistant auto-reply runtime', () => {
       skipped: 0,
       stopScanning: false,
     })
-    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(2)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.receiptMetadata).toEqual(
       expect.objectContaining({
         autoReplyCaptureIds: 'capture-1',
       }),
     )
-    expect(replyMocks.sendAssistantMessage.mock.calls[1]?.[0]?.receiptMetadata).toEqual(
-      expect.objectContaining({
-        autoReplyCaptureIds: 'capture-1,capture-late',
-      }),
+    expect(replyMocks.sendAssistantMessage.mock.calls[0]?.[0]?.activeTurnInput).toBeTypeOf(
+      'function',
     )
     expect(events).toContainEqual({
       type: 'capture.reply-progress',
       captureId: 'capture-1',
-      details: 'new input arrived before delivery; revising reply with 1 additional capture(s)',
+      details: 'new input accepted into active turn with 1 additional capture(s)',
       providerKind: 'status',
       providerState: 'running',
     })
   })
 
-  it('defers delivery after the bounded late-capture revision budget is exhausted', async () => {
+  it('defers delivery when the active-turn input budget is exhausted', async () => {
     const lateCapture = createCaptureSummary({
       captureId: 'capture-late',
       occurredAt: '2026-04-08T00:03:00.000Z',
@@ -3221,35 +3220,10 @@ describe('assistant auto-reply runtime', () => {
     }
 
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
-      beforeDelivery?: (
-        value: {
-          response: string
-          sessionId: string
-          turnId: string
-          vault: string
-        },
-      ) => Promise<void>
+      activeTurnInput?: unknown
     }) => {
-      await input.beforeDelivery?.({
-        response: 'draft response',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        vault: '/tmp/assistant-automation-vault',
-      })
-      return {
-        delivery: {
-          channel: 'telegram',
-          target: 'target-1',
-          sentAt: '2026-04-08T00:10:00.000Z',
-        },
-        deliveryDeferred: false,
-        deliveryError: null,
-        deliveryIntentId: 'intent-1',
-        response: 'draft response',
-        session: {
-          sessionId: 'session-1',
-        },
-      }
+      expect(input.activeTurnInput).toBeTypeOf('function')
+      throw new AssistantActiveTurnInputBudgetExceededError()
     })
 
     const events: Array<Record<string, unknown>> = []
@@ -3272,13 +3246,10 @@ describe('assistant auto-reply runtime', () => {
       failed: 0,
       nextWakeAt: expect.any(String),
       replied: 0,
-      skipped: 2,
+      skipped: 1,
       stopScanning: true,
     })
-    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(4)
-    expect(events.filter((event) => event.type === 'capture.reply-progress')).toHaveLength(
-      3,
-    )
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     expect(events.at(-1)).toMatchObject({
       type: 'capture.reply-skipped',
       captureId: 'capture-1',

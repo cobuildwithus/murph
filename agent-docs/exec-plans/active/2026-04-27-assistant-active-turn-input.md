@@ -102,6 +102,44 @@ hard cut, not as a blocker for it:
   slice. That should land after the mailbox/checkpoint hard cut has stabilized,
   using the runtime-owned mailbox/workspace ports from `migration.md`.
 
+2026-04-28 follow-up implementation slice:
+
+- Tightened the accepted-input journal invariants from the review pass:
+  provider requests now represent the full current accepted-input snapshot, and
+  appends cannot close current-turn admission in the same write that adds new
+  input.
+- Marked `.runtime/operations/assistant/accepted-turn-inputs/**` as portable
+  assistant runtime state and added hosted-bundle coverage proving it snapshots
+  and restores with the encrypted workspace state.
+- Made provider continuity policy required at the turn finalizer seam so future
+  outbound automation cannot accidentally persist native provider resume by
+  omission.
+- Added the service-level active-turn admission hook:
+  `activeTurnInput(request_boundary)` returns either `no-new-input` or a revised
+  prompt/content/delivery metadata snapshot. `sendAssistantMessageLocal` now
+  loops within one receipt and session lock, passing accepted input into the
+  next provider request and delivering only the final provider response.
+- Moved auto-reply off the intended `before_delivery` revision path. It now
+  materializes late same-conversation captures through the active-turn hook,
+  updates the final auto-reply context from the accepted capture set, and
+  commits artifacts/cursors/reply targets from that final context.
+- Kept the old revision exception as a fallback only for cases that cannot yet
+  be folded into active admission, such as late input that changes prompt
+  preparation into defer/skip while the hosted hard cut is still landing.
+- Added a budget-exceeded active-turn error so automation defers instead of
+  failing if input keeps arriving across continuation boundaries.
+
+Remaining planned work after this follow-up:
+
+- Persist initial and accepted active-turn items from the service loop into the
+  accepted-input journal, then build provider history from that journal plus
+  provider outputs instead of prompt replacement alone.
+- Add provider request/continuation ordinals to usage accounting so every model
+  request in a multi-request logical turn is billable/auditable without id
+  collisions.
+- Wire hosted/Cloudflare active-turn admission after the mailbox/checkpoint hard
+  cut stabilizes; current hosted rows in `migration.md` still own that surface.
+
 ## Codex Reference Model
 
 Codex's core shape is intentionally small:

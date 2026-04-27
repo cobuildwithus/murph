@@ -3,6 +3,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxListResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
+import type { AssistantUserMessageContentPart } from '../model-harness.js'
 import {
   conversationCaptureRefFromCapture,
   isSameAssistantConversationCapture,
@@ -67,6 +68,27 @@ export type AssistantTurnBeforeDeliveryHook = (
   input: AssistantTurnBeforeDeliveryInput,
 ) => Promise<void>
 
+export interface AssistantActiveTurnInputAdmissionInput
+  extends AssistantTurnBeforeDeliveryInput {
+  providerRequestOrdinal: number
+}
+
+export type AssistantActiveTurnInputAdmissionResult =
+  | {
+      kind: 'no-new-input'
+    }
+  | {
+      deliveryReplyToMessageId?: string | null
+      prompt: string
+      receiptMetadata?: Record<string, string> | null
+      userMessageContent?: AssistantUserMessageContentPart[] | null
+      kind: 'accepted'
+    }
+
+export type AssistantActiveTurnInputAdmissionHook = (
+  input: AssistantActiveTurnInputAdmissionInput,
+) => Promise<AssistantActiveTurnInputAdmissionResult>
+
 export class AssistantTurnRevisionRequiredError extends Error {
   readonly captures: readonly AssistantInboxCaptureSummary[]
   readonly nextCursor: AssistantAutomationCursor
@@ -86,10 +108,30 @@ export class AssistantTurnRevisionRequiredError extends Error {
   }
 }
 
+export class AssistantActiveTurnInputBudgetExceededError extends Error {
+  constructor(message?: string) {
+    super(
+      message ??
+        'Active turn input kept arriving before delivery; retry the expanded turn later.',
+    )
+    this.name = 'AssistantActiveTurnInputBudgetExceededError'
+  }
+}
+
 export function isAssistantTurnRevisionRequiredError(
   value: unknown,
 ): value is AssistantTurnRevisionRequiredError {
   return value instanceof AssistantTurnRevisionRequiredError
+}
+
+export function isAssistantActiveTurnInputBudgetExceededError(
+  value: unknown,
+): value is AssistantActiveTurnInputBudgetExceededError {
+  return (
+    value instanceof AssistantActiveTurnInputBudgetExceededError ||
+    (value instanceof Error &&
+      value.name === 'AssistantActiveTurnInputBudgetExceededError')
+  )
 }
 
 export function createNoopAssistantTurnInputPort(): AssistantTurnInputPort {

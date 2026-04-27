@@ -106,6 +106,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/outbox",
     "Assistant outbox intents that must move with hosted delivery continuity.",
   ),
+  definePortableAssistantSubtree(
+    ".runtime/operations/assistant/accepted-turn-inputs",
+    "Assistant active-turn accepted input journals that must move with hosted execution continuity.",
+  ),
   defineMachineLocalAssistantSubtree(
     ".runtime/operations/assistant/outbox/.quarantine",
     "Assistant outbox quarantine artifacts that are local repair residue only.",

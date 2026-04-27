@@ -19,8 +19,10 @@ import { listAssistantTurnReceipts } from '../receipts.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
 import {
-  createAssistantTurnBeforeDeliveryHook,
+  AssistantTurnRevisionRequiredError,
+  isAssistantActiveTurnInputBudgetExceededError,
   isAssistantTurnRevisionRequiredError,
+  type AssistantActiveTurnInputAdmissionHook,
   type AssistantTurnInputPort,
 } from '../turn-input.js'
 import {
@@ -114,6 +116,11 @@ interface AssistantAutoReplyScanState {
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
 >
+
+interface AssistantAutoReplyResolvedGroupOutcome {
+  context: AssistantAutoReplyGroupContext
+  outcome: AssistantAutoReplyGroupOutcome
+}
 
 interface AssistantAutoReplyOutcomeSummary {
   failed: number
@@ -333,17 +340,31 @@ export async function processAssistantAutoReplyGroup(input: {
 
   for (let revisionCount = 0; revisionCount <= MAX_AUTO_REPLY_REVISIONS; revisionCount += 1) {
     try {
-      const outcome = await resolveAssistantAutoReplyGroupOutcome({
+      const resolved = await resolveAssistantAutoReplyGroupOutcome({
         ...input,
         context,
       })
       return commitAssistantAutoReplyGroupOutcome({
-        context,
+        context: resolved.context,
         onEvent: input.onEvent,
-        outcome,
+        outcome: resolved.outcome,
         vault: input.vault,
       })
     } catch (error) {
+      if (isAssistantActiveTurnInputBudgetExceededError(error)) {
+        return commitAssistantAutoReplyGroupOutcome({
+          context,
+          onEvent: input.onEvent,
+          outcome: createDeferredGroupOutcome({
+            captureCount: context.captureCount,
+            nextWakeAt: new Date().toISOString(),
+            reason: error.message,
+            stopScanning: true,
+          }),
+          vault: input.vault,
+        })
+      }
+
       if (!isAssistantTurnRevisionRequiredError(error)) {
         return commitAssistantAutoReplyGroupOutcome({
           context,
@@ -428,7 +449,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   sessionMaxAgeMs: number | null
   turnInputPort?: AssistantTurnInputPort
   vault: string
-}): Promise<AssistantAutoReplyGroupOutcome> {
+}): Promise<AssistantAutoReplyResolvedGroupOutcome> {
   const decision = await evaluateAssistantAutoReplyGroup({
     allowSelfAuthored: input.allowSelfAuthored,
     enabledChannels: input.enabledChannels,
@@ -438,15 +459,22 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     vault: input.vault,
   })
   if (decision.kind === 'ignore') {
-    return createIgnoredGroupOutcome()
+    return {
+      context: input.context,
+      outcome: createIgnoredGroupOutcome(),
+    }
   }
   if (decision.kind === 'skip') {
-    return createSkippedDecisionOutcome({
-      captureCount: input.context.captureCount,
-      decision,
-    })
+    return {
+      context: input.context,
+      outcome: createSkippedDecisionOutcome({
+        captureCount: input.context.captureCount,
+        decision,
+      }),
+    }
   }
 
+  let acceptedContext = input.context
   input.onEvent?.({
     type: 'capture.reply-started',
     captureId: input.context.firstCaptureId,
@@ -457,7 +485,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryReplyToMessageId: decision.deliveryReplyToMessageId,
     executionContext: input.executionContext,
-    lastCursor: input.context.lastCursor,
     providerHeartbeatMs: input.providerHeartbeatMs,
     providerLongRunningCommandStallTimeoutMs:
       input.providerLongRunningCommandStallTimeoutMs,
@@ -470,15 +497,33 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     primaryCapture: decision.primaryCapture,
     prompt: decision.prompt,
     replyCaptureId: input.context.firstCaptureId,
-    turnInputPort: input.turnInputPort,
+    activeTurnInput: input.turnInputPort
+      ? createAssistantAutoReplyActiveTurnInputHook({
+          context: input.context,
+          inboxServices: input.inboxServices,
+          onAcceptedContext(nextContext) {
+            acceptedContext = nextContext
+          },
+          onEvent: input.onEvent,
+          port: input.turnInputPort,
+          requestId: input.requestId,
+          vault: input.vault,
+        })
+      : undefined,
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
   if (result.deliveryDeferred) {
-    return createDeferredDeliveryGroupOutcome(result)
+    return {
+      context: acceptedContext,
+      outcome: createDeferredDeliveryGroupOutcome(result),
+    }
   }
 
-  return createSuccessfulReplyGroupOutcome(result)
+  return {
+    context: acceptedContext,
+    outcome: createSuccessfulReplyGroupOutcome(result),
+  }
 }
 
 async function commitAssistantAutoReplyGroupOutcome(input: {
@@ -874,11 +919,11 @@ async function loadAssistantAutoReplyCaptures(input: {
 }
 
 async function executeAssistantAutoReply(input: {
+  activeTurnInput?: AssistantActiveTurnInputAdmissionHook
   captureIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryReplyToMessageId: string | null
   executionContext?: AssistantExecutionContext | null
-  lastCursor: AssistantAutomationCursor
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -890,7 +935,6 @@ async function executeAssistantAutoReply(input: {
   primaryCapture: InboxShowResult['capture']
   prompt: string
   replyCaptureId: string
-  turnInputPort?: AssistantTurnInputPort
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof sendAssistantMessage>>> {
@@ -901,14 +945,7 @@ async function executeAssistantAutoReply(input: {
       vault: input.vault,
       conversation: conversationRefFromCapture(input.primaryCapture),
       abortSignal: watchdog.signal,
-      beforeDelivery: input.turnInputPort
-        ? createAssistantTurnBeforeDeliveryHook({
-            afterCursor: input.lastCursor,
-            conversation: conversationCaptureRefFromCapture(input.primaryCapture),
-            knownCaptureIds: input.captureIds,
-            port: input.turnInputPort,
-          })
-        : undefined,
+      activeTurnInput: input.activeTurnInput,
       executionContext: input.executionContext,
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
@@ -936,6 +973,90 @@ async function executeAssistantAutoReply(input: {
     throw watchdog.normalizeError(error)
   } finally {
     watchdog.dispose()
+  }
+}
+
+function createAssistantAutoReplyActiveTurnInputHook(input: {
+  context: AssistantAutoReplyGroupContext
+  inboxServices: InboxServices
+  onAcceptedContext(context: AssistantAutoReplyGroupContext): void
+  onEvent?: (event: AssistantRunEvent) => void
+  port: AssistantTurnInputPort
+  requestId: string | null
+  vault: string
+}): AssistantActiveTurnInputAdmissionHook {
+  let context = input.context
+
+  return async () => {
+    await input.port.refresh({
+      phase: 'after_provider',
+    })
+
+    const lateCaptures = await input.port.listNewConversationCaptures({
+      afterCursor: context.lastCursor,
+      conversation: conversationCaptureRefFromCapture(context.firstItem.summary),
+      knownCaptureIds: context.captureIds,
+    })
+    if (lateCaptures.captures.length === 0) {
+      return {
+        kind: 'no-new-input',
+      }
+    }
+
+    const nextContext = await mergeAssistantAutoReplyGroupContext({
+      context,
+      lateCaptures: lateCaptures.captures,
+      vault: input.vault,
+    })
+    if (!nextContext) {
+      throw new AssistantTurnRevisionRequiredError({
+        captures: lateCaptures.captures,
+        nextCursor: lateCaptures.nextCursor,
+      })
+    }
+    if (nextContext.captureIds.length <= context.captureIds.length) {
+      return {
+        kind: 'no-new-input',
+      }
+    }
+
+    const shownGroup = await loadAssistantAutoReplyCaptures({
+      group: nextContext,
+      inboxServices: input.inboxServices,
+      requestId: input.requestId,
+      vault: input.vault,
+    })
+    const preparedInput = await prepareAssistantAutoReplyInput(
+      shownGroup,
+      input.vault,
+    )
+    if (preparedInput.kind !== 'ready') {
+      throw new AssistantTurnRevisionRequiredError({
+        captures: lateCaptures.captures,
+        nextCursor: lateCaptures.nextCursor,
+      })
+    }
+
+    context = nextContext
+    input.onAcceptedContext(context)
+    input.onEvent?.({
+      type: 'capture.reply-progress',
+      captureId: context.firstCaptureId,
+      details: `new input accepted into active turn with ${lateCaptures.captures.length} additional capture(s)`,
+      providerKind: 'status',
+      providerState: 'running',
+    })
+
+    return {
+      deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId(shownGroup),
+      kind: 'accepted',
+      prompt: preparedInput.prompt,
+      receiptMetadata: {
+        [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]: context.firstCaptureId,
+        [AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]: context.captureIds.join(','),
+      },
+      userMessageContent: preparedInput.userMessageContent,
+    }
   }
 }
 

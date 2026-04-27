@@ -311,9 +311,10 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
       sessionId: input.sessionId,
       turnId: input.turnId,
     })
+    const nextAdmissionState = input.admissionState ?? base.admissionState
     assertAssistantAcceptedTurnInputAdmissionStateTransition({
       existingAdmissionState: base.admissionState,
-      nextAdmissionState: input.admissionState ?? base.admissionState,
+      nextAdmissionState,
     })
     const nextInputs = [...base.inputs]
     const existingIds = new Set(nextInputs.map((item) => item.id))
@@ -333,9 +334,8 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
     }
 
     if (
-      existing &&
       appendedInputCount > 0 &&
-      existing.admissionState !== 'current-turn-open'
+      nextAdmissionState !== 'current-turn-open'
     ) {
       throw new VaultCliError(
         'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
@@ -345,7 +345,7 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
 
     const updated = assistantAcceptedTurnInputJournalSchema.parse({
       ...base,
-      admissionState: input.admissionState ?? base.admissionState,
+      admissionState: nextAdmissionState,
       inputIds: nextInputs.map((item) => item.id),
       inputs: nextInputs,
       updatedAt: now,
@@ -537,26 +537,21 @@ function normalizeProviderRequestAcceptedInputIds(input: {
   const acceptedInputIds = input.acceptedInputIds
     ? [...input.acceptedInputIds]
     : [...input.inputIds]
-  const knownInputIndexes = new Map(
-    input.inputIds.map((inputId, index) => [inputId, index] as const),
-  )
-  const seenInputIds = new Set<string>()
-  let previousIndex = -1
 
-  for (const inputId of acceptedInputIds) {
-    const index = knownInputIndexes.get(inputId)
-    if (
-      index === undefined ||
-      seenInputIds.has(inputId) ||
-      index <= previousIndex
-    ) {
+  if (acceptedInputIds.length !== input.inputIds.length) {
+    throw new VaultCliError(
+      'ASSISTANT_TURN_INPUT_JOURNAL_INVALID_PROVIDER_REQUEST',
+      'Provider request input ids must match the current accepted journal snapshot.',
+    )
+  }
+
+  for (let index = 0; index < acceptedInputIds.length; index += 1) {
+    if (acceptedInputIds[index] !== input.inputIds[index]) {
       throw new VaultCliError(
         'ASSISTANT_TURN_INPUT_JOURNAL_INVALID_PROVIDER_REQUEST',
-        'Provider request input ids must be unique accepted journal inputs in accepted order.',
+        'Provider request input ids must match the current accepted journal snapshot.',
       )
     }
-    seenInputIds.add(inputId)
-    previousIndex = index
   }
 
   return acceptedInputIds
