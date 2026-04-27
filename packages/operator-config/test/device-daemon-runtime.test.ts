@@ -85,6 +85,17 @@ function createFileDependencies() {
   }
 }
 
+function deviceSyncAuthResponse(status: number): ResponseInit {
+  return status === 401 || status === 403
+    ? {
+        status,
+        headers: {
+          'WWW-Authenticate': 'Bearer realm="device-syncd-control-plane"',
+        },
+      }
+    : { status }
+}
+
 async function importDeviceDaemonProcessWithMocks(setupMocks: () => void) {
   vi.resetModules()
   setupMocks()
@@ -770,7 +781,14 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
     vault: healthyVault,
     baseUrl: 'http://127.0.0.1:4318',
     dependencies: {
-      fetchImpl: async () => new Response(null, { status: 200 }),
+      fetchImpl: async (_input, init) =>
+        new Response(null, {
+          ...deviceSyncAuthResponse(
+            new Headers(init?.headers).get('Authorization') === 'Bearer managed-token'
+              ? 200
+              : 401,
+          ),
+        }),
       isProcessAlive: () => true,
       now: () => new Date('2026-04-08T00:00:00.000Z'),
     },
@@ -780,6 +798,79 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
   assert.equal(
     alreadyManaged.message,
     'Murph is already managing the local device sync daemon.',
+  )
+
+  await removeManagedControlToken(healthyPaths, createFileDependencies())
+  let missingManagedTokenFetchCalls = 0
+  let missingManagedTokenError: Error | null = null
+  try {
+    await startManagedDeviceSyncDaemon({
+      vault: healthyVault,
+      baseUrl: 'http://127.0.0.1:4318',
+      dependencies: {
+        fetchImpl: async () => {
+          missingManagedTokenFetchCalls += 1
+          throw new Error('fetchImpl should not be called')
+        },
+        isProcessAlive: () => true,
+        now: () => new Date('2026-04-08T00:00:00.000Z'),
+        spawnProcess: async () => {
+          throw new Error('spawnProcess should not be called')
+        },
+      },
+    })
+  } catch (error) {
+    missingManagedTokenError = error instanceof Error ? error : new Error(String(error))
+  }
+  assert.notEqual(missingManagedTokenError, null)
+  assert.match(
+    missingManagedTokenError?.message ?? '',
+    /tracked device sync daemon process is still running/u,
+  )
+  assert.match(
+    missingManagedTokenError?.message ?? '',
+    /Stop it with `murph device daemon stop --vault <path>` or retry with `DEVICE_SYNC_PORT=<free-port>`\./u,
+  )
+  assert.doesNotMatch(missingManagedTokenError?.message ?? '', /DEVICE_SYNC_CONTROL_TOKEN/u)
+  assert.equal(missingManagedTokenFetchCalls, 0)
+  await writeManagedControlToken(healthyPaths, 'managed-token', createFileDependencies())
+
+  await rm(healthyPaths.launcherStatePath, { force: true })
+  const missingLauncherAuthorizations: Array<string | null> = []
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: healthyVault,
+        baseUrl: 'http://127.0.0.1:4318',
+        dependencies: {
+          fetchImpl: async (_input, init) => {
+            missingLauncherAuthorizations.push(
+              new Headers(init?.headers).get('Authorization'),
+            )
+            return new Response(null, deviceSyncAuthResponse(401))
+          },
+          isProcessAlive: () => false,
+          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          spawnProcess: async () => {
+            throw new Error('spawnProcess should not be called')
+          },
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+      /this vault is not managing it/u.test(error.message) &&
+      /lsof -nP -iTCP:4318 -sTCP:LISTEN/u.test(error.message),
+  )
+  assert.deepEqual(missingLauncherAuthorizations, [null])
+  await writeDeviceDaemonState(
+    healthyPaths,
+    {
+      pid: 8123,
+      baseUrl: 'http://127.0.0.1:4318',
+      startedAt: '2026-04-08T00:00:00.000Z',
+    },
+    createFileDependencies(),
   )
 
   const conflictVault = await createTempVault('operator-config-device-daemon-conflict-')
@@ -796,6 +887,26 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'DEVICE_SYNC_DAEMON_CONFLICT',
+  )
+
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: conflictVault,
+        dependencies: {
+          fetchImpl: async () => new Response(null, deviceSyncAuthResponse(401)),
+          isProcessAlive: () => false,
+          now: () => new Date('2026-04-08T00:00:00.000Z'),
+          spawnProcess: async () => {
+            throw new Error('spawnProcess should not be called')
+          },
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+      /this vault is not managing it/u.test(error.message) &&
+      /lsof -nP -iTCP:8788 -sTCP:LISTEN/u.test(error.message),
   )
 
   await assert.rejects(
@@ -839,7 +950,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
       fetchImpl: async () => {
         healthAttempt += 1
         return new Response(null, {
-          status: healthAttempt >= 2 ? 200 : 503,
+          status: healthAttempt >= 3 ? 200 : 503,
         })
       },
       isProcessAlive: (pid) => livePids.has(pid),
@@ -866,7 +977,15 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
     dependencies: {
       now: () => new Date('2026-04-08T00:00:00.000Z'),
       sleep: async () => undefined,
-      fetchImpl: async () => new Response(null, { status: 200 }),
+      fetchImpl: async (_input, init) =>
+        new Response(null, {
+          ...deviceSyncAuthResponse(
+            new Headers(init?.headers).get('Authorization') ===
+              `Bearer ${resolveManagedControlToken(resolveDeviceDaemonPaths(managedVault))}`
+              ? 200
+              : 401,
+          ),
+        }),
       isProcessAlive: (pid) => livePids.has(pid),
     },
   })
@@ -890,22 +1009,36 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
   assert.equal(resolveManagedControlToken(resolveDeviceDaemonPaths(managedVault)), null)
   assert.equal(await readDeviceDaemonState(resolveDeviceDaemonPaths(managedVault), createFileDependencies()), null)
 
+  const unmanagedStatusAuthorizations: Array<string | null> = []
   const unmanagedStatus = await getManagedDeviceSyncDaemonStatus({
     vault: staleVault,
     baseUrl: 'http://127.0.0.1:4318',
     dependencies: {
-      fetchImpl: async () => new Response(null, { status: 200 }),
+      fetchImpl: async (_input, init) => {
+        const authorization = new Headers(init?.headers).get('Authorization')
+        unmanagedStatusAuthorizations.push(authorization)
+        return new Response(null, {
+          ...deviceSyncAuthResponse(authorization === 'Bearer managed-token' ? 200 : 401),
+        })
+      },
       isProcessAlive: () => false,
     },
   })
   assert.equal(unmanagedStatus.managed, true)
-  assert.equal(unmanagedStatus.healthy, true)
+  assert.equal(unmanagedStatus.healthy, false)
+  assert.deepEqual(unmanagedStatusAuthorizations, [null])
 
+  const nonDeviceSyncStatusAuthorizations: Array<string | null> = []
   const reachableButUnmanaged = await getManagedDeviceSyncDaemonStatus({
     vault: staleVault,
     baseUrl: 'http://127.0.0.1:9999',
     dependencies: {
-      fetchImpl: async () => new Response(null, { status: 200 }),
+      fetchImpl: async (_input, init) => {
+        nonDeviceSyncStatusAuthorizations.push(
+          new Headers(init?.headers).get('Authorization'),
+        )
+        return new Response(null, { status: 401 })
+      },
       isProcessAlive: () => false,
     },
   })
@@ -914,6 +1047,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
     reachableButUnmanaged.message,
     'Device sync control plane is reachable at the target base URL, but it is not managed by this Murph vault.',
   )
+  assert.deepEqual(nonDeviceSyncStatusAuthorizations, [null])
 
   const explicitManagedReuse = await ensureManagedDeviceSyncControlPlane({
     vault: managedVault,
@@ -975,6 +1109,40 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
   assert.deepEqual(killedPids, [9100])
   assert.equal(removedFiles.includes(startFailurePaths.launcherStatePath), true)
   assert.equal(resolveManagedControlToken(startFailurePaths), null)
+
+  const addressConflictVault = await createTempVault('operator-config-device-daemon-address-conflict-')
+  const addressConflictPaths = resolveDeviceDaemonPaths(addressConflictVault)
+  let addressConflictNowMs = 0
+  await mkdir(path.dirname(addressConflictPaths.stderrLogPath), { recursive: true })
+  await writeFile(
+    addressConflictPaths.stderrLogPath,
+    'Error: listen EADDRINUSE: address already in use 127.0.0.1:8788\n',
+    'utf8',
+  )
+
+  await assert.rejects(
+    () =>
+      startManagedDeviceSyncDaemon({
+        vault: addressConflictVault,
+        baseUrl: 'http://127.0.0.1:4318',
+        dependencies: {
+          now: () => new Date(addressConflictNowMs),
+          sleep: async () => {
+            addressConflictNowMs += 100
+          },
+          fetchImpl: async () => new Response(null, { status: 503 }),
+          isProcessAlive: () => true,
+          killProcess: () => undefined,
+          resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+          spawnProcess: async () => ({ pid: 9200 }),
+        },
+      }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'DEVICE_SYNC_DAEMON_CONFLICT' &&
+      /already listening at http:\/\/127.0.0.1:4318/u.test(error.message) &&
+      /lsof -nP -iTCP:4318 -sTCP:LISTEN/u.test(error.message),
+  )
 
   const writeFailureVault = await createTempVault('operator-config-device-daemon-write-failure-')
   const writeFailurePaths = resolveDeviceDaemonPaths(writeFailureVault)
@@ -1078,25 +1246,70 @@ test('device-daemon lifecycle handles startup cleanup and stop edge cases determ
   )
 })
 
-test('device-daemon management also covers explicit-token fallback ownership and default kill/sleep dependencies', async () => {
+test('device-daemon management also covers explicit spawn tokens and default kill/sleep dependencies', async () => {
   const fallbackVault = await createTempVault('operator-config-device-daemon-fallback-')
+  let fallbackHealthy = false
+  let fallbackSpawnCalls = 0
   const fallbackResult = await ensureManagedDeviceSyncControlPlane({
     vault: fallbackVault,
     env: {
       DEVICE_SYNC_CONTROL_TOKEN: ' explicit-token ',
     },
     dependencies: {
-      fetchImpl: async () => new Response(null, { status: 200 }),
+      fetchImpl: async (_input, init) =>
+        new Response(null, {
+          status:
+            fallbackHealthy &&
+            new Headers(init?.headers).get('Authorization') === 'Bearer explicit-token'
+              ? 200
+              : 503,
+        }),
       isProcessAlive: () => false,
       now: () => new Date('2026-04-08T00:00:00.000Z'),
+      resolveDeviceSyncPackageEntry: () => '/opt/device-syncd/dist/index.js',
+      spawnProcess: async () => {
+        fallbackSpawnCalls += 1
+        fallbackHealthy = true
+        return { pid: 9500 }
+      },
     },
   })
   assert.deepEqual(fallbackResult, {
     baseUrl: 'http://localhost:8788',
     controlToken: 'explicit-token',
-    managed: false,
+    managed: true,
+    started: true,
+  })
+
+  const fallbackReuse = await ensureManagedDeviceSyncControlPlane({
+    vault: fallbackVault,
+    env: {
+      DEVICE_SYNC_CONTROL_TOKEN: ' explicit-token ',
+    },
+    dependencies: {
+      fetchImpl: async (_input, init) =>
+        new Response(null, {
+          status:
+            fallbackHealthy &&
+            new Headers(init?.headers).get('Authorization') === 'Bearer explicit-token'
+              ? 200
+              : 401,
+        }),
+      isProcessAlive: (pid) => pid === 9500,
+      now: () => new Date('2026-04-08T00:00:00.000Z'),
+      spawnProcess: async () => {
+        fallbackSpawnCalls += 1
+        throw new Error('spawnProcess should not be called')
+      },
+    },
+  })
+  assert.deepEqual(fallbackReuse, {
+    baseUrl: 'http://localhost:8788',
+    controlToken: 'explicit-token',
+    managed: true,
     started: false,
   })
+  assert.equal(fallbackSpawnCalls, 1)
 
   const defaultStopVault = await createTempVault('operator-config-device-daemon-default-stop-')
   const defaultStopPaths = resolveDeviceDaemonPaths(defaultStopVault)
