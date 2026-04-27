@@ -26,8 +26,14 @@ import {
 import { dailyFoodTimeSchema } from '@murphai/vault-usecases/records'
 import { createRegistryDocEntityGroup } from './entity-command-groups.js'
 import {
+  appendTypedClear,
+  appendTypedSet,
   createDirectEntityDeleteCommandDefinition,
   createDirectEntityEditCommandDefinition,
+  emptyToUndefined,
+  numberOption,
+  stringArrayOption,
+  stringOption,
 } from './record-mutation-command-helpers.js'
 
 const foodStatusSchema = z.enum(FOOD_STATUSES)
@@ -560,13 +566,108 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
       schema: z.string().min(1).describe('Food id or slug to edit.'),
     },
     description:
-      'Edit one food by merging a partial JSON patch or one or more path assignments into the saved record.',
+      'Edit one food from typed fields.',
+    options: {
+      title: z.string().min(1).max(160).optional().describe('Replace food title or name.'),
+      slug: foodSlugSchema.optional().describe('Replace food slug and rename the underlying document.'),
+      status: foodStatusSchema.optional().describe('Replace food status.'),
+      summary: z.string().min(1).max(4000).optional().describe('Replace short summary.'),
+      kind: z.string().min(1).max(160).optional().describe('Replace food kind.'),
+      brand: z.string().min(1).max(160).optional().describe('Replace product brand.'),
+      vendor: z.string().min(1).max(160).optional().describe('Replace vendor or restaurant.'),
+      location: z.string().min(1).max(160).optional().describe('Replace vendor location.'),
+      serving: z.string().min(1).max(160).optional().describe('Replace serving label.'),
+      calories: nonnegativeNumberOptionSchema('Replace calories per serving.'),
+      proteinGrams: nonnegativeNumberOptionSchema('Replace protein grams per serving.'),
+      carbsGrams: nonnegativeNumberOptionSchema('Replace carbohydrate grams per serving.'),
+      fatGrams: nonnegativeNumberOptionSchema('Replace fat grams per serving.'),
+      fiberGrams: nonnegativeNumberOptionSchema('Replace fiber grams per serving.'),
+      nutritionSource: nutritionProvenanceSourceSchema.optional().describe('Replace nutrition provenance source.'),
+      nutritionConfidence: nutritionConfidenceLevelSchema.optional().describe('Replace nutrition provenance confidence.'),
+      nutritionSourceDetail: z.string().min(1).max(240).optional().describe('Replace nutrition provenance detail.'),
+      alias: repeatedTextOptionSchema('Replace aliases. Repeat --alias for multiple values.'),
+      ingredient: repeatedTextOptionSchema('Replace ingredients. Repeat --ingredient for multiple values.', 4000),
+      tag: repeatedTextOptionSchema('Replace tags. Repeat --tag for multiple values.'),
+      note: z.string().min(1).max(4000).optional().describe('Replace food note.'),
+      autoLogDailyTime: dailyFoodTimeSchema.optional().describe('Replace recurring auto-log time in HH:MM form.'),
+      attachedRegimenId: z.array(regimenIdSchema).optional().describe('Replace attached regimen ids. Repeat --attached-regimen-id for multiple values.'),
+      linkRelatedRegimenId: z.array(regimenIdSchema).optional().describe('Replace related regimen links. Repeat --link-related-regimen-id for multiple links.'),
+      clearSummary: z.boolean().optional().describe('Clear food summary.'),
+      clearKind: z.boolean().optional().describe('Clear food kind.'),
+      clearBrand: z.boolean().optional().describe('Clear product brand.'),
+      clearVendor: z.boolean().optional().describe('Clear vendor.'),
+      clearLocation: z.boolean().optional().describe('Clear vendor location.'),
+      clearServing: z.boolean().optional().describe('Clear serving label.'),
+      clearNutrition: z.boolean().optional().describe('Clear saved nutrition.'),
+      clearAliases: z.boolean().optional().describe('Clear aliases.'),
+      clearIngredients: z.boolean().optional().describe('Clear ingredients.'),
+      clearTags: z.boolean().optional().describe('Clear tags.'),
+      clearNote: z.boolean().optional().describe('Clear food note.'),
+      clearAutoLogDaily: z.boolean().optional().describe('Clear recurring auto-log settings.'),
+      clearAttachedRegimenIds: z.boolean().optional().describe('Clear attached regimen ids.'),
+      clearLinks: z.boolean().optional().describe('Clear food links.'),
+    },
+    buildInput(input, options) {
+      const set: string[] = []
+      const clear: string[] = []
+      appendTypedSet(set, 'title', stringOption(options.title))
+      appendTypedSet(set, 'slug', stringOption(options.slug))
+      appendTypedSet(set, 'status', stringOption(options.status))
+      appendTypedSet(set, 'summary', stringOption(options.summary))
+      appendTypedSet(set, 'kind', stringOption(options.kind))
+      appendTypedSet(set, 'brand', stringOption(options.brand))
+      appendTypedSet(set, 'vendor', stringOption(options.vendor))
+      appendTypedSet(set, 'location', stringOption(options.location))
+      appendTypedSet(set, 'serving', stringOption(options.serving))
+      appendTypedSet(set, 'nutrition.perServing.calories', numberOption(options.calories))
+      appendTypedSet(set, 'nutrition.perServing.proteinGrams', numberOption(options.proteinGrams))
+      appendTypedSet(set, 'nutrition.perServing.carbsGrams', numberOption(options.carbsGrams))
+      appendTypedSet(set, 'nutrition.perServing.fatGrams', numberOption(options.fatGrams))
+      appendTypedSet(set, 'nutrition.perServing.fiberGrams', numberOption(options.fiberGrams))
+      appendTypedSet(set, 'nutrition.provenance.source', stringOption(options.nutritionSource))
+      appendTypedSet(set, 'nutrition.provenance.confidence', stringOption(options.nutritionConfidence))
+      appendTypedSet(set, 'nutrition.provenance.sourceDetail', stringOption(options.nutritionSourceDetail))
+      appendTypedSet(set, 'aliases', stringArrayOption(options.alias))
+      appendTypedSet(set, 'ingredients', stringArrayOption(options.ingredient))
+      appendTypedSet(set, 'tags', stringArrayOption(options.tag))
+      appendTypedSet(set, 'note', stringOption(options.note))
+      const autoLogDailyTime = stringOption(options.autoLogDailyTime)
+      if (autoLogDailyTime !== undefined) {
+        appendTypedSet(set, 'autoLogDaily', { time: autoLogDailyTime })
+      }
+      appendTypedSet(set, 'attachedRegimenIds', stringArrayOption(options.attachedRegimenId))
+      const relatedRegimenIds = stringArrayOption(options.linkRelatedRegimenId)
+      if (relatedRegimenIds !== undefined) {
+        appendTypedSet(set, 'links', relatedRegimenIds.map((targetId) => ({
+          type: 'related_regimen',
+          targetId,
+        })))
+      }
+      appendTypedClear(clear, 'summary', options.clearSummary === true)
+      appendTypedClear(clear, 'kind', options.clearKind === true)
+      appendTypedClear(clear, 'brand', options.clearBrand === true)
+      appendTypedClear(clear, 'vendor', options.clearVendor === true)
+      appendTypedClear(clear, 'location', options.clearLocation === true)
+      appendTypedClear(clear, 'serving', options.clearServing === true)
+      appendTypedClear(clear, 'nutrition', options.clearNutrition === true)
+      appendTypedClear(clear, 'aliases', options.clearAliases === true)
+      appendTypedClear(clear, 'ingredients', options.clearIngredients === true)
+      appendTypedClear(clear, 'tags', options.clearTags === true)
+      appendTypedClear(clear, 'note', options.clearNote === true)
+      appendTypedClear(clear, 'autoLogDaily', options.clearAutoLogDaily === true)
+      appendTypedClear(clear, 'attachedRegimenIds', options.clearAttachedRegimenIds === true)
+      appendTypedClear(clear, 'links', options.clearLinks === true)
+      return {
+        ...input,
+        set: emptyToUndefined(set),
+        clear: emptyToUndefined(clear),
+      }
+    },
     run(input) {
       return services.core.editFood({
         vault: input.vault,
         requestId: input.requestId,
         lookup: input.lookup,
-        inputFile: input.inputFile,
         set: input.set,
         clear: input.clear,
       })

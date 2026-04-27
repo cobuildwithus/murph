@@ -2803,25 +2803,87 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
-                          "type": "string"
+                        "title": {
+                          "description": "Replace the saved title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         },
-                        "set": {
+                        "note": {
+                          "description": "Replace the saved note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "occurredAt": {
+                          "description": "Replace the occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "timeZone": {
+                          "description": "Replace the explicit IANA time zone, such as America/New_York.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "dayKey": {
+                          "description": "Set the explicit local day key in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "source": {
+                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "tag": {
+                          "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
+                            "maxLength": 160
                           }
                         },
-                        "clear": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
-                          }
+                        "clearTitle": {
+                          "description": "Clear the saved title.",
+                          "type": "boolean"
+                        },
+                        "clearNote": {
+                          "description": "Clear the saved note.",
+                          "type": "boolean"
+                        },
+                        "clearTimeZone": {
+                          "description": "Clear the saved explicit time zone.",
+                          "type": "boolean"
+                        },
+                        "clearDayKey": {
+                          "description": "Clear the saved day key.",
+                          "type": "boolean"
+                        },
+                        "clearSource": {
+                          "description": "Clear the saved source.",
+                          "type": "boolean"
+                        },
+                        "clearTags": {
+                          "description": "Clear all saved tags.",
+                          "type": "boolean"
                         },
                         "dayKeyPolicy": {
                           "type": "string",
@@ -3849,25 +3911,87 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
-                          "type": "string"
+                        "title": {
+                          "description": "Replace the saved title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         },
-                        "set": {
+                        "note": {
+                          "description": "Replace the saved note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "occurredAt": {
+                          "description": "Replace the occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "timeZone": {
+                          "description": "Replace the explicit IANA time zone, such as America/New_York.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "dayKey": {
+                          "description": "Set the explicit local day key in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "source": {
+                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "tag": {
+                          "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
+                            "maxLength": 160
                           }
                         },
-                        "clear": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
-                          }
+                        "clearTitle": {
+                          "description": "Clear the saved title.",
+                          "type": "boolean"
+                        },
+                        "clearNote": {
+                          "description": "Clear the saved note.",
+                          "type": "boolean"
+                        },
+                        "clearTimeZone": {
+                          "description": "Clear the saved explicit time zone.",
+                          "type": "boolean"
+                        },
+                        "clearDayKey": {
+                          "description": "Clear the saved day key.",
+                          "type": "boolean"
+                        },
+                        "clearSource": {
+                          "description": "Clear the saved source.",
+                          "type": "boolean"
+                        },
+                        "clearTags": {
+                          "description": "Clear all saved tags.",
+                          "type": "boolean"
                         },
                         "dayKeyPolicy": {
                           "type": "string",
@@ -3876,6 +4000,75 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
+                        },
+                        "ingredient": {
+                          "description": "Replace saved ingredients. Repeat --ingredient for each item.",
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "nutritionCalories": {
+                          "description": "Replace meal calorie total.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionProteinGrams": {
+                          "description": "Replace meal protein grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionCarbsGrams": {
+                          "description": "Replace meal carbohydrate grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionFatGrams": {
+                          "description": "Replace meal fat grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionFiberGrams": {
+                          "description": "Replace meal fiber grams.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionSource": {
+                          "description": "Replace meal nutrition provenance source.",
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "label",
+                            "database",
+                            "inherited",
+                            "estimated"
+                          ]
+                        },
+                        "nutritionConfidence": {
+                          "description": "Replace meal nutrition provenance confidence.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ]
+                        },
+                        "nutritionSourceDetail": {
+                          "description": "Replace meal nutrition provenance detail.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "clearIngredients": {
+                          "description": "Clear saved ingredients.",
+                          "type": "boolean"
+                        },
+                        "clearNutrition": {
+                          "description": "Clear saved nutrition totals and provenance.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -4564,25 +4757,87 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
-                          "type": "string"
+                        "title": {
+                          "description": "Replace the saved title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         },
-                        "set": {
+                        "note": {
+                          "description": "Replace the saved note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "occurredAt": {
+                          "description": "Replace the occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "timeZone": {
+                          "description": "Replace the explicit IANA time zone, such as America/New_York.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "dayKey": {
+                          "description": "Set the explicit local day key in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "source": {
+                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "tag": {
+                          "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
+                            "maxLength": 160
                           }
                         },
-                        "clear": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
-                          }
+                        "clearTitle": {
+                          "description": "Clear the saved title.",
+                          "type": "boolean"
+                        },
+                        "clearNote": {
+                          "description": "Clear the saved note.",
+                          "type": "boolean"
+                        },
+                        "clearTimeZone": {
+                          "description": "Clear the saved explicit time zone.",
+                          "type": "boolean"
+                        },
+                        "clearDayKey": {
+                          "description": "Clear the saved day key.",
+                          "type": "boolean"
+                        },
+                        "clearSource": {
+                          "description": "Clear the saved source.",
+                          "type": "boolean"
+                        },
+                        "clearTags": {
+                          "description": "Clear all saved tags.",
+                          "type": "boolean"
                         },
                         "dayKeyPolicy": {
                           "type": "string",
@@ -4591,6 +4846,101 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
+                        },
+                        "duration": {
+                          "description": "Replace duration in minutes.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1440
+                        },
+                        "type": {
+                          "description": "Replace workout activity type.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "distanceKm": {
+                          "description": "Replace workout distance in kilometers.",
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000
+                        },
+                        "workoutSourceApp": {
+                          "description": "Replace nested workout-session source app slug.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "workoutSourceWorkoutId": {
+                          "description": "Replace nested source workout id.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "workoutStartedAt": {
+                          "description": "Replace nested workout started-at timestamp.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "workoutEndedAt": {
+                          "description": "Replace nested workout ended-at timestamp.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "workoutRoutineId": {
+                          "description": "Replace nested workout routine id.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "workoutRoutineName": {
+                          "description": "Replace nested workout routine name.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "workoutSessionNote": {
+                          "description": "Replace nested workout session note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "workoutMedia": {
+                          "description": "Replace stored workout media entries as kind=...;relativePath=...;mediaType=...;caption=.... Repeat --workout-media for multiple entries.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "workoutExercise": {
+                          "description": "Replace workout exercises as order=...;name=... entries. Repeat --workout-exercise for multiple exercises.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "workoutSet": {
+                          "description": "Workout set as exercise=...;order=... plus optional set fields. Repeat --workout-set for multiple sets.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "clearDuration": {
+                          "description": "Clear saved duration.",
+                          "type": "boolean"
+                        },
+                        "clearDistance": {
+                          "description": "Clear saved distance.",
+                          "type": "boolean"
+                        },
+                        "clearWorkout": {
+                          "description": "Clear the nested workout session payload.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -5155,25 +5505,87 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
-                          "type": "string"
+                        "title": {
+                          "description": "Replace the saved title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         },
-                        "set": {
+                        "note": {
+                          "description": "Replace the saved note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "occurredAt": {
+                          "description": "Replace the occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "timeZone": {
+                          "description": "Replace the explicit IANA time zone, such as America/New_York.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "dayKey": {
+                          "description": "Set the explicit local day key in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "source": {
+                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "tag": {
+                          "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
+                            "maxLength": 160
                           }
                         },
-                        "clear": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
-                          }
+                        "clearTitle": {
+                          "description": "Clear the saved title.",
+                          "type": "boolean"
+                        },
+                        "clearNote": {
+                          "description": "Clear the saved note.",
+                          "type": "boolean"
+                        },
+                        "clearTimeZone": {
+                          "description": "Clear the saved explicit time zone.",
+                          "type": "boolean"
+                        },
+                        "clearDayKey": {
+                          "description": "Clear the saved day key.",
+                          "type": "boolean"
+                        },
+                        "clearSource": {
+                          "description": "Clear the saved source.",
+                          "type": "boolean"
+                        },
+                        "clearTags": {
+                          "description": "Clear all saved tags.",
+                          "type": "boolean"
                         },
                         "dayKeyPolicy": {
                           "type": "string",
@@ -5182,6 +5594,31 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
+                        },
+                        "type": {
+                          "description": "Replace the intervention type.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "duration": {
+                          "description": "Replace the duration in minutes.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 1440
+                        },
+                        "regimenId": {
+                          "description": "Replace the related regimen id.",
+                          "type": "string",
+                          "pattern": "^reg_[0-9A-Za-z]+$"
+                        },
+                        "clearDuration": {
+                          "description": "Clear the saved duration.",
+                          "type": "boolean"
+                        },
+                        "clearRegimenId": {
+                          "description": "Clear the saved regimen id and related links.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -5436,25 +5873,103 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
+                        "title": {
+                          "description": "Replace provider title or name.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "slug": {
+                          "description": "Replace provider slug and rename the underlying document.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "status": {
+                          "description": "Optional provider status. Defaults to active.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "specialty": {
+                          "description": "Optional provider specialty.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "organization": {
+                          "description": "Optional provider organization.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "location": {
+                          "description": "Optional provider location.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "website": {
+                          "description": "Optional provider website.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "phone": {
+                          "description": "Optional provider phone label or number.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "note": {
+                          "description": "Optional provider note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "alias": {
+                          "description": "Optional alias for lookup and search. Repeat --alias for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "body": {
+                          "description": "Optional Markdown body for the provider document.",
                           "type": "string"
                         },
-                        "set": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
-                          }
+                        "clearSpecialty": {
+                          "description": "Clear provider specialty.",
+                          "type": "boolean"
                         },
-                        "clear": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
-                          }
+                        "clearOrganization": {
+                          "description": "Clear provider organization.",
+                          "type": "boolean"
+                        },
+                        "clearLocation": {
+                          "description": "Clear provider location.",
+                          "type": "boolean"
+                        },
+                        "clearWebsite": {
+                          "description": "Clear provider website.",
+                          "type": "boolean"
+                        },
+                        "clearPhone": {
+                          "description": "Clear provider phone.",
+                          "type": "boolean"
+                        },
+                        "clearNote": {
+                          "description": "Clear provider note.",
+                          "type": "boolean"
+                        },
+                        "clearAliases": {
+                          "description": "Clear provider aliases.",
+                          "type": "boolean"
+                        },
+                        "clearBody": {
+                          "description": "Clear provider Markdown body override.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -5625,25 +6140,176 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
-                          "type": "string"
+                        "title": {
+                          "description": "Replace recipe title or name.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
                         },
-                        "set": {
+                        "slug": {
+                          "description": "Replace recipe slug and rename the underlying document.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "status": {
+                          "description": "Replace recipe status.",
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "saved",
+                            "archived"
+                          ]
+                        },
+                        "summary": {
+                          "description": "Replace recipe summary.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "cuisine": {
+                          "description": "Replace cuisine label.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "dishType": {
+                          "description": "Replace dish type.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "source": {
+                          "description": "Replace source label or citation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "servings": {
+                          "description": "Replace serving count.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "prepTimeMinutes": {
+                          "description": "Replace prep time in minutes.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "cookTimeMinutes": {
+                          "description": "Replace cook time in minutes.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "totalTimeMinutes": {
+                          "description": "Replace total time in minutes.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "tag": {
+                          "description": "Replace recipe tags. Repeat --tag for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
+                            "minLength": 1
                           }
                         },
-                        "clear": {
+                        "ingredient": {
+                          "description": "Replace ingredient lines. Repeat --ingredient for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
+                            "minLength": 1
                           }
+                        },
+                        "step": {
+                          "description": "Replace preparation steps. Repeat --step for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "relatedGoalId": {
+                          "description": "Replace related goal ids. Repeat --related-goal-id for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^goal_[0-9A-Za-z]+$"
+                          }
+                        },
+                        "relatedConditionId": {
+                          "description": "Replace related condition ids. Repeat --related-condition-id for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^cond_[0-9A-Za-z]+$"
+                          }
+                        },
+                        "link": {
+                          "description": "Replace relation links in type:targetId form. Repeat --link for multiple values. Supported types: supports_goal, addresses_condition.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "clearSummary": {
+                          "description": "Clear recipe summary.",
+                          "type": "boolean"
+                        },
+                        "clearCuisine": {
+                          "description": "Clear cuisine.",
+                          "type": "boolean"
+                        },
+                        "clearDishType": {
+                          "description": "Clear dish type.",
+                          "type": "boolean"
+                        },
+                        "clearSource": {
+                          "description": "Clear source label or citation.",
+                          "type": "boolean"
+                        },
+                        "clearServings": {
+                          "description": "Clear serving count.",
+                          "type": "boolean"
+                        },
+                        "clearPrepTime": {
+                          "description": "Clear prep time.",
+                          "type": "boolean"
+                        },
+                        "clearCookTime": {
+                          "description": "Clear cook time.",
+                          "type": "boolean"
+                        },
+                        "clearTotalTime": {
+                          "description": "Clear total time.",
+                          "type": "boolean"
+                        },
+                        "clearTags": {
+                          "description": "Clear tags.",
+                          "type": "boolean"
+                        },
+                        "clearIngredients": {
+                          "description": "Clear ingredients.",
+                          "type": "boolean"
+                        },
+                        "clearSteps": {
+                          "description": "Clear preparation steps.",
+                          "type": "boolean"
+                        },
+                        "clearRelatedGoalIds": {
+                          "description": "Clear related goal ids.",
+                          "type": "boolean"
+                        },
+                        "clearRelatedConditionIds": {
+                          "description": "Clear related condition ids.",
+                          "type": "boolean"
+                        },
+                        "clearLinks": {
+                          "description": "Clear relation links.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -6228,25 +6894,221 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
-                          "type": "string"
+                        "title": {
+                          "description": "Replace food title or name.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
                         },
-                        "set": {
+                        "slug": {
+                          "description": "Replace food slug and rename the underlying document.",
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                        },
+                        "status": {
+                          "description": "Replace food status.",
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "archived"
+                          ]
+                        },
+                        "summary": {
+                          "description": "Replace short summary.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "kind": {
+                          "description": "Replace food kind.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "brand": {
+                          "description": "Replace product brand.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "vendor": {
+                          "description": "Replace vendor or restaurant.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "location": {
+                          "description": "Replace vendor location.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "serving": {
+                          "description": "Replace serving label.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "calories": {
+                          "description": "Replace calories per serving.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "proteinGrams": {
+                          "description": "Replace protein grams per serving.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "carbsGrams": {
+                          "description": "Replace carbohydrate grams per serving.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "fatGrams": {
+                          "description": "Replace fat grams per serving.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "fiberGrams": {
+                          "description": "Replace fiber grams per serving.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "nutritionSource": {
+                          "description": "Replace nutrition provenance source.",
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "label",
+                            "database",
+                            "inherited",
+                            "estimated"
+                          ]
+                        },
+                        "nutritionConfidence": {
+                          "description": "Replace nutrition provenance confidence.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high"
+                          ]
+                        },
+                        "nutritionSourceDetail": {
+                          "description": "Replace nutrition provenance detail.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "alias": {
+                          "description": "Replace aliases. Repeat --alias for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
+                            "maxLength": 160
                           }
                         },
-                        "clear": {
+                        "ingredient": {
+                          "description": "Replace ingredients. Repeat --ingredient for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
+                            "maxLength": 4000
                           }
+                        },
+                        "tag": {
+                          "description": "Replace tags. Repeat --tag for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          }
+                        },
+                        "note": {
+                          "description": "Replace food note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "autoLogDailyTime": {
+                          "description": "Replace recurring auto-log time in HH:MM form.",
+                          "type": "string",
+                          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                        },
+                        "attachedRegimenId": {
+                          "description": "Replace attached regimen ids. Repeat --attached-regimen-id for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^reg_[A-Za-z0-9_-]+$"
+                          }
+                        },
+                        "linkRelatedRegimenId": {
+                          "description": "Replace related regimen links. Repeat --link-related-regimen-id for multiple links.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^reg_[A-Za-z0-9_-]+$"
+                          }
+                        },
+                        "clearSummary": {
+                          "description": "Clear food summary.",
+                          "type": "boolean"
+                        },
+                        "clearKind": {
+                          "description": "Clear food kind.",
+                          "type": "boolean"
+                        },
+                        "clearBrand": {
+                          "description": "Clear product brand.",
+                          "type": "boolean"
+                        },
+                        "clearVendor": {
+                          "description": "Clear vendor.",
+                          "type": "boolean"
+                        },
+                        "clearLocation": {
+                          "description": "Clear vendor location.",
+                          "type": "boolean"
+                        },
+                        "clearServing": {
+                          "description": "Clear serving label.",
+                          "type": "boolean"
+                        },
+                        "clearNutrition": {
+                          "description": "Clear saved nutrition.",
+                          "type": "boolean"
+                        },
+                        "clearAliases": {
+                          "description": "Clear aliases.",
+                          "type": "boolean"
+                        },
+                        "clearIngredients": {
+                          "description": "Clear ingredients.",
+                          "type": "boolean"
+                        },
+                        "clearTags": {
+                          "description": "Clear tags.",
+                          "type": "boolean"
+                        },
+                        "clearNote": {
+                          "description": "Clear food note.",
+                          "type": "boolean"
+                        },
+                        "clearAutoLogDaily": {
+                          "description": "Clear recurring auto-log settings.",
+                          "type": "boolean"
+                        },
+                        "clearAttachedRegimenIds": {
+                          "description": "Clear attached regimen ids.",
+                          "type": "boolean"
+                        },
+                        "clearLinks": {
+                          "description": "Clear food links.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -6454,25 +7316,87 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "input": {
-                          "description": "Optional partial JSON patch in @file.json form or - for stdin.",
-                          "type": "string"
+                        "title": {
+                          "description": "Replace the saved title.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         },
-                        "set": {
+                        "note": {
+                          "description": "Replace the saved note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "occurredAt": {
+                          "description": "Replace the occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                              "description": "Timestamp in ISO 8601 format with an explicit UTC offset."
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                              "description": "Calendar date in YYYY-MM-DD form."
+                            }
+                          ]
+                        },
+                        "timeZone": {
+                          "description": "Replace the explicit IANA time zone, such as America/New_York.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "dayKey": {
+                          "description": "Set the explicit local day key in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "source": {
+                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "import",
+                            "device",
+                            "derived"
+                          ]
+                        },
+                        "tag": {
+                          "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "description": "Path assignment in dotted.path=value form. Repeat --set for multiple fields."
+                            "maxLength": 160
                           }
                         },
-                        "clear": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Dotted path to clear from the saved record. Repeat --clear for multiple fields."
-                          }
+                        "clearTitle": {
+                          "description": "Clear the saved title.",
+                          "type": "boolean"
+                        },
+                        "clearNote": {
+                          "description": "Clear the saved note.",
+                          "type": "boolean"
+                        },
+                        "clearTimeZone": {
+                          "description": "Clear the saved explicit time zone.",
+                          "type": "boolean"
+                        },
+                        "clearDayKey": {
+                          "description": "Clear the saved day key.",
+                          "type": "boolean"
+                        },
+                        "clearSource": {
+                          "description": "Clear the saved source.",
+                          "type": "boolean"
+                        },
+                        "clearTags": {
+                          "description": "Clear all saved tags.",
+                          "type": "boolean"
                         },
                         "dayKeyPolicy": {
                           "type": "string",
@@ -6481,6 +7405,11 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
+                        },
+                        "kind": {
+                          "description": "Replace the canonical event kind.",
+                          "type": "string",
+                          "minLength": 1
                         }
                       }
                     }

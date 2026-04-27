@@ -237,7 +237,7 @@ test('workout add schema exposes the freeform workout capture surface', async ()
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
-test('workout edit/delete schemas expose shared record mutation options', async () => {
+test('workout edit/delete schemas expose typed mutation options', async () => {
   const editSchema = JSON.parse(
     await runSliceCliRaw(['workout', 'edit', '--schema']),
   ) as SchemaEnvelope
@@ -245,9 +245,12 @@ test('workout edit/delete schemas expose shared record mutation options', async 
     await runSliceCliRaw(['workout', 'delete', '--schema']),
   ) as SchemaEnvelope
 
-  assert.equal('input' in editSchema.options.properties, true)
-  assert.equal('set' in editSchema.options.properties, true)
-  assert.equal('clear' in editSchema.options.properties, true)
+  assert.equal('input' in editSchema.options.properties, false)
+  assert.equal('set' in editSchema.options.properties, false)
+  assert.equal('clear' in editSchema.options.properties, false)
+  assert.equal('note' in editSchema.options.properties, true)
+  assert.equal('duration' in editSchema.options.properties, true)
+  assert.equal('type' in editSchema.options.properties, true)
   assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
   assert.deepEqual(editSchema.options.required, ['vault'])
   assert.deepEqual(deleteSchema.options.required, ['vault'])
@@ -1566,14 +1569,13 @@ test(
         'workout',
         'edit',
         requireData(created).eventId,
-        '--set',
-        'note=Easy recovery ride.',
-        '--set',
-        'durationMinutes=50',
-        '--set',
-        'title=50-minute ride',
-        '--clear',
-        'distanceKm',
+        '--note',
+        'Easy recovery ride.',
+        '--duration',
+        '50',
+        '--title',
+        '50-minute ride',
+        '--clear-distance',
         '--vault',
         vaultRoot,
       ])
@@ -1614,7 +1616,7 @@ test(
 )
 
 test(
-  'workout manifest resolves from workout media paths even after rawRefs are cleared',
+  'workout manifest resolves from workout media paths after typed edits',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-manifest-'))
     const mediaPath = path.join(vaultRoot, 'workout-photo.jpg')
@@ -1647,8 +1649,8 @@ test(
         'workout',
         'edit',
         requireData(created).eventId,
-        '--clear',
-        'rawRefs',
+        '--note',
+        'Edited walk with attached media.',
         '--vault',
         vaultRoot,
       ])

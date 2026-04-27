@@ -33,8 +33,11 @@ import {
 import type { VaultServices } from '@murphai/vault-usecases'
 import { createLedgerEventEntityGroup } from './entity-command-groups.js'
 import {
+  appendTypedSet,
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
+  emptyToUndefined,
+  stringOption,
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
@@ -383,13 +386,20 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
           schema: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
         },
         description:
-          'Edit one canonical event by merging a partial JSON patch or one or more path assignments into the saved record.',
+          'Edit one canonical event from typed fields.',
+        options: {
+          kind: z.string().min(1).optional().describe('Replace the canonical event kind.'),
+        },
+        buildPatch(options) {
+          const set: string[] = []
+          appendTypedSet(set, 'kind', stringOption(options.kind))
+          return { set: emptyToUndefined(set) }
+        },
         async run(input) {
           const result = await editEventRecord({
             vault: input.vault,
             lookup: input.lookup,
             entityLabel: 'event',
-            inputFile: input.inputFile,
             set: input.set,
             clear: input.clear,
             dayKeyPolicy: input.dayKeyPolicy,

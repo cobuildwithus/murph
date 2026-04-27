@@ -15,8 +15,13 @@ import {
 import { registerRegistryDocEntityGroup } from './entity-command-groups.js'
 import { type FactoryCommandConfig } from './command-factory-primitives.js'
 import {
+  appendTypedClear,
+  appendTypedSet,
   createEntityDeleteCommandConfig,
   createEntityEditCommandConfig,
+  emptyToUndefined,
+  stringArrayOption,
+  stringOption,
 } from './record-mutation-command-helpers.js'
 
 const providerIdSchema = z
@@ -235,12 +240,60 @@ export function registerProviderCommands(
           schema: z.string().min(1).describe('Provider id or slug to edit.'),
         },
         description:
-          'Edit one provider by merging a partial JSON patch or one or more path assignments into the saved record.',
+          'Edit one provider from typed fields.',
+        options: {
+          title: providerTitleSchema.optional().describe('Replace provider title or name.'),
+          slug: providerSlugSchema.optional().describe('Replace provider slug and rename the underlying document.'),
+          status: providerSaveOptions.status,
+          specialty: providerSaveOptions.specialty,
+          organization: providerSaveOptions.organization,
+          location: providerSaveOptions.location,
+          website: providerSaveOptions.website,
+          phone: providerSaveOptions.phone,
+          note: providerSaveOptions.note,
+          alias: providerSaveOptions.alias,
+          body: providerSaveOptions.body,
+          clearSpecialty: z.boolean().optional().describe('Clear provider specialty.'),
+          clearOrganization: z.boolean().optional().describe('Clear provider organization.'),
+          clearLocation: z.boolean().optional().describe('Clear provider location.'),
+          clearWebsite: z.boolean().optional().describe('Clear provider website.'),
+          clearPhone: z.boolean().optional().describe('Clear provider phone.'),
+          clearNote: z.boolean().optional().describe('Clear provider note.'),
+          clearAliases: z.boolean().optional().describe('Clear provider aliases.'),
+          clearBody: z.boolean().optional().describe('Clear provider Markdown body override.'),
+        },
+        buildInput(input, options) {
+          const set: string[] = []
+          const clear: string[] = []
+          appendTypedSet(set, 'title', stringOption(options.title))
+          appendTypedSet(set, 'slug', stringOption(options.slug))
+          appendTypedSet(set, 'status', stringOption(options.status))
+          appendTypedSet(set, 'specialty', stringOption(options.specialty))
+          appendTypedSet(set, 'organization', stringOption(options.organization))
+          appendTypedSet(set, 'location', stringOption(options.location))
+          appendTypedSet(set, 'website', stringOption(options.website))
+          appendTypedSet(set, 'phone', stringOption(options.phone))
+          appendTypedSet(set, 'note', stringOption(options.note))
+          appendTypedSet(set, 'aliases', stringArrayOption(options.alias))
+          appendTypedSet(set, 'body', stringOption(options.body))
+          appendTypedClear(clear, 'specialty', options.clearSpecialty === true)
+          appendTypedClear(clear, 'organization', options.clearOrganization === true)
+          appendTypedClear(clear, 'location', options.clearLocation === true)
+          appendTypedClear(clear, 'website', options.clearWebsite === true)
+          appendTypedClear(clear, 'phone', options.clearPhone === true)
+          appendTypedClear(clear, 'note', options.clearNote === true)
+          appendTypedClear(clear, 'aliases', options.clearAliases === true)
+          appendTypedClear(clear, 'body', options.clearBody === true)
+          return {
+            ...input,
+            set: emptyToUndefined(set),
+            clear: emptyToUndefined(clear),
+          }
+        },
         run(input) {
           return editProviderRecord({
             vault: input.vault,
             lookup: input.lookup,
-            inputFile: input.inputFile,
             set: input.set,
             clear: input.clear,
           })

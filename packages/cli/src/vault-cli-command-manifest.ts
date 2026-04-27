@@ -603,7 +603,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['document', 'edit'],
-        description: 'Edit one imported document event by merging a partial JSON patch or path assignments.',
+        description: 'Edit one imported document event from typed fields.',
       },
       {
         path: ['document', 'delete'],
@@ -708,7 +708,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['meal', 'edit'],
-        description: 'Edit one meal event by merging a partial JSON patch or path assignments.',
+        description: 'Edit one meal event from typed fields.',
       },
       {
         path: ['meal', 'delete'],
@@ -783,7 +783,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['workout', 'edit'],
         description:
-          'Edit one saved workout activity event by merging a partial JSON patch or path assignments.',
+          'Edit one saved workout activity event from typed fields.',
       },
       {
         path: ['workout', 'delete'],
@@ -849,7 +849,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['intervention', 'edit'],
         description:
-          'Edit one saved intervention session event by merging a partial JSON patch or path assignments.',
+          'Edit one saved intervention session event from typed fields.',
       },
       {
         path: ['intervention', 'delete'],
@@ -888,7 +888,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['provider', 'edit'],
-        description: 'Edit one provider by merging a partial JSON patch or path assignments.',
+        description: 'Edit one provider from typed fields.',
       },
       {
         path: ['provider', 'delete'],
@@ -931,7 +931,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['recipe', 'edit'],
-        description: 'Edit one recipe by merging a partial JSON patch or path assignments.',
+        description: 'Edit one recipe from typed fields.',
       },
       {
         path: ['recipe', 'delete'],
@@ -974,7 +974,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['food', 'edit'],
-        description: 'Edit one food by merging a partial JSON patch or path assignments.',
+        description: 'Edit one food from typed fields.',
       },
       {
         path: ['food', 'delete'],
@@ -1056,7 +1056,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['event', 'edit'],
-        description: 'Edit one canonical event by merging a partial JSON patch or path assignments.',
+        description: 'Edit one canonical event from typed fields.',
       },
       {
         path: ['event', 'delete'],

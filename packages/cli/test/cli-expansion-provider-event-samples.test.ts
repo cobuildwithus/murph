@@ -191,24 +191,28 @@ test('provider, food, recipe, and event edit/delete schemas expose shared record
     }
   }
 
-  assert.equal('input' in providerEditSchema.options.properties, true)
-  assert.equal('set' in providerEditSchema.options.properties, true)
-  assert.equal('clear' in providerEditSchema.options.properties, true)
+  assert.equal('input' in providerEditSchema.options.properties, false)
+  assert.equal('set' in providerEditSchema.options.properties, false)
+  assert.equal('clear' in providerEditSchema.options.properties, false)
+  assert.equal('title' in providerEditSchema.options.properties, true)
   assert.deepEqual(providerEditSchema.options.required, ['vault'])
 
-  assert.equal('input' in foodEditSchema.options.properties, true)
-  assert.equal('set' in foodEditSchema.options.properties, true)
-  assert.equal('clear' in foodEditSchema.options.properties, true)
+  assert.equal('input' in foodEditSchema.options.properties, false)
+  assert.equal('set' in foodEditSchema.options.properties, false)
+  assert.equal('clear' in foodEditSchema.options.properties, false)
+  assert.equal('title' in foodEditSchema.options.properties, true)
   assert.deepEqual(foodEditSchema.options.required, ['vault'])
 
-  assert.equal('input' in recipeEditSchema.options.properties, true)
-  assert.equal('set' in recipeEditSchema.options.properties, true)
-  assert.equal('clear' in recipeEditSchema.options.properties, true)
+  assert.equal('input' in recipeEditSchema.options.properties, false)
+  assert.equal('set' in recipeEditSchema.options.properties, false)
+  assert.equal('clear' in recipeEditSchema.options.properties, false)
+  assert.equal('title' in recipeEditSchema.options.properties, true)
   assert.deepEqual(recipeEditSchema.options.required, ['vault'])
 
-  assert.equal('input' in eventEditSchema.options.properties, true)
-  assert.equal('set' in eventEditSchema.options.properties, true)
-  assert.equal('clear' in eventEditSchema.options.properties, true)
+  assert.equal('input' in eventEditSchema.options.properties, false)
+  assert.equal('set' in eventEditSchema.options.properties, false)
+  assert.equal('clear' in eventEditSchema.options.properties, false)
+  assert.equal('title' in eventEditSchema.options.properties, true)
   assert.equal('dayKeyPolicy' in eventEditSchema.options.properties, true)
   assert.deepEqual(eventEditSchema.options.required, ['vault'])
 
@@ -1558,8 +1562,8 @@ test.sequential(
         'food',
         'edit',
         requireData(foodCreated).foodId,
-        '--set',
-        'slug=protein-acai-bowl',
+        '--slug',
+        'protein-acai-bowl',
         '--vault',
         vaultRoot,
       ])
@@ -1572,8 +1576,8 @@ test.sequential(
         'recipe',
         'edit',
         requireData(recipeCreated).recipeId,
-        '--set',
-        'slug=sheet-pan-salmon-skillet',
+        '--slug',
+        'sheet-pan-salmon-skillet',
         '--vault',
         vaultRoot,
       ])
@@ -1602,13 +1606,11 @@ test.sequential(
 )
 
 test.sequential(
-  'food and recipe edit accept input payload files while preserving canonical ids',
+  'food and recipe edit typed fields preserve canonical ids',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-edit-input-'))
     const foodPayloadPath = path.join(vaultRoot, 'food.json')
     const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
-    const foodEditPath = path.join(vaultRoot, 'food-edit.json')
-    const recipeEditPath = path.join(vaultRoot, 'recipe-edit.json')
 
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
@@ -1656,29 +1658,6 @@ test.sequential(
       assert.equal(foodCreated.ok, true)
       assert.equal(recipeCreated.ok, true)
 
-      await writeFile(
-        foodEditPath,
-        JSON.stringify({
-          foodId: 'food_PATCHATTEMPT1',
-          title: 'Protein Acai Bowl',
-          slug: 'protein-acai-bowl',
-          note: 'Now with chia seeds.',
-        }),
-        'utf8',
-      )
-      await writeFile(
-        recipeEditPath,
-        JSON.stringify({
-          recipeId: 'rcp_PATCHATTEMPT1',
-          title: 'Sheet Pan Salmon Skillet',
-          slug: 'sheet-pan-salmon-skillet',
-          summary: 'Updated rotation dinner.',
-          ingredients: ['2 salmon fillets', '1 lemon'],
-          steps: ['Roast the salmon.', 'Finish with lemon juice.'],
-        }),
-        'utf8',
-      )
-
       const foodEdited = await runSliceCli<{
         entity: {
           id: string
@@ -1692,8 +1671,12 @@ test.sequential(
         'food',
         'edit',
         requireData(foodCreated).foodId,
-        '--input',
-        `@${foodEditPath}`,
+        '--title',
+        'Protein Acai Bowl',
+        '--slug',
+        'protein-acai-bowl',
+        '--note',
+        'Now with chia seeds.',
         '--vault',
         vaultRoot,
       ])
@@ -1710,8 +1693,20 @@ test.sequential(
         'recipe',
         'edit',
         requireData(recipeCreated).recipeId,
-        '--input',
-        `@${recipeEditPath}`,
+        '--title',
+        'Sheet Pan Salmon Skillet',
+        '--slug',
+        'sheet-pan-salmon-skillet',
+        '--summary',
+        'Updated rotation dinner.',
+        '--ingredient',
+        '2 salmon fillets',
+        '--ingredient',
+        '1 lemon',
+        '--step',
+        'Roast the salmon.',
+        '--step',
+        'Finish with lemon juice.',
         '--vault',
         vaultRoot,
       ])
@@ -1787,7 +1782,7 @@ test.sequential(
 )
 
 test.sequential(
-  'food and recipe edit preserve canonical ids when set and clear target the id fields',
+  'food and recipe edit typed fields preserve canonical ids',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-edit-id-boundary-'))
     const foodPayloadPath = path.join(vaultRoot, 'food.json')
@@ -1839,9 +1834,6 @@ test.sequential(
       assert.equal(foodCreated.ok, true)
       assert.equal(recipeCreated.ok, true)
 
-      const attemptedFoodId = 'food_PATCHATTEMPT2'
-      const attemptedRecipeId = 'rcp_PATCHATTEMPT2'
-
       const foodEdited = await runSliceCli<{
         entity: {
           id: string
@@ -1854,14 +1846,9 @@ test.sequential(
         'food',
         'edit',
         requireData(foodCreated).foodId,
-        '--set',
-        `foodId=${attemptedFoodId}`,
-        '--set',
-        'title=Protein Acai Bowl',
-        '--clear',
-        'foodId',
-        '--clear',
-        'note',
+        '--title',
+        'Protein Acai Bowl',
+        '--clear-note',
         '--vault',
         vaultRoot,
       ])
@@ -1877,14 +1864,9 @@ test.sequential(
         'recipe',
         'edit',
         requireData(recipeCreated).recipeId,
-        '--set',
-        `recipeId=${attemptedRecipeId}`,
-        '--set',
-        'title=Sheet Pan Salmon Skillet',
-        '--clear',
-        'recipeId',
-        '--clear',
-        'summary',
+        '--title',
+        'Sheet Pan Salmon Skillet',
+        '--clear-summary',
         '--vault',
         vaultRoot,
       ])
@@ -1923,21 +1905,6 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const foodAttemptedReplacement = await runSliceCli([
-        'food',
-        'show',
-        attemptedFoodId,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeAttemptedReplacement = await runSliceCli([
-        'recipe',
-        'show',
-        attemptedRecipeId,
-        '--vault',
-        vaultRoot,
-      ])
-
       assert.equal(foodShown.ok, true)
       assert.equal(requireData(foodShown).entity.id, requireData(foodCreated).foodId)
       assert.equal(requireData(foodShown).entity.title, 'Protein Acai Bowl')
@@ -1945,10 +1912,6 @@ test.sequential(
       assert.equal(requireData(recipeShown).entity.id, requireData(recipeCreated).recipeId)
       assert.equal(requireData(recipeShown).entity.title, 'Sheet Pan Salmon Skillet')
 
-      assert.equal(foodAttemptedReplacement.ok, false)
-      assert.equal(foodAttemptedReplacement.error.code, 'not_found')
-      assert.equal(recipeAttemptedReplacement.ok, false)
-      assert.equal(recipeAttemptedReplacement.error.code, 'not_found')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -1997,8 +1960,8 @@ test.sequential(
         'provider',
         'edit',
         requireData(created).providerId,
-        '--set',
-        'note=Updated lab note.',
+        '--note',
+        'Updated lab note.',
         '--vault',
         vaultRoot,
       ])
@@ -2021,8 +1984,8 @@ test.sequential(
         'provider',
         'edit',
         requireData(created).providerId,
-        '--set',
-        'title="Labcorp West"',
+        '--title',
+        'Labcorp West',
         '--vault',
         vaultRoot,
       ])
@@ -2047,8 +2010,7 @@ test.sequential(
         'provider',
         'edit',
         requireData(created).providerId,
-        '--clear',
-        'body',
+        '--clear-body',
         '--vault',
         vaultRoot,
       ])
@@ -2181,10 +2143,9 @@ test.sequential(
         'provider',
         'edit',
         requireData(providerUpsert).providerId,
-        '--set',
-        'title=Labcorp West',
-        '--clear',
-        'website',
+        '--title',
+        'Labcorp West',
+        '--clear-website',
         '--vault',
         vaultRoot,
       ])
@@ -2201,14 +2162,15 @@ test.sequential(
         'food',
         'edit',
         requireData(foodUpsert).foodId,
-        '--set',
-        'note=Now with chia seeds.',
-        '--set',
-        'tags=[\"breakfast\",\"protein\"]',
-        '--clear',
-        'aliases.0',
-        '--clear',
-        'autoLogDaily.time',
+        '--note',
+        'Now with chia seeds.',
+        '--tag',
+        'breakfast',
+        '--tag',
+        'protein',
+        '--alias',
+        'usual acai bowl',
+        '--clear-auto-log-daily',
         '--vault',
         vaultRoot,
       ])
@@ -2227,10 +2189,9 @@ test.sequential(
         'recipe',
         'edit',
         requireData(recipeUpsert).recipeId,
-        '--set',
-        'summary=Updated rotation dinner.',
-        '--clear',
-        'ingredients',
+        '--summary',
+        'Updated rotation dinner.',
+        '--clear-ingredients',
         '--vault',
         vaultRoot,
       ])
@@ -2248,10 +2209,12 @@ test.sequential(
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'note=Resolved after hydration.',
-        '--set',
-        'tags=[\"symptom\",\"resolved\"]',
+        '--note',
+        'Resolved after hydration.',
+        '--tag',
+        'symptom',
+        '--tag',
+        'resolved',
         '--vault',
         vaultRoot,
       ])
@@ -2382,8 +2345,8 @@ test.sequential(
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'occurredAt=2026-03-27T01:30:00.000Z',
+        '--occurred-at',
+        '2026-03-27T01:30:00.000Z',
         '--vault',
         vaultRoot,
       ])
@@ -2397,8 +2360,8 @@ test.sequential(
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'title="Retitled headache"',
+        '--title',
+        'Retitled headache',
         '--day-key-policy',
         'keep',
         '--vault',
@@ -2420,10 +2383,10 @@ test.sequential(
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'occurredAt=2026-03-27T01:30:00.000Z',
-        '--set',
-        'dayKey=2026-03-26',
+        '--occurred-at',
+        '2026-03-27T01:30:00.000Z',
+        '--day-key',
+        '2026-03-26',
         '--vault',
         vaultRoot,
       ])
@@ -2445,10 +2408,10 @@ test.sequential(
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'occurredAt=2026-03-27T02:30:00.000Z',
-        '--set',
-        'dayKey=2026-03-27',
+        '--occurred-at',
+        '2026-03-27T02:30:00.000Z',
+        '--day-key',
+        '2026-03-27',
         '--day-key-policy',
         'keep',
         '--vault',
@@ -2461,48 +2424,30 @@ test.sequential(
         /Choose either --day-key-policy or an explicit dayKey patch/u,
       )
 
-      const nullDayKeyPatch = await runSliceCli([
-        'event',
-        'edit',
-        requireData(eventUpsert).eventId,
-        '--set',
-        'occurredAt=2026-03-27T03:00:00.000Z',
-        '--set',
-        'dayKey=null',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(nullDayKeyPatch.ok, false)
-      assert.equal(nullDayKeyPatch.error?.code, 'invalid_payload')
-      assert.match(
-        nullDayKeyPatch.error?.message ?? '',
-        /direct dayKey patch must be a concrete YYYY-MM-DD value/u,
-      )
-
       const invalidDayKeyPatch = await runSliceCli([
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'occurredAt=2026-03-27T03:15:00.000Z',
-        '--set',
-        'dayKey=not-a-date',
+        '--occurred-at',
+        '2026-03-27T03:15:00.000Z',
+        '--day-key',
+        'not-a-date',
         '--vault',
         vaultRoot,
       ])
       assert.equal(invalidDayKeyPatch.ok, false)
-      assert.equal(invalidDayKeyPatch.error?.code, 'invalid_payload')
+      assert.equal(invalidDayKeyPatch.error?.code, 'VALIDATION_ERROR')
       assert.match(
         invalidDayKeyPatch.error?.message ?? '',
-        /direct dayKey patch must be a concrete YYYY-MM-DD value/u,
+        /Expected YYYY-MM-DD/u,
       )
 
       const recomputeWithoutExplicitTimeZone = await runSliceCli([
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'occurredAt=2026-03-27T03:30:00.000Z',
+        '--occurred-at',
+        '2026-03-27T03:30:00.000Z',
         '--day-key-policy',
         'recompute',
         '--vault',
@@ -2523,8 +2468,8 @@ test.sequential(
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'occurredAt=2026-03-27T04:30:00.000Z',
+        '--occurred-at',
+        '2026-03-27T04:30:00.000Z',
         '--day-key-policy',
         'keep',
         '--vault',
@@ -2543,8 +2488,8 @@ test.sequential(
         'event',
         'edit',
         requireData(eventUpsert).eventId,
-        '--set',
-        'timeZone=America/New_York',
+        '--time-zone',
+        'America/New_York',
         '--day-key-policy',
         'recompute',
         '--vault',
