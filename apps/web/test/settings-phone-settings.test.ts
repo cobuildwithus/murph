@@ -1,6 +1,8 @@
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   refreshUser: vi.fn(),
@@ -11,7 +13,28 @@ vi.mock("@privy-io/react-auth", () => ({
   useUser: mocks.useUser,
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
+  HostedPhoneAuth() {
+    return createElement(
+      "div",
+      {
+        "data-testid": "hosted-phone-auth",
+      },
+      "Phone link form",
+    );
+  },
+}));
+
+let cleanupRender: (() => Promise<void>) | null = null;
+
 describe("HostedPhoneSettings", () => {
+  afterEach(async () => {
+    if (cleanupRender) {
+      await cleanupRender();
+      cleanupRender = null;
+    }
+  });
+
   it("renders the member's routed Murph SMS number when available", async () => {
     mocks.useUser.mockReturnValue({
       refreshUser: mocks.refreshUser,
@@ -62,5 +85,41 @@ describe("HostedPhoneSettings", () => {
     );
 
     expect(markup).not.toContain("href=\"sms:");
+  });
+
+  it("keeps an unconnected phone number in a compact link row until the member opens it", async () => {
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: null,
+    });
+
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [],
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.textContent).toContain("Phone");
+    expect(container.textContent).toContain("Not connected");
+    expect(container.textContent).toContain("Link phone");
+    expect(container.textContent).not.toContain(
+      "Add a phone number if you want Murph to text you directly.",
+    );
+    expect(container.querySelector('[data-testid="hosted-phone-auth"]')).toBeNull();
+
+    const linkButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Link phone"),
+    );
+    expect(linkButton).toBeTruthy();
+
+    await act(async () => {
+      linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="hosted-phone-auth"]')).toBeTruthy();
   });
 });

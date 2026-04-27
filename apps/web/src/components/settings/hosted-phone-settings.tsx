@@ -47,7 +47,7 @@ export function HostedPhoneSettings(props: {
     });
     return extractHostedPrivyPhoneAccount(linkedAccounts)?.number ?? null;
   }, [linkedPhoneOverride, props.initialLinkedAccounts, user]);
-  const showLinkForm = expanded || !currentPhoneNumber;
+  const showLinkForm = expanded;
 
   async function handleLinked(payload: HostedPhoneLinkPayload) {
     setErrorMessage(null);
@@ -101,8 +101,12 @@ export function HostedPhoneSettings(props: {
       ) : (
         <ConnectedAccountCard
           value="Not connected"
-          meta="Add a phone number if you want Murph to text you directly."
           variant="empty"
+          action={
+            <Button type="button" size="sm" onClick={() => setExpanded(true)}>
+              Link phone
+            </Button>
+          }
         />
       )}
 

@@ -138,6 +138,35 @@ describe("HostedTelegramSettings", () => {
     });
   });
 
+  it("renders the unconnected Telegram state with the same compact link row", async () => {
+    const { HostedTelegramSettings } = await import(
+      "@/src/components/settings/hosted-telegram-settings"
+    );
+    mocks.useUser.mockReturnValue({
+      refreshUser: mocks.refreshUser,
+      user: {
+        linkedAccounts: [],
+      },
+    });
+
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedTelegramSettings, {
+        authenticated: true,
+        initialLinkedAccounts: [],
+      }),
+    );
+    cleanupRender = cleanup;
+
+    expect(container.textContent).toContain("Telegram");
+    expect(container.textContent).toContain("Not connected");
+    expect(container.textContent).toContain("Link Telegram");
+    expect(container.textContent).not.toContain(
+      "Connect your Telegram account so Murph can message you there.",
+    );
+    expect(container.textContent).not.toContain("Message @withmurph_bot");
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
   it("keeps a newer relink result when an older background sync resolves later", async () => {
     const { HostedTelegramSettings } = await import(
       "@/src/components/settings/hosted-telegram-settings"

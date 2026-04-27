@@ -98,12 +98,14 @@ export function HostedEmailSettingsContent(props: {
         />
       )}
 
-      <SettingsContactLink
-        href={`mailto:${MURPH_CONTACT_EMAIL}`}
-        label={`Email Murph at ${MURPH_CONTACT_EMAIL}`}
-      >
-        Email {MURPH_CONTACT_EMAIL}
-      </SettingsContactLink>
+      {currentEmail ? (
+        <SettingsContactLink
+          href={`mailto:${MURPH_CONTACT_EMAIL}`}
+          label={`Email Murph at ${MURPH_CONTACT_EMAIL}`}
+        >
+          Email {MURPH_CONTACT_EMAIL}
+        </SettingsContactLink>
+      ) : null}
 
       {canSendEmailUpdateCode ? (
         <div className="space-y-2">
