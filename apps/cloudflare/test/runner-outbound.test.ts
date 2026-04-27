@@ -9,6 +9,7 @@ import {
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import { resolveRunnerOutboundUserRunnerStub } from "../src/runner-outbound/shared.ts";
+import { readHostedRunnerWebControlRoute } from "../src/runner-outbound/shared-web-control-policy.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import type {
   WorkerBindUserRunnerStubLike,
@@ -443,6 +444,19 @@ describe("handleRunnerOutboundRequest", () => {
     expect(headers.get("content-type")).toBeNull();
     expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+  });
+
+  it("rejects absolute web-control runtime routes before allowlist checks", () => {
+    expect(readHostedRunnerWebControlRoute(
+      `${HOSTED_RUNTIME_WORKSPACE_PATH}?requestId=request_123`,
+    )).toEqual({
+      pathAndSearch: `${HOSTED_RUNTIME_WORKSPACE_PATH}?requestId=request_123`,
+      pathname: HOSTED_RUNTIME_WORKSPACE_PATH,
+    });
+
+    expect(() => readHostedRunnerWebControlRoute(
+      `https://example.test${HOSTED_RUNTIME_WORKSPACE_PATH}`,
+    )).toThrow("Hosted runtime web-control route must be relative.");
   });
 
   it("signs share payload proxy calls as the bound runner while carrying the owner query", async () => {

@@ -63,6 +63,7 @@ import {
   HOSTED_WEB_ISSUE_RECORD_PATH,
   HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
   HOSTED_WEB_USAGE_RECORD_PATH,
+  readHostedRunnerWebControlRoute,
 } from "./runner-outbound/shared-web-control-policy.ts";
 import {
   checkpointHostedRuntimeBridgeWebWorkspace,
@@ -771,10 +772,10 @@ async function fetchHostedWebControlPlaneJson(input: {
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
   const method = input.method ?? (input.body === undefined ? "GET" : "POST");
-  const path = readHostedWebControlPathname(input.path);
+  const route = readHostedRunnerWebControlRoute(input.path);
   assertAllowedHostedRunnerWebControlRequest({
     method,
-    path,
+    path: route.pathname,
   });
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   const response = input.transport.mode === "direct"
@@ -785,7 +786,7 @@ async function fetchHostedWebControlPlaneJson(input: {
       callbackSigning: input.transport.callbackSigning,
       fetchImpl: input.fetchImpl,
       method,
-      path: input.path,
+      path: route.pathAndSearch,
       timeoutMs: input.timeoutMs,
     })
     : await fetchHostedResponse({
@@ -798,9 +799,9 @@ async function fetchHostedWebControlPlaneJson(input: {
         }),
         method,
       },
-      logPath: createHostedWebControlLogPath(input.path),
+      logPath: createHostedWebControlLogPath(route.pathname),
       timeoutMs: input.timeoutMs,
-      url: createHostedWebControlProxyUrl(input.path),
+      url: createHostedWebControlProxyUrl(route.pathAndSearch),
     });
 
   if (!response.ok) {
@@ -820,7 +821,7 @@ async function fetchHostedWebControlPlaneJson(input: {
       details: {
         description: input.description,
         method,
-        path: createHostedWebControlLogPath(input.path),
+        path: createHostedWebControlLogPath(route.pathname),
         responseOrigin: input.transport.mode === "direct"
           ? new URL(input.transport.webControlBaseUrl).origin
           : CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane,
@@ -847,10 +848,6 @@ async function fetchHostedWebControlPlaneJson(input: {
   } catch (error) {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
-}
-
-function readHostedWebControlPathname(path: string): string {
-  return new URL(path.replace(/^\/+/u, ""), "https://hosted-runtime.invalid/").pathname;
 }
 
 function createHostedWebControlProxyUrl(path: string): URL {
