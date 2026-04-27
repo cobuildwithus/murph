@@ -44,7 +44,7 @@ import type {
 import {
   createHostedVaultSyncImportSummary,
   resolveHostedVaultSyncImportStatus,
-} from "./vault-sync-mailbox-import.ts";
+} from "./vault-sync-import-summary.ts";
 
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA = "murph.hosted-system-mailbox-state.v1";
 const HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION = 1;
@@ -67,6 +67,19 @@ type HostedSystemMailboxRecordRequest =
       kind: "vault-sync-import";
       request: HostedRuntimeVaultSyncImportRequest;
     };
+
+class HostedSystemMailboxTerminalRecordError extends Error {
+  readonly recordRequest: HostedSystemMailboxRecordRequest;
+
+  constructor(input: {
+    message: string;
+    recordRequest: HostedSystemMailboxRecordRequest;
+  }) {
+    super(input.message);
+    this.name = "HostedSystemMailboxTerminalRecordError";
+    this.recordRequest = input.recordRequest;
+  }
+}
 
 export interface HostedSystemMailboxPendingItem {
   attemptCount: number;
@@ -229,6 +242,26 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
     };
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
+    if (error instanceof HostedSystemMailboxTerminalRecordError) {
+      const terminalItem: HostedSystemMailboxPendingItem = {
+        ...prepared,
+        lastErrorCode: normalized.code,
+        lastErrorMessage: normalized.message,
+        nextAttemptAt: null,
+        postCheckpointRecord: error.recordRequest,
+        status: "recording",
+      };
+      await updateHostedSystemMailboxPendingItem({
+        item: terminalItem,
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        item: terminalItem,
+        itemId: prepared.itemId,
+        status: "recording",
+      };
+    }
+
     const nextWakeAt = new Date(Date.parse(startedAt) + 60_000).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
@@ -342,11 +375,12 @@ function buildHostedSystemMailboxRecordRequest(input: {
   item: HostedSystemMailboxPendingItem;
   metrics: HostedMailboxExecutionMetrics;
 }): HostedSystemMailboxRecordRequest | null {
-  const importedAt = new Date().toISOString();
+  const importedAt = input.item.lastAttemptAt ?? new Date().toISOString();
   if (input.item.wake.kind === "vault.share.accepted" && input.metrics.shareImportResult) {
     return {
       kind: "share-import",
       request: {
+        eventId: input.item.wake.eventId,
         importedAt,
         ownerUserId: input.item.wake.share.ownerUserId,
         shareId: input.item.wake.share.shareId,
@@ -417,6 +451,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     sharePack: await fetchHostedSharePackForWake({
+      attemptedAt: input.pendingItem.lastAttemptAt,
       platform: input.runtime.platform,
       requestId: input.pendingItem.requestId,
       wake: input.pendingItem.wake,
@@ -445,6 +480,21 @@ async function executePendingHostedVaultSyncImport(input: {
   });
   if (!fetched.payload) {
     const unavailable = fetched.unavailable ?? null;
+    if (unavailable?.retryable === false) {
+      throw new HostedSystemMailboxTerminalRecordError({
+        message: `Hosted vault sync payload unavailable: ${unavailable.code}.`,
+        recordRequest: {
+          kind: "vault-sync-import",
+          request: {
+            errorCode: `vault_sync_payload.${unavailable.code}`,
+            importedAt: input.pendingItem.lastAttemptAt ?? new Date().toISOString(),
+            sessionId: input.pendingItem.wake.vaultSync.sessionId,
+            status: "failed",
+            summary: createEmptyHostedVaultSyncImportSummary(),
+          },
+        },
+      });
+    }
     throw new TypeError(
       unavailable
         ? `Hosted vault sync payload unavailable: ${unavailable.code}.`
@@ -486,6 +536,7 @@ async function executePendingHostedVaultSyncImport(input: {
 }
 
 async function fetchHostedSharePackForWake(input: {
+  attemptedAt: string | null;
   platform: HostedRuntimePlatform;
   requestId: string | null;
   wake: HostedExecutionSystemWake;
@@ -499,12 +550,30 @@ async function fetchHostedSharePackForWake(input: {
   }
 
   const response = await input.platform.sharePort.fetchPayload({
+    eventId: input.wake.eventId,
     ownerUserId: input.wake.share.ownerUserId,
     requestId: input.requestId ?? input.wake.eventId,
     shareId: input.wake.share.shareId,
   });
 
   if (!response.payload) {
+    const unavailable = response.unavailable ?? null;
+    if (unavailable?.retryable === false) {
+      throw new HostedSystemMailboxTerminalRecordError({
+        message: `Hosted share accepted wake payload unavailable: ${unavailable.code}.`,
+        recordRequest: {
+          kind: "share-import",
+          request: {
+            errorCode: `share_payload.${unavailable.code}`,
+            eventId: input.wake.eventId,
+            importedAt: input.attemptedAt ?? new Date().toISOString(),
+            ownerUserId: input.wake.share.ownerUserId,
+            shareId: input.wake.share.shareId,
+            status: "quarantined",
+          },
+        },
+      });
+    }
     throw new TypeError("Hosted share accepted wake payload is missing.");
   }
 
@@ -740,6 +809,7 @@ function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMail
       kind: "share-import",
       request: {
         errorCode: readOptionalString(requestRecord.errorCode, "hosted system mailbox share errorCode"),
+        eventId: readRequiredString(requestRecord.eventId, "hosted system mailbox share eventId"),
         importedAt: readRequiredString(
           requestRecord.importedAt,
           "hosted system mailbox share importedAt",
@@ -854,6 +924,14 @@ function normalizeHostedSystemMailboxError(error: unknown): {
   code: string;
   message: string;
 } {
+  if (error instanceof HostedSystemMailboxTerminalRecordError) {
+    const request = error.recordRequest.request;
+    return {
+      code: request.errorCode ?? "HOSTED_SYSTEM_MAILBOX_TERMINAL",
+      message: error.message,
+    };
+  }
+
   if (error instanceof Error) {
     const codedError: Error & { code?: unknown } = error;
     const code = typeof codedError.code === "string"
@@ -868,6 +946,17 @@ function normalizeHostedSystemMailboxError(error: unknown): {
   return {
     code: "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS",
     message: "Hosted system mailbox effect failed after checkpoint.",
+  };
+}
+
+function createEmptyHostedVaultSyncImportSummary(): HostedRuntimeVaultSyncImportSummary {
+  return {
+    conflictCount: 0,
+    importedJsonlRecords: 0,
+    importedRawFiles: 0,
+    importedTextFiles: 0,
+    skippedDuplicates: 0,
+    skippedExcludedFiles: 0,
   };
 }
 

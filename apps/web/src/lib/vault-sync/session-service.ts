@@ -23,7 +23,7 @@ import {
   deleteHostedVaultSyncPayload,
   projectHostedVaultSyncSessionView,
   requireHostedVaultSyncAgentSession,
-  upsertHostedVaultSyncPayload,
+  createHostedVaultSyncPayload,
   type HostedVaultSyncSessionView,
 } from "./shared";
 
@@ -200,19 +200,17 @@ export async function completeHostedVaultSyncAgentUpload(input: {
   const now = new Date();
 
   const updated = await prisma.$transaction(async (tx) => {
-    await upsertHostedVaultSyncPayload({
-      memberId: session.memberId,
-      payload: {
-        bundleBase64: input.bundleBase64,
-        sessionId: input.sessionId,
-        sourceSchemaVersion: input.sourceSchemaVersion ?? null,
+    const claim = await tx.hostedVaultSyncSession.updateMany({
+      where: {
+        agentTokenHash: session.agentTokenHash,
+        expiresAt: {
+          gt: now,
+        },
+        id: input.sessionId,
+        memberId: session.memberId,
+        revokedAt: null,
+        status: "exchanged",
       },
-      prisma: tx,
-      sessionId: input.sessionId,
-    });
-
-    const updatedSession = await tx.hostedVaultSyncSession.update({
-      where: { id: input.sessionId },
       data: {
         localManifestHash: input.localManifestHash,
         queuedAt: now,
@@ -222,6 +220,34 @@ export async function completeHostedVaultSyncAgentUpload(input: {
         status: "queued",
         uploadedAt: now,
       },
+    });
+
+    if (claim.count !== 1) {
+      const currentSession = await tx.hostedVaultSyncSession.findFirst({
+        where: {
+          id: input.sessionId,
+          memberId: session.memberId,
+        },
+      });
+      if (currentSession?.status === "queued") {
+        return currentSession;
+      }
+      throw hostedOnboardingError({
+        code: "HOSTED_VAULT_SYNC_SESSION_ALREADY_USED",
+        httpStatus: 409,
+        message: "That vault sync session has already been used. Start a new sync from Settings.",
+      });
+    }
+
+    await createHostedVaultSyncPayload({
+      memberId: session.memberId,
+      payload: {
+        bundleBase64: input.bundleBase64,
+        sessionId: input.sessionId,
+        sourceSchemaVersion: input.sourceSchemaVersion ?? null,
+      },
+      prisma: tx,
+      sessionId: input.sessionId,
     });
 
     await appendHostedMailboxEnvelopeTx({
@@ -240,7 +266,9 @@ export async function completeHostedVaultSyncAgentUpload(input: {
       tx,
     });
 
-    return updatedSession;
+    return await tx.hostedVaultSyncSession.findUniqueOrThrow({
+      where: { id: input.sessionId },
+    });
   });
 
   await nudgeHostedRunnerBestEffort({

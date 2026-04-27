@@ -658,6 +658,7 @@ function createHostedWebSharePort(input: {
           buildHostedRuntimeSharePayloadPath(request.shareId),
           request.requestId,
           {
+            eventId: request.eventId,
             ownerUserId: request.ownerUserId,
           },
         ),

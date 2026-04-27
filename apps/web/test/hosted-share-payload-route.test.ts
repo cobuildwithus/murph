@@ -1,7 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  deleteHostedSharePayload: vi.fn(),
   getPrisma: vi.fn(),
   projectHostedSharePayloadState: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -16,7 +15,6 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-share/shared", () => ({
-  deleteHostedSharePayload: mocks.deleteHostedSharePayload,
   HOSTED_SHARE_PAYLOAD_SCHEMA: "murph.hosted-share-payload.v1",
   projectHostedSharePayloadState: mocks.projectHostedSharePayloadState,
 }));
@@ -54,6 +52,7 @@ describe("hosted share payload route", () => {
             acceptedByMemberId: "member_recipient",
             consumedAt: null,
             expiresAt: new Date("2099-04-21T00:00:00.000Z"),
+            lastEventId: "event_accepted_123",
             senderMemberId: "member_sender",
           },
           shareId: "share_123",
@@ -63,7 +62,7 @@ describe("hosted share payload route", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const response = await hostedSharePayloadRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?ownerUserId=member_sender"),
+      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?eventId=event_accepted_123&ownerUserId=member_sender"),
       {
         params: Promise.resolve({
           shareId: "share_123",
@@ -85,10 +84,9 @@ describe("hosted share payload route", () => {
       },
       unavailable: null,
     });
-    expect(mocks.deleteHostedSharePayload).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the owner query is missing", async () => {
+  it("fails closed when the event or owner query is missing", async () => {
     const response = await hostedSharePayloadRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload"),
       {
@@ -98,11 +96,12 @@ describe("hosted share payload route", () => {
       },
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_SHARE_PAYLOAD_NOT_FOUND",
-        message: "That shared bundle is no longer available.",
+      fetchedAt: expect.any(String),
+      payload: null,
+      unavailable: {
+        code: "not_found",
         retryable: false,
       },
     });
@@ -120,6 +119,7 @@ describe("hosted share payload route", () => {
             acceptedByMemberId: null,
             consumedAt: null,
             expiresAt: new Date("2099-04-21T00:00:00.000Z"),
+            lastEventId: null,
             senderMemberId: "member_sender",
           },
           shareId: "share_123",
@@ -129,7 +129,7 @@ describe("hosted share payload route", () => {
     mocks.getPrisma.mockReturnValue(prisma);
 
     const response = await hostedSharePayloadRoute.GET(
-      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?ownerUserId=member_sender"),
+      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?eventId=event_accepted_123&ownerUserId=member_sender"),
       {
         params: Promise.resolve({
           shareId: "share_123",
@@ -137,18 +137,18 @@ describe("hosted share payload route", () => {
       },
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_SHARE_PAYLOAD_NOT_FOUND",
-        message: "That shared bundle is no longer available.",
+      fetchedAt: expect.any(String),
+      payload: null,
+      unavailable: {
+        code: "not_found",
         retryable: false,
       },
     });
-    expect(mocks.deleteHostedSharePayload).not.toHaveBeenCalled();
   });
 
-  it("prunes expired payload rows before failing closed", async () => {
+  it("returns expired as terminal state without mutating payload rows", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-04-20T12:00:00.000Z"));
@@ -159,11 +159,12 @@ describe("hosted share payload route", () => {
             payloadSchema: "murph.hosted-share-payload.v1",
             share: {
               acceptedAt: new Date("2026-04-19T00:00:00.000Z"),
-              acceptedByMemberId: "member_recipient",
-              consumedAt: null,
-              expiresAt: new Date("2026-04-19T23:59:59.000Z"),
-              senderMemberId: "member_sender",
-            },
+            acceptedByMemberId: "member_recipient",
+            consumedAt: null,
+            expiresAt: new Date("2026-04-19T23:59:59.000Z"),
+            lastEventId: "event_accepted_123",
+            senderMemberId: "member_sender",
+          },
             shareId: "share_123",
           })),
         },
@@ -171,7 +172,7 @@ describe("hosted share payload route", () => {
       mocks.getPrisma.mockReturnValue(prisma);
 
       const response = await hostedSharePayloadRoute.GET(
-        new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?ownerUserId=member_sender"),
+        new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?eventId=event_accepted_123&ownerUserId=member_sender"),
         {
           params: Promise.resolve({
             shareId: "share_123",
@@ -179,20 +180,104 @@ describe("hosted share payload route", () => {
         },
       );
 
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({
-        error: {
-          code: "HOSTED_SHARE_PAYLOAD_NOT_FOUND",
-          message: "That shared bundle is no longer available.",
+        fetchedAt: "2026-04-20T12:00:00.000Z",
+        payload: null,
+        unavailable: {
+          code: "expired",
           retryable: false,
         },
-      });
-      expect(mocks.deleteHostedSharePayload).toHaveBeenCalledWith({
-        prisma,
-        shareId: "share_123",
       });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not reveal terminal share state unless the payload is bound to the requester", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-20T12:00:00.000Z"));
+      const prisma = {
+        hostedSharePayload: {
+          findUnique: vi.fn(async () => ({
+            payloadEncrypted: "ciphertext",
+            payloadSchema: "murph.hosted-share-payload.v1",
+            share: {
+              acceptedAt: new Date("2026-04-19T00:00:00.000Z"),
+            acceptedByMemberId: "member_recipient",
+            consumedAt: null,
+            expiresAt: new Date("2026-04-19T23:59:59.000Z"),
+            lastEventId: "event_accepted_123",
+            senderMemberId: "member_other_sender",
+          },
+            shareId: "share_123",
+          })),
+        },
+      };
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const response = await hostedSharePayloadRoute.GET(
+        new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?eventId=event_accepted_123&ownerUserId=member_sender"),
+        {
+          params: Promise.resolve({
+            shareId: "share_123",
+          }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        fetchedAt: "2026-04-20T12:00:00.000Z",
+        payload: null,
+        unavailable: {
+          code: "not_found",
+          retryable: false,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not expose the payload to stale accepted-event fetches", async () => {
+    const prisma = {
+      hostedSharePayload: {
+        findUnique: vi.fn(async () => ({
+          payloadEncrypted: "ciphertext",
+          payloadSchema: "murph.hosted-share-payload.v1",
+          share: {
+            acceptedAt: new Date("2026-04-20T00:00:00.000Z"),
+            acceptedByMemberId: "member_recipient",
+            consumedAt: null,
+            expiresAt: new Date("2099-04-21T00:00:00.000Z"),
+            lastEventId: "event_newer_acceptance",
+            senderMemberId: "member_sender",
+          },
+          shareId: "share_123",
+        })),
+      },
+    };
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await hostedSharePayloadRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-execution/share/share_123/payload?eventId=event_old_acceptance&ownerUserId=member_sender"),
+      {
+        params: Promise.resolve({
+          shareId: "share_123",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.projectHostedSharePayloadState).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      fetchedAt: expect.any(String),
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
+    });
   });
 });

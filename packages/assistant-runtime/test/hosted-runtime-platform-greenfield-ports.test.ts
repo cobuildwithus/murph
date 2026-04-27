@@ -179,6 +179,7 @@ test("hosted runtime platform can write structured logs through an injected fake
 test("hosted runtime platform can fetch and record share side inputs through an injected fake port", async () => {
   const { shareFetchRequests, shareImportRequests, platform } = createFakeHostedRuntimePlatform();
   const fetchRequest = {
+    eventId: "event_synthetic_share_001",
     ownerUserId: TEST_USER_ID,
     requestId: "request_synthetic_share_001",
     shareId: "share_synthetic_001",
@@ -197,6 +198,7 @@ test("hosted runtime platform can fetch and record share side inputs through an 
   });
 
   const importRequest = {
+    eventId: "event_synthetic_share_001",
     importedAt: TEST_NOW,
     ownerUserId: TEST_USER_ID,
     shareId: "share_synthetic_001",

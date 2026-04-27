@@ -13,6 +13,10 @@ describe("check-hosted-run-stale-residue", () => {
     expect(shouldScanHostedRunProductionFile("packages/hosted-execution/src/contracts.ts")).toBe(
       true,
     );
+    expect(shouldScanHostedRunProductionFile("apps/web/prisma/schema.prisma")).toBe(true);
+    expect(
+      shouldScanHostedRunProductionFile("apps/web/prisma/migrations/2026040600_init/migration.sql"),
+    ).toBe(false);
     expect(shouldScanHostedRunProductionFile("apps/web/test/hosted-wake-routes.test.ts")).toBe(
       false,
     );
@@ -23,49 +27,61 @@ describe("check-hosted-run-stale-residue", () => {
     ).toBe(false);
   });
 
-  it("flags deleted hosted-wake production paths", () => {
+  it("flags deleted hosted-run production paths", () => {
     expect(
-      findHostedRunStaleResidueMatches("apps/web/src/lib/hosted-wake/store.ts", "export {};"),
+      findHostedRunStaleResidueMatches("apps/web/src/lib/hosted-run/store.ts", "export {};"),
     ).toEqual([
       {
         kind: "path",
-        filePath: "apps/web/src/lib/hosted-wake/store.ts",
-        matched: "apps/web/src/lib/hosted-wake",
+        filePath: "apps/web/src/lib/hosted-run/store.ts",
+        matched: "apps/web/src/lib/hosted-run/",
       },
     ]);
   });
 
-  it("flags blocked stale hosted-wake tokens with line numbers", () => {
+  it("flags blocked stale hosted-run tokens with line numbers", () => {
     expect(
       findHostedRunStaleResidueMatches(
         "apps/cloudflare/src/user-runner.ts",
         [
-          "const terminalState = null;",
-          "const assistantNextWakeAt = nextRuntimeWakeAt;",
-          "const hints = wakeMaterializationHints;",
+          "const lease = request.runDrain;",
+          "const token = runToken;",
+          "const hint = targetCommittedSeqHint;",
         ].join("\n"),
       ),
     ).toEqual([
       {
         kind: "content",
         filePath: "apps/cloudflare/src/user-runner.ts",
-        matched: "assistantNextWakeAt",
+        matched: "runDrain",
+        line: 1,
+      },
+      {
+        kind: "content",
+        filePath: "apps/cloudflare/src/user-runner.ts",
+        matched: "runToken",
         line: 2,
       },
       {
         kind: "content",
         filePath: "apps/cloudflare/src/user-runner.ts",
-        matched: "wakeMaterializationHints",
+        matched: "targetCommittedSeqHint",
         line: 3,
       },
     ]);
   });
 
-  it("allows run-centric production names and grandfathered test paths", () => {
+  it("allows hosted-runner production names, parser legacy rejection tables, and tests", () => {
     expect(
       findHostedRunStaleResidueMatches(
-        "apps/web/src/lib/hosted-run/store.ts",
-        "const nextRuntimeWakeAt = input.run.nextRuntimeWakeAt ?? null;",
+        "apps/web/src/lib/hosted-runner/control.ts",
+        "type HostedRunnerNudgeResult = { nudged: boolean };",
+      ),
+    ).toEqual([]);
+    expect(
+      findHostedRunStaleResidueMatches(
+        "packages/hosted-execution/src/parsers/runtime-control.ts",
+        `const removedFields = ["committedSeq", "runDrain", "runToken", "finalizeRequired", "targetCommittedSeqHint"];`,
       ),
     ).toEqual([]);
     expect(shouldScanHostedRunProductionFile("apps/cloudflare/test/workers/test-hosted-wake-control.ts")).toBe(
@@ -73,18 +89,56 @@ describe("check-hosted-run-stale-residue", () => {
     );
   });
 
-  it("flags stale assistantNextWakeAt residue in assistant-runtime production code", () => {
+  it("flags stale targetCommittedSeqHint residue in assistant-runtime production code", () => {
     expect(
       findHostedRunStaleResidueMatches(
         "packages/assistant-runtime/src/hosted-runtime/execution.ts",
-        "const assistantNextWakeAt = nextRuntimeWakeAt;",
+        "const targetCommittedSeqHint = input.cursor.committedSeq;",
       ),
     ).toEqual([
       {
         kind: "content",
         filePath: "packages/assistant-runtime/src/hosted-runtime/execution.ts",
-        matched: "assistantNextWakeAt",
+        matched: "committedSeq",
         line: 1,
+      },
+      {
+        kind: "content",
+        filePath: "packages/assistant-runtime/src/hosted-runtime/execution.ts",
+        matched: "targetCommittedSeqHint",
+        line: 1,
+      },
+    ]);
+  });
+
+  it("flags old hosted run and ingress schema names in the active schema", () => {
+    expect(
+      findHostedRunStaleResidueMatches(
+        "apps/web/prisma/schema.prisma",
+        [
+          "model HostedRunLog {",
+          "model HostedIngressEvent {",
+          "@@map(\"hosted_ingress_payload\")",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      {
+        kind: "content",
+        filePath: "apps/web/prisma/schema.prisma",
+        matched: "HostedIngressEvent",
+        line: 2,
+      },
+      {
+        kind: "content",
+        filePath: "apps/web/prisma/schema.prisma",
+        matched: "HostedRunLog",
+        line: 1,
+      },
+      {
+        kind: "content",
+        filePath: "apps/web/prisma/schema.prisma",
+        matched: "hosted_ingress_payload",
+        line: 3,
       },
     ]);
   });

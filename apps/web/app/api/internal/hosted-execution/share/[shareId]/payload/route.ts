@@ -1,4 +1,3 @@
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -6,7 +5,6 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  deleteHostedSharePayload,
   HOSTED_SHARE_PAYLOAD_SCHEMA,
   projectHostedSharePayloadState,
 } from "@/src/lib/hosted-share/shared";
@@ -16,12 +14,18 @@ export const GET = withJsonError(async (
   context: { params: Promise<{ shareId: string }> },
 ) => {
   const runnerUserId = await requireHostedCloudflareCallbackRequest(request);
-  const ownerUserId = new URL(request.url).searchParams.get("ownerUserId");
-  if (!ownerUserId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_PAYLOAD_NOT_FOUND",
-      message: "That shared bundle is no longer available.",
-      httpStatus: 404,
+  const now = new Date();
+  const searchParams = new URL(request.url).searchParams;
+  const eventId = searchParams.get("eventId");
+  const ownerUserId = searchParams.get("ownerUserId");
+  if (!eventId || !ownerUserId) {
+    return jsonOk({
+      fetchedAt: now.toISOString(),
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
     });
   }
   const shareId = await resolveDecodedRouteParam(context.params, "shareId");
@@ -37,36 +41,37 @@ export const GET = withJsonError(async (
           acceptedByMemberId: true,
           consumedAt: true,
           expiresAt: true,
+          lastEventId: true,
           senderMemberId: true,
         },
       },
     },
   });
 
-  const now = new Date();
-  const payloadExpired = Boolean(record && record.share.expiresAt <= now);
-  const payloadConsumed = Boolean(record?.share.consumedAt);
+  const payloadOwnerMatched = Boolean(
+    record
+    && record.share.senderMemberId === ownerUserId
+    && record.share.acceptedByMemberId === runnerUserId
+    && record.share.lastEventId === eventId,
+  );
+  const payloadExpired = Boolean(record && payloadOwnerMatched && record.share.expiresAt <= now);
+  const payloadConsumed = Boolean(record?.share.consumedAt && payloadOwnerMatched);
   const payloadReady = Boolean(
     record !== null
-    && record.share.senderMemberId === ownerUserId
+    && payloadOwnerMatched
     && record.share.acceptedAt
-    && record.share.acceptedByMemberId === runnerUserId
     && !payloadExpired
     && !payloadConsumed,
   );
 
-  if ((payloadExpired || payloadConsumed) && record) {
-    await deleteHostedSharePayload({
-      prisma,
-      shareId,
-    });
-  }
-
   if (!record || !payloadReady) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_PAYLOAD_NOT_FOUND",
-      message: "That shared bundle is no longer available.",
-      httpStatus: 404,
+    return jsonOk({
+      fetchedAt: now.toISOString(),
+      payload: null,
+      unavailable: {
+        code: payloadExpired ? "expired" : payloadConsumed ? "gone" : "not_found",
+        retryable: false,
+      },
     });
   }
 

@@ -116,14 +116,6 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     updatedAt: now,
   };
 
-  await input.store.syncDurableConnectionState(connection);
-  await input.store.persistStoredConnectionTokenBundle({
-    connectionId: input.connectionId,
-    externalAccountId: storedAccount?.externalAccountId ?? null,
-    provider: existing.provider,
-    tokenBundle: null,
-  });
-
   const hint = {
     reason: "user_disconnect",
     ...(warning ? { revokeWarning: warning } : {}),
@@ -140,6 +132,14 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     wake,
     store: input.store,
     persist: async (tx) => {
+      await input.store.syncDurableConnectionState(connection, tx);
+      await input.store.persistStoredConnectionTokenBundle({
+        connectionId: input.connectionId,
+        externalAccountId: storedAccount?.externalAccountId ?? null,
+        provider: existing.provider,
+        tokenBundle: null,
+        tx,
+      });
       await input.store.createSignal({
         userId: input.userId,
         connectionId: input.connectionId,

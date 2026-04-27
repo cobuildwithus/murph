@@ -29,8 +29,9 @@ Internal control routes:
 - `POST /internal/users/:userId/nudge` requests hosted workspace-runtime work for a user and returns the runner nudge result
 - `POST /internal/users/:userId/browser-vault/session`
 - `GET /internal/users/:userId/status`
+- `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
 
-The supported worker HTTP surface stops at those three control routes plus the public banner and health checks.
+The supported worker HTTP surface stops at those three control routes, the deploy smoke callback, and the public banner and health checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 When `HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL` is configured for local hosted development, the worker also accepts a loopback-only transport shim under `__murph/local-internal-proxy/users/:userId/:host/...`; that seam is not a supported product API and exists only to bridge local child-runtime requests back onto the same lease-scoped internal-worker bridge contract used by direct `http://*.worker` requests.
 

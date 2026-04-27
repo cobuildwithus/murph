@@ -338,9 +338,9 @@ Do not move hosted dispatch ids, event kinds, or transport policy into `device-s
 
 ### 19. Collapse hosted assistant-delivery identity to one id and hard-cut the duplicate journal API
 
-**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{callbacks,platform}.ts`, `apps/cloudflare/src/{runtime-platform,runner-outbound/results,side-effect-journal}.ts`
+**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{callbacks,platform}.ts`, `apps/cloudflare/src/{runtime-platform,runner-outbound/results}.ts`
 
-`HostedAssistantDeliverySideEffect` and `HostedAssistantDeliveryRecord` were still carrying both `effectId` and `intentId` even though the shared owner forced those fields to be identical. The hosted runtime also still exposed both assistant-delivery-specific journal methods and a second generic `*SideEffect` API for the same journal, while the Cloudflare runner still accepted two route aliases for the same resource.
+`HostedAssistantDeliverySideEffect` and `HostedAssistantDeliveryRecord` were still carrying both `effectId` and `intentId` even though the shared owner forced those fields to be identical. The hosted runtime also still exposed both assistant-delivery-specific journal methods and a second generic `*SideEffect` API for the same journal.
 
 This patch:
 
@@ -348,9 +348,9 @@ This patch:
 - rejects older hosted assistant-delivery payloads/records that still persist `intentId` on the hosted side-effect shape
 - maps assistant outbox `intentId` to hosted `effectId` only at the assistant-runtime adapter edge instead of persisting both names through the hosted stack
 - removes the duplicate generic journal method names from `HostedRuntimeEffectsPort` and the matching duplicate Cloudflare runtime implementation branches
-- removes the dead runner-outbound alias so the hosted journal has one public path shape
+- keeps the Cloudflare results bridge on the assistant-delivery-specific parser and journal method names
 
-**Why this is simpler:** one assistant-delivery effect now has one durable identity and one journal API. Adding another assistant-delivery field or changing journal behavior no longer requires keeping duplicated ids, duplicated method names, and duplicated route aliases aligned across hosted-execution, assistant-runtime, and Cloudflare.
+**Why this is simpler:** one assistant-delivery effect now has one durable identity and one journal API. Adding another assistant-delivery field or changing journal behavior no longer requires keeping duplicated ids or duplicated method names aligned across hosted-execution, assistant-runtime, and Cloudflare.
 
 **Main refactor risk:** callers outside this repo that depend on the published `@murphai/hosted-execution` or `@murphai/assistant-runtime` surfaces may need coordinated updates if they were still reading `intentId` from hosted assistant-delivery payloads or implementing the legacy generic journal method names. Do not reintroduce parser tolerance for those old hosted side-effect shapes unless a new public compatibility policy explicitly requires it.
 

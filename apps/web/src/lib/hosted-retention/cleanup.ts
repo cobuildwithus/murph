@@ -15,7 +15,6 @@ const EXPIRABLE_VAULT_SYNC_SESSION_STATUSES = [
   "pending",
   "exchanged",
   "uploaded",
-  "queued",
 ] as const;
 
 export interface HostedRetentionCleanupResult {
@@ -138,6 +137,9 @@ async function deleteExpiredVaultSyncPayloads(input: {
         is: {
           expiresAt: {
             lte: input.now,
+          },
+          status: {
+            in: [...EXPIRABLE_VAULT_SYNC_SESSION_STATUSES],
           },
         },
       },

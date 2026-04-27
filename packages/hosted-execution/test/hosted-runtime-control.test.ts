@@ -347,10 +347,12 @@ describe("hosted runtime control contracts", () => {
 
     expect(parseHostedRuntimeSharePayload(payload)).toEqual(payload);
     expect(parseHostedRuntimeSharePayloadFetchRequest({
+      eventId: "event_accepted_123",
       ownerUserId: "member_owner",
       requestId: "share-fetch-1",
       shareId: "share_123",
     })).toEqual({
+      eventId: "event_accepted_123",
       ownerUserId: "member_owner",
       requestId: "share-fetch-1",
       shareId: "share_123",
@@ -378,11 +380,13 @@ describe("hosted runtime control contracts", () => {
       },
     });
     expect(parseHostedRuntimeShareImportRequest({
+      eventId: "event_accepted_123",
       importedAt: "2026-04-26T00:00:05.000Z",
       ownerUserId: "member_owner",
       shareId: "share_123",
       status: "imported",
     })).toEqual({
+      eventId: "event_accepted_123",
       importedAt: "2026-04-26T00:00:05.000Z",
       ownerUserId: "member_owner",
       shareId: "share_123",
@@ -402,6 +406,7 @@ describe("hosted runtime control contracts", () => {
       payloadSchema: "wrong",
     })).toThrow(/payloadSchema/u);
     expect(() => parseHostedRuntimeShareImportRequest({
+      eventId: "event_accepted_123",
       importedAt: "2026-04-26T00:00:05.000Z",
       ownerUserId: "member_owner",
       shareId: "share_123",

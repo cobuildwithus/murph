@@ -330,6 +330,7 @@ export function parseHostedRuntimeSharePayloadFetchRequest(
   const record = requireObject(value, "Hosted runtime share payload fetch request");
 
   return {
+    eventId: requireString(record.eventId, "Hosted runtime share payload fetch request eventId"),
     ownerUserId: requireString(
       record.ownerUserId,
       "Hosted runtime share payload fetch request ownerUserId",
@@ -379,6 +380,7 @@ export function parseHostedRuntimeShareImportRequest(
             "Hosted runtime share import request errorCode",
           ),
         }),
+    eventId: requireString(record.eventId, "Hosted runtime share import request eventId"),
     importedAt: requireString(record.importedAt, "Hosted runtime share import request importedAt"),
     ownerUserId: requireString(record.ownerUserId, "Hosted runtime share import request ownerUserId"),
     shareId: requireString(record.shareId, "Hosted runtime share import request shareId"),

@@ -41,11 +41,11 @@ describe("browser vault session route", () => {
     });
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: null,
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: null,
       updatedAt: "2026-04-20T08:00:00.000Z",
       userId: "member_123",
@@ -80,11 +80,11 @@ describe("browser vault session route", () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: {
         hash: "a".repeat(64),
         kind: "prepared",
@@ -124,11 +124,11 @@ describe("browser vault session route", () => {
     const replicaRef = createReplicaRef();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: replicaRef,
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: {
         hash: "a".repeat(64),
         kind: "prepared",
@@ -165,11 +165,11 @@ describe("browser vault session route", () => {
     const createBrowserVaultSession = vi.fn();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: {
         hash: "b".repeat(64),
         kind: "prepared",
@@ -206,11 +206,11 @@ describe("browser vault session route", () => {
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: replicaRef,
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: {
         hash: "b".repeat(64),
         kind: "prepared",
@@ -244,11 +244,11 @@ describe("browser vault session route", () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: {
         hash: "a".repeat(64),
         kind: "prepared",
@@ -281,11 +281,11 @@ describe("browser vault session route", () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: {
         hash: "a".repeat(64),
         kind: "prepared",
@@ -324,11 +324,11 @@ describe("browser vault session route", () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
-      committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
-      nextSeq: "1",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
       snapshotRef: {
         hash: "a".repeat(64),
         kind: "prepared",
