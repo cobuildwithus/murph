@@ -328,6 +328,7 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'hosted-email,linq,mapbox,telegram' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
+      'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
       "HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}",
       "Container rollout: \\`${{ inputs.container_rollout }}\\`",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
