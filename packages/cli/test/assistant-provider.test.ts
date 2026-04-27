@@ -336,6 +336,7 @@ test('resolveAssistantModelCatalog keeps custom Codex models first-class in the 
   })
 
   assert.equal(catalog.modelOptions[0]?.value, 'gpt-oss:20b')
+  assert.equal(catalog.modelOptions[1]?.value, 'gpt-5.5')
   assert.equal(
     catalog.modelOptions.some((option) => option.value === 'gpt-5.4'),
     true,

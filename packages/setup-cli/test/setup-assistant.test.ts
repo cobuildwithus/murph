@@ -23,6 +23,7 @@ import {
   formatSavedAssistantDefaultsSummary,
 } from '../src/setup-assistant-defaults.js'
 import {
+  DEFAULT_SETUP_CODEX_MODEL,
   createSetupAssistantResolver,
   getDefaultSetupAssistantPreset,
   hasExplicitSetupAssistantOptions,
@@ -904,6 +905,18 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
   assert.equal(skipped.provider, null)
   assert.match(skipped.detail, /Skipped assistant setup/u)
   assert.equal(capturedAssistants[0]?.provider, null)
+
+  const defaultCodex = await resolver.resolve({
+    allowPrompt: false,
+    commandName: 'murph setup',
+    options: createSetupOptions(),
+    preset: 'codex',
+  })
+  assert.equal(defaultCodex.model, DEFAULT_SETUP_CODEX_MODEL)
+  assert.equal(
+    defaultCodex.detail,
+    'Use Codex with gpt-5.5. Use the explicit Codex home at /tmp/codex-home. Detected Team account from local Codex credentials.',
+  )
 
   const codex = await resolver.resolve({
     allowPrompt: false,

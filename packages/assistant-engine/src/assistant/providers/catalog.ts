@@ -24,9 +24,16 @@ export const DEFAULT_OPENAI_COMPATIBLE_MODEL_CAPABILITIES: AssistantModelCapabil
 
 export const DEFAULT_CODEX_MODELS: readonly AssistantCatalogModel[] = [
   {
+    id: 'gpt-5.5',
+    label: 'gpt-5.5',
+    description: 'Latest frontier agentic coding model.',
+    source: 'static',
+    capabilities: DEFAULT_CODEX_MODEL_CAPABILITIES,
+  },
+  {
     id: 'gpt-5.4',
     label: 'gpt-5.4',
-    description: 'Latest frontier agentic coding model.',
+    description: 'Previous frontier agentic coding model.',
     source: 'static',
     capabilities: DEFAULT_CODEX_MODEL_CAPABILITIES,
   },

@@ -224,7 +224,7 @@ export function registerModelCommands(
         description: 'Save a Codex default model without re-running onboarding.',
         options: {
           preset: 'codex',
-          model: 'gpt-5.4',
+          model: 'gpt-5.5',
         },
       },
       {
