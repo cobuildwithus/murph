@@ -19,7 +19,15 @@ const mocks = vi.hoisted(() => {
     incrementHostedLinqOutboundDailyState: vi.fn(),
     linqIngressTypingDiagnosticEnabled: false,
     linqIngressTypingDiagnosticTimeoutMs: 750,
-    nudgeHostedRunnerUserBestEffort: vi.fn(async () => true),
+    nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    })),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqTypingPing: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
@@ -75,6 +83,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
+  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -269,7 +278,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
     mocks.linqIngressTypingDiagnosticEnabled = false;
     mocks.linqIngressTypingDiagnosticTimeoutMs = 750;
-    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     mocks.sendHostedLinqTypingPing.mockResolvedValue({
       ok: true,
       status: 204,
@@ -387,7 +404,7 @@ https://join.example.test/join/code_first_text`);
         mocks.finishHostedOnboardingTiming.mock.calls.some(
           ([handle, outcome]) =>
             (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-nudge"
-            && outcome === "completed",
+            && outcome === "accepted",
         ),
       ).toBe(true);
       expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
@@ -464,7 +481,7 @@ https://join.example.test/join/code_first_text`);
       mocks.finishHostedOnboardingTiming.mock.calls.some(
         ([handle, outcome]) =>
           (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.wake-nudge"
-          && outcome === "completed",
+          && outcome === "accepted",
       ),
     ).toBe(true);
   });

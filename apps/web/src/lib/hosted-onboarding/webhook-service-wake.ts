@@ -1,5 +1,5 @@
 import {
-  nudgeHostedRunnerUserBestEffort,
+  nudgeHostedRunnerUserBestEffortResult,
 } from "../hosted-runner/control";
 import {
   finishHostedOnboardingTiming,
@@ -28,9 +28,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
       deferred: Boolean(input.defer),
-      eventId: input.eventId,
+      eventIdSuffix: toLogIdSuffix(input.eventId),
       responseReason: input.response.reason,
-      userId: memberId,
+      userIdPresent: true,
+      userIdSuffix: toLogIdSuffix(memberId),
     },
   );
 
@@ -73,14 +74,32 @@ async function handoffHostedExecutionWebhookWake(input: {
     `hosted-onboarding.webhook.${input.source}.wake-nudge`,
     {
       deferred: input.deferred,
-      eventId: input.eventId,
+      eventIdSuffix: toLogIdSuffix(input.eventId),
       responseReason: input.responseReason,
-      userId: input.userId,
+      userIdPresent: true,
+      userIdSuffix: toLogIdSuffix(input.userId),
     },
   );
-  await nudgeHostedRunnerUserBestEffort({
+  const result = await nudgeHostedRunnerUserBestEffortResult({
     context: `webhook:${input.source}`,
     userId: input.userId,
   });
-  finishHostedOnboardingTiming(nudgeTiming, "completed");
+  finishHostedOnboardingTiming(nudgeTiming, result.accepted ? "accepted" : "not-accepted", {
+    accepted: result.accepted,
+    alarmScheduled: result.alarmScheduled,
+    alreadyRunning: result.alreadyRunning,
+    configured: result.configured,
+    errorCode: result.errorCode,
+    inFlight: result.inFlight,
+    nextAlarmAtPresent: result.nextAlarmAtPresent,
+  });
+}
+
+function toLogIdSuffix(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return trimmed.slice(-6);
 }

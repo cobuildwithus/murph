@@ -9,7 +9,15 @@ const mocks = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
-    nudgeHostedRunnerUserBestEffort: vi.fn(async () => true),
+    nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    })),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     runtimeEnv: {
       contactPrivacyKeyring: {
@@ -105,6 +113,7 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
+  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
 }));
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -136,7 +145,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     vi.clearAllMocks();
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
-    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 

@@ -29,6 +29,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
+  nudgeHostedRunnerUserBestEffortResult: mocks.nudgeHostedRunnerUserBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -99,7 +100,15 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(undefined);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({ eventId: "evt_123" });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
-    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
+      accepted: true,
+      alarmScheduled: false,
+      alreadyRunning: false,
+      configured: true,
+      errorCode: null,
+      inFlight: false,
+      nextAlarmAtPresent: false,
+    });
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });
