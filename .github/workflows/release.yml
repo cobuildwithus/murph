@@ -22,7 +22,7 @@ env:
 
 jobs:
   tag-check:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       version: ${{ steps.tag_metadata.outputs.version }}
       npm_tag: ${{ steps.tag_metadata.outputs.npm_tag }}
@@ -78,7 +78,7 @@ jobs:
 
   build:
     needs: tag-check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
 
@@ -121,7 +121,7 @@ jobs:
     needs:
       - tag-check
       - build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:
@@ -157,7 +157,7 @@ jobs:
     needs:
       - tag-check
       - build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
       id-token: write
