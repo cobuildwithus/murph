@@ -193,14 +193,24 @@ murph_review_gpt_profile_browser_binary() {
 
 murph_review_gpt_profile_open_chatgpt() {
   local profile_slug="$1"
-  local target_app user_data_dir
-  target_app="$(murph_review_gpt_profile_ensure_app "$profile_slug")" || return 1
+  local browser_binary user_data_dir
+  browser_binary="$(murph_review_gpt_profile_browser_binary "$profile_slug")" || return 1
   user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
   murph_review_gpt_load_profile "$profile_slug" || return 1
 
   mkdir -p "$user_data_dir"
 
-  open -g -na "$target_app" --args \
+  if [[ "${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-1}" =~ ^(0|false|no|off)$ ]]; then
+    nohup "$browser_binary" \
+      "--user-data-dir=$user_data_dir" \
+      "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
+      "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
+      --no-startup-window \
+      >/dev/null 2>&1 &
+    return 0
+  fi
+
+  open -g -na "$MURPH_REVIEW_GPT_PROFILE_ROOT/$MURPH_REVIEW_GPT_PROFILE_NAME.app" --args \
     "--user-data-dir=$user_data_dir" \
     "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
     "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
@@ -468,6 +478,7 @@ murph_review_gpt_profile_run_research() {
   local profile_slug="$1"
   shift
 
+  export REVIEW_GPT_ALLOW_BROWSER_FOREGROUND="${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-0}"
   murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
 
   export RESEARCH_MANAGED_BROWSER_LANE="$profile_slug"
@@ -476,7 +487,6 @@ murph_review_gpt_profile_run_research() {
   export RESEARCH_MANAGED_BROWSER_ENDPOINT="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
   export RESEARCH_MANAGED_BROWSER_PORT="$managed_browser_port"
   export RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT="$MURPH_REVIEW_GPT_BROWSER_ENDPOINT"
-  export REVIEW_GPT_ALLOW_BROWSER_FOREGROUND="${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-0}"
 
   exec "$@"
 }
