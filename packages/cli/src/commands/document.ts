@@ -111,12 +111,11 @@ export function registerDocumentCommands(
           schema: documentLookupSchema,
         },
         description:
-          'Edit one imported document event by merging a partial JSON patch or one or more path assignments into the saved event.',
+          'Edit one imported document event from typed fields.',
         run(input) {
           return editDocumentRecord({
             vault: input.vault,
             lookup: input.lookup,
-            inputFile: input.inputFile,
             set: input.set,
             clear: input.clear,
             dayKeyPolicy: input.dayKeyPolicy,

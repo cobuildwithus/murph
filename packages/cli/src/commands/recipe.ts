@@ -20,8 +20,14 @@ import {
 import { suggestedCommandsCta } from './command-factory-primitives.js'
 import { createRegistryDocEntityGroup } from './entity-command-groups.js'
 import {
+  appendTypedClear,
+  appendTypedSet,
   createEntityDeleteCommandConfig,
   createEntityEditCommandConfig,
+  emptyToUndefined,
+  numberOption,
+  stringArrayOption,
+  stringOption,
 } from './record-mutation-command-helpers.js'
 
 const recipeIdSchema = z
@@ -247,12 +253,87 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
           schema: z.string().min(1).describe('Recipe id or slug to edit.'),
         },
         description:
-          'Edit one recipe by merging a partial JSON patch or one or more path assignments into the saved record.',
+          'Edit one recipe from typed fields.',
+        options: {
+          title: z.string().min(1).max(160).optional().describe('Replace recipe title or name.'),
+          slug: recipeSlugSchema.optional().describe('Replace recipe slug and rename the underlying document.'),
+          status: recipeStatusSchema.optional().describe('Replace recipe status.'),
+          summary: z.string().min(1).max(4000).optional().describe('Replace recipe summary.'),
+          cuisine: z.string().min(1).max(160).optional().describe('Replace cuisine label.'),
+          dishType: z.string().min(1).max(160).optional().describe('Replace dish type.'),
+          source: z.string().min(1).max(240).optional().describe('Replace source label or citation.'),
+          servings: z.number().nonnegative().optional().describe('Replace serving count.'),
+          prepTimeMinutes: z.number().int().nonnegative().optional().describe('Replace prep time in minutes.'),
+          cookTimeMinutes: z.number().int().nonnegative().optional().describe('Replace cook time in minutes.'),
+          totalTimeMinutes: z.number().int().nonnegative().optional().describe('Replace total time in minutes.'),
+          tag: repeatedRecipeOptionSchema('Replace recipe tags. Repeat --tag for multiple values.'),
+          ingredient: repeatedRecipeOptionSchema('Replace ingredient lines. Repeat --ingredient for multiple values.'),
+          step: repeatedRecipeOptionSchema('Replace preparation steps. Repeat --step for multiple values.'),
+          relatedGoalId: z.array(goalIdSchema).optional().describe('Replace related goal ids. Repeat --related-goal-id for multiple values.'),
+          relatedConditionId: z.array(conditionIdSchema).optional().describe('Replace related condition ids. Repeat --related-condition-id for multiple values.'),
+          link: repeatedRecipeOptionSchema('Replace relation links in type:targetId form. Repeat --link for multiple values. Supported types: supports_goal, addresses_condition.'),
+          clearSummary: z.boolean().optional().describe('Clear recipe summary.'),
+          clearCuisine: z.boolean().optional().describe('Clear cuisine.'),
+          clearDishType: z.boolean().optional().describe('Clear dish type.'),
+          clearSource: z.boolean().optional().describe('Clear source label or citation.'),
+          clearServings: z.boolean().optional().describe('Clear serving count.'),
+          clearPrepTime: z.boolean().optional().describe('Clear prep time.'),
+          clearCookTime: z.boolean().optional().describe('Clear cook time.'),
+          clearTotalTime: z.boolean().optional().describe('Clear total time.'),
+          clearTags: z.boolean().optional().describe('Clear tags.'),
+          clearIngredients: z.boolean().optional().describe('Clear ingredients.'),
+          clearSteps: z.boolean().optional().describe('Clear preparation steps.'),
+          clearRelatedGoalIds: z.boolean().optional().describe('Clear related goal ids.'),
+          clearRelatedConditionIds: z.boolean().optional().describe('Clear related condition ids.'),
+          clearLinks: z.boolean().optional().describe('Clear relation links.'),
+        },
+        buildInput(input, options) {
+          const set: string[] = []
+          const clear: string[] = []
+          appendTypedSet(set, 'title', stringOption(options.title))
+          appendTypedSet(set, 'slug', stringOption(options.slug))
+          appendTypedSet(set, 'status', stringOption(options.status))
+          appendTypedSet(set, 'summary', stringOption(options.summary))
+          appendTypedSet(set, 'cuisine', stringOption(options.cuisine))
+          appendTypedSet(set, 'dishType', stringOption(options.dishType))
+          appendTypedSet(set, 'source', stringOption(options.source))
+          appendTypedSet(set, 'servings', numberOption(options.servings))
+          appendTypedSet(set, 'prepTimeMinutes', numberOption(options.prepTimeMinutes))
+          appendTypedSet(set, 'cookTimeMinutes', numberOption(options.cookTimeMinutes))
+          appendTypedSet(set, 'totalTimeMinutes', numberOption(options.totalTimeMinutes))
+          appendTypedSet(set, 'tags', stringArrayOption(options.tag))
+          appendTypedSet(set, 'ingredients', stringArrayOption(options.ingredient))
+          appendTypedSet(set, 'steps', stringArrayOption(options.step))
+          appendTypedSet(set, 'relatedGoalIds', stringArrayOption(options.relatedGoalId))
+          appendTypedSet(set, 'relatedConditionIds', stringArrayOption(options.relatedConditionId))
+          const linkEntries = stringArrayOption(options.link)
+          if (linkEntries !== undefined) {
+            appendTypedSet(set, 'links', linkEntries.map(parseRecipeLinkOption))
+          }
+          appendTypedClear(clear, 'summary', options.clearSummary === true)
+          appendTypedClear(clear, 'cuisine', options.clearCuisine === true)
+          appendTypedClear(clear, 'dishType', options.clearDishType === true)
+          appendTypedClear(clear, 'source', options.clearSource === true)
+          appendTypedClear(clear, 'servings', options.clearServings === true)
+          appendTypedClear(clear, 'prepTimeMinutes', options.clearPrepTime === true)
+          appendTypedClear(clear, 'cookTimeMinutes', options.clearCookTime === true)
+          appendTypedClear(clear, 'totalTimeMinutes', options.clearTotalTime === true)
+          appendTypedClear(clear, 'tags', options.clearTags === true)
+          appendTypedClear(clear, 'ingredients', options.clearIngredients === true)
+          appendTypedClear(clear, 'steps', options.clearSteps === true)
+          appendTypedClear(clear, 'relatedGoalIds', options.clearRelatedGoalIds === true)
+          appendTypedClear(clear, 'relatedConditionIds', options.clearRelatedConditionIds === true)
+          appendTypedClear(clear, 'links', options.clearLinks === true)
+          return {
+            ...input,
+            set: emptyToUndefined(set),
+            clear: emptyToUndefined(clear),
+          }
+        },
         run(input) {
           return editRecipeRecord({
             vault: input.vault,
             lookup: input.lookup,
-            inputFile: input.inputFile,
             set: input.set,
             clear: input.clear,
           })

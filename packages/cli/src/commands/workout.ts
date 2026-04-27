@@ -55,8 +55,14 @@ import {
   showWorkoutUnitPreferences,
 } from '@murphai/vault-usecases/workouts'
 import {
+  appendTypedClear,
+  appendTypedSet,
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
+  emptyToUndefined,
+  numberOption,
+  stringArrayOption,
+  stringOption,
 } from './record-mutation-command-helpers.js'
 import {
   commonDateRangeOptionDescriptions,
@@ -731,12 +737,57 @@ export function registerWorkoutCommands(
       schema: workoutLookupSchema,
     },
     description:
-      'Edit one workout session by merging a partial JSON patch or one or more path assignments into the saved activity event.',
+      'Edit one workout session from typed fields.',
+    options: {
+      duration: z.number().int().positive().max(24 * 60).optional().describe('Replace duration in minutes.'),
+      type: z.string().min(1).max(120).optional().describe('Replace workout activity type.'),
+      distanceKm: z.number().positive().max(1_000).optional().describe('Replace workout distance in kilometers.'),
+      workoutSourceApp: z.string().regex(workoutSlugPattern).optional().describe('Replace nested workout-session source app slug.'),
+      workoutSourceWorkoutId: z.string().min(1).max(200).optional().describe('Replace nested source workout id.'),
+      workoutStartedAt: isoTimestampSchema.optional().describe('Replace nested workout started-at timestamp.'),
+      workoutEndedAt: isoTimestampSchema.optional().describe('Replace nested workout ended-at timestamp.'),
+      workoutRoutineId: z.string().min(1).max(200).optional().describe('Replace nested workout routine id.'),
+      workoutRoutineName: z.string().min(1).max(160).optional().describe('Replace nested workout routine name.'),
+      workoutSessionNote: z.string().min(1).max(4000).optional().describe('Replace nested workout session note.'),
+      workoutMedia: z.array(z.string().min(1)).optional().describe('Replace stored workout media entries as kind=...;relativePath=...;mediaType=...;caption=.... Repeat --workout-media for multiple entries.'),
+      workoutExercise: z.array(z.string().min(1)).optional().describe('Replace workout exercises as order=...;name=... entries. Repeat --workout-exercise for multiple exercises.'),
+      workoutSet: z.array(z.string().min(1)).optional().describe('Workout set as exercise=...;order=... plus optional set fields. Repeat --workout-set for multiple sets.'),
+      clearDuration: z.boolean().optional().describe('Clear saved duration.'),
+      clearDistance: z.boolean().optional().describe('Clear saved distance.'),
+      clearWorkout: z.boolean().optional().describe('Clear the nested workout session payload.'),
+    },
+    buildPatch(options) {
+      const set: string[] = []
+      const clear: string[] = []
+      appendTypedSet(set, 'durationMinutes', numberOption(options.duration))
+      appendTypedSet(set, 'activityType', stringOption(options.type))
+      appendTypedSet(set, 'distanceKm', numberOption(options.distanceKm))
+      appendTypedSet(set, 'workout.sourceApp', stringOption(options.workoutSourceApp))
+      appendTypedSet(set, 'workout.sourceWorkoutId', stringOption(options.workoutSourceWorkoutId))
+      appendTypedSet(set, 'workout.startedAt', stringOption(options.workoutStartedAt))
+      appendTypedSet(set, 'workout.endedAt', stringOption(options.workoutEndedAt))
+      appendTypedSet(set, 'workout.routineId', stringOption(options.workoutRoutineId))
+      appendTypedSet(set, 'workout.routineName', stringOption(options.workoutRoutineName))
+      appendTypedSet(set, 'workout.sessionNote', stringOption(options.workoutSessionNote))
+      const workoutDraft = buildWorkoutFromTypedOptions({
+        workoutMedia: stringArrayOption(options.workoutMedia),
+        workoutExercise: stringArrayOption(options.workoutExercise),
+        workoutSet: stringArrayOption(options.workoutSet),
+      })
+      if (workoutDraft?.media !== undefined) appendTypedSet(set, 'workout.media', workoutDraft.media)
+      if (workoutDraft?.exercises !== undefined) appendTypedSet(set, 'workout.exercises', workoutDraft.exercises)
+      appendTypedClear(clear, 'durationMinutes', options.clearDuration === true)
+      appendTypedClear(clear, 'distanceKm', options.clearDistance === true)
+      appendTypedClear(clear, 'workout', options.clearWorkout === true)
+      return {
+        set: emptyToUndefined(set),
+        clear: emptyToUndefined(clear),
+      }
+    },
     run(input) {
       return editWorkoutRecord({
         vault: input.vault,
         lookup: input.lookup,
-        inputFile: input.inputFile,
         set: input.set,
         clear: input.clear,
         dayKeyPolicy: input.dayKeyPolicy,

@@ -307,7 +307,60 @@ const canonicalTypedCommands = [
       'setTemplate',
     ],
   },
+  {
+    label: 'document edit',
+    commandNames: ['document edit'],
+    fieldHints: ['title', 'note', 'occurredAt', 'dayKeyPolicy'],
+  },
+  {
+    label: 'event edit',
+    commandNames: ['event edit'],
+    fieldHints: ['kind', 'title', 'note', 'occurredAt', 'dayKeyPolicy'],
+  },
+  {
+    label: 'meal edit',
+    commandNames: ['meal edit'],
+    fieldHints: ['note', 'ingredient', 'nutritionCalories', 'dayKeyPolicy'],
+  },
+  {
+    label: 'workout edit',
+    commandNames: ['workout edit'],
+    fieldHints: ['note', 'duration', 'type', 'workoutExercise', 'dayKeyPolicy'],
+  },
+  {
+    label: 'intervention edit',
+    commandNames: ['intervention edit'],
+    fieldHints: ['note', 'type', 'duration', 'regimenId', 'dayKeyPolicy'],
+  },
+  {
+    label: 'provider edit',
+    commandNames: ['provider edit'],
+    fieldHints: ['title', 'slug', 'status', 'specialty', 'alias'],
+  },
+  {
+    label: 'food edit',
+    commandNames: ['food edit'],
+    fieldHints: ['title', 'slug', 'status', 'ingredient', 'nutritionSource'],
+  },
+  {
+    label: 'recipe edit',
+    commandNames: ['recipe edit'],
+    fieldHints: ['title', 'slug', 'status', 'ingredient', 'step'],
+  },
 ] as const satisfies readonly CommandGuard[]
+
+const typedPatchEditCommandNames = [
+  'document edit',
+  'event edit',
+  'meal edit',
+  'workout edit',
+  'intervention edit',
+  'provider edit',
+  'food edit',
+  'recipe edit',
+] as const
+
+const genericPatchOptionNames = ['input', 'set', 'clear'] as const
 
 test('canonical agent write commands expose typed schemas without primary JSON input blobs', async () => {
   const commands = await loadFullLlmCommands()
@@ -433,8 +486,6 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'blood-test import-json',
     'capture import-json',
     'condition import-json',
-    'document edit',
-    'event edit',
     'event import-json',
     'experiment checkpoint-json',
     'experiment context log-json',
@@ -442,24 +493,18 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'experiment session log-json',
     'experiment start',
     'family import-json',
-    'food edit',
     'food import-json',
     'genetics import-json',
     'goal import-json',
-    'intervention edit',
-    'meal edit',
     'meal import-json',
     'measurement import-json',
     'protocol import-json',
-    'provider edit',
     'provider import-json',
-    'recipe edit',
     'regimen import-json',
     'recipe import-json',
     'samples import-json',
     'scheduled-log import-json',
     'supplement import-json',
-    'workout edit',
     'workout format import-json',
     'workout import-json',
   ].sort()
@@ -470,6 +515,51 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     .sort()
 
   assert.deepEqual(inputCommands, reviewedInputCommands)
+})
+
+test('patch-style edit commands expose typed fields instead of generic patch flags', async () => {
+  const commands = await loadFullLlmCommands()
+  const generatedTypes = await readFile(
+    new URL('../src/incur.generated.ts', import.meta.url),
+    'utf8',
+  )
+  const configSchema = parseJsonObject(
+    await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
+    'config schema',
+  )
+  const failures: string[] = []
+
+  for (const commandName of typedPatchEditCommandNames) {
+    const manifestCommand = requireManifestCommand(commands, {
+      label: commandName,
+      commandNames: [commandName],
+      fieldHints: ['title', 'note', 'status', 'ingredient', 'duration'],
+    })
+    const directSchema = await loadCommandSchema(commandName)
+    const configOptions = commandConfigOptionNames(configSchema, commandName)
+    const generatedLinePattern = new RegExp(
+      `'${commandName}': \\{[^\\n]+options: \\{([^\\n]+)\\}`,
+      'u',
+    )
+    const generatedLine = generatedTypes.match(generatedLinePattern)?.[1] ?? ''
+
+    for (const optionName of genericPatchOptionNames) {
+      collectAssertionFailure(failures, `${commandName} llms ${optionName}`, () => {
+        assert.equal(schemaIncludesProperty(manifestCommand.schema, optionName), false)
+      })
+      collectAssertionFailure(failures, `${commandName} schema ${optionName}`, () => {
+        assert.equal(schemaIncludesProperty(directSchema, optionName), false)
+      })
+      collectAssertionFailure(failures, `${commandName} config ${optionName}`, () => {
+        assert.equal(configOptions.includes(optionName), false)
+      })
+      collectAssertionFailure(failures, `${commandName} generated ${optionName}`, () => {
+        assert.equal(new RegExp(`\\b${optionName}\\??:`, 'u').test(generatedLine), false)
+      })
+    }
+  }
+
+  assert.deepEqual(failures, [], failures.join('\n'))
 })
 
 test('health registry import-json hard cut is reflected in generated artifacts and help', async () => {
@@ -685,6 +775,56 @@ function requiredFields(schema: JsonRecord, key: 'args' | 'options'): string[] {
   return values.map((value, index) =>
     requireString(value, `schema.${key}.required[${index}]`),
   )
+}
+
+function commandConfigOptionNames(
+  configSchema: JsonRecord,
+  commandName: string,
+): string[] {
+  const rootCommands = requireRecord(
+    requireRecord(
+      requireRecord(configSchema.properties, 'config schema.properties').commands,
+      'config schema.properties.commands',
+    ).properties,
+    'config schema.properties.commands.properties',
+  )
+  const segments = commandName.split(' ')
+  let currentCommands = rootCommands
+
+  for (const [index, segment] of segments.entries()) {
+    const commandSchema = requireRecord(
+      currentCommands[segment],
+      `config schema command ${segments.slice(0, index + 1).join(' ')}`,
+    )
+    const commandProperties = requireRecord(
+      commandSchema.properties,
+      `config schema command ${segments.slice(0, index + 1).join(' ')} properties`,
+    )
+
+    if (index === segments.length - 1) {
+      const options = commandProperties.options
+      if (options === undefined) {
+        return []
+      }
+      return Object.keys(
+        requireRecord(
+          requireRecord(options, `${commandName} options`).properties,
+          `${commandName} option properties`,
+        ),
+      )
+    }
+
+    const nestedCommands = requireRecord(
+      commandProperties.commands,
+      `config schema command ${segments.slice(0, index + 1).join(' ')} commands`,
+    )
+    currentCommands = requireRecord(
+      nestedCommands.properties,
+      `config schema command ${segments.slice(0, index + 1).join(' ')} command properties`,
+    )
+  }
+
+  return []
 }
 
 function parseJsonObject(text: string, label: string): JsonRecord {

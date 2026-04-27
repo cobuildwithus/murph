@@ -271,9 +271,11 @@ test(
     assert.equal('kind' in documentListSchema.options.properties, false)
     assert.deepEqual(documentListSchema.options.required, ['vault'])
 
-    assert.equal('input' in documentEditSchema.options.properties, true)
-    assert.equal('set' in documentEditSchema.options.properties, true)
-    assert.equal('clear' in documentEditSchema.options.properties, true)
+    assert.equal('input' in documentEditSchema.options.properties, false)
+    assert.equal('set' in documentEditSchema.options.properties, false)
+    assert.equal('clear' in documentEditSchema.options.properties, false)
+    assert.equal('title' in documentEditSchema.options.properties, true)
+    assert.equal('note' in documentEditSchema.options.properties, true)
     assert.equal('dayKeyPolicy' in documentEditSchema.options.properties, true)
     assert.deepEqual(documentEditSchema.options.required, ['vault'])
     assert.deepEqual(documentDeleteSchema.options.required, ['vault'])
@@ -288,6 +290,12 @@ test(
       String((mealImportJsonSchema.options.properties.input as { description?: unknown }).description),
       /Structured meal payload in @file\.json form or - for stdin/u,
     )
+    assert.equal('input' in mealEditSchema.options.properties, false)
+    assert.equal('set' in mealEditSchema.options.properties, false)
+    assert.equal('clear' in mealEditSchema.options.properties, false)
+    assert.equal('ingredient' in mealEditSchema.options.properties, true)
+    assert.equal('nutritionCalories' in mealEditSchema.options.properties, true)
+    assert.equal('dayKeyPolicy' in mealEditSchema.options.properties, true)
     assert.match(
       String((mealImportJsonSchema.options.properties.input as { description?: unknown }).description),
       /Structured payload object keys:.*ingredients.*nutrition/u,
@@ -297,9 +305,9 @@ test(
       'vault',
     ])
 
-    assert.equal('input' in mealEditSchema.options.properties, true)
-    assert.equal('set' in mealEditSchema.options.properties, true)
-    assert.equal('clear' in mealEditSchema.options.properties, true)
+    assert.equal('input' in mealEditSchema.options.properties, false)
+    assert.equal('set' in mealEditSchema.options.properties, false)
+    assert.equal('clear' in mealEditSchema.options.properties, false)
     assert.equal('dayKeyPolicy' in mealEditSchema.options.properties, true)
     assert.deepEqual(mealEditSchema.options.required, ['vault'])
     assert.deepEqual(mealDeleteSchema.options.required, ['vault'])
@@ -550,10 +558,10 @@ test.sequential(
         'document',
         'edit',
         documentRecord.documentId,
-        '--set',
-        'title=Updated Lab Report',
-        '--set',
-        'note=Reviewed with PCP.',
+        '--title',
+        'Updated Lab Report',
+        '--note',
+        'Reviewed with PCP.',
         '--vault',
         vaultRoot,
       ])
@@ -566,12 +574,30 @@ test.sequential(
         'meal',
         'edit',
         mealRecord.mealId,
-        '--set',
-        'note=Green smoothie after training.',
-        '--set',
-        'ingredients=[\"spinach\",\"banana\",\"greek yogurt\"]',
-        '--set',
-        'nutrition={\"totals\":{\"calories\":430,\"proteinGrams\":32,\"carbsGrams\":46,\"fatGrams\":14,\"fiberGrams\":9},\"provenance\":{\"source\":\"estimated\",\"confidence\":\"medium\",\"sourceDetail\":\"Recipe estimate\"}}',
+        '--note',
+        'Green smoothie after training.',
+        '--ingredient',
+        'spinach',
+        '--ingredient',
+        'banana',
+        '--ingredient',
+        'greek yogurt',
+        '--nutrition-calories',
+        '430',
+        '--nutrition-protein-grams',
+        '32',
+        '--nutrition-carbs-grams',
+        '46',
+        '--nutrition-fat-grams',
+        '14',
+        '--nutrition-fiber-grams',
+        '9',
+        '--nutrition-source',
+        'estimated',
+        '--nutrition-confidence',
+        'medium',
+        '--nutrition-source-detail',
+        'Recipe estimate',
         '--vault',
         vaultRoot,
       ])

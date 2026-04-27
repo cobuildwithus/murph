@@ -12,8 +12,13 @@ import {
   editInterventionRecord,
 } from '@murphai/vault-usecases/records'
 import {
+  appendTypedClear,
+  appendTypedSet,
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
+  emptyToUndefined,
+  numberOption,
+  stringOption,
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 const regimenIdSchema = z
@@ -130,12 +135,51 @@ export function registerInterventionCommands(
       schema: interventionLookupSchema.describe('Canonical intervention event id such as evt_<ULID>.'),
     },
     description:
-      'Edit one intervention session by merging a partial JSON patch or one or more path assignments into the saved event.',
+      'Edit one intervention session from typed fields.',
+    options: {
+      type: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Replace the intervention type.'),
+      duration: z
+        .number()
+        .int()
+        .positive()
+        .max(24 * 60)
+        .optional()
+        .describe('Replace the duration in minutes.'),
+      regimenId: regimenIdSchema
+        .optional()
+        .describe('Replace the related regimen id.'),
+      clearDuration: z.boolean().optional().describe('Clear the saved duration.'),
+      clearRegimenId: z.boolean().optional().describe('Clear the saved regimen id and related links.'),
+    },
+    buildPatch(options) {
+      const set: string[] = []
+      const clear: string[] = []
+      appendTypedSet(set, 'interventionType', stringOption(options.type))
+      appendTypedSet(set, 'durationMinutes', numberOption(options.duration))
+      appendTypedSet(set, 'regimenId', stringOption(options.regimenId))
+      if (typeof options.regimenId === 'string') {
+        appendTypedSet(set, 'links', [{
+          type: 'related_to',
+          targetId: options.regimenId,
+        }])
+      }
+      appendTypedClear(clear, 'durationMinutes', options.clearDuration === true)
+      appendTypedClear(clear, 'regimenId', options.clearRegimenId === true)
+      appendTypedClear(clear, 'links', options.clearRegimenId === true)
+      return {
+        set: emptyToUndefined(set),
+        clear: emptyToUndefined(clear),
+      }
+    },
     run(input) {
       return editInterventionRecord({
         vault: input.vault,
         lookup: input.lookup,
-        inputFile: input.inputFile,
         set: input.set,
         clear: input.clear,
         dayKeyPolicy: input.dayKeyPolicy,

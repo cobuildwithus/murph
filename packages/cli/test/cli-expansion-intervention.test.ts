@@ -102,7 +102,7 @@ test('intervention add schema exposes the freeform intervention capture surface'
   assert.deepEqual(schema.options.required, ['vault'])
 })
 
-test('intervention edit/delete schemas expose shared record mutation options', async () => {
+test('intervention edit/delete schemas expose typed mutation options', async () => {
   const editSchema = JSON.parse(
     await runSliceCliRaw(['intervention', 'edit', '--schema']),
   ) as SchemaEnvelope
@@ -110,9 +110,12 @@ test('intervention edit/delete schemas expose shared record mutation options', a
     await runSliceCliRaw(['intervention', 'delete', '--schema']),
   ) as SchemaEnvelope
 
-  assert.equal('input' in editSchema.options.properties, true)
-  assert.equal('set' in editSchema.options.properties, true)
-  assert.equal('clear' in editSchema.options.properties, true)
+  assert.equal('input' in editSchema.options.properties, false)
+  assert.equal('set' in editSchema.options.properties, false)
+  assert.equal('clear' in editSchema.options.properties, false)
+  assert.equal('note' in editSchema.options.properties, true)
+  assert.equal('duration' in editSchema.options.properties, true)
+  assert.equal('type' in editSchema.options.properties, true)
   assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
   assert.deepEqual(editSchema.options.required, ['vault'])
   assert.deepEqual(deleteSchema.options.required, ['vault'])
@@ -340,12 +343,12 @@ test.sequential(
         'intervention',
         'edit',
         requireData(created).eventId,
-        '--set',
-        'note=Cooldown sauna after lifting.',
-        '--set',
-        'durationMinutes=25',
-        '--set',
-        'title=25-minute sauna',
+        '--note',
+        'Cooldown sauna after lifting.',
+        '--duration',
+        '25',
+        '--title',
+        '25-minute sauna',
         '--vault',
         vaultRoot,
       ])

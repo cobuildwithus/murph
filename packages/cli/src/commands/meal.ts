@@ -34,8 +34,11 @@ import type { VaultServices } from '@murphai/vault-usecases'
 import { loadImportersRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { registerArtifactBackedEntityGroup } from './entity-command-groups.js'
 import {
+  appendTypedClear,
+  appendTypedSet,
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
+  emptyToUndefined,
 } from './record-mutation-command-helpers.js'
 import { commonListLimitOptionSchema } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
@@ -575,12 +578,44 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           schema: mealLookupSchema,
         },
         description:
-          'Edit one meal by merging a partial JSON patch or one or more path assignments into the saved event.',
+          'Edit one meal event from typed fields.',
+        options: {
+          ingredient: mealIngredientsSchema
+            .describe('Replace saved ingredients. Repeat --ingredient for each item.'),
+          nutritionCalories: z.number().nonnegative().optional().describe('Replace meal calorie total.'),
+          nutritionProteinGrams: z.number().nonnegative().optional().describe('Replace meal protein grams.'),
+          nutritionCarbsGrams: z.number().nonnegative().optional().describe('Replace meal carbohydrate grams.'),
+          nutritionFatGrams: z.number().nonnegative().optional().describe('Replace meal fat grams.'),
+          nutritionFiberGrams: z.number().nonnegative().optional().describe('Replace meal fiber grams.'),
+          nutritionSource: nutritionProvenanceSourceSchema.optional().describe('Replace meal nutrition provenance source.'),
+          nutritionConfidence: nutritionConfidenceLevelSchema.optional().describe('Replace meal nutrition provenance confidence.'),
+          nutritionSourceDetail: z.string().trim().min(1).max(240).optional().describe('Replace meal nutrition provenance detail.'),
+          clearIngredients: z.boolean().optional().describe('Clear saved ingredients.'),
+          clearNutrition: z.boolean().optional().describe('Clear saved nutrition totals and provenance.'),
+        },
+        buildPatch(options) {
+          const set: string[] = []
+          const clear: string[] = []
+          appendTypedSet(set, 'ingredients', stringArrayOption(options.ingredient))
+          appendTypedSet(set, 'nutrition.totals.calories', numberOption(options.nutritionCalories))
+          appendTypedSet(set, 'nutrition.totals.proteinGrams', numberOption(options.nutritionProteinGrams))
+          appendTypedSet(set, 'nutrition.totals.carbsGrams', numberOption(options.nutritionCarbsGrams))
+          appendTypedSet(set, 'nutrition.totals.fatGrams', numberOption(options.nutritionFatGrams))
+          appendTypedSet(set, 'nutrition.totals.fiberGrams', numberOption(options.nutritionFiberGrams))
+          appendTypedSet(set, 'nutrition.provenance.source', nutritionSourceOption(options.nutritionSource))
+          appendTypedSet(set, 'nutrition.provenance.confidence', nutritionConfidenceOption(options.nutritionConfidence))
+          appendTypedSet(set, 'nutrition.provenance.sourceDetail', stringOption(options.nutritionSourceDetail))
+          appendTypedClear(clear, 'ingredients', options.clearIngredients === true)
+          appendTypedClear(clear, 'nutrition', options.clearNutrition === true)
+          return {
+            set: emptyToUndefined(set),
+            clear: emptyToUndefined(clear),
+          }
+        },
         run(input) {
           return editMealRecord({
             vault: input.vault,
             lookup: input.lookup,
-            inputFile: input.inputFile,
             set: input.set,
             clear: input.clear,
             dayKeyPolicy: input.dayKeyPolicy,
