@@ -301,6 +301,9 @@ describe('assistant conversation onboarding guidance', () => {
     })
 
     expect(prompt).toContain('roughly 3-4 short assistant messages')
+    expect(prompt).toContain(
+      'Do not compress the whole orientation into one "send me things" reply',
+    )
     expect(prompt).toContain('Murph is a health context layer')
     expect(prompt).toContain('Identify data sources in one short message')
     expect(prompt).toContain(
@@ -308,7 +311,12 @@ describe('assistant conversation onboarding guidance', () => {
     )
     expect(prompt).toContain('WHOOP')
     expect(prompt).toContain('one lightweight, bounded experiment at a time')
+    expect(prompt).toContain('sleep, strength, energy, or simple baseline logging')
     expect(prompt).toContain('completion gates are satisfied')
+    expect(prompt).toContain(
+      'Creating an active experiment remains a separate confirmed flow',
+    )
+    expect(prompt).toContain('Natural first-run flow')
     expect(prompt).toContain('Do not mark onboarding complete just because')
     expect(prompt).toContain('a generic "sounds good."')
   })
