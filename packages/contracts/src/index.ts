@@ -1,5 +1,4 @@
 export * from "./bank-entities.ts";
-export * from "./command-capabilities.ts";
 export * from "./constants.ts";
 export * from "./event-lifecycle.ts";
 export * from "./examples.ts";

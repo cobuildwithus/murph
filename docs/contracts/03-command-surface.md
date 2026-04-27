@@ -220,21 +220,7 @@ vault-cli <noun> show <id|current> --vault <path> [--request-id <id>]
 vault-cli <noun> list --vault <path> [--limit <n>] [--request-id <id>]
 ```
 
-The placeholder grammar above applies to the frozen health nouns listed below when they expose the shared scaffold/import-json/show/list capability bundle.
-
-## Capability Bundles
-
-The command surface is organized around reusable capability bundles, not a payload-first grammar plus a growing exception list. The shared bundle, noun, and top-level alias taxonomy summarized in this section lives in `packages/contracts/src/command-capabilities.ts`.
-
-- `readable`: `show | list`
-- `payloadCrud`: `scaffold | import-json | show | list`
-- `artifactImport`: `import | show | list | manifest`
-- `batchInspection`: `batch show | batch list`
-- `lifecycle`: `create | show | list | update | checkpoint | stop`
-- `dateAddressedDoc`: `ensure | show | list | append | link | unlink`
-- `derivedAdmin`: `stats | rebuild | materialize | prune | validate`
-- `runtimeControl`: `bootstrap | setup | doctor | parse | requeue | attachment list/inspect/show/status/show-status/decode/parse/reparse | promote | model bundle/route`
-- `deviceControl`: `provider list | connect | account list/show/reconcile/disconnect | daemon status/start/stop`
+The placeholder grammar above applies to health nouns that expose the shared scaffold/import-json/show/list command shape. Native Incur command definitions and generated discovery metadata are the executable source of truth for the current command graph.
 
 ## Noun Composition
 
@@ -266,22 +252,9 @@ The command surface is organized around reusable capability bundles, not a paylo
 - Top-level `stop` is a shorthand alias for `assistant stop`; it shares the same option/output contract so installed `murph stop` discovery stays truthful while giving operators a supported recovery path for stuck assistant automation locks.
 - `device` is a local control-plane noun backed by `@murphai/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault.
 
-These are capabilities, not exceptions. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
+These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, `provider` remains the registry-backed noun for `bank/providers/*.md`, and the inbox attachment commands remain the attachment-level runtime surface for `.runtime` plus `derived/inbox/**`.
 
 Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
-
-Frozen health nouns remain:
-
-- `goal`
-- `condition`
-- `allergy`
-- `food`
-- `supplement`
-- `regimen`
-- `protocol`
-- `family`
-- `genetics`
-- `blood-test`
 
 ## Native Incur Contract
 
