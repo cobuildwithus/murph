@@ -3,50 +3,45 @@ import type { SharePack } from "@murphai/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type WakeDispatchRecord = {
-  wakeState: "completed" | "quarantined" | "queued" | "replaced";
+  wakeState: "queued";
   eventId: string;
 };
 
 const shareHarness = vi.hoisted(() => {
   const state = {
     issueHostedInviteForPhone: vi.fn(),
-    readHostedIngressLifecycleState: vi.fn(async (input: {
-      eventId: string;
-      prisma?: { outboxRows?: WakeDispatchRecord[] };
-      userId: string;
-    }) =>
-      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? null),
-    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
-      wake: { eventId: string };
+    appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
+      envelope: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
       const outboxRows = input.tx?.outboxRows;
-      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.wake.eventId)) {
+      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.envelope.eventId)) {
         outboxRows.push({
           wakeState: "queued",
-          eventId: input.wake.eventId,
+          eventId: input.envelope.eventId,
         });
       }
 
       return {
-        eventId: input.wake.eventId,
+        item: {
+          dedupeKey: input.envelope.eventId,
+        },
       };
     }),
-    nudgeHostedRunBestEffort: vi.fn(),
+    nudgeHostedRunnerBestEffort: vi.fn(),
   };
 
   return state;
 });
 
-vi.mock("@/src/lib/hosted-ingress/lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-ingress/lifecycle")>(
-    "@/src/lib/hosted-ingress/lifecycle",
+vi.mock("@/src/lib/hosted-mailbox/store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
+    "@/src/lib/hosted-mailbox/store",
   );
 
   return {
     ...actual,
-    materializeHostedIngressEnvelopeTx: shareHarness.materializeHostedIngressEnvelopeTx,
-    readHostedIngressLifecycleState: shareHarness.readHostedIngressLifecycleState,
+    appendHostedMailboxEnvelopeTx: shareHarness.appendHostedMailboxEnvelopeTx,
   };
 });
 vi.mock("@/src/lib/prisma", () => ({
@@ -54,8 +49,8 @@ vi.mock("@/src/lib/prisma", () => ({
     throw new Error("Unexpected getPrisma call in hosted-share-service.test.ts");
   }),
 }));
-vi.mock("@/src/lib/hosted-ingress/control", () => ({
-  nudgeHostedRunBestEffort: shareHarness.nudgeHostedRunBestEffort,
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: shareHarness.nudgeHostedRunnerBestEffort,
 }));
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   issueHostedInviteForPhone: shareHarness.issueHostedInviteForPhone,
@@ -128,31 +123,27 @@ describe("hosted share service", () => {
     shareHarness.issueHostedInviteForPhone.mockRejectedValue(
       new Error("Unexpected invite issuance in hosted share service test."),
     );
-    shareHarness.readHostedIngressLifecycleState.mockReset();
-    shareHarness.readHostedIngressLifecycleState.mockImplementation(async (input: {
-      eventId: string;
-      prisma?: { outboxRows?: WakeDispatchRecord[] };
-    }) =>
-      input.prisma?.outboxRows?.find((entry) => entry.eventId === input.eventId)?.wakeState ?? null);
-    shareHarness.materializeHostedIngressEnvelopeTx.mockReset();
-    shareHarness.materializeHostedIngressEnvelopeTx.mockImplementation(async (input: {
-      wake: { eventId: string };
+    shareHarness.appendHostedMailboxEnvelopeTx.mockReset();
+    shareHarness.appendHostedMailboxEnvelopeTx.mockImplementation(async (input: {
+      envelope: { eventId: string };
       tx?: { outboxRows?: WakeDispatchRecord[] };
     }) => {
       const outboxRows = input.tx?.outboxRows;
-      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.wake.eventId)) {
+      if (outboxRows && !outboxRows.some((entry) => entry.eventId === input.envelope.eventId)) {
         outboxRows.push({
           wakeState: "queued",
-          eventId: input.wake.eventId,
+          eventId: input.envelope.eventId,
         });
       }
 
       return {
-        eventId: input.wake.eventId,
+        item: {
+          dedupeKey: input.envelope.eventId,
+        },
       };
     });
-    shareHarness.nudgeHostedRunBestEffort.mockReset();
-    shareHarness.nudgeHostedRunBestEffort.mockResolvedValue(undefined);
+    shareHarness.nudgeHostedRunnerBestEffort.mockReset();
+    shareHarness.nudgeHostedRunnerBestEffort.mockResolvedValue(undefined);
     originalHostedOnboardingPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
     originalHostedContactPrivacyCurrentKeyVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
     originalHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
@@ -300,7 +291,7 @@ describe("hosted share service", () => {
     expect(pageData.stage).toBe("processing");
     expect(pageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBeNull();
-    expect(shareHarness.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+    expect(shareHarness.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "hosted-share.acceptance",
       userId: "member_123",
     });
@@ -367,14 +358,14 @@ describe("hosted share service", () => {
     });
   });
 
-  it("does not wait for the best-effort hosted run nudge before returning the share claim", async () => {
+  it("does not wait for the best-effort hosted runner nudge before returning the share claim", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma,
       pack: buildPack(),
       senderMemberId: "member_sender",
     });
-    shareHarness.nudgeHostedRunBestEffort.mockReturnValue(new Promise(() => {}));
+    shareHarness.nudgeHostedRunnerBestEffort.mockReturnValue(new Promise(() => {}));
 
     await expect(acceptHostedShareLink({
       member: createHostedShareMember(),
@@ -385,7 +376,7 @@ describe("hosted share service", () => {
       pending: true,
     });
 
-    expect(shareHarness.nudgeHostedRunBestEffort).toHaveBeenCalledTimes(1);
+    expect(shareHarness.nudgeHostedRunnerBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("accepts the share from the web-owned payload without a Cloudflare pack seam", async () => {
@@ -406,7 +397,7 @@ describe("hosted share service", () => {
     });
 
     expect(prisma.outboxRows).toHaveLength(1);
-    expect(shareHarness.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+    expect(shareHarness.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "hosted-share.acceptance",
       userId: "member_123",
     });
@@ -442,7 +433,7 @@ describe("hosted share service", () => {
     expect(retried.pending).toBe(true);
     expect(prisma.outboxRows).toHaveLength(1);
     expect(prisma.outboxRows[0]?.eventId).toBe(prisma.rows[0]?.lastEventId);
-    expect(shareHarness.nudgeHostedRunBestEffort).toHaveBeenCalledTimes(2);
+    expect(shareHarness.nudgeHostedRunnerBestEffort).toHaveBeenCalledTimes(2);
 
     await finalizeHostedShareAcceptance({
       eventId: prisma.rows[0]?.lastEventId ?? "",
@@ -462,7 +453,7 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
   });
 
-  it("reconciles a processing share from Cloudflare event status when the local outbox row is still queued", async () => {
+  it("reconciles a processing share after the runtime import callback finalizes it", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma,
@@ -476,8 +467,12 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     });
 
-    prisma.outboxRows[0]!.wakeState = "queued";
-    prisma.outboxRows[0]!.wakeState = "completed";
+    await finalizeHostedShareAcceptance({
+      eventId: prisma.rows[0]?.lastEventId ?? "",
+      memberId: "member_123",
+      prisma,
+      shareId: prisma.rows[0]?.id ?? "",
+    });
 
     await expect(acceptHostedShareLink({
       member: createHostedShareMember(),
@@ -499,7 +494,7 @@ describe("hosted share service", () => {
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
   });
 
-  it("releases a processing share when the wake lifecycle is quarantined before local reconciliation catches up", async () => {
+  it("keeps a processing share pending until the runtime import callback resolves it", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma,
@@ -513,25 +508,21 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     });
 
-    prisma.outboxRows[0]!.wakeState = "queued";
-    prisma.outboxRows[0]!.wakeState = "quarantined";
-
     await expect(buildHostedSharePageData({
       authenticatedMember: createHostedShareMember(),
       prisma,
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       share: {
-        acceptedByCurrentMember: false,
+        acceptedByCurrentMember: true,
       },
-      stage: "ready",
+      stage: "processing",
     });
     expect(prisma.rows[0]).toMatchObject({
-      acceptedAt: null,
-      acceptedByMemberId: null,
+      acceptedByMemberId: "member_123",
       consumedAt: null,
       consumedByMemberId: null,
-      lastEventId: null,
+      lastEventId: expect.any(String),
     });
   });
 
@@ -575,42 +566,7 @@ describe("hosted share service", () => {
     expect(prisma.hostedSharePayloadRows).toHaveLength(0);
   });
 
-  it("releases a processing share when the wake lifecycle is replaced before local reconciliation catches up", async () => {
-    const prisma = createHostedSharePrisma();
-    const created = await createHostedShareLink({
-      prisma,
-      pack: buildPack(),
-      senderMemberId: "member_sender",
-    });
-
-    await acceptHostedShareLink({
-      member: createHostedShareMember(),
-      prisma,
-      shareCode: created.shareCode,
-    });
-
-    prisma.outboxRows[0]!.wakeState = "replaced";
-
-    await expect(buildHostedSharePageData({
-      authenticatedMember: createHostedShareMember(),
-      prisma,
-      shareCode: created.shareCode,
-    })).resolves.toMatchObject({
-      share: {
-        acceptedByCurrentMember: false,
-      },
-      stage: "ready",
-    });
-    expect(prisma.rows[0]).toMatchObject({
-      acceptedAt: null,
-      acceptedByMemberId: null,
-      consumedAt: null,
-      consumedByMemberId: null,
-      lastEventId: null,
-    });
-  });
-
-  it("releases a processing share when the canonical wake row is absent", async () => {
+  it("does not release a processing share just because the old outbox row is absent", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
       prisma,
@@ -632,16 +588,15 @@ describe("hosted share service", () => {
       shareCode: created.shareCode,
     })).resolves.toMatchObject({
       share: {
-        acceptedByCurrentMember: false,
+        acceptedByCurrentMember: true,
       },
-      stage: "ready",
+      stage: "processing",
     });
     expect(prisma.rows[0]).toMatchObject({
-      acceptedAt: null,
-      acceptedByMemberId: null,
+      acceptedByMemberId: "member_123",
       consumedAt: null,
       consumedByMemberId: null,
-      lastEventId: null,
+      lastEventId: expect.any(String),
     });
   });
 

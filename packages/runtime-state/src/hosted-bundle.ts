@@ -11,7 +11,6 @@ const MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
 const MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT = 50_000;
 const MAX_HOSTED_BUNDLE_PATH_LENGTH = 4_096;
 const MAX_HOSTED_BUNDLE_ROOT_LENGTH = 256;
-const BASE64_CANONICAL_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 
 export interface HostedBundleArtifactRef {
@@ -300,7 +299,7 @@ function decodeStrictBase64(value: string, errorMessage: string): Uint8Array {
 
   if (
     normalized.length % 4 !== 0
-    || !BASE64_CANONICAL_PATTERN.test(normalized)
+    || !isCanonicalBase64Text(normalized)
   ) {
     throw new TypeError(errorMessage);
   }
@@ -356,7 +355,7 @@ function assertCanonicalBase64(value: string, errorMessage: string): void {
 
   if (
     value.length % 4 !== 0
-    || !BASE64_CANONICAL_PATTERN.test(value)
+    || !isCanonicalBase64Text(value)
   ) {
     throw new Error(errorMessage);
   }
@@ -365,6 +364,40 @@ function assertCanonicalBase64(value: string, errorMessage: string): void {
   if (decoded.toString("base64") !== value) {
     throw new Error(errorMessage);
   }
+}
+
+function isCanonicalBase64Text(value: string): boolean {
+  let paddingStart = value.length;
+
+  if (value.endsWith("==")) {
+    paddingStart = value.length - 2;
+  } else if (value.endsWith("=")) {
+    paddingStart = value.length - 1;
+  }
+
+  for (let index = 0; index < paddingStart; index += 1) {
+    if (!isBase64DataCharacter(value.charCodeAt(index))) {
+      return false;
+    }
+  }
+
+  for (let index = paddingStart; index < value.length; index += 1) {
+    if (value[index] !== "=") {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isBase64DataCharacter(charCode: number): boolean {
+  return (
+    (charCode >= 65 && charCode <= 90)
+    || (charCode >= 97 && charCode <= 122)
+    || (charCode >= 48 && charCode <= 57)
+    || charCode === 43
+    || charCode === 47
+  );
 }
 
 export function normalizeBundlePath(value: string): string {

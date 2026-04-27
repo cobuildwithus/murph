@@ -6,8 +6,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMember: [
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
-    "hostedRunLogs HostedRunLog[]",
-    "hostedRuns HostedRun[]",
+    'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     'suspendedAt DateTime? @map("suspended_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
@@ -71,184 +70,22 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
 } as const;
 
-const HOSTED_INGRESS_RUNTIME_SCHEMA_GUARD = {
-  HostedExecutionCursor: [
-    'userId String @id @map("user_id")',
-    'nextSeq BigInt @default(1) @map("next_seq")',
-    'committedSeq BigInt @default(0) @map("committed_seq")',
-    'nextRuntimeWakeAt DateTime? @map("next_runtime_wake_at")',
-    'nextRuntimeWakeReason String? @map("next_runtime_wake_reason")',
-    'snapshotRef Json? @map("snapshot_ref")',
-    'browserVaultReplicaRef Json? @map("browser_vault_replica_ref")',
-    'version BigInt @default(0) @map("version")',
-    'createdAt DateTime @default(now()) @map("created_at")',
-    'updatedAt DateTime @updatedAt @map("updated_at")',
-  ],
-  HostedIngressEvent: [
-    "id String @id",
-    'userId String @map("user_id")',
-    'runId String? @map("run_id")',
-    'seq BigInt @map("seq")',
-    "kind String",
-    "behavior HostedIngressBehavior",
-    'state String @default("pending")',
-    'dedupeKey String? @map("dedupe_key")',
-    'coalescingKey String? @map("coalescing_key")',
-    'occurredAt DateTime @map("occurred_at")',
-    'payloadSchema String @map("payload_schema")',
-    'payloadInlineCiphertext String? @map("payload_inline_ciphertext")',
-    'payloadRef String? @map("payload_ref")',
-    'payloadBytes Int? @map("payload_bytes")',
-    'completedAt DateTime? @map("completed_at")',
-    'quarantinedAt DateTime? @map("quarantined_at")',
-    'quarantineCode String? @map("quarantine_code")',
-    'createdAt DateTime @default(now()) @map("created_at")',
-    'updatedAt DateTime @updatedAt @map("updated_at")',
-    'run HostedRun? @relation(fields: [runId], references: [id], onDelete: SetNull)',
-  ],
-  HostedIngressEventAlias: [
-    'eventId String @map("event_id")',
-    'ingressEventId String @map("ingress_event_id")',
-    'userId String @map("user_id")',
-    'replacedByEventId String? @map("replaced_by_event_id")',
-    'createdAt DateTime @default(now()) @map("created_at")',
-    'updatedAt DateTime @updatedAt @map("updated_at")',
-  ],
-  HostedIngressPayload: [
-    'ingressEventId String @id @map("ingress_event_id")',
-    'userId String @map("user_id")',
-    'payloadCiphertext String @map("payload_ciphertext")',
-    'payloadSchema String @map("payload_schema")',
-    'payloadBytes Int @map("payload_bytes")',
-    'createdAt DateTime @default(now()) @map("created_at")',
-    'updatedAt DateTime @updatedAt @map("updated_at")',
-  ],
-} as const;
-
-const HOSTED_INGRESS_RUNTIME_MIGRATION_GUARD = {
-  hosted_execution_cursor: {
-    columns: [
-      '"user_id" TEXT NOT NULL',
-      '"next_seq" BIGINT NOT NULL DEFAULT 1',
-      '"committed_seq" BIGINT NOT NULL DEFAULT 0',
-      '"next_runtime_wake_at" TIMESTAMP(3)',
-      '"next_runtime_wake_reason" TEXT',
-      '"snapshot_ref" JSONB',
-      '"browser_vault_replica_ref" JSONB',
-      '"version" BIGINT NOT NULL DEFAULT 0',
-      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
-      '"updated_at" TIMESTAMP(3) NOT NULL',
-    ],
-    constraints: [
-      'CONSTRAINT "hosted_execution_cursor_pkey" PRIMARY KEY ("user_id")',
-    ],
-    foreignKeys: [
-      'ALTER TABLE "hosted_execution_cursor" ADD CONSTRAINT "hosted_execution_cursor_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-    ],
-    indexes: [],
-  },
-  hosted_ingress_event: {
-    columns: [
-      '"id" TEXT NOT NULL',
-      '"user_id" TEXT NOT NULL',
-      '"run_id" TEXT',
-      '"seq" BIGINT NOT NULL',
-      '"kind" TEXT NOT NULL',
-      '"behavior" "HostedIngressBehavior" NOT NULL',
-      '"state" TEXT NOT NULL DEFAULT \'pending\'',
-      '"dedupe_key" TEXT',
-      '"coalescing_key" TEXT',
-      '"occurred_at" TIMESTAMP(3) NOT NULL',
-      '"payload_schema" TEXT NOT NULL',
-      '"payload_inline_ciphertext" TEXT',
-      '"payload_ref" TEXT',
-      '"payload_bytes" INTEGER',
-      '"completed_at" TIMESTAMP(3)',
-      '"quarantined_at" TIMESTAMP(3)',
-      '"quarantine_code" TEXT',
-      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
-      '"updated_at" TIMESTAMP(3) NOT NULL',
-    ],
-    constraints: [
-      'CONSTRAINT "hosted_ingress_event_pkey" PRIMARY KEY ("id")',
-    ],
-    foreignKeys: [
-      'ALTER TABLE "hosted_ingress_event" ADD CONSTRAINT "hosted_ingress_event_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_ingress_event" ADD CONSTRAINT "hosted_ingress_event_run_id_fkey" FOREIGN KEY ("run_id") REFERENCES "hosted_run"("id") ON DELETE SET NULL ON UPDATE CASCADE',
-    ],
-    indexes: [
-      'CREATE INDEX "hosted_ingress_event_user_id_seq_idx" ON "hosted_ingress_event"("user_id", "seq")',
-      'CREATE INDEX "hosted_ingress_event_user_id_state_seq_idx" ON "hosted_ingress_event"("user_id", "state", "seq")',
-      'CREATE INDEX "hosted_ingress_event_run_id_idx" ON "hosted_ingress_event"("run_id")',
-      'CREATE INDEX "hosted_ingress_event_user_id_coalescing_key_seq_idx" ON "hosted_ingress_event"("user_id", "coalescing_key", "seq")',
-      'CREATE INDEX "hosted_ingress_event_user_id_kind_seq_idx" ON "hosted_ingress_event"("user_id", "kind", "seq")',
-      'CREATE UNIQUE INDEX "hosted_ingress_event_user_id_seq_key" ON "hosted_ingress_event"("user_id", "seq")',
-      'CREATE UNIQUE INDEX "hosted_ingress_event_user_id_dedupe_key_key" ON "hosted_ingress_event"("user_id", "dedupe_key")',
-    ],
-  },
-  hosted_ingress_event_alias: {
-    columns: [
-      '"event_id" TEXT NOT NULL',
-      '"ingress_event_id" TEXT NOT NULL',
-      '"user_id" TEXT NOT NULL',
-      '"replaced_by_event_id" TEXT',
-      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
-      '"updated_at" TIMESTAMP(3) NOT NULL',
-    ],
-    constraints: [
-      'CONSTRAINT "hosted_ingress_event_alias_pkey" PRIMARY KEY ("user_id","event_id")',
-    ],
-    foreignKeys: [
-      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_replaced_by_event_id_fkey" FOREIGN KEY ("user_id", "replaced_by_event_id") REFERENCES "hosted_ingress_event_alias"("user_id", "event_id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED',
-    ],
-    indexes: [
-      'CREATE INDEX "hosted_ingress_event_alias_event_id_idx" ON "hosted_ingress_event_alias"("event_id")',
-      'CREATE INDEX "hosted_ingress_event_alias_user_id_idx" ON "hosted_ingress_event_alias"("user_id")',
-      'CREATE INDEX "hosted_ingress_event_alias_user_id_replaced_by_event_id_idx" ON "hosted_ingress_event_alias"("user_id", "replaced_by_event_id")',
-      'CREATE UNIQUE INDEX "hosted_ingress_event_alias_user_id_ingress_event_id_current_key" ON "hosted_ingress_event_alias"("user_id", "ingress_event_id") WHERE "replaced_by_event_id" IS NULL',
-      'CREATE INDEX "hosted_ingress_event_alias_ingress_event_id_idx" ON "hosted_ingress_event_alias"("ingress_event_id")',
-    ],
-  },
-  hosted_ingress_payload: {
-    columns: [
-      '"ingress_event_id" TEXT NOT NULL',
-      '"user_id" TEXT NOT NULL',
-      '"payload_ciphertext" TEXT NOT NULL',
-      '"payload_schema" TEXT NOT NULL',
-      '"payload_bytes" INTEGER NOT NULL',
-      '"created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
-      '"updated_at" TIMESTAMP(3) NOT NULL',
-    ],
-    constraints: [
-      'CONSTRAINT "hosted_ingress_payload_pkey" PRIMARY KEY ("ingress_event_id")',
-    ],
-    foreignKeys: [
-      'ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-      'ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_ingress_event_id_fkey" FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id") ON DELETE CASCADE ON UPDATE CASCADE',
-    ],
-    indexes: [
-      'CREATE INDEX "hosted_ingress_payload_user_id_idx" ON "hosted_ingress_payload"("user_id")',
-    ],
-  },
-} as const;
-
 const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsage",
   "HostedInvite",
   "HostedLinqDailyState",
-  "HostedExecutionCursor",
   "HostedMember",
   "HostedMemberBillingRef",
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
-  "HostedIngressEvent",
-  "HostedIngressEventAlias",
-  "HostedIngressPayload",
+  "HostedMailboxItem",
+  "HostedMailboxLaneCounter",
+  "HostedMailboxPayload",
+  "HostedRuntimeLog",
   "HostedVaultSyncPayload",
   "HostedVaultSyncSession",
+  "HostedWorkspace",
 ]);
 
 describe("hosted Prisma baseline migration", () => {
@@ -278,10 +115,21 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedRuntimeHardCutMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026042700_hosted_runtime_hard_cut/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
       "20260425010000_drop_revnet_issuance",
+      "20260426000000_hosted_member_pending_activation_timezone",
+      "20260426010000_hosted_mailbox_workspace_groundwork",
+      "20260426020000_hosted_mailbox_payload_hash",
+      "2026042700_hosted_runtime_hard_cut",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -315,39 +163,14 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(baselineMigrationSql).toContain('"access_token_encrypted" TEXT');
     expect(baselineMigrationSql).toContain('"refresh_token_encrypted" TEXT');
-    expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_ingress_payload"',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CREATE INDEX "hosted_ingress_payload_user_id_idx"',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_execution_cursor"',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_ingress_event"',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_ingress_event_user_id_dedupe_key_key" ON "hosted_ingress_event"("user_id", "dedupe_key")',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CREATE TABLE "hosted_ingress_event_alias"',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CONSTRAINT "hosted_ingress_event_alias_pkey" PRIMARY KEY ("user_id","event_id")',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CREATE INDEX "hosted_ingress_event_alias_event_id_idx" ON "hosted_ingress_event_alias"("event_id")',
-    );
-    expect(baselineMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_ingress_event_alias_user_id_ingress_event_id_current_key" ON "hosted_ingress_event_alias"("user_id", "ingress_event_id") WHERE "replaced_by_event_id" IS NULL',
-    );
-    expect(baselineMigrationSql).toContain(
-      'FOREIGN KEY ("ingress_event_id") REFERENCES "hosted_ingress_event"("id")',
-    );
     expect(baselineMigrationSql).toContain('"last_stripe_event_created_at" TIMESTAMP(3)');
-    expect(baselineMigrationSql).toContain(
-      'ALTER TABLE "hosted_ingress_event_alias" ADD CONSTRAINT "hosted_ingress_event_alias_user_id_replaced_by_event_id_fkey" FOREIGN KEY ("user_id", "replaced_by_event_id") REFERENCES "hosted_ingress_event_alias"("user_id", "event_id") ON DELETE NO ACTION ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED',
+    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_payload" CASCADE');
+    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event_alias" CASCADE');
+    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_ingress_event" CASCADE');
+    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_run" CASCADE');
+    expect(hostedRuntimeHardCutMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_execution_cursor" CASCADE');
+    expect(hostedRuntimeHardCutMigrationSql).toContain(
+      'ALTER TABLE "hosted_vault_sync_session" DROP COLUMN IF EXISTS "queued_ingress_event_id"',
     );
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_webhook_event"');
     expect(legacyLinqDropMigrationSql).toContain('DROP TABLE IF EXISTS "linq_recipient_binding"');
@@ -438,42 +261,6 @@ describe("hosted Prisma baseline migration", () => {
     expect(schema).not.toContain("model LinqWebhookEvent");
   });
 
-  it("keeps hosted-ingress runtime storage aligned between the Prisma schema and baseline migration", () => {
-    const schema = readFileSync(
-      new URL("../prisma/schema.prisma", import.meta.url),
-      "utf8",
-    );
-    const baselineMigrationSql = readFileSync(
-      new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
-      "utf8",
-    );
-
-    for (const [modelName, expectedFields] of Object.entries(HOSTED_INGRESS_RUNTIME_SCHEMA_GUARD)) {
-      expect(
-        readPrismaScalarFieldSpecs(schema, modelName).sort(),
-        `${modelName} changed. Review hosted-ingress runtime persistence explicitly before changing greenfield ingress/cursor storage.`,
-      ).toEqual([...expectedFields].sort());
-    }
-
-    for (const [tableName, guard] of Object.entries(HOSTED_INGRESS_RUNTIME_MIGRATION_GUARD)) {
-      expect(
-        readSqlTableColumns(baselineMigrationSql, tableName),
-        `${tableName} column set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
-      ).toEqual(new Set(guard.columns));
-      expect(
-        readSqlTableConstraints(baselineMigrationSql, tableName),
-        `${tableName} constraint set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
-      ).toEqual(new Set(guard.constraints));
-      expect(
-        readSqlTableForeignKeys(baselineMigrationSql, tableName),
-        `${tableName} foreign-key set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
-      ).toEqual(new Set(guard.foreignKeys));
-      expect(
-        readSqlTableIndexes(baselineMigrationSql, tableName),
-        `${tableName} index set changed. Review hosted-ingress greenfield runtime storage before landing schema drift.`,
-      ).toEqual(new Set(guard.indexes));
-    }
-  });
 
   it("keeps hosted-member data on the reviewed scalar schema contract", () => {
     const schema = readFileSync(

@@ -4,7 +4,7 @@ import {
   buildHostedExecutionEmailConversationMessageWake,
 } from "../src/builders.ts";
 import { resolveHostedEmailSelfAddresses } from "../src/hosted-email.ts";
-import { parseHostedIngressEnvelope } from "../src/parsers.ts";
+import { parseHostedExecutionWake } from "../src/parsers.ts";
 
 describe("hosted email wake", () => {
   it("round-trips the optional selfAddress through the wake codec", () => {
@@ -17,7 +17,7 @@ describe("hosted email wake", () => {
       userId: "user_123",
     });
 
-    const parsed = parseHostedIngressEnvelope(wake);
+    const parsed = parseHostedExecutionWake(wake);
 
     expect(parsed.kind).toBe("conversation.message");
     if (parsed.kind !== "conversation.message" || parsed.message.channel !== "email") {

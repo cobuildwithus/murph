@@ -5,7 +5,7 @@ import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   emitHostedExecutionStructuredLog,
   type HostedExecutionMemberChannels,
-  type HostedIngressEnvelope,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
   createAssistantFoodAutoLogHooks,
@@ -76,7 +76,7 @@ const DEFAULT_HOSTED_MEMBER_TIME_ZONE = "America/New_York";
 
 export async function prepareHostedWakeContext(
   vaultRoot: string,
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
   runtimeEnv: Readonly<Record<string, string>>,
   resolvedConfig: {
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
@@ -113,7 +113,7 @@ export async function prepareHostedWakeContext(
 
 export async function bootstrapHostedMemberContext(
   vaultRoot: string,
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
 ): Promise<HostedMemberBootstrapResult> {
   const requestId = wake.eventId;
   const vaultServices = createIntegratedVaultServices({
@@ -141,7 +141,7 @@ export async function bootstrapHostedMemberContext(
 
 async function bootstrapHostedAssistantRuntimeState(
   vaultRoot: string,
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
   runtimeEnv: Readonly<Record<string, string>>,
   resolvedConfig: {
     channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
@@ -218,7 +218,7 @@ function resolveHostedManagedAutoReplyChannels(resolvedConfig: {
 
 async function ensureHostedAssistantAutoReplyChannelForWake(
   vaultRoot: string,
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
   managedAutoReplyChannels: readonly HostedAssistantRuntimeManagedAutoReplyChannel[],
   assistantConfigured: boolean,
 ): Promise<HostedAssistantAutoReplyChannelState> {
@@ -359,7 +359,7 @@ export async function reconcileHostedAssistantChannelState(
     | readonly HostedAssistantRuntimeManagedAutoReplyChannel[],
   assistantConfigured: boolean,
   options?: {
-    wake?: HostedIngressEnvelope;
+    wake?: HostedExecutionWake;
   },
 ): Promise<Pick<
   HostedBootstrapResult,
@@ -402,7 +402,7 @@ export async function reconcileHostedAssistantChannelState(
 }
 
 function resolveHostedAutoReplySelfHealTarget(
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
   managedAutoReplyChannels: readonly HostedAssistantRuntimeManagedAutoReplyChannel[],
 ): HostedAssistantRuntimeManagedAutoReplyChannel | null {
   if (wake.kind !== "conversation.message") {
@@ -474,7 +474,7 @@ function resolveHostedAssistantAutoReplyState(
 }
 
 function resolveHostedWakeMemberChannels(
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
 ): HostedExecutionMemberChannels {
   if (
     wake.kind === "member.activated"
@@ -504,7 +504,7 @@ function normalizeHostedAssistantBootstrapStatus(
 
 export async function requireHostedBootstrapForWake(
   vaultRoot: string,
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
 ): Promise<void> {
   if (existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
     return;

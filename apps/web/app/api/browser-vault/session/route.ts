@@ -1,10 +1,11 @@
+import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
-import { readHostedExecutionCursorForUser } from "@/src/lib/hosted-run/store";
+import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 
 export const POST = withJsonError(async (request: Request) => {
   const auth = await requireActivePrivyMemberAuth(request);
@@ -14,14 +15,18 @@ export const POST = withJsonError(async (request: Request) => {
     "Browser vault session request browserPublicKeyJwk",
   );
   const knownDataVersion = readOptionalString(body.knownDataVersion, "Browser vault session request knownDataVersion");
-  const cursor = await readHostedExecutionCursorForUser({ userId: auth.member.id });
-  const replicaRef = cursor.browserVaultReplicaRef ?? null;
+  const workspace = await readHostedWorkspace({ userId: auth.member.id });
+  const replicaRef = parseHostedBrowserVaultReplicaRef(
+    workspace?.browserVaultReplicaRef ?? null,
+    "Hosted browser vault session workspace replica ref",
+  );
 
   if (!replicaRef) {
     return emptyBrowserVaultSession();
   }
 
-  if (cursor.snapshotRef && cursor.snapshotRef.hash !== replicaRef.sourceBundleHash) {
+  const workspaceSnapshotHash = readHostedWorkspaceSnapshotHash(workspace?.snapshotRef ?? null);
+  if (workspaceSnapshotHash && workspaceSnapshotHash !== replicaRef.sourceBundleHash) {
     return emptyBrowserVaultSession();
   }
 
@@ -89,4 +94,13 @@ function readOptionalString(value: unknown, label: string): string | null {
   }
 
   return value.length > 0 ? value : null;
+}
+
+function readHostedWorkspaceSnapshotHash(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const hash = Reflect.get(value, "hash");
+  return typeof hash === "string" ? hash : null;
 }

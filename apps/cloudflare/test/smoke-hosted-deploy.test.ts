@@ -139,12 +139,14 @@ describe("runSmokeHostedDeploy", () => {
 
       if (String(url).endsWith("/status")) {
         return new Response(JSON.stringify({
-          bundleRef: null,
           inFlight: false,
-          lastError: null,
+          lastErrorAt: null,
+          lastErrorCode: null,
           lastRunAt: "2026-03-27T00:59:00.000Z",
-          pendingIngressEventCount: 0,
+          leaseGeneration: "0",
+          mailboxLag: [],
           userId: "member_123",
+          workspace: null,
         }), { status: 200 });
       }
 
@@ -485,12 +487,14 @@ describe("runSmokeHostedDeploy", () => {
 
       if (String(url).endsWith("/status")) {
         return new Response(JSON.stringify({
-          bundleRef: null,
           inFlight: false,
-          lastError: null,
+          lastErrorAt: null,
+          lastErrorCode: null,
           lastRunAt: "2026-03-27T00:59:00.000Z",
-          pendingIngressEventCount: 0,
+          leaseGeneration: "0",
+          mailboxLag: [],
           userId: "member_123",
+          workspace: null,
         }), { status: 200 });
       }
 

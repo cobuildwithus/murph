@@ -2,11 +2,10 @@ import type { Server as HttpServer } from "node:http";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedIngressAppendResponse,
-  type HostedRunNudgeResult,
-  type HostedExecutionUserStatus,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
+import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
+import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution";
 
 import {
   DEFAULT_DATABASE_URL,
@@ -46,6 +45,7 @@ import {
   bindHostedActiveLinqHomeChat,
   seedHostedActiveLinqMember,
   seedHostedActiveMember,
+  type HostedMailboxAppendForTestResponse,
 } from "#hosted-web-testing";
 
 interface HostedActiveMemberSeedArgs {
@@ -70,10 +70,13 @@ export interface HostedLocalFullStackScenario {
     wake: HostedExecutionWake,
     userId: string,
   ): Promise<{
-    append: HostedIngressAppendResponse;
-    wakeResult: HostedRunNudgeResult;
+    append: HostedMailboxAppendForTestResponse;
+    wakeResult: HostedRunnerNudgeResult;
   }>;
-  enqueueWake(wake: HostedExecutionWake, userId: string): Promise<HostedIngressAppendResponse>;
+  enqueueWake(
+    wake: HostedExecutionWake,
+    userId: string,
+  ): Promise<HostedMailboxAppendForTestResponse>;
   harness: HostedLocalDevHarness;
   stop(): Promise<void>;
   waitForHostedCompletion(
@@ -82,8 +85,8 @@ export interface HostedLocalFullStackScenario {
       pollIntervalMs?: number;
       timeoutMs?: number;
     },
-  ): Promise<HostedExecutionUserStatus>;
-  waitForLatestPendingWake(userId: string): Promise<HostedRunNudgeResult>;
+  ): Promise<HostedRunnerStatusResponse>;
+  waitForLatestPendingWake(userId: string): Promise<HostedRunnerNudgeResult>;
   buildFailureMessage(userId: string, summaryLines: readonly string[]): Promise<string>;
   seedActiveHostedLinqMember(input: HostedActiveLinqMemberSeedArgs): Promise<void>;
   seedActiveHostedMember(input: HostedActiveMemberSeedArgs): Promise<void>;

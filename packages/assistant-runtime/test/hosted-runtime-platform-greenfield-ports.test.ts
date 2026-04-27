@@ -87,6 +87,7 @@ test("hosted runtime platform can fetch sidecar mailbox payloads through the mai
     mailboxPayloads: [payload],
   });
   const request = {
+    dedupeKey: "dedupe_synthetic_001",
     mailboxItemId: payload.mailboxItemId,
     payloadRef: `hosted-mailbox-payload:${payload.mailboxItemId}`,
     requestId: "request_synthetic_payload_001",

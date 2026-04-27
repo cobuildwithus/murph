@@ -2,14 +2,9 @@ export type {
   HostedAssistantDeliveryOutcome,
   HostedAssistantRuntimeChannelCapabilities,
   HostedAssistantRuntimeConfig,
-  HostedAssistantRuntimeCompletedJobResult,
-  HostedAssistantRuntimePreparedJobResult,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedAssistantWorkspaceRuntimeJobResult,
-  HostedAssistantRuntimeJobInput,
-  HostedAssistantRuntimeJobRequest,
-  HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeManagedAutoReplyChannel,
   HostedAssistantRuntimeResolvedConfig,
 } from "./hosted-runtime/models.ts";
@@ -26,7 +21,6 @@ export type {
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
   HostedRuntimeSharePort,
-  HostedRuntimeTurnInputPort,
   HostedRuntimeUsageExportPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeVaultSyncPort,
@@ -36,8 +30,6 @@ export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   parseHostedAssistantWorkspaceRuntimeJobRequest,
-  parseHostedAssistantRuntimeJobInput,
-  parseHostedAssistantRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
 export {
   parseHostedRuntimeBillingStripeCustomerResponse,
@@ -81,7 +73,7 @@ export type {
   HostedWorkspaceRunnerResult,
 } from "./hosted-runtime/workspace-runner.ts";
 export {
-  computeHostedRunElapsedMs,
+  computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 export {
   deleteHostedLinqMessages,

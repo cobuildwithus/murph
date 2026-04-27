@@ -50,7 +50,6 @@ export interface HostedVaultSyncSessionView {
   expiresAt: string;
   id: string;
   localManifestHash: string | null;
-  queuedIngressEventId: string | null;
   sourceVaultId: string | null;
   sourceVaultTitle: string | null;
   status: HostedVaultSyncSessionStatus;
@@ -99,7 +98,6 @@ export function projectHostedVaultSyncSessionView(input: {
     | "expiresAt"
     | "id"
     | "localManifestHash"
-    | "queuedIngressEventId"
     | "revokedAt"
     | "sourceVaultId"
     | "sourceVaultTitle"
@@ -120,7 +118,6 @@ export function projectHostedVaultSyncSessionView(input: {
     expiresAt: input.session.expiresAt.toISOString(),
     id: input.session.id,
     localManifestHash: input.session.localManifestHash,
-    queuedIngressEventId: input.session.queuedIngressEventId,
     sourceVaultId: input.session.sourceVaultId,
     sourceVaultTitle: input.session.sourceVaultTitle,
     status,

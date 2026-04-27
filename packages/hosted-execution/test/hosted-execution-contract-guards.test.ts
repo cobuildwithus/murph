@@ -9,7 +9,7 @@ import {
 import {
   isHostedConversationMessageWake,
   isHostedEmailConversationMessageWake,
-  isHostedIngressKind,
+  isHostedExecutionWakeKind,
   isHostedLinqConversationMessageWake,
   isHostedSystemWake,
   isHostedTelegramConversationMessageWake,
@@ -17,11 +17,11 @@ import {
 
 describe("hosted execution wake guards", () => {
   it("accepts canonical wake kinds only", () => {
-    expect(isHostedIngressKind("conversation.message")).toBe(true);
-    expect(isHostedIngressKind("member.activated")).toBe(true);
-    expect(isHostedIngressKind("unsupported.kind")).toBe(false);
-    expect(isHostedIngressKind("linq.message.received")).toBe(false);
-    expect(isHostedIngressKind("email.message.received")).toBe(false);
+    expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
+    expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
+    expect(isHostedExecutionWakeKind("unsupported.kind")).toBe(false);
+    expect(isHostedExecutionWakeKind("linq.message.received")).toBe(false);
+    expect(isHostedExecutionWakeKind("email.message.received")).toBe(false);
   });
 
   it("narrows hosted wakes by conversation channel versus system wake", () => {

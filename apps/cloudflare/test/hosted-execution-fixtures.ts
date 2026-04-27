@@ -1,8 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createCipheriv, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 
-import type { HostedExecutionCursorState } from "@murphai/hosted-execution/contracts";
-
 export const TEST_AUTOMATION_RECIPIENT_KEY_ID = "automation:v1";
 export const TEST_RECOVERY_RECIPIENT_KEY_ID = "recovery:v1";
 export const TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID = "tee-automation:v1";
@@ -56,16 +54,21 @@ const ENCRYPTED_SECRET_PREFIX = "hbds";
 const AES_256_GCM = "aes-256-gcm";
 const GCM_IV_BYTES = 12;
 const HOSTED_WAKE_SCOPE_SALT = Buffer.from("murph.hosted.device-sync.secret.v1", "utf8");
-const HOSTED_WAKE_FETCH_PROOF_CONTEXT = "murph.hosted-ingress.fetch-proof.v1:";
+const HOSTED_WAKE_FETCH_PROOF_CONTEXT = "murph.hosted-mailbox.fetch-proof.v1:";
 const TEST_HOSTED_WAKE_FETCH_PROOF_NOW = new Date("2026-03-26T12:00:00.000Z");
 const TEST_HOSTED_WAKE_FETCH_PROOF_TTL_SECONDS = 5 * 60;
+
+type TestHostedWakeCursorState = {
+  committedSeq: string;
+  version: string;
+};
 
 interface TestHostedWakeFetchProofClaims {
   exp: number;
   fetchedCommittedSeq: string;
   fetchedCursorVersion: string;
   iat: number;
-  kind: "hosted-ingress-fetch-proof";
+  kind: "hosted-mailbox-fetch-proof";
   userId: string;
   wakeEventId: string;
   wakeId: string;
@@ -81,7 +84,7 @@ function isTestHostedWakeFetchProofClaims(value: unknown): value is TestHostedWa
     return false;
   }
 
-  return value.kind === "hosted-ingress-fetch-proof"
+  return value.kind === "hosted-mailbox-fetch-proof"
     && typeof value.userId === "string"
     && typeof value.wakeEventId === "string"
     && typeof value.wakeId === "string"
@@ -120,7 +123,7 @@ export function createHostedExecutionTestEnv(
 }
 
 export function issueTestHostedWakeFetchProof(input: {
-  cursor: Pick<HostedExecutionCursorState, "committedSeq" | "version">;
+  cursor: TestHostedWakeCursorState;
   now?: Date;
   wake: {
     eventId: string;
@@ -136,7 +139,7 @@ export function issueTestHostedWakeFetchProof(input: {
     fetchedCommittedSeq: input.cursor.committedSeq,
     fetchedCursorVersion: input.cursor.version,
     iat: nowSeconds,
-    kind: "hosted-ingress-fetch-proof",
+    kind: "hosted-mailbox-fetch-proof",
     userId: input.wake.userId,
     wakeEventId: input.wake.eventId,
     wakeId: input.wake.id,
@@ -149,7 +152,7 @@ export function issueTestHostedWakeFetchProof(input: {
 }
 
 export function verifyTestHostedWakeFetchProof(input: {
-  cursor: Pick<HostedExecutionCursorState, "committedSeq" | "version">;
+  cursor: TestHostedWakeCursorState;
   proof: string;
   wake: {
     eventId: string;
@@ -194,8 +197,8 @@ export function verifyTestHostedWakeFetchProof(input: {
     && claims.fetchedCursorVersion === input.cursor.version;
 }
 
-export function encryptTestHostedIngressPayload(input: {
-  field?: "hosted-ingress-inline-payload" | "hosted-ingress-ref-payload";
+export function encryptTestHostedMailboxPayload(input: {
+  field?: "hosted-mailbox-inline-payload" | "hosted-mailbox-ref-payload";
   userId: string;
   value: unknown;
 }): { payloadBytes: number; payloadCiphertext: string } {
@@ -205,12 +208,12 @@ export function encryptTestHostedIngressPayload(input: {
     AES_256_GCM,
     deriveHostedSecretScopeKey(
       TEST_HOSTED_WAKE_ENCRYPTION_KEY_BYTES,
-      `hosted-ingress-payload:${input.field ?? "hosted-ingress-ref-payload"}`,
+      `hosted-mailbox-payload:${input.field ?? "hosted-mailbox-ref-payload"}`,
     ),
     iv,
   );
   cipher.setAAD(buildHostedWakeFieldAad({
-    field: input.field ?? "hosted-ingress-ref-payload",
+    field: input.field ?? "hosted-mailbox-ref-payload",
     userId: input.userId,
   }));
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -235,7 +238,7 @@ function buildHostedWakeFieldAad(input: {
   return Buffer.from(JSON.stringify({
     field: input.field,
     memberId: input.userId,
-    purpose: "hosted-ingress-payload",
+    purpose: "hosted-mailbox-payload",
   }), "utf8");
 }
 

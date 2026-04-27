@@ -120,7 +120,7 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | Path                         | Responsibility                                                                                                                             |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/contracts`         | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts.                                                             |
-| `packages/hosted-execution`  | Shared hosted ingress/run/cursor/status contracts plus narrow control/auth helpers for the hosted `apps/web` control plane and Cloudflare worker. |
+| `packages/hosted-execution`  | Shared hosted mailbox, workspace checkpoint, runtime log/status, nudge, and auth contracts for the hosted `apps/web` control plane and Cloudflare worker. |
 | `packages/runtime-state`     | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers.       |
 | `packages/core`              | Workspace-private canonical mutation owner. No other package may write canonical vault data directly.                                      |
 | `packages/importers`         | Workspace-private external adapters that normalize inputs and delegate writes to `core`.                                                   |
@@ -139,8 +139,8 @@ Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-pl
 | `packages/assistantd`        | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane.                                          |
 | `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
 | `packages/openclaw-plugin`   | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault.             |
-| `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and the canonical Postgres-owned ingress/run/cursor lifecycle (`HostedIngressEvent`, `HostedRun`, `HostedExecutionCursor`). |
-| `apps/cloudflare`            | Hosted execution plane for authenticated run/control requests, per-user coordination, encrypted hosted bundles, and container-backed runs. |
+| `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, encrypted mailbox intake, workspace checkpoints, and hosted runtime status/logs. |
+| `apps/cloudflare`            | Thin hosted runner for authenticated nudges/status, per-user coordination, encrypted hosted bundles, and container-backed workspace runtime passes. |
 | `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |
 
 ## Local and hosted surfaces
@@ -155,12 +155,12 @@ Murph now has three distinct runtime tiers:
 
 ### 2. Hosted control plane
 
-- `apps/web` owns hosted onboarding, billing, OAuth callbacks, webhook intake, device-sync control-plane metadata, sparse routing state, and the canonical Postgres-owned ingress/run/cursor lifecycle (`HostedIngressEvent`, `HostedRun`, `HostedExecutionCursor`)
+- `apps/web` owns hosted onboarding, billing, OAuth callbacks, webhook intake, device-sync control-plane metadata, sparse routing state, encrypted hosted mailbox rows, workspace checkpoint metadata, and hosted runtime status/logs
 - it does not own canonical health data
 
 ### 3. Hosted execution plane
 
-- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runs, keeps only DO-local runtime coordination state, executes one-shot inbox/parser/assistant/device-sync/share-import work through the workspace-private `@murphai/assistant-runtime` package, and advances progress only through the web-owned hosted-run and cursor commit/finalize path
+- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runtime passes, keeps only DO-local runner coordination state, and invokes the workspace-private `@murphai/assistant-runtime` package against web-owned mailbox/checkpoint/log ports
 - it is intentionally separate from the public hosted web app
 
 ## CLI surface

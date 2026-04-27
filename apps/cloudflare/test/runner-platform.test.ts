@@ -66,20 +66,20 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await expect(
       platform.effectsPort.readRawEmailMessage("raw_123"),
-    ).rejects.toThrow("Hosted raw email read raw_123 request failed.");
+    ).rejects.toThrow("Hosted raw email read request failed.");
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "assistant-delivery",
         details: {
-          description: "Hosted raw email read raw_123",
+          description: "Hosted raw email read",
           method: "GET",
           path: "/messages/raw_123",
           responseOrigin: "http://results.worker",
         },
         level: "warn",
         message: "Hosted runtime upstream request failed.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: null,
       }),
     );
@@ -120,7 +120,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
         level: "warn",
         message: "Hosted runtime control-plane response returned non-OK.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: "member_123",
       }),
     );
@@ -141,24 +141,24 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await expect(
       platform.effectsPort.readRawEmailMessage("raw_123"),
-    ).rejects.toThrow("Hosted raw email read raw_123 failed with HTTP 500.");
+    ).rejects.toThrow("Hosted raw email read failed with HTTP 500.");
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "assistant-delivery",
         details: {
-          description: "Hosted raw email read raw_123",
+          description: "Hosted raw email read",
           responseStatus: 500,
         },
         level: "warn",
         message: "Hosted runtime upstream response returned non-OK.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: null,
       }),
     );
   });
 
-  it("routes raw email reads through the Cloudflare internal effects port and attaches the per-run proxy token", async () => {
+  it("routes raw email reads through the Cloudflare internal effects port and attaches the invocation proxy token", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -177,59 +177,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("GET");
   });
 
-  it("routes hosted turn-input refreshes through the Cloudflare internal effects port", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      events: [
-        {
-          ingressEventId: "wake_11",
-          seq: "11",
-          wake: {
-            eventId: "evt_timer",
-            kind: "runtime.timer",
-            occurredAt: "2026-04-23T00:00:00.000Z",
-            triggerKind: "runtime_timer",
-            userId: "member_123",
-          },
-        },
-      ],
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      hostedRunId: "run_123",
-      hostedRunToken: "run-token",
-      internalWorkerProxyToken: "runner-proxy-token",
-    });
-
-    const result = await platform.turnInputPort!.refresh({
-      afterSeq: "10",
-      phase: "before_delivery",
-      requestId: "req_123",
-    });
-
-    expect(result.events).toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "turn-input fetch");
-    expect(request.url).toBe("http://results.worker/turn-input/refresh");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.method).toBe("POST");
-    await expect(request.json()).resolves.toEqual({
-      afterSeq: "10",
-      phase: "before_delivery",
-      requestId: "req_123",
-      runId: "run_123",
-      runToken: "run-token",
-    });
-  });
-
-  it("fails closed before issuing internal-host requests when the per-run proxy token is missing", async () => {
+  it("fails closed before issuing internal-host requests when the invocation proxy token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -239,7 +187,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(
       platform.effectsPort.readRawEmailMessage("raw_123"),
     ).rejects.toThrow(
-      "Hosted raw email read raw_123 request failed.",
+      "Hosted raw email read request failed.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -743,6 +691,55 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      checkpointed: true,
+      workspace: {
+        checkpointedAt: "2026-04-26T00:00:04.000Z",
+        createdAt: "2026-04-26T00:00:00.000Z",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: {},
+        snapshotRef: null,
+        updatedAt: "2026-04-26T00:00:04.000Z",
+        userId: "member_123",
+        version: "5",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "3",
+        }),
+      },
+    });
+
+    const result = await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "idle",
+      redactedStatus: {},
+      snapshotRef: null,
+    });
+
+    expect(result.checkpointed).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("reads workspace state through the web callback route", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       fetchedAt: "2026-04-26T00:00:05.000Z",
@@ -1143,7 +1140,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await expect(
       platform.effectsPort.readRawEmailMessage("raw_123"),
-    ).rejects.toThrow(/Hosted raw email read raw_123 failed with HTTP 503/u);
+    ).rejects.toThrow(/Hosted raw email read failed with HTTP 503/u);
 
     await expect(
       platform.effectsPort.readRawEmailMessage("raw_123"),

@@ -1,6 +1,6 @@
 import {
-  nudgeHostedRunUserBestEffort,
-} from "../hosted-ingress/control";
+  nudgeHostedRunnerUserBestEffort,
+} from "../hosted-runner/control";
 import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
@@ -78,7 +78,7 @@ async function handoffHostedExecutionWebhookWake(input: {
       userId: input.userId,
     },
   );
-  await nudgeHostedRunUserBestEffort({
+  await nudgeHostedRunnerUserBestEffort({
     context: `webhook:${input.source}`,
     userId: input.userId,
   });

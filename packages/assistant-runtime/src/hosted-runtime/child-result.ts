@@ -3,7 +3,7 @@ import {
 } from "@murphai/operator-config/hosted-assistant-config";
 
 import type {
-  HostedAssistantRuntimeJobResult,
+  HostedAssistantWorkspaceRuntimeJobResult,
 } from "./models.ts";
 
 export interface HostedAssistantRuntimeChildResult {
@@ -15,7 +15,7 @@ export interface HostedAssistantRuntimeChildResult {
     name?: string | null;
     stack?: string | null;
   };
-  result?: HostedAssistantRuntimeJobResult;
+  result?: HostedAssistantWorkspaceRuntimeJobResult;
 }
 
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";

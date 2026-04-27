@@ -1,6 +1,4 @@
-import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
-import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
-import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node/hosted-bundle-codec";
+import type { HostedWorkspaceRunResult } from "@murphai/hosted-execution";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,7 +25,6 @@ import {
   RunnerContainer,
 } from "../src/runner-container.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.ts";
-import { HostedBundleArchiveValidationError } from "../src/hosted-bundle-validation.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -70,6 +67,7 @@ describe("RunnerContainer", () => {
 
     const firstResponse = await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest(),
       },
       timeoutMs: 60_000,
@@ -77,6 +75,7 @@ describe("RunnerContainer", () => {
     });
     const secondResponse = await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_second"),
       },
       timeoutMs: 60_000,
@@ -136,10 +135,10 @@ describe("RunnerContainer", () => {
         expect(value).toMatchObject({
           internalWorkerProxyToken: expect.any(String),
           method: "internalWorkerProxy",
-          runAttempt: 1,
-          runId: "run_123",
           userId: "member_123",
         });
+        expect(value).not.toHaveProperty("runAttempt");
+        expect(value).not.toHaveProperty("runId");
       }
     }
   });
@@ -215,7 +214,7 @@ describe("RunnerContainer", () => {
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://host.docker.internal:4010/.well-known/jwks",
         HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
         HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "cobuildwithus",
-        HOSTED_WAKE_ENCRYPTION_KEY: "hosted-ingress-key",
+        HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-key",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "web:v3",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
@@ -224,6 +223,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_local_proxy_upstream"),
       },
       timeoutMs: 60_000,
@@ -259,6 +259,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_procfs_supervisor_env"),
       },
       timeoutMs: 60_000,
@@ -287,6 +288,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_local_bridge_forwarding"),
       },
       timeoutMs: 60_000,
@@ -307,7 +309,7 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("accepts only the active run-bound proxy token and expires it after completion", async () => {
+  it("accepts only the active workspace proxy token and expires it after completion", async () => {
     let activeToken: string | null = null;
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
@@ -330,16 +332,22 @@ describe("RunnerContainer", () => {
             : null;
         expect(activeToken).toBeTruthy();
         expect(await container.ownsInternalWorkerProxyToken({
-          attempt: 1,
-          runId: "run_123",
+          attemptId: "attempt_evt_active_proxy_token",
+          leaseGeneration: "11",
           token: activeToken ?? "",
           userId: "member_123",
         })).toBe(true);
         expect(await container.ownsInternalWorkerProxyToken({
-          attempt: 1,
-          runId: "run_123",
+          attemptId: "attempt_evt_active_proxy_token",
+          leaseGeneration: "11",
           token: activeToken ?? "",
           userId: "member_other",
+        })).toBe(false);
+        expect(await container.ownsInternalWorkerProxyToken({
+          attemptId: "stale_attempt",
+          leaseGeneration: "11",
+          token: activeToken ?? "",
+          userId: "member_123",
         })).toBe(false);
 
         return new Response(JSON.stringify(createRunnerResult()), {
@@ -353,6 +361,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_active_proxy_token"),
       },
       timeoutMs: 60_000,
@@ -361,8 +370,6 @@ describe("RunnerContainer", () => {
 
     expect(activeToken).toBeTruthy();
     expect(await container.ownsInternalWorkerProxyToken({
-      attempt: 1,
-      runId: "run_123",
       token: activeToken ?? "",
       userId: "member_123",
     })).toBe(false);
@@ -380,6 +387,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_retry_outbound_handlers"),
       },
       timeoutMs: 60_000,
@@ -402,6 +410,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_loopback_proxy"),
       },
       timeoutMs: 60_000,
@@ -421,6 +430,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest(),
       },
       timeoutMs: 60_000,
@@ -437,6 +447,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_after_alarm"),
       },
       timeoutMs: 60_000,
@@ -486,6 +497,7 @@ describe("RunnerContainer", () => {
 
       const firstInvoke = container.invoke({
         job: {
+          kind: "workspace-run",
           request: createRunnerRequest("evt_teardown_failure_first"),
         },
         timeoutMs: 30_000,
@@ -496,6 +508,7 @@ describe("RunnerContainer", () => {
 
       await expect(container.invoke({
         job: {
+          kind: "workspace-run",
           request: createRunnerRequest("evt_teardown_failure_second"),
         },
         timeoutMs: 30_000,
@@ -536,6 +549,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest(),
       },
       timeoutMs: 60_000,
@@ -577,6 +591,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_restart_ambiguous_shell"),
       },
       timeoutMs: 30_000,
@@ -623,6 +638,7 @@ describe("RunnerContainer", () => {
 
       await container.invoke({
         job: {
+          kind: "workspace-run",
           request: createRunnerRequest("evt_restart_after_failed_health"),
         },
         timeoutMs: 5_000,
@@ -655,6 +671,7 @@ describe("RunnerContainer", () => {
 
     const response = await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_short_budget"),
       },
       timeoutMs: 1_000,
@@ -682,18 +699,13 @@ describe("RunnerContainer", () => {
     expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeGreaterThan(0);
   });
 
-  it("emits claim-relative readiness timing in container logs", async () => {
+  it("emits workspace-run readiness timing in container logs", async () => {
     const { container } = createContainerDouble();
 
     await container.invoke({
       job: {
-        request: createRunnerRequest("evt_run_elapsed", {
-          run: {
-            attempt: 1,
-            runId: "run_123",
-            startedAt: "2026-03-27T00:00:00.000Z",
-          },
-        }),
+        kind: "workspace-run",
+        request: createRunnerRequest("evt_workspace_ready"),
       },
       timeoutMs: 60_000,
       userId: "member_123",
@@ -704,7 +716,6 @@ describe("RunnerContainer", () => {
         component: "container",
         details: expect.objectContaining({
           readinessLatencyMs: expect.any(Number),
-          runElapsedMs: expect.any(Number),
         }),
         message: "Hosted execution container is ready.",
         phase: "container.ready",
@@ -739,6 +750,7 @@ describe("RunnerContainer", () => {
 
     const thrown = await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_config_error"),
       },
       timeoutMs: 10_000,
@@ -784,6 +796,7 @@ describe("RunnerContainer", () => {
 
     const thrown = await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_invalid_request_diagnostics"),
       },
       timeoutMs: 10_000,
@@ -834,6 +847,7 @@ describe("RunnerContainer", () => {
 
     const thrown = await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_bundle_validation_diagnostics"),
       },
       timeoutMs: 10_000,
@@ -853,125 +867,13 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("rejects HTTP 200 runner responses with invalid output bundle archives", async () => {
-    const invalidBundle = encodeHostedBundleBase64(
-      Uint8Array.from(Buffer.from("not-a-hosted-bundle")),
-    );
-    if (!invalidBundle) {
-      throw new Error("Expected invalid bundle bytes to encode.");
-    }
-
-    const { container, destroy } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        return new Response(JSON.stringify({
-          ...createRunnerResult(),
-          result: {
-            ...createRunnerResult().result,
-            bundle: invalidBundle,
-          },
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }),
-    });
-
-    const thrown = await container.invoke({
-      job: {
-        request: createRunnerRequest("evt_invalid_output_bundle"),
-      },
-      timeoutMs: 10_000,
-      userId: "member_123",
-    }).catch((error: unknown) => error);
-
-    expect(thrown).toBeInstanceOf(HostedBundleArchiveValidationError);
-    expect(thrown).toMatchObject({
-      code: "bundle_archive_validation_error",
-      details: {
-        bundleArchiveOperation: "runner-output",
-        bundleRefHash: null,
-        bundleRefKey: null,
-        bundleRefPresent: false,
-        bundleRefSize: null,
-      },
-      message: "Hosted bundle archive is invalid.",
-      operation: "runner-output",
-      refKey: null,
-    });
-    expect(String(thrown)).not.toContain(invalidBundle);
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects HTTP 200 runner responses with invalid output bundle payloads", async () => {
-    const { container, destroy } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({ ok: true }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        return new Response(JSON.stringify({
-          ...createRunnerResult(),
-          result: {
-            ...createRunnerResult().result,
-            bundle: "not-base64!",
-          },
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }),
-    });
-
-    const thrown = await container.invoke({
-      job: {
-        request: createRunnerRequest("evt_invalid_output_bundle_payload"),
-      },
-      timeoutMs: 10_000,
-      userId: "member_123",
-    }).catch((error: unknown) => error);
-
-    expect(thrown).toBeInstanceOf(HostedBundleArchiveValidationError);
-    expect(thrown).toMatchObject({
-      code: "bundle_archive_validation_error",
-      details: {
-        bundleArchiveOperation: "runner-output",
-        bundleRefHash: null,
-        bundleRefKey: null,
-        bundleRefPresent: false,
-        bundleRefSize: null,
-      },
-      message: "Hosted bundle archive payload is invalid.",
-      operation: "runner-output",
-      refKey: null,
-    });
-    expect(String(thrown)).not.toContain("not-base64!");
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps the canonical internal HTTP run route disabled", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
     const response = await container.fetch(new Request("https://runner.internal/internal/run", {
       body: JSON.stringify({
         job: {
+          kind: "workspace-run",
           request: createRunnerRequest("evt_no_token"),
         },
         timeoutMs: 30_000,
@@ -1019,7 +921,7 @@ describe("RunnerContainer", () => {
       job: "not-an-object" as never,
       timeoutMs: 0 as never,
       userId: "member_123",
-    })).rejects.toThrow("Hosted assistant runtime job input must be an object.");
+    })).rejects.toThrow("Hosted execution runner job input must be an object.");
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
@@ -1251,6 +1153,7 @@ describe("RunnerContainer", () => {
     try {
       const invokeResultPromise = container.invoke({
         job: {
+          kind: "workspace-run",
           request: createRunnerRequest("evt_destroy_failure"),
         },
         timeoutMs: 30_000,
@@ -1316,6 +1219,7 @@ describe("RunnerContainer", () => {
 
       const invokePromise = container.invoke({
         job: {
+          kind: "workspace-run",
           request: createRunnerRequest("evt_after_destroy_race"),
         },
         timeoutMs: 30_000,
@@ -1359,6 +1263,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_bad_ready_timeout"),
       },
       timeoutMs: 60_000,
@@ -1381,6 +1286,7 @@ describe("RunnerContainer", () => {
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_ready_timeout"),
       },
       timeoutMs: 60_000,
@@ -1429,6 +1335,7 @@ describe("RunnerContainer", () => {
 
     await invokeHostedExecutionContainerRunner({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_namespace"),
       },
       runnerContainerNamespace: { getByName },
@@ -1444,6 +1351,7 @@ describe("RunnerContainer", () => {
     const body = requireObject(firstCall.at(0), "Runner container invoke payload");
     expect(body).toMatchObject({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_namespace"),
       },
       timeoutMs: 45_000,
@@ -1471,12 +1379,13 @@ describe("RunnerContainer", () => {
 
     await expect(invokeHostedExecutionContainerRunner({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_namespace_mismatch"),
       },
       runnerContainerNamespace: { getByName },
       timeoutMs: 45_000,
       userId: "member_other",
-    })).rejects.toThrow("route userId must match job runDrain.userId");
+    })).rejects.toThrow("route userId must match workspace job userId");
 
     expect(getByName).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
@@ -1487,70 +1396,183 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: {
+        kind: "workspace-run",
         request: createRunnerRequest("evt_invoke_mismatch"),
       },
       timeoutMs: 45_000,
       userId: "member_other",
-    })).rejects.toThrow("invoke userId must match job runDrain.userId");
+    })).rejects.toThrow("invoke userId must match workspace job userId");
 
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("rejects runner jobs whose run id does not match the drain run id", async () => {
+  it("rejects workspace-run route mismatches against the workspace job userId", async () => {
+    const invoke = vi.fn(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
+    }));
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
+      async destroyInstance() {},
+      invoke,
+      async ownsInternalWorkerProxyToken() {
+        return false;
+      },
+      async smokeHealth() {
+        return {
+          ok: true,
+          runnerBundle: null,
+          service: "cloudflare-hosted-runner-node",
+          status: 200,
+        };
+      },
+    }));
+
+    await expect(invokeHostedExecutionContainerRunner({
+      job: createWorkspaceRunnerJob("member_workspace_job"),
+      runnerContainerNamespace: { getByName },
+      timeoutMs: 45_000,
+      userId: "member_other",
+    })).rejects.toThrow("route userId must match workspace job userId");
+
+    expect(getByName).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("forwards workspace-run jobs without run-drain fields to the container shell", async () => {
+    const { container, containerFetch, setOutboundByHosts } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          nextWakeAt: null,
+          redactedStatus: {
+            importedCount: 0,
+          },
+          status: "idle",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }),
+    });
+
+    await expect(container.invoke({
+      job: createWorkspaceRunnerJob("member_workspace_container"),
+      timeoutMs: 45_000,
+      userId: "member_workspace_container",
+    })).resolves.toEqual({
+      nextWakeAt: null,
+      redactedStatus: {
+        importedCount: 0,
+      },
+      status: "idle",
+    });
+
+    const executeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/internal/run")
+    );
+    expect(executeCall).toBeTruthy();
+    if (!executeCall?.[1]?.body || typeof executeCall[1].body !== "string") {
+      throw new Error("Expected the container double to forward a JSON request body.");
+    }
+    const forwarded = JSON.parse(executeCall[1].body) as Record<string, unknown>;
+    expect(forwarded).toMatchObject({
+      internalWorkerProxyToken: expect.any(String),
+      job: {
+        kind: "workspace-run",
+        request: {
+          attemptId: "attempt_member_workspace_container",
+          leaseGeneration: "11",
+          reason: "nudge",
+          userId: "member_workspace_container",
+          workspaceVersion: "6",
+        },
+      },
+    });
+    const forwardedJob = requireObject(
+      requireObject(forwarded.job, "forwarded.job").request,
+      "forwarded.job.request",
+    );
+    expect(forwardedJob).not.toHaveProperty("run");
+    expect(forwardedJob).not.toHaveProperty("runDrain");
+    expect(forwardedJob).not.toHaveProperty("runToken");
+
+    const outboundAssignments = setOutboundByHosts.mock.calls
+      .map(([mapping]) => readRunnerOutboundAssignments(mapping as Record<string, unknown>))
+      .filter((assignment) => Object.keys(assignment).length > 0);
+    expect(outboundAssignments).toHaveLength(1);
+    for (const value of Object.values(outboundAssignments[0] ?? {})) {
+      expect(value).toMatchObject({
+        internalWorkerProxyToken: expect.any(String),
+        method: "internalWorkerProxy",
+        userId: "member_workspace_container",
+      });
+      expect(value).not.toHaveProperty("runAttempt");
+      expect(value).not.toHaveProperty("runId");
+    }
+  });
+
+  it("rejects explicit run-drain runner jobs at the container boundary", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
     await expect(container.invoke({
       job: {
-        request: {
-          ...createRunnerRequest("evt_run_id_mismatch"),
-          run: {
-            attempt: 1,
-            runId: "run_other",
-            startedAt: "2026-03-27T00:00:00.000Z",
-          },
-        },
+        // @ts-expect-error Deliberately exercising the runtime parse boundary.
+        kind: "run-drain",
+        request: createRunnerRequest("evt_run_drain_rejected"),
       },
       timeoutMs: 45_000,
       userId: "member_123",
-    })).rejects.toThrow("run.runId must match runDrain.runId");
+    })).rejects.toThrow("kind must be workspace-run");
 
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("preserves extended runner request fields when the container is invoked over durable-object RPC", async () => {
+  it("rejects legacy run fields on workspace-run requests", async () => {
+    const { container, startAndWaitForPorts } = createContainerDouble();
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-run",
+        request: {
+          ...createRunnerRequest("evt_legacy_fields_rejected"),
+          // @ts-expect-error Deliberately exercising the runtime parse boundary.
+          run: {
+            attempt: 1,
+            runId: "run_legacy",
+            startedAt: "2026-03-27T00:00:00.000Z",
+          },
+          runDrain: {},
+        },
+      },
+      timeoutMs: 45_000,
+      userId: "member_123",
+    })).rejects.toThrow("request.run is no longer supported");
+
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("preserves workspace-run request fields when the container is invoked over durable-object RPC", async () => {
     const { container, containerFetch } = createContainerDouble();
     const extendedRequest = {
       ...createRunnerRequest("evt_extended"),
-      commit: {
-        bundleRef: null,
-      },
-      runDrain: {
-        acquiredAt: "2026-03-27T00:00:00.000Z",
-        events: [],
-        inputCommittedSeq: "1",
-        inputCursorVersion: "1",
-        committedResult: {
-          assistantDeliveryEffects: [],
-          bundle: null,
-          result: {
-            eventsHandled: 1,
-            summary: "already committed",
-          },
-        },
-        resumeFinalize: true,
-        runId: "run_123",
-        triggerKind: "runtime_timer" as const,
-        userId: "member_123",
-      },
-      run: {
-        attempt: 2,
-        runId: "run_123",
-        startedAt: "2026-03-27T00:00:00.000Z",
+      budget: {
+        maxMailboxItems: 3,
       },
     };
 
     await container.invoke({
       job: {
+        kind: "workspace-run",
         request: extendedRequest,
         runtime: {
           userEnv: {
@@ -1574,22 +1596,16 @@ describe("RunnerContainer", () => {
       internalWorkerProxyToken: expect.any(String),
       localInternalProxyBaseUrl: null,
       job: {
+        kind: "workspace-run",
         request: {
-          runDrain: {
-            acquiredAt: "2026-03-27T00:00:00.000Z",
-            events: [],
-            inputCommittedSeq: "1",
-            inputCursorVersion: "1",
-            resumeFinalize: true,
-            runId: "run_123",
-            triggerKind: "runtime_timer",
-            userId: "member_123",
+          attemptId: "attempt_evt_extended",
+          budget: {
+            maxMailboxItems: 3,
           },
-          run: {
-            attempt: 2,
-            runId: "run_123",
-            startedAt: "2026-03-27T00:00:00.000Z",
-          },
+          leaseGeneration: "11",
+          reason: "nudge",
+          userId: "member_123",
+          workspaceVersion: "6",
         },
         runtime: {
           userEnv: {
@@ -1721,8 +1737,6 @@ function readRunnerOutboundAssignments(
   {
     internalWorkerProxyToken: string | null;
     method: string | null;
-    runAttempt: number | null;
-    runId: string | null;
     userId: string | null;
   }
 > {
@@ -1733,8 +1747,6 @@ function readRunnerOutboundAssignments(
           method?: unknown;
           params?: {
             internalWorkerProxyToken?: unknown;
-            runAttempt?: unknown;
-            runId?: unknown;
             userId?: unknown;
           };
         }) : undefined;
@@ -1747,14 +1759,6 @@ function readRunnerOutboundAssignments(
               ? assignment.params.internalWorkerProxyToken
               : null,
           method: typeof assignment?.method === "string" ? assignment.method : null,
-          runAttempt:
-            typeof assignment?.params?.runAttempt === "number"
-              ? assignment.params.runAttempt
-              : null,
-          runId:
-            typeof assignment?.params?.runId === "string"
-              ? assignment.params.runId
-              : null,
           userId: typeof assignment?.params?.userId === "string" ? assignment.params.userId : null,
         },
       ];
@@ -1762,47 +1766,33 @@ function readRunnerOutboundAssignments(
   );
 }
 
-function createRunnerRequest(
-  eventId = "evt_123",
-  input: {
-    run?: {
-      attempt: number;
-      runId: string;
-      startedAt: string;
-    };
-  } = {},
-) {
-  const wake = buildHostedExecutionMemberActivatedWake({
-    eventId,
-    memberChannels: {
-      email: false,
-      linq: false,
-      telegram: false,
-    },
-    memberId: "member_123",
-    occurredAt: "2026-03-27T00:00:00.000Z",
-  });
+function createRunnerRequest(eventId = "evt_123") {
   return {
-    bundle: null,
-    run: input.run ?? {
-      attempt: 1,
-      runId: "run_123",
-      startedAt: "2026-03-27T00:00:00.000Z",
+    attemptId: `attempt_${eventId}`,
+    leaseGeneration: "11",
+    reason: "nudge" as const,
+    userId: "member_123",
+    workspaceVersion: "6",
+  };
+}
+
+function createWorkspaceRunnerJob(userId: string) {
+  return {
+    kind: "workspace-run" as const,
+    request: {
+      attemptId: `attempt_${userId}`,
+      budget: {
+        maxMailboxItems: 5,
+      },
+      leaseGeneration: "11",
+      reason: "nudge" as const,
+      userId,
+      workspaceVersion: "6",
     },
-    runDrain: {
-      acquiredAt: "2026-03-27T00:00:00.000Z",
-      events: [
-        {
-          seq: "1",
-          wake,
-          ingressEventId: `wake_${eventId}`,
-        },
-      ],
-      inputCommittedSeq: "1",
-      inputCursorVersion: "1",
-      runId: input.run?.runId ?? "run_123",
-      triggerKind: "external_ingress" as const,
-      userId: "member_123",
+    runtime: {
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-test",
+      },
     },
   };
 }
@@ -1860,15 +1850,12 @@ async function readParentProcEnvironmentFromChild(
   return Buffer.concat(stdoutChunks).toString("utf8");
 }
 
-function createRunnerResult(): HostedAssistantRuntimeJobResult {
+function createRunnerResult(): HostedWorkspaceRunResult {
   return {
-    finalGatewayProjectionSnapshot: null,
-    result: {
-      bundle: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
+    nextWakeAt: null,
+    redactedStatus: {
+      importedCount: 0,
     },
+    status: "idle",
   };
 }

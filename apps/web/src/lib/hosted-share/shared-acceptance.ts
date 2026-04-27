@@ -3,15 +3,16 @@ import type {
   Prisma,
 } from "@prisma/client";
 
-import {
-  readHostedIngressLifecycleState,
-  type HostedIngressLifecycleState,
-} from "../hosted-ingress/lifecycle";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import { hashHostedShareCode, normalizeOptionalString } from "./shared-identifiers";
 import { deleteHostedSharePayload } from "./shared-payload";
 import type { HostedSharePrismaClient } from "./types";
+
+export type HostedShareAcceptanceLifecycleState =
+  | "completed"
+  | "queued"
+  | "quarantined";
 
 export function findHostedShareLinkByCode(
   shareCode: string,
@@ -117,12 +118,33 @@ export async function readHostedShareWakeLifecycleState(input: {
   eventId: string;
   memberId: string;
   prisma: HostedSharePrismaClient;
-}): Promise<HostedIngressLifecycleState | null> {
-  return readHostedIngressLifecycleState({
-    eventId: input.eventId,
-    prisma: input.prisma,
-    userId: input.memberId,
+  shareId: string;
+}): Promise<HostedShareAcceptanceLifecycleState | null> {
+  const record = await input.prisma.hostedShareLink.findUnique({
+    select: {
+      acceptedByMemberId: true,
+      consumedAt: true,
+      consumedByMemberId: true,
+      lastEventId: true,
+    },
+    where: {
+      id: input.shareId,
+    },
   });
+
+  if (
+    !record
+    || record.acceptedByMemberId !== input.memberId
+    || record.lastEventId !== input.eventId
+  ) {
+    return null;
+  }
+
+  if (record.consumedAt && record.consumedByMemberId === input.memberId) {
+    return "completed";
+  }
+
+  return "queued";
 }
 
 export async function reconcileHostedShareAcceptanceLifecycle(input: {
@@ -130,11 +152,12 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
   memberId: string;
   prisma: HostedSharePrismaClient;
   shareId: string;
-}): Promise<HostedIngressLifecycleState | null> {
+}): Promise<HostedShareAcceptanceLifecycleState | null> {
   const state = await readHostedShareWakeLifecycleState({
     eventId: input.eventId,
     memberId: input.memberId,
     prisma: input.prisma,
+    shareId: input.shareId,
   });
 
   if (state === "completed") {
@@ -144,7 +167,7 @@ export async function reconcileHostedShareAcceptanceLifecycle(input: {
       prisma: input.prisma,
       shareId: input.shareId,
     });
-  } else if (state === "quarantined" || state === "replaced" || state === null) {
+  } else if (state === "quarantined") {
     await releaseHostedShareAcceptance({
       eventId: input.eventId,
       memberId: input.memberId,

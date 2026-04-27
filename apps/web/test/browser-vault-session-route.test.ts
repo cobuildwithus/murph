@@ -6,7 +6,7 @@ import { createJsonPostRequest } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
-  readHostedExecutionCursorForUser: vi.fn(),
+  readHostedWorkspace: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
 }));
 
@@ -19,8 +19,8 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
 
-vi.mock("@/src/lib/hosted-run/store", () => ({
-  readHostedExecutionCursorForUser: mocks.readHostedExecutionCursorForUser,
+vi.mock("@/src/lib/hosted-workspace/store", () => ({
+  readHostedWorkspace: mocks.readHostedWorkspace,
 }));
 
 type BrowserVaultSessionRouteModule = typeof import("../app/api/browser-vault/session/route");
@@ -39,7 +39,7 @@ describe("browser vault session route", () => {
         id: "member_123",
       },
     });
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: null,
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -53,7 +53,7 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("returns an empty session when the cursor does not publish a replica ref", async () => {
+  it("returns an empty session when the workspace does not publish a replica ref", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
@@ -78,7 +78,7 @@ describe("browser vault session route", () => {
 
   it("forwards the authenticated member, known version, and replica ref to the hosted control client", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -122,7 +122,7 @@ describe("browser vault session route", () => {
   it("returns not_modified when the browser already has the current replica", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: replicaRef,
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -160,10 +160,10 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("returns empty when the cursor snapshot ref no longer matches the replica source bundle hash", async () => {
+  it("returns empty when the workspace snapshot ref no longer matches the replica source bundle hash", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -199,12 +199,12 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("prefers the cursor snapshot mismatch guard over not_modified reuse", async () => {
+  it("prefers the workspace snapshot mismatch guard over not_modified reuse", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     const createBrowserVaultSession = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: replicaRef,
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -242,7 +242,7 @@ describe("browser vault session route", () => {
 
   it("returns a 503 when hosted execution control is not configured", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -279,7 +279,7 @@ describe("browser vault session route", () => {
 
   it("returns a 502 when hosted execution control returns an invalid browser vault session", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",
@@ -322,7 +322,7 @@ describe("browser vault session route", () => {
 
   it("returns empty when hosted execution control cannot find the referenced replica", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    mocks.readHostedExecutionCursorForUser.mockResolvedValue({
+    mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
       committedSeq: "0",
       createdAt: "2026-04-20T08:00:00.000Z",

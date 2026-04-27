@@ -26,13 +26,13 @@ const mocks = vi.hoisted(() => {
     prisma: {
       $transaction: vi.fn(),
     },
-    nudgeHostedRunBestEffort: vi.fn(),
-    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
-      wake: { eventId: string };
+    nudgeHostedRunnerBestEffort: vi.fn(),
+    appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
+      envelope: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
       return {
-        eventId: input.wake.eventId,
+        eventId: input.envelope.eventId,
       };
     }),
   };
@@ -54,12 +54,12 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
 }));
 
-vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
-  materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
 
-vi.mock("@/src/lib/hosted-ingress/control", () => ({
-  nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -309,7 +309,7 @@ describe("appendHostedDeviceSyncWake", () => {
     mocks.createSignal.mockResolvedValue({ id: 8 });
     mocks.prismaTx.deviceSyncSignal.create.mockResolvedValue({ id: 8 });
     mocks.completeWebhookTrace.mockResolvedValue(undefined);
-    mocks.nudgeHostedRunBestEffort.mockResolvedValue(undefined);
+    mocks.nudgeHostedRunnerBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection());
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
@@ -388,7 +388,7 @@ describe("appendHostedDeviceSyncWake", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           connectionId: "dsc_123",
           hint: {
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -403,7 +403,7 @@ describe("appendHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "device-sync.wake",
       userId: "user-123",
     });
@@ -436,7 +436,7 @@ describe("appendHostedDeviceSyncWake", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           connectionId: "dsc_123",
           hint: {
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -454,8 +454,8 @@ describe("appendHostedDeviceSyncWake", () => {
     );
   });
 
-  it("does not wait for the best-effort hosted run nudge before returning a wake dispatch", async () => {
-    mocks.nudgeHostedRunBestEffort.mockReturnValue(new Promise(() => {}));
+  it("does not wait for the best-effort hosted runner nudge before returning a wake dispatch", async () => {
+    mocks.nudgeHostedRunnerBestEffort.mockReturnValue(new Promise(() => {}));
 
     await expect(appendHostedDeviceSyncWake({
       connectionId: "dsc_123",
@@ -467,7 +467,7 @@ describe("appendHostedDeviceSyncWake", () => {
       wakeAppended: true,
     });
 
-    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("uses the dedicated device-sync wake path for disconnect events", async () => {
@@ -496,7 +496,7 @@ describe("appendHostedDeviceSyncWake", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           connectionId: "dsc_123",
           hint: {
             occurredAt: "2026-03-26T12:00:00.000Z",
@@ -511,7 +511,7 @@ describe("appendHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "device-sync.wake",
       userId: "user-123",
     });
@@ -556,7 +556,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         }),
         tx: mocks.prismaTx,
@@ -608,7 +608,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           hint: expect.objectContaining({
             revokeWarning: {
               code: "PROVIDER_REVOKE_FAILED",
@@ -737,7 +737,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           connectionId: "dsc_123",
           hint: {
             jobs: [],
@@ -802,7 +802,7 @@ describe("appendHostedDeviceSyncWake", () => {
     await controlPlane.handleWebhook("oura");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.envelope?.hint;
 
     expect(mocks.createSignal).toHaveBeenCalledWith(
       {
@@ -845,7 +845,7 @@ describe("appendHostedDeviceSyncWake", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           connectionId: "dsc_123",
           hint: {
             eventType: "sleep.updated",
@@ -919,7 +919,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
   });
 
   it("shapes hosted webhook hints by provider and job allowlists instead of key redaction", async () => {
@@ -993,7 +993,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     const signalJson = JSON.stringify(signalInput ?? {});
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.envelope?.hint;
 
     expect(signalJson).not.toContain("provider-secret-token");
     expect(signalJson).not.toContain("job-auth-secret");
@@ -1098,7 +1098,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     const signalJson = JSON.stringify(signalInput ?? {});
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.envelope?.hint;
 
     expect(signalJson).not.toContain("whoop-session-secret");
     expect(signalJson).not.toContain("drop-me");
@@ -1172,7 +1172,7 @@ describe("appendHostedDeviceSyncWake", () => {
     expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
   });
 
   it("keeps delete webhook hints narrow across the hosted handoff", async () => {
@@ -1241,7 +1241,7 @@ describe("appendHostedDeviceSyncWake", () => {
 
     await controlPlane.handleWebhook("oura");
 
-    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.wake?.hint;
+    const dispatchedHint = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0]?.envelope?.hint;
     const hintJob = Array.isArray(dispatchedHint?.jobs) ? dispatchedHint.jobs[0] : null;
     const hintPayload =
       hintJob && typeof hintJob === "object" && "payload" in hintJob

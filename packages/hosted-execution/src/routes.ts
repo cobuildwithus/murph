@@ -1,6 +1,3 @@
-export const HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH = "/send";
-export const HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH = "/turn-input/refresh";
-
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";

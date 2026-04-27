@@ -1,0 +1,128 @@
+# Hosted Mailbox Runtime Protocol
+
+Last verified: 2026-04-27
+
+## Decision
+
+Hosted execution is hard-cut to a mailbox plus workspace-checkpoint protocol.
+There is no executor-facing `HostedRun` protocol.
+
+The live ownership split is:
+
+- `apps/web` owns hosted product/control-plane facts, encrypted mailbox rows,
+  latest workspace checkpoint metadata, redacted runtime status, and bounded
+  redacted runtime logs.
+- `apps/cloudflare` owns per-user runner coordination, lease/alarm/nudge
+  coalescing, container invocation, encrypted object plumbing, and signed
+  callback transport.
+- `packages/assistant-runtime` restores the local runtime, imports mailbox
+  rows, runs assistant/device/share/vault-sync work, and checkpoints the
+  resulting workspace.
+
+The final seam is:
+
+```text
+append encrypted mailbox item
+nudge runner
+restore hosted workspace
+import mailbox prefix into local runtime state
+checkpoint after import
+run local runtime work until idle or budget
+checkpoint final runtime state
+project redacted status/logs
+```
+
+## Current Protocol
+
+Hosted producers append one `HostedMailboxItem` in the same transaction as the
+product/control-plane mutation that made work necessary. Large payloads use
+`HostedMailboxPayload`; lane sequence allocation uses
+`HostedMailboxLaneCounter`.
+
+Cloudflare does not acquire a web run row. A runner nudge only asks the
+per-user Durable Object to invoke the container if needed. The Durable Object
+keeps lease, in-flight invocation, alarm, and short-lived coordination metadata
+only. It does not persist queue history, per-message completion, outbox truth,
+assistant cursors, or checkpoint recovery truth.
+
+The runtime reads `HostedWorkspace`, restores the encrypted local workspace,
+fetches mailbox rows after its checkpointed per-lane watermarks, imports them
+into local runtime state, and checkpoints immediately after import. Late
+same-conversation input is supported by the hosted mailbox-backed turn-input
+refresh: before delivery, the runtime refreshes mailbox rows, imports any new
+items, checkpoints, and lets the existing local turn-revision loop rerun the
+reply.
+
+## Ownership Rules
+
+### Web/Postgres Owns
+
+- `HostedMailboxItem`
+- `HostedMailboxPayload`
+- `HostedMailboxLaneCounter`
+- `HostedWorkspace`
+- `HostedRuntimeLog`
+- runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
+- hosted member identity/routing/billing/email authorization
+- hosted share metadata and share payloads
+- hosted vault-sync sessions and encrypted import payloads
+- hosted device-sync authority
+- hosted AI usage ledger
+- anonymized assistant-runtime issue sink
+
+### Runtime Owns
+
+- mailbox import watermarks
+- assistant sessions, transcripts, receipts, diagnostics, and outbox intents
+- same-conversation turn revision
+- provider delivery and receipt/reconciliation policy
+- runtime timers and next wake projection
+- checkpoint timing
+
+### Cloudflare Owns
+
+- per-user Durable Object routing
+- lease/fencing generation
+- alarm/nudge coalescing
+- container invocation
+- encrypted bundle/artifact/env/journal object plumbing
+- worker-to-web callback signing
+
+Cloudflare does not own product facts, mailbox state, mailbox import progress,
+assistant cursors, outbox truth, or durable queue history.
+
+## Runtime Timers
+
+Private runtime timers live in local runtime state and surface only as a
+redacted due-time projection on the workspace/status surface. Web does not
+materialize timer rows, and Cloudflare does not persist timer work items.
+
+If the runner needs a synthetic in-process object for logging or execution
+plumbing, it may use an internal-only `runtime.timer` wake. That object is not a
+persisted mailbox row unless an external product/control-plane mutation
+explicitly appends one.
+
+## Observability
+
+`HostedRuntimeLog` is redacted observability, not correctness state. Logs may be
+lossy and must not contain plaintext messages, transcripts, vault data,
+provider payloads, secrets, local paths, or direct personal identifiers.
+
+Correctness is recovered from the encrypted workspace checkpoint plus mailbox
+rows that remain fetchable by the runtime until imported and checkpointed.
+
+## Deleted Protocol
+
+The old run-centric acquire/commit/finalize protocol is intentionally gone from
+live code. Do not reintroduce:
+
+- web-owned `HostedRun`
+- web-owned `HostedExecutionCursor`
+- web-owned turn-input peek/adopt
+- Cloudflare acquire/commit/finalize clients
+- executor-facing run-drain request/result contracts
+- adopted event-result or cleanup-target arrays
+
+Historical completed execution plans may still mention those terms as past
+state. Live architecture docs and production code should not treat them as
+current primitives.

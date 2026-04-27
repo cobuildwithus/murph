@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHostedIngressEnvelope } from "../src/parsers.ts";
+import { parseHostedExecutionWake } from "../src/parsers.ts";
 
 describe("device-sync wake parser delegation", () => {
   it("parses the nested wake hint through the device-sync owner", () => {
-    const parsed = parseHostedIngressEnvelope({
+    const parsed = parseHostedExecutionWake({
       connectionId: "conn_123",
       eventId: "evt_123",
       hint: {
@@ -77,7 +77,7 @@ describe("device-sync wake parser delegation", () => {
 
   it("fails closed when delegated wake-hint payload fields are invalid", () => {
     expect(() =>
-      parseHostedIngressEnvelope({
+      parseHostedExecutionWake({
         eventId: "evt_123",
         hint: {
           jobs: [

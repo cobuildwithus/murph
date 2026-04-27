@@ -77,6 +77,7 @@ export async function resolveHostedMailboxItemPayload(input: {
 
   const requestId = input.requestId ?? createHostedMailboxPayloadRequestId();
   const response = await input.mailboxPort.fetchPayload({
+    dedupeKey: input.item.dedupeKey,
     mailboxItemId: input.item.id,
     payloadRef,
     requestId,

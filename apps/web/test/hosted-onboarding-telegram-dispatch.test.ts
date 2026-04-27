@@ -9,8 +9,8 @@ const mocks = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
-    nudgeHostedRunUserBestEffort: vi.fn(async () => true),
-    readHostedIngressTarget: vi.fn(async () => null),
+    nudgeHostedRunnerUserBestEffort: vi.fn(async () => true),
+    readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     runtimeEnv: {
       contactPrivacyKeyring: {
         currentVersion: "v1",
@@ -37,20 +37,23 @@ const mocks = vi.hoisted(() => {
       telegramBotUsername: "murph_bot",
       telegramWebhookSecret: null as string | null,
     },
-    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
+    appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
+      envelope?: { eventId: string };
       eventId?: string;
       wake?: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
       const eventId = typeof input.eventId === "string"
         ? input.eventId
-        : input.dispatch?.eventId ?? input.wake?.eventId;
+        : input.dispatch?.eventId ?? input.envelope?.eventId ?? input.wake?.eventId;
       if (!eventId) {
-        throw new Error("Expected a hosted ingress append eventId.");
+        throw new Error("Expected a hosted mailbox append eventId.");
       }
       return {
-        eventId,
+        item: {
+          dedupeKey: eventId,
+        },
       };
     }),
   };
@@ -58,15 +61,15 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-ingress/lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-ingress/lifecycle")>(
-    "@/src/lib/hosted-ingress/lifecycle",
+vi.mock("@/src/lib/hosted-mailbox/store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
+    "@/src/lib/hosted-mailbox/store",
   );
 
   return {
     ...actual,
-    materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
-    readHostedIngressTarget: mocks.readHostedIngressTarget,
+    appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+    readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   };
 });
 
@@ -99,9 +102,9 @@ vi.mock("@/src/lib/prisma", () => ({
   }),
 }));
 
-vi.mock("@/src/lib/hosted-ingress/control", () => ({
-  nudgeHostedRunBestEffort: vi.fn(async () => "wake"),
-  nudgeHostedRunUserBestEffort: mocks.nudgeHostedRunUserBestEffort,
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
+  nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
 }));
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -133,7 +136,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     vi.clearAllMocks();
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
-    mocks.nudgeHostedRunUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue(true);
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 
@@ -219,7 +222,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           eventId: "telegram:update:321",
           kind: "conversation.message",
           message: expect.objectContaining({
@@ -236,7 +239,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
-    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
       userId: "member_telegram_123",
     });
@@ -306,7 +309,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           message: expect.objectContaining({
             telegramMessage: expect.objectContaining({
               threadId: "123:business:biz-42",
@@ -505,7 +508,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("bounds hosted Telegram replyContextPreview before writing the hosted wake payload", async () => {
@@ -571,7 +574,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     const enqueueCall = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0] as {
-      wake?: {
+      envelope?: {
         message?: {
           telegramMessage?: {
             replyContextPreview?: unknown;
@@ -579,7 +582,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         };
       };
     } | undefined;
-    const preview = enqueueCall?.wake?.message?.telegramMessage?.replyContextPreview;
+    const preview = enqueueCall?.envelope?.message?.telegramMessage?.replyContextPreview;
 
     expect(typeof preview).toBe("string");
     expect(preview).toHaveLength(240);
@@ -645,11 +648,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
       userId: "member_telegram_123",
     });
@@ -712,15 +715,15 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       reason: "wake-appended-active-member",
     });
     expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:telegram",
       userId: "member_telegram_123",
     });
-    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("accepts Telegram webhooks whose secret header is missing", async () => {
@@ -1114,7 +1117,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           eventId: "telegram:update:777",
           kind: "conversation.message",
           message: expect.objectContaining({
@@ -1278,19 +1281,19 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       });
 
       const enqueueCall = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0] as {
-        wake?: {
+        envelope?: {
           kind?: string;
           message?: {
             telegramMessage?: unknown;
           };
         };
       } | undefined;
-      expect(enqueueCall?.wake?.kind).toBe("conversation.message");
-      if (!enqueueCall?.wake?.message || typeof enqueueCall.wake.message !== "object") {
+      expect(enqueueCall?.envelope?.kind).toBe("conversation.message");
+      if (!enqueueCall?.envelope?.message || typeof enqueueCall.envelope.message !== "object") {
         throw new Error("Expected a hosted Telegram wake message.");
       }
 
-      expect(enqueueCall.wake.message.telegramMessage).toEqual({
+      expect(enqueueCall.envelope.message.telegramMessage).toEqual({
         messageId: String(testCase.message.message_id),
         schema: "murph.hosted-telegram-message.v1",
         text: testCase.expectedText,

@@ -418,7 +418,7 @@ interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   mailboxPort: {
     fetch(input: {
-      lanes: readonly HostedMailboxLaneCursor[];
+      lanes: readonly HostedMailboxLaneCounter[];
       limitPerLane: number;
       requestId: string;
     }): Promise<HostedMailboxFetchResult>;
@@ -1078,7 +1078,7 @@ Do not fork assistant semantics for hosted.
    - `packages/assistant-runtime/README.md`
    - `packages/hosted-execution/README.md`
    - `packages/cloudflare-hosted-control/README.md` if present, or the package source docs if not.
-2. Mark `agent-docs/references/hosted-run-protocol.md` obsolete or replace it with a hosted mailbox/checkpoint protocol doc.
+2. Mark `agent-docs/references/hosted-runtime-protocol.md` obsolete or replace it with a hosted mailbox/checkpoint protocol doc.
 3. Add a short glossary:
    - mailbox item
    - mailbox lane
@@ -1343,9 +1343,9 @@ Acceptance:
 
 ## Current Remaining Work Map
 
-As of the active wave-three implementation, the migration is partially landed
-but not yet at the destructive deletion point. Treat this as the current
-checkout status, not the abstract target.
+As of the active deletion wave, the migration is partially landed and the
+checkout is already past the first destructive web cleanup. Treat this as the
+current checkout status, not the abstract target.
 
 Already landed:
 
@@ -1368,13 +1368,26 @@ Already landed:
   `HostedWorkspaceRunRequest`, fails closed without mailbox/workspace/read
   ports, reads current workspace before mailbox import, rejects stale workspace
   versions before fetching mailbox items, imports and checkpoints the mailbox
-  prefix, and returns a run-free `HostedWorkspaceRunResult`. The assistant
-  phase is still intentionally omitted in this slice.
+  prefix, runs the assistant/outbox phase through local runtime semantics, and
+  returns a run-free `HostedWorkspaceRunResult`.
+- The workspace-run job now restores the existing hosted snapshot into the
+  local vault root before mailbox import, or creates a local null-bootstrap
+  workspace when web has no snapshot yet. Missing snapshot bytes fail closed
+  before any mailbox fetch/import/checkpoint work.
 - Cloudflare runtime platform has mailbox/workspace/log/share/vault-sync/device
   callback ports and a workspace read port.
+- Cloudflare node/container transport now has an additive discriminated
+  `workspace-run` job envelope parsed at the container HTTP boundary, DO invoke
+  boundary, isolated child boundary, and child-stdin boundary. Workspace jobs
+  route toward `runHostedWorkspaceRuntimeJobInProcess` with real snapshot,
+  checkpoint, conversation mailbox import, and vault-sync mailbox import bridge
+  adapters.
 - Cloudflare exposes a run-free runner nudge route and a runner-status route.
 - Web handoff calls the runner nudge route through the configured control
   client.
+- Web nudge helpers have moved from `hosted-ingress/control` to
+  `hosted-runner/control`, and the run-worded helper names are gone from active
+  web producer/control call sites.
 - `packages/cloudflare-hosted-control` now exposes browser-vault session,
   runner status, and runner nudge only; its legacy `/run`, `getStatus`, and
   `nudgeUserRun` client surfaces are gone.
@@ -1386,115 +1399,49 @@ Already landed:
   the current lease, one helper validates lease before web checkpoint, and the
   full helper composes both. This shape fits the runtime semantic snapshot
   builder without double-checkpointing.
-- The legacy deletion map is known, but broad deletion is still blocked by
-  production imports of run-drain/acquire/finalize surfaces.
+- `HostedUserRunner` has an additive `runUntilIdleOrBudget({ reason })` path
+  that acquires the runner lease, reads the latest hosted workspace, invokes one
+  `workspace-run` container job, clears invocation state, and schedules the next
+  alarm from the workspace projection or pending nudge.
+- Web vault-sync upload now writes the side input, updates the session, appends
+  a `vault.sync.import` mailbox item in the same transaction, and nudges the
+  runner best-effort after commit. Hosted-run commit/finalize no longer owns
+  vault-sync session completion.
+- Runtime-owned vault-sync mailbox import now fetches the side input through
+  `vaultSyncPort`, runs the local vault-sync merge helper, records terminal
+  import metrics through the semantic port, and advances/quarantines mailbox
+  progress according to runtime import outcomes.
+- Web's executor-facing hosted-run routes, `src/lib/hosted-run/**` helpers,
+  and `src/lib/hosted-ingress/**` helpers have been deleted in the active
+  checkout.
+- Web producers now append mailbox items and nudge the run-free runner helper.
+- The destructive Prisma pass now drops old hosted execution cursor/run/ingress
+  tables and the old ingress behavior enum. The privacy/schema guard test has
+  been updated so old models cannot silently return.
+- Cloudflare run-finalization, wake-input, turn-input, run-result validation,
+  and run-processor modules have been deleted from the active checkout.
+- Shared hosted-execution run-control and ingress-control parser modules have
+  been deleted, and the active shared contract surface is mailbox/workspace/log
+  plus runner nudge/status.
+- Live architecture docs now describe the mailbox/checkpoint protocol. Historical
+  completed exec plans may still mention old terminology, but live docs should
+  not treat it as current.
 
-Remaining critical path:
+Remaining implementation work before final handoff is verification/audit only:
 
-1. **Wire the runtime workspace-run entrypoint into node/container.**
-   Move `node-runner.ts`, `node-runner-child.ts`, `container-entrypoint.ts`,
-   and `runner-container.ts` from `HostedAssistantRuntimeJobInput.request.runDrain`
-   to `HostedWorkspaceRunRequest`. The child should receive only runtime config
-   plus the short-lived bridge token, not run tokens, web signing credentials,
-   or direct web route authority. Use the Cloudflare bridge split as:
-   `createCheckpointSnapshot` snapshots/writes the local workspace bundle, and
-   `workspacePort.checkpoint` validates lease then calls web CAS.
-2. **Restore or create the local workspace in the workspace job path.**
-   The additive entrypoint currently proves mailbox import/checkpoint semantics
-   but does not yet restore the encrypted snapshot into a full local runtime
-   workspace or run the assistant phase. Add the hosted workspace restore/null
-   bootstrap adapter before making it the active container path.
-3. **Replace `HostedUserRunner` orchestration.**
-   Add `runUntilIdleOrBudget({ reason })` as the active path: acquire local
-   lease, read web workspace, invoke the workspace runner once, clear in-flight
-   state, and schedule the next alarm from latest workspace status. Then remove
-   acquire-loop, committed-seq target, finalize, release-finalize, and
-   run-breadcrumb behavior.
-4. **Simplify Cloudflare DO state.**
-   Replace `runDrainLock` with a generic invocation lock and reduce durable
-   state to lease/in-flight/heartbeat/error/last-run/next-alarm/pending-nudge.
-   Do not keep active run ids, active event ids, attempts, committed snapshot
-   pointers, or bootstrap-completion state once key/bootstrap resolution is
-   independent.
-5. **Complete web producer migration.**
-   Every hosted producer must append one mailbox item in the same product
-   transaction as its control-plane mutation, then best-effort nudge the runner.
-   Remaining producers that still write hosted ingress/run events or depend on
-   run summaries must move to mailbox/workspace status. Rename web helper
-   exports from run wording to runner/mailbox wording in the same producer
-   slices; do not add new compatibility names.
-6. **Replace vault-sync/run-summary coupling.**
-   Vault-sync readiness should be a `vault.sync.import` mailbox item plus
-   `vaultSyncPort` side input fetch/import. It must not depend on queued run ids,
-   queued ingress event ids, or hosted-run commit/finalize summaries.
-7. **Move side effects to local outbox checkpoint semantics.**
-   Before any provider delivery or external mutation, checkpoint the outbox
-   intent/sending state. After the effect, checkpoint receipt, failure,
-   confirmation-pending, retry, reconcile, or abandoned state using the local
-   outbox model. Only then delete hosted-run finalization and committed delivery
-   effects.
-8. **Delete old web and Cloudflare run APIs.**
-   Once active paths no longer import them, delete `apps/web/src/lib/hosted-run/**`,
-   `/api/internal/hosted-run/{acquire,commit,finalize,release-finalize,turn-input/*}`,
-   Cloudflare run-finalization/wake-input/turn-input modules, and run-specific
-   result validation.
-9. **Delete old shared run contracts and docs.**
-   Remove run/cursor/drain exports, parsers, builders, tests, and stale docs
-   after production callers are gone. Historical completed exec plans may keep
-   old terminology, but live architecture docs should not.
-
-Final cutover integration order from this checkout:
-
-1. Add a workspace job envelope for container transport and parse it at every
-   boundary before deleting the old envelope. This keeps failures explicit while
-   central files are edited.
-2. In Cloudflare runner/container code, derive `{ userId, attemptId,
-   leaseGeneration, workspaceVersion }` from the DO lease plus latest web
-   workspace, not from a web run row.
-3. In the child process, restore the local workspace from web `snapshotRef`,
-   call `runHostedWorkspaceRuntimeJobInProcess`, and wire
-   `createCheckpointSnapshot` to the Cloudflare snapshot/write helper.
-4. Wrap `workspacePort.checkpoint` in the parent bridge so every web CAS is
-   lease-validated immediately before the request leaves Cloudflare.
-5. Switch `HostedUserRunner.nudgeHostedRunner`/alarm to invoke the workspace
-   path. Keep old `drainHostedRuns` only until tests no longer need it.
-6. Move producers from hosted ingress/run append helpers to mailbox append
-   helpers, then delete run route tests and old run status expectations.
-7. Delete the old web run APIs, Cloudflare run processors/finalizers, and
-   shared run contracts in one destructive pass after `rg` shows no production
-   imports.
-
-Parallel work lanes that remain safe:
-
-- `apps/web`: migrate remaining producer call-site names to runner/mailbox
-  wording, then migrate producer storage to mailbox rows. Keep schema deletion
-  for the final destructive pass.
-- Docs/tests cleanup can proceed for surfaces already removed from production:
-  control-client `/run` naming and Cloudflare public `/internal/users/:userId/run`
-  route assumptions.
-- `packages/assistant-runtime`: implement the full restore/bootstrap and
-  assistant phase inside the workspace job path, without touching Cloudflare.
-- `apps/cloudflare`: after the central job envelope is in place, a separate
-  pass can reduce DO state from run-drain wording to invocation/lease wording.
-
-Do not parallelize `user-runner.ts`, `node-runner.ts`, `node-runner-child.ts`,
-`container-entrypoint.ts`, and `runner-container.ts` across separate writers.
-Those helper seams now exist, so the next pass may edit that set, but it should
-still be treated as one coordinated integration lane because all five files
-share the job contract.
+1. Run the focused hosted web, assistant-runtime, hosted-execution, and
+   Cloudflare checks.
+2. Run root/app typecheck where feasible.
+3. Run the required security/privacy, coverage, simplify, and final-review
+   audit passes for this high-risk cross-cutting diff.
+4. Fix only findings that reveal real migration gaps; do not reintroduce web
+   run adoption/finalize semantics.
 
 ### Phase 8: Delete Old Protocol
 
 Delete old files after all call sites are gone:
 
 ```text
-apps/web/src/lib/hosted-run/**
-apps/web/app/api/internal/hosted-run/acquire/route.ts
-apps/web/app/api/internal/hosted-run/commit/route.ts
-apps/web/app/api/internal/hosted-run/finalize/route.ts
-apps/web/app/api/internal/hosted-run/release-finalize/route.ts
-apps/web/app/api/internal/hosted-run/turn-input/peek/route.ts
-apps/web/app/api/internal/hosted-run/turn-input/adopt/route.ts
 apps/cloudflare/src/user-runner/run-finalization.ts
 apps/cloudflare/src/user-runner/wake-inputs.ts
 apps/cloudflare/src/runner-outbound/turn-input.ts
@@ -1507,6 +1454,9 @@ Then remove old symbols:
 HostedExecutionCursor
 HostedRun
 HostedRunLog
+HostedIngressEvent
+HostedIngressEventAlias
+HostedIngressPayload
 HostedRuntimeDrainRequest
 HostedRunEventResult
 HostedRunCleanupTarget
@@ -1540,7 +1490,7 @@ Update:
 - `packages/assistant-runtime/README.md`
 - `packages/hosted-execution/README.md`
 - `packages/cloudflare-hosted-control` docs/source comments
-- `agent-docs/references/hosted-run-protocol.md` replacement or removal
+- `agent-docs/references/hosted-runtime-protocol.md` replacement or removal
 - `agent-docs/index.md` if canonical docs are added, removed, moved, or materially repurposed
 
 Do not list this `migration.md` in the canonical docs index unless it becomes durable architecture rather than a point-in-time migration guide.

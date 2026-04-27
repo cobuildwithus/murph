@@ -11,11 +11,19 @@ Cloudflare execution worker.
 - normalize the shared hosted execution env variables that are deployment-vendor neutral
 - build stable internal route paths for hosted runtime mailbox, workspace,
   logging, status, and transport helpers
-- temporarily keep the legacy `HostedIngressEvent` / `HostedRun` /
-  `HostedExecutionCursor` contracts only until the hard-cut migration deletes
-  their call sites
 - provide typed shared control helpers while keeping deployed auth adapters
   app-local
+
+## Active public path
+
+New hosted runtime code should import mailbox, workspace checkpoint, runtime log,
+runner nudge/status, and workspace-run contracts from
+`@murphai/hosted-execution/runtime-control`. Use
+`@murphai/hosted-execution/routes` for stable route constants and builders.
+
+Run/cursor/drain contracts and parsers are not part of the active package
+surface. Historical completed plans and migration notes may still mention them
+as deleted state.
 
 ## Contract
 

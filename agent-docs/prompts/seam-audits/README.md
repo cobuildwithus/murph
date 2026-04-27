@@ -38,7 +38,7 @@ Each prompt is intentionally short: use one file as the starting prompt for a de
 - [25-hosted-execution.md](./25-hosted-execution.md)
 - [26-cloudflare-hosted-control.md](./26-cloudflare-hosted-control.md)
 - [27-web-member-core.md](./27-web-member-core.md)
-- [28-web-hosted-run-authority.md](./28-web-hosted-run-authority.md)
+- [28-web-hosted-runtime-authority.md](./28-web-hosted-runtime-authority.md)
 - [29-web-share-browser-vault-sync.md](./29-web-share-browser-vault-sync.md)
 - [30-web-device-sync-messaging-ingress.md](./30-web-device-sync-messaging-ingress.md)
 - [31-cloudflare-user-runner.md](./31-cloudflare-user-runner.md)

@@ -70,7 +70,7 @@ describe("requireVercelCronRequest", () => {
 
   it("accepts a matching Vercel cron bearer token", () => {
     expect(() =>
-      requireVercelCronRequest(new Request("https://join.example.test/api/internal/hosted-ingress/repair", {
+      requireVercelCronRequest(new Request("https://join.example.test/api/internal/hosted-mailbox/repair", {
         headers: {
           authorization: "Bearer cron-secret",
         },
@@ -80,7 +80,7 @@ describe("requireVercelCronRequest", () => {
 
   it("rejects an invalid Vercel cron bearer token", () => {
     const invoke = () =>
-      requireVercelCronRequest(new Request("https://join.example.test/api/internal/hosted-ingress/repair", {
+      requireVercelCronRequest(new Request("https://join.example.test/api/internal/hosted-mailbox/repair", {
         headers: {
           authorization: "Bearer wrong-secret",
         },

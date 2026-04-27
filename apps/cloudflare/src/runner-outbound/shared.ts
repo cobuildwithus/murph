@@ -7,14 +7,14 @@ import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../internal-hosts.ts";
 import { json } from "../json.ts";
 import { requireHostedUserCryptoContextFromEnvironment } from "../user-key-store.js";
 import type {
-  WorkerBootstrapUserRunnerStubLike,
+  WorkerBindUserRunnerStubLike,
   WorkerEnvironmentContract,
 } from "../worker-contracts.ts";
 
-type RunnerOutboundUserRunnerStubLike = WorkerBootstrapUserRunnerStubLike;
+type RunnerOutboundUserRunnerStubLike = WorkerBindUserRunnerStubLike;
 
 export interface RunnerOutboundEnvironmentSource
-  extends WorkerEnvironmentContract<WorkerBootstrapUserRunnerStubLike> {}
+  extends WorkerEnvironmentContract<WorkerBindUserRunnerStubLike> {}
 
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
@@ -43,8 +43,8 @@ export async function resolveRunnerOutboundUserRunnerStub(
   userId: string,
 ): Promise<RunnerOutboundUserRunnerStubLike> {
   const stub = env.USER_RUNNER.getByName(userId);
-  requireRunnerOutboundUserStubMethod(stub, "bootstrapUser");
-  await stub.bootstrapUser(userId);
+  requireRunnerOutboundUserStubMethod(stub, "bindUser");
+  await stub.bindUser(userId);
   return stub;
 }
 

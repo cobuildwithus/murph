@@ -5,10 +5,7 @@ import {
   type SharePack,
 } from "@murphai/contracts";
 
-import {
-  HOSTED_INGRESS_PAYLOAD_SCHEMA,
-  isHostedConversationMessageChannel,
-} from "./contracts.ts";
+import { isHostedConversationMessageChannel, isHostedExecutionWakeKind } from "./contracts.ts";
 
 import type {
   HostedExecutionAssistantNotificationDelivery,
@@ -20,39 +17,21 @@ import type {
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
-  HostedRuntimeEvent,
-  HostedIngressEnvelope,
-  HostedIngressKind,
+  HostedExecutionWake,
+  HostedExecutionWakeKind,
   HostedExecutionEvent,
   HostedExecutionConversationMessageWake,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
-  HostedExecutionRunnerRequest,
-  HostedExecutionRunnerSharePack,
-  HostedExecutionRunnerVaultSyncImport,
-  HostedExecutionRunnerResult,
   HostedExecutionShareReference,
-  HostedExecutionUserStatus,
-  HostedRunDrainResult,
-  HostedRunNudgeResult,
   HostedExecutionVaultShareAcceptedEvent,
   HostedExecutionVaultSyncImportEvent,
-  HostedIngressLifecycleState,
-  HostedIngressPayloadSchema,
-  HostedRuntimeDrainEvent,
-  HostedRuntimeDrainRequest,
-  HostedRunCleanupTarget,
-  HostedRunEventResult,
 } from "./contracts.ts";
 import type {
-  HostedExecutionRunContext,
-  HostedExecutionRunLevel,
-  HostedExecutionRunStatus,
-  HostedExecutionTimelineEntry,
+  HostedExecutionLogLevel,
 } from "./observability.ts";
 import {
-  isHostedExecutionRunLevel,
-  isHostedExecutionRunPhase,
+  isHostedExecutionLogLevel,
 } from "./observability.ts";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
@@ -62,7 +41,6 @@ import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionVaultShareAcceptedWake,
   buildHostedExecutionVaultSyncImportWake,
@@ -71,7 +49,6 @@ import {
   rejectLegacyAliases,
   requireArray,
   requireBoolean,
-  requireBigIntString,
   requireNumber,
   requireObject,
   requireString,
@@ -84,51 +61,20 @@ import {
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
-  parseHostedExecutionCursorSnapshotRef,
+  parseHostedExecutionSnapshotRef,
 } from "./parsers/cursor.ts";
 import {
   parseHostedExecutionDeviceSyncReason,
   parseHostedExecutionDeviceSyncWakeHint,
 } from "./parsers/device-sync.ts";
-import {
-  parseHostedIngressKind,
-} from "./parsers/ingress-control.ts";
-import {
-  parseHostedRunTriggerKind,
-} from "./parsers/run-control.ts";
 import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
 export {
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   parseHostedBrowserVaultReplicaRef,
-  parseHostedExecutionCursorSnapshotRef,
-  parseHostedExecutionCursorState,
+  parseHostedExecutionSnapshotRef,
 } from "./parsers/cursor.ts";
-export {
-  parseHostedIngressAppendResponse,
-  parseHostedIngressEvent,
-} from "./parsers/ingress-control.ts";
-export {
-  parseHostedRunAcquireRequest,
-  parseHostedRunAcquireResponse,
-  parseHostedRunCommitRequest,
-  parseHostedRunCommitResponse,
-  parseHostedRunFinalizeRequest,
-  parseHostedRunFinalizeResponse,
-  parseHostedRunLogRecord,
-  parseHostedRunLogRequest,
-  parseHostedRunLogResponse,
-  parseHostedRunReleaseFinalizeRequest,
-  parseHostedRunReleaseFinalizeResponse,
-  parseHostedRunRecord,
-  parseHostedRunStatusRequest,
-  parseHostedRunStatusResponse,
-  parseHostedRunTurnInputAdoptRequest,
-  parseHostedRunTurnInputAdoptResponse,
-  parseHostedRunTurnInputPeekRequest,
-  parseHostedRunTurnInputPeekResponse,
-} from "./parsers/run-control.ts";
 export {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
@@ -154,6 +100,7 @@ export {
   parseHostedRuntimeSharePayloadFetchResponse,
   parseHostedRuntimeUsageExportRequest,
   parseHostedRuntimeUsageExportResponse,
+  parseHostedRuntimeWebStatusResponse,
   parseHostedRuntimeVaultSyncImportPayload,
   parseHostedRuntimeVaultSyncImportRequest,
   parseHostedRuntimeVaultSyncImportResponse,
@@ -168,9 +115,9 @@ export {
   parseHostedWorkspaceState,
 } from "./parsers/runtime-control.ts";
 
-export function parseHostedIngressEnvelope(value: unknown): HostedIngressEnvelope {
+export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
   const record = requireObject(value, "Hosted execution wake");
-  const kind = parseHostedIngressKind(record.kind, "Hosted execution wake kind");
+  const kind = parseHostedExecutionWakeKind(record.kind, "Hosted execution wake kind");
   const eventId = requireString(record.eventId, "Hosted execution wake eventId");
   const occurredAt = requireString(record.occurredAt, "Hosted execution wake occurredAt");
   const wireUserId = requireString(record.userId, "Hosted execution wake userId");
@@ -419,260 +366,6 @@ function parseHostedExecutionLinqConversationMessagePart(
   throw new TypeError(`${label} type must be "text", "link", "media", or "voice_memo".`);
 }
 
-export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {
-  const record = requireObject(value, "Hosted execution runner request");
-  if (record.wake !== undefined) {
-    throw new TypeError(
-      "Hosted execution runner request.wake is no longer supported; use runDrain.",
-    );
-  }
-
-  if (record.sharePack !== undefined) {
-    throw new TypeError(
-      "Hosted execution runner request.sharePack is no longer supported; use runDrain.events[].sharePack.",
-    );
-  }
-
-  const request: HostedExecutionRunnerRequest = {
-    bundle: parseHostedExecutionBundlePayload(
-      record.bundle,
-      "Hosted execution runner request bundle",
-    ),
-    run: parseHostedExecutionRunContext(record.run),
-    runDrain: parseHostedRuntimeDrainRequest(record.runDrain),
-  };
-
-  if (record.currentBundleRef !== undefined) {
-    request.currentBundleRef = record.currentBundleRef === null
-      ? null
-      : parseHostedExecutionBundleRef(
-          record.currentBundleRef,
-          "Hosted execution runner request currentBundleRef",
-        );
-  }
-
-  return request;
-}
-
-export function parseHostedRuntimeEvent(value: unknown): HostedRuntimeEvent {
-  const record = requireObject(value, "Hosted execution runner wake");
-  const kind = requireString(record.kind, "Hosted execution runner wake kind");
-
-  if (kind === "runtime.timer") {
-    return buildHostedExecutionRuntimeTimerWake({
-      eventId: requireString(record.eventId, "Hosted execution runner wake eventId"),
-      occurredAt: requireString(record.occurredAt, "Hosted execution runner wake occurredAt"),
-      triggerKind: parseHostedRunTriggerKind(record.triggerKind),
-      userId: requireString(record.userId, "Hosted execution runner wake userId"),
-    });
-  }
-
-  return parseHostedIngressEnvelope(record);
-}
-
-export function parseHostedRuntimeDrainRequest(
-  value: unknown,
-): HostedRuntimeDrainRequest {
-  const record = requireObject(value, "Hosted runtime drain request");
-
-  return {
-    acquiredAt: requireString(record.acquiredAt, "Hosted runtime drain request acquiredAt"),
-    ...(record.committedResult === undefined
-      ? {}
-      : {
-          committedResult: record.committedResult === null
-            ? null
-            : parseHostedExecutionRunnerResult(record.committedResult),
-        }),
-    events: requireArray(record.events, "Hosted runtime drain request events")
-      .map((entry, index) => parseHostedRuntimeDrainEvent(
-        entry,
-        `Hosted runtime drain request events[${index}]`,
-      )),
-    inputCommittedSeq: requireBigIntString(
-      record.inputCommittedSeq,
-      "Hosted runtime drain request inputCommittedSeq",
-    ),
-    inputCursorVersion: requireBigIntString(
-      record.inputCursorVersion,
-      "Hosted runtime drain request inputCursorVersion",
-    ),
-    ...(record.resumeFinalize === undefined
-      ? {}
-      : {
-          resumeFinalize: record.resumeFinalize === null
-            ? null
-            : requireBoolean(
-                record.resumeFinalize,
-                "Hosted runtime drain request resumeFinalize",
-              ),
-        }),
-    runId: requireString(record.runId, "Hosted runtime drain request runId"),
-    triggerKind: parseHostedRunTriggerKind(record.triggerKind),
-    userId: requireString(record.userId, "Hosted runtime drain request userId"),
-  };
-}
-
-export function parseHostedRuntimeDrainEvent(
-  value: unknown,
-  label = "Hosted runtime drain event",
-): HostedRuntimeDrainEvent {
-  const record = requireObject(value, label);
-  rejectLegacyAliases(record, label, {
-    wakeId: "ingressEventId",
-  });
-
-  return {
-    ingressEventId: requireString(record.ingressEventId, `${label}.ingressEventId`),
-    seq: requireBigIntString(record.seq, `${label}.seq`),
-    ...(record.sharePack === undefined
-      ? {}
-      : {
-          sharePack: record.sharePack === null
-            ? null
-            : parseHostedExecutionRunnerSharePack(record.sharePack),
-        }),
-    ...(record.vaultSyncImport === undefined
-      ? {}
-      : {
-          vaultSyncImport: record.vaultSyncImport === null
-            ? null
-            : parseHostedExecutionRunnerVaultSyncImport(record.vaultSyncImport),
-        }),
-    wake: parseHostedRuntimeEvent(record.wake),
-  };
-}
-
-export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutionRunnerResult {
-  const record = requireObject(value, "Hosted execution runner result");
-  const result = requireObject(record.result, "Hosted execution runner result.result");
-
-  return {
-    bundle: parseHostedExecutionBundlePayload(
-      record.bundle,
-      "Hosted execution runner result bundle",
-    ),
-    result: {
-      ...(result.adoptedCleanupTargets === undefined
-        ? {}
-        : {
-            adoptedCleanupTargets: requireArray(
-              result.adoptedCleanupTargets,
-              "Hosted execution runner result adoptedCleanupTargets",
-            ).map((entry, index) =>
-              parseHostedExecutionRunnerCleanupTarget(
-                entry,
-                `Hosted execution runner result adoptedCleanupTargets[${index}]`,
-              ),
-            ),
-          }),
-      ...(result.adoptedEventResults === undefined
-        ? {}
-        : {
-            adoptedEventResults: requireArray(
-              result.adoptedEventResults,
-              "Hosted execution runner result adoptedEventResults",
-            ).map((entry, index) =>
-              parseHostedExecutionRunnerEventResult(
-                entry,
-                `Hosted execution runner result adoptedEventResults[${index}]`,
-              ),
-            ),
-          }),
-      eventsHandled: requireNumber(result.eventsHandled, "Hosted execution runner result eventsHandled"),
-      nextWakeAt: readOptionalNullableString(
-        result.nextWakeAt,
-        "Hosted execution runner result nextWakeAt",
-      ),
-      ...(result.redactedDetails === undefined
-        ? {}
-        : {
-            redactedDetails: result.redactedDetails === null
-              ? null
-              : requireObject(
-                  result.redactedDetails,
-                  "Hosted execution runner result redactedDetails",
-                ),
-          }),
-      ...(result.redactedLogEntries === undefined
-        ? {}
-        : {
-            redactedLogEntries: result.redactedLogEntries === null
-              ? null
-              : requireArray(
-                  result.redactedLogEntries,
-                  "Hosted execution runner result redactedLogEntries",
-                ).map((entry, index) =>
-                  parseHostedExecutionRedactedLogEntry(
-                    entry,
-                    `Hosted execution runner result redactedLogEntries[${index}]`,
-                  ),
-                ),
-          }),
-      summary: requireString(result.summary, "Hosted execution runner result summary"),
-    },
-  };
-}
-
-function parseHostedExecutionRunnerCleanupTarget(
-  value: unknown,
-  label: string,
-): HostedRunCleanupTarget {
-  const record = requireObject(value, label);
-  const channel = requireString(record.channel, `${label}.channel`);
-
-  if (channel === "email") {
-    return {
-      channel,
-      eventId: requireString(record.eventId, `${label}.eventId`),
-      rawMessageKey: requireString(record.rawMessageKey, `${label}.rawMessageKey`),
-      userId: requireString(record.userId, `${label}.userId`),
-    };
-  }
-
-  if (channel === "linq") {
-    return {
-      channel,
-      messageId: requireString(record.messageId, `${label}.messageId`),
-    };
-  }
-
-  if (channel === "telegram") {
-    return {
-      channel,
-      messageId: requireString(record.messageId, `${label}.messageId`),
-      target: requireString(record.target, `${label}.target`),
-    };
-  }
-
-  throw new TypeError(`${label}.channel must be email, linq, or telegram.`);
-}
-
-function parseHostedExecutionRunnerEventResult(
-  value: unknown,
-  label: string,
-): HostedRunEventResult {
-  const record = requireObject(value, label);
-  rejectLegacyAliases(record, label, {
-    wakeId: "ingressEventId",
-  });
-  const state = requireString(record.state, `${label}.state`);
-
-  if (state !== "completed" && state !== "quarantined") {
-    throw new TypeError(`${label}.state must be completed or quarantined.`);
-  }
-
-  return {
-    ingressEventId: requireString(record.ingressEventId, `${label}.ingressEventId`),
-    ...(record.quarantineCode === undefined
-      ? {}
-      : {
-          quarantineCode: readNullableString(record.quarantineCode, `${label}.quarantineCode`),
-        }),
-    state,
-  };
-}
-
 function parseHostedExecutionRedactedLogEntry(
   value: unknown,
   label: string,
@@ -685,7 +378,7 @@ function parseHostedExecutionRedactedLogEntry(
       : {
           eventId: readOptionalNullableString(record.eventId, `${label} eventId`),
         }),
-    level: parseHostedRunLogLevelValue(record.level, `${label} level`),
+    level: parseHostedExecutionLogLevelValue(record.level, `${label} level`),
     message: requireString(record.message, `${label} message`),
     phase: requireString(record.phase, `${label} phase`),
     ...(record.redacted === undefined
@@ -698,160 +391,15 @@ function parseHostedExecutionRedactedLogEntry(
   };
 }
 
-function parseHostedRunLogLevelValue(
+function parseHostedExecutionLogLevelValue(
   value: unknown,
   label: string,
-): HostedExecutionRunLevel {
+): HostedExecutionLogLevel {
   const level = requireString(value, label);
-  if (isHostedExecutionRunLevel(level)) {
+  if (isHostedExecutionLogLevel(level)) {
     return level;
   }
   throw new TypeError(`${label} must be a valid hosted execution run level.`);
-}
-
-export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionUserStatus {
-  const record = requireObject(value, "Hosted execution user status");
-  rejectLegacyAliases(record, "Hosted execution user status", {
-    pendingWakeCount: "pendingIngressEventCount",
-  });
-
-  return {
-    bundleRef: parseHostedExecutionBundleRef(
-      record.bundleRef,
-      "Hosted execution user status bundleRef",
-    ),
-    inFlight: requireBoolean(record.inFlight, "Hosted execution user status inFlight"),
-    lastError: readNullableString(record.lastError, "Hosted execution user status lastError"),
-    ...(record.lastErrorAt === undefined ? {} : {
-      lastErrorAt: readNullableString(record.lastErrorAt, "Hosted execution user status lastErrorAt"),
-    }),
-    ...(record.lastErrorCode === undefined ? {} : {
-      lastErrorCode: readNullableString(
-        record.lastErrorCode,
-        "Hosted execution user status lastErrorCode",
-      ),
-    }),
-    lastEventId: readNullableString(record.lastEventId, "Hosted execution user status lastEventId"),
-    lastRunAt: readNullableString(record.lastRunAt, "Hosted execution user status lastRunAt"),
-    nextWakeAt: readNullableString(record.nextWakeAt, "Hosted execution user status nextWakeAt"),
-    pendingIngressEventCount: requireNumber(
-      record.pendingIngressEventCount,
-      "Hosted execution user status pendingIngressEventCount",
-    ),
-    ...(record.run === undefined ? {} : {
-      run: record.run === null ? null : parseHostedExecutionRunStatus(record.run),
-    }),
-    ...(record.timeline === undefined ? {} : {
-      timeline: parseHostedExecutionTimelineEntries(record.timeline),
-    }),
-    userId: requireString(record.userId, "Hosted execution user status userId"),
-  };
-}
-
-export function parseHostedRunDrainResult(
-  value: unknown,
-): HostedRunDrainResult {
-  const record = requireObject(value, "Hosted execution wake drain result");
-
-  return {
-    committedSeq: requireBigIntString(
-      record.committedSeq,
-      "Hosted execution wake drain result committedSeq",
-    ),
-    requestedTargetSeq: readNullableString(
-      record.requestedTargetSeq,
-      "Hosted execution wake drain result requestedTargetSeq",
-    ),
-    targetReached: requireBoolean(
-      record.targetReached,
-      "Hosted execution wake drain result targetReached",
-    ),
-  };
-}
-
-export function parseHostedRunNudgeResult(
-  value: unknown,
-): HostedRunNudgeResult {
-  const record = requireObject(value, "Hosted execution wake nudge result");
-
-  return {
-    accepted: requireBoolean(
-      record.accepted,
-      "Hosted execution wake nudge result accepted",
-    ),
-    alarmScheduled: requireBoolean(
-      record.alarmScheduled,
-      "Hosted execution wake nudge result alarmScheduled",
-    ),
-    alreadyRunning: requireBoolean(
-      record.alreadyRunning,
-      "Hosted execution wake nudge result alreadyRunning",
-    ),
-  };
-}
-
-export function parseHostedExecutionRunContext(value: unknown): HostedExecutionRunContext {
-  const record = requireObject(value, "Hosted execution run context");
-
-  return {
-    attempt: requireNumber(record.attempt, "Hosted execution run context attempt"),
-    runId: requireString(record.runId, "Hosted execution run context runId"),
-    startedAt: requireString(record.startedAt, "Hosted execution run context startedAt"),
-  };
-}
-
-export function parseHostedExecutionRunStatus(value: unknown): HostedExecutionRunStatus {
-  const record = requireObject(value, "Hosted execution run status");
-  const phase = requireString(record.phase, "Hosted execution run status phase");
-
-  if (!isHostedExecutionRunPhase(phase)) {
-    throw new TypeError("Hosted execution run status phase is invalid.");
-  }
-
-  return {
-    attempt: requireNumber(record.attempt, "Hosted execution run status attempt"),
-    eventId: requireString(record.eventId, "Hosted execution run status eventId"),
-    phase,
-    runId: requireString(record.runId, "Hosted execution run status runId"),
-    startedAt: requireString(record.startedAt, "Hosted execution run status startedAt"),
-    updatedAt: requireString(record.updatedAt, "Hosted execution run status updatedAt"),
-  };
-}
-
-export function parseHostedExecutionTimelineEntries(value: unknown): HostedExecutionTimelineEntry[] {
-  return requireArray(value, "Hosted execution timeline entries").map((entry, index) => {
-    const record = requireObject(entry, `Hosted execution timeline entries[${index}]`);
-    const level = requireString(record.level, `Hosted execution timeline entries[${index}].level`);
-    const phase = requireString(record.phase, `Hosted execution timeline entries[${index}].phase`);
-
-    if (!isHostedExecutionRunLevel(level)) {
-      throw new TypeError(`Hosted execution timeline entries[${index}].level is invalid.`);
-    }
-
-    if (!isHostedExecutionRunPhase(phase)) {
-      throw new TypeError(`Hosted execution timeline entries[${index}].phase is invalid.`);
-    }
-
-    return {
-      at: requireString(record.at, `Hosted execution timeline entries[${index}].at`),
-      attempt: requireNumber(record.attempt, `Hosted execution timeline entries[${index}].attempt`),
-      component: requireString(
-        record.component,
-        `Hosted execution timeline entries[${index}].component`,
-      ),
-      ...(record.errorCode === undefined ? {} : {
-        errorCode: readNullableString(
-          record.errorCode,
-          `Hosted execution timeline entries[${index}].errorCode`,
-        ),
-      }),
-      eventId: requireString(record.eventId, `Hosted execution timeline entries[${index}].eventId`),
-      level,
-      message: requireString(record.message, `Hosted execution timeline entries[${index}].message`),
-      phase,
-      runId: requireString(record.runId, `Hosted execution timeline entries[${index}].runId`),
-    };
-  });
 }
 
 export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent {
@@ -1177,75 +725,16 @@ export function parseHostedExecutionVaultSyncImportReference(
   };
 }
 
-export function parseHostedExecutionRunnerSharePack(value: unknown): HostedExecutionRunnerSharePack {
-  const record = requireObject(value, "Hosted execution runner share pack");
-
-  return {
-    ownerUserId: requireString(
-      record.ownerUserId,
-      "Hosted execution runner share pack ownerUserId",
-    ),
-    pack: assertContract(sharePackSchema, record.pack, "share pack"),
-    shareId: requireString(record.shareId, "Hosted execution runner share pack shareId"),
-  };
-}
-
-
-export function parseHostedExecutionRunnerVaultSyncImport(
-  value: unknown,
-): HostedExecutionRunnerVaultSyncImport {
-  const record = requireObject(value, "Hosted execution runner vault sync import");
-
-  return {
-    bundleBase64: requireString(
-      record.bundleBase64,
-      "Hosted execution runner vault sync import bundleBase64",
-    ),
-    sessionId: requireString(
-      record.sessionId,
-      "Hosted execution runner vault sync import sessionId",
-    ),
-    ...(record.sourceSchemaVersion === undefined
-      ? {}
-      : {
-          sourceSchemaVersion: readOptionalNullableString(
-            record.sourceSchemaVersion,
-            "Hosted execution runner vault sync import sourceSchemaVersion",
-          ),
-        }),
-  };
-}
-
 export function parseHostedExecutionSharePack(value: unknown): SharePack {
   return assertContract(sharePackSchema, value, "share pack");
 }
 
-export function parseHostedIngressPayload(input: {
-  decryptedPayload?: unknown;
-  kind: HostedIngressKind;
-  occurredAt: string;
-  payloadSchema: HostedIngressPayloadSchema;
-  userId: string;
-}): HostedIngressEnvelope {
-  if (input.payloadSchema !== HOSTED_INGRESS_PAYLOAD_SCHEMA) {
-    throw new TypeError("Hosted wake payload requires the execution payload schema.");
+function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExecutionWakeKind {
+  const kind = requireString(value, label);
+  if (!isHostedExecutionWakeKind(kind)) {
+    throw new TypeError(`${label} is invalid.`);
   }
-
-  const wake = parseHostedIngressEnvelope(input.decryptedPayload);
-
-  if (wake.userId !== input.userId) {
-    throw new TypeError("Hosted wake payload userId must match the wake record.");
-  }
-
-  if (wake.kind !== input.kind) {
-    throw new TypeError("Hosted wake payload kind must match the wake record.");
-  }
-
-  if (wake.occurredAt !== input.occurredAt) {
-    throw new TypeError("Hosted wake payload occurredAt must match the wake record.");
-  }
-
-  return wake;
+  return kind;
 }
 
 function parseHostedConversationMessageChannel(

@@ -241,10 +241,10 @@ describe("hosted local Linq webhook e2e", () => {
       userId,
     });
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingIngressEventCount).toBe(0);
+    expect(finalStatus.lastErrorCode).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalStatus.inFlight).toBe(false);
-    expect(finalStatus.bundleRef).not.toBeNull();
+    expect(finalStatus.workspace).not.toBeNull();
 
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,

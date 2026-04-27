@@ -1,8 +1,8 @@
 import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
-  parseHostedRunnerStatusResponse,
   parseHostedRuntimeLogResponse,
+  parseHostedRuntimeWebStatusResponse,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -182,6 +182,7 @@ describe("hosted runtime internal web routes", () => {
     const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/payload/fetch",
       {
+        dedupeKey: "dedupe_item_2",
         mailboxItemId: "mailbox_item_2",
         payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
         requestId: "request_payload_fetch_1",
@@ -191,6 +192,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      dedupeKey: "dedupe_item_2",
       mailboxItemId: "mailbox_item_2",
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
       requestId: "request_payload_fetch_1",
@@ -481,7 +483,7 @@ describe("hosted runtime internal web routes", () => {
       "https://join.example.test/api/internal/hosted-runtime/status?logLimit=5",
       { method: "GET" },
     ));
-    const payload = parseHostedRunnerStatusResponse(await response.json());
+    const payload = parseHostedRuntimeWebStatusResponse(await response.json());
 
     expect(response.status).toBe(200);
     expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledWith({
@@ -489,8 +491,6 @@ describe("hosted runtime internal web routes", () => {
       userId: "member_routes_1",
     });
     expect(payload).toMatchObject({
-      inFlight: false,
-      leaseGeneration: "0",
       mailboxLag: [
         {
           importedSeq: "10",

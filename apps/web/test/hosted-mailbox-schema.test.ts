@@ -56,7 +56,5 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     expect(payloadHashMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item" ADD COLUMN "payload_hash" TEXT',
     );
-    expect(schema).toContain("model HostedRun {");
-    expect(schema).toContain("model HostedIngressEvent {");
   });
 });

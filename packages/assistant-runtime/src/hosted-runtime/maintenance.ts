@@ -23,8 +23,6 @@ import {
 import { readHostedAssistantRuntimeState } from "./context.ts";
 import type {
   HostedExecutionRedactedLogEntry,
-  HostedRunCleanupTarget,
-  HostedRunEventResult,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -132,8 +130,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.runtime,
       )
     : {
-        adoptedCleanupTargets: [],
-        adoptedEventResults: [],
         nextWakeAt: null,
         progressed: false,
         redactedLogEntries: [],
@@ -143,12 +139,6 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   redactedLogEntries.push(...assistantResult.redactedLogEntries);
 
   return {
-    ...(assistantResult.adoptedCleanupTargets.length === 0
-      ? {}
-      : { adoptedCleanupTargets: assistantResult.adoptedCleanupTargets }),
-    ...(assistantResult.adoptedEventResults.length === 0
-      ? {}
-      : { adoptedEventResults: assistantResult.adoptedEventResults }),
     deviceSyncProcessed: 0,
     deviceSyncSkipped: true,
     nextWakeAt,
@@ -164,8 +154,6 @@ export async function runHostedAssistantAutomation(
   wake: HostedRuntimeEvent,
   runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
 ): Promise<{
-  adoptedCleanupTargets: HostedRunCleanupTarget[];
-  adoptedEventResults: HostedRunEventResult[];
   nextWakeAt: string | null;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
@@ -174,20 +162,12 @@ export async function runHostedAssistantAutomation(
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
-  const adoptedEventResults: HostedRunEventResult[] = [];
-  const adoptedCleanupTargets: HostedRunCleanupTarget[] = [];
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;
   const turnInputPort = runtime
     ? createHostedAssistantTurnInputPort({
         inboxServices,
-        onImportedEvent(result, cleanupTarget) {
-          adoptedEventResults.push(result);
-          if (cleanupTarget) {
-            adoptedCleanupTargets.push(cleanupTarget);
-          }
-        },
         requestId,
         runtime,
         vaultRoot,
@@ -303,8 +283,6 @@ export async function runHostedAssistantAutomation(
       phase: "wake.running",
     }));
     return {
-      adoptedCleanupTargets,
-      adoptedEventResults,
       nextWakeAt: result.nextWakeAt,
       progressed: result.progressed,
       redactedLogEntries,
@@ -326,8 +304,6 @@ export async function runHostedAssistantAutomation(
         phase: "wake.running",
       }));
       return {
-        adoptedCleanupTargets,
-        adoptedEventResults,
         nextWakeAt: null,
         progressed: false,
         redactedLogEntries,

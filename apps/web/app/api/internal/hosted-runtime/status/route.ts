@@ -2,7 +2,7 @@ import {
   type HostedMailboxLane,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  parseHostedRunnerStatusResponse,
+  parseHostedRuntimeWebStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 
 import {
@@ -25,9 +25,7 @@ export const GET = withJsonError(async (request: Request) => {
   ]);
   const redactedStatus = readRecord(workspace?.redactedStatusJson);
 
-  return jsonOk(parseHostedRunnerStatusResponse({
-    inFlight: false,
-    leaseGeneration: "0",
+  return jsonOk(parseHostedRuntimeWebStatusResponse({
     mailboxLag: maxSeqByLane.map((highWater) => {
       const importedSeq = readImportedSeqForLane(redactedStatus, highWater.lane);
       const maxSeq = BigInt(highWater.maxSeq);
@@ -39,7 +37,6 @@ export const GET = withJsonError(async (request: Request) => {
         maxSeq: highWater.maxSeq,
       };
     }),
-    nextAlarmAt: workspace?.nextWakeAt ?? null,
     recentLogs: recentLogs.map((entry) => ({
       at: entry.at,
       attemptId: entry.attemptId,
@@ -97,6 +94,7 @@ function readImportedSeqForLane(
 
   const capitalizedLane = `${lane.slice(0, 1).toUpperCase()}${lane.slice(1)}`;
   const candidates = [
+    `hostedMailbox${capitalizedLane}ImportedSeq`,
     `${lane}ImportedSeq`,
     `imported${capitalizedLane}Seq`,
     `mailbox${capitalizedLane}ImportedSeq`,

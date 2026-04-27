@@ -9,13 +9,13 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   type HostedExecutionAssistantNotificationRoute,
-  type HostedIngressEnvelope,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import {
-  findHostedIngressByEventId,
-  materializeHostedIngressEnvelopeTx,
-} from "../hosted-ingress/lifecycle";
+  appendHostedMailboxEnvelopeTx,
+  readHostedMailboxItemByDedupeKey,
+} from "../hosted-mailbox/store";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
@@ -109,9 +109,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
   });
-  const existingWakeEventId = await findHostedIngressByEventId({
-    eventId: activationEventId,
-    tx: input.prisma,
+  const existingWake = await readHostedMailboxItemByDedupeKey({
+    dedupeKey: activationEventId,
+    prisma: input.prisma,
     userId: currentMember.core.id,
   });
 
@@ -119,7 +119,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     input.skipIfBillingAlreadyActive
     && currentMember.core.billingStatus === HostedBillingStatus.active
   ) {
-    if (existingWakeEventId) {
+    if (existingWake) {
       if (currentMember.core.pendingActivationTimeZone) {
         await clearHostedMemberPendingActivationTimeZone({
           memberId: currentMember.core.id,
@@ -129,7 +129,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
 
       return {
         activated: false,
-        hostedExecutionEventId: existingWakeEventId,
+        hostedExecutionEventId: existingWake.dedupeKey,
         memberId: currentMember.core.id,
       };
     }
@@ -302,23 +302,25 @@ function buildHostedInactiveMemberActivationResult(
 }
 
 async function materializeHostedMemberActivationWakesTx(input: {
-  activationWake: HostedIngressEnvelope;
+  activationWake: HostedExecutionWake;
   prisma: Prisma.TransactionClient;
-  welcomeWake: HostedIngressEnvelope | null;
+  welcomeWake: HostedExecutionWake | null;
 }): Promise<{ eventId: string }> {
-  const appendedWake = await materializeHostedIngressEnvelopeTx({
-    wake: input.activationWake,
+  const appendedWake = await appendHostedMailboxEnvelopeTx({
+    envelope: input.activationWake,
     tx: input.prisma,
   });
 
   if (input.welcomeWake) {
-    await materializeHostedIngressEnvelopeTx({
-      wake: input.welcomeWake,
+    await appendHostedMailboxEnvelopeTx({
+      envelope: input.welcomeWake,
       tx: input.prisma,
     });
   }
 
-  return appendedWake;
+  return {
+    eventId: appendedWake.item.dedupeKey,
+  };
 }
 
 function buildHostedMemberActivationWakeForMember(input: {
@@ -327,7 +329,7 @@ function buildHostedMemberActivationWakeForMember(input: {
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
-}): HostedIngressEnvelope {
+}): HostedExecutionWake {
   return buildHostedMemberActivationWake({
     emailLinked: input.emailLinked,
     memberId: input.member.core.id,
@@ -353,7 +355,7 @@ function buildHostedMemberActivationWake(input: {
   sourceEventId: string;
   sourceType: string;
   timeZone?: string | null;
-}): HostedIngressEnvelope {
+}): HostedExecutionWake {
   return buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedMemberActivationEventId(input),
     memberChannels: resolveHostedMemberChannels({
@@ -373,10 +375,10 @@ function buildHostedMemberActivationWake(input: {
 }
 
 function buildHostedMemberSignupWelcomeNotificationWake(input: {
-  activationWake: HostedIngressEnvelope;
+  activationWake: HostedExecutionWake;
   occurredAt: string;
   route: HostedExecutionAssistantNotificationRoute | null;
-}): HostedIngressEnvelope | null {
+}): HostedExecutionWake | null {
   if (!input.route) {
     return null;
   }
@@ -411,7 +413,7 @@ function buildHostedMemberSignupWelcomeInstructions(): string {
 }
 
 function buildHostedMemberSignupWelcomeNotificationEventId(
-  activationWake: HostedIngressEnvelope,
+  activationWake: HostedExecutionWake,
 ): string {
   return `assistant.notification.requested:signup-welcome:${activationWake.userId}:${activationWake.eventId}`;
 }

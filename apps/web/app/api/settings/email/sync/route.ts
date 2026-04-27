@@ -1,5 +1,5 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { nudgeHostedRunBestEffort } from "@/src/lib/hosted-ingress/control";
+import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -33,7 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const now = new Date().toISOString();
   const verifiedAt = new Date(verifiedEmail.verifiedAt * 1000).toISOString();
-  const channelSyncDispatch = await getPrisma().$transaction((tx) => {
+  await getPrisma().$transaction((tx) => {
     return upsertHostedMemberEmailAuthorization({
       directPublicSender: {
         address: verifiedEmail.address,
@@ -55,7 +55,7 @@ export const POST = withJsonError(async (request: Request) => {
       })
     );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  await nudgeHostedRunBestEffort({
+  await nudgeHostedRunnerBestEffort({
     context: "settings.email.sync",
     userId: auth.member.id,
   });

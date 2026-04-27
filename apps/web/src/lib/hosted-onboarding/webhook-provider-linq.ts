@@ -20,7 +20,7 @@ import {
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "./linq-routing-policy";
-import { materializeHostedIngressEnvelopeTx } from "../hosted-ingress/lifecycle";
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
@@ -159,8 +159,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await materializeHostedIngressEnvelopeTx({
-      wake: buildHostedExecutionLinqConversationMessageWake({
+    await appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedExecutionLinqConversationMessageWake({
         eventId: input.event.event_id,
         linqMessage: {
           chatId: summary.chatId,

@@ -60,8 +60,8 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(fetchRequests, [
       {
         lanes: [
-          { importedSeq: "0", lane: "conversation" },
           { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
         ],
         limitPerLane: 10,
         requestId: "request_synthetic_import_001",
@@ -143,6 +143,7 @@ describe("hosted mailbox import loop", () => {
 
     assert.deepEqual(payloadFetchRequests, [
       {
+        dedupeKey: "dedupe_synthetic_import",
         mailboxItemId: "mailbox_item_conversation_sidecar",
         payloadRef: "hosted-mailbox-payload:mailbox_item_conversation_sidecar",
         requestId: "request_synthetic_import_payload_missing:mailbox_item_conversation_sidecar:payload",

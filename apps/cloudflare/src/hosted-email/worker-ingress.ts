@@ -198,43 +198,43 @@ export async function handleHostedEmailIngress(
 
   try {
     const stub = await resolveUserRunnerStub(env, route.userId);
-    const nudge = await stub.nudgeHostedRun();
+    const nudge = await stub.nudgeHostedRunner();
     if (nudge.alreadyRunning) {
       return;
     }
 
-    const drainPromise = stub.drainHostedRuns().catch(async (error) => {
+    const runPromise = stub.runUntilIdleOrBudget({ reason: "nudge" }).catch(async (error) => {
       emitHostedExecutionStructuredLog({
         component: "hosted.email",
         details: buildHostedEmailIngressLogDetails({
           eventId,
           identityId: route.identityId,
-          reason: "run-background-drain-failed",
+          reason: "runner-background-run-failed",
           routeAddress: route.routeAddress,
           to: message.to,
         }),
         error,
         level: "warn",
-        message: "Hosted email background drain failed after appending the canonical ingress event.",
+        message: "Hosted email background runner invocation failed after appending the canonical ingress event.",
         phase: "wake.running",
         userId: route.userId,
       });
 
       try {
-        await stub.nudgeHostedRun();
+        await stub.nudgeHostedRunner();
       } catch (fallbackError) {
         emitHostedExecutionStructuredLog({
           component: "hosted.email",
           details: buildHostedEmailIngressLogDetails({
             eventId,
             identityId: route.identityId,
-            reason: "run-retry-arm-fallback-failed",
+            reason: "runner-retry-arm-fallback-failed",
             routeAddress: route.routeAddress,
             to: message.to,
           }),
           error: fallbackError,
           level: "error",
-          message: "Hosted email retry-arm fallback failed after the direct drain call failed.",
+          message: "Hosted email retry-arm fallback failed after the direct runner invocation failed.",
           phase: "wake.running",
           userId: route.userId,
         });
@@ -243,9 +243,9 @@ export async function handleHostedEmailIngress(
     });
 
     if (runtime.waitUntil) {
-      runtime.waitUntil(drainPromise);
+      runtime.waitUntil(runPromise);
     } else {
-      await drainPromise;
+      await runPromise;
     }
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -253,13 +253,13 @@ export async function handleHostedEmailIngress(
       details: buildHostedEmailIngressLogDetails({
         eventId,
         identityId: route.identityId,
-        reason: "run-background-drain-setup-failed",
+        reason: "runner-background-run-setup-failed",
         routeAddress: route.routeAddress,
         to: message.to,
       }),
       error,
       level: "warn",
-      message: "Hosted email background drain setup failed after appending the canonical ingress event.",
+      message: "Hosted email background runner setup failed after appending the canonical ingress event.",
       phase: "wake.running",
       userId: route.userId,
     });

@@ -6,8 +6,6 @@
 
 import {
   summarizeHostedExecutionErrorCode,
-  type HostedExecutionRunStatus,
-  type HostedExecutionTimelineEntry,
 } from "@murphai/hosted-execution";
 import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
@@ -18,17 +16,17 @@ import type {
 
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
-  active_run_attempt: number | null;
-  active_run_event_id: string | null;
-  active_run_id: string | null;
-  active_run_started_at: string | null;
-  runtime_bootstrapped: number;
+  active_invocation_id: string | null;
+  active_invocation_reason: string | null;
+  active_invocation_started_at: string | null;
+  active_workspace_version: string | null;
+  lease_generation: number;
   in_flight: number;
   last_error_at: string | null;
   last_error_code: string | null;
-  last_event_id: string | null;
   last_run_at: string | null;
   next_wake_at: string | null;
+  pending_nudge: number;
   user_id: string;
 }
 
@@ -36,27 +34,19 @@ export interface RunnerStateProjection {
   record: RunnerStateRecord;
 }
 
-export function appendBoundedRunnerTimelineEntry(
-  entries: readonly HostedExecutionTimelineEntry[],
-  entry: HostedExecutionTimelineEntry,
-  limit: number,
-): HostedExecutionTimelineEntry[] {
-  return [...entries, entry].slice(-limit);
-}
-
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
-    active_run_attempt: null,
-    active_run_event_id: null,
-    active_run_id: null,
-    active_run_started_at: null,
-    runtime_bootstrapped: 0,
+    active_invocation_id: null,
+    active_invocation_reason: null,
+    active_invocation_started_at: null,
+    active_workspace_version: null,
+    lease_generation: 0,
     in_flight: 0,
     last_error_at: null,
     last_error_code: null,
-    last_event_id: null,
     last_run_at: null,
     next_wake_at: null,
+    pending_nudge: 0,
     user_id: userId,
   };
 }
@@ -64,34 +54,31 @@ export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
 export function projectRunnerStateRecord(input: {
   bundleRef: HostedExecutionBundleRef | null;
   meta: RunnerMetaRow;
-  run: HostedExecutionRunStatus | null;
-  timeline: readonly HostedExecutionTimelineEntry[];
 }): RunnerStateProjection {
   const nextLastError = summarizeHostedExecutionErrorCode(input.meta.last_error_code);
-  const hasPersistedRunLease = input.meta.active_run_event_id !== null
-    && input.meta.active_run_id !== null
-    && typeof input.meta.active_run_attempt === "number"
-    && input.meta.active_run_started_at !== null;
-  const lastEventId = input.meta.last_event_id
-    ?? input.meta.active_run_event_id
-    ?? input.run?.eventId
-    ?? null;
+  const hasPersistedInvocationLease = input.meta.active_invocation_id !== null
+    && input.meta.active_invocation_started_at !== null;
 
   return {
     record: {
-      runtimeBootstrapped: input.meta.runtime_bootstrapped === 1,
       bundleRef: input.bundleRef,
-      inFlight: input.meta.in_flight === 1 || hasPersistedRunLease,
+      inFlight: hasPersistedInvocationLease,
       lastError: nextLastError,
       lastErrorAt: input.meta.last_error_at,
       lastErrorCode: input.meta.last_error_code,
-      lastEventId,
       lastRunAt: input.meta.last_run_at,
+      leaseGeneration: input.meta.lease_generation,
       nextWakeAt: input.meta.next_wake_at,
-      pendingIngressEventCount: 0,
-      run: input.run,
-      timeline: [...input.timeline],
+      pendingNudge: input.meta.pending_nudge === 1,
       userId: input.meta.user_id,
+      workspaceInvocation: hasPersistedInvocationLease
+        ? {
+            attemptId: input.meta.active_invocation_id ?? "",
+            reason: input.meta.active_invocation_reason,
+            startedAt: input.meta.active_invocation_started_at ?? "",
+            workspaceVersion: input.meta.active_workspace_version,
+          }
+        : null,
     },
   };
 }

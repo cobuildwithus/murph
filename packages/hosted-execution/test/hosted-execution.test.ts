@@ -19,12 +19,9 @@ import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-  HOSTED_INGRESS_PAYLOAD_SCHEMA,
-  HOSTED_RUN_STATUSES,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
-  HOSTED_INGRESS_LIFECYCLE_STATES,
   HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "../src/contracts.ts";
@@ -33,13 +30,7 @@ import {
   normalizeHostedExecutionString,
 } from "../src/env.ts";
 import {
-  parseHostedExecutionRunnerVaultSyncImport,
-  parseHostedIngressEnvelope,
-  parseHostedRuntimeDrainEvent,
-  parseHostedRunTurnInputAdoptRequest,
-  parseHostedRunTurnInputAdoptResponse,
-  parseHostedRunTurnInputPeekRequest,
-  parseHostedRunTurnInputPeekResponse,
+  parseHostedExecutionWake,
 } from "../src/parsers.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
@@ -80,7 +71,7 @@ describe("hosted execution coverage gaps", () => {
         encodeHostedExecutionSignedRequestPayload({
           method: " patch ",
           nonce: "  nonce_abc  ",
-          path: "internal/hosted-ingress",
+          path: "internal/hosted-mailbox",
           payload: "{\"ok\":true}",
           search: "limit=10&sort=desc",
           timestamp: "2026-04-07T00:00:00.000Z",
@@ -90,7 +81,7 @@ describe("hosted execution coverage gaps", () => {
     ).toBe(JSON.stringify([
       "2026-04-07T00:00:00.000Z",
       "PATCH",
-      "/internal/hosted-ingress",
+      "/internal/hosted-mailbox",
       "?limit=10&sort=desc",
       "user_123",
       "nonce_abc",
@@ -167,22 +158,6 @@ describe("hosted execution coverage gaps", () => {
       "vault.share.accepted",
       "vault.sync.import",
     ]);
-    expect(HOSTED_INGRESS_LIFECYCLE_STATES).toEqual([
-      "queued",
-      "backpressured",
-      "completed",
-      "replaced",
-      "quarantined",
-    ]);
-    expect(HOSTED_RUN_STATUSES).toEqual([
-      "acquired",
-      "running",
-      "finalizing",
-      "committed_needs_finalize",
-      "finalized",
-      "failed",
-      "superseded",
-    ]);
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
       "Hosted execution wake handling is not configured.",
     );
@@ -206,12 +181,32 @@ describe("hosted execution coverage gaps", () => {
       exports?: Record<string, unknown>;
     };
 
-    expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./dispatch-ref");
-    expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./client");
-    expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./outbox-payload");
+    const exportKeys = Object.keys(packageJson.exports ?? {}).sort();
+
+    expect(exportKeys).toEqual([
+      ".",
+      "./auth",
+      "./bundles",
+      "./contracts",
+      "./env",
+      "./hosted-email",
+      "./parsers",
+      "./routes",
+      "./runtime-control",
+      "./side-effects",
+    ]);
+    expect(exportKeys.filter((key) => key.startsWith("./") && key.slice(2).includes("/")))
+      .toEqual([]);
+    expect(exportKeys).not.toContain("./dispatch-ref");
+    expect(exportKeys).not.toContain("./client");
+    expect(exportKeys).not.toContain("./outbox-payload");
 
     const rootModule = await import("@murphai/hosted-execution");
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
+    const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
+      string,
+      unknown
+    >;
 
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
@@ -221,9 +216,26 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
+    expect(runtimeControlModule.HOSTED_WORKSPACE_RUN_REASONS).toEqual([
+      "nudge",
+      "alarm",
+      "retry",
+      "manual",
+    ]);
+    expect(runtimeControlModule.HOSTED_WORKSPACE_RUN_STATUSES).toEqual([
+      "idle",
+      "budget_exhausted",
+      "scheduled",
+      "failed",
+    ]);
+    expect("HOSTED_RUN_STATUSES" in runtimeControlModule).toBe(false);
+    expect("HOSTED_RUN_TRIGGER_KINDS" in runtimeControlModule).toBe(false);
+    expect("HOSTED_RUN_EXECUTOR_KINDS" in runtimeControlModule).toBe(false);
+    expect("HOSTED_RUN_LOG_LEVELS" in runtimeControlModule).toBe(false);
+    expect("HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH" in routeModule).toBe(false);
+    expect("HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH" in routeModule).toBe(false);
     expect(Object.keys(routeModule).sort()).toEqual([
-      "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
-      "HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LOG_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
@@ -264,64 +276,6 @@ describe("hosted execution coverage gaps", () => {
     ).toBe("/api/internal/hosted-execution/vault-sync/vsi%2F1/payload");
   });
 
-  it("parses hosted run turn-input peek and adopt contracts", () => {
-    const event = {
-      behavior: "ordered",
-      createdAt: "2026-04-23T00:00:00.000Z",
-      id: "wake_11",
-      kind: "conversation.message",
-      occurredAt: "2026-04-23T00:00:00.000Z",
-      payloadCiphertext: "ciphertext",
-      payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
-      seq: "11",
-      updatedAt: "2026-04-23T00:00:00.000Z",
-      userId: "member_123",
-    };
-
-    expect(parseHostedRunTurnInputPeekRequest({
-      afterSeq: "10",
-      limit: 2,
-      runId: "run_123",
-      runToken: "run-token",
-    })).toEqual({
-      afterSeq: "10",
-      limit: 2,
-      runId: "run_123",
-      runToken: "run-token",
-    });
-    expect(parseHostedRunTurnInputPeekResponse({
-      events: [event],
-      run: null,
-    })).toEqual({
-      events: [event],
-      run: null,
-    });
-    expect(parseHostedRunTurnInputAdoptRequest({
-      ingressEventIds: ["wake_11"],
-      runId: "run_123",
-      runToken: "run-token",
-    })).toEqual({
-      ingressEventIds: ["wake_11"],
-      runId: "run_123",
-      runToken: "run-token",
-    });
-    expect(parseHostedRunTurnInputAdoptResponse({
-      adopted: true,
-      events: [event],
-      run: null,
-    })).toEqual({
-      adopted: true,
-      events: [event],
-      run: null,
-    });
-
-    expect(() => parseHostedRunTurnInputPeekRequest({
-      afterSeq: "not-a-seq",
-      runId: "run_123",
-      runToken: "run-token",
-    })).toThrow(/base-10 integer string/iu);
-  });
-
   it("builds and parses hosted vault sync import side-input contracts", () => {
     const wake = buildHostedExecutionVaultSyncImportWake({
       eventId: "evt_vault_sync",
@@ -336,7 +290,7 @@ describe("hosted execution coverage gaps", () => {
       },
     });
 
-    expect(parseHostedIngressEnvelope(wake)).toEqual(wake);
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
     expect(
       buildHostedExecutionVaultSyncImportWake({
         eventId: "evt_vault_sync_minimal",
@@ -357,37 +311,5 @@ describe("hosted execution coverage gaps", () => {
         sessionId: "vsi_minimal",
       },
     });
-
-    const runnerPayload = {
-      bundleBase64: "AAAA",
-      sessionId: "vsi_contract",
-      sourceSchemaVersion: "murph.vault.v1",
-    };
-    expect(parseHostedExecutionRunnerVaultSyncImport(runnerPayload)).toEqual(runnerPayload);
-    expect(parseHostedRuntimeDrainEvent({
-      ingressEventId: "ingress_vault_sync",
-      seq: "12",
-      vaultSyncImport: runnerPayload,
-      wake,
-    })).toEqual({
-      ingressEventId: "ingress_vault_sync",
-      seq: "12",
-      vaultSyncImport: runnerPayload,
-      wake,
-    });
-
-    expect(() => parseHostedRuntimeDrainEvent({
-      seq: "12",
-      vaultSyncImport: runnerPayload,
-      wake,
-      wakeId: "ingress_vault_sync",
-    })).toThrow(/ingressEventId/u);
-    expect(() => parseHostedRuntimeDrainEvent({
-      ingressEventId: "ingress_vault_sync",
-      seq: "12",
-      vaultSyncImport: runnerPayload,
-      wake,
-      wakeId: "ingress_vault_sync",
-    })).toThrow(/wakeId/u);
   });
 });

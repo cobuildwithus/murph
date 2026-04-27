@@ -1,11 +1,13 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionVaultSyncImportWake,
+  type HostedRuntimeVaultSyncImportRequest,
+  type HostedRuntimeVaultSyncImportStatus,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { materializeHostedIngressEnvelopeTx } from "../hosted-ingress/lifecycle";
-import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { nudgeHostedRunnerBestEffort } from "../hosted-runner/control";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 
@@ -26,6 +28,12 @@ import {
 export interface CreateHostedVaultSyncSessionResult {
   pairingCode: string;
   session: HostedVaultSyncSessionView;
+}
+
+export interface RecordHostedVaultSyncImportResult {
+  recorded: boolean;
+  sessionId: string;
+  status: HostedRuntimeVaultSyncImportStatus;
 }
 
 export async function createHostedVaultSyncSession(input: {
@@ -66,12 +74,7 @@ export async function listHostedVaultSyncSessions(input: {
     take: 5,
     where: { memberId: input.memberId },
   });
-  return Promise.all(
-    sessions.map((session) => projectHostedVaultSyncSessionViewWithRunStatus({
-      prisma,
-      session,
-    })),
-  );
+  return sessions.map((session) => projectHostedVaultSyncSessionView({ session }));
 }
 
 export async function revokeHostedVaultSyncSession(input: {
@@ -110,98 +113,6 @@ export async function revokeHostedVaultSyncSession(input: {
     });
   }
   return projectHostedVaultSyncSessionView({ session });
-}
-
-async function projectHostedVaultSyncSessionViewWithRunStatus(input: {
-  prisma: PrismaClient;
-  session: Parameters<typeof projectHostedVaultSyncSessionView>[0]["session"];
-}): Promise<HostedVaultSyncSessionView> {
-  const view = projectHostedVaultSyncSessionView({ session: input.session });
-  if (!input.session.queuedIngressEventId || view.status !== "queued") {
-    return view;
-  }
-
-  const event = await input.prisma.hostedIngressEvent.findUnique({
-    where: { id: input.session.queuedIngressEventId },
-    include: { run: true },
-  });
-  if (!event) {
-    return view;
-  }
-
-  if (event.state === "quarantined" || event.run?.status === "failed") {
-    return { ...view, status: "failed" };
-  }
-
-  if (event.state === "completed") {
-    const conflictCount = readVaultSyncImportConflictCount(
-      event.run?.redactedSummaryJson ?? null,
-      input.session.id,
-    );
-    return {
-      ...view,
-      status: conflictCount && conflictCount > 0 ? "committed_with_conflicts" : "committed",
-    };
-  }
-
-  return view;
-}
-
-function readVaultSyncImportSummaries(value: unknown): Record<string, unknown>[] {
-  const summary = readRecord(value);
-  const details = readRecord(summary?.details);
-  const summaries = details?.vaultSyncImports;
-  if (Array.isArray(summaries)) {
-    return summaries.flatMap((entry) => {
-      const record = readRecord(entry);
-      return record ? [record] : [];
-    });
-  }
-
-  return [];
-}
-
-function readVaultSyncImportSummary(value: unknown, sessionId?: string | null): Record<string, unknown> | null {
-  const summaries = readVaultSyncImportSummaries(value);
-  if (!sessionId) {
-    return summaries[0] ?? null;
-  }
-
-  return summaries.find((summary) => summary.sessionId === sessionId) ?? null;
-}
-
-function readVaultSyncImportConflictCount(value: unknown, sessionId?: string | null): number | null {
-  const vaultSyncImport = readVaultSyncImportSummary(value, sessionId);
-  const conflictCount = vaultSyncImport?.conflictCount;
-  return typeof conflictCount === "number" && Number.isFinite(conflictCount)
-    ? conflictCount
-    : null;
-}
-
-function readVaultSyncImportSessionSummaries(value: unknown): Array<{
-  conflictCount: number;
-  sessionId: string;
-}> {
-  return readVaultSyncImportSummaries(value).flatMap((vaultSyncImport) => {
-    const sessionId = vaultSyncImport.sessionId;
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      return [];
-    }
-
-    const conflictCount = vaultSyncImport.conflictCount;
-    return [{
-      conflictCount: typeof conflictCount === "number" && Number.isFinite(conflictCount)
-        ? conflictCount
-        : 0,
-      sessionId,
-    }];
-  });
-}
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
 }
 
 export async function exchangeHostedVaultSyncPairingCode(input: {
@@ -270,7 +181,11 @@ export async function completeHostedVaultSyncAgentUpload(input: {
     sessionId: input.sessionId,
   });
   const eventId = buildHostedVaultSyncImportEventId(input.sessionId);
-  if (session.status === "queued" && session.queuedIngressEventId === eventId) {
+  if (session.status === "queued") {
+    await nudgeHostedRunnerBestEffort({
+      context: "vault-sync.import",
+      userId: session.memberId,
+    });
     return projectHostedVaultSyncSessionView({ session });
   }
   if (session.status !== "exchanged") {
@@ -294,9 +209,21 @@ export async function completeHostedVaultSyncAgentUpload(input: {
       sessionId: input.sessionId,
     });
 
-    await materializeHostedIngressEnvelopeTx({
-      tx,
-      wake: buildHostedExecutionVaultSyncImportWake({
+    const updatedSession = await tx.hostedVaultSyncSession.update({
+      where: { id: input.sessionId },
+      data: {
+        localManifestHash: input.localManifestHash,
+        queuedAt: now,
+        sourceSchemaVersion: input.sourceSchemaVersion ?? null,
+        sourceVaultId: input.sourceVaultId ?? null,
+        sourceVaultTitle: input.sourceVaultTitle ?? null,
+        status: "queued",
+        uploadedAt: now,
+      },
+    });
+
+    await appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedExecutionVaultSyncImportWake({
         eventId,
         memberId: session.memberId,
         occurredAt: now.toISOString(),
@@ -308,24 +235,13 @@ export async function completeHostedVaultSyncAgentUpload(input: {
           sourceVaultTitle: input.sourceVaultTitle ?? null,
         },
       }),
+      tx,
     });
 
-    return await tx.hostedVaultSyncSession.update({
-      where: { id: input.sessionId },
-      data: {
-        localManifestHash: input.localManifestHash,
-        queuedAt: now,
-        queuedIngressEventId: eventId,
-        sourceSchemaVersion: input.sourceSchemaVersion ?? null,
-        sourceVaultId: input.sourceVaultId ?? null,
-        sourceVaultTitle: input.sourceVaultTitle ?? null,
-        status: "queued",
-        uploadedAt: now,
-      },
-    });
+    return updatedSession;
   });
 
-  await nudgeHostedRunBestEffort({
+  await nudgeHostedRunnerBestEffort({
     context: "vault-sync.import",
     userId: session.memberId,
   });
@@ -347,40 +263,68 @@ export async function readHostedVaultSyncAgentSession(input: {
   return projectHostedVaultSyncSessionView({ session });
 }
 
+export async function recordHostedVaultSyncImportResult(input: {
+  memberId: string;
+  prisma?: PrismaClient;
+  request: HostedRuntimeVaultSyncImportRequest;
+}): Promise<RecordHostedVaultSyncImportResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const importedAt = new Date(input.request.importedAt);
+  if (Number.isNaN(importedAt.getTime())) {
+    throw new TypeError("Hosted vault sync import importedAt must be a valid ISO timestamp.");
+  }
+
+  const terminalStatus = mapHostedVaultSyncImportStatus(input.request.status);
+  const recorded = await prisma.$transaction(async (tx) => {
+    const updateResult = await tx.hostedVaultSyncSession.updateMany({
+      where: {
+        id: input.request.sessionId,
+        memberId: input.memberId,
+        status: {
+          in: ["exchanged", "uploaded", "queued"],
+        },
+      },
+      data: {
+        agentTokenHash: null,
+        status: terminalStatus,
+      },
+    });
+
+    if (updateResult.count !== 1) {
+      return false;
+    }
+
+    await deleteHostedVaultSyncPayload({
+      memberId: input.memberId,
+      prisma: tx,
+      sessionId: input.request.sessionId,
+    });
+    return true;
+  });
+
+  return {
+    recorded,
+    sessionId: input.request.sessionId,
+    status: input.request.status,
+  };
+}
+
 export function buildHostedVaultSyncImportEventId(sessionId: string): string {
   return `vault-sync.import:${sessionId}`;
 }
 
 export type VaultSyncTx = Prisma.TransactionClient;
 
-export async function markHostedVaultSyncSessionCommittedFromRunSummary(input: {
-  memberId: string;
-  prisma?: PrismaClient;
-  redactedSummary: unknown;
-}): Promise<void> {
-  const sessions = readVaultSyncImportSessionSummaries(input.redactedSummary);
-  if (sessions.length === 0) {
-    return;
+function mapHostedVaultSyncImportStatus(
+  status: HostedRuntimeVaultSyncImportStatus,
+): "committed" | "committed_with_conflicts" | "failed" {
+  if (status === "imported") {
+    return "committed";
   }
 
-  const prisma = input.prisma ?? getPrisma();
-  await Promise.all(
-    sessions.map(async (session) => {
-      await prisma.hostedVaultSyncSession.updateMany({
-        where: {
-          id: session.sessionId,
-          memberId: input.memberId,
-          status: { in: ["exchanged", "uploaded", "queued"] },
-        },
-        data: {
-          status: session.conflictCount > 0 ? "committed_with_conflicts" : "committed",
-        },
-      });
-      await deleteHostedVaultSyncPayload({
-        memberId: input.memberId,
-        prisma,
-        sessionId: session.sessionId,
-      });
-    }),
-  );
+  if (status === "imported_with_conflicts") {
+    return "committed_with_conflicts";
+  }
+
+  return "failed";
 }

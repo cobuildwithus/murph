@@ -18,14 +18,12 @@ vi.mock("../src/hosted-runtime/message-cleanup.ts", () => ({
 
 import {
   drainHostedProviderCleanupAfterCommit,
-  readHostedProviderCleanupPreparedResult,
+  readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
 } from "../src/hosted-runtime/provider-cleanup.ts";
 
-const preparedResult = {
-  eventsHandled: 2,
+const checkpoint = {
   nextWakeAt: "2026-04-08T00:05:00.000Z",
-  summary: "Prepared hosted run.",
 } as const;
 
 const wake = buildHostedExecutionRuntimeTimerWake({
@@ -40,23 +38,23 @@ beforeEach(() => {
   mocks.deleteHostedLinqMessages.mockResolvedValue(undefined);
 });
 
-test("hosted provider cleanup records prepared result and unique Linq ids in runtime state", async () => {
+test("hosted provider cleanup records checkpoint state and unique Linq ids in runtime state", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
     await recordHostedProviderCleanupBeforeCommit({
       linqMessageIds: ["linq_inbound_1", "linq_inbound_1", " "],
-      preparedResult,
+      checkpoint,
       vaultRoot,
     });
 
     assert.deepEqual(
-      await readHostedProviderCleanupPreparedResult(vaultRoot),
-      preparedResult,
+      await readHostedProviderCleanupCheckpoint(vaultRoot),
+      checkpoint,
     );
     const raw = await readHostedProviderCleanupFile(vaultRoot);
     assert.deepEqual(raw.linqMessageIds, ["linq_inbound_1"]);
-    assert.deepEqual(raw.preparedResult, preparedResult);
+    assert.deepEqual(raw.checkpoint, checkpoint);
   } finally {
     await cleanup();
   }
@@ -68,7 +66,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
   try {
     await recordHostedProviderCleanupBeforeCommit({
       linqMessageIds: ["linq_inbound_1"],
-      preparedResult,
+      checkpoint,
       vaultRoot,
     });
 
@@ -94,7 +92,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
       env: {
         LINQ_API_TOKEN: "test-token",
       },
-      preparedResult,
+      checkpoint,
       vaultRoot,
       wake,
     });
@@ -128,14 +126,14 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
     mocks.deleteHostedLinqMessages.mockRejectedValueOnce(new Error("delete unavailable"));
     await recordHostedProviderCleanupBeforeCommit({
       linqMessageIds: ["linq_inbound_1"],
-      preparedResult,
+      checkpoint,
       vaultRoot,
     });
 
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [],
       env: {},
-      preparedResult,
+      checkpoint,
       vaultRoot,
       wake,
     });
@@ -148,7 +146,7 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
     });
     const raw = await readHostedProviderCleanupFile(vaultRoot);
     assert.deepEqual(raw.linqMessageIds, ["linq_inbound_1"]);
-    assert.deepEqual(raw.preparedResult, preparedResult);
+    assert.deepEqual(raw.checkpoint, checkpoint);
   } finally {
     vi.useRealTimers();
     await cleanup();
@@ -157,7 +155,7 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
 
 async function readHostedProviderCleanupFile(vaultRoot: string): Promise<{
   linqMessageIds: unknown;
-  preparedResult: unknown;
+  checkpoint: unknown;
 }> {
   const filePath = path.join(
     resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
@@ -165,6 +163,6 @@ async function readHostedProviderCleanupFile(vaultRoot: string): Promise<{
   );
   return JSON.parse(await readFile(filePath, "utf8")) as {
     linqMessageIds: unknown;
-    preparedResult: unknown;
+    checkpoint: unknown;
   };
 }

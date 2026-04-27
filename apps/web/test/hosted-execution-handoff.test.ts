@@ -18,10 +18,10 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { nudgeHostedRunBestEffort } from "@/src/lib/hosted-ingress/control";
+import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
 import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
 
-describe("nudgeHostedRunBestEffort", () => {
+describe("nudgeHostedRunnerBestEffort", () => {
   beforeEach(() => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
   });
@@ -40,7 +40,7 @@ describe("nudgeHostedRunBestEffort", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      nudgeHostedRunBestEffort({
+      nudgeHostedRunnerBestEffort({
         userId: "user-123",
       }),
     ).resolves.toBeUndefined();
@@ -65,7 +65,7 @@ describe("nudgeHostedRunBestEffort", () => {
       nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
-    await nudgeHostedRunBestEffort({
+    await nudgeHostedRunnerBestEffort({
       context: "member-activation",
       timeoutMs: 25,
       userId: "user-123",

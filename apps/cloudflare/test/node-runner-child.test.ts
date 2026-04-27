@@ -16,6 +16,8 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   parseHostedRuntimeChildResult,
+  type HostedAssistantWorkspaceRuntimeJobInput,
+  type HostedWorkspaceRuntimeJobOptions,
 } from "@murphai/assistant-runtime";
 
 import {
@@ -100,6 +102,76 @@ describe("runHostedExecutionChild", () => {
         }),
       }),
     );
+  });
+
+  it("routes workspace-run child payloads through the workspace runtime with proxy-only authority", async () => {
+    const stdout = { write: vi.fn() };
+    const setExitCode = vi.fn();
+    const runWorkspaceInProcess = vi.fn(async (
+      _input: HostedAssistantWorkspaceRuntimeJobInput,
+      _options: HostedWorkspaceRuntimeJobOptions,
+    ) => ({
+      nextWakeAt: null,
+      redactedStatus: {
+        importedCount: 0,
+      },
+      status: "idle" as const,
+    }));
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        internalWorkerProxyToken: "bridge-token",
+        localInternalProxyBaseUrl: "http://127.0.0.1:8787/__murph/local-internal-proxy/users/u_workspace",
+        job: {
+          kind: "workspace-run",
+          request: {
+            attemptId: "attempt_workspace_child",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {
+              HOSTED_ASSISTANT_MODEL: "gpt-test",
+            },
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      stdout,
+    });
+
+    expect(setExitCode).not.toHaveBeenCalled();
+    expect(runWorkspaceInProcess).toHaveBeenCalledTimes(1);
+    expect(runWorkspaceInProcess.mock.calls[0]?.[0]).toMatchObject({
+      kind: "workspace-run",
+      request: {
+        attemptId: "attempt_workspace_child",
+        userId: "u_workspace",
+        workspaceVersion: "4",
+      },
+    });
+    expect(runWorkspaceInProcess.mock.calls[0]?.[1]).toMatchObject({
+      createCheckpointSnapshot: expect.any(Function),
+      importItem: expect.any(Function),
+      platform: expect.objectContaining({
+        workspacePort: expect.any(Object),
+      }),
+    });
+
+    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+    expect(payload).toEqual({
+      ok: true,
+      result: {
+        nextWakeAt: null,
+        redactedStatus: {
+          importedCount: 0,
+        },
+        status: "idle",
+      },
+    });
   });
 });
 

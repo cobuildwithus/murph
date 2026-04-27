@@ -133,10 +133,41 @@ describe("hosted workspace store", () => {
       },
     });
   });
+
+  it("preserves optional wake and redacted status fields when a checkpoint omits them", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => buildHostedWorkspaceRow({
+        nextWakeAt: new Date("2026-04-26T00:05:00.000Z"),
+        nextWakeReason: "assistant",
+        redactedStatusJson: {
+          hostedAssistantProgressed: true,
+        },
+        snapshotRef: createBundleRef("snapshot_2"),
+        version: 5n,
+      })),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedWorkspace,
+    });
+
+    await checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason: "maintenance",
+      snapshotRef: createBundleRef("snapshot_2"),
+      tx,
+      userId: "member_workspace_1",
+    });
+
+    const updateData = hostedWorkspace.updateMany.mock.calls[0]?.[0].data;
+    expect(updateData).not.toHaveProperty("nextWakeAt");
+    expect(updateData).not.toHaveProperty("nextWakeReason");
+    expect(updateData).not.toHaveProperty("redactedStatusJson");
+  });
 });
 
 describe("hosted runtime log store", () => {
-  it("inserts allowlisted structured log fields and drops unallowlisted redacted data", async () => {
+  it("inserts parser-accepted structured log fields", async () => {
     const hostedRuntimeLog = createHostedRuntimeLogDelegate();
     const tx = createHostedWorkspaceTx({
       hostedRuntimeLog,
@@ -173,6 +204,7 @@ describe("hosted runtime log store", () => {
         redactedJson: {
           dedupeConflict: true,
           incomingKind: "conversation.message",
+          unallowlistedDetail: "DROP_THIS",
         },
         userId: "member_workspace_1",
         workspaceVersion: 5n,
@@ -181,6 +213,7 @@ describe("hosted runtime log store", () => {
     expect(result.redactedJson).toEqual({
       dedupeConflict: true,
       incomingKind: "conversation.message",
+      unallowlistedDetail: "DROP_THIS",
     });
   });
 

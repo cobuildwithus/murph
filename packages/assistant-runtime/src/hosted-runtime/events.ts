@@ -4,10 +4,10 @@ import type {
   HostedExecutionRedactedLogEntry,
   HostedExecutionRunnerSharePack,
   HostedExecutionRunnerVaultSyncImport,
-  HostedExecutionRunLevel,
-  HostedIngressSystemEnvelope,
-  HostedIngressEnvelope,
-  HostedExecutionRunPhase,
+  HostedExecutionLogLevel,
+  HostedExecutionSystemWake,
+  HostedExecutionWake,
+  HostedExecutionLogPhase,
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -31,17 +31,18 @@ import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { handleHostedShareAcceptedWake } from "./events/share.ts";
 import { handleHostedVaultSyncImportWake } from "./events/vault-sync.ts";
+import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
 import type {
-  HostedIngressEffect,
-  HostedIngressLane,
-  HostedIngressExecutionMetrics,
+  HostedMailboxEffect,
+  HostedMailboxLane,
+  HostedMailboxExecutionMetrics,
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 
-type HostedIngressOutcome = HostedIngressEffect & {
-  ingressLane: HostedIngressLane;
+type HostedMailboxOutcome = HostedMailboxEffect & {
+  mailboxLane: HostedMailboxLane;
 };
 
 const HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA = "murph.assistant-provider-request-debug.v1";
@@ -49,8 +50,8 @@ const HOSTED_PROVIDER_REQUEST_DEBUG_TYPE = "assistant.provider.request.debug";
 const HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA = "murph.assistant-responses-request-debug.v1";
 const HOSTED_RESPONSES_REQUEST_DEBUG_TYPE = "assistant.responses.request.debug";
 
-export async function executeHostedIngressEvent(input: {
-  wake: HostedIngressEnvelope;
+export async function executeHostedMailboxEvent(input: {
+  wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -60,7 +61,7 @@ export async function executeHostedIngressEvent(input: {
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
-}): Promise<HostedIngressExecutionMetrics> {
+}): Promise<HostedMailboxExecutionMetrics> {
   const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,
     input.wake,
@@ -70,7 +71,7 @@ export async function executeHostedIngressEvent(input: {
   const bootstrappedExecutionContext = await hydrateHostedExecutionDefaultTarget(
     input.executionContext,
   );
-  const ingressEffect = await handleHostedIngressEvent({
+  const mailboxEffect = await handleHostedMailboxEvent({
     wake: input.wake,
     executionContext: bootstrappedExecutionContext,
     runtime: input.runtime,
@@ -81,17 +82,17 @@ export async function executeHostedIngressEvent(input: {
 
   return {
     bootstrapResult,
-    conversationMetrics: ingressEffect.conversationMetrics,
-    ingressLane: ingressEffect.ingressLane,
-    redactedLogEntries: ingressEffect.redactedLogEntries ?? [],
-    shareImportResult: ingressEffect.shareImportResult,
-    shareImportTitle: ingressEffect.shareImportTitle,
-    vaultSyncImportResult: ingressEffect.vaultSyncImportResult,
+    conversationMetrics: mailboxEffect.conversationMetrics,
+    mailboxLane: mailboxEffect.mailboxLane,
+    redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
+    shareImportResult: mailboxEffect.shareImportResult,
+    shareImportTitle: mailboxEffect.shareImportTitle,
+    vaultSyncImportResult: mailboxEffect.vaultSyncImportResult,
   };
 }
 
-async function handleHostedIngressEvent(input: {
-  wake: HostedIngressEnvelope;
+async function handleHostedMailboxEvent(input: {
+  wake: HostedExecutionWake;
   executionContext: AssistantExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -100,7 +101,7 @@ async function handleHostedIngressEvent(input: {
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
-}): Promise<HostedIngressOutcome> {
+}): Promise<HostedMailboxOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
     return executeHostedConversationWake({
       wake: input.wake,
@@ -112,6 +113,7 @@ async function handleHostedIngressEvent(input: {
   return executeHostedSystemWake({
     wake: input.wake,
     executionContext: input.executionContext,
+    runtime: input.runtime,
     sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
     vaultSyncImport: input.vaultSyncImport ?? null,
@@ -125,36 +127,40 @@ async function executeHostedConversationWake(input: {
     "forwardedEnv" | "platform" | "platformEnv"
   >;
   vaultRoot: string;
-}): Promise<HostedIngressOutcome> {
+}): Promise<HostedMailboxOutcome> {
   const conversationMetrics = await ingestHostedConversationMessageWake(input);
   const redactedLogEntries = isHostedLinqConversationMessageWake(input.wake)
     ? [emitHostedLinqConversationContextLog(input.wake)]
     : [];
 
-  return createNoopIngressEffect({
+  return createNoopMailboxEffect({
     conversationMetrics,
-    ingressLane: "conversation-message",
+    mailboxLane: "conversation-message",
     redactedLogEntries,
   });
 }
 
 async function executeHostedSystemWake(input: {
-  wake: HostedIngressSystemEnvelope;
+  wake: HostedExecutionSystemWake;
   executionContext: AssistantExecutionContext;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "platform" | "resolvedConfig"
+  >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
-}): Promise<HostedIngressOutcome> {
+}): Promise<HostedMailboxOutcome> {
   switch (input.wake.kind) {
     case "member.activated":
-      return createNoopIngressEffect({
+      return createNoopMailboxEffect({
         conversationMetrics: null,
-        ingressLane: "member-activated",
+        mailboxLane: "member-activated",
       });
     case "member.channels.updated":
-      return createNoopIngressEffect({
+      return createNoopMailboxEffect({
         conversationMetrics: null,
-        ingressLane: "member-channels-updated",
+        mailboxLane: "member-channels-updated",
       });
     case "assistant.notification.requested":
       return executeHostedAssistantNotificationWake({
@@ -163,9 +169,16 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
       });
     case "device-sync.wake":
-      return createNoopIngressEffect({
+      await runHostedDeviceSyncWakeLane({
+        deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+        resolvedConfig: input.runtime.resolvedConfig,
+        timeoutMs: input.runtime.commitTimeoutMs,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+      return createNoopMailboxEffect({
         conversationMetrics: null,
-        ingressLane: "device-sync",
+        mailboxLane: "device-sync",
       });
     case "vault.share.accepted":
       if (!input.sharePack) {
@@ -174,13 +187,14 @@ async function executeHostedSystemWake(input: {
       return {
         ...(await handleHostedShareAcceptedWake({
           wake: input.wake,
+          sharePort: input.runtime.platform.sharePort ?? null,
           sharePack: input.sharePack,
           vaultRoot: input.vaultRoot,
         })),
         conversationMetrics: null,
         redactedLogEntries: [],
         vaultSyncImportResult: null,
-        ingressLane: "vault-share-accepted",
+        mailboxLane: "vault-share-accepted",
       };
     case "vault.sync.import":
       if (!input.vaultSyncImport) {
@@ -193,7 +207,7 @@ async function executeHostedSystemWake(input: {
           vaultSyncImport: input.vaultSyncImport,
         })),
         redactedLogEntries: [],
-        ingressLane: "vault-sync-import",
+        mailboxLane: "vault-sync-import",
       };
   }
 
@@ -206,7 +220,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
   vaultRoot: string;
-}): Promise<HostedIngressOutcome> {
+}): Promise<HostedMailboxOutcome> {
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [
     emitHostedAssistantNotificationLifecycleLog({
       message: "Hosted assistant notification started.",
@@ -241,9 +255,9 @@ export async function executeHostedAssistantNotificationWake(input: {
     }
 
     redactedLogEntries.push(emitHostedAssistantNotificationSkipLog(input.wake, error));
-    return createNoopIngressEffect({
+    return createNoopMailboxEffect({
       conversationMetrics: null,
-      ingressLane: "assistant-notification",
+      mailboxLane: "assistant-notification",
       redactedLogEntries,
     });
   }
@@ -256,9 +270,9 @@ export async function executeHostedAssistantNotificationWake(input: {
     }),
   );
 
-  return createNoopIngressEffect({
+  return createNoopMailboxEffect({
     conversationMetrics: null,
-    ingressLane: "assistant-notification",
+    mailboxLane: "assistant-notification",
     redactedLogEntries,
   });
 }
@@ -277,7 +291,7 @@ function emitHostedAssistantNotificationSkipLog(
   return emitHostedAssistantNotificationLifecycleLog({
     error,
     level: "warn",
-    message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+    message: "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
     phase: "wake.running",
     wake,
   });
@@ -309,14 +323,14 @@ function buildHostedAssistantNotificationLogDetails(
   };
 }
 
-function createNoopIngressEffect(input: {
+function createNoopMailboxEffect(input: {
   conversationMetrics: HostedConversationWakeMetrics | null;
-  ingressLane: HostedIngressLane;
+  mailboxLane: HostedMailboxLane;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[];
-}): HostedIngressOutcome {
+}): HostedMailboxOutcome {
   return {
     conversationMetrics: input.conversationMetrics,
-    ingressLane: input.ingressLane,
+    mailboxLane: input.mailboxLane,
     redactedLogEntries: input.redactedLogEntries ?? [],
     shareImportResult: null,
     shareImportTitle: null,
@@ -326,9 +340,9 @@ function createNoopIngressEffect(input: {
 
 function emitHostedAssistantNotificationLifecycleLog(input: {
   error?: unknown;
-  level?: HostedExecutionRunLevel;
+  level?: HostedExecutionLogLevel;
   message: string;
-  phase: HostedExecutionRunPhase;
+  phase: HostedExecutionLogPhase;
   wake: HostedExecutionAssistantNotificationRequestedWake;
 }): HostedExecutionRedactedLogEntry {
   const details = buildHostedAssistantNotificationLogDetails(input.wake);

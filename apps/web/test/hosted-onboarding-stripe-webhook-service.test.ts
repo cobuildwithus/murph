@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   constructEvent: vi.fn(),
-  nudgeHostedRunBestEffort: vi.fn(),
+  nudgeHostedRunnerBestEffort: vi.fn(),
   reconcileHostedStripeEventById: vi.fn(),
   recordHostedStripeEvent: vi.fn(),
   runtime: {
@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/src/lib/hosted-ingress/control", () => ({
-  nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -39,7 +39,7 @@ describe("hosted Stripe webhook service", () => {
     vi.clearAllMocks();
     mocks.runtime.webhookSecret = "whsec_test_123";
     mocks.constructEvent.mockReturnValue(makeStripeEvent());
-    mocks.nudgeHostedRunBestEffort.mockResolvedValue("outbox");
+    mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("outbox");
     mocks.reconcileHostedStripeEventById.mockResolvedValue({
       activatedMemberId: "member_123",
       eventId: "evt_123",
@@ -73,7 +73,7 @@ describe("hosted Stripe webhook service", () => {
       eventId: "evt_123",
       prisma,
     });
-    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "stripe.webhook",
       userId: "member_123",
     });
@@ -130,7 +130,7 @@ describe("hosted Stripe webhook service", () => {
       eventId: "evt_123",
       prisma,
     });
-    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "stripe.webhook",
       userId: "member_123",
     });
@@ -157,7 +157,7 @@ describe("hosted Stripe webhook service", () => {
 
     expect(mocks.reconcileHostedStripeEventById).not.toHaveBeenCalled();
     expect(prisma.hostedStripeEvent.updateMany).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
   });
 
   it("skips duplicate inline reconciliation when another worker holds a fresh processing lease", async () => {
@@ -182,7 +182,7 @@ describe("hosted Stripe webhook service", () => {
 
     expect(mocks.reconcileHostedStripeEventById).not.toHaveBeenCalled();
     expect(prisma.hostedStripeEvent.updateMany).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
   });
 
   it("rejects webhook requests without a Stripe signature", async () => {
@@ -271,7 +271,7 @@ describe("hosted Stripe webhook service", () => {
       eventId: "evt_123",
       prisma,
     });
-    expect(mocks.nudgeHostedRunBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
   });
 });
 

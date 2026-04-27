@@ -28,8 +28,8 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.webControlTimeoutMs).toBe(30_000);
     expect(environment.vercelOidcValidation.teamSlug).toBe("murph-team");
     expect(environment.hostedWebBaseUrl).toBe("https://web.example.test");
-    expect(environment.hostedIngressEncryption.keyVersion).toBe("v1");
-    expect(environment.hostedIngressEncryption.key).toHaveLength(32);
+    expect(environment.hostedMailboxEncryption.keyVersion).toBe("v1");
+    expect(environment.hostedMailboxEncryption.key).toHaveLength(32);
     expect(environment.webCallbackSigning.keyId).toBe("v1");
     expect(environment.webCallbackSigning.privateKeyJwkJson).toContain("\"kty\":\"EC\"");
   });

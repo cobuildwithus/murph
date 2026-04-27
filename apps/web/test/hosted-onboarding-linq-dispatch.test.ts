@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => {
     incrementHostedLinqOutboundDailyState: vi.fn(),
     linqIngressTypingDiagnosticEnabled: false,
     linqIngressTypingDiagnosticTimeoutMs: 750,
-    nudgeHostedRunUserBestEffort: vi.fn(async () => true),
+    nudgeHostedRunnerUserBestEffort: vi.fn(async () => true),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqTypingPing: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
@@ -27,21 +27,24 @@ const mocks = vi.hoisted(() => {
       startedAtMs: 0,
       step,
     })),
-    readHostedIngressTarget: vi.fn(async () => null),
-    materializeHostedIngressEnvelopeTx: vi.fn(async (input: {
+    readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
+    appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       dispatch?: { eventId: string };
+      envelope?: { eventId: string };
       eventId?: string;
       wake?: { eventId: string };
     }) => {
       await state.enqueueHostedExecutionOutbox(input);
       const eventId = typeof input.eventId === "string"
         ? input.eventId
-        : input.dispatch?.eventId ?? input.wake?.eventId;
+        : input.dispatch?.eventId ?? input.envelope?.eventId ?? input.wake?.eventId;
       if (!eventId) {
-        throw new Error("Expected a hosted ingress append eventId.");
+        throw new Error("Expected a hosted mailbox append eventId.");
       }
       return {
-        eventId,
+        item: {
+          dedupeKey: eventId,
+        },
       };
     }),
   };
@@ -49,15 +52,15 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
-vi.mock("@/src/lib/hosted-ingress/lifecycle", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-ingress/lifecycle")>(
-    "@/src/lib/hosted-ingress/lifecycle",
+vi.mock("@/src/lib/hosted-mailbox/store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
+    "@/src/lib/hosted-mailbox/store",
   );
 
   return {
     ...actual,
-    materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
-    readHostedIngressTarget: mocks.readHostedIngressTarget,
+    appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+    readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
   };
 });
 
@@ -69,9 +72,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   resolveHostedLinqDayUtc: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-ingress/control", () => ({
-  nudgeHostedRunBestEffort: vi.fn(async () => "wake"),
-  nudgeHostedRunUserBestEffort: mocks.nudgeHostedRunUserBestEffort,
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),
+  nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
 }));
 
 vi.mock("../src/lib/hosted-onboarding/linq", async () => {
@@ -266,7 +269,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
     mocks.linqIngressTypingDiagnosticEnabled = false;
     mocks.linqIngressTypingDiagnosticTimeoutMs = 750;
-    mocks.nudgeHostedRunUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue(true);
     mocks.sendHostedLinqTypingPing.mockResolvedValue({
       ok: true,
       status: 204,
@@ -328,7 +331,7 @@ https://join.example.test/join/code_first_text`);
       });
       expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
         expect.objectContaining({
-          wake: expect.objectContaining({
+          envelope: expect.objectContaining({
             eventId: "evt_123",
             kind: "conversation.message",
             message: expect.objectContaining({
@@ -342,7 +345,7 @@ https://join.example.test/join/code_first_text`);
           }),
         }),
       );
-      expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+      expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
         context: "webhook:linq",
         userId: "member_123",
       });
@@ -440,11 +443,11 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
 
     await deferred[0]?.();
 
-    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
       userId: "member_123",
     });
@@ -513,7 +516,7 @@ https://join.example.test/join/code_first_text`);
       timeoutMs: 750,
     });
     expect(deferred).toHaveLength(1);
-    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
       "hosted-onboarding.webhook.linq.ingress-typing",
       expect.objectContaining({
@@ -594,7 +597,7 @@ https://join.example.test/join/code_first_text`);
     );
 
     await deferred[0]?.();
-    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
       userId: "member_123",
     });
@@ -656,7 +659,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         tx: transactionClient,
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           eventId: "evt_123",
           kind: "conversation.message",
           occurredAt: "2026-03-26T12:00:00.000Z",
@@ -800,7 +803,7 @@ https://join.example.test/join/code_first_text`);
 
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        wake: expect.objectContaining({
+        envelope: expect.objectContaining({
           eventId: "evt_456",
           kind: "conversation.message",
           occurredAt: "2026-03-26T12:00:05.000Z",

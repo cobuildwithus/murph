@@ -1,7 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import type { SQLInputValue } from "node:sqlite";
 
-import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
@@ -122,23 +121,6 @@ function createRunnerStateStoreHarness(setup?: (db: DatabaseSync) => void): {
   };
 }
 
-function createRunnerStateStoreFromDb(db: DatabaseSync): RunnerStateStore {
-  return new RunnerStateStore(createDurableObjectState(db));
-}
-
-function trackedAuthoritativeCursorStorageKey(): string {
-  return "runner:tracked-authoritative-cursor";
-}
-
-function makeBundleRef(key: string): HostedExecutionBundleRef {
-  return {
-    hash: `${key}-hash`,
-    key,
-    size: key.length,
-    updatedAt: "2026-04-02T00:00:00.000Z",
-  };
-}
-
 function readRunnerMetaColumns(db: DatabaseSync): string[] {
   return (db.prepare("PRAGMA table_info(runner_meta)").all() as Array<{ name: string }>)
     .map((column) => column.name);
@@ -153,7 +135,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
   return row?.name === "runner_bundle_slots";
 }
 
-describe("RunnerStateStore bundle cache", () => {
+describe("RunnerStateStore schema guard", () => {
   it("fails closed when the legacy split runner bundle schema is still present", () => {
     const setupLegacyBundleSchema = (database: DatabaseSync) => {
       database.exec(`
@@ -162,11 +144,9 @@ describe("RunnerStateStore bundle cache", () => {
         CREATE TABLE runner_meta (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           user_id TEXT NOT NULL,
-          runtime_bootstrapped INTEGER NOT NULL DEFAULT 0,
           in_flight INTEGER NOT NULL DEFAULT 0,
           last_error_at TEXT,
           last_error_code TEXT,
-          last_event_id TEXT,
           last_run_at TEXT,
           next_wake_at TEXT
         );
@@ -183,119 +163,29 @@ describe("RunnerStateStore bundle cache", () => {
     expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
     expect(runnerBundleSlotsTableExists(db)).toBe(true);
     expect(() => createRunnerStateStoreHarness(setupLegacyBundleSchema)).toThrow(
-      /runner_meta schema is unsupported; missing active_run_event_id, active_run_id, active_run_attempt, active_run_started_at/u,
+      /runner_meta schema is unsupported; legacy runner_bundle_slots table remains/u,
     );
   });
 
-  it("keeps the warm bundle ref cache in memory only", async () => {
-    const currentVaultRef = makeBundleRef("vault/current");
+  it("keeps runner state free of bundle metadata after initialization", async () => {
     const { db, store } = createRunnerStateStoreHarness();
-    await store.bootstrapUser("user-cache");
+    await store.bindUser("user-cache");
 
-    const cached = await store.syncBundleRefCache(currentVaultRef);
-    expect(cached.bundleRef).toEqual(currentVaultRef);
-    await expect(store.readCachedBundleRef()).resolves.toEqual(currentVaultRef);
-    expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
-    expect(readRunnerMetaColumns(db)).not.toContain("bundle_version");
-
-    const coldStore = createRunnerStateStoreFromDb(db);
-    await coldStore.bootstrapUser("user-cache");
-    await expect(coldStore.readState()).resolves.toMatchObject({
+    await expect(store.readState()).resolves.toMatchObject({
       bundleRef: null,
       userId: "user-cache",
     });
-  });
-
-  it("updates the warm cache without persisting bundle metadata into SQLite", async () => {
-    const currentVaultRef = makeBundleRef("vault/current");
-    const nextVaultRef = makeBundleRef("vault/next");
-    const { db, store } = createRunnerStateStoreHarness();
-    await store.bootstrapUser("user-cache");
-
-    await expect(store.syncBundleRefCache(currentVaultRef)).resolves.toMatchObject({
-      bundleRef: currentVaultRef,
-    });
-    await expect(store.syncBundleRefCache(nextVaultRef)).resolves.toMatchObject({
-      bundleRef: nextVaultRef,
-    });
-
+    expect(readRunnerMetaColumns(db)).not.toContain("bundle_ref_json");
+    expect(readRunnerMetaColumns(db)).not.toContain("bundle_version");
     expect(db.prepare(`
-      SELECT user_id, active_run_event_id, active_run_id, active_run_attempt, active_run_started_at
+      SELECT user_id, active_invocation_id, active_invocation_reason, active_workspace_version
       FROM runner_meta
       WHERE singleton = 1
     `).get()).toEqual({
       user_id: "user-cache",
-      active_run_event_id: null,
-      active_run_id: null,
-      active_run_attempt: null,
-      active_run_started_at: null,
+      active_invocation_id: null,
+      active_invocation_reason: null,
+      active_workspace_version: null,
     });
-  });
-});
-
-describe("RunnerStateStore tracked authoritative cursor", () => {
-  it("persists the tracked authoritative cursor across cold stores", async () => {
-    const { db, storageValues, store } = createRunnerStateStoreHarness();
-    const cursor = {
-      browserVaultReplicaRef: null,
-      snapshotRef: makeBundleRef("vault/current"),
-    } as const;
-
-    await store.bootstrapUser("user-cache");
-    await store.writeTrackedAuthoritativeCursor(cursor);
-    await expect(store.readTrackedAuthoritativeCursor()).resolves.toEqual(cursor);
-
-    const coldStore = new RunnerStateStore(createDurableObjectState(db, storageValues));
-    await coldStore.bootstrapUser("user-cache");
-    await expect(coldStore.readTrackedAuthoritativeCursor()).resolves.toEqual(cursor);
-
-    await coldStore.writeTrackedAuthoritativeCursor(null);
-    await expect(coldStore.readTrackedAuthoritativeCursor()).resolves.toBeNull();
-  });
-
-  it("accepts legacy full-cursor-shaped tracked authoritative state", async () => {
-    const { storageValues, store } = createRunnerStateStoreHarness();
-    const snapshotRef = makeBundleRef("vault/current");
-
-    await store.bootstrapUser("user-cache");
-    storageValues.set(trackedAuthoritativeCursorStorageKey(), {
-      browserVaultReplicaRef: null,
-      committedSeq: "10",
-      createdAt: "2026-04-20T00:00:00.000Z",
-      nextRuntimeWakeAt: null,
-      nextRuntimeWakeReason: null,
-      nextSeq: "11",
-      snapshotRef,
-      updatedAt: "2026-04-20T00:00:00.000Z",
-      userId: "user-cache",
-      version: "cursor-v1",
-    });
-
-    await expect(store.readTrackedAuthoritativeCursor()).resolves.toEqual({
-      browserVaultReplicaRef: null,
-      snapshotRef,
-    });
-  });
-
-  it("clears malformed tracked authoritative cursor state so later reads can reseed recovery", async () => {
-    const { storageValues, store } = createRunnerStateStoreHarness();
-
-    await store.bootstrapUser("user-cache");
-    storageValues.set(trackedAuthoritativeCursorStorageKey(), {
-      browserVaultReplicaRef: null,
-      snapshotRef: {
-        hash: 123,
-      },
-    });
-
-    await expect(store.readTrackedAuthoritativeCursor()).resolves.toBeNull();
-    expect(storageValues.has(trackedAuthoritativeCursorStorageKey())).toBe(false);
-
-    const cursor = {
-      browserVaultReplicaRef: null,
-      snapshotRef: makeBundleRef("vault/reseeded"),
-    } as const;
-    await store.writeTrackedAuthoritativeCursor(cursor);
-    await expect(store.readTrackedAuthoritativeCursor()).resolves.toEqual(cursor);
   });
 });

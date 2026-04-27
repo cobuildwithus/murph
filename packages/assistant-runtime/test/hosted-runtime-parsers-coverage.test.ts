@@ -2,66 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseHostedAssistantRuntimeConfig,
-  parseHostedAssistantRuntimeJobInput,
-  parseHostedAssistantRuntimeJobRequest,
 } from "../src/hosted-runtime/parsers.ts";
-import { resolveHostedWake } from "../src/hosted-runtime/utils.ts";
-
-const defaultMemberChannels = {
-  email: false,
-  linq: false,
-  telegram: false,
-} as const;
-
-function buildMemberActivatedWake(eventId: string) {
-  return {
-    eventId,
-    kind: "member.activated" as const,
-    memberChannels: defaultMemberChannels,
-    occurredAt: "2026-04-08T00:00:00.000Z",
-    userId: "member_123",
-  };
-}
-
-function buildRuntimeTimerJobRequest(overrides: Record<string, unknown> = {}) {
-  return {
-    bundle: null,
-    run: {
-      attempt: 1,
-      runId: "run_123",
-      startedAt: "2026-04-08T00:00:01.000Z",
-    },
-    runDrain: {
-      acquiredAt: "2026-04-08T00:00:00.000Z",
-      events: [],
-      inputCommittedSeq: "24",
-      inputCursorVersion: "4",
-      runId: "run_123",
-      triggerKind: "runtime_timer",
-      userId: "member_123",
-    },
-    ...overrides,
-  };
-}
 
 describe("hosted runtime parser coverage", () => {
-  it("rejects missing or null runDrain on runtime job inputs", () => {
-    expect(() => parseHostedAssistantRuntimeJobInput({
-      request: {
-        bundle: null,
-        wake: buildMemberActivatedWake("evt_123"),
-      },
-    })).toThrow(/runDrain is required/u);
-
-    expect(() => parseHostedAssistantRuntimeJobInput({
-      request: {
-        bundle: null,
-        wake: buildMemberActivatedWake("evt_123"),
-        runDrain: null,
-      },
-    })).toThrow(/runDrain is required/u);
-  });
-
   it("parses nullable runtime config fields and forwarded env records", () => {
     expect(
       parseHostedAssistantRuntimeConfig({
@@ -135,39 +78,6 @@ describe("hosted runtime parser coverage", () => {
     });
   });
 
-  it("rejects non-object job inputs for both null and array values", () => {
-    expect(() => parseHostedAssistantRuntimeJobInput(null)).toThrow(
-      /Hosted assistant runtime job input must be an object/u,
-    );
-    expect(() => parseHostedAssistantRuntimeJobInput([])).toThrow(
-      /Hosted assistant runtime job input must be an object/u,
-    );
-  });
-
-  it("parses run-drain finalize requests", () => {
-    const parsed = parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
-      runDrain: {
-        acquiredAt: "2026-04-08T00:00:00.000Z",
-        events: [],
-        inputCommittedSeq: "24",
-        inputCursorVersion: "4",
-        resumeFinalize: true,
-        runId: "run_123",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-    }));
-
-    expect(resolveHostedWake(parsed.runDrain)).toEqual({
-      eventId: "hosted-run:run_123",
-      kind: "runtime.timer",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      triggerKind: "runtime_timer",
-      userId: "member_123",
-    });
-    expect(parsed.runDrain.resumeFinalize).toBe(true);
-  });
-
   it("rejects invalid runtime numeric fields", () => {
     expect(() => parseHostedAssistantRuntimeConfig({
       commitTimeoutMs: Number.NaN,
@@ -181,75 +91,6 @@ describe("hosted runtime parser coverage", () => {
         },
       },
     })).toThrow(/emailSendReady must be a boolean/u);
-  });
-
-  it("rejects invalid run-drain finalize flags", () => {
-    expect(() => parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
-      runDrain: {
-        acquiredAt: "2026-04-08T00:00:00.000Z",
-        events: [],
-        inputCommittedSeq: "24",
-        inputCursorVersion: "4",
-        resumeFinalize: "yes",
-        runId: "run_123",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-    }))).toThrow(/resumeFinalize must be a boolean/u);
-  });
-
-  it("rejects legacy request.wake once runDrain is present", () => {
-    expect(() => parseHostedAssistantRuntimeJobRequest({
-      bundle: null,
-      run: {
-        attempt: 1,
-        runId: "run_legacy_wake",
-        startedAt: "2026-04-08T00:00:01.000Z",
-      },
-      runDrain: {
-        acquiredAt: "2026-04-08T00:00:00.000Z",
-        events: [],
-        inputCommittedSeq: "24",
-        inputCursorVersion: "4",
-        runId: "run_legacy_wake",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      wake: {
-        eventId: "hosted-run:run_legacy_wake",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-    })).toThrow(/request\.wake is no longer supported/u);
-  });
-
-  it("derives a synthetic runtime-timer wake from empty run-drain requests", () => {
-    const parsed = parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
-      run: {
-        attempt: 1,
-        runId: "run_empty_drain",
-        startedAt: "2026-04-08T00:00:01.000Z",
-      },
-      runDrain: {
-        acquiredAt: "2026-04-08T00:00:00.000Z",
-        events: [],
-        inputCommittedSeq: "24",
-        inputCursorVersion: "4",
-        runId: "run_empty_drain",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-    }));
-
-    expect(resolveHostedWake(parsed.runDrain)).toEqual({
-      eventId: "hosted-run:run_empty_drain",
-      kind: "runtime.timer",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      triggerKind: "runtime_timer",
-      userId: "member_123",
-    });
   });
 
   it("rejects the remaining removed runtime callback override fields", () => {
@@ -392,23 +233,4 @@ describe("hosted runtime parser coverage", () => {
     })).toThrow(/managedAutoReplyChannels\[0\]\.channel must be a non-empty string/u);
   });
 
-  it("parses nullable and string run tokens on hosted runtime job requests", () => {
-    expect(
-      parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
-        runToken: null,
-      })).runToken,
-    ).toBeNull();
-
-    expect(
-      parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
-        runToken: "run-token-123",
-      })).runToken,
-    ).toBe("run-token-123");
-  });
-
-  it("rejects invalid run tokens", () => {
-    expect(() => parseHostedAssistantRuntimeJobRequest(buildRuntimeTimerJobRequest({
-      runToken: "",
-    }))).toThrow(/request runToken must be a non-empty string/u);
-  });
 });

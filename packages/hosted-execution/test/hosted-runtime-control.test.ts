@@ -65,8 +65,8 @@ import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 describe("hosted runtime control contracts", () => {
   it("freezes the mailbox lanes, item kinds, checkpoint reasons, and log codes", () => {
     expect(HOSTED_MAILBOX_LANES).toEqual([
-      "conversation",
       "system",
+      "conversation",
     ]);
     expect(HOSTED_MAILBOX_KINDS).toEqual([
       "conversation.message",
@@ -88,6 +88,7 @@ describe("hosted runtime control contracts", () => {
       "error",
     ]);
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.imported");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.dedupe_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
@@ -126,14 +127,31 @@ describe("hosted runtime control contracts", () => {
       userId: "member_123",
       workspaceVersion: "4",
     });
-    expect(() => parseHostedWorkspaceRunRequest({
-      attemptId: "attempt_1",
-      leaseGeneration: "7",
-      reason: "nudge",
-      runDrain: {},
-      userId: "member_123",
-      workspaceVersion: "4",
-    })).toThrow("Hosted workspace run request.runDrain is no longer supported.");
+    for (const field of [
+      "committedSeq",
+      "events",
+      "finalizeRequired",
+      "inputCommittedSeq",
+      "inputCursorVersion",
+      "requestedTargetSeq",
+      "resumeFinalize",
+      "run",
+      "runDrain",
+      "runId",
+      "runToken",
+      "targetCommittedSeqHint",
+      "targetReached",
+      "wake",
+    ]) {
+      expect(() => parseHostedWorkspaceRunRequest({
+        attemptId: "attempt_1",
+        leaseGeneration: "7",
+        reason: "nudge",
+        [field]: field === "events" ? [] : "legacy",
+        userId: "member_123",
+        workspaceVersion: "4",
+      })).toThrow(`Hosted workspace run request.${field} is no longer supported.`);
+    }
     expect(parseHostedWorkspaceRunResult({
       nextWakeAt: null,
       redactedStatus: {
@@ -269,10 +287,12 @@ describe("hosted runtime control contracts", () => {
     };
 
     expect(parseHostedMailboxPayloadFetchRequest({
+      dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_system_1",
       payloadRef: "payload_ref_1",
       requestId: "payload-fetch-1",
     })).toEqual({
+      dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_system_1",
       payloadRef: "payload_ref_1",
       requestId: "payload-fetch-1",
@@ -828,7 +848,10 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRunnerNudgeResult(nudge)).toEqual(nudge);
     expect(parseHostedRunnerStatusResponse(status)).toEqual(status);
     expect(parseHostedRunnerNudgeResult(nudge)).not.toHaveProperty("runId");
-    expect(parseHostedRunnerStatusResponse(status)).not.toHaveProperty("committedSeq");
+    expect(() => parseHostedRunnerStatusResponse({
+      ...status,
+      committedSeq: "10",
+    })).toThrow(/must not include legacy committedSeq/u);
     expect(() => parseHostedRunnerNudgeResult({
       ...nudge,
       leaseGeneration: "-1",

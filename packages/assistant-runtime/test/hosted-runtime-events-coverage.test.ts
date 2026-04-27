@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
+  runHostedDeviceSyncWakeLane: vi.fn(),
   sendAssistantNotification: vi.fn(),
 }));
 
@@ -51,7 +52,11 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
   handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
-import { executeHostedIngressEvent } from "../src/hosted-runtime/events.ts";
+vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
+  runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+}));
+
+import { executeHostedMailboxEvent } from "../src/hosted-runtime/events.ts";
 import {
   createHostedRuntimeEffectsPortStub,
   createHostedRuntimeResolvedConfig,
@@ -97,6 +102,12 @@ beforeEach(() => {
     nextWakeAt: null,
     parserProcessed: 0,
   });
+  mocks.runHostedDeviceSyncWakeLane.mockResolvedValue({
+    deviceSyncProcessed: 1,
+    deviceSyncSkipped: false,
+    nextWakeAt: "2026-04-08T00:20:00.000Z",
+    parserProcessed: 0,
+  });
 });
 
 afterEach(() => {
@@ -116,7 +127,7 @@ describe("hosted runtime event coverage", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    const result = await executeHostedIngressEvent({
+    const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -128,7 +139,7 @@ describe("hosted runtime event coverage", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      ingressLane: "member-activated",
+      mailboxLane: "member-activated",
       redactedLogEntries: [],
       shareImportResult: null,
       shareImportTitle: null,
@@ -136,7 +147,7 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
-  it("returns noop metrics for device-sync wakes", async () => {
+  it("runs the device-sync runtime lane for device-sync wakes", async () => {
     const runtime = createRuntime();
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake",
@@ -146,7 +157,7 @@ describe("hosted runtime event coverage", () => {
     });
 
     await expect(
-      executeHostedIngressEvent({
+      executeHostedMailboxEvent({
         wake: deviceSyncWake,
         executionContext,
         runtime,
@@ -156,11 +167,18 @@ describe("hosted runtime event coverage", () => {
     ).resolves.toEqual({
       bootstrapResult: null,
       conversationMetrics: null,
-      ingressLane: "device-sync",
+      mailboxLane: "device-sync",
       redactedLogEntries: [],
       shareImportResult: null,
       shareImportTitle: null,
       vaultSyncImportResult: null,
+    });
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith({
+      deviceSyncPort: null,
+      resolvedConfig: runtime.resolvedConfig,
+      timeoutMs: null,
+      vaultRoot: "/tmp/assistant-runtime-events-coverage",
+      wake: deviceSyncWake,
     });
   });
 
@@ -189,7 +207,7 @@ describe("hosted runtime event coverage", () => {
       shareId: "share_123",
     };
 
-    const result = await executeHostedIngressEvent({
+    const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -200,13 +218,14 @@ describe("hosted runtime event coverage", () => {
 
     expect(mocks.handleHostedShareAcceptedWake).toHaveBeenCalledWith({
       wake,
+      sharePort: null,
       sharePack,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
     });
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      ingressLane: "vault-share-accepted",
+      mailboxLane: "vault-share-accepted",
       redactedLogEntries: [],
       shareImportResult: "imported",
       shareImportTitle: "Shared export",
@@ -216,7 +235,7 @@ describe("hosted runtime event coverage", () => {
 
   it("fails closed on unexpected wake kinds", async () => {
     await expect(
-      executeHostedIngressEvent({
+      executeHostedMailboxEvent({
         wake: {
           kind: "unexpected.event",
           eventId: "evt_unexpected",

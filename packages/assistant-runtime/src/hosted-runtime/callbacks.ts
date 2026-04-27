@@ -30,8 +30,6 @@ import {
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import type {
-  HostedCommittedExecutionState,
-  HostedAssistantRuntimeJobRequest,
   HostedAssistantDeliveryOutcome,
 } from "./models.ts";
 import type {
@@ -88,7 +86,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
       }),
       wake: input.wake,
       message: "Hosted assistant delivery starting.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: input.wake.userId,
     });
     outcomes.push(await deliverHostedCommittedAssistantDelivery({
@@ -189,7 +187,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
       wake: input.wake,
       error: enrichedError,
       message: "Hosted assistant delivery threw during post-commit delivery.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: input.userId,
     });
     throw enrichedError;
@@ -399,7 +397,7 @@ function emitHostedAssistantDeliveryDispatchSuccess(input: {
     }),
     wake: input.wake,
     message: "Hosted assistant delivery sent successfully during post-commit delivery.",
-    phase: "side-effects.draining",
+    phase: "outbox",
     userId: input.userId,
   });
 }
@@ -434,7 +432,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
     wake: input.wake,
     level: input.retryable ? "warn" : "error",
     message: `Hosted assistant delivery finished with ${input.deliveryStatus} status during post-commit delivery.`,
-    phase: "side-effects.draining",
+    phase: "outbox",
     userId: input.userId,
   });
 }
@@ -695,7 +693,7 @@ async function bestEffortHostedAssistantDeliveryMirror(input: {
       error,
       level: "warn",
       message: "Hosted assistant delivery local mirror update failed.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: input.userId,
     });
   }

@@ -18,8 +18,8 @@ import type {
 } from "./contracts.ts";
 
 export const HOSTED_MAILBOX_LANES = [
-  "conversation",
   "system",
+  "conversation",
 ] as const;
 
 export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
@@ -82,6 +82,7 @@ export interface HostedRuntimeSideInputUnavailable {
 }
 
 export interface HostedMailboxPayloadFetchRequest {
+  dedupeKey: string;
   mailboxItemId: string;
   payloadRef?: string | null;
   requestId: string;
@@ -357,6 +358,7 @@ export type HostedRuntimeLogPhase = (typeof HOSTED_RUNTIME_LOG_PHASES)[number];
 export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.cas_conflict",
   "checkpoint.committed",
+  "mailbox.dedupe_conflict",
   "mailbox.imported",
   "mailbox.quarantined",
   "mailbox.retryable_payload_missing",
@@ -431,6 +433,13 @@ export interface HostedRunnerStatusResponse {
   leaseGeneration: string;
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
+  recentLogs?: HostedRuntimeLogEntry[];
+  userId: string;
+  workspace: HostedWorkspaceState | null;
+}
+
+export interface HostedRuntimeWebStatusResponse {
+  mailboxLag: HostedMailboxLaneLag[];
   recentLogs?: HostedRuntimeLogEntry[];
   userId: string;
   workspace: HostedWorkspaceState | null;

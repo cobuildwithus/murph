@@ -148,49 +148,50 @@ function buildJobBody(input: {
     eventId: string;
     occurredAt: string;
   };
-  run?: {
-    attempt: number;
-    runId: string;
-    startedAt: string;
-  };
 }) {
-  const run = input.run ?? {
-    attempt: 1,
-    runId: `run_${input.wake.eventId}`,
-    startedAt: input.wake.occurredAt,
-  };
-  const wake = {
-    ...input.wake.event,
-    eventId: input.wake.eventId,
-    occurredAt: input.wake.occurredAt,
-  };
   const userId = typeof input.wake.event.userId === "string" ? input.wake.event.userId : "u1";
-  const triggerKind = input.wake.event.kind === "runtime.timer"
-    && typeof input.wake.event.triggerKind === "string"
-    ? input.wake.event.triggerKind
-    : "external_ingress";
 
   return {
     internalWorkerProxyToken: "proxy-token",
     job: {
+      kind: "workspace-run",
       request: {
-        bundle: null,
-        currentBundleRef: null,
-        run,
-        runDrain: {
-          acquiredAt: input.wake.occurredAt,
-          events: [
-            {
-              seq: "1",
-              wake,
-              ingressEventId: `wake_${input.wake.eventId}`,
-            },
-          ],
-          inputCommittedSeq: "0",
-          inputCursorVersion: "1",
-          runId: run.runId,
-          triggerKind,
-          userId,
+        attemptId: `attempt_${input.wake.eventId}`,
+        leaseGeneration: "1",
+        reason: "nudge",
+        userId,
+        workspaceVersion: "0",
+      },
+    },
+  };
+}
+
+function buildWorkspaceRunnerResult() {
+  return {
+    nextWakeAt: null,
+    redactedStatus: {
+      importedCount: 0,
+    },
+    status: "idle" as const,
+  };
+}
+
+function buildWorkspaceJobBody() {
+  return {
+    internalWorkerProxyToken: "workspace-proxy-token",
+    localInternalProxyBaseUrl: "http://127.0.0.1:8787",
+    job: {
+      kind: "workspace-run",
+      request: {
+        attemptId: "attempt_container_workspace",
+        leaseGeneration: "8",
+        reason: "nudge",
+        userId: "u_container_workspace",
+        workspaceVersion: "5",
+      },
+      runtime: {
+        forwardedEnv: {
+          HOSTED_ASSISTANT_MODEL: "gpt-test",
         },
       },
     },
@@ -325,17 +326,9 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects a first run bearer token when no startup control token exists", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
-    });
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
     const server = await startHostedContainerEntrypoint({
       controlToken: null,
       port: 0,
@@ -417,17 +410,9 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects oversized run requests before parsing JSON", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
-    });
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
       port: 0,
@@ -457,17 +442,9 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects chunked oversized run requests while streaming without content-length", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
-    });
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
       port: 0,
@@ -536,23 +513,14 @@ describe("startHostedContainerEntrypoint", () => {
       await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>(
         "@murphai/assistant-runtime/hosted-runtime-contracts",
       );
-    const parsedJob = actualContractsModule.parseHostedAssistantRuntimeJobInput(requestBody.job);
-    const parseHostedAssistantRuntimeJobInput = vi.fn(() => parsedJob);
+    const parsedJob =
+      actualContractsModule.parseHostedAssistantWorkspaceRuntimeJobInput(requestBody.job);
+    const parseHostedAssistantWorkspaceRuntimeJobInput = vi.fn(() => parsedJob);
     const contractsModule = {
       ...actualContractsModule,
-      parseHostedAssistantRuntimeJobInput,
+      parseHostedAssistantWorkspaceRuntimeJobInput,
     };
-    const runHostedExecutionJob = vi.fn().mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
-    });
+    const runHostedExecutionJob = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
     const nodeRunnerModule = {
       ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
       runHostedExecutionJob,
@@ -591,11 +559,70 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.status).toBe(200);
     expect(loadRuntimeContracts).toHaveBeenCalledTimes(1);
     expect(loadNodeRunner).toHaveBeenCalledTimes(1);
-    expect(parseHostedAssistantRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
+    expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
     expect(runHostedExecutionJob).toHaveBeenCalledWith(
-      parsedJob,
+      {
+        ...parsedJob,
+        kind: "workspace-run",
+      },
       expect.objectContaining({
         internalWorkerProxyToken: "proxy-token",
+      }),
+    );
+  });
+
+  it("parses workspace-run requests through the workspace contract before invoking the node runner", async () => {
+    const requestBody = buildWorkspaceJobBody();
+    const actualContractsModule =
+      await vi.importActual<typeof import("@murphai/assistant-runtime/hosted-runtime-contracts")>(
+        "@murphai/assistant-runtime/hosted-runtime-contracts",
+      );
+    const parsedJob =
+      actualContractsModule.parseHostedAssistantWorkspaceRuntimeJobInput(requestBody.job);
+    const parseHostedAssistantWorkspaceRuntimeJobInput = vi.fn(() => parsedJob);
+    const contractsModule = {
+      ...actualContractsModule,
+      parseHostedAssistantWorkspaceRuntimeJobInput,
+    };
+    const runHostedExecutionJob = vi.fn().mockResolvedValue(buildWorkspaceRunnerResult());
+    const nodeRunnerModule = {
+      ...await vi.importActual<typeof import("../src/node-runner.js")>("../src/node-runner.js"),
+      runHostedExecutionJob,
+    };
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        loadNodeRunner: vi.fn(async () => nodeRunnerModule),
+        loadRuntimeContracts: vi.fn(async () => contractsModule),
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
+      body: JSON.stringify(requestBody),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(parseHostedAssistantWorkspaceRuntimeJobInput).toHaveBeenCalledWith(requestBody.job);
+    expect(runHostedExecutionJob).toHaveBeenCalledWith(
+      {
+        ...parsedJob,
+        kind: "workspace-run",
+      },
+      expect.objectContaining({
+        internalWorkerProxyToken: "workspace-proxy-token",
+        localInternalProxyBaseUrl: "http://127.0.0.1:8787",
       }),
     );
   });
@@ -640,18 +667,10 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("forwards the per-run proxy token and local bridge config into the node runner", async () => {
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
-    });
+  it("forwards the invocation proxy token and local bridge config into the node runner", async () => {
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
 
     try {
       const server = await startHostedContainerEntrypoint({
@@ -844,7 +863,7 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("redacts downstream runtime secrets while surfacing safe failure diagnostics", async () => {
     const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
-      new Error("Authorization: Bearer secret-token for ops@example.com OPENAI_API_KEY=sk-live-secret"),
+      new Error("Authorization: Bearer placeholder for ops@example.com OPENAI_API_KEY=placeholder"),
     );
 
     try {
@@ -940,14 +959,10 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
-  it("passes the hosted run context through request parsing into the node runner", async () => {
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: { eventsHandled: 1, summary: "ok" },
-      },
-    });
+  it("passes the workspace-run context through request parsing into the node runner", async () => {
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
 
     try {
       const server = await startHostedContainerEntrypoint({
@@ -961,20 +976,9 @@ describe("startHostedContainerEntrypoint", () => {
         throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
       }
 
-      const run = {
-        attempt: 4,
-        runId: "run_trace",
-        startedAt: "2026-03-26T12:00:00.000Z",
-      };
+      const requestBody = buildWorkspaceJobBody();
       const response = await fetch(`http://127.0.0.1:${address.port}/internal/run`, {
-        body: JSON.stringify(buildJobBody({
-          wake: {
-            event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-            eventId: "evt_with_run",
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-          run,
-        })),
+        body: JSON.stringify(requestBody),
         headers: {
           authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
@@ -986,16 +990,10 @@ describe("startHostedContainerEntrypoint", () => {
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
           request: expect.objectContaining({
-            run,
-            runDrain: expect.objectContaining({
-              events: expect.arrayContaining([
-                expect.objectContaining({
-                  wake: expect.objectContaining({
-                    eventId: "evt_with_run",
-                  }),
-                }),
-              ]),
-            }),
+            attemptId: "attempt_container_workspace",
+            leaseGeneration: "8",
+            userId: "u_container_workspace",
+            workspaceVersion: "5",
           }),
         }),
         expect.objectContaining({
@@ -1132,17 +1130,9 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
-    });
+    const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
 
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",
@@ -1261,17 +1251,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      finalGatewayProjectionSnapshot: null,
-      result: {
-        bundle: null,
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
-        },
-      },
-    });
+    vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue(buildWorkspaceRunnerResult());
 
     const server = await startHostedContainerEntrypoint({
       controlToken: "runner-token",

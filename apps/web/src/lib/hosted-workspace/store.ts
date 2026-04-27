@@ -209,16 +209,6 @@ export async function checkpointHostedWorkspaceTx(input: {
     checkpointedAt: input.checkpointedAt === undefined || input.checkpointedAt === null
       ? new Date()
       : requireDate(input.checkpointedAt, "Hosted workspace checkpointedAt"),
-    nextWakeAt: input.nextWakeAt === undefined || input.nextWakeAt === null
-      ? null
-      : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt"),
-    nextWakeReason: normalizeNullableString(input.nextWakeReason),
-    redactedStatusJson: input.redactedStatusJson === undefined
-      ? Prisma.DbNull
-      : toNullablePrismaJson(sanitizeHostedRuntimeRedactedJson(
-        input.redactedStatusJson,
-        "Hosted workspace redactedStatusJson",
-      )),
     snapshotRef: toNullablePrismaJson(parseHostedExecutionBundleRef(
       input.snapshotRef,
       "Hosted workspace snapshotRef",
@@ -227,6 +217,25 @@ export async function checkpointHostedWorkspaceTx(input: {
       increment: 1,
     },
   };
+
+  if ("nextWakeAt" in input) {
+    updateData.nextWakeAt = input.nextWakeAt === undefined || input.nextWakeAt === null
+      ? null
+      : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt");
+  }
+
+  if ("nextWakeReason" in input) {
+    updateData.nextWakeReason = normalizeNullableString(input.nextWakeReason);
+  }
+
+  if ("redactedStatusJson" in input) {
+    updateData.redactedStatusJson = input.redactedStatusJson === undefined
+      ? Prisma.DbNull
+      : toNullablePrismaJson(sanitizeHostedRuntimeRedactedJson(
+        input.redactedStatusJson,
+        "Hosted workspace redactedStatusJson",
+      ));
+  }
 
   if ("browserVaultReplicaRef" in input) {
     updateData.browserVaultReplicaRef = toNullablePrismaJson(parseHostedBrowserVaultReplicaRef(
@@ -463,48 +472,7 @@ function normalizeHostedRuntimeLogLimit(value: number): number {
 function sanitizeHostedRuntimeLogRedactedJson(
   value: HostedRuntimeRedactedJson | null | undefined,
 ): HostedRuntimeRedactedJson | null {
-  if (!value) {
-    return null;
-  }
-
-  const allowed = new Set([
-    "actualVersion",
-    "checkpointReason",
-    "code",
-    "conflict",
-    "count",
-    "dedupeConflict",
-    "duplicate",
-    "existingItemId",
-    "existingKind",
-    "existingLane",
-    "existingLaneSeq",
-    "expectedVersion",
-    "incomingKind",
-    "lane",
-    "limitPerLane",
-    "mailboxItemId",
-    "reason",
-    "requestedLane",
-  ]);
-  const entries = Object.entries(value);
-  const output: HostedRuntimeRedactedJson = {};
-
-  if (entries.length > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
-    throw new TypeError(
-      `Hosted runtime log redactedJson must contain at most ${HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS} fields.`,
-    );
-  }
-
-  for (const [key, entry] of entries) {
-    if (!allowed.has(key)) {
-      continue;
-    }
-
-    output[key] = parseHostedRuntimeRedactedValue(entry, `Hosted runtime log redactedJson.${key}`);
-  }
-
-  return Object.keys(output).length === 0 ? null : output;
+  return sanitizeHostedRuntimeRedactedJson(value, "Hosted runtime log redactedJson");
 }
 
 function sanitizeHostedRuntimeRedactedJson(

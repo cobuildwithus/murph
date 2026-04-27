@@ -79,15 +79,9 @@ describe("hosted runtime child-result helpers", () => {
     const payload = {
       ok: true,
       result: {
-        finalGatewayProjectionSnapshot: null,
-        result: {
-          bundle: "encoded-bundle",
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: null,
-            summary: "completed summary",
-          },
-        },
+        nextWakeAt: null,
+        redactedStatus: { imported: 1 },
+        status: "idle" as const,
       },
     };
 

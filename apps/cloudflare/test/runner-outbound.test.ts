@@ -11,7 +11,7 @@ import {
 import { resolveRunnerOutboundUserRunnerStub } from "../src/runner-outbound/shared.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import type {
-  WorkerBootstrapUserRunnerStubLike,
+  WorkerBindUserRunnerStubLike,
   WorkerUserRunnerNamespaceLike,
 } from "../src/worker-contracts.ts";
 
@@ -97,12 +97,12 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it("bootstraps the bound user before returning the outbound stub", async () => {
-    type ReceiverSensitiveStub = WorkerBootstrapUserRunnerStubLike & {
+    type ReceiverSensitiveStub = WorkerBindUserRunnerStubLike & {
       marker: string;
     };
     const stub: ReceiverSensitiveStub = {
       marker: "runner-outbound-stub",
-      bootstrapUser: vi.fn(async function (
+      bindUser: vi.fn(async function (
         this: ReceiverSensitiveStub,
         userId: string,
       ) {
@@ -121,8 +121,8 @@ describe("handleRunnerOutboundRequest", () => {
     const resolvedStub = await resolveRunnerOutboundUserRunnerStub(env, "member_123");
 
     expect(resolvedStub).toBe(stub);
-    expect(stub.bootstrapUser).toHaveBeenCalledOnce();
-    expect(stub.bootstrapUser).toHaveBeenCalledWith("member_123");
+    expect(stub.bindUser).toHaveBeenCalledOnce();
+    expect(stub.bindUser).toHaveBeenCalledWith("member_123");
   });
 
   it("fails closed when the runner stub is malformed at runtime", async () => {
@@ -135,7 +135,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
 
     await expect(resolveRunnerOutboundUserRunnerStub(env, "member_123")).rejects.toThrow(
-      'User runner stub does not implement bootstrapUser.',
+      'User runner stub does not implement bindUser.',
     );
   });
 
@@ -155,7 +155,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("rejects artifact host proxy traffic when the per-run proxy token does not match", async () => {
+  it("rejects artifact host proxy traffic when the invocation proxy token does not match", async () => {
     const response = await handleRunnerOutboundRequest(
       new Request(MISSING_ARTIFACT_URL, {
         headers: {
@@ -516,55 +516,12 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("uses the hosted-web control timeout for turn-input refresh", async () => {
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-    const fetchMock = vi.fn(async (
-      ..._args: Parameters<typeof fetch>
-    ): Promise<Response> => new Response(JSON.stringify({
-      events: [],
-      run: null,
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://results.worker/turn-input/refresh", {
-        body: JSON.stringify({
-          runId: "run_123",
-          runToken: "run_token_123",
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "600000",
-        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
-      }),
-      "member_123",
-      RUNNER_PROXY_TOKEN,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      events: [],
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(timeoutSpy).toHaveBeenCalledWith(45_000);
-  });
-
   it("returns 404 for non-allowlisted web-control proxy paths", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request("http://web-control.worker/api/internal/hosted-ingress/status", {
+      new Request("http://web-control.worker/api/internal/hosted-mailbox/status", {
         body: JSON.stringify({
           eventId: "evt_123",
         }),
@@ -622,10 +579,10 @@ function createRunnerOutboundEnv(
   overrides: Partial<RunnerOutboundEnvironmentSource> = {},
 ): RunnerOutboundEnvironmentSource {
   const values = new Map<string, string>();
-  const defaultUserRunnerNamespace: WorkerUserRunnerNamespaceLike<WorkerBootstrapUserRunnerStubLike> = {
+  const defaultUserRunnerNamespace: WorkerUserRunnerNamespaceLike<WorkerBindUserRunnerStubLike> = {
     getByName() {
       return {
-        async bootstrapUser() {
+        async bindUser() {
           return { userId: "member_123" };
         },
       };
@@ -687,14 +644,14 @@ function createRunnerOutboundEnv(
         const stub = userRunnerNamespace.getByName(userId);
         return {
           ...stub,
-          async bootstrapUser(boundUserId: string) {
+          async bindUser(boundUserId: string) {
             let seeded = bootstrappedByUserId.get(boundUserId);
             if (!seeded) {
               seeded = ensureRunnerOutboundUserEnvelope(env, boundUserId);
               bootstrappedByUserId.set(boundUserId, seeded);
             }
             await seeded;
-            return stub.bootstrapUser?.(boundUserId) ?? { userId: boundUserId };
+            return stub.bindUser?.(boundUserId) ?? { userId: boundUserId };
           },
         };
       },

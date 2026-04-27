@@ -84,9 +84,9 @@ describe("hosted local Linq first-contact e2e", () => {
     );
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.bundleRef).not.toBeNull();
-    expect(finalStatus.lastError).toBeNull();
-    expect(finalStatus.pendingIngressEventCount).toBe(0);
+    expect(finalStatus.workspace).not.toBeNull();
+    expect(finalStatus.lastErrorCode).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const sendRequest = await requireLinqStub().waitForSend({
       expectedPath: requireLinqStub().createChatPath,
@@ -219,8 +219,8 @@ describe("hosted local Linq first-contact e2e", () => {
       requireLinqStub().listObservedMessageIds(materializedChatId)[observedMessageIdsBeforeReply] ?? null;
     expect(outboundReplyMessageId).not.toBeNull();
     const finalStatus = await completionPromise;
-    expect(finalStatus.pendingIngressEventCount).toBe(0);
-    expect(finalStatus.lastError).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(finalStatus.lastErrorCode).toBeNull();
     await requireLinqStub().waitForMatchingRequestCount({
       expectedCount: 1,
       expectedMethod: "DELETE",

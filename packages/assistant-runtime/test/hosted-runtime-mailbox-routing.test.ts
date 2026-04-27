@@ -115,7 +115,7 @@ describe("hosted mailbox routing", () => {
     );
     assertQuarantine(
       createHostedMailboxRoutingPlan(createMailboxItem({
-        payloadSchema: "murph.hosted-ingress-conversation-message.v1",
+        payloadSchema: "murph.unsupported-mailbox-payload.v1",
       })),
       "invalid_payload_schema",
     );

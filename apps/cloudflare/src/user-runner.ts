@@ -1,25 +1,25 @@
 import type {
-  HostedExecutionCursorState,
-  HostedRuntimeEvent,
-  HostedRunDrainResult,
-  HostedRunNudgeResult,
-  HostedExecutionUserStatus,
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
+  HostedRuntimeWebStatusResponse,
+  HostedWorkspaceReadResponse,
+  HostedWorkspaceRunReason,
+  HostedWorkspaceRunResult,
+  HostedWorkspaceState,
 } from "@murphai/hosted-execution";
-import type {
-  HostedRunAcquireResponse,
-} from "@murphai/hosted-execution/contracts";
-import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  parseHostedExecutionCursorSnapshotRef,
+  parseHostedRuntimeWebStatusResponse,
+  parseHostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_STATUS_PATH,
+  HOSTED_RUNTIME_WORKSPACE_PATH,
+} from "@murphai/hosted-execution/routes";
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
-import { HostedGatewayProjectionCache } from "./gateway-projection-cache.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
   createHostedUserKeyStoreFromEnvironment,
@@ -27,51 +27,38 @@ import {
   type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
 import {
+  buildHostedRunnerContainerEnv,
+  buildHostedRunnerJobRuntimeConfig,
+} from "./runner-env.ts";
+import {
+  invokeHostedExecutionContainerRunner,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
 import { withSerializedLock } from "./serialized-lock.js";
 import {
-  acquireHostedRunFromWeb,
-  isHostedRunStaleRunnerAcquireError,
-  readHostedRunStatusFromWeb,
+  fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
-import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
-import {
-  RunnerRunProcessor,
-  HostedExecutionObsoleteRunResultError,
-  recordHostedRunBreadcrumbInWebBestEffort,
-  type RunnerUserStores,
-} from "./user-runner/runner-run-processor.js";
-import {
-  finalizeAcquiredHostedRun,
-  mergeAdoptedHostedRunCommitInputs as mergeAdoptedHostedRunCommitInputsForHostedRun,
-  prepareAndCommitAcquiredHostedRun,
-  reconcileTrackedAuthoritativeCursorBestEffort,
-  type HostedRunBreadcrumbInput,
-  type HostedRunDrainState,
-  type HostedRunFinalizationContext,
-} from "./user-runner/run-finalization.js";
-import type { RunnerLeaseOwnerInput } from "./user-runner/runner-state-store.js";
+import type {
+  RunnerInvocationLease,
+} from "./user-runner/runner-state-store.js";
 import { RunnerSecretsService } from "./user-runner/runner-secrets.js";
 import { RunnerStateStore } from "./user-runner/runner-state-store.js";
 import { RunnerRuntimeAlarmScheduler } from "./user-runner/runner-runtime-alarm-scheduler.js";
-import {
-  toUserStatus,
-  type DurableObjectStateLike,
-  type RunnerStateRecord,
+import type {
+  DurableObjectStateLike,
+  RunnerStateRecord,
 } from "./user-runner/types.js";
+import {
+  HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND,
+  type HostedExecutionWorkspaceRunJobInput,
+} from "./runner-job-transport.js";
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
-const DEFAULT_HOSTED_WAKE_BATCH_LIMIT = 64;
-const MAX_HOSTED_WAKE_DRAIN_BATCHES = 32;
-const MAX_HOSTED_WAKE_DRAIN_EVENTS =
-  DEFAULT_HOSTED_WAKE_BATCH_LIMIT * MAX_HOSTED_WAKE_DRAIN_BATCHES;
-
-type HostedRunDrainExitState = HostedRunDrainState | "stale_runner" | null;
-
-interface HostedRunDrainLoopResult extends HostedRunDrainResult {
-  exitState: HostedRunDrainExitState;
+interface RunnerUserStores {
+  crypto: HostedUserCryptoContext;
+  runnerSecrets: RunnerSecretsService;
+  userId: string;
 }
 
 function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
@@ -85,15 +72,13 @@ function emitHostedUserKeyAuditLog(record: HostedUserKeyAuditRecord): void {
 }
 
 export class HostedUserRunner {
-  private readonly runProcessor: RunnerRunProcessor;
-  private readonly eventTransitionLocks = new Map<string, Promise<void>>();
   private readonly stateStore: RunnerStateStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly runtimeAlarmScheduler: RunnerRuntimeAlarmScheduler;
   private readonly userKeyStore: ReturnType<typeof createHostedUserKeyStoreFromEnvironment>;
   private runnerStores: RunnerUserStores | null = null;
   private userKeyEnvelopeLock: Promise<void> | null = null;
-  private runDrainLock: Promise<void> | null = null;
+  private invocationLock: Promise<void> | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -115,23 +100,6 @@ export class HostedUserRunner {
     this.userKeyStore = userKeyStore;
     this.stateStore = new RunnerStateStore(state);
     this.runtimeAlarmScheduler = new RunnerRuntimeAlarmScheduler(this.stateStore, state);
-    this.runProcessor = new RunnerRunProcessor({
-      applyHostedTransition: <T>(input: {
-        eventId: string;
-        gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
-        leaseOwner?: RunnerLeaseOwnerInput;
-        run: (userId: string, stores: RunnerUserStores) => Promise<T>;
-      }) => this.applyHostedTransition(input),
-      bucket: this.bucket,
-      ensureRunnerStores: (userId?: string) => this.ensureRunnerStores(userId),
-      env: this.env,
-      hostedWebBaseUrl: this.env.hostedWebBaseUrl,
-      stateStore: this.stateStore,
-      readRunnerRuntimeConfigSource: () => this.readRunnerRuntimeConfigSource(),
-      runnerContainerNamespace: this.runnerContainerNamespace,
-      runnerRuntimeEnvSource: this.runnerRuntimeEnvSource,
-      runtimeAlarmScheduler: this.runtimeAlarmScheduler,
-    });
   }
 
   private async ensureRunnerStores(userId?: string): Promise<RunnerUserStores> {
@@ -150,28 +118,13 @@ export class HostedUserRunner {
     });
   }
 
-  private async ensureRunnerStoresWhileHoldingKeyLock(userId: string): Promise<RunnerUserStores> {
-    if (this.runnerStores?.userId === userId) {
-      return this.runnerStores;
-    }
-
-    return this.refreshRunnerStores(userId);
-  }
-
   private async refreshRunnerStores(userId: string): Promise<RunnerUserStores> {
     const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
       reason: "runner-store-refresh",
     });
 
     const stores: RunnerUserStores = {
-      bundleSync: new RunnerBundleSync(
-        this.bucket,
-        crypto.rootKey,
-        crypto.rootKeyId,
-        crypto.keysById,
-      ),
       crypto,
-      gatewayCache: new HostedGatewayProjectionCache(),
       runnerSecrets: this.createRunnerSecretsService(crypto),
       userId,
     };
@@ -180,20 +133,9 @@ export class HostedUserRunner {
     return stores;
   }
 
-  async bootstrapUser(userId: string): Promise<{ userId: string }> {
-    await this.stateStore.bootstrapUser(userId);
-    await this.stateStore.markRuntimeBootstrapped();
+  async bindUser(userId: string): Promise<{ userId: string }> {
+    await this.stateStore.bindUser(userId);
     return { userId };
-  }
-
-  private async ensureManagedUserCryptoForActivationWakeIfNeeded(
-    wake: HostedRuntimeEvent,
-  ): Promise<void> {
-    if (wake.kind !== "member.activated") {
-      return;
-    }
-
-    await this.provisionManagedUserCryptoAtActivation(wake.userId, "member-activation-wake");
   }
 
   async alarm(): Promise<void> {
@@ -213,11 +155,8 @@ export class HostedUserRunner {
       return;
     }
 
-    record = await this.stateStore.clearNextWakeIfDue(Date.now());
-    if (!record.runtimeBootstrapped) {
-      return;
-    }
-
+    const nowMs = Date.now();
+    record = await this.stateStore.clearNextWakeIfDue(nowMs);
     if (!record.userId) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -231,10 +170,18 @@ export class HostedUserRunner {
     }
 
     try {
-      const drainResult = await this.withRunDrainLock(async () => this.drainHostedRunsInternal());
-      if (shouldScheduleHostedWakeRetryAlarm(drainResult)) {
-        await this.scheduleHostedWakeRetryAlarm();
+      const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
+      if (
+        !record.pendingNudge
+        && !hostedWorkspaceWakeIsDue(webStatus.workspace?.nextWakeAt ?? null, nowMs)
+      ) {
+        await this.runtimeAlarmScheduler.syncNextWake({
+          preferredWakeAt: webStatus.workspace?.nextWakeAt ?? null,
+        });
+        return;
       }
+
+      await this.runUntilIdleOrBudget({ reason: "alarm" });
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -248,389 +195,273 @@ export class HostedUserRunner {
     }
   }
 
-  async status(): Promise<HostedExecutionUserStatus> {
-    const record = await this.stateStore.readState();
-    return this.composeUserStatus(record);
-  }
-
   async runnerStatus(): Promise<HostedRunnerStatusResponse> {
     const record = await this.stateStore.readState();
+    const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
 
     return {
-      inFlight: this.runDrainLock !== null || record.inFlight,
+      ...webStatus,
+      inFlight: this.invocationLock !== null || record.inFlight,
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}),
-      leaseGeneration: record.run?.attempt.toString() ?? "0",
-      mailboxLag: [],
-      nextAlarmAt: record.nextWakeAt,
-      recentLogs: [],
+      leaseGeneration: record.leaseGeneration.toString(),
+      nextAlarmAt: record.nextWakeAt ?? webStatus.workspace?.nextWakeAt ?? null,
       userId: record.userId,
-      workspace: null,
-    };
-  }
-
-  async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
-    if (this.runDrainLock !== null) {
-      await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: new Date().toISOString(),
-      });
-
-      return {
-        accepted: true,
-        alarmScheduled: true,
-        alreadyRunning: true,
-      };
-    }
-
-    await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: new Date().toISOString(),
-    });
-
-    return {
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: false,
+      workspace: webStatus.workspace,
     };
   }
 
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
-    const record = await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: new Date().toISOString(),
-    });
-    const alreadyRunning = this.runDrainLock !== null || record.inFlight;
+    const runningRecord = await this.stateStore.readState();
+    const alreadyRunning = this.invocationLock !== null
+      || runningRecord.inFlight;
+    const record = alreadyRunning
+      ? await this.markPendingNudgeAndApplyAlarm()
+      : await this.runtimeAlarmScheduler.syncNextWake({
+          preferredWakeAt: new Date().toISOString(),
+        });
 
     return {
       accepted: true,
       alarmScheduled: record.nextWakeAt !== null,
       alreadyRunning,
       inFlight: alreadyRunning,
-      leaseGeneration: record.run?.attempt.toString() ?? "0",
+      leaseGeneration: record.leaseGeneration.toString(),
       nextAlarmAt: record.nextWakeAt,
     };
   }
 
-  async drainHostedRuns(input: {
-    targetCommittedSeqHint?: string | null;
-  } = {}): Promise<HostedRunDrainResult> {
-    try {
-      const result = await this.withRunDrainLock(async () => this.drainHostedRunsInternal(input));
-      if (shouldScheduleHostedWakeRetryAlarm(result)) {
-        await this.scheduleHostedWakeRetryAlarm();
+  async runUntilIdleOrBudget(input: {
+    reason: HostedWorkspaceRunReason;
+  }): Promise<HostedWorkspaceRunResult> {
+    if (this.invocationLock !== null) {
+      const record = await this.markPendingNudgeAndApplyAlarm();
+      return {
+        nextWakeAt: record.nextWakeAt,
+        status: "scheduled",
+      };
+    }
+
+    return this.withInvocationLock(async () => this.runUntilIdleOrBudgetInternal(input));
+  }
+
+  private async runUntilIdleOrBudgetInternal(input: {
+    reason: HostedWorkspaceRunReason;
+  }): Promise<HostedWorkspaceRunResult> {
+    let initialRecord = await this.stateStore.readState();
+    if (initialRecord.inFlight) {
+      if (initialRecord.workspaceInvocation) {
+        const recovery = await this.stateStore.clearStaleInvocationIfExpired({
+          nowMs: Date.now(),
+          timeoutMs: this.env.runnerTimeoutMs,
+        });
+        initialRecord = recovery.record;
+        if (recovery.cleared) {
+          emitHostedExecutionStructuredLog({
+            component: "hosted.runner",
+            details: {
+              workspaceAttemptId: recovery.attemptId,
+            },
+            level: "warn",
+            message: "Hosted workspace invocation lease expired; clearing stale in-flight state.",
+            phase: "wake.running",
+            userId: initialRecord.userId,
+          });
+        }
       }
-      return toHostedRunDrainResult(result);
+
+      if (initialRecord.inFlight) {
+        const record = await this.markPendingNudgeAndApplyAlarm();
+        return {
+          nextWakeAt: record.nextWakeAt,
+          status: "scheduled",
+        };
+      }
+    }
+
+    let lease = await this.stateStore.beginInvocation({
+      reason: input.reason,
+      userId: initialRecord.userId,
+    });
+
+    try {
+      const workspaceRead = await this.readHostedWorkspaceFromWeb(initialRecord.userId);
+      this.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, initialRecord.userId);
+      const workspaceVersion = workspaceRead.workspace?.version ?? "0";
+      lease = await this.stateStore.bindInvocationWorkspaceVersion({
+        lease,
+        workspaceVersion,
+      });
+      const result = await this.invokeWorkspaceRunner({
+        lease,
+        reason: input.reason,
+        userId: initialRecord.userId,
+        workspaceVersion,
+      });
+      await this.stateStore.completeInvocation({
+        finishedAt: new Date().toISOString(),
+        lease,
+      });
+      await this.scheduleNextWorkspaceAlarm({
+        fallbackNextWakeAt: result.nextWakeAt ?? null,
+        userId: initialRecord.userId,
+      });
+      return result;
     } catch (error) {
+      await this.stateStore.failInvocation({
+        error,
+        finishedAt: new Date().toISOString(),
+        lease,
+      });
       await this.scheduleHostedWakeRetryAlarm();
       throw error;
     }
   }
 
-  private async scheduleHostedWakeRetryAlarm(): Promise<void> {
-    await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
-    });
-  }
-
-  private async drainHostedRunsInternal(input: {
-    targetCommittedSeqHint?: string | null;
-  } = {}): Promise<HostedRunDrainLoopResult> {
-    const userId = await this.requireBoundUserId();
-    await this.bootstrapUser(userId);
-    const runFinalizationContext = this.createHostedRunFinalizationContext();
-    let targetCommittedSeqHint = parseOptionalHostedCommittedSeq(input.targetCommittedSeqHint);
-    let committedSeq: string | null = null;
-    let exitState: HostedRunDrainState | null = null;
-    let capExhausted = true;
-    let drainedEventCount = 0;
-
-    for (
-      let round = 0;
-      round < MAX_HOSTED_WAKE_DRAIN_BATCHES
-        && drainedEventCount < MAX_HOSTED_WAKE_DRAIN_EVENTS;
-      round += 1
-    ) {
-      const remainingEventBudget = MAX_HOSTED_WAKE_DRAIN_EVENTS - drainedEventCount;
-      const acquired = await this.acquireHostedRunForDrain({
-        limit: Math.min(DEFAULT_HOSTED_WAKE_BATCH_LIMIT, remainingEventBudget),
-        targetCommittedSeqHint,
-        userId,
-      });
-
-      if (!acquired) {
-        return this.stopStaleHostedRunnerAcquireRetries({
-          targetCommittedSeqHint,
-        });
-      }
-
-      await reconcileTrackedAuthoritativeCursorBestEffort(runFinalizationContext, {
-        currentCursor: acquired.cursor,
-        userId,
-      });
-      committedSeq = acquired.cursor.committedSeq;
-      await this.syncRunnerBundleCacheToCursor(acquired.cursor.snapshotRef);
-      await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: acquired.cursor.nextRuntimeWakeAt ?? null,
-      });
-
-      if (!acquired.acquired || !acquired.run || !acquired.runToken) {
-        capExhausted = false;
-        break;
-      }
-      drainedEventCount += acquired.events.length;
-
-      this.recordHostedRunBreadcrumb({
-        message: "Cloudflare acquired a hosted run from the web-owned run ledger.",
-        phase: "acquired",
-        redacted: {
-          eventCount: acquired.events.length,
-          resumeFinalize: acquired.resumeFinalize,
-          triggerKind: acquired.run.triggerKind,
-        },
-        run: acquired.run,
-        runToken: acquired.runToken,
-        userId,
-      });
-
-      const outcome = acquired.resumeFinalize
-        ? await finalizeAcquiredHostedRun(runFinalizationContext, { acquired, userId })
-        : await prepareAndCommitAcquiredHostedRun(runFinalizationContext, { acquired, userId });
-
-      committedSeq = outcome.cursor.committedSeq;
-      await this.syncRunnerBundleCacheToCursor(outcome.cursor.snapshotRef);
-      await this.runtimeAlarmScheduler.syncNextWake({
-        preferredWakeAt: outcome.cursor.nextRuntimeWakeAt ?? null,
-      });
-
-      if (outcome.state !== "completed") {
-        exitState = outcome.state;
-        capExhausted = false;
-        break;
-      }
-
-      if (
-        !acquired.resumeFinalize
-        && acquired.events.length < DEFAULT_HOSTED_WAKE_BATCH_LIMIT
-        && (!targetCommittedSeqHint || BigInt(committedSeq) >= targetCommittedSeqHint)
-        && !hostedRuntimeWakeHintDueNow(outcome.cursor.nextRuntimeWakeAt)
-      ) {
-        capExhausted = false;
-        break;
-      }
+  private async markPendingNudgeAndApplyAlarm(): Promise<RunnerStateRecord> {
+    const record = await this.stateStore.markPendingInvocationNudge();
+    if (record.nextWakeAt) {
+      await this.state.storage.setAlarm(new Date(record.nextWakeAt));
     }
-
-    if (capExhausted) {
-      exitState ??= "backpressured";
-    }
-
-    const finalCommittedSeq = committedSeq ?? await this.readCommittedSeqFromWeb(userId);
-    return {
-      committedSeq: finalCommittedSeq,
-      exitState,
-      requestedTargetSeq: targetCommittedSeqHint?.toString() ?? null,
-      targetReached: targetCommittedSeqHint === null
-        || BigInt(finalCommittedSeq) >= targetCommittedSeqHint,
-    };
+    return record;
   }
 
-  private recordHostedRunBreadcrumb(input: HostedRunBreadcrumbInput): void {
-    void recordHostedRunBreadcrumbInWebBestEffort({
-      baseUrl: this.readHostedWebControlBaseUrl(),
-      callbackSigning: this.env.webCallbackSigning,
-      level: input.level,
-      message: input.message,
-      phase: input.phase,
-      redacted: input.redacted,
-      run: {
-        attempt: input.run.attempt,
-        runId: input.run.id,
-        startedAt: input.run.acquiredAt,
-      },
-      runToken: input.runToken,
-      userId: input.userId,
-      wakeEventId: input.wakeEventId ?? `hosted-run:${input.run.id}`,
-    });
+  private async readHostedWorkspaceForStatus(
+    userId: string,
+  ): Promise<HostedWorkspaceState | null> {
+    const workspace = (await this.readHostedWorkspaceFromWeb(userId)).workspace;
+    this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
+    return workspace;
   }
 
-  private async acquireHostedRunForDrain(input: {
-    limit: number;
-    targetCommittedSeqHint: bigint | null;
-    userId: string;
-  }): Promise<HostedRunAcquireResponse | null> {
-    try {
-      return await acquireHostedRunFromWeb({
-        baseUrl: this.readHostedWebControlBaseUrl(),
-        body: {
-          executorKind: "cloudflare-container",
-          limit: input.limit,
-        },
-        boundUserId: input.userId,
-        callbackSigning: this.env.webCallbackSigning,
-        timeoutMs: this.env.webControlTimeoutMs,
-      });
-    } catch (error) {
-      if (isHostedRunStaleRunnerAcquireError(error)) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: {
-            condition: "data-integrity.stale-runner-missing-hosted-member",
-            errorCode: error.errorCode ?? "",
-            httpStatus: String(error.status),
-            requestedTargetSeq: input.targetCommittedSeqHint?.toString() ?? "",
-          },
-          error,
-          level: "error",
-          message:
-            "Hosted runner acquire found a stale bound user missing from the web database; clearing the immediate retry alarm.",
-          phase: "wake.running",
-          userId: input.userId,
-        });
-        return null;
-      }
-
-      throw error;
-    }
-  }
-
-  private async stopStaleHostedRunnerAcquireRetries(input: {
-    targetCommittedSeqHint: bigint | null;
-  }): Promise<HostedRunDrainLoopResult> {
-    await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: null,
-    });
-
-    return {
-      committedSeq: "0",
-      exitState: "stale_runner",
-      requestedTargetSeq: input.targetCommittedSeqHint?.toString() ?? null,
-      targetReached: false,
-    };
-  }
-
-  private createHostedRunFinalizationContext(): HostedRunFinalizationContext {
-    return {
-      bucket: this.bucket,
-      callbackSigning: this.env.webCallbackSigning,
-      ensureManagedUserCryptoForActivationWakeIfNeeded: (wake) =>
-        this.ensureManagedUserCryptoForActivationWakeIfNeeded(wake),
-      ensureRunnerStores: (userId) => this.ensureRunnerStores(userId),
-      hostedIngressEncryption: this.env.hostedIngressEncryption,
-      hostedWebBaseUrl: this.readHostedWebControlBaseUrl(),
-      readRunDrainSharePack: (wake) => this.runProcessor.readRunDrainSharePack(wake),
-      readRunDrainVaultSyncImport: (wake) => this.runProcessor.readRunDrainVaultSyncImport(wake),
-      recordHostedRunBreadcrumb: (input) => this.recordHostedRunBreadcrumb(input),
-      resolveAcquiredRunInputSnapshotRef: (acquired) =>
-        this.resolveAcquiredRunInputSnapshotRef(acquired),
-      resolveAcquiredRunPreparedSnapshotRef: (acquired) =>
-        this.resolveAcquiredRunPreparedSnapshotRef(acquired),
-      runProcessor: this.runProcessor,
-      webControlTimeoutMs: this.env.webControlTimeoutMs,
-      stateStore: this.stateStore,
-      syncRunnerBundleCacheToCursor: (snapshotRef) =>
-        this.syncRunnerBundleCacheToCursor(snapshotRef),
-    };
-  }
-
-  private async mergeAdoptedHostedRunCommitInputs(
-    input: Parameters<typeof mergeAdoptedHostedRunCommitInputsForHostedRun>[1],
-  ): ReturnType<typeof mergeAdoptedHostedRunCommitInputsForHostedRun> {
-    return mergeAdoptedHostedRunCommitInputsForHostedRun(
-      this.createHostedRunFinalizationContext(),
-      input,
-    );
-  }
-
-  private async syncRunnerBundleCacheToCursor(
-    snapshotRef: HostedExecutionCursorState["snapshotRef"] | undefined,
-  ): Promise<void> {
-    const nextBundleRef = parseHostedExecutionCursorSnapshotRef(
-      snapshotRef,
-      "Hosted run cursor snapshotRef",
-    );
-    await this.stateStore.syncBundleRefCache(nextBundleRef);
-  }
-
-  private resolveAcquiredRunInputSnapshotRef(
-    acquired: HostedRunAcquireResponse,
-  ): HostedExecutionCursorState["snapshotRef"] {
-    return parseHostedExecutionCursorSnapshotRef(
-      acquired.run?.inputSnapshotRef ?? acquired.cursor.snapshotRef,
-      "Hosted acquired run inputSnapshotRef",
-    );
-  }
-
-  private resolveAcquiredRunPreparedSnapshotRef(
-    acquired: HostedRunAcquireResponse,
-  ): HostedExecutionCursorState["snapshotRef"] {
-    return parseHostedExecutionCursorSnapshotRef(
-      acquired.cursor.snapshotRef,
-      "Hosted acquired run prepared snapshotRef",
-    );
-  }
-
-  private async composeUserStatus(record: RunnerStateRecord): Promise<HostedExecutionUserStatus> {
-    const baseStatus = toUserStatus(record);
-
-    try {
-      const runStatus = await readHostedRunStatusFromWeb({
-        baseUrl: this.readHostedWebControlBaseUrl(),
-        boundUserId: record.userId,
-        callbackSigning: this.env.webCallbackSigning,
-        timeoutMs: this.env.webControlTimeoutMs,
-      });
-
-      return {
-        ...baseStatus,
-        bundleRef: runStatus.cursor.snapshotRef,
-        nextWakeAt: runStatus.cursor.nextRuntimeWakeAt ?? baseStatus.nextWakeAt,
-        pendingIngressEventCount: runStatus.pendingIngressEventCount > 0
-          ? runStatus.pendingIngressEventCount
-          : baseStatus.pendingIngressEventCount,
-      };
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        error,
-        level: "warn",
-        message: "Hosted run status read failed; returning local runner status only.",
-        phase: "wake.running",
-        userId: record.userId,
-      });
-      return baseStatus;
-    }
-  }
-
-  private async readCommittedSeqFromWeb(userId: string): Promise<string> {
-    const runStatus = await readHostedRunStatusFromWeb({
+  private async readHostedRuntimeStatusFromWeb(
+    userId: string,
+  ): Promise<HostedRuntimeWebStatusResponse> {
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
       baseUrl: this.readHostedWebControlBaseUrl(),
       boundUserId: userId,
       callbackSigning: this.env.webCallbackSigning,
+      method: "GET",
+      path: HOSTED_RUNTIME_STATUS_PATH,
       timeoutMs: this.env.webControlTimeoutMs,
     });
 
-    return runStatus.cursor.committedSeq;
+    if (!response.ok) {
+      throw new Error(`Hosted runtime status read failed with HTTP ${response.status}.`);
+    }
+
+    const status = parseHostedRuntimeWebStatusResponse(await response.json());
+    if (status.userId !== userId) {
+      throw new Error("Hosted runtime status read returned a different user.");
+    }
+    this.assertWorkspaceBelongsToRunnerUser(status.workspace, userId);
+    return status;
   }
 
-  private async applyHostedTransition<T>(input: {
-    eventId: string;
-    gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
-    leaseOwner?: RunnerLeaseOwnerInput;
-    run: (userId: string, stores: RunnerUserStores) => Promise<T>;
-  }): Promise<T> {
-    return this.withEventTransitionLock(input.eventId, async () => {
-      if (input.leaseOwner && !(await this.stateStore.hasActiveRunLease(input.leaseOwner))) {
-        throw new HostedExecutionObsoleteRunResultError(
-          input.eventId,
-          input.leaseOwner.run?.runId ?? null,
-        );
-      }
+  private async readHostedWorkspaceFromWeb(
+    userId: string,
+  ): Promise<HostedWorkspaceReadResponse> {
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: this.readHostedWebControlBaseUrl(),
+      boundUserId: userId,
+      callbackSigning: this.env.webCallbackSigning,
+      method: "GET",
+      path: HOSTED_RUNTIME_WORKSPACE_PATH,
+      timeoutMs: this.env.webControlTimeoutMs,
+    });
 
-      return this.withUserKeyEnvelopeLock(async () => {
-        const userId = await this.requireBoundUserId();
-        const stores = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
-        const result = await input.run(userId, stores);
-        await stores.gatewayCache.applySnapshot(input.gatewayProjectionSnapshot ?? null);
-        return result;
+    if (!response.ok) {
+      throw new Error(`Hosted workspace read failed with HTTP ${response.status}.`);
+    }
+
+    return parseHostedWorkspaceReadResponse(await response.json());
+  }
+
+  private assertWorkspaceBelongsToRunnerUser(
+    workspace: HostedWorkspaceState | null,
+    userId: string,
+  ): void {
+    if (workspace && workspace.userId !== userId) {
+      throw new Error("Hosted workspace read returned a different user.");
+    }
+  }
+
+  private async invokeWorkspaceRunner(input: {
+    lease: RunnerInvocationLease;
+    reason: HostedWorkspaceRunReason;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<HostedWorkspaceRunResult> {
+    if (!this.runnerContainerNamespace) {
+      throw new Error("Native hosted execution requires a RunnerContainer binding.");
+    }
+
+    const { runnerSecrets: runnerSecretsService } = await this.ensureRunnerStores(input.userId);
+    const runnerSecrets = await runnerSecretsService.readRunnerSecrets(input.userId);
+    const forwardedEnv = buildHostedRunnerContainerEnv(
+      this.runnerRuntimeEnvSource,
+    );
+    const runtimeConfig = buildHostedRunnerJobRuntimeConfig({
+      configSource: this.readRunnerRuntimeConfigSource(),
+      forwardedEnv,
+      rewritePlatformUrlsForContainer: true,
+      runnerSecrets,
+    });
+    const job: HostedExecutionWorkspaceRunJobInput = {
+      kind: HOSTED_EXECUTION_WORKSPACE_RUN_JOB_KIND,
+      request: {
+        attemptId: input.lease.attemptId,
+        leaseGeneration: input.lease.leaseGeneration,
+        reason: input.reason,
+        userId: input.userId,
+        workspaceVersion: input.workspaceVersion,
+      },
+      runtime: runtimeConfig,
+    };
+
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        workspaceAttemptId: input.lease.attemptId,
+        workspaceLeaseGeneration: input.lease.leaseGeneration,
+        workspaceReason: input.reason,
+        workspaceVersion: input.workspaceVersion,
+      },
+      message: "Hosted runner prepared workspace invocation.",
+      phase: "wake.running",
+      userId: input.userId,
+    });
+
+    return await invokeHostedExecutionContainerRunner({
+      job,
+      runnerContainerNamespace: this.runnerContainerNamespace,
+      timeoutMs: this.env.runnerTimeoutMs,
+      userId: input.userId,
+    });
+  }
+
+  private async scheduleNextWorkspaceAlarm(input: {
+    fallbackNextWakeAt: string | null;
+    userId: string;
+  }): Promise<void> {
+    const record = await this.stateStore.readState();
+    if (record.pendingNudge) {
+      await this.runtimeAlarmScheduler.syncNextWake({
+        preferredWakeAt: new Date().toISOString(),
       });
+      return;
+    }
+
+    const latestWorkspace = await this.readHostedWorkspaceForStatus(input.userId);
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: latestWorkspace?.nextWakeAt ?? input.fallbackNextWakeAt,
+    });
+  }
+
+  private async scheduleHostedWakeRetryAlarm(): Promise<void> {
+    await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: new Date(Date.now() + this.env.retryDelayMs).toISOString(),
     });
   }
 
@@ -665,59 +496,8 @@ export class HostedUserRunner {
     return this.env.hostedWebBaseUrl;
   }
 
-  private async resolveRunnerSecretsServiceWhileHoldingKeyLock(
-    userId: string,
-    options: {
-      reason: string;
-    },
-  ): Promise<RunnerSecretsService | null> {
-    if (this.runnerStores?.userId === userId) {
-      return this.runnerStores.runnerSecrets;
-    }
-
-    if (!(await this.userKeyStore.hasManagedUserCryptoEnvelope(userId))) {
-      return null;
-    }
-
-    const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
-      reason: options.reason,
-    });
-    return this.createRunnerSecretsService(crypto);
-  }
-
-  private async provisionManagedUserCryptoAtActivation(
-    userId: string,
-    reason: string,
-  ) {
-    const status = await this.userKeyStore.provisionManagedUserCryptoAtActivation(userId, {
-      reason,
-    });
-
-    if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === userId) {
-      this.runnerStores = null;
-    }
-
-    return status;
-  }
-
   private async requireBoundUserId(): Promise<string> {
     return (await this.stateStore.readState()).userId;
-  }
-
-  private async withEventTransitionLock<T>(eventId: string, run: () => Promise<T>): Promise<T> {
-    return withSerializedLock(
-      {
-        get: () => this.eventTransitionLocks.get(eventId) ?? null,
-        set: (value) => {
-          if (value === null) {
-            this.eventTransitionLocks.delete(eventId);
-            return;
-          }
-          this.eventTransitionLocks.set(eventId, value);
-        },
-      },
-      run,
-    );
   }
 
   private async withUserKeyEnvelopeLock<T>(run: () => Promise<T>): Promise<T> {
@@ -732,12 +512,12 @@ export class HostedUserRunner {
     );
   }
 
-  private async withRunDrainLock<T>(run: () => Promise<T>): Promise<T> {
+  private async withInvocationLock<T>(run: () => Promise<T>): Promise<T> {
     return withSerializedLock(
       {
-        get: () => this.runDrainLock,
+        get: () => this.invocationLock,
         set: (value) => {
-          this.runDrainLock = value;
+          this.invocationLock = value;
         },
       },
       run,
@@ -746,39 +526,14 @@ export class HostedUserRunner {
 
 }
 
-function toHostedRunDrainResult(
-  input: HostedRunDrainLoopResult,
-): HostedRunDrainResult {
-  return {
-    committedSeq: input.committedSeq,
-    requestedTargetSeq: input.requestedTargetSeq,
-    targetReached: input.targetReached,
-  };
-}
-
-function shouldScheduleHostedWakeRetryAlarm(
-  input: HostedRunDrainLoopResult,
+function hostedWorkspaceWakeIsDue(
+  nextWakeAt: string | null,
+  nowMs: number,
 ): boolean {
-  return input.exitState === "backpressured";
-}
-
-function hostedRuntimeWakeHintDueNow(value: string | null | undefined): boolean {
-  if (!value) {
+  if (!nextWakeAt) {
     return false;
   }
 
-  const parsedMs = Date.parse(value);
-  return Number.isFinite(parsedMs) && parsedMs <= Date.now();
-}
-
-function parseOptionalHostedCommittedSeq(value: string | null | undefined): bigint | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return BigInt(value);
-  } catch {
-    return null;
-  }
+  const parsedMs = Date.parse(nextWakeAt);
+  return Number.isFinite(parsedMs) && parsedMs <= nowMs;
 }

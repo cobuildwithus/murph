@@ -6,12 +6,14 @@ import {
   buildCloudflareHostedControlUserStatusPath,
 } from "@murphai/cloudflare-hosted-control/routes";
 import {
-  parseHostedExecutionUserStatus,
+  parseHostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedRunnerStatusResponse,
+} from "@murphai/hosted-execution";
 import {
   parseOptionalStrictInteger,
   readBooleanEnv,
@@ -45,7 +47,7 @@ interface SmokeControlRequest {
   versionOverrideHeaders: Record<string, string> | undefined;
 }
 
-type SmokeUserStatus = HostedExecutionUserStatus;
+type SmokeUserStatus = HostedRunnerStatusResponse;
 
 interface SmokeRunnerBundleManifest {
   buildSkipped?: boolean;
@@ -172,7 +174,7 @@ export async function runSmokeHostedDeploy(input: {
   const status = await readSmokeUserStatus(statusRequest);
   log(
     `Authenticated hosted status check passed for ${smokeUserId}. `
-      + `pendingIngressEventCount=${status.pendingIngressEventCount}`,
+      + `mailboxLag=${JSON.stringify(status.mailboxLag)}`,
   );
   log("Cloudflare hosted execution smoke checks passed.");
 }
@@ -419,7 +421,7 @@ async function readSmokeUserStatus(input: SmokeControlRequest): Promise<SmokeUse
     action: "Hosted execution status check",
   });
 
-  return parseHostedExecutionUserStatus(await response.json());
+  return parseHostedRunnerStatusResponse(await response.json());
 }
 
 async function sendSmokeControlRequest(input: SmokeControlRequest & {

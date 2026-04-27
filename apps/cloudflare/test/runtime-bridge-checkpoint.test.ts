@@ -161,7 +161,6 @@ describe("checkpointHostedRuntimeBridgeWorkspace", () => {
   it.each([
     ["stale_user", { userId: "member_other" }],
     ["stale_attempt", { attemptId: "attempt_2" }],
-    ["stale_workspace_version", { workspaceVersion: "5" }],
   ] as const)("rejects a %s lease before snapshotting", async (code, leasePatch) => {
     const snapshotWorkspace = vi.fn();
     const writeBundle = vi.fn();
@@ -189,34 +188,40 @@ describe("checkpointHostedRuntimeBridgeWorkspace", () => {
     expect(checkpointWorkspace).not.toHaveBeenCalled();
   });
 
-  it("rejects a lease that becomes stale after snapshot before bundle upload", async () => {
+  it("allows a newer workspace version lease after snapshot before bundle upload", async () => {
     const readCurrentLease = vi.fn()
+      .mockReturnValue({
+        ...BASE_LEASE,
+        workspaceVersion: "5",
+      })
       .mockReturnValueOnce(BASE_LEASE)
       .mockReturnValueOnce({
         ...BASE_LEASE,
         workspaceVersion: "5",
       });
     const snapshotWorkspace = vi.fn(() => Uint8Array.from([4, 5, 6]));
-    const writeBundle = vi.fn();
-    const checkpointWorkspace = vi.fn();
+    const writeBundle = vi.fn(() => WRITTEN_REF);
+    const checkpointWorkspace = vi.fn((request: HostedWorkspaceCheckpointRequest) =>
+      createCheckpointResponse({
+        checkpointed: true,
+        snapshotRef: request.snapshotRef,
+        version: "5",
+      })
+    );
 
-    await expect(
-      checkpointHostedRuntimeBridgeWorkspace({
-        checkpointWorkspace,
-        readCurrentLease,
-        request: BASE_REQUEST,
-        snapshotWorkspace,
-        userId: "member_123",
-        writeBundle,
-      }),
-    ).rejects.toMatchObject({
-      code: "stale_workspace_version",
-      stage: "before_bundle_write",
-    } satisfies Partial<HostedRuntimeBridgeCheckpointLeaseError>);
+    const result = await checkpointHostedRuntimeBridgeWorkspace({
+      checkpointWorkspace,
+      readCurrentLease,
+      request: BASE_REQUEST,
+      snapshotWorkspace,
+      userId: "member_123",
+      writeBundle,
+    });
 
+    expect(result.checkpointed).toBe(true);
     expect(snapshotWorkspace).toHaveBeenCalledTimes(1);
-    expect(writeBundle).not.toHaveBeenCalled();
-    expect(checkpointWorkspace).not.toHaveBeenCalled();
+    expect(writeBundle).toHaveBeenCalledTimes(1);
+    expect(checkpointWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a lease that becomes stale after upload before web checkpoint", async () => {

@@ -20,9 +20,9 @@ import {
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
 import {
-  readHostedIngressEncryptionEnvironment,
-  type HostedIngressEncryptionEnvironment,
-} from "./hosted-ingress-encryption.ts";
+  readHostedMailboxEncryptionEnvironment,
+  type HostedMailboxEncryptionEnvironment,
+} from "./hosted-mailbox-encryption.ts";
 import {
   assertHostedLocalInternalProxyEnvironment,
 } from "./local-loopback-proxy.ts";
@@ -44,7 +44,7 @@ export type HostedExecutionEnvironment = Omit<
   automationRecipientPrivateKey: HostedUserRecipientPrivateKeyJwk;
   automationRecipientPrivateKeysById: Readonly<Record<string, HostedUserRecipientPrivateKeyJwk>>;
   hostedWebBaseUrl: string;
-  hostedIngressEncryption: HostedIngressEncryptionEnvironment;
+  hostedMailboxEncryption: HostedMailboxEncryptionEnvironment;
   automationRecipientPublicKey: HostedUserRecipientPublicKeyJwk;
   platformEnvelopeKey: Uint8Array;
   platformEnvelopeKeysById: Readonly<Record<string, Uint8Array>>;
@@ -102,7 +102,7 @@ export function readHostedExecutionEnvironment(
       keyringJson: automationRecipientPrivateKeyringJson,
     }),
     automationRecipientPublicKey,
-    hostedIngressEncryption: readHostedIngressEncryptionEnvironment({
+    hostedMailboxEncryption: readHostedMailboxEncryptionEnvironment({
       HOSTED_WAKE_ENCRYPTION_KEY: hostedWakeEncryptionKey,
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: hostedWakeEncryptionKeyringJson ?? undefined,
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: hostedWakeEncryptionKeyVersion,

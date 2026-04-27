@@ -12,7 +12,7 @@ description: One-pass seam audit prompt for the apps/cloudflare runner container
 
 ## Focus
 
-- child-process isolation, env/secret filtering, per-run writable root handling, and local internal-proxy bridging
+- child-process isolation, env/secret filtering, invocation-local writable root handling, and local internal-proxy bridging
 - supervisor vs child authority boundaries and abort/process-group reaping
 - secret forwarding or container-bridge behavior that could overexpose runtime authority
 

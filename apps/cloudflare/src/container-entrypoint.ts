@@ -5,20 +5,20 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  type HostedAssistantRuntimeJobInput,
-} from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import {
-  createRuntimeTimerSyntheticWake,
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
-  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedExecutionRunnerJobInput,
+  readHostedExecutionRunnerJobUserId,
+  type HostedExecutionRunnerJobInput,
+} from "./runner-job-transport.ts";
 
 const HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN_ENV = "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN";
 const HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES = 8 * 1024 * 1024;
@@ -126,7 +126,7 @@ export async function startHostedContainerEntrypoint(input: {
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
     let claimedRunnerSlot = false;
-    let job: HostedAssistantRuntimeJobInput | null = null;
+    let job: HostedExecutionRunnerJobInput | null = null;
     let internalWorkerProxyToken: string | null = null;
     let localBridge: HostedExecutionLocalBridgeConfig = {
       localInternalProxyBaseUrl: null,
@@ -227,10 +227,9 @@ export async function startHostedContainerEntrypoint(input: {
           forwardedEnvKeyCount: Object.keys(job.runtime?.forwardedEnv ?? {}).length,
           runnerSecretKeyCount: Object.keys(job.runtime?.userEnv ?? {}).length,
         },
-        wake: resolveHostedContainerJobWake(job),
         message: "Hosted container entrypoint accepted runner job.",
         phase: "wake.running",
-        run: job.request.run ?? null,
+        userId: readHostedExecutionRunnerJobUserId(job),
       });
 
       const result = await runHostedExecutionJobWithProcessIsolation(job, runtime, {
@@ -246,12 +245,11 @@ export async function startHostedContainerEntrypoint(input: {
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
-          resultPhase: result.phase ?? null,
+          resultPhase: readHostedExecutionRunnerResultPhase(result),
         },
-        wake: resolveHostedContainerJobWake(job),
         message: "Hosted container entrypoint completed runner job.",
         phase: "wake.running",
-        run: job.request.run ?? null,
+        userId: readHostedExecutionRunnerJobUserId(job),
       });
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
@@ -263,11 +261,10 @@ export async function startHostedContainerEntrypoint(input: {
 
       emitHostedExecutionStructuredLog({
         component: "container",
-        wake: typeof job === "object" && job ? resolveHostedContainerJobWake(job) : null,
         error,
         message: "Hosted container entrypoint failed a runner job.",
         phase: "failed",
-        run: typeof job === "object" && job ? job.request.run ?? null : null,
+        userId: typeof job === "object" && job ? readHostedExecutionRunnerJobUserId(job) : null,
       });
       if (error instanceof HostedRunnerShellIsolationError) {
         runtime.exitScheduler();
@@ -328,18 +325,13 @@ export async function startHostedContainerEntrypoint(input: {
   return server;
 }
 
-function resolveHostedContainerJobWake(job: HostedAssistantRuntimeJobInput): HostedRuntimeEvent {
-  const [firstEvent] = job.request.runDrain.events;
-  return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(job.request.runDrain);
-}
-
 async function parseHostedExecutionContainerRunRequest(
   value: unknown,
   runtime: HostedContainerRuntimeDependencies,
 ): Promise<{
   internalWorkerProxyToken: string | null;
   localBridge: HostedExecutionLocalBridgeConfig;
-  job: HostedAssistantRuntimeJobInput;
+  job: HostedExecutionRunnerJobInput;
 }> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Hosted container runner request must be an object.");
@@ -359,7 +351,9 @@ async function parseHostedExecutionContainerRunRequest(
         "Hosted container runner request.localInternalProxyBaseUrl",
       ),
     },
-    job: assistantRuntime.parseHostedAssistantRuntimeJobInput(record.job),
+    job: parseHostedExecutionRunnerJobInput(record.job, {
+      parseWorkspaceJobInput: assistantRuntime.parseHostedAssistantWorkspaceRuntimeJobInput,
+    }),
   };
 }
 
@@ -496,6 +490,15 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return null;
+  }
+
+  const phase = (result as { phase?: unknown }).phase;
+  return typeof phase === "string" ? phase : null;
 }
 
 function resolveHostedContainerRuntimeDependencies(
@@ -826,7 +829,7 @@ async function readHostedRunnerBundleManifestSummary(
 }
 
 async function runHostedExecutionJob(
-  input: HostedAssistantRuntimeJobInput,
+  input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
     internalWorkerProxyToken?: string | null;
@@ -839,7 +842,7 @@ async function runHostedExecutionJob(
 }
 
 async function runHostedExecutionJobWithProcessIsolation(
-  input: HostedAssistantRuntimeJobInput,
+  input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
     internalWorkerProxyToken?: string | null;

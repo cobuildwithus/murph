@@ -5,10 +5,8 @@ import {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import {
-  materializeHostedIngressEnvelopeTx,
-} from "../hosted-ingress/lifecycle";
-import { nudgeHostedRunBestEffort } from "../hosted-ingress/control";
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { nudgeHostedRunnerBestEffort } from "../hosted-runner/control";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { type HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
@@ -146,8 +144,8 @@ export async function acceptHostedShareLink(input: {
           },
         });
 
-    await materializeHostedIngressEnvelopeTx({
-      wake: buildHostedShareAcceptanceWake({
+    await appendHostedMailboxEnvelopeTx({
+      envelope: buildHostedShareAcceptanceWake({
         acceptedAt: acceptedAt.toISOString(),
         eventId,
         memberId,
@@ -173,7 +171,7 @@ export async function acceptHostedShareLink(input: {
     };
   }
 
-  void nudgeHostedRunBestEffort({
+  void nudgeHostedRunnerBestEffort({
     context: "hosted-share.acceptance",
     userId: memberId,
   });
@@ -234,11 +232,11 @@ async function reconcileHostedShareClaim(input: {
     };
   }
 
-  if (lifecycleState === "quarantined" || lifecycleState === "replaced" || lifecycleState === null) {
-    return {
-      outcome: "continue",
-      record: await requireHostedShareLinkById(tx, latest.id),
-    };
+    if (lifecycleState === "quarantined" || lifecycleState === null) {
+      return {
+        outcome: "continue",
+        record: await requireHostedShareLinkById(tx, latest.id),
+      };
   }
 
   return {

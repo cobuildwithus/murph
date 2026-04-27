@@ -1,16 +1,18 @@
 import { importSharePackIntoVault } from "@murphai/core";
 import type {
   HostedExecutionRunnerSharePack,
-  HostedIngressEnvelope,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
-import type { HostedIngressEffect } from "../models.ts";
+import type { HostedMailboxEffect } from "../models.ts";
+import type { HostedRuntimeSharePort } from "../platform.ts";
 
 export async function handleHostedShareAcceptedWake(input: {
-  wake: Extract<HostedIngressEnvelope, { kind: "vault.share.accepted" }>;
+  wake: Extract<HostedExecutionWake, { kind: "vault.share.accepted" }>;
+  sharePort?: HostedRuntimeSharePort | null;
   sharePack: HostedExecutionRunnerSharePack;
   vaultRoot: string;
-}): Promise<HostedIngressEffect> {
+}): Promise<HostedMailboxEffect> {
   if (input.sharePack.ownerUserId !== input.wake.share.ownerUserId) {
     throw new TypeError("Hosted share pack ownerUserId must match the canonical share reference.");
   }
@@ -20,13 +22,23 @@ export async function handleHostedShareAcceptedWake(input: {
   }
 
   const pack = input.sharePack.pack;
+  const shareImportResult = await importSharePackIntoVault({
+    pack,
+    vaultRoot: input.vaultRoot,
+  });
+
+  if (input.sharePort) {
+    await input.sharePort.recordImport({
+      importedAt: new Date().toISOString(),
+      ownerUserId: input.wake.share.ownerUserId,
+      shareId: input.wake.share.shareId,
+      status: "imported",
+    });
+  }
 
   return {
     conversationMetrics: null,
-    shareImportResult: await importSharePackIntoVault({
-      pack,
-      vaultRoot: input.vaultRoot,
-    }),
+    shareImportResult,
     shareImportTitle: pack.title,
     vaultSyncImportResult: null,
   };

@@ -1,67 +1,22 @@
-import {
-  HostedBillingStatus,
-  type PrismaClient,
-} from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  readLatestHostedIngressLifecycleByKind: vi.fn(),
-}));
-
-vi.mock("../hosted-ingress/store", () => ({
-  readLatestHostedIngressLifecycleByKind: mocks.readLatestHostedIngressLifecycleByKind,
-}));
+import { HostedBillingStatus } from "@prisma/client";
+import { describe, expect, it } from "vitest";
 
 import { isHostedMemberActivationPending } from "./activation-progress";
 
 describe("hosted member activation progress", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue(null);
-  });
-
-  it("keeps activation pending when the latest hosted wake lifecycle is non-terminal", async () => {
-    const prisma = {} as PrismaClient;
-    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue({
-      eventId: "evt_activation",
-      state: "queued",
-    });
-
+  it("does not model activation progress in web-owned ingress state", async () => {
     await expect(isHostedMemberActivationPending({
       billingStatus: HostedBillingStatus.active,
       memberId: "member_123",
-      prisma,
-    })).resolves.toBe(true);
-    expect(mocks.readLatestHostedIngressLifecycleByKind).toHaveBeenCalledWith({
-      kind: "member.activated",
-      prisma,
-      userId: "member_123",
-    });
-  });
-
-  it("treats completed hosted wake lifecycle records as terminal", async () => {
-    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue({
-      eventId: "evt_activation",
-      state: "completed",
-    });
-
-    await expect(isHostedMemberActivationPending({
-      billingStatus: HostedBillingStatus.active,
-      memberId: "member_123",
-      prisma: {} as PrismaClient,
+      prisma: {},
     })).resolves.toBe(false);
   });
 
-  it("returns false when no activation wake has been recorded", async () => {
-    mocks.readLatestHostedIngressLifecycleByKind.mockResolvedValue({
-      eventId: "evt_activation",
-      state: "quarantined",
-    });
-
+  it("returns false for inactive billing states", async () => {
     await expect(isHostedMemberActivationPending({
-      billingStatus: HostedBillingStatus.active,
+      billingStatus: HostedBillingStatus.not_started,
       memberId: "member_123",
-      prisma: {} as PrismaClient,
+      prisma: {},
     })).resolves.toBe(false);
   });
 });

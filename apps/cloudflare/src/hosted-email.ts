@@ -34,10 +34,8 @@ const HOSTED_EMAIL_RAW_MESSAGE_OBJECT_PREFIX = "hosted-email/messages";
 export class HostedEmailRawMessageMissingError extends Error {
   readonly code = "email-raw-message-missing";
 
-  constructor(input: { rawMessageKey: string; userId: string }) {
-    super(
-      `Hosted email message fetch failed for ${input.userId}/${input.rawMessageKey}.`,
-    );
+  constructor(_input: { rawMessageKey: string; userId: string }) {
+    super("Hosted email message fetch failed.");
     this.name = "HostedEmailRawMessageMissingError";
   }
 }
