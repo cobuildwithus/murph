@@ -46,7 +46,9 @@ const workspaceSmokePackages = [
   {
     packageName: "assistant-engine",
     requiredSubpaths: [
-      "assistant-cron",
+      "assistant-automation",
+      "assistant-runtime",
+      "assistant-state",
       "knowledge",
     ],
   },
