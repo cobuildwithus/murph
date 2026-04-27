@@ -178,11 +178,6 @@ enum HostedStripeEventStatus {
   poisoned
 }
 
-enum HostedIngressBehavior {
-  ordered
-  coalescing
-}
-
 model HostedMember {
   id                         String                           @id
   billingStatus              HostedBillingStatus              @default(not_started) @map("billing_status")
@@ -197,17 +192,11 @@ model HostedMember {
   routing                    HostedMemberRouting?
   billingRef                 HostedMemberBillingRef?
   emailAuthorization         HostedMemberEmailAuthorization?
-  executionCursor            HostedExecutionCursor?
-  hostedIngressEvents        HostedIngressEvent[]
-  hostedIngressEventAliases  HostedIngressEventAlias[]
-  hostedIngressPayloads      HostedIngressPayload[]
   hostedMailboxItems         HostedMailboxItem[]
   hostedMailboxPayloads      HostedMailboxPayload[]
   hostedMailboxLaneCounters  HostedMailboxLaneCounter[]
   hostedWorkspace            HostedWorkspace?
   hostedRuntimeLogs          HostedRuntimeLog[]
-  hostedRuns         HostedRun[]
-  hostedRunLogs      HostedRunLog[]
   vaultSyncSessions  HostedVaultSyncSession[]
   vaultSyncPayloads  HostedVaultSyncPayload[]
 
@@ -290,158 +279,6 @@ model HostedMemberEmailAuthorization {
   member                           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_email_authorization")
-}
-
-model HostedExecutionCursor {
-  userId       String       @id @map("user_id")
-  nextSeq      BigInt       @default(1) @map("next_seq")
-  committedSeq BigInt       @default(0) @map("committed_seq")
-  nextRuntimeWakeAt DateTime? @map("next_runtime_wake_at")
-  nextRuntimeWakeReason String? @map("next_runtime_wake_reason")
-  snapshotRef  Json?        @map("snapshot_ref")
-  browserVaultReplicaRef Json? @map("browser_vault_replica_ref")
-  version      BigInt       @default(0) @map("version")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
-  member       HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("hosted_execution_cursor")
-}
-
-model HostedIngressEvent {
-  id                    String             @id
-  userId                String             @map("user_id")
-  runId                 String?            @map("run_id")
-  seq                   BigInt             @map("seq")
-  kind                  String
-  behavior              HostedIngressBehavior
-  state                 String             @default("pending")
-  dedupeKey             String?            @map("dedupe_key")
-  coalescingKey         String?            @map("coalescing_key")
-  occurredAt            DateTime           @map("occurred_at")
-  payloadSchema         String             @map("payload_schema")
-  payloadInlineCiphertext String?          @map("payload_inline_ciphertext")
-  payloadRef            String?            @map("payload_ref")
-  payloadBytes          Int?               @map("payload_bytes")
-  completedAt           DateTime?          @map("completed_at")
-  quarantinedAt         DateTime?          @map("quarantined_at")
-  quarantineCode        String?            @map("quarantine_code")
-  createdAt             DateTime           @default(now()) @map("created_at")
-  updatedAt             DateTime           @updatedAt @map("updated_at")
-  member                HostedMember       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  run                   HostedRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
-  aliases               HostedIngressEventAlias[]
-  payload               HostedIngressPayload?
-
-  @@unique([userId, seq])
-  @@unique([userId, dedupeKey])
-  @@index([userId, seq])
-  @@index([userId, state, seq])
-  @@index([runId])
-  @@index([userId, coalescingKey, seq])
-  @@index([userId, kind, seq])
-  @@map("hosted_ingress_event")
-}
-
-model HostedRun {
-  id                   String         @id
-  userId               String         @map("user_id")
-  executorKind         String         @default("cloudflare-container") @map("executor_kind")
-  executorCodeDigest   String?        @map("executor_code_digest")
-  attestationRef       String?        @map("attestation_ref")
-  signedResultRef      String?        @map("signed_result_ref")
-  status               String
-  triggerKind          String         @map("trigger_kind")
-  runTokenHash         String         @unique @map("run_token_hash")
-  inputCommittedSeq    BigInt         @map("input_committed_seq")
-  outputCommittedSeq   BigInt?        @map("output_committed_seq")
-  inputCursorVersion   BigInt         @map("input_cursor_version")
-  outputCursorVersion  BigInt?        @map("output_cursor_version")
-  inputSnapshotRef     Json?          @map("input_snapshot_ref")
-  preparedSnapshotRef  Json?          @map("prepared_snapshot_ref")
-  finalSnapshotRef     Json?          @map("final_snapshot_ref")
-  nextRuntimeWakeAt    DateTime?      @map("next_runtime_wake_at")
-  nextRuntimeWakeReason String?       @map("next_runtime_wake_reason")
-  eventCount           Int            @default(0) @map("event_count")
-  eventKindsJson       Json           @map("event_kinds_json")
-  eventSeqsJson        Json           @map("event_seqs_json")
-  ingressEventIdsJson  Json           @map("ingress_event_ids_json")
-  redactedSummaryJson  Json?          @map("redacted_summary_json")
-  errorCode            String?        @map("error_code")
-  errorClass           String?        @map("error_class")
-  attempt              Int            @default(1)
-  acquiredAt           DateTime       @map("acquired_at")
-  startedAt            DateTime?      @map("started_at")
-  preparedAt           DateTime?      @map("prepared_at")
-  committedAt          DateTime?      @map("committed_at")
-  finalizedAt          DateTime?      @map("finalized_at")
-  failedAt             DateTime?      @map("failed_at")
-  createdAt            DateTime       @default(now()) @map("created_at")
-  updatedAt            DateTime       @updatedAt @map("updated_at")
-  member               HostedMember   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ingressEvents        HostedIngressEvent[]
-  logs                 HostedRunLog[]
-
-  @@index([userId, createdAt])
-  @@index([userId, status, createdAt])
-  @@index([status, createdAt])
-  @@index([triggerKind, createdAt])
-  @@map("hosted_run")
-}
-
-model HostedRunLog {
-  id             String       @id
-  runId          String       @map("run_id")
-  userId         String       @map("user_id")
-  at             DateTime
-  level          String
-  component      String
-  phase          String
-  message        String
-  redactedJson   Json?        @map("redacted_json")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-  run            HostedRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
-
-  @@index([userId, at])
-  @@index([runId, at])
-  @@index([level, at])
-  @@map("hosted_run_log")
-}
-
-model HostedIngressEventAlias {
-  eventId           String       @map("event_id")
-  ingressEventId    String       @map("ingress_event_id")
-  userId            String       @map("user_id")
-  replacedByEventId String?      @map("replaced_by_event_id")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ingressEvent      HostedIngressEvent @relation(fields: [ingressEventId], references: [id], onDelete: Cascade)
-  replacedBy        HostedIngressEventAlias? @relation("HostedIngressEventAliasReplacement", fields: [userId, replacedByEventId], references: [userId, eventId], onDelete: NoAction, onUpdate: Cascade)
-  replaces          HostedIngressEventAlias[] @relation("HostedIngressEventAliasReplacement")
-
-  @@id([userId, eventId])
-  @@index([eventId])
-  @@index([userId])
-  @@index([userId, replacedByEventId])
-  @@index([ingressEventId])
-  @@map("hosted_ingress_event_alias")
-}
-
-model HostedIngressPayload {
-  ingressEventId    String       @id @map("ingress_event_id")
-  userId            String       @map("user_id")
-  payloadCiphertext String       @map("payload_ciphertext")
-  payloadSchema     String       @map("payload_schema")
-  payloadBytes      Int          @map("payload_bytes")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ingressEvent      HostedIngressEvent @relation(fields: [ingressEventId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("hosted_ingress_payload")
 }
 
 model HostedMailboxItem {
@@ -620,7 +457,6 @@ model HostedVaultSyncSession {
   sourceVaultTitle     String?   @map("source_vault_title")
   sourceSchemaVersion  String?   @map("source_schema_version")
   localManifestHash    String?   @map("local_manifest_hash")
-  queuedIngressEventId String?   @unique @map("queued_ingress_event_id")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
   expiresAt            DateTime  @map("expires_at")

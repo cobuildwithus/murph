@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildHostedExecutionDeviceSyncWake } from "../src/builders.ts";
-import { parseHostedIngressEnvelope } from "../src/parsers.ts";
+import { parseHostedExecutionWake } from "../src/parsers.ts";
 
 describe("device-sync wake", () => {
   it("round-trips device-sync wake metadata through hosted-execution", () => {
@@ -14,6 +14,6 @@ describe("device-sync wake", () => {
       userId: "user_123",
     });
 
-    expect(parseHostedIngressEnvelope(wake)).toEqual(wake);
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
   });
 });

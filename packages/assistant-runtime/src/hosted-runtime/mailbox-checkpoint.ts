@@ -1,4 +1,5 @@
 import type {
+  HostedMailboxLane,
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointReason,
   HostedWorkspaceCheckpointRequest,
@@ -24,6 +25,7 @@ import type {
 export interface HostedMailboxImportCheckpointInput {
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   checkpointReason?: HostedWorkspaceCheckpointReason;
@@ -85,6 +87,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     expectedUserId: input.expectedUserId,
     importItem: input.importItem,
+    lanes: input.lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
     now: input.now,

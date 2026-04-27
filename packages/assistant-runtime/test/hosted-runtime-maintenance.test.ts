@@ -154,30 +154,10 @@ beforeEach(() => {
 });
 
 describe("runHostedAssistantAutomation", () => {
-  it("wraps hosted turn-input refreshes through the local inbox-backed port", async () => {
-    const lateWake = {
-      eventId: "evt_late",
-      kind: "conversation.message" as const,
-      message: {
-        channel: "telegram" as const,
-        telegramMessage: {
-          messageId: "789",
-          schema: "murph.hosted-telegram-message.v1" as const,
-          threadId: "telegram:123",
-          text: "Actually, one more detail",
-        },
-      },
-      occurredAt: "2026-04-23T00:00:01.000Z",
-      userId: "member_123",
-    };
-    const hostedTurnInputRefresh = vi.fn(async () => ({
-      events: [
-        {
-          ingressEventId: "wake_late",
-          seq: "11",
-          wake: lateWake,
-        },
-      ],
+  it("wraps hosted mailbox refreshes through the local inbox-backed port", async () => {
+    const refreshMailboxBeforeDelivery = vi.fn(async () => ({
+      progressed: true,
+      reason: "ingested_input" as const,
     }));
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       await input.turnInputPort?.refresh({
@@ -218,220 +198,25 @@ describe("runHostedAssistantAutomation", () => {
               readRawEmailMessage: vi.fn(async () => null),
               sendEmail: vi.fn(async () => undefined),
             },
-            turnInputPort: {
-              refresh: hostedTurnInputRefresh,
-            },
+            refreshMailboxBeforeDelivery,
           },
           platformEnv: {},
         },
       ),
     ).resolves.toEqual({
-      adoptedCleanupTargets: [
-        {
-          channel: "telegram",
-          messageId: "789",
-          target: "telegram:123",
-        },
-      ],
-      adoptedEventResults: [
-        {
-          ingressEventId: "wake_late",
-          state: "completed",
-        },
-      ],
       nextWakeAt: null,
       progressed: true,
       redactedLogEntries: expect.any(Array),
     });
 
-    expect(hostedTurnInputRefresh).toHaveBeenCalledWith({
-      phase: "before_delivery",
+    expect(refreshMailboxBeforeDelivery).toHaveBeenCalledWith({
       requestId: "req_turn_input",
-    });
-    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({
-        platform: expect.objectContaining({
-          turnInputPort: expect.any(Object),
-        }),
-      }),
-      vaultRoot: "/tmp/vault-root",
-      wake: lateWake,
     });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
       expect.objectContaining({
         turnInputPort: expect.any(Object),
       }),
     );
-  });
-
-  it("propagates hosted turn-input import failures after adoption", async () => {
-    const baseRefresh = vi.fn(async () => ({
-      progressed: false,
-      reason: "no_new_input" as const,
-    }));
-    mocks.createInboxBackedAssistantTurnInputPort.mockReturnValueOnce({
-      listNewConversationCaptures: vi.fn(async (query) => ({
-        captures: [],
-        nextCursor: query.afterCursor,
-      })),
-      refresh: baseRefresh,
-    });
-    const lateWake = {
-      eventId: "evt_late_import_failure",
-      kind: "conversation.message" as const,
-      message: {
-        channel: "telegram" as const,
-        telegramMessage: {
-          messageId: "789",
-          schema: "murph.hosted-telegram-message.v1" as const,
-          threadId: "telegram:123",
-          text: "Actually, one more detail",
-        },
-      },
-      occurredAt: "2026-04-23T00:00:01.000Z",
-      userId: "member_123",
-    };
-    const hostedTurnInputRefresh = vi.fn(async () => ({
-      events: [
-        {
-          ingressEventId: "wake_late_import_failure",
-          seq: "11",
-          wake: lateWake,
-        },
-      ],
-    }));
-    mocks.ingestHostedConversationMessageWake.mockRejectedValueOnce(
-      new Error("inbox import failed"),
-    );
-    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      await input.turnInputPort?.refresh({
-        phase: "before_delivery",
-      });
-      return {
-        nextWakeAt: null,
-        progressed: true,
-      };
-    });
-
-    await expect(
-      runHostedAssistantAutomation(
-        "/tmp/vault-root",
-        "req_turn_input_import_failure",
-        {
-          hosted: {
-            issueDeviceConnectLink: vi.fn(),
-            memberId: "member_123",
-            userEnvKeys: [],
-          },
-        },
-        {
-          eventId: "evt_automation_turn_input_import_failure",
-          kind: "runtime.timer",
-          occurredAt: "2026-04-23T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        {
-          forwardedEnv: {},
-          platform: {
-            artifactStore: {
-              get: vi.fn(async () => null),
-              put: vi.fn(async () => undefined),
-            },
-            effectsPort: {
-              readRawEmailMessage: vi.fn(async () => null),
-              sendEmail: vi.fn(async () => undefined),
-            },
-            turnInputPort: {
-              refresh: hostedTurnInputRefresh,
-            },
-          },
-          platformEnv: {},
-        },
-      ),
-    ).rejects.toThrow("inbox import failed");
-
-    expect(hostedTurnInputRefresh).toHaveBeenCalledWith({
-      phase: "before_delivery",
-      requestId: "req_turn_input_import_failure",
-    });
-    expect(mocks.ingestHostedConversationMessageWake).toHaveBeenCalledWith({
-      runtime: expect.any(Object),
-      vaultRoot: "/tmp/vault-root",
-      wake: lateWake,
-    });
-    expect(baseRefresh).not.toHaveBeenCalled();
-  });
-
-  it("propagates hosted turn-input refresh failures before delivery", async () => {
-    const baseRefresh = vi.fn(async () => ({
-      progressed: false,
-      reason: "no_new_input" as const,
-    }));
-    mocks.createInboxBackedAssistantTurnInputPort.mockReturnValueOnce({
-      listNewConversationCaptures: vi.fn(async (query) => ({
-        captures: [],
-        nextCursor: query.afterCursor,
-      })),
-      refresh: baseRefresh,
-    });
-    const hostedTurnInputRefresh = vi.fn(async () => {
-      throw new Error("hosted refresh failed");
-    });
-    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      await input.turnInputPort?.refresh({
-        phase: "before_delivery",
-      });
-      return {
-        nextWakeAt: null,
-        progressed: true,
-      };
-    });
-
-    await expect(
-      runHostedAssistantAutomation(
-        "/tmp/vault-root",
-        "req_turn_input_refresh_failure",
-        {
-          hosted: {
-            issueDeviceConnectLink: vi.fn(),
-            memberId: "member_123",
-            userEnvKeys: [],
-          },
-        },
-        {
-          eventId: "evt_automation_turn_input_refresh_failure",
-          kind: "runtime.timer",
-          occurredAt: "2026-04-23T00:00:00.000Z",
-          triggerKind: "runtime_timer",
-          userId: "member_123",
-        },
-        {
-          forwardedEnv: {},
-          platform: {
-            artifactStore: {
-              get: vi.fn(async () => null),
-              put: vi.fn(async () => undefined),
-            },
-            effectsPort: {
-              readRawEmailMessage: vi.fn(async () => null),
-              sendEmail: vi.fn(async () => undefined),
-            },
-            turnInputPort: {
-              refresh: hostedTurnInputRefresh,
-            },
-          },
-          platformEnv: {},
-        },
-      ),
-    ).rejects.toThrow("hosted refresh failed");
-
-    expect(hostedTurnInputRefresh).toHaveBeenCalledWith({
-      phase: "before_delivery",
-      requestId: "req_turn_input_refresh_failure",
-    });
-    expect(mocks.ingestHostedConversationMessageWake).not.toHaveBeenCalled();
-    expect(baseRefresh).not.toHaveBeenCalled();
   });
 
   it("logs automation events emitted during the hosted pass", async () => {
@@ -502,8 +287,6 @@ describe("runHostedAssistantAutomation", () => {
         },
       ),
     ).resolves.toEqual({
-      adoptedCleanupTargets: [],
-      adoptedEventResults: [],
       nextWakeAt: "2026-04-08T01:15:00.000Z",
       progressed: true,
       redactedLogEntries: [
@@ -578,8 +361,6 @@ describe("runHostedAssistantAutomation", () => {
         },
       ),
     ).resolves.toEqual({
-      adoptedCleanupTargets: [],
-      adoptedEventResults: [],
       nextWakeAt: null,
       progressed: false,
       redactedLogEntries: [

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
-import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
+import type { HostedAssistantWorkspaceRuntimeJobResult } from "@murphai/assistant-runtime";
 import {
   deriveHostedStorageOpaqueId,
 } from "../src/crypto-context.ts";
@@ -25,7 +25,7 @@ import type {
 } from "../src/worker-routes/shared.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import {
-  type HostedIngressEnvelope,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -368,6 +368,45 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("rejects local workspace checkpoints when the proxy token lease does not match", async () => {
+    const upstreamFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+      }),
+    );
+    const env = createWorkerEnv(undefined, {
+      ALLOW_LOCAL_INTERNAL_PROXY: "true",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+    });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/web-control.worker/api/internal/hosted-workspace/checkpoint",
+        {
+          body: JSON.stringify({
+            attemptId: "attempt_stale",
+            expectedWorkspaceVersion: "4",
+            leaseGeneration: "9",
+            reason: "import",
+            snapshotRef: null,
+          }),
+          headers: {
+            [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
   it("hard-fails when the local internal proxy is configured outside development", async () => {
     const response = await worker.fetch(
       new Request("https://runner.example.test/health"),
@@ -411,7 +450,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.bootstrapUser).not.toHaveBeenCalled();
+    expect(stub.bindUser).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
@@ -428,7 +467,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.bootstrapUser).not.toHaveBeenCalled();
+    expect(stub.bindUser).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
@@ -457,7 +496,7 @@ describe("cloudflare worker routes", () => {
     await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
       error: "Not found",
     });
-    expect(stub.bootstrapUser).not.toHaveBeenCalled();
+    expect(stub.bindUser).not.toHaveBeenCalled();
   });
 
   it("keeps the removed legacy-reference dispatch route hidden from OIDC callers", async () => {
@@ -480,7 +519,7 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.bootstrapUser).not.toHaveBeenCalled();
+    expect(stub.bindUser).not.toHaveBeenCalled();
   });
 
   it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
@@ -490,7 +529,7 @@ describe("cloudflare worker routes", () => {
     const response = await worker.fetch(request, createWorkerEnv(stub));
 
     expect(response.status).toBe(404);
-    expect(stub.bootstrapUser).not.toHaveBeenCalled();
+    expect(stub.bindUser).not.toHaveBeenCalled();
   });
 
   it("keeps the removed dispatch route hidden even for missing, malformed, and mismatched OIDC bearer requests", async () => {
@@ -538,7 +577,7 @@ describe("cloudflare worker routes", () => {
     await expect(wrongSubjectResponse.json()).resolves.toEqual({
       error: "Not found",
     });
-    expect(stub.bootstrapUser).not.toHaveBeenCalled();
+    expect(stub.bindUser).not.toHaveBeenCalled();
   });
 
   it("reads canonical per-user status while keeping the per-event status route removed", async () => {
@@ -570,7 +609,6 @@ describe("cloudflare worker routes", () => {
       workspace: null,
     });
     expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
-    expect(stub.status).not.toHaveBeenCalled();
 
     const eventStatusResponse = await worker.fetch(
       await signControlRequest(new Request(
@@ -584,6 +622,27 @@ describe("cloudflare worker routes", () => {
     await expect(eventStatusResponse.json()).resolves.toEqual({
       error: "Not found",
     });
+  });
+
+  it("fails closed when canonical per-user status cannot be validated", async () => {
+    const stub = createUserRunnerStub({
+      runnerStatus: vi.fn(async () => {
+        throw new Error("Hosted workspace read returned a different user.");
+      }),
+    });
+
+    const statusResponse = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
+        method: "GET",
+      })),
+      createWorkerEnv(stub),
+    );
+
+    expect(statusResponse.status).toBe(500);
+    await expect(statusResponse.json()).resolves.toEqual({
+      error: "Internal error.",
+    });
+    expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
   });
 
   it("returns a stable browser-vault missing-replica code from the browser-vault route", async () => {
@@ -682,8 +741,28 @@ describe("cloudflare worker routes", () => {
       nextAlarmAt: "2026-04-26T00:00:00.000Z",
     });
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
-    expect(stub.nudgeHostedRun).not.toHaveBeenCalled();
-    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+  });
+
+  it("rejects runner nudge route/user mismatches before touching the Durable Object", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await signControlRequest(
+        new Request("https://runner.example.test/internal/users/member_123/nudge", {
+          method: "POST",
+        }),
+        { boundUserId: "member_other" },
+      ),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the route user.",
+    });
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
   });
 
   it("does not expose the legacy hosted-run nudge route", async () => {
@@ -697,8 +776,8 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(404);
-    expect(stub.nudgeHostedRun).not.toHaveBeenCalled();
-    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -997,11 +1076,22 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
     getByName(name: string) {
       return {
         async destroyInstance() {},
-        async invoke(): Promise<HostedAssistantRuntimeJobResult> {
+        async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
           throw new Error("Runner container should not be invoked by route tests.");
         },
-        async ownsInternalWorkerProxyToken(input: { token: string }): Promise<boolean> {
-          return name === "member_123" && input.token === RUNNER_PROXY_TOKEN;
+        async ownsInternalWorkerProxyToken(input: {
+          attemptId?: string;
+          leaseGeneration?: string;
+          token: string;
+        }): Promise<boolean> {
+          const tokenMatches = name === "member_123" && input.token === RUNNER_PROXY_TOKEN;
+          if (!tokenMatches) {
+            return false;
+          }
+          if (input.attemptId === undefined && input.leaseGeneration === undefined) {
+            return true;
+          }
+          return input.attemptId === "attempt_current" && input.leaseGeneration === "9";
         },
         async smokeHealth() {
           return {
@@ -1059,9 +1149,9 @@ function createWorkerEnv(
     const baseStub = wrappedUserRunnerStubs.size === 0 ? seedStub : createUserRunnerStub();
     const wrappedStub: UserRunnerStub = {
       ...baseStub,
-      bootstrapUser: vi.fn(async (boundUserId: string) => {
+      bindUser: vi.fn(async (boundUserId: string) => {
         await resolveHostedUserCryptoContextForTest(env, boundUserId);
-        return baseStub.bootstrapUser(boundUserId);
+        return baseStub.bindUser(boundUserId);
       }),
     };
     wrappedUserRunnerStubs.set(userId, wrappedStub);
@@ -1122,7 +1212,7 @@ function createBucketStore() {
   };
 }
 
-function createWake(eventId: string): HostedIngressEnvelope {
+function createWake(eventId: string): HostedExecutionWake {
   return {
     eventId,
     kind: "member.activated",
@@ -1218,12 +1308,7 @@ async function resolveHostedUserCryptoContextForTest(
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
-    bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
-    nudgeHostedRun: vi.fn(async () => ({
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: false,
-    })),
+    bindUser: vi.fn(async (userId: string) => ({ userId })),
     nudgeHostedRunner: vi.fn(async () => ({
       accepted: true,
       alarmScheduled: true,
@@ -1231,6 +1316,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       inFlight: false,
       leaseGeneration: "0",
       nextAlarmAt: null,
+    })),
+    runUntilIdleOrBudget: vi.fn(async () => ({
+      nextWakeAt: null,
+      status: "idle" as const,
     })),
     runnerStatus: vi.fn(async () => ({
       inFlight: false,
@@ -1240,21 +1329,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recentLogs: [],
       userId: "member_123",
       workspace: null,
-    })),
-    status: vi.fn(async () => ({
-      bundleRef: null,
-      inFlight: false,
-      lastError: null,
-      lastEventId: null,
-      lastRunAt: null,
-      nextWakeAt: null,
-      pendingIngressEventCount: 0,
-      userId: "member_123",
-    })),
-    drainHostedRuns: vi.fn(async () => ({
-      committedSeq: "0",
-      requestedTargetSeq: null,
-      targetReached: true,
     })),
     ...overrides,
   } satisfies UserRunnerDurableObjectStubLike;
@@ -1290,7 +1364,7 @@ async function createSignedJsonControlRequest(
 
 async function createSignedWakeRequest(
   path: string,
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
   input: {
     aud?: string;
     boundUserId?: string | null;

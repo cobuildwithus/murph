@@ -5,7 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
-  nudgeHostedRunBestEffort: vi.fn(),
+  nudgeHostedRunnerBestEffort: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -22,8 +22,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   upsertHostedMemberEmailAuthorization: mocks.upsertHostedMemberEmailAuthorization,
 }));
 
-vi.mock("@/src/lib/hosted-ingress/control", () => ({
-  nudgeHostedRunBestEffort: mocks.nudgeHostedRunBestEffort,
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
@@ -80,7 +80,7 @@ describe("settings email sync route", () => {
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
     });
-    mocks.nudgeHostedRunBestEffort.mockResolvedValue("wake");
+    mocks.nudgeHostedRunnerBestEffort.mockResolvedValue("wake");
   });
 
   it("verifies the server-side Privy cookie-backed session and writes canonical verified-email facts", async () => {
@@ -116,7 +116,7 @@ describe("settings email sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.email.sync",
     });
-    expect(mocks.nudgeHostedRunBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
       context: "settings.email.sync",
       userId: "member_123",
     });

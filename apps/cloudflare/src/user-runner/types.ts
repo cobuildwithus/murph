@@ -1,9 +1,4 @@
-import type {
-  HostedExecutionBundleRef,
-  HostedExecutionRunStatus,
-  HostedExecutionTimelineEntry,
-  HostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+import type { HostedExecutionBundleRef } from "@murphai/hosted-execution";
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 
 export interface DurableObjectSqlCursorLike<
@@ -40,50 +35,27 @@ export interface DurableObjectStateLike {
 }
 
 export interface RunnerStateRecord {
-  runtimeBootstrapped: boolean;
   bundleRef: HostedExecutionBundleRef | null;
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt: string | null;
   lastErrorCode: string | null;
-  lastEventId: string | null;
   lastRunAt: string | null;
+  leaseGeneration: number;
   nextWakeAt: string | null;
-  pendingIngressEventCount: number;
-  run: HostedExecutionRunStatus | null;
-  timeline: HostedExecutionTimelineEntry[];
+  pendingNudge: boolean;
   userId: string;
+  workspaceInvocation: {
+    attemptId: string;
+    reason: string | null;
+    startedAt: string;
+    workspaceVersion: string | null;
+  } | null;
 }
 
 export const COMMITTED_RESULT_FRESH_WINDOW_MS = 7 * 24 * 60 * 60_000;
-export const MAX_RUN_TIMELINE_ENTRIES = 24;
 export const RETRY_MAX_DELAY_MS = 5 * 60_000;
 
 export function computeRetryDelayMs(baseDelayMs: number, attempts: number): number {
   return Math.min(RETRY_MAX_DELAY_MS, baseDelayMs * (2 ** Math.max(0, attempts - 1)));
-}
-
-export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStatus {
-  return {
-    bundleRef: record.bundleRef,
-    inFlight: record.inFlight,
-    lastError: record.lastError,
-    ...(record.lastErrorAt ? {
-      lastErrorAt: record.lastErrorAt,
-    } : {}),
-    ...(record.lastErrorCode ? {
-      lastErrorCode: record.lastErrorCode,
-    } : {}),
-    lastEventId: record.lastEventId,
-    lastRunAt: record.lastRunAt,
-    nextWakeAt: record.nextWakeAt,
-    pendingIngressEventCount: record.pendingIngressEventCount,
-    ...(record.run ? {
-      run: record.run,
-    } : {}),
-    ...(record.timeline.length > 0 ? {
-      timeline: record.timeline,
-    } : {}),
-    userId: record.userId,
-  };
 }

@@ -28,10 +28,6 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedRuntimeDrainEvent,
-} from "@murphai/hosted-execution/contracts";
-import type {
-  AssistantTurnInputRefreshPhase,
   AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
 import type {
@@ -135,16 +131,6 @@ export interface HostedRuntimeVaultSyncPort {
   ): Promise<HostedRuntimeVaultSyncImportResponse>;
 }
 
-export interface HostedRuntimeTurnInputPort {
-  refresh(input: {
-    afterSeq?: string | null;
-    phase: AssistantTurnInputRefreshPhase;
-    requestId: string;
-  }): Promise<{
-    events: HostedRuntimeDrainEvent[];
-  }>;
-}
-
 export interface HostedRuntimePlatform {
   artifactStore: HostedRuntimeArtifactStore;
   billingPort?: HostedRuntimeBillingPort | null;
@@ -155,7 +141,6 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   refreshMailboxBeforeDelivery?: HostedRuntimeBeforeDeliveryMailboxRefresh | null;
   sharePort?: HostedRuntimeSharePort | null;
-  turnInputPort?: HostedRuntimeTurnInputPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
   vaultSyncPort?: HostedRuntimeVaultSyncPort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;

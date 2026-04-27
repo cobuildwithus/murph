@@ -1,5 +1,4 @@
 import type {
-  HostedExecutionRunContext,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
@@ -21,7 +20,6 @@ import {
 export async function resolveHostedVercelAiGatewayStripeCustomerId(input: {
   billingPort: HostedRuntimePlatform["billingPort"] | null | undefined;
   forwardedEnv: Readonly<Record<string, string>>;
-  run: HostedExecutionRunContext | null | undefined;
   userEnv: Readonly<Record<string, string>>;
   wake: HostedRuntimeEvent;
 }): Promise<string | null> {
@@ -54,7 +52,6 @@ export async function resolveHostedVercelAiGatewayStripeCustomerId(input: {
       level: "warn",
       message: "Hosted runtime delegated Vercel Stripe billing customer lookup failed; proceeding without delegated billing.",
       phase: "runtime.starting",
-      run: input.run ?? null,
       wake: input.wake,
     });
     return null;

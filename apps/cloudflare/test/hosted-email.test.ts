@@ -165,7 +165,7 @@ describe("hosted email routing and transport", () => {
         },
         level: "warn",
         message: "Hosted email route registration request failed.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: "user_123",
       }),
     );
@@ -201,7 +201,7 @@ describe("hosted email routing and transport", () => {
         },
         level: "warn",
         message: "Hosted email route registration response returned non-OK.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: "user_123",
       }),
     );
@@ -299,7 +299,7 @@ describe("hosted email routing and transport", () => {
         },
         level: "warn",
         message: "Hosted email route resolution request failed.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: null,
       }),
     );
@@ -345,7 +345,7 @@ describe("hosted email routing and transport", () => {
         },
         level: "warn",
         message: "Hosted email route resolution response returned non-OK.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: null,
       }),
     );
@@ -682,7 +682,7 @@ describe("hosted email routing and transport", () => {
         },
         level: "warn",
         message: "Hosted email send failed.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: null,
       }),
     );
@@ -733,7 +733,7 @@ describe("hosted email routing and transport", () => {
         },
         level: "warn",
         message: "Hosted email send failed.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: null,
       }),
     );

@@ -121,7 +121,7 @@ export async function createHostedEmailUserAddress(input: {
       error: wrappedError,
       level: "warn",
       message: "Hosted email route registration request failed.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: input.userId,
     });
     throw wrappedError;
@@ -151,7 +151,7 @@ export async function createHostedEmailUserAddress(input: {
       error,
       level: "warn",
       message: "Hosted email route registration response returned non-OK.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: input.userId,
     });
     throw error;
@@ -290,7 +290,7 @@ async function resolveHostedEmailRouteUserId(input: {
       error: wrappedError,
       level: "warn",
       message: "Hosted email route resolution request failed.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: null,
     });
     throw wrappedError;
@@ -316,7 +316,7 @@ async function resolveHostedEmailRouteUserId(input: {
       error,
       level: "warn",
       message: "Hosted email route resolution response returned non-OK.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: null,
     });
     throw error;
@@ -342,7 +342,7 @@ async function resolveHostedEmailRouteUserId(input: {
       error: wrappedError,
       level: "warn",
       message: "Hosted email route resolution returned invalid JSON.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: null,
     });
     throw wrappedError;
@@ -372,7 +372,7 @@ async function resolveHostedEmailRouteUserId(input: {
       error,
       level: "warn",
       message: "Hosted email route resolution returned an invalid payload.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: null,
     });
     throw error;

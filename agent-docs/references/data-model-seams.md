@@ -298,24 +298,22 @@ This patch:
 **Main refactor risk:** do not answer future caller needs by reviving a wide `HostedMemberAggregate` or by leaking encrypted/blind-index columns through the lookup surface.
 The seam stays healthy only if the lookup result remains nested and privacy-minimized.
 
-### 17. Keep hosted execution status centered on the web-owned run/cursor lifecycle
+### 17. Keep hosted execution status centered on mailbox and workspace truth
 
-**Seam:** `apps/web/src/lib/hosted-run/store.ts`, `apps/web/src/lib/hosted-ingress/queue.ts`, `packages/hosted-execution/src/contracts.ts`, `apps/cloudflare/src/user-runner.ts`
+**Seam:** `apps/web/src/lib/hosted-mailbox/store.ts`, `apps/web/src/lib/hosted-workspace/store.ts`, `packages/hosted-execution/src/runtime-control.ts`, `apps/cloudflare/src/user-runner.ts`
 
-Hosted execution used to translate across overlapping outbox, queue-presence,
-and dispatch-state models. The current tree is simpler: web-owned hosted
-ingress ordering plus `HostedExecutionCursor` and `HostedRun` are the canonical
-ordering/fence/recovery truth, while Cloudflare status is a consumer-facing
-projection over that lifecycle plus local execution residue.
+Hosted execution now translates across two web-owned primitives: append-only
+mailbox items for producer input and versioned hosted workspace checkpoints for
+runtime progress. Cloudflare status is a runner-control view over those
+primitives, not an owner of queue depth, run recovery, or cursor adoption.
 
-**Why this is simpler:** ordering, committed high-water, and snapshot fences now
-live with the cursor owner and finalize recovery lives with the hosted-run
-owner instead of being split across a web outbox and a Cloudflare queue model.
+**Why this is simpler:** ordering lives in mailbox lane sequences, snapshot
+fences live in hosted workspace versions, and the runner only leases a single
+workspace attempt at a time.
 
-**Main refactor risk:** do not let Cloudflare status output grow a second
-execution ownership seam. Queue-depth and recovery fields should stay
-web-owned, with Cloudflare exposing only a projection over that source of
-truth.
+**Main refactor risk:** do not reintroduce a Cloudflare-owned run/cursor model.
+If status needs more detail, derive it from mailbox/workspace/log readers rather
+than adding another runner-owned projection.
 
 ### 18. Keep device-sync wake hint subshapes with the device-sync runtime owner
 
@@ -456,18 +454,19 @@ It already does the thing the higher-leverage findings above still need to do.
 
 **Main failure mode if changed poorly:** spreading these definitions back across query, assistant-engine, and CLI would recreate exactly the taxonomy drift and duplicate command metadata the repo has been paying down elsewhere.
 
-#### B. Keep hosted ingress payload ownership split between shared ingress contracts and the web-owned storage helper
+#### B. Keep hosted mailbox payload ownership split between shared contracts and the web-owned storage helper
 
-**Seam:** `packages/hosted-execution/src/{contracts,builders,parsers}.ts`, `apps/web/src/lib/hosted-ingress/payload.ts`
+**Seam:** `packages/hosted-execution/src/{contracts,builders,parsers,runtime-control}.ts`, `apps/web/src/lib/hosted-mailbox/store.ts`
 
 This seam is already simple and composable enough.
-`@murphai/hosted-execution` owns the shared external-ingress kinds, payload
-schemas, and normalization helpers, while the web-owned ingress store owns the
-ciphertext inline-vs-reference storage policy for durable ingress rows.
+`@murphai/hosted-execution` owns the shared mailbox kinds, payload schemas, and
+normalization helpers, while the web-owned mailbox store owns lane sequencing,
+dedupe, and ciphertext inline-vs-reference storage policy for durable mailbox
+rows.
 
 **Why keep it:** this split keeps the shared contract vendor-neutral while
-leaving inline-vs-ref storage policy with the web-owned ingress owner instead of
-reintroducing a second outbox or Cloudflare-owned payload seam.
+leaving sequencing and storage policy with the web-owned mailbox owner instead
+of reintroducing a second outbox or Cloudflare-owned payload seam.
 
 **Main failure mode if changed poorly:** reintroducing a dispatch/outbox payload
 model or letting Cloudflare define its own payload storage rules would recreate

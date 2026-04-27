@@ -1,5 +1,5 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { nudgeHostedRunBestEffort } from "@/src/lib/hosted-ingress/control";
+import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import {
   assertHostedMemberNotSuspended,
@@ -86,7 +86,7 @@ export const POST = withJsonError(async (request: Request) => {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (channelSyncDispatch) {
-    await nudgeHostedRunBestEffort({
+    await nudgeHostedRunnerBestEffort({
       context: "settings.telegram.sync",
       userId: auth.member.id,
     });

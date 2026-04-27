@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import {
   buildHostedExecutionMemberChannelsUpdatedWake,
   type HostedExecutionMemberChannels,
-  type HostedIngressEnvelope,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
@@ -42,7 +42,7 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   sourceType: string;
-}): Promise<HostedIngressEnvelope> {
+}): Promise<HostedExecutionWake> {
   await lockHostedMemberRow(input.prisma, input.memberId);
 
   const member = await readHostedMemberSnapshot({

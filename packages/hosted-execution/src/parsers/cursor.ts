@@ -4,18 +4,15 @@ import {
   HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
   type HostedBrowserVaultReplicaCursorRef,
   type HostedBrowserVaultReplicaRef,
-  type HostedExecutionCursorState,
 } from "../contracts.ts";
 import type {
   HostedExecutionBundlePayload,
   HostedExecutionBundleRefState,
 } from "../bundles.ts";
 import {
-  requireBigIntString,
   requireObject,
   requireNumber,
   requireString,
-  readNullableString,
   readNullableStringValue,
 } from "./assertions.ts";
 
@@ -33,9 +30,9 @@ export function parseHostedExecutionBundleRef(
   return parseRuntimeHostedExecutionBundleRef(value, label);
 }
 
-export function parseHostedExecutionCursorSnapshotRef(
+export function parseHostedExecutionSnapshotRef(
   value: unknown,
-  label = "Hosted execution cursor snapshotRef",
+  label = "Hosted execution snapshot ref",
 ): HostedExecutionBundleRefState {
   return parseHostedExecutionBundleRef(value === undefined ? null : value, label);
 }
@@ -70,50 +67,4 @@ export function parseHostedBrowserVaultReplicaRef(
     schema,
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
   } satisfies HostedBrowserVaultReplicaRef;
-}
-
-export function parseHostedExecutionCursorState(
-  value: unknown,
-): HostedExecutionCursorState {
-  const record = requireObject(value, "Hosted execution cursor state");
-
-  return {
-    committedSeq: requireBigIntString(
-      record.committedSeq,
-      "Hosted execution cursor state committedSeq",
-    ),
-    createdAt: requireString(record.createdAt, "Hosted execution cursor state createdAt"),
-    nextSeq: requireBigIntString(record.nextSeq, "Hosted execution cursor state nextSeq"),
-    ...(record.nextRuntimeWakeAt === undefined
-      ? {}
-      : {
-          nextRuntimeWakeAt: readNullableString(
-            record.nextRuntimeWakeAt,
-            "Hosted execution cursor state nextRuntimeWakeAt",
-          ),
-        }),
-    ...(record.nextRuntimeWakeReason === undefined
-      ? {}
-      : {
-          nextRuntimeWakeReason: readNullableString(
-            record.nextRuntimeWakeReason,
-            "Hosted execution cursor state nextRuntimeWakeReason",
-          ),
-        }),
-    ...(record.browserVaultReplicaRef === undefined
-      ? {}
-      : {
-          browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(
-            record.browserVaultReplicaRef,
-            "Hosted execution cursor state browserVaultReplicaRef",
-          ),
-        }),
-    snapshotRef: parseHostedExecutionCursorSnapshotRef(
-      record.snapshotRef,
-      "Hosted execution cursor state snapshotRef",
-    ),
-    updatedAt: requireString(record.updatedAt, "Hosted execution cursor state updatedAt"),
-    userId: requireString(record.userId, "Hosted execution cursor state userId"),
-    version: requireBigIntString(record.version, "Hosted execution cursor state version"),
-  };
 }

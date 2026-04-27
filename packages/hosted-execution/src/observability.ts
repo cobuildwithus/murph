@@ -1,30 +1,26 @@
-export const HOSTED_EXECUTION_RUN_PHASES = [
-  "claimed",
+export const HOSTED_EXECUTION_LOG_PHASES = [
   "wake.running",
   "container.starting",
   "container.ready",
   "runtime.starting",
-  "commit.recorded",
-  "side-effects.draining",
-  "finalize.recorded",
-  "completed",
-  "retry.scheduled",
+  "checkpoint",
+  "outbox",
   "failed",
-  "quarantined",
+  "scheduled",
 ] as const;
 
-export type HostedExecutionRunPhase = (typeof HOSTED_EXECUTION_RUN_PHASES)[number];
+export type HostedExecutionLogPhase = (typeof HOSTED_EXECUTION_LOG_PHASES)[number];
 
-export const HOSTED_EXECUTION_RUN_LEVELS = ["info", "warn", "error"] as const;
+export const HOSTED_EXECUTION_LOG_LEVELS = ["info", "warn", "error"] as const;
 
-export type HostedExecutionRunLevel = (typeof HOSTED_EXECUTION_RUN_LEVELS)[number];
+export type HostedExecutionLogLevel = (typeof HOSTED_EXECUTION_LOG_LEVELS)[number];
 
 export type HostedExecutionErrorCode =
   | "authorization_error"
   | "bundle_archive_validation_error"
   | "configuration_error"
-  | "durable_commit_error"
-  | "durable_finalize_error"
+  | "checkpoint_error"
+  | "outbox_error"
   | "invalid_request"
   | "range_error"
   | "reference_error"
@@ -100,8 +96,8 @@ const HOSTED_EXECUTION_ERROR_SUMMARIES = {
   authorization_error: "Hosted execution authorization failed.",
   bundle_archive_validation_error: "Hosted bundle archive validation failed.",
   configuration_error: "Hosted execution configuration is invalid.",
-  durable_commit_error: "Hosted execution failed before recording a durable commit.",
-  durable_finalize_error: "Hosted execution failed while finalizing a committed run.",
+  checkpoint_error: "Hosted execution failed while recording a checkpoint.",
+  outbox_error: "Hosted execution failed while draining hosted outbox.",
   invalid_request: "Hosted execution rejected an invalid request.",
   range_error: "Hosted execution runtime failed.",
   reference_error: "Hosted execution runtime failed.",
@@ -113,48 +109,22 @@ const HOSTED_EXECUTION_ERROR_SUMMARIES = {
   uri_error: "Hosted execution runtime failed.",
 } as const satisfies Record<HostedExecutionErrorCode, string>;
 
-export interface HostedExecutionRunContext {
-  attempt: number;
-  runId: string;
-  startedAt: string;
-}
-
-export interface HostedExecutionRunStatus extends HostedExecutionRunContext {
-  eventId: string;
-  phase: HostedExecutionRunPhase;
-  updatedAt: string;
-}
-
-export interface HostedExecutionTimelineEntry {
-  at: string;
-  attempt: number;
-  component: string;
-  errorCode?: string | null;
-  eventId: string;
-  level: HostedExecutionRunLevel;
-  message: string;
-  phase: HostedExecutionRunPhase;
-  runId: string;
-}
-
 export interface HostedExecutionStructuredLogRecord {
-  attempt: number | null;
   component: string;
   details?: HostedExecutionStructuredLogDetails | null;
   errorCode?: string | null;
   errorMessage?: string | null;
   errorName?: string | null;
   eventId: string | null;
-  level: HostedExecutionRunLevel;
+  level: HostedExecutionLogLevel;
   message: string;
-  phase: HostedExecutionRunPhase;
-  runId: string | null;
+  phase: HostedExecutionLogPhase;
   schema: "murph.hosted-execution.log.v1";
   time: string;
   userId: string | null;
 }
 
-interface HostedIngressEnvelopeLike {
+interface HostedExecutionWakeLike {
   eventId?: string | null;
 }
 
@@ -231,24 +201,23 @@ export interface HostedExecutionStructuredLogInput {
   details?: HostedExecutionStructuredLogDetails | null;
   error?: unknown;
   eventId?: string | null;
-  level?: HostedExecutionRunLevel;
+  level?: HostedExecutionLogLevel;
   message: string;
-  phase: HostedExecutionRunPhase;
-  run?: HostedExecutionRunContext | null;
+  phase: HostedExecutionLogPhase;
   time?: string;
   userId?: string | null;
-  wake?: HostedIngressEnvelopeLike | null;
+  wake?: HostedExecutionWakeLike | null;
 }
 
-export function isHostedExecutionRunPhase(value: unknown): value is HostedExecutionRunPhase {
-  return typeof value === "string" && HOSTED_EXECUTION_RUN_PHASES.includes(
-    value as HostedExecutionRunPhase,
+export function isHostedExecutionLogPhase(value: unknown): value is HostedExecutionLogPhase {
+  return typeof value === "string" && HOSTED_EXECUTION_LOG_PHASES.includes(
+    value as HostedExecutionLogPhase,
   );
 }
 
-export function isHostedExecutionRunLevel(value: unknown): value is HostedExecutionRunLevel {
-  return typeof value === "string" && HOSTED_EXECUTION_RUN_LEVELS.includes(
-    value as HostedExecutionRunLevel,
+export function isHostedExecutionLogLevel(value: unknown): value is HostedExecutionLogLevel {
+  return typeof value === "string" && HOSTED_EXECUTION_LOG_LEVELS.includes(
+    value as HostedExecutionLogLevel,
   );
 }
 
@@ -306,12 +275,12 @@ export function deriveHostedExecutionErrorCode(error: unknown): HostedExecutionE
     return "configuration_error";
   }
 
-  if (hostedExecutionMessageIncludesAny(message, ["durable commit"])) {
-    return "durable_commit_error";
+  if (hostedExecutionMessageIncludesAny(message, ["checkpoint"])) {
+    return "checkpoint_error";
   }
 
-  if (hostedExecutionMessageIncludesAny(message, ["durable finalize", "finalize"])) {
-    return "durable_finalize_error";
+  if (hostedExecutionMessageIncludesAny(message, ["outbox"])) {
+    return "outbox_error";
   }
 
   if (hostedExecutionMessageIncludesAny(message, ["returned http"])) {
@@ -480,7 +449,6 @@ export function buildHostedExecutionStructuredLogRecord(
     buildHostedExecutionSafeErrorDetails(error),
   );
   return {
-    attempt: input.run?.attempt ?? null,
     component: input.component,
     ...(details ? { details } : {}),
     ...(errorCode === null || errorMessage === null ? {} : {
@@ -492,7 +460,6 @@ export function buildHostedExecutionStructuredLogRecord(
     level,
     message,
     phase: input.phase,
-    runId: input.run?.runId ?? null,
     schema: "murph.hosted-execution.log.v1",
     time: input.time ?? new Date().toISOString(),
     userId: input.userId ?? null,

@@ -1,9 +1,4 @@
 import {
-  createRuntimeTimerSyntheticWake,
-  type HostedRuntimeDrainRequest,
-  type HostedRuntimeEvent,
-} from "@murphai/hosted-execution";
-import {
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
 } from "../hosted-assistant-env-constants.ts";
@@ -17,13 +12,6 @@ export const HOSTED_RUNTIME_USER_ENV_CATEGORY_KEYS = {
 
 export function assertNever(value: never): never {
   throw new Error(`Unexpected hosted execution event: ${JSON.stringify(value)}`);
-}
-
-export function resolveHostedWake(
-  runDrain: HostedRuntimeDrainRequest,
-): HostedRuntimeEvent {
-  const [firstEvent] = runDrain.events;
-  return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(runDrain);
 }
 
 export function classifyHostedRuntimeEnvCategories<T extends Record<string, readonly string[]>>(
@@ -45,7 +33,7 @@ export function hasAnyHostedRuntimeConfigKey(
   return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }
 
-export function computeHostedRunElapsedMs(
+export function computeHostedRuntimeElapsedMs(
   run: { startedAt?: string | null } | null | undefined,
 ): number | null {
   if (!run?.startedAt) {

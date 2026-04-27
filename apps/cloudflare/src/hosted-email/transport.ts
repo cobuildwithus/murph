@@ -161,7 +161,7 @@ async function sendHostedEmailMimeMessage(input: {
       error: wrappedError,
       level: "warn",
       message: "Hosted email send failed.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: null,
     });
     throw wrappedError;

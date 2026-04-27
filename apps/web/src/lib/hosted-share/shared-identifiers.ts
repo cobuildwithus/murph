@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import {
   buildHostedExecutionVaultShareAcceptedWake,
-  type HostedIngressEnvelope,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -49,7 +49,7 @@ export function buildHostedShareAcceptanceWake(input: {
   memberId: string;
   ownerUserId: string;
   shareId: string;
-}): HostedIngressEnvelope {
+}): HostedExecutionWake {
   return buildHostedExecutionVaultShareAcceptedWake({
     eventId: input.eventId,
     memberId: input.memberId,

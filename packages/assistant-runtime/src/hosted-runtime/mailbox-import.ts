@@ -1,6 +1,7 @@
 import type {
   HostedMailboxFetchResponse,
   HostedMailboxItem,
+  HostedMailboxLane,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_MAILBOX_LANES,
@@ -78,6 +79,7 @@ export class HostedMailboxUserMismatchError extends Error {
 export async function fetchAndProcessHostedMailboxPrefix(input: {
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   now?: () => string;
@@ -85,8 +87,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxImportLoopResult> {
   const now = input.now ?? (() => new Date().toISOString());
+  const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
   const fetched = await input.mailboxPort.fetch({
-    lanes: HOSTED_MAILBOX_LANES.map((lane) => ({
+    lanes: lanes.map((lane) => ({
       importedSeq: input.state.watermarks[lane],
       lane,
     })),
@@ -102,7 +105,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   let importedCount = 0;
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
 
-  for (const lane of HOSTED_MAILBOX_LANES) {
+  for (const lane of lanes) {
     let expectedSeq = BigInt(nextState.watermarks[lane]) + 1n;
 
     for (const item of itemsByLane[lane]) {

@@ -4,11 +4,9 @@ import { readFileSync } from "node:fs";
 import { test } from "vitest";
 
 import {
-  runHostedAssistantRuntimeJobInProcess,
   runHostedWorkspaceRuntimeJobInProcess,
 } from "@murphai/assistant-runtime";
 import {
-  parseHostedAssistantRuntimeJobInput,
   readHostedRunnerCommitTimeoutMs,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
@@ -22,7 +20,6 @@ import {
   HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-assistant-env-constants";
 import {
-  parseHostedAssistantRuntimeJobInput as parseHostedAssistantRuntimeJobInputDirect,
   parseHostedAssistantWorkspaceRuntimeJobInput as parseHostedAssistantWorkspaceRuntimeJobInputDirect,
 } from "../src/hosted-runtime/parsers.ts";
 import {
@@ -37,7 +34,6 @@ import {
   readHostedAssistantApiKeyEnvName,
 } from "../src/hosted-assistant-env.ts";
 import {
-  runHostedAssistantRuntimeJobInProcess as runHostedAssistantRuntimeJobInProcessDirect,
   runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessDirect,
 } from "../src/hosted-runtime.ts";
 import {
@@ -50,13 +46,18 @@ import {
 
 test("package root export re-exports the hosted runtime surface only", () => {
   assert.equal(
-    runHostedAssistantRuntimeJobInProcess,
-    runHostedAssistantRuntimeJobInProcessDirect,
-  );
-  assert.equal(
     runHostedWorkspaceRuntimeJobInProcess,
     runHostedWorkspaceRuntimeJobInProcessDirect,
   );
+});
+
+test("package root export omits legacy run-drain job helpers", async () => {
+  const root = await import("@murphai/assistant-runtime");
+
+  assert.equal("runHostedAssistantRuntimeJobInProcess" in root, false);
+  assert.equal("runHostedAssistantRuntimeJobInProcessDetailed" in root, false);
+  assert.equal("parseHostedAssistantRuntimeJobInput" in root, false);
+  assert.equal("parseHostedAssistantRuntimeJobRequest" in root, false);
 });
 
 test("hosted-email subpath export stays wired to the hosted email source surface", () => {
@@ -66,7 +67,6 @@ test("hosted-email subpath export stays wired to the hosted email source surface
 test("hosted-runtime-contracts subpath stays wired to the worker-safe hosted runtime surface", async () => {
   const contracts = await import("@murphai/assistant-runtime/hosted-runtime-contracts");
 
-  assert.equal(parseHostedAssistantRuntimeJobInput, parseHostedAssistantRuntimeJobInputDirect);
   assert.equal(
     contracts["parseHostedAssistantWorkspaceRuntimeJobInput" as keyof typeof contracts],
     parseHostedAssistantWorkspaceRuntimeJobInputDirect,

@@ -1,9 +1,8 @@
 import type {
-  HostedRunDrainResult,
-  HostedRunNudgeResult,
-  HostedExecutionUserStatus,
   HostedRunnerNudgeResult,
   HostedRunnerStatusResponse,
+  HostedWorkspaceRunReason,
+  HostedWorkspaceRunResult,
 } from "@murphai/hosted-execution";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
@@ -17,14 +16,10 @@ import type {
 } from "../worker-contracts.ts";
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
-  bootstrapUser(userId: string): Promise<{ userId: string }>;
+  bindUser(userId: string): Promise<{ userId: string }>;
   nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
-  nudgeHostedRun(): Promise<HostedRunNudgeResult>;
+  runUntilIdleOrBudget(input: { reason: HostedWorkspaceRunReason }): Promise<HostedWorkspaceRunResult>;
   runnerStatus(): Promise<HostedRunnerStatusResponse>;
-  status(): Promise<HostedExecutionUserStatus>;
-  drainHostedRuns(input?: {
-    targetCommittedSeqHint?: string | null;
-  }): Promise<HostedRunDrainResult>;
 }
 
 export interface WorkerEnvironmentSource
@@ -46,7 +41,7 @@ export async function resolveUserRunnerStub(
   userId: string,
 ): Promise<UserRunnerDurableObjectStubLike> {
   const stub = env.USER_RUNNER.getByName(userId);
-  await stub.bootstrapUser(userId);
+  await stub.bindUser(userId);
   return stub;
 }
 

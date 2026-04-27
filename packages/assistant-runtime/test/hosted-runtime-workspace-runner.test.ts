@@ -343,9 +343,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
         ["0", "1"],
       );
-      assert.deepEqual(fetchRequests.map((request) => request.lanes[0]), [
-        { importedSeq: "0", lane: "conversation" },
-        { importedSeq: "1", lane: "conversation" },
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "1", lane: "conversation" },
+        ],
       ]);
     } finally {
       await rm(vaultRoot, {

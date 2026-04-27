@@ -112,8 +112,8 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       assert.deepEqual(fetchRequests, [
         {
           lanes: [
-            { importedSeq: "0", lane: "conversation" },
             { importedSeq: "0", lane: "system" },
+            { importedSeq: "0", lane: "conversation" },
           ],
           limitPerLane: 10,
           requestId: "request_synthetic_checkpoint_001",
@@ -252,6 +252,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       assert.equal(result.state.watermarks.conversation, "0");
       assert.deepEqual(payloadFetchRequests, [
         {
+          dedupeKey: "dedupe_synthetic_checkpoint",
           mailboxItemId: "mailbox_item_conversation_sidecar",
           payloadRef: "hosted-mailbox-payload:mailbox_item_conversation_sidecar",
           requestId: "request_synthetic_checkpoint_retryable:mailbox_item_conversation_sidecar:payload",

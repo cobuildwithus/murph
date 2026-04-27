@@ -2,15 +2,11 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type {
-  HostedExecutionRunnerResult,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution/contracts";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
-import {
-  parseHostedExecutionRunnerResult,
-} from "@murphai/hosted-execution/parsers";
 import {
   resolveAssistantStatePaths,
   writeJsonFileAtomic,
@@ -27,8 +23,12 @@ const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
 
 interface HostedProviderCleanupState {
   linqMessageIds: string[];
-  preparedResult: HostedExecutionRunnerResult["result"] | null;
+  checkpoint: HostedProviderCleanupCheckpoint | null;
   schema: typeof HOSTED_PROVIDER_CLEANUP_SCHEMA;
+}
+
+export interface HostedProviderCleanupCheckpoint {
+  nextWakeAt?: string | null;
 }
 
 export interface HostedProviderCleanupDrainResult {
@@ -40,13 +40,13 @@ export interface HostedProviderCleanupDrainResult {
 
 export async function recordHostedProviderCleanupBeforeCommit(input: {
   linqMessageIds?: readonly string[] | null;
-  preparedResult: HostedExecutionRunnerResult["result"];
+  checkpoint: HostedProviderCleanupCheckpoint;
   vaultRoot: string;
 }): Promise<void> {
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
   await writeHostedProviderCleanupState(input.vaultRoot, {
     schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-    preparedResult: input.preparedResult,
+    checkpoint: normalizeHostedProviderCleanupCheckpoint(input.checkpoint),
     linqMessageIds: normalizeHostedProviderMessageIds([
       ...(existing?.linqMessageIds ?? []),
       ...(input.linqMessageIds ?? []),
@@ -54,16 +54,16 @@ export async function recordHostedProviderCleanupBeforeCommit(input: {
   });
 }
 
-export async function readHostedProviderCleanupPreparedResult(
+export async function readHostedProviderCleanupCheckpoint(
   vaultRoot: string,
-): Promise<HostedExecutionRunnerResult["result"] | null> {
-  return (await readHostedProviderCleanupState(vaultRoot))?.preparedResult ?? null;
+): Promise<HostedProviderCleanupCheckpoint | null> {
+  return (await readHostedProviderCleanupState(vaultRoot))?.checkpoint ?? null;
 }
 
 export async function drainHostedProviderCleanupAfterCommit(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   env: NodeJS.ProcessEnv;
-  preparedResult: HostedExecutionRunnerResult["result"];
+  checkpoint: HostedProviderCleanupCheckpoint;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): Promise<HostedProviderCleanupDrainResult> {
@@ -93,7 +93,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   } catch (error) {
     await writeHostedProviderCleanupState(input.vaultRoot, {
       schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-      preparedResult: existing?.preparedResult ?? input.preparedResult,
+      checkpoint: existing?.checkpoint ?? normalizeHostedProviderCleanupCheckpoint(input.checkpoint),
       linqMessageIds: messageIds,
     });
     const nextWakeAt = new Date(Date.now() + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
@@ -107,8 +107,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
       level: "warn",
       message:
         "Hosted runtime could not delete provider-visible Linq messages after commit; retry state remains in the runtime snapshot.",
-      phase: "side-effects.draining",
-      run: null,
+      phase: "outbox",
       wake: input.wake,
     });
     return {
@@ -179,7 +178,7 @@ async function writeHostedProviderCleanupState(
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeJsonFileAtomic(filePath, {
     schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-    preparedResult: state.preparedResult,
+    checkpoint: state.checkpoint,
     linqMessageIds: normalizeHostedProviderMessageIds(state.linqMessageIds),
   });
 }
@@ -203,8 +202,8 @@ function parseHostedProviderCleanupState(value: unknown): HostedProviderCleanupS
   }
 
   const record = value as {
+    checkpoint?: unknown;
     linqMessageIds?: unknown;
-    preparedResult?: unknown;
     schema?: unknown;
   };
   if (record.schema !== HOSTED_PROVIDER_CLEANUP_SCHEMA) {
@@ -213,17 +212,27 @@ function parseHostedProviderCleanupState(value: unknown): HostedProviderCleanupS
 
   return {
     schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-    preparedResult: record.preparedResult === undefined || record.preparedResult === null
-      ? null
-      : parseHostedExecutionRunnerResult({
-          bundle: null,
-          result: record.preparedResult,
-        }).result,
+    checkpoint: normalizeHostedProviderCleanupCheckpoint(record.checkpoint ?? null),
     linqMessageIds: Array.isArray(record.linqMessageIds)
       ? normalizeHostedProviderMessageIds(record.linqMessageIds.filter((messageId) =>
           typeof messageId === "string"
         ))
       : [],
+  };
+}
+
+function normalizeHostedProviderCleanupCheckpoint(
+  value: HostedProviderCleanupCheckpoint | unknown,
+): HostedProviderCleanupCheckpoint | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as { nextWakeAt?: unknown };
+  return {
+    ...(typeof record.nextWakeAt === "string" || record.nextWakeAt === null
+      ? { nextWakeAt: record.nextWakeAt }
+      : {}),
   };
 }
 

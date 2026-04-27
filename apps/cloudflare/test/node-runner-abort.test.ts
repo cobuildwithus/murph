@@ -1,4 +1,3 @@
-import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -21,15 +20,11 @@ describe("runHostedExecutionJob abort forwarding", () => {
       }
     }
     runHostedAssistantRuntimeJobIsolated.mockResolvedValue({
-      bundles: {
-        agentState: null,
-        vault: null,
+      nextWakeAt: null,
+      redactedStatus: {
+        importedCount: 0,
       },
-      result: {
-        eventsHandled: 1,
-        nextWakeAt: null,
-        summary: "ok",
-      },
+      status: "idle",
     });
   });
 
@@ -41,37 +36,13 @@ describe("runHostedExecutionJob abort forwarding", () => {
     const controller = new AbortController();
 
     await runHostedExecutionJob({
+      kind: "workspace-run",
       request: {
-        bundle: null,
-        run: {
-          attempt: 1,
-          runId: "run_abort_forwarding",
-          startedAt: "2026-03-29T10:45:00.000Z",
-        },
-        runDrain: {
-          acquiredAt: "2026-03-29T10:45:00.000Z",
-          events: [
-            {
-              seq: "1",
-              wake: buildHostedExecutionMemberActivatedWake({
-                eventId: "evt_abort_forwarding",
-                memberChannels: {
-                  email: false,
-                  linq: false,
-                  telegram: false,
-                },
-                memberId: "member_abort_forwarding",
-                occurredAt: "2026-03-29T10:45:00.000Z",
-              }),
-              ingressEventId: "wake_evt_abort_forwarding",
-            },
-          ],
-          inputCommittedSeq: "1",
-          inputCursorVersion: "1",
-          runId: "run_abort_forwarding",
-          triggerKind: "external_ingress",
-          userId: "member_abort_forwarding",
-        },
+        attemptId: "attempt_abort_forwarding",
+        leaseGeneration: "1",
+        reason: "nudge",
+        userId: "member_abort_forwarding",
+        workspaceVersion: "0",
       },
     }, {
       signal: controller.signal,

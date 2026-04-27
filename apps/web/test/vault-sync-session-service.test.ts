@@ -1,12 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   decryptHostedWebNullableString: vi.fn(),
+  encryptHostedWebNullableString: vi.fn(),
+  nudgeHostedRunnerBestEffort: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
   decryptHostedWebNullableString: mocks.decryptHostedWebNullableString,
-  encryptHostedWebNullableString: vi.fn(),
+  encryptHostedWebNullableString: mocks.encryptHostedWebNullableString,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+}));
+
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerBestEffort: mocks.nudgeHostedRunnerBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -26,10 +37,15 @@ import {
   requireHostedVaultSyncAgentSession,
 } from "@/src/lib/vault-sync/shared";
 import {
+  completeHostedVaultSyncAgentUpload,
   createHostedVaultSyncSession,
   listHostedVaultSyncSessions,
-  markHostedVaultSyncSessionCommittedFromRunSummary,
+  recordHostedVaultSyncImportResult,
 } from "@/src/lib/vault-sync/session-service";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("vault sync pairing setup", () => {
   it("generates 10-character pairing codes in a readable display shape", () => {
@@ -49,7 +65,6 @@ describe("vault sync pairing setup", () => {
       createdAt: now,
       localManifestHash: null,
       queuedAt: null,
-      queuedIngressEventId: null,
       revokedAt: null,
       sourceSchemaVersion: null,
       sourceVaultId: null,
@@ -97,7 +112,6 @@ describe("vault sync shared projections", () => {
       expiresAt: new Date("2026-04-21T01:00:00.000Z"),
       id: "vsi_123",
       localManifestHash: null,
-      queuedIngressEventId: null,
       revokedAt: null,
       sourceVaultId: "vault_local",
       sourceVaultTitle: "Local Vault",
@@ -121,7 +135,6 @@ describe("vault sync shared projections", () => {
       expiresAt: "2026-04-21T01:00:00.000Z",
       id: "vsi_123",
       localManifestHash: null,
-      queuedIngressEventId: null,
       sourceVaultId: "vault_local",
       sourceVaultTitle: "Local Vault",
       status: "pending",
@@ -215,8 +228,8 @@ describe("vault sync agent session auth", () => {
   });
 });
 
-describe("vault sync commit projection", () => {
-  it("reads plural vault-sync summaries when projecting queued session run status", async () => {
+describe("vault sync mailbox producer", () => {
+  it("lists product-owned session status without reading legacy hosted run summaries", async () => {
     const prisma = {
       hostedVaultSyncSession: {
         findMany: vi.fn().mockResolvedValue([
@@ -225,7 +238,6 @@ describe("vault sync commit projection", () => {
             expiresAt: new Date("2026-04-21T01:00:00.000Z"),
             id: "vsi_first",
             localManifestHash: null,
-            queuedIngressEventId: "evt_first",
             revokedAt: null,
             sourceVaultId: "vault_local",
             sourceVaultTitle: "Local Vault",
@@ -236,7 +248,6 @@ describe("vault sync commit projection", () => {
             expiresAt: new Date("2026-04-20T01:00:00.000Z"),
             id: "vsi_second",
             localManifestHash: null,
-            queuedIngressEventId: "evt_second",
             revokedAt: null,
             sourceVaultId: "vault_local",
             sourceVaultTitle: "Local Vault",
@@ -245,39 +256,7 @@ describe("vault sync commit projection", () => {
         ]),
       },
       hostedIngressEvent: {
-        findUnique: vi.fn()
-          .mockResolvedValueOnce({
-            run: {
-              redactedSummaryJson: {
-                details: {
-                  vaultSyncImports: [
-                    {
-                      conflictCount: 0,
-                      sessionId: "vsi_first",
-                    },
-                  ],
-                },
-              },
-              status: "completed",
-            },
-            state: "completed",
-          })
-          .mockResolvedValueOnce({
-            run: {
-              redactedSummaryJson: {
-                details: {
-                  vaultSyncImports: [
-                    {
-                      conflictCount: 3,
-                      sessionId: "vsi_second",
-                    },
-                  ],
-                },
-              },
-              status: "completed",
-            },
-            state: "completed",
-          }),
+        findUnique: vi.fn(),
       },
     } as never;
 
@@ -287,42 +266,164 @@ describe("vault sync commit projection", () => {
     })).resolves.toEqual([
       expect.objectContaining({
         id: "vsi_first",
-        status: "committed",
+        status: "queued",
       }),
       expect.objectContaining({
         id: "vsi_second",
-        status: "committed_with_conflicts",
+        status: "queued",
       }),
     ]);
+    expect((prisma as {
+      hostedIngressEvent: { findUnique: ReturnType<typeof vi.fn> };
+    }).hostedIngressEvent.findUnique).not.toHaveBeenCalled();
   });
 
-  it("marks committed sessions with conflicts when the plural run summary reports vault-sync conflicts", async () => {
-    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const prisma = {
-      hostedVaultSyncPayload: {
-        deleteMany,
-      },
-      hostedVaultSyncSession: {
-        updateMany,
-      },
-    } as never;
-
-    await markHostedVaultSyncSessionCommittedFromRunSummary({
-      memberId: "member_123",
-      prisma,
-      redactedSummary: {
-        details: {
-          vaultSyncImports: [{
-            conflictCount: 2,
-            sessionId: "vsi_123",
-          }],
+  it("updates the upload session and appends the vault-sync mailbox item in one transaction before nudging", async () => {
+    const order: string[] = [];
+    const session = buildVaultSyncAgentSession({
+      agentTokenHash: hashHostedVaultSyncSecret("vst_test_agent_token"),
+    });
+    const tx = buildVaultSyncUploadTx({
+      onPayload: () => order.push("payload"),
+      onSessionUpdate: () => order.push("session"),
+      session,
+    });
+    const prisma = buildVaultSyncUploadPrisma({ session, tx, order });
+    mocks.encryptHostedWebNullableString.mockReturnValue("encrypted-vault-sync-payload");
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async ({ envelope, tx: actualTx }) => {
+      order.push("mailbox");
+      expect(actualTx).toBe(tx);
+      expect(envelope).toMatchObject({
+        eventId: "vault-sync.import:vsi_123",
+        kind: "vault.sync.import",
+        userId: "member_123",
+        vaultSync: {
+          localManifestHash: "manifest-hash",
+          sessionId: "vsi_123",
+          sourceSchemaVersion: "murph.vault.v1",
+          sourceVaultId: "vault_local",
+          sourceVaultTitle: "Local Vault",
         },
-      },
+      });
+      return {
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {},
+      };
+    });
+    mocks.nudgeHostedRunnerBestEffort.mockImplementation(async () => {
+      order.push("nudge");
     });
 
-    expect(updateMany).toHaveBeenCalledWith({
+    await expect(completeHostedVaultSyncAgentUpload({
+      bundleBase64: "AQID",
+      localManifestHash: "manifest-hash",
+      prisma,
+      request: buildVaultSyncAgentRequest("vst_test_agent_token"),
+      sessionId: "vsi_123",
+      sourceSchemaVersion: "murph.vault.v1",
+      sourceVaultId: "vault_local",
+      sourceVaultTitle: "Local Vault",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "vsi_123",
+      localManifestHash: "manifest-hash",
+      status: "queued",
+    }));
+
+    expect(tx.hostedVaultSyncSession.update).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        localManifestHash: "manifest-hash",
+        status: "queued",
+      }),
+      where: { id: "vsi_123" },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.nudgeHostedRunnerBestEffort).toHaveBeenCalledWith({
+      context: "vault-sync.import",
+      userId: "member_123",
+    });
+    expect(order).toEqual(["payload", "session", "mailbox", "commit", "nudge"]);
+  });
+
+  it("does not append a vault-sync mailbox item or nudge when the product mutation fails", async () => {
+    const order: string[] = [];
+    const session = buildVaultSyncAgentSession({
+      agentTokenHash: hashHostedVaultSyncSecret("vst_test_agent_token"),
+    });
+    const tx = buildVaultSyncUploadTx({
+      onPayload: () => order.push("payload"),
+      onSessionUpdate: () => {
+        order.push("session");
+        throw new Error("session update failed");
+      },
+      session,
+    });
+    const prisma = buildVaultSyncUploadPrisma({ session, tx, order });
+    mocks.encryptHostedWebNullableString.mockReturnValue("encrypted-vault-sync-payload");
+
+    await expect(completeHostedVaultSyncAgentUpload({
+      bundleBase64: "AQID",
+      localManifestHash: "manifest-hash",
+      prisma,
+      request: buildVaultSyncAgentRequest("vst_test_agent_token"),
+      sessionId: "vsi_123",
+    })).rejects.toThrow("session update failed");
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerBestEffort).not.toHaveBeenCalled();
+    expect(order).toEqual(["payload", "session"]);
+  });
+
+  it("records runtime import completion and deletes the vault-sync side input in one transaction", async () => {
+    const order: string[] = [];
+    const tx = {
+      hostedVaultSyncPayload: {
+        deleteMany: vi.fn(async () => {
+          order.push("delete-payload");
+          return { count: 1 };
+        }),
+      },
+      hostedVaultSyncSession: {
+        updateMany: vi.fn(async () => {
+          order.push("update-session");
+          return { count: 1 };
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (actualTx: typeof tx) => Promise<unknown>) => {
+        const result = await callback(tx);
+        order.push("commit");
+        return result;
+      }),
+    } as never;
+
+    await expect(recordHostedVaultSyncImportResult({
+      memberId: "member_123",
+      prisma,
+      request: {
+        importedAt: "2026-04-21T00:02:00.000Z",
+        sessionId: "vsi_123",
+        status: "imported_with_conflicts",
+        summary: {
+          conflictCount: 2,
+          importedJsonlRecords: 10,
+          importedRawFiles: 1,
+          importedTextFiles: 3,
+          skippedDuplicates: 4,
+          skippedExcludedFiles: 5,
+        },
+      },
+    })).resolves.toEqual({
+      recorded: true,
+      sessionId: "vsi_123",
+      status: "imported_with_conflicts",
+    });
+
+    expect(tx.hostedVaultSyncSession.updateMany).toHaveBeenCalledWith({
       data: {
+        agentTokenHash: null,
         status: "committed_with_conflicts",
       },
       where: {
@@ -333,106 +434,51 @@ describe("vault sync commit projection", () => {
         },
       },
     });
-    expect(deleteMany).toHaveBeenCalledWith({
+    expect(tx.hostedVaultSyncPayload.deleteMany).toHaveBeenCalledWith({
       where: {
         memberId: "member_123",
         sessionId: "vsi_123",
       },
     });
+    expect(order).toEqual(["update-session", "delete-payload", "commit"]);
   });
 
-  it("ignores legacy singular vault-sync summaries after the hard cut", async () => {
-    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const prisma = {
+  it("does not delete vault-sync side input when the runtime import callback cannot claim the session", async () => {
+    const tx = {
       hostedVaultSyncPayload: {
-        deleteMany,
+        deleteMany: vi.fn(),
       },
       hostedVaultSyncSession: {
-        updateMany,
+        updateMany: vi.fn(async () => ({ count: 0 })),
       },
-    } as never;
-
-    await markHostedVaultSyncSessionCommittedFromRunSummary({
-      memberId: "member_123",
-      prisma,
-      redactedSummary: {
-        details: {
-          vaultSyncImport: {
-            conflictCount: 2,
-            sessionId: "vsi_123",
-          },
-        },
-      },
-    });
-
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(deleteMany).not.toHaveBeenCalled();
-  });
-
-  it("marks every vault-sync session reported by one run summary", async () => {
-    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    };
     const prisma = {
-      hostedVaultSyncPayload: {
-        deleteMany,
-      },
-      hostedVaultSyncSession: {
-        updateMany,
-      },
+      $transaction: vi.fn(async (callback: (actualTx: typeof tx) => Promise<unknown>) => callback(tx)),
     } as never;
 
-    await markHostedVaultSyncSessionCommittedFromRunSummary({
+    await expect(recordHostedVaultSyncImportResult({
       memberId: "member_123",
       prisma,
-      redactedSummary: {
-        details: {
-          vaultSyncImports: [
-            {
-              conflictCount: 0,
-              sessionId: "vsi_first",
-            },
-            {
-              conflictCount: 3,
-              sessionId: "vsi_second",
-            },
-          ],
+      request: {
+        importedAt: "2026-04-21T00:02:00.000Z",
+        sessionId: "vsi_123",
+        status: "failed",
+        summary: {
+          conflictCount: 0,
+          importedJsonlRecords: 0,
+          importedRawFiles: 0,
+          importedTextFiles: 0,
+          skippedDuplicates: 0,
+          skippedExcludedFiles: 0,
         },
       },
+    })).resolves.toEqual({
+      recorded: false,
+      sessionId: "vsi_123",
+      status: "failed",
     });
 
-    expect(updateMany).toHaveBeenCalledTimes(2);
-    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      data: {
-        status: "committed",
-      },
-      where: expect.objectContaining({
-        id: "vsi_first",
-        memberId: "member_123",
-      }),
-    }));
-    expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      data: {
-        status: "committed_with_conflicts",
-      },
-      where: expect.objectContaining({
-        id: "vsi_second",
-        memberId: "member_123",
-      }),
-    }));
-    expect(deleteMany).toHaveBeenCalledTimes(2);
-    expect(deleteMany).toHaveBeenNthCalledWith(1, {
-      where: {
-        memberId: "member_123",
-        sessionId: "vsi_first",
-      },
-    });
-    expect(deleteMany).toHaveBeenNthCalledWith(2, {
-      where: {
-        memberId: "member_123",
-        sessionId: "vsi_second",
-      },
-    });
+    expect(tx.hostedVaultSyncPayload.deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -457,7 +503,6 @@ function buildVaultSyncAgentSession(overrides: {
     memberId: "member_123",
     pairingCodeHash: null,
     queuedAt: null,
-    queuedIngressEventId: null,
     revokedAt: null,
     sourceSchemaVersion: null,
     sourceVaultId: null,
@@ -472,6 +517,49 @@ function buildVaultSyncAuthPrisma(session: ReturnType<typeof buildVaultSyncAgent
   return {
     hostedVaultSyncSession: {
       findUnique: vi.fn().mockResolvedValue(session),
+    },
+  } as never;
+}
+
+function buildVaultSyncUploadTx(input: {
+  onPayload: () => void;
+  onSessionUpdate: () => void;
+  session: ReturnType<typeof buildVaultSyncAgentSession>;
+}) {
+  return {
+    hostedVaultSyncPayload: {
+      upsert: vi.fn(async () => {
+        input.onPayload();
+      }),
+    },
+    hostedVaultSyncSession: {
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        input.onSessionUpdate();
+        return {
+          ...input.session,
+          ...data,
+          updatedAt: new Date("2026-04-21T00:01:00.000Z"),
+        };
+      }),
+    },
+  };
+}
+
+function buildVaultSyncUploadPrisma(input: {
+  order: string[];
+  session: ReturnType<typeof buildVaultSyncAgentSession>;
+  tx: ReturnType<typeof buildVaultSyncUploadTx>;
+}) {
+  return {
+    $transaction: vi.fn(async (
+      callback: (tx: ReturnType<typeof buildVaultSyncUploadTx>) => Promise<unknown>,
+    ) => {
+      const result = await callback(input.tx);
+      input.order.push("commit");
+      return result;
+    }),
+    hostedVaultSyncSession: {
+      findUnique: vi.fn().mockResolvedValue(input.session),
     },
   } as never;
 }

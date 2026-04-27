@@ -14,6 +14,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request);
   const body = parseHostedMailboxPayloadFetchRequest(await readOptionalJsonObject(request));
   const response = await fetchHostedMailboxPayload({
+    dedupeKey: body.dedupeKey,
     mailboxItemId: body.mailboxItemId,
     ...("payloadRef" in body ? { payloadRef: body.payloadRef } : {}),
     requestId: body.requestId,

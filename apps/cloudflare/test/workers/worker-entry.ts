@@ -1,9 +1,7 @@
 import { DurableObject, env } from "cloudflare:workers";
 import {
   buildHostedExecutionRuntimeTimerWake,
-  createRuntimeTimerSyntheticWake,
-  parseHostedIngressEnvelope,
-  type HostedRuntimeEvent,
+  parseHostedExecutionWake,
 } from "@murphai/hosted-execution";
 
 import worker from "../../src/index.ts";
@@ -14,8 +12,6 @@ import {
 } from "../../src/env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
 import { createHostedUserKeyStore } from "../../src/user-key-store.js";
-import { RunnerBundleSync } from "../../src/user-runner/runner-bundle-sync.js";
-import { RunnerStateStore } from "../../src/user-runner/runner-state-store.js";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -24,24 +20,16 @@ import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts"
 import { asWorkerStringEnvironment } from "../../src/worker-contracts.ts";
 import {
   armInvalidRunnerOutputBundleFault,
-  armRunnerCommitPause,
-  buildSeededDuplicateCommitPayload,
   clearRunnerInvocationState,
   clearRunnerOutputBundleFault,
-  clearRunnerCommitPause,
   persistRunnerRuntimeTimerWake,
-  readRunnerCommitPauseRequest,
   readRunnerInvocationState,
-  readRunnerCommitPauseState,
-  releaseRunnerCommitPause,
 } from "./runner-e2e-control.ts";
 
-import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import type {
-  HostedExecutionBundleRef,
   HostedExecutionWake,
-  HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
 
 type TestWorkerEnvironment = WorkerEnvironmentSource & {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
@@ -56,7 +44,7 @@ interface TestWakeExecutionResult {
     state: "completed" | "queued";
     userId: string;
   };
-  status: HostedExecutionUserStatus;
+  status: HostedRunnerStatusResponse;
 }
 
 function toDurableObjectStateLike(ctx: DurableObjectState): DurableObjectStateLike {
@@ -72,14 +60,12 @@ function readWorkerEnvironmentSource(): WorkerEnvironmentSource {
 export class VitestUserRunnerDurableObject extends DurableObject {
   private readonly bucket: R2BucketLike;
   private readonly runtimeEnv: HostedExecutionEnvironment;
-  private readonly stateStore: RunnerStateStore;
   private readonly runner: HostedUserRunner;
 
   constructor(ctx: DurableObjectState, env: TestWorkerEnvironment) {
     super(ctx, env);
     this.bucket = createTestControlledBucket(env.BUNDLES);
     const state = toDurableObjectStateLike(ctx);
-    this.stateStore = new RunnerStateStore(state);
     this.runtimeEnv = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
     this.runner = new HostedUserRunner(
       state,
@@ -90,11 +76,11 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     );
   }
 
-  async bootstrapUser(userId: string): Promise<{ userId: string }> {
-    return this.runner.bootstrapUser(userId);
+  async bindUser(userId: string): Promise<{ userId: string }> {
+    return this.runner.bindUser(userId);
   }
 
-  async wake(input: TestWake): Promise<HostedExecutionUserStatus> {
+  async wake(input: TestWake): Promise<HostedRunnerStatusResponse> {
     return wakeRunnerForTest(this.runner, this.runtimeEnv, input);
   }
 
@@ -102,36 +88,12 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return wakeRunnerWithOutcomeForTest(this.runner, this.runtimeEnv, input);
   }
 
-  async status(): Promise<HostedExecutionUserStatus> {
-    return this.runner.status();
+  async runnerStatus(): Promise<HostedRunnerStatusResponse> {
+    return this.runner.runnerStatus();
   }
 
   async runAlarmForTest(): Promise<void> {
-    await this.runner.nudgeHostedRun();
-  }
-
-  async seedPendingCommitForTest(input: {
-    payload: Extract<HostedAssistantRuntimeJobResult, { phase: "prepared" }>;
-    userId: string;
-    wake: HostedRuntimeEvent;
-  }): Promise<{ bundleRef: HostedExecutionBundleRef | null }> {
-    await this.runner.bootstrapUser(input.userId);
-    const crypto = await resolveHostedUserCryptoContext(input.userId);
-    const bundleSync = new RunnerBundleSync(
-      this.bucket,
-      crypto.rootKey,
-      crypto.rootKeyId,
-      crypto.keysById,
-    );
-    const { bundleRef } = await bundleSync.applyRunnerResultBundles(
-      input.userId,
-      null,
-      input.payload.result.bundle,
-    );
-    await this.stateStore.syncBundleRefCache(bundleRef);
-    return {
-      bundleRef,
-    };
+    await this.runner.nudgeHostedRunner();
   }
 
   override async alarm(): Promise<void> {
@@ -143,20 +105,18 @@ async function wakeRunnerForTest(
   runner: HostedUserRunner,
   runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
   wake: TestWake,
-): Promise<HostedExecutionUserStatus> {
-  await runner.bootstrapUser(wake.userId);
+): Promise<HostedRunnerStatusResponse> {
+  await runner.bindUser(wake.userId);
   if (wake.kind === "runtime.timer") {
     await persistRuntimeTimerWakeForTest(wake);
     await armRuntimeWakeInWeb(runtimeEnv, wake);
-    await runner.drainHostedRuns();
-    return runner.status();
+    await runner.runUntilIdleOrBudget({ reason: "nudge" });
+    return runner.runnerStatus();
   }
 
-  const append = await appendHostedWakeInWeb(runtimeEnv, wake);
-  await runner.drainHostedRuns({
-    targetCommittedSeqHint: append.wake.seq,
-  });
-  return runner.status();
+  await appendHostedWakeInWeb(runtimeEnv, wake);
+  await runner.runUntilIdleOrBudget({ reason: "nudge" });
+  return runner.runnerStatus();
 }
 
 async function wakeRunnerWithOutcomeForTest(
@@ -164,24 +124,22 @@ async function wakeRunnerWithOutcomeForTest(
   runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
   wake: TestWake,
 ): Promise<TestWakeExecutionResult> {
-  await runner.bootstrapUser(wake.userId);
+  await runner.bindUser(wake.userId);
   if (wake.kind === "runtime.timer") {
     await persistRuntimeTimerWakeForTest(wake);
     await armRuntimeWakeInWeb(runtimeEnv, wake);
-    await runner.drainHostedRuns();
+    await runner.runUntilIdleOrBudget({ reason: "nudge" });
   } else {
-    const append = await appendHostedWakeInWeb(runtimeEnv, wake);
-    await runner.drainHostedRuns({
-      targetCommittedSeqHint: append.wake.seq,
-    });
+    await appendHostedWakeInWeb(runtimeEnv, wake);
+    await runner.runUntilIdleOrBudget({ reason: "nudge" });
   }
-  const status = await runner.status();
+  const status = await runner.runnerStatus();
 
   return {
     event: {
       eventId: wake.eventId,
       lastError: null,
-      state: status.pendingIngressEventCount === 0 ? "completed" : "queued",
+      state: hostedRunnerStatusIsIdle(status) ? "completed" : "queued",
       userId: wake.userId,
     },
     status,
@@ -192,17 +150,20 @@ async function armRuntimeWakeInWeb(
   runtimeEnv: ReturnType<typeof readHostedExecutionEnvironment>,
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>,
 ): Promise<void> {
-  const response = await fetch(new URL("/__test/hosted-run/runtime-wake", runtimeEnv.hostedWebBaseUrl), {
-    body: JSON.stringify({
-      occurredAt: wake.occurredAt,
-      userId: wake.userId,
-    }),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "x-hosted-execution-user-id": wake.userId,
+  const response = await fetch(
+    new URL("/__test/hosted-runtime/wake", runtimeEnv.hostedWebBaseUrl),
+    {
+      body: JSON.stringify({
+        occurredAt: wake.occurredAt,
+        userId: wake.userId,
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "x-hosted-execution-user-id": wake.userId,
+      },
+      method: "POST",
     },
-    method: "POST",
-  });
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to arm the runtime wake: HTTP ${response.status}.`);
@@ -219,13 +180,16 @@ async function appendHostedWakeInWeb(
     seq: string;
   };
 }> {
-  const response = await fetch(new URL("/__test/hosted-wake/append", runtimeEnv.hostedWebBaseUrl), {
-    body: JSON.stringify(wake),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
+  const response = await fetch(
+    new URL("/__test/hosted-mailbox/append", runtimeEnv.hostedWebBaseUrl),
+    {
+      body: JSON.stringify(wake),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
     },
-    method: "POST",
-  });
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to append the test hosted wake: HTTP ${response.status}.`);
@@ -257,7 +221,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     const wakePayload: unknown = await request.json();
     const wake = readTestWake(wakePayload);
     const runner = getUserRunnerStub(wake.userId);
-    await runner.bootstrapUser(wake.userId);
+    await runner.bindUser(wake.userId);
     return Response.json(await runner.wakeWithOutcome(wake));
   }
 
@@ -268,7 +232,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
       return Response.json({ error: "userId is required." }, { status: 400 });
     }
 
-    return Response.json(await getUserRunnerStub(userId).status());
+    return Response.json(await getUserRunnerStub(userId).runnerStatus());
   }
 
   if (url.pathname === "/__test/bootstrap-user" && request.method === "POST") {
@@ -279,7 +243,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     }
 
     await resolveHostedUserCryptoContext(body.userId);
-    return Response.json(await getUserRunnerStub(body.userId).bootstrapUser(body.userId));
+    return Response.json(await getUserRunnerStub(body.userId).bindUser(body.userId));
   }
 
   if (url.pathname === "/__test/alarm" && request.method === "POST") {
@@ -293,109 +257,6 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     return Response.json({
       ok: true,
       userId: body.userId,
-    });
-  }
-
-  if (url.pathname === "/__test/runner/pause" && request.method === "POST") {
-    const body = await request.json() as { eventId?: unknown };
-
-    if (typeof body.eventId !== "string" || body.eventId.length === 0) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    await armRunnerCommitPause((env as { BUNDLES: R2BucketLike }).BUNDLES, body.eventId);
-    return Response.json({
-      eventId: body.eventId,
-      ok: true,
-    });
-  }
-
-  if (url.pathname === "/__test/runner/pause" && request.method === "GET") {
-    const eventId = url.searchParams.get("eventId");
-
-    if (!eventId) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    return Response.json({
-      eventId,
-      ...await readRunnerCommitPauseState((env as { BUNDLES: R2BucketLike }).BUNDLES, eventId),
-    });
-  }
-
-  if (url.pathname === "/__test/runner/release" && request.method === "POST") {
-    const body = await request.json() as { eventId?: unknown };
-
-    if (typeof body.eventId !== "string" || body.eventId.length === 0) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    const released = await releaseRunnerCommitPause(
-      (env as { BUNDLES: R2BucketLike }).BUNDLES,
-      body.eventId,
-    );
-    return Response.json({
-      eventId: body.eventId,
-      released,
-    }, { status: released ? 200 : 404 });
-  }
-
-  if (url.pathname === "/__test/seed-duplicate-commit" && request.method === "POST") {
-    const body = await request.json() as { eventId?: unknown; userId?: unknown };
-
-    if (typeof body.eventId !== "string" || body.eventId.length === 0) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    if (typeof body.userId !== "string" || body.userId.length === 0) {
-      return Response.json({ error: "userId is required." }, { status: 400 });
-    }
-
-    const seeded = await buildSeededDuplicateCommitPayload(
-      (env as { BUNDLES: R2BucketLike }).BUNDLES,
-      body.eventId,
-    );
-
-    if (!seeded || seeded.phase !== "prepared") {
-      return Response.json({
-        error: `No paused prepared runner request is available for ${body.eventId}.`,
-      }, { status: 409 });
-    }
-
-    const pausedRequest = await readRunnerCommitPauseRequest(
-      (env as { BUNDLES: R2BucketLike }).BUNDLES,
-      body.eventId,
-    );
-    if (!pausedRequest) {
-      return Response.json({
-        error: `No paused prepared runner request is available for ${body.eventId}.`,
-      }, { status: 409 });
-    }
-
-    await getUserRunnerStub(body.userId).seedPendingCommitForTest({
-      payload: seeded,
-      userId: body.userId,
-      wake: resolvePrimaryWake(pausedRequest),
-    });
-
-    return Response.json({
-      eventId: body.eventId,
-      ok: true,
-      userId: body.userId,
-    });
-  }
-
-  if (url.pathname === "/__test/runner/clear" && request.method === "POST") {
-    const body = await request.json() as { eventId?: unknown };
-
-    if (typeof body.eventId !== "string" || body.eventId.length === 0) {
-      return Response.json({ error: "eventId is required." }, { status: 400 });
-    }
-
-    await clearRunnerCommitPause((env as { BUNDLES: R2BucketLike }).BUNDLES, body.eventId);
-    return Response.json({
-      eventId: body.eventId,
-      ok: true,
     });
   }
 
@@ -468,26 +329,18 @@ function getUserRunnerStub(userId: string) {
     env as {
       USER_RUNNER: {
         getByName(name: string): {
-          bootstrapUser(userId: string): Promise<{ userId: string }>;
-          seedPendingCommitForTest(input: {
-            payload: Extract<HostedAssistantRuntimeJobResult, { phase: "prepared" }>;
-            userId: string;
-            wake: HostedRuntimeEvent;
-          }): Promise<{ bundleRef: HostedExecutionBundleRef | null }>;
+          bindUser(userId: string): Promise<{ userId: string }>;
           wakeWithOutcome(input: TestWake): Promise<TestWakeExecutionResult>;
           runAlarmForTest(): Promise<void>;
-          status(): Promise<HostedExecutionUserStatus>;
+          runnerStatus(): Promise<HostedRunnerStatusResponse>;
         };
       };
     }
   ).USER_RUNNER).getByName(userId);
 }
 
-function resolvePrimaryWake(
-  request: import("@murphai/assistant-runtime").HostedAssistantRuntimeJobRequest,
-): HostedRuntimeEvent {
-  const [firstEvent] = request.runDrain.events;
-  return firstEvent?.wake ?? createRuntimeTimerSyntheticWake(request.runDrain);
+function hostedRunnerStatusIsIdle(status: HostedRunnerStatusResponse): boolean {
+  return !status.inFlight && status.mailboxLag.every((lane) => lane.lag === "0");
 }
 
 async function resolveHostedUserCryptoContext(userId: string) {
@@ -542,7 +395,7 @@ function readTestWake(value: unknown): TestWake {
     }
   }
 
-  return parseHostedIngressEnvelope(value);
+  return parseHostedExecutionWake(value);
 }
 
 async function persistRuntimeTimerWakeForTest(

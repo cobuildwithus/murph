@@ -71,6 +71,7 @@ test("fetches sidecar mailbox ciphertext with a generated request id and item id
   });
 
   assert.equal(payloadFetchRequests.length, 1);
+  assert.deepEqual(payloadFetchRequests[0]?.dedupeKey, item.dedupeKey);
   assert.deepEqual(payloadFetchRequests[0]?.mailboxItemId, "mailbox_item_synthetic_sidecar");
   assert.deepEqual(
     payloadFetchRequests[0]?.payloadRef,
@@ -112,6 +113,7 @@ test("uses a caller request id when fetching sidecar mailbox ciphertext", async 
   assert.equal(result.status, "resolved");
   assert.deepEqual(payloadFetchRequests, [
     {
+      dedupeKey: "dedupe_synthetic_mailbox_payload",
       mailboxItemId: "mailbox_item_synthetic_custom_request",
       payloadRef: "hosted-mailbox-payload:mailbox_item_synthetic_custom_request",
       requestId: "request_synthetic_custom_payload",

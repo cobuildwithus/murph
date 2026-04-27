@@ -15,7 +15,7 @@ import type {
   HostedExecutionRuntimeTimerWake,
   HostedExecutionTelegramMessage,
   HostedExecutionTelegramConversationMessagePayload,
-  HostedRunTriggerKind,
+  HostedRuntimeTimerTriggerKind,
   HostedExecutionVaultShareAcceptedEvent,
   HostedExecutionVaultShareAcceptedWake,
   HostedExecutionVaultSyncImportEvent,
@@ -263,7 +263,7 @@ export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
 export function buildHostedExecutionRuntimeTimerWake(input: {
   eventId: string;
   occurredAt: string;
-  triggerKind: HostedRunTriggerKind;
+  triggerKind: HostedRuntimeTimerTriggerKind;
   userId: string;
 }): HostedExecutionRuntimeTimerWake {
   return {
@@ -277,13 +277,13 @@ export function buildHostedExecutionRuntimeTimerWake(input: {
 
 export function createRuntimeTimerSyntheticWake(input: {
   acquiredAt: string;
-  runId: string;
-  triggerKind: HostedRunTriggerKind;
+  timerId: string;
+  triggerKind: HostedRuntimeTimerTriggerKind;
   userId: string;
 }): HostedExecutionRuntimeTimerWake {
-  // Runtime timers are internal continuation context, not persisted ingress rows.
+  // Runtime timers are internal continuation context, not persisted mailbox rows.
   return buildHostedExecutionRuntimeTimerWake({
-    eventId: `hosted-run:${input.runId}`,
+    eventId: `hosted-runtime-timer:${input.timerId}`,
     occurredAt: input.acquiredAt,
     triggerKind: input.triggerKind,
     userId: input.userId,

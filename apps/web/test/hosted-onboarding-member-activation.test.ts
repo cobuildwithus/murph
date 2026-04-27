@@ -14,7 +14,7 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
 
 const mocks = vi.hoisted(() => ({
   clearHostedMemberPendingActivationTimeZone: vi.fn(),
-  findHostedIngressByEventId: vi.fn(),
+  readHostedMailboxItemByDedupeKey: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   readHostedMemberActivationCoreState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
@@ -22,13 +22,13 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
-  materializeHostedIngressEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
-  findHostedIngressByEventId: mocks.findHostedIngressByEventId,
-  materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -79,7 +79,7 @@ describe("hosted onboarding member activation", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
 
-    mocks.findHostedIngressByEventId.mockResolvedValue(null);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     setActivationMemberSnapshot(makeMemberSnapshot());
@@ -96,8 +96,10 @@ describe("hosted onboarding member activation", () => {
         threadIsDirect: true,
       },
     });
-    mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({
-      eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: {
+        dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_123",
+      },
     });
     mocks.updateHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -134,8 +136,8 @@ describe("hosted onboarding member activation", () => {
       member,
       prisma: expect.anything(),
     });
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(1, {
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
+      envelope: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
         kind: "member.activated",
         memberChannels: {
@@ -146,8 +148,8 @@ describe("hosted onboarding member activation", () => {
       }),
       tx: expect.anything(),
     });
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(2, {
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+      envelope: expect.objectContaining({
         kind: "assistant.notification.requested",
         notification: expect.objectContaining({
           deliveryDedupeToken: "signup-welcome:member_123",
@@ -219,8 +221,8 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(2, {
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+      envelope: expect.objectContaining({
         kind: "assistant.notification.requested",
         notification: expect.objectContaining({
           route: {
@@ -272,8 +274,8 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
       prisma: expect.anything(),
     });
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(1, {
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
+      envelope: expect.objectContaining({
         kind: "member.activated",
         timeZone: "America/Los_Angeles",
       }),
@@ -318,8 +320,8 @@ describe("hosted onboarding member activation", () => {
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenNthCalledWith(2, {
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(2, {
+      envelope: expect.objectContaining({
         kind: "assistant.notification.requested",
         notification: expect.objectContaining({
           route: {
@@ -415,8 +417,8 @@ describe("hosted onboarding member activation", () => {
       prisma: makeTransactionHarness() as never,
     });
 
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
         kind: "member.activated",
         memberChannels: {
           email: false,
@@ -446,8 +448,10 @@ describe("hosted onboarding member activation", () => {
       },
     });
     setActivationMemberSnapshot(member);
-    mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({
-      eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: {
+        dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
+      },
     });
 
     await expect(activateHostedMemberForPositiveSourceTx({
@@ -465,8 +469,8 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
-      wake: expect.objectContaining({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_member_channels",
         kind: "member.activated",
         memberChannels: {
@@ -486,9 +490,9 @@ describe("hosted onboarding member activation", () => {
       },
     });
     setActivationMemberSnapshot(member);
-    mocks.findHostedIngressByEventId.mockResolvedValue(
-      "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
-    );
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      dedupeKey: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
+    });
 
     await expect(
       activateHostedMemberForPositiveSourceTx({
@@ -510,7 +514,7 @@ describe("hosted onboarding member activation", () => {
 
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.materializeHostedIngressEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });
 

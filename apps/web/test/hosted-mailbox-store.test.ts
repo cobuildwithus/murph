@@ -139,7 +139,23 @@ describe("appendHostedMailboxItemTx", () => {
         payloadInlineCiphertext: "cipher_first_1",
       },
     });
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        component: "mailbox",
+        eventCode: "mailbox.dedupe_conflict",
+        level: "warn",
+        mailboxLane: "conversation",
+        mailboxSeqEnd: 1n,
+        mailboxSeqStart: 1n,
+        phase: "import",
+        redactedJson: expect.objectContaining({
+          existingKind: "conversation.message",
+          requestedKind: "member.activated",
+        }),
+        userId: "member_mailbox_1",
+      }),
+    });
     expect(hostedMailboxItem.create).not.toHaveBeenCalled();
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
   });
@@ -504,6 +520,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
 
     const result = await fetchHostedMailboxPayload({
+      dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_ref_1",
       payloadRef: MAILBOX_REF_1_PAYLOAD_REF,
       prisma,
@@ -513,6 +530,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
 
     expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
       where: {
+        dedupeKey: "dedupe_1",
         id: "mailbox_ref_1",
         userId: "member_mailbox_1",
       },
@@ -566,6 +584,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
 
     const result = await fetchHostedMailboxPayload({
+      dedupeKey: "dedupe_1",
       mailboxItemId: "mailbox_ref_1",
       payloadRef: MAILBOX_REF_1_PAYLOAD_REF,
       prisma,
@@ -736,9 +755,66 @@ function createHostedMailboxTx(input: {
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
 }) {
   return Object.assign(Object.create(null), {
-    $queryRaw: vi.fn(async () => [{ seq: 1n }]),
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = strings.join("?");
+      if (sql.includes("pg_advisory_xact_lock")) {
+        return [];
+      }
+
+      if (sql.includes("hosted_mailbox_lane_counter")) {
+        return [{ seq: 1n }];
+      }
+
+      if (sql.includes("INSERT INTO hosted_mailbox_item")) {
+        const row = await input.hostedMailboxItem.create({
+          data: {
+            id: String(values[0]),
+            userId: String(values[1]),
+            lane: String(values[2]),
+            laneSeq: values[3] as bigint,
+            dedupeKey: String(values[4]),
+            kind: String(values[5]),
+            occurredAt: values[6] as Date,
+            payloadSchema: String(values[7]),
+            payloadInlineCiphertext: values[8] as string | null,
+            payloadRef: values[9] as string | null,
+            payloadBytes: values[10] as number,
+            payloadHash: values[11] as string | null,
+            expiresAt: values[12] as Date | null,
+          },
+        });
+        return [row];
+      }
+
+      throw new Error(`Unexpected hosted mailbox query: ${sql}`);
+    }),
     hostedMailboxItem: input.hostedMailboxItem,
     hostedMailboxPayload: input.hostedMailboxPayload,
+    hostedRuntimeLog: {
+      create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
+        at: args.data.at as Date,
+        attemptId: args.data.attemptId as string | null,
+        checkpointVersion: args.data.checkpointVersion as bigint | null,
+        component: String(args.data.component),
+        createdAt: FIXED_NOW,
+        errorCode: args.data.errorCode as string | null,
+        eventCode: String(args.data.eventCode),
+        id: String(args.data.id),
+        leaseGeneration: args.data.leaseGeneration as bigint | null,
+        level: String(args.data.level),
+        mailboxLane: args.data.mailboxLane as string | null,
+        mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
+        mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
+        outboxIntentRef: args.data.outboxIntentRef as string | null,
+        phase: String(args.data.phase),
+        redactedJson: args.data.redactedJson,
+        userId: String(args.data.userId),
+        workspaceVersion: args.data.workspaceVersion as bigint | null,
+      })),
+    },
+    hostedWorkspace: {
+      upsert: vi.fn(async () => null),
+    },
   }) as Parameters<typeof appendHostedMailboxItemTx>[0]["tx"];
 }
 

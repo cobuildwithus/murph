@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildCloudflareHostedControlUserStatusPath } from "@murphai/cloudflare-hosted-control/routes";
-import { parseHostedExecutionUserStatus } from "@murphai/hosted-execution/parsers";
-import type { HostedExecutionUserStatus } from "@murphai/hosted-execution";
+import { parseHostedRunnerStatusResponse } from "@murphai/hosted-execution/parsers";
+import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution";
 
 import { repoRoot } from "../../vitest.shared.js";
 import { resolveHostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/config.ts";
@@ -23,7 +23,7 @@ export interface HostedLocalDevHarness {
   persistDir: string;
   request(pathname: string, init?: RequestInit): Promise<Response>;
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
-  readUserStatus(userId: string): Promise<HostedExecutionUserStatus>;
+  readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   stderrTail(maxChars?: number): string;
   stop(): Promise<void>;
   stdoutTail(maxChars?: number): string;
@@ -33,14 +33,14 @@ export interface HostedLocalDevHarness {
       pollIntervalMs?: number;
       timeoutMs?: number;
     },
-  ): Promise<HostedExecutionUserStatus>;
+  ): Promise<HostedRunnerStatusResponse>;
   waitForHostedIdle(
     userId: string,
     input?: {
       pollIntervalMs?: number;
       timeoutMs?: number;
     },
-  ): Promise<HostedExecutionUserStatus>;
+  ): Promise<HostedRunnerStatusResponse>;
   webBaseUrl: string;
   workerBaseUrl: string;
 }
@@ -132,7 +132,7 @@ export async function startHostedLocalDevHarness(input: {
       },
       oidcToken: stack.oidcToken,
       persistDir,
-      readUserStatus: async (userId: string): Promise<HostedExecutionUserStatus> => {
+      readUserStatus: async (userId: string): Promise<HostedRunnerStatusResponse> => {
         return await readHostedUserStatus({
           requestJson: requestJsonForRuntime,
           statusHeaders,
@@ -151,7 +151,7 @@ export async function startHostedLocalDevHarness(input: {
           pollIntervalMs?: number;
           timeoutMs?: number;
         } = {},
-      ): Promise<HostedExecutionUserStatus> => {
+      ): Promise<HostedRunnerStatusResponse> => {
         const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
@@ -165,10 +165,10 @@ export async function startHostedLocalDevHarness(input: {
           });
 
           if (
-            status.pendingIngressEventCount === 0
-            && !status.inFlight
-            && status.bundleRef !== null
-            && status.lastError === null
+            !status.inFlight
+            && status.mailboxLag.every((lane) => lane.lag === "0")
+            && status.workspace !== null
+            && !status.lastErrorCode
           ) {
             return status;
           }
@@ -186,7 +186,7 @@ export async function startHostedLocalDevHarness(input: {
           pollIntervalMs?: number;
           timeoutMs?: number;
         } = {},
-      ): Promise<HostedExecutionUserStatus> => {
+      ): Promise<HostedRunnerStatusResponse> => {
         const timeoutMs = pollInput.timeoutMs ?? hostedLocalStatusTimeoutMs;
         const pollIntervalMs = pollInput.pollIntervalMs ?? hostedLocalStatusPollIntervalMs;
         const startedAt = Date.now();
@@ -199,7 +199,7 @@ export async function startHostedLocalDevHarness(input: {
             userId,
           });
 
-          if (status.pendingIngressEventCount === 0 && !status.inFlight) {
+          if (!status.inFlight && status.mailboxLag.every((lane) => lane.lag === "0")) {
             return status;
           }
 
@@ -314,12 +314,12 @@ async function readHostedUserStatus(input: {
   statusHeaders: (userId: string) => HeadersInit;
   statusPath: (userId: string) => string;
   userId: string;
-}): Promise<HostedExecutionUserStatus> {
-  const status = await input.requestJson<HostedExecutionUserStatus>(input.statusPath(input.userId), {
+}): Promise<HostedRunnerStatusResponse> {
+  const status = await input.requestJson<HostedRunnerStatusResponse>(input.statusPath(input.userId), {
     headers: input.statusHeaders(input.userId),
   });
 
-  return parseHostedExecutionUserStatus(status);
+  return parseHostedRunnerStatusResponse(status);
 }
 
 function buildAuthenticatedHeaders(

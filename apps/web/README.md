@@ -6,15 +6,18 @@ Hosted integration control plane for Vercel deployments.
 in Postgres here, not in Cloudflare worker control storage. In particular,
 `apps/web` owns hosted member identity, routing, billing, email authorization,
 share facts, device-sync control-plane authority, the hosted AI usage ledger,
-and the canonical web-owned hosted execution ingress, cursor, and run recovery state.
+and the hosted mailbox, latest workspace checkpoint pointer, and redacted
+runtime logs/status projection.
 
-Every hosted producer now appends canonical external ingress in Postgres and
-hands execution off to Cloudflare with a narrow authenticated wake call. Hosted
-execution flows through that single web-owned acquire/commit/finalize path.
+Every hosted producer appends an encrypted mailbox item in Postgres and hands
+execution off to Cloudflare with a narrow authenticated runner nudge. Hosted
+execution no longer flows through a web-owned acquire/commit/finalize run
+protocol; the restored local runtime imports mailbox items and checkpoints its
+own workspace state.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
-authenticated execution intents, restores encrypted runtime state, runs one
-hosted job, and commits the next encrypted workspace snapshot. It may hold
+authenticated execution intents, restores encrypted runtime state, runs a
+workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It may hold
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 Hosted device-sync provider registration is intentionally shared with
@@ -38,7 +41,8 @@ The UI receives the composed `Experiment` view model, but public protocol prose,
 - per-user device connection ownership mapping plus token audit history
 - hosted member core, identity, routing, billing, and email-authorization slices
 - hosted share link metadata, canonical hosted share payloads, and share-claim state
-- durable external-ingress rows plus `HostedExecutionCursor` and `HostedRun` as the canonical hosted execution ordering/recovery seam
+- encrypted hosted mailbox rows and lane counters for durable execution inputs
+- latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -64,10 +68,13 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedMemberEmailAuthorization` owns verified-email and sender-authorization facts
 - `HostedShareLink` owns public share-link UX metadata and claim lifecycle
 - `HostedSharePayload` owns canonical encrypted share payloads in Postgres
-- external ingress rows own ordered execution inputs only
-- `HostedExecutionCursor` owns the canonical committed high-water and snapshot fence
-- `HostedRun` owns redacted execution and finalize-recovery state for each hosted runtime drain
-- Cloudflare acquires and completes runs only through web-owned hosted-run APIs; it does not own a second queue or recovery ledger
+- `HostedMailboxItem`, `HostedMailboxPayload`, and `HostedMailboxLaneCounter`
+  own append-only encrypted execution inputs and per-lane sequence allocation
+- `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
+  status projection
+- `HostedRuntimeLog` owns bounded redacted observability events
+- Cloudflare nudges the per-user runner only; it does not own a queue, mailbox
+  cursor, or web-visible run recovery ledger
 - `HostedAiUsage` owns the canonical hosted usage ledger
 
 ## Key environment variables
@@ -313,10 +320,11 @@ pnpm --dir apps/web prisma:migrate:deploy
 
 The hosted schema now includes the canonical member slices, hosted email
 authorization, hosted share payload ownership, device-sync web ownership
-models, the anonymized hosted assistant-runtime issue sink, plus the canonical hosted execution ingress, cursor, and run-recovery fence.
-The checked-in Prisma history is now a single greenfield baseline migration
-that matches the current hosted schema. If you have an older local database
-from the superseded incremental chain, reset it before reapplying migrations.
+models, the anonymized hosted assistant-runtime issue sink, canonical hosted
+mailbox rows, hosted workspace checkpoints, and hosted runtime logs/status.
+This branch is a greenfield hosted-runtime cutover. If you have an older local
+database from the superseded run/ingress/cursor chain, reset it before
+reapplying migrations.
 
 ## Local dev aids
 
@@ -348,8 +356,8 @@ Notes:
 - Hosted wake repair, usage metering, and Stripe recovery accept only Vercel
   cron bearer auth via `CRON_SECRET`.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
-  `member.activated` hosted execution ingress first, then performs post-commit managed-user
-  crypto provisioning in the activation path.
+  `member.activated` hosted mailbox input first, then performs activation-path
+  managed-user crypto provisioning.
 
 ## Main routes
 
@@ -389,7 +397,13 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-execution/share/:shareId/payload`
 - `GET /api/internal/hosted-execution/usage/cron`
 - `POST /api/internal/hosted-execution/usage/record`
-- `POST /api/internal/hosted-run/status`
+- `POST /api/internal/hosted-mailbox/fetch`
+- `POST /api/internal/hosted-mailbox/payload/fetch`
+- `POST /api/internal/hosted-mailbox/email-ingress`
+- `GET /api/internal/hosted-runtime/status`
+- `POST /api/internal/hosted-runtime/log`
+- `GET /api/internal/hosted-workspace`
+- `POST /api/internal/hosted-workspace/checkpoint`
 - `GET /api/internal/hosted-onboarding/stripe/cron`
 
 The old staged-payload and share-import completion/release callback routes are
@@ -397,7 +411,7 @@ gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
 share-pack CRUD, or an outbox drain route. It still uses narrow signed
 hosted-web callbacks for execution-time device-sync runtime snapshot/apply,
 device connect-link starts, canonical hosted share payload reads, direct
-hosted usage recording, and canonical hosted-run acquire/commit/finalize/log/status calls.
+hosted usage recording, and mailbox/workspace runtime status plus log callbacks.
 
 ## Hosted onboarding and share routes
 
@@ -432,9 +446,9 @@ The onboarding lane is intentionally thin:
 - Hosted share payloads are canonically stored in Postgres; Cloudflare fetches
   them through the signed internal payload route immediately before import.
 - Hosted share acceptance writes canonical claim state plus an inline
-  `vault.share.accepted` hosted execution ingress event in the same transaction.
+  `vault.share.accepted` hosted mailbox item in the same transaction.
 - Cloudflare-bound execution from onboarding, share acceptance, and hosted
-  device-sync trigger paths always appends canonical hosted execution ingress first.
+  device-sync trigger paths always appends canonical hosted mailbox input first.
 - Verified email sync updates canonical hosted email-authorization facts in web
   storage; it does not write hosted execution env.
 

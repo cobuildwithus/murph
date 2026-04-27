@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import {
@@ -8,11 +8,8 @@ import {
 const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
-export const HOSTED_TERMINAL_INGRESS_RETENTION_MS = 30 * DAY_MS;
+export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_EXPIRED_VAULT_SYNC_SESSION_RETENTION_MS = 7 * DAY_MS;
-
-const HOSTED_STALE_INGRESS_QUARANTINE_CODE = "retention_expired";
-const HOSTED_STALE_INGRESS_SKIP_BATCH_SIZE = 500;
 
 const EXPIRABLE_VAULT_SYNC_SESSION_STATUSES = [
   "pending",
@@ -27,9 +24,8 @@ export interface HostedRetentionCleanupResult {
   expiredVaultSyncPayloadsDeleted: number;
   expiredVaultSyncSessionsDeleted: number;
   expiredVaultSyncSessionsMarked: number;
-  oldRunLogsDeleted: number;
-  staleIngressEventsDeleted: number;
-  staleIngressEventsQuarantined: number;
+  expiredMailboxItemsDeleted: number;
+  oldRuntimeLogsDeleted: number;
 }
 
 export async function runHostedRetentionCleanup(input: {
@@ -57,15 +53,11 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const staleIngressEventsQuarantined = await quarantineStalePendingIngressEvents({
+  const expiredMailboxItemsDeleted = await deleteExpiredMailboxItems({
     now,
     prisma,
   });
-  const staleIngressEventsDeleted = await deleteStaleTerminalIngressEvents({
-    now,
-    prisma,
-  });
-  const oldRunLogsDeleted = await deleteOldHostedRunLogs({
+  const oldRuntimeLogsDeleted = await deleteOldHostedRuntimeLogs({
     now,
     prisma,
   });
@@ -76,9 +68,8 @@ export async function runHostedRetentionCleanup(input: {
     expiredVaultSyncPayloadsDeleted,
     expiredVaultSyncSessionsDeleted,
     expiredVaultSyncSessionsMarked,
-    oldRunLogsDeleted,
-    staleIngressEventsDeleted,
-    staleIngressEventsQuarantined,
+    expiredMailboxItemsDeleted,
+    oldRuntimeLogsDeleted,
   };
 }
 
@@ -193,21 +184,21 @@ async function deleteOldExpiredVaultSyncSessions(input: {
   return result.count;
 }
 
-async function deleteStaleTerminalIngressEvents(input: {
+async function deleteExpiredMailboxItems(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<number> {
-  const cutoff = new Date(input.now.getTime() - HOSTED_TERMINAL_INGRESS_RETENTION_MS);
-  const result = await input.prisma.hostedIngressEvent.deleteMany({
+  const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+  const result = await input.prisma.hostedMailboxItem.deleteMany({
     where: {
       OR: [
         {
-          completedAt: {
-            lt: cutoff,
+          expiresAt: {
+            lte: input.now,
           },
         },
         {
-          quarantinedAt: {
+          createdAt: {
             lt: cutoff,
           },
         },
@@ -218,201 +209,12 @@ async function deleteStaleTerminalIngressEvents(input: {
   return result.count;
 }
 
-async function quarantineStalePendingIngressEvents(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const cutoff = new Date(input.now.getTime() - HOSTED_TERMINAL_INGRESS_RETENTION_MS);
-  const users = await input.prisma.hostedIngressEvent.groupBy({
-    by: ["userId"],
-    where: {
-      completedAt: null,
-      createdAt: {
-        lt: cutoff,
-      },
-      quarantinedAt: null,
-      runId: null,
-      state: "pending",
-      OR: [
-        {
-          payloadBytes: {
-            not: null,
-          },
-        },
-        {
-          payloadInlineCiphertext: {
-            not: null,
-          },
-        },
-        {
-          payloadRef: {
-            not: null,
-          },
-        },
-      ],
-    },
-  });
-
-  let count = 0;
-  for (const user of users) {
-    count += await quarantineStalePendingIngressEventsForUser({
-      cutoff,
-      now: input.now,
-      prisma: input.prisma,
-      userId: user.userId,
-    });
-  }
-
-  return count;
-}
-
-async function quarantineStalePendingIngressEventsForUser(input: {
-  cutoff: Date;
-  now: Date;
-  prisma: PrismaClient;
-  userId: string;
-}): Promise<number> {
-  try {
-    return await input.prisma.$transaction(async (tx) => {
-      await lockHostedExecutionCursorForRetentionTx({
-        tx,
-        userId: input.userId,
-      });
-      const cursor = await tx.hostedExecutionCursor.findUnique({
-        where: {
-          userId: input.userId,
-        },
-        select: {
-          committedSeq: true,
-          version: true,
-        },
-      });
-      if (!cursor) {
-        return 0;
-      }
-
-      const rows = await tx.hostedIngressEvent.findMany({
-        where: {
-          completedAt: null,
-          quarantinedAt: null,
-          runId: null,
-          seq: {
-            gt: cursor.committedSeq,
-          },
-          state: "pending",
-          userId: input.userId,
-        },
-        orderBy: {
-          seq: "asc",
-        },
-        select: {
-          createdAt: true,
-          id: true,
-          payloadRef: true,
-          seq: true,
-        },
-        take: HOSTED_STALE_INGRESS_SKIP_BATCH_SIZE,
-      });
-
-      const stalePrefix: typeof rows = [];
-      let expectedSeq = cursor.committedSeq + 1n;
-      for (const row of rows) {
-        if (row.seq !== expectedSeq || row.createdAt >= input.cutoff) {
-          break;
-        }
-        stalePrefix.push(row);
-        expectedSeq += 1n;
-      }
-      if (stalePrefix.length === 0) {
-        return 0;
-      }
-
-      const payloadRefs = stalePrefix.flatMap((row) => row.payloadRef ? [row.payloadRef] : []);
-      if (payloadRefs.length > 0) {
-        await tx.hostedIngressPayload.deleteMany({
-          where: {
-            ingressEventId: {
-              in: payloadRefs,
-            },
-            userId: input.userId,
-          },
-        });
-      }
-
-      const ids = stalePrefix.map((row) => row.id);
-      const updated = await tx.hostedIngressEvent.updateMany({
-        where: {
-          completedAt: null,
-          createdAt: {
-            lt: input.cutoff,
-          },
-          id: {
-            in: ids,
-          },
-          quarantinedAt: null,
-          runId: null,
-          state: "pending",
-          userId: input.userId,
-        },
-        data: {
-          completedAt: input.now,
-          payloadBytes: null,
-          payloadInlineCiphertext: null,
-          payloadRef: null,
-          quarantineCode: HOSTED_STALE_INGRESS_QUARANTINE_CODE,
-          quarantinedAt: input.now,
-          state: "quarantined",
-        },
-      });
-      if (updated.count !== stalePrefix.length) {
-        throw new HostedRetentionCleanupRaceError();
-      }
-
-      const cursorUpdated = await tx.hostedExecutionCursor.updateMany({
-        where: {
-          committedSeq: cursor.committedSeq,
-          userId: input.userId,
-          version: cursor.version,
-        },
-        data: {
-          committedSeq: stalePrefix[stalePrefix.length - 1]!.seq,
-          version: {
-            increment: 1,
-          },
-        },
-      });
-      if (cursorUpdated.count !== 1) {
-        throw new HostedRetentionCleanupRaceError();
-      }
-
-      return stalePrefix.length;
-    });
-  } catch (error) {
-    if (error instanceof HostedRetentionCleanupRaceError) {
-      return 0;
-    }
-    throw error;
-  }
-}
-
-async function lockHostedExecutionCursorForRetentionTx(input: {
-  tx: Prisma.TransactionClient;
-  userId: string;
-}): Promise<void> {
-  await input.tx.$queryRaw<Array<{ user_id: string }>>`
-    SELECT user_id
-    FROM hosted_execution_cursor
-    WHERE user_id = ${input.userId}
-    FOR UPDATE
-  `;
-}
-
-async function deleteOldHostedRunLogs(input: {
+async function deleteOldHostedRuntimeLogs(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_RUN_LOG_RETENTION_MS);
-  const result = await input.prisma.hostedRunLog.deleteMany({
+  const result = await input.prisma.hostedRuntimeLog.deleteMany({
     where: {
       at: {
         lt: cutoff,
@@ -432,5 +234,3 @@ function normalizeRetentionDate(value: Date | string): Date {
 
   return date;
 }
-
-class HostedRetentionCleanupRaceError extends Error {}

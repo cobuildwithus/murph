@@ -14,16 +14,18 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-import { HOSTED_INGRESS_PAYLOAD_SCHEMA } from "@murphai/hosted-execution";
+import {
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
   appendHostedEmailIngressWakeInWeb: vi.fn(),
-  drainHostedRuns: vi.fn(),
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
-  nudgeHostedRun: vi.fn(),
+  nudgeHostedRunner: vi.fn(),
   readHostedExecutionEnvironment: vi.fn(),
   resolveHostedExecutionUserCryptoContext: vi.fn(),
   resolveUserRunnerStub: vi.fn(),
+  runUntilIdleOrBudget: vi.fn(),
 }));
 
 vi.mock("../src/env.ts", () => ({
@@ -106,37 +108,41 @@ describe("hosted email worker ingress", () => {
       rootKeyId: "v1",
     });
     mocks.appendHostedEmailIngressWakeInWeb.mockResolvedValue({
+      dedupeConflict: false,
       duplicate: false,
       inserted: true,
-      updatedExisting: false,
-      wake: {
-        behavior: "ordered",
+      item: {
         createdAt: "2026-04-17T00:00:00.000Z",
         dedupeKey: "email:raw_123",
-        id: "wake_123",
+        expiresAt: null,
+        id: "mailbox_item_123",
         kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: "24",
         occurredAt: "2026-04-17T00:00:00.000Z",
-        payloadSchema: HOSTED_INGRESS_PAYLOAD_SCHEMA,
-        quarantineCode: null,
-        quarantinedAt: null,
-        seq: "24",
+        payloadBytes: 128,
+        payloadInlineCiphertext: "ciphertext_inline_123",
+        payloadRef: null,
+        payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
         updatedAt: "2026-04-17T00:00:00.000Z",
         userId: "user_123",
       },
     });
-    mocks.drainHostedRuns.mockResolvedValue({
-      committedSeq: "24",
-      requestedTargetSeq: null,
-      targetReached: true,
-    });
-    mocks.nudgeHostedRun.mockResolvedValue({
+    mocks.nudgeHostedRunner.mockResolvedValue({
       accepted: true,
       alarmScheduled: true,
       alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "0",
+      nextAlarmAt: null,
+    });
+    mocks.runUntilIdleOrBudget.mockResolvedValue({
+      nextWakeAt: null,
+      status: "idle",
     });
     mocks.resolveUserRunnerStub.mockResolvedValue({
-      drainHostedRuns: mocks.drainHostedRuns,
-      nudgeHostedRun: mocks.nudgeHostedRun,
+      nudgeHostedRunner: mocks.nudgeHostedRunner,
+      runUntilIdleOrBudget: mocks.runUntilIdleOrBudget,
     });
   });
 
@@ -183,7 +189,6 @@ describe("hosted email worker ingress", () => {
     }, createWorkerEnv(bucket));
 
     expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
@@ -237,7 +242,7 @@ describe("hosted email worker ingress", () => {
 
     expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
@@ -297,7 +302,7 @@ describe("hosted email worker ingress", () => {
       boundUserId: "user_123",
       timeoutMs: 30_000,
     });
-    expect(mocks.drainHostedRuns).toHaveBeenCalledWith();
+    expect(mocks.runUntilIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
     expect(waitUntil).toHaveBeenCalledTimes(1);
 
     const rawMessageKey = appendInput?.body?.rawMessageKey;
@@ -312,6 +317,68 @@ describe("hosted email worker ingress", () => {
       from: "Owner <owner@example.com>",
       to: replyAliasAddress,
     })));
+  });
+
+  it("posts hosted email appends to the mailbox callback route", async () => {
+    const actualEmailIngressClient = await vi.importActual<
+      typeof import("../src/web-control-plane-email-ingress.ts")
+    >("../src/web-control-plane-email-ingress.ts");
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {
+          createdAt: "2026-04-17T00:00:00.000Z",
+          dedupeKey: "email:raw_123",
+          expiresAt: null,
+          id: "mailbox_item_123",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "24",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          payloadBytes: 128,
+          payloadInlineCiphertext: "ciphertext_inline_123",
+          payloadRef: null,
+          payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+          updatedAt: "2026-04-17T00:00:00.000Z",
+          userId: "user_123",
+        },
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await expect(actualEmailIngressClient.appendHostedEmailIngressWakeInWeb({
+      baseUrl: "https://web.example.test",
+      body: {
+        eventId: "email:raw_123",
+        identityId: "identity_123",
+        occurredAt: "2026-04-17T00:00:00.000Z",
+        rawMessageKey: "raw_123",
+        selfAddress: "assistant@example.test",
+      },
+      boundUserId: "user_123",
+      callbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      fetchImpl: fetch,
+      timeoutMs: 30_000,
+    })).resolves.toMatchObject({
+      item: {
+        id: "mailbox_item_123",
+        lane: "conversation",
+        laneSeq: "24",
+      },
+    });
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "POST",
+        path: "/api/internal/hosted-mailbox/email-ingress",
+      }),
+    );
   });
 
   it("routes fixed public-sender ingress through the web-owned direct-public-sender authorization lookup", async () => {
@@ -350,17 +417,20 @@ describe("hosted email worker ingress", () => {
       }),
       boundUserId: "user_456",
     }));
-    expect(mocks.nudgeHostedRun).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedRuns).toHaveBeenCalledWith();
+    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(mocks.runUntilIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
-  it("returns after nudging when the hosted email drain is already running", async () => {
+  it("returns after nudging when the hosted email runner is already running", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
-    mocks.nudgeHostedRun.mockResolvedValueOnce({
+    mocks.nudgeHostedRunner.mockResolvedValueOnce({
       accepted: true,
       alarmScheduled: true,
       alreadyRunning: true,
+      inFlight: true,
+      leaseGeneration: "0",
+      nextAlarmAt: null,
     });
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
@@ -384,17 +454,17 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket));
 
-    expect(mocks.nudgeHostedRun).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(mocks.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 
-  it("falls back to the retry-arm nudge when the direct email drain call fails", async () => {
+  it("falls back to the retry-arm nudge when the direct email runner call fails", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
       void promise;
     });
 
-    mocks.drainHostedRuns.mockRejectedValue(new Error("drain failed"));
+    mocks.runUntilIdleOrBudget.mockRejectedValue(new Error("runner failed"));
 
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
       JSON.stringify({
@@ -409,8 +479,8 @@ describe("hosted email worker ingress", () => {
     ));
 
     mocks.resolveUserRunnerStub.mockResolvedValue({
-      drainHostedRuns: mocks.drainHostedRuns,
-      nudgeHostedRun: mocks.nudgeHostedRun,
+      nudgeHostedRunner: mocks.nudgeHostedRunner,
+      runUntilIdleOrBudget: mocks.runUntilIdleOrBudget,
     });
 
     await handleHostedEmailIngress({
@@ -423,8 +493,11 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket), { waitUntil });
 
-    expect(mocks.drainHostedRuns).toHaveBeenCalledWith();
-    expect(mocks.nudgeHostedRun).toHaveBeenCalledTimes(2);
+    const [scheduled] = waitUntil.mock.calls[0] ?? [];
+    await scheduled;
+
+    expect(mocks.runUntilIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
+    expect(mocks.nudgeHostedRunner).toHaveBeenCalledTimes(2);
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
 
@@ -461,7 +534,7 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 422/u);
 
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
@@ -498,7 +571,7 @@ describe("hosted email worker ingress", () => {
       to: "assistant@mail.example.test",
     }, createWorkerEnv(bucket))).rejects.toThrow(/HTTP 503/u);
 
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toHaveLength(1);
   });
 
@@ -582,7 +655,7 @@ describe("hosted email worker ingress", () => {
 
     expect(setReject).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
@@ -607,7 +680,7 @@ describe("hosted email worker ingress", () => {
 
     expect(setReject).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 
@@ -632,7 +705,7 @@ describe("hosted email worker ingress", () => {
 
     expect(setReject).not.toHaveBeenCalled();
     expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
-    expect(mocks.drainHostedRuns).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
     expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
   });
 });

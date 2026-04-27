@@ -56,6 +56,7 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedScalar,
   type HostedRuntimeRedactedValue,
+  type HostedRuntimeWebStatusResponse,
   type HostedRuntimeShareImportRequest,
   type HostedRuntimeShareImportResponse,
   type HostedRuntimeShareImportStatus,
@@ -85,6 +86,7 @@ import {
   type HostedWorkspaceState,
 } from "../runtime-control.ts";
 import {
+  rejectLegacyAliases,
   requireArray,
   requireBoolean,
   requireNumber,
@@ -117,6 +119,34 @@ const FORBIDDEN_REDACTED_KEY_PARTS = [
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 24;
 const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 128;
+const HOSTED_WORKSPACE_RUN_REMOVED_FIELDS = [
+  "committedSeq",
+  "events",
+  "finalizeRequired",
+  "inputCommittedSeq",
+  "inputCursorVersion",
+  "requestedTargetSeq",
+  "resumeFinalize",
+  "run",
+  "runDrain",
+  "runId",
+  "runToken",
+  "targetCommittedSeqHint",
+  "targetReached",
+  "wake",
+] as const;
+const HOSTED_RUNNER_STATUS_REMOVED_FIELDS = [
+  "bundleRef",
+  "committedSeq",
+  "lastError",
+  "lastEventId",
+  "nextWakeAt",
+  "pendingIngressEventCount",
+  "pendingWakeCount",
+  "run",
+  "runId",
+  "timeline",
+] as const;
 
 export function parseHostedMailboxItem(value: unknown): HostedMailboxItem {
   const record = requireObject(value, "Hosted mailbox item");
@@ -182,6 +212,10 @@ export function parseHostedMailboxPayloadFetchRequest(
   const record = requireObject(value, "Hosted mailbox payload fetch request");
 
   return {
+    dedupeKey: requireString(
+      record.dedupeKey,
+      "Hosted mailbox payload fetch request dedupeKey",
+    ),
     mailboxItemId: requireString(
       record.mailboxItemId,
       "Hosted mailbox payload fetch request mailboxItemId",
@@ -905,6 +939,11 @@ export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeR
 
 export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerStatusResponse {
   const record = requireObject(value, "Hosted runner status response");
+  rejectLegacyAliases(
+    record,
+    "Hosted runner status response",
+    Object.fromEntries(HOSTED_RUNNER_STATUS_REMOVED_FIELDS.map((field) => [field, "runtime-control status"])),
+  );
 
   return {
     ...(record.heartbeatAt === undefined
@@ -968,14 +1007,37 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
   };
 }
 
+export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRuntimeWebStatusResponse {
+  const record = requireObject(value, "Hosted runtime web status response");
+  rejectLegacyAliases(
+    record,
+    "Hosted runtime web status response",
+    Object.fromEntries(HOSTED_RUNNER_STATUS_REMOVED_FIELDS.map((field) => [field, "runner status"])),
+  );
+
+  return {
+    mailboxLag: requireArray(record.mailboxLag, "Hosted runtime web status response mailboxLag")
+      .map((entry, index) => parseHostedMailboxLaneLag(
+        entry,
+        `Hosted runtime web status response mailboxLag[${index}]`,
+      )),
+    ...(record.recentLogs === undefined
+      ? {}
+      : {
+          recentLogs: requireArray(record.recentLogs, "Hosted runtime web status response recentLogs")
+            .map((entry) => parseHostedRuntimeLogEntry(entry)),
+        }),
+    userId: requireString(record.userId, "Hosted runtime web status response userId"),
+    workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
 export function parseHostedWorkspaceRunRequest(value: unknown): HostedWorkspaceRunRequest {
   const record = requireObject(value, "Hosted workspace run request");
 
-  rejectHostedWorkspaceRunRemovedField(record, "run");
-  rejectHostedWorkspaceRunRemovedField(record, "runDrain");
-  rejectHostedWorkspaceRunRemovedField(record, "runToken");
-  rejectHostedWorkspaceRunRemovedField(record, "targetCommittedSeqHint");
-  rejectHostedWorkspaceRunRemovedField(record, "wake");
+  for (const field of HOSTED_WORKSPACE_RUN_REMOVED_FIELDS) {
+    rejectHostedWorkspaceRunRemovedField(record, field);
+  }
 
   return {
     attemptId: requireString(record.attemptId, "Hosted workspace run request attemptId"),

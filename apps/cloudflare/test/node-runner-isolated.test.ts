@@ -1,8 +1,9 @@
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
 
-import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { HostedExecutionWorkspaceRunJobInput } from "../src/runner-job-transport.ts";
 
 const spawnMock = vi.fn();
 
@@ -16,39 +17,19 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     vi.restoreAllMocks();
   });
 
-  function createCronJobRequest(eventId: string) {
-    const wake = buildHostedExecutionMemberActivatedWake({
-      eventId,
-      memberChannels: {
-        email: false,
-        linq: false,
-        telegram: false,
-      },
-      memberId: "member_123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-    });
-
+  function createWorkspaceJob(eventId: string): HostedExecutionWorkspaceRunJobInput {
     return {
-      bundle: null,
-      run: {
-        attempt: 1,
-        runId: "run_123",
-        startedAt: "2026-04-08T00:00:00.000Z",
-      },
-      runDrain: {
-        acquiredAt: "2026-04-08T00:00:00.000Z",
-        events: [
-          {
-            seq: "1",
-            wake,
-            ingressEventId: `wake_${eventId}`,
-          },
-        ],
-        inputCommittedSeq: "1",
-        inputCursorVersion: "1",
-        runId: "run_123",
-        triggerKind: "external_ingress" as const,
+      kind: "workspace-run",
+      request: {
+        attemptId: `attempt_${eventId}`,
+        leaseGeneration: "1",
+        reason: "nudge",
         userId: "member_123",
+        workspaceVersion: "0",
+      },
+      runtime: {
+        forwardedEnv: {},
+        userEnv: {},
       },
     };
   }
@@ -86,16 +67,10 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
 
     const result = await module.runHostedExecutionJobIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
-      job: {
-        request: createCronJobRequest("evt_child_cleanup"),
-        runtime: {
-          forwardedEnv: {},
-          userEnv: {},
-        },
-      },
+      job: createWorkspaceJob("evt_child_cleanup"),
     });
 
-    expect(result.result.result.summary).toBe("ok");
+    expect(result.status).toBe("idle");
     expect(processKillSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
   });
 
@@ -161,7 +136,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     await module.runHostedExecutionJobIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
       job: {
-        request: createCronJobRequest("evt_child_env"),
+        ...createWorkspaceJob("evt_child_env"),
         runtime: {
           forwardedEnv: {
             HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
@@ -181,7 +156,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
     });
   });
 
-  it("accepts completed child results that omit the explicit phase field", async () => {
+  it("rejects legacy child results at the isolated runner boundary", async () => {
     const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
     const module = await import("../src/node-runner-isolated.ts");
 
@@ -202,19 +177,16 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       child.stderr.setEncoding("utf8");
 
       queueMicrotask(() => {
-        child.stdout.end(module.formatHostedExecutionChildResult({
-          ok: true,
+        child.stdout.end(formatLegacyChildResult({
           result: {
+            bundle: null,
             result: {
-              bundle: null,
-              result: {
-                eventsHandled: 1,
-                nextWakeAt: null,
-                summary: "ok",
-              },
+              eventsHandled: 1,
+              nextWakeAt: null,
+              summary: "ok",
             },
-            finalGatewayProjectionSnapshot: null,
           },
+          finalGatewayProjectionSnapshot: null,
         }));
         child.emit("close", 0);
       });
@@ -222,18 +194,11 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       return child;
     });
 
-    const result = await module.runHostedExecutionJobIsolatedDetailed({
+    await expect(module.runHostedExecutionJobIsolatedDetailed({
       internalWorkerProxyToken: "proxy-token",
-      job: {
-        request: createCronJobRequest("evt_child_phase_optional"),
-        runtime: {
-          forwardedEnv: {},
-          userEnv: {},
-        },
-      },
-    });
+      job: createWorkspaceJob("evt_child_legacy_result"),
+    })).rejects.toThrow("Hosted workspace run result");
 
-    expect(result.result.result.summary).toBe("ok");
     expect(processKillSpy).toHaveBeenCalledWith(-4246, "SIGKILL");
   });
 
@@ -241,15 +206,20 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
 
 function createRunnerResult() {
   return {
-    phase: "completed" as const,
-    result: {
-      bundle: null,
-      result: {
-        eventsHandled: 1,
-        nextWakeAt: null,
-        summary: "ok",
-      },
+    nextWakeAt: null,
+    redactedStatus: {
+      importedCount: 0,
     },
-    finalGatewayProjectionSnapshot: null,
+    status: "idle" as const,
   };
+}
+
+function formatLegacyChildResult(result: unknown): string {
+  return `__HB_ASSISTANT_RUNTIME_RESULT__${Buffer.from(
+    JSON.stringify({
+      ok: true,
+      result,
+    }),
+    "utf8",
+  ).toString("base64")}`;
 }

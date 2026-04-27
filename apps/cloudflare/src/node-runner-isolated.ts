@@ -6,10 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  formatHostedRuntimeChildResult,
-  parseHostedRuntimeChildResult,
-  type HostedAssistantRuntimeJobInput,
-  type HostedAssistantRuntimeJobResult,
+  type HostedAssistantWorkspaceRuntimeJobResult,
 } from "@murphai/assistant-runtime";
 import {
   HostedAssistantConfigurationError,
@@ -21,23 +18,38 @@ import {
   resolveHostedRunnerTsxImportSpecifier,
 } from "./runner-child-launcher.ts";
 import {
-  assertHostedAssistantRuntimeJobResult,
-} from "./hosted-runtime-result-validation.ts";
+  assertHostedExecutionRunnerJobResult,
+  formatHostedExecutionRunnerChildResult,
+  parseHostedExecutionRunnerChildResult,
+  type HostedExecutionWorkspaceRunJobInput,
+} from "./runner-job-transport.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
-  job: HostedAssistantRuntimeJobInput;
+  job: HostedExecutionWorkspaceRunJobInput;
 }
 
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 
+export function runHostedExecutionJobIsolatedDetailed(
+  input: HostedExecutionIsolatedRunnerInput & { job: HostedExecutionWorkspaceRunJobInput },
+  options?: {
+    signal?: AbortSignal;
+  },
+): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
+export function runHostedExecutionJobIsolatedDetailed(
+  input: HostedExecutionIsolatedRunnerInput,
+  options?: {
+    signal?: AbortSignal;
+  },
+): Promise<HostedAssistantWorkspaceRuntimeJobResult>;
 export async function runHostedExecutionJobIsolatedDetailed(
   input: HostedExecutionIsolatedRunnerInput,
   options?: {
     signal?: AbortSignal;
   },
-): Promise<HostedAssistantRuntimeJobResult> {
+): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
   const launcherRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-launch-"));
 
   try {
@@ -116,17 +128,14 @@ export async function runHostedExecutionJobIsolatedDetailed(
         sink: process.stderr,
         suppressResultPayload: false,
       });
-      const childResult = parseHostedRuntimeChildResult(stdoutChunks.join(""));
+      const childResult = parseHostedExecutionRunnerChildResult(stdoutChunks.join(""));
 
       if (!childResult.ok) {
         throw createHostedRuntimeChildFailure(childResult.error, code);
       }
 
       const result = childResult.result;
-      assertHostedAssistantRuntimeJobResult(result, {
-        bundleArchiveOperation: "runner-output",
-      });
-      return result;
+      return assertHostedExecutionRunnerJobResult(result, input.job);
     } finally {
       options?.signal?.removeEventListener("abort", abortHandler);
       terminateChildProcess(child.pid);
@@ -137,9 +146,9 @@ export async function runHostedExecutionJobIsolatedDetailed(
 }
 
 export function formatHostedExecutionChildResult(
-  payload: Parameters<typeof formatHostedRuntimeChildResult>[0],
+  payload: Parameters<typeof formatHostedExecutionRunnerChildResult>[0],
 ): string {
-  return formatHostedRuntimeChildResult(payload);
+  return formatHostedExecutionRunnerChildResult(payload);
 }
 
 function resolveNodeRunnerChildEntry(): string {

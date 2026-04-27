@@ -1,7 +1,7 @@
 import { type Prisma } from "@prisma/client";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 
-import { materializeHostedIngressEnvelopeTx } from "../hosted-ingress/lifecycle";
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
@@ -87,8 +87,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     telegramUserId: summary.senderTelegramUserId,
   });
 
-  await materializeHostedIngressEnvelopeTx({
-    wake: buildHostedExecutionTelegramConversationMessageWake({
+  await appendHostedMailboxEnvelopeTx({
+    envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId: buildHostedTelegramWebhookEventId(input.update),
       occurredAt: summary.occurredAt,
       telegramMessage,

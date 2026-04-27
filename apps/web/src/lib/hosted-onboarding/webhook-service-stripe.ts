@@ -3,8 +3,8 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import {
-  nudgeHostedRunBestEffort,
-} from "../hosted-ingress/control";
+  nudgeHostedRunnerBestEffort,
+} from "../hosted-runner/control";
 import { hostedOnboardingError } from "./errors";
 import {
   requireHostedStripeWebhookVerificationConfig,
@@ -110,7 +110,7 @@ async function reconcileHostedStripeWebhookEvent(input: {
     return;
   }
 
-  await nudgeHostedRunBestEffort({
+  await nudgeHostedRunnerBestEffort({
     context: "stripe.webhook",
     userId: hostedExecutionMemberId,
   });

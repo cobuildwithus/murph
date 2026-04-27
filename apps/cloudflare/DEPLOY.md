@@ -23,7 +23,7 @@ The rendered deploy helper path is the canonical rollout contract. The lower-lev
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints, so applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config/secrets render newer than the bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
-Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace plus the web-owned hosted-run recovery record.
+Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
 ## One-Time Cloudflare Setup
 
@@ -70,8 +70,8 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_WAKE_ENCRYPTION_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
 
-The callback-signing key remains part of the required worker secret surface because the canonical hosted ingress append and hosted-run acquire/commit/finalize flow now goes through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
-The wake encryption key is execution-only and should decrypt hosted execution ingress payloads only. Do not reuse the broader web-owned `HOSTED_WEB_ENCRYPTION_*` private-field lane in Cloudflare.
+The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The wake encryption key is execution-only and should decrypt hosted mailbox payloads only. Do not reuse the broader web-owned `HOSTED_WEB_ENCRYPTION_*` private-field lane in Cloudflare.
 
 ## Optional Vars
 
@@ -102,7 +102,7 @@ Signed hosted-web callback metadata:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 
-Hosted ingress encryption rotation metadata:
+Hosted mailbox encryption rotation metadata:
 
 - `HOSTED_WAKE_ENCRYPTION_KEY_VERSION`
 

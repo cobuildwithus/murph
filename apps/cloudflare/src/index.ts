@@ -9,18 +9,23 @@ import {
   wrapHostedBrowserSessionKey,
 } from "@murphai/runtime-state";
 import {
-  type HostedRunDrainResult,
-  type HostedRunNudgeResult,
-  type HostedExecutionUserStatus,
   type HostedRunnerNudgeResult,
   type HostedRunnerStatusResponse,
+  type HostedWorkspaceRunReason,
+  type HostedWorkspaceRunResult,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
-import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
+import {
+  parseHostedBrowserVaultReplicaRef,
+  parseHostedWorkspaceCheckpointRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+} from "@murphai/hosted-execution/routes";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
@@ -28,6 +33,7 @@ import {
 } from "@murphai/cloudflare-hosted-control/routes";
 
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
@@ -228,30 +234,22 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     );
   }
 
-  async bootstrapUser(userId: string): Promise<{ userId: string }> {
-    return this.runner.bootstrapUser(userId);
-  }
-
-  async status(): Promise<HostedExecutionUserStatus> {
-    return this.runner.status();
+  async bindUser(userId: string): Promise<{ userId: string }> {
+    return this.runner.bindUser(userId);
   }
 
   async runnerStatus(): Promise<HostedRunnerStatusResponse> {
     return this.runner.runnerStatus();
   }
 
-  async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
-    return this.runner.nudgeHostedRun();
-  }
-
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
     return this.runner.nudgeHostedRunner();
   }
 
-  async drainHostedRuns(input?: {
-    targetCommittedSeqHint?: string | null;
-  }): Promise<HostedRunDrainResult> {
-    return this.runner.drainHostedRuns(input);
+  async runUntilIdleOrBudget(input: {
+    reason: HostedWorkspaceRunReason;
+  }): Promise<HostedWorkspaceRunResult> {
+    return this.runner.runUntilIdleOrBudget(input);
   }
 
   async fetch(): Promise<Response> {
@@ -759,6 +757,35 @@ async function maybeHandleLocalInternalProxyRoute(
 
   const internalUrl = new URL(`http://${targetHost}${match.groups.path ?? "/"}`);
   internalUrl.search = url.search;
+  if (
+    targetHost === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane
+    && internalUrl.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
+  ) {
+    const checkpointRequest = parseHostedWorkspaceCheckpointRequest(
+      await readOptionalJsonObject(request.clone() as Request),
+    );
+    const validCheckpointLease = await ownsLocalInternalProxyTokenForUser({
+      attemptId: checkpointRequest.attemptId,
+      env,
+      leaseGeneration: checkpointRequest.leaseGeneration,
+      token: runnerProxyToken,
+      userId: boundUserId,
+    });
+    if (!validCheckpointLease) {
+      emitHostedExecutionStructuredLog({
+        component: "worker",
+        details: buildWorkerRouteLogDetails({
+          reason: "runner-proxy-token-lease-verification-failed",
+          routeName: "local-internal-proxy",
+        }, request, boundUserId),
+        level: "warn",
+        message: "Hosted worker rejected a local workspace checkpoint after lease-token verification failed.",
+        phase: "failed",
+        userId: boundUserId,
+      });
+      return unauthorized();
+    }
+  }
   return await handleRunnerOutboundRequest(
     createLocalInternalProxyRequest(request, internalUrl),
     env,
@@ -768,13 +795,22 @@ async function maybeHandleLocalInternalProxyRoute(
 }
 
 async function ownsLocalInternalProxyTokenForUser(input: {
+  attemptId?: string;
   env: WorkerEnvironmentSource;
+  leaseGeneration?: string;
   token: string;
   userId: string;
 }): Promise<boolean> {
   const stub = input.env.RUNNER_CONTAINER.getByName(input.userId);
   return typeof stub.ownsInternalWorkerProxyToken === "function"
-    ? await stub.ownsInternalWorkerProxyToken({ token: input.token, userId: input.userId })
+    ? await stub.ownsInternalWorkerProxyToken({
+        ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
+        ...(input.leaseGeneration === undefined
+          ? {}
+          : { leaseGeneration: input.leaseGeneration }),
+        token: input.token,
+        userId: input.userId,
+      })
     : false;
 }
 

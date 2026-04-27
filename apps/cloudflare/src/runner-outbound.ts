@@ -81,11 +81,13 @@ export async function handleRunnerOutboundRequest(
 
     return notFound();
   } catch (error) {
+    const safeUrl = safeRunnerOutboundRequestUrl(request.url);
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
         method: request.method,
-        url: request.url,
+        path: safeUrl?.pathname ?? null,
+        urlHost: safeUrl?.hostname ?? null,
         userId,
       },
       error,
@@ -102,6 +104,14 @@ export async function handleRunnerOutboundRequest(
       ...(details ? { details } : {}),
       ...(errorName ? { errorName } : {}),
     }, 500);
+  }
+}
+
+function safeRunnerOutboundRequestUrl(value: string): URL | null {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
   }
 }
 

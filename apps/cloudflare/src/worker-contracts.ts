@@ -6,11 +6,11 @@ export interface WorkerSendEmailBindingLike {
 }
 
 export interface WorkerUserRunnerStubLike {
-  bootstrapUser?(userId: string): Promise<{ userId: string }>;
+  bindUser?(userId: string): Promise<{ userId: string }>;
 }
 
-export interface WorkerBootstrapUserRunnerStubLike extends WorkerUserRunnerStubLike {
-  bootstrapUser(userId: string): Promise<{ userId: string }>;
+export interface WorkerBindUserRunnerStubLike extends WorkerUserRunnerStubLike {
+  bindUser(userId: string): Promise<{ userId: string }>;
 }
 
 export interface WorkerUserRunnerNamespaceLike<

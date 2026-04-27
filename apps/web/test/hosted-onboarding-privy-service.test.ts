@@ -98,10 +98,6 @@ type HostedMemberEmailAuthorizationDelegate = {
     where?: Record<string, unknown>;
   }) => Promise<unknown>;
 };
-type HostedIngressEventDelegate = {
-  findFirst?: (input: { where?: Record<string, unknown> }) => Promise<unknown>;
-};
-
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1346,7 +1342,6 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   const hostedMemberRouting = readHostedMemberRoutingDelegate(prismaWithQueryRaw.hostedMemberRouting);
   const hostedMemberEmailAuthorization =
     readHostedMemberEmailAuthorizationDelegate(prismaWithQueryRaw.hostedMemberEmailAuthorization);
-  const hostedIngressEvent = readHostedIngressEventDelegate(prismaWithQueryRaw.hostedIngressEvent);
   if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
     Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
       configurable: true,
@@ -1715,16 +1710,6 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
     }
   }
 
-  if (!("hostedIngressEvent" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedIngressEvent) {
-    Object.defineProperty(prismaWithQueryRaw, "hostedIngressEvent", {
-      configurable: true,
-      value: {
-        ...(hostedIngressEvent ?? {}),
-        findFirst: vi.fn(async () => null),
-      },
-    });
-  }
-
   if (
     !("hostedMemberEmailAuthorization" in prismaWithQueryRaw)
     || !prismaWithQueryRaw.hostedMemberEmailAuthorization
@@ -1875,19 +1860,6 @@ function readHostedMemberEmailAuthorizationDelegate(
         }
       : {}),
   };
-}
-
-function readHostedIngressEventDelegate(value: unknown): HostedIngressEventDelegate | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-
-  const findFirst: HostedIngressEventDelegate["findFirst"] | undefined = Reflect.get(value, "findFirst");
-  return typeof findFirst === "function"
-    ? {
-        findFirst,
-      }
-    : undefined;
 }
 
 function projectHostedMemberFindUniqueResult(input: {

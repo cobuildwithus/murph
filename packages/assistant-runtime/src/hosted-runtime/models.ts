@@ -2,29 +2,18 @@ import type {
   ImportSharePackIntoVaultResult,
   VaultSyncImportMergeResult,
 } from "@murphai/core";
-import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import type {
   ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import type {
-  HostedIngressEnvelope,
+  HostedExecutionWake,
   HostedExecutionRedactedLogEntry,
-  HostedExecutionRunnerRequest,
-  HostedExecutionRunnerResult,
-  HostedRunCleanupTarget,
-  HostedRunEventResult,
   HostedWorkspaceRunRequest,
   HostedWorkspaceRunResult,
-  HostedRuntimeDrainRequest,
 } from "@murphai/hosted-execution";
-import type {
-  HostedAssistantDeliveryEffect,
-} from "@murphai/hosted-execution/side-effects";
-
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
-import type { BrowserVaultReplica } from "@murphai/query/browser";
 
 export interface HostedAssistantRuntimeChannelCapabilities {
   emailSendReady: boolean;
@@ -51,17 +40,6 @@ export interface HostedAssistantRuntimeConfig {
   platformEnv?: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   userEnv?: Readonly<Record<string, string>>;
-}
-
-export interface HostedAssistantRuntimeJobRequest
-  extends Omit<HostedExecutionRunnerRequest, "runDrain"> {
-  runDrain: HostedRuntimeDrainRequest;
-  runToken?: string | null;
-}
-
-export interface HostedAssistantRuntimeJobInput {
-  request: HostedAssistantRuntimeJobRequest;
-  runtime?: HostedAssistantRuntimeConfig;
 }
 
 export interface HostedAssistantWorkspaceRuntimeJobInput {
@@ -96,27 +74,6 @@ export interface NormalizedHostedAssistantRuntimeConfig {
   userEnv: Record<string, string>;
 }
 
-export interface HostedCommittedExecutionState {
-  committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
-  committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-  committedResult: HostedExecutionRunnerResult;
-}
-
-export interface HostedRunDrainMetrics {
-  adoptedCleanupTargets: HostedRunCleanupTarget[];
-  adoptedEventResults: HostedRunEventResult[];
-  bootstrapResult: HostedBootstrapResult | null;
-  deviceSyncProcessed: number;
-  deviceSyncSkipped: boolean;
-  eventsHandled: number;
-  nextWakeAt: string | null;
-  parserProcessed: number;
-  redactedLogEntries: HostedExecutionRedactedLogEntry[];
-  shareImportResult: HostedShareImportResult | null;
-  shareImportTitle: string | null;
-  vaultSyncImportResults: HostedVaultSyncImportResult[];
-}
-
 export type HostedAssistantDeliveryOutcomeStatus =
   | "abandoned"
   | "failed"
@@ -147,32 +104,10 @@ export interface HostedAssistantDeliveryOutcome {
   targetKind: string | null;
 }
 
-export interface HostedAssistantRuntimePreparedJobResult {
-  committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-  committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
-  finalGatewayProjectionSnapshot?: null;
-  phase: "prepared";
-  result: HostedExecutionRunnerResult;
-}
-
-export interface HostedAssistantRuntimeCompletedJobResult {
-  assistantDeliveryOutcomes?: HostedAssistantDeliveryOutcome[];
-  browserVaultReplica?: BrowserVaultReplica | null;
-  finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
-  phase?: "completed";
-  result: HostedExecutionRunnerResult;
-}
-
-export type HostedAssistantRuntimeJobResult =
-  | HostedAssistantRuntimePreparedJobResult
-  | HostedAssistantRuntimeCompletedJobResult;
-
 export type HostedShareImportResult = ImportSharePackIntoVaultResult;
 export type HostedVaultSyncImportResult = VaultSyncImportMergeResult;
 
-export interface HostedIngressEffect {
-  adoptedCleanupTargets?: HostedRunCleanupTarget[] | null;
-  adoptedEventResults?: HostedRunEventResult[] | null;
+export interface HostedMailboxEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
   shareImportResult: HostedShareImportResult | null;
@@ -185,7 +120,7 @@ export interface HostedConversationWakeMetrics {
   parserProcessed: number;
 }
 
-export type HostedIngressLane =
+export type HostedMailboxLane =
   | "assistant-notification"
   | "conversation-message"
   | "device-sync"
@@ -194,14 +129,12 @@ export type HostedIngressLane =
   | "vault-share-accepted"
   | "vault-sync-import";
 
-export interface HostedIngressExecutionMetrics extends HostedIngressEffect {
+export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
   bootstrapResult: HostedBootstrapResult | null;
-  ingressLane: HostedIngressLane;
+  mailboxLane: HostedMailboxLane;
 }
 
 export interface HostedMaintenanceMetrics {
-  adoptedCleanupTargets?: HostedRunCleanupTarget[] | null;
-  adoptedEventResults?: HostedRunEventResult[] | null;
   deviceSyncProcessed: number;
   deviceSyncSkipped: boolean;
   nextWakeAt: string | null;

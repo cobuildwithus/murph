@@ -60,7 +60,7 @@ vi.mock("../src/hosted-runtime/events/share.ts", () => ({
   handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
-import { executeHostedIngressEvent } from "../src/hosted-runtime/events.ts";
+import { executeHostedMailboxEvent } from "../src/hosted-runtime/events.ts";
 import { emitHostedAssistantContextTraceLog } from "../src/hosted-runtime/context-diagnostics.ts";
 
 const executionContext = {
@@ -106,7 +106,7 @@ afterEach(() => {
   });
 });
 
-describe("executeHostedIngressEvent", () => {
+describe("executeHostedMailboxEvent", () => {
   it("drops spoofed raw-looking values from hosted context diagnostic traces", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_context_spoof",
@@ -342,7 +342,7 @@ describe("executeHostedIngressEvent", () => {
     });
 
     const runtime = createRuntime();
-    const result = await executeHostedIngressEvent({
+    const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime,
@@ -503,7 +503,7 @@ describe("executeHostedIngressEvent", () => {
     expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
-      ingressLane: "assistant-notification",
+      mailboxLane: "assistant-notification",
       redactedLogEntries: [
         {
           component: "runtime",
@@ -644,7 +644,7 @@ describe("executeHostedIngressEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedIngressEvent({
+    await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -719,7 +719,7 @@ describe("executeHostedIngressEvent", () => {
       }),
     );
 
-    const result = await executeHostedIngressEvent({
+    const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -729,7 +729,7 @@ describe("executeHostedIngressEvent", () => {
 
     expect(result).toMatchObject({
       conversationMetrics: null,
-      ingressLane: "assistant-notification",
+      mailboxLane: "assistant-notification",
     });
     expect(result.redactedLogEntries).toEqual([
       expect.objectContaining({
@@ -739,7 +739,7 @@ describe("executeHostedIngressEvent", () => {
       expect.objectContaining({
         eventId: "evt_notification_skipped",
         level: "warn",
-        message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+        message: "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
         redacted: expect.objectContaining({
           assistantNotificationErrorCode: "authorization_error",
           assistantNotificationErrorCodeDetail: "invalid_api_key",
@@ -765,7 +765,7 @@ describe("executeHostedIngressEvent", () => {
           notificationRouteThreadIsDirect: null,
         }),
         level: "warn",
-        message: "Hosted assistant notification failed and was skipped so the hosted run can continue.",
+        message: "Hosted assistant notification failed and was skipped so the hosted runtime pass can continue.",
         phase: "wake.running",
         wake,
       }),
@@ -799,7 +799,7 @@ describe("executeHostedIngressEvent", () => {
       new Error("optional notification skipped by provider"),
     );
 
-    await expect(executeHostedIngressEvent({
+    await expect(executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -807,7 +807,7 @@ describe("executeHostedIngressEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     })).resolves.toMatchObject({
       conversationMetrics: null,
-      ingressLane: "assistant-notification",
+      mailboxLane: "assistant-notification",
     });
   });
 
@@ -838,7 +838,7 @@ describe("executeHostedIngressEvent", () => {
       new Error("required notification failed"),
     );
 
-    await expect(executeHostedIngressEvent({
+    await expect(executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -873,7 +873,7 @@ describe("executeHostedIngressEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedIngressEvent({
+    await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -925,7 +925,7 @@ describe("executeHostedIngressEvent", () => {
       phoneLookupKey: "15551234567",
       userId: "member_123",
     });
-    const linqResult = await executeHostedIngressEvent({
+    const linqResult = await executeHostedMailboxEvent({
       wake: linqWake,
       executionContext,
       runtime,
@@ -944,7 +944,7 @@ describe("executeHostedIngressEvent", () => {
       },
       userId: "member_123",
     });
-    await executeHostedIngressEvent({
+    await executeHostedMailboxEvent({
       wake: telegramWake,
       executionContext,
       runtime,
@@ -960,7 +960,7 @@ describe("executeHostedIngressEvent", () => {
       selfAddress: "user@example.com",
       userId: "member_123",
     });
-    await executeHostedIngressEvent({
+    await executeHostedMailboxEvent({
       wake: emailWake,
       executionContext,
       runtime,
@@ -991,7 +991,7 @@ describe("executeHostedIngressEvent", () => {
         nextWakeAt: null,
         parserProcessed: 0,
       },
-      ingressLane: "conversation-message",
+      mailboxLane: "conversation-message",
       redactedLogEntries: [
         {
           component: "runtime.context",
@@ -1028,7 +1028,7 @@ describe("executeHostedIngressEvent", () => {
       occurredAt: "2026-04-08T00:03:00.000Z",
     });
 
-    const result = await executeHostedIngressEvent({
+    const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -1040,7 +1040,7 @@ describe("executeHostedIngressEvent", () => {
     assert.deepEqual(result, {
       bootstrapResult: null,
       conversationMetrics: null,
-      ingressLane: "member-channels-updated",
+      mailboxLane: "member-channels-updated",
       redactedLogEntries: [],
       shareImportResult: null,
       shareImportTitle: null,
@@ -1060,7 +1060,7 @@ describe("executeHostedIngressEvent", () => {
     });
 
     await expect(
-      executeHostedIngressEvent({
+      executeHostedMailboxEvent({
         wake,
         executionContext,
         runtime: createRuntime(),

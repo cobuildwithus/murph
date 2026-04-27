@@ -3,7 +3,7 @@ import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  type HostedIngressEnvelope,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
@@ -40,7 +40,7 @@ describe("cloudflare worker queue backpressure routes", () => {
 
   it("keeps the removed dispatch route unavailable without relying on legacy local queue state", async () => {
     const harness = createUserRunnerDurableObject();
-    await harness.durableObject.bootstrapUser("member_123");
+    await harness.durableObject.bindUser("member_123");
     await provisionManagedUserCryptoAtActivationForTest(harness.env as never, "member_123");
 
     const overflowResponse = await worker.fetch(
@@ -59,9 +59,7 @@ describe("cloudflare worker queue backpressure routes", () => {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
     });
     const stub = {
-      bootstrapUser: vi.fn(async (userId: string) => ({ userId })),
-      drainHostedRuns: vi.fn(),
-      nudgeHostedRun: vi.fn(),
+      bindUser: vi.fn(async (userId: string) => ({ userId })),
       nudgeHostedRunner: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: false,
@@ -70,17 +68,11 @@ describe("cloudflare worker queue backpressure routes", () => {
         leaseGeneration: "0",
         nextAlarmAt: null,
       })),
-      runnerStatus: vi.fn(),
-      status: vi.fn(async () => ({
-        bundleRef: null,
-        inFlight: false,
-        lastError: null,
-        lastEventId: null,
-        lastRunAt: null,
+      runUntilIdleOrBudget: vi.fn(async () => ({
         nextWakeAt: null,
-        pendingIngressEventCount: 0,
-        userId: "member_123",
+        status: "idle" as const,
       })),
+      runnerStatus: vi.fn(),
     };
     const env = {
       ...harness.env,
@@ -109,9 +101,9 @@ describe("cloudflare worker queue backpressure routes", () => {
       leaseGeneration: "0",
       nextAlarmAt: null,
     });
-    expect(stub.bootstrapUser).toHaveBeenCalledWith("member_123");
+    expect(stub.bindUser).toHaveBeenCalledWith("member_123");
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
-    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
   });
 });
 
@@ -241,7 +233,7 @@ function createStorage() {
   };
 }
 
-function createWake(eventId: string): HostedIngressEnvelope {
+function createWake(eventId: string): HostedExecutionWake {
   return {
     eventId,
     kind: "member.activated",
@@ -257,7 +249,7 @@ function createWake(eventId: string): HostedIngressEnvelope {
 
 async function createSignedWakeRequest(
   path: string,
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
   input: {
     aud?: string;
     boundUserId?: string | null;

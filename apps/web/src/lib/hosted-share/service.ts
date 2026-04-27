@@ -65,8 +65,6 @@ export async function buildHostedSharePageData(input: {
   if (
     lifecycleState === "completed"
     || lifecycleState === "quarantined"
-    || lifecycleState === "replaced"
-    || lifecycleState === null
   ) {
     data = await buildHostedSharePageDataBase({
       ...input,

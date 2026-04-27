@@ -1,9 +1,7 @@
 import { pathToFileURL } from "node:url";
 
 import {
-  formatHostedRuntimeChildResult,
-  parseHostedAssistantRuntimeJobInput,
-  runHostedAssistantRuntimeJobInProcessDetailed,
+  runHostedWorkspaceRuntimeJobInProcess,
 } from "@murphai/assistant-runtime";
 import {
   buildHostedExecutionSafeErrorDetails,
@@ -14,11 +12,21 @@ import {
 } from "@murphai/hosted-execution";
 
 import { buildHostedExecutionRuntimePlatform } from "./runtime-platform.js";
+import {
+  createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
+  createHostedWorkspaceRuntimeBridgeJobOptions,
+} from "./runtime-bridge-workspace.js";
+import {
+  formatHostedExecutionRunnerChildResult,
+  parseHostedExecutionRunnerJobInput,
+  readHostedExecutionRunnerJobUserId,
+  type HostedExecutionWorkspaceRunJobInput,
+} from "./runner-job-transport.js";
 
 interface HostedExecutionChildDependencies {
   emitLog?: typeof emitHostedExecutionStructuredLog;
   readStandardInput?: () => Promise<string>;
-  runInProcess?: typeof runHostedAssistantRuntimeJobInProcessDetailed;
+  runWorkspaceInProcess?: typeof runHostedWorkspaceRuntimeJobInProcess;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   setExitCode?: (value: number) => void;
 }
@@ -26,7 +34,7 @@ interface HostedExecutionChildDependencies {
 interface HostedExecutionChildInput {
   internalWorkerProxyToken: string | null;
   localInternalProxyBaseUrl: string | null;
-  job: ReturnType<typeof parseHostedAssistantRuntimeJobInput>;
+  job: HostedExecutionWorkspaceRunJobInput;
 }
 
 export async function runHostedExecutionChild(
@@ -34,7 +42,8 @@ export async function runHostedExecutionChild(
 ): Promise<void> {
   const emitLog = dependencies.emitLog ?? emitHostedExecutionStructuredLog;
   const readInput = dependencies.readStandardInput ?? readStandardInput;
-  const runInProcess = dependencies.runInProcess ?? runHostedAssistantRuntimeJobInProcessDetailed;
+  const runWorkspaceInProcess =
+    dependencies.runWorkspaceInProcess ?? runHostedWorkspaceRuntimeJobInProcess;
   const stdout = dependencies.stdout ?? process.stdout;
   const setExitCode = dependencies.setExitCode ?? ((value: number) => {
     process.exitCode = value;
@@ -56,7 +65,7 @@ export async function runHostedExecutionChild(
       message: "Hosted node runner child failed to parse its bootstrap payload.",
       phase: "failed",
     });
-    stdout.write(`${formatHostedRuntimeChildResult({
+    stdout.write(`${formatHostedExecutionRunnerChildResult({
       ok: false,
       error: createHostedExecutionChildBootstrapError(error),
     })}\n`);
@@ -75,26 +84,19 @@ export async function runHostedExecutionChild(
         localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
       },
     });
-    const result = await runInProcess(
-      input.job,
-      {
-        platform: buildHostedExecutionRuntimePlatform({
-          boundUserId: input.job.request.runDrain.userId,
-          commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
-          hostedRunId: input.job.request.run.runId,
-          hostedRunToken: input.job.request.runToken ?? null,
-          internalWorkerProxyToken: input.internalWorkerProxyToken,
-          localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
-        }),
-      },
-    );
+    const result = await runWorkspaceChildJob({
+      internalWorkerProxyToken: input.internalWorkerProxyToken,
+      job: input.job,
+      localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
+      runWorkspaceInProcess,
+    });
     emitHostedRunnerChildDebug({
       stage: "after-run",
       payload: {
-        resultPhase: result.phase ?? null,
+        resultPhase: "phase" in result ? result.phase ?? null : null,
       },
     });
-    stdout.write(`${formatHostedRuntimeChildResult({ ok: true, result })}\n`);
+    stdout.write(`${formatHostedExecutionRunnerChildResult({ ok: true, result })}\n`);
   } catch (error) {
     emitHostedRunnerChildDebug({
       stage: "run-error",
@@ -104,7 +106,7 @@ export async function runHostedExecutionChild(
       },
     });
     stdout.write(
-      `${formatHostedRuntimeChildResult({
+      `${formatHostedExecutionRunnerChildResult({
         ok: false,
         error: {
           code:
@@ -123,6 +125,33 @@ export async function runHostedExecutionChild(
     );
     setExitCode(1);
   }
+}
+
+async function runWorkspaceChildJob(input: {
+  internalWorkerProxyToken: string | null;
+  job: HostedExecutionWorkspaceRunJobInput;
+  localInternalProxyBaseUrl: string | null;
+  runWorkspaceInProcess: typeof runHostedWorkspaceRuntimeJobInProcess;
+}) {
+  const platform = buildHostedExecutionRuntimePlatform({
+    boundUserId: readHostedExecutionRunnerJobUserId(input.job),
+    commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
+    internalWorkerProxyToken: input.internalWorkerProxyToken,
+    localInternalProxyBaseUrl: input.localInternalProxyBaseUrl,
+    workspaceCheckpointBridge: {
+      readCurrentLease: () =>
+        createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.job.request),
+    },
+  });
+
+  return await input.runWorkspaceInProcess(
+    input.job,
+    createHostedWorkspaceRuntimeBridgeJobOptions({
+      platform,
+      request: input.job.request,
+      runtime: input.job.runtime ?? {},
+    }),
+  );
 }
 
 async function readStandardInput(): Promise<string> {
@@ -155,7 +184,7 @@ function parseHostedExecutionChildInput(value: unknown): HostedExecutionChildInp
       record.localInternalProxyBaseUrl,
       "Hosted node runner child input.localInternalProxyBaseUrl",
     ),
-    job: parseHostedAssistantRuntimeJobInput(record.job),
+    job: parseHostedExecutionRunnerJobInput(record.job),
   };
 }
 

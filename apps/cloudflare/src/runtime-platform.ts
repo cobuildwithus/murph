@@ -22,8 +22,6 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
-  HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
-  HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
@@ -35,8 +33,8 @@ import {
   buildHostedRuntimeVaultSyncPayloadPath,
 } from "@murphai/hosted-execution/routes";
 import {
-  parseHostedRuntimeDrainEvent,
-} from "@murphai/hosted-execution/parsers";
+  HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
+} from "./runner-email-route.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -64,6 +62,10 @@ import {
   HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH,
   HOSTED_WEB_USAGE_RECORD_PATH,
 } from "./runner-outbound/shared-web-control-policy.ts";
+import {
+  checkpointHostedRuntimeBridgeWebWorkspace,
+  type HostedRuntimeBridgeCheckpointLease,
+} from "./runtime-bridge-checkpoint.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
 
@@ -77,16 +79,22 @@ type HostedWebControlTransport =
     mode: "proxy";
   };
 
+export interface HostedWorkspaceCheckpointBridgeAuthority {
+  readCurrentLease():
+    | HostedRuntimeBridgeCheckpointLease
+    | null
+    | Promise<HostedRuntimeBridgeCheckpointLease | null>;
+}
+
 export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
-  hostedRunId?: string | null;
-  hostedRunToken?: string | null;
   internalWorkerProxyToken?: string | null;
   localInternalProxyBaseUrl?: string | null;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl?: string | null;
+  workspaceCheckpointBridge?: HostedWorkspaceCheckpointBridgeAuthority | null;
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
     input.boundUserId,
@@ -108,13 +116,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         transport: hostedWebControlTransport,
       })
     : null;
-  const hostedTurnInputRun = input.hostedRunId && input.hostedRunToken
-    ? {
-        runId: input.hostedRunId,
-        runToken: input.hostedRunToken,
-      }
-    : null;
-
   return {
     artifactStore: {
       async get(sha256) {
@@ -184,6 +185,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             fetchImpl,
             timeoutMs,
             transport: hostedWebControlTransport,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
         }
       : {}),
@@ -191,7 +193,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
     effectsPort: {
       async readRawEmailMessage(rawMessageKey) {
         const response = await fetchHostedResponse({
-          description: `Hosted raw email read ${rawMessageKey}`,
+          description: "Hosted raw email read",
           fetchImpl,
           timeoutMs,
           url: new URL(
@@ -204,7 +206,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           return null;
         }
 
-        assertHostedOk(response, `Hosted raw email read ${rawMessageKey}`);
+        assertHostedOk(response, "Hosted raw email read");
         return new Uint8Array(await response.arrayBuffer());
       },
       async sendEmail(request) {
@@ -224,35 +226,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         return target ? { target } : undefined;
       },
     },
-    ...(hostedTurnInputRun
-      ? {
-          turnInputPort: {
-            async refresh(refreshInput) {
-              const payload = await fetchHostedJson({
-                body: {
-                  ...(refreshInput.afterSeq === undefined
-                    ? {}
-                    : { afterSeq: refreshInput.afterSeq }),
-                  phase: refreshInput.phase,
-                  requestId: refreshInput.requestId,
-                  runId: hostedTurnInputRun.runId,
-                  runToken: hostedTurnInputRun.runToken,
-                },
-                description: "Hosted turn-input refresh",
-                fetchImpl,
-                method: "POST",
-                timeoutMs,
-                url: new URL(
-                  HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH,
-                  `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
-                ),
-              });
-
-              return parseHostedRuntimeTurnInputRefreshResponse(payload);
-            },
-          },
-        }
-      : {}),
     ...(hostedWebControlTransport
       ? {
           issueExportPort: {
@@ -315,17 +288,17 @@ function resolveHostedWebControlTransport(input: {
   webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl: string | null;
 }): HostedWebControlTransport | null {
+  if (input.internalWorkerProxyToken) {
+    return {
+      mode: "proxy",
+    };
+  }
+
   if (input.webControlBaseUrl && input.webCallbackSigning) {
     return {
       callbackSigning: input.webCallbackSigning,
       mode: "direct",
       webControlBaseUrl: input.webControlBaseUrl,
-    };
-  }
-
-  if (input.internalWorkerProxyToken) {
-    return {
-      mode: "proxy",
     };
   }
 
@@ -348,7 +321,7 @@ function createCloudflareHostedRuntimeFetch(
 
     if (!internalWorkerProxyToken) {
       throw new Error(
-        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing the per-run proxy token.`,
+        `Hosted runtime internal request for ${url.hostname}${url.pathname} is missing the invocation proxy token.`,
       );
     }
 
@@ -375,7 +348,7 @@ function createCloudflareHostedRuntimeFetch(
       component: "assistant-delivery",
       details,
       message: "Hosted runtime internal request started.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: boundUserId,
     });
 
@@ -389,7 +362,7 @@ function createCloudflareHostedRuntimeFetch(
           status: String(response.status),
         },
         message: "Hosted runtime internal request completed.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: boundUserId,
       });
       return response;
@@ -400,7 +373,7 @@ function createCloudflareHostedRuntimeFetch(
         error,
         level: "warn",
         message: "Hosted runtime internal request failed.",
-        phase: "side-effects.draining",
+        phase: "outbox",
         userId: boundUserId,
       });
       throw error;
@@ -583,6 +556,7 @@ function createHostedWebWorkspacePort(input: {
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority | null;
 }) {
   return {
     async read() {
@@ -601,17 +575,34 @@ function createHostedWebWorkspacePort(input: {
     async checkpoint(
       request: Parameters<NonNullable<HostedRuntimePlatform["workspacePort"]>["checkpoint"]>[0],
     ) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
-        boundUserId: input.boundUserId,
-        description: "Hosted workspace checkpoint",
-        fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
+      const checkpointWorkspace = async (
+        checkpointRequest: Parameters<
+          NonNullable<HostedRuntimePlatform["workspacePort"]>["checkpoint"]
+        >[0],
+      ) => {
+        const payload = await fetchHostedWebControlPlaneJson({
+          body: checkpointRequest,
+          boundUserId: input.boundUserId,
+          description: "Hosted workspace checkpoint",
+          fetchImpl: input.fetchImpl,
+          path: HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
+          timeoutMs: input.timeoutMs,
+          transport: input.transport,
+        });
 
-      return parseHostedWorkspaceCheckpointResponse(payload);
+        return parseHostedWorkspaceCheckpointResponse(payload);
+      };
+
+      if (!input.workspaceCheckpointBridge) {
+        return await checkpointWorkspace(request);
+      }
+
+      return await checkpointHostedRuntimeBridgeWebWorkspace({
+        checkpointWorkspace,
+        readCurrentLease: input.workspaceCheckpointBridge.readCurrentLease,
+        request,
+        userId: input.boundUserId,
+      });
     },
   };
 }
@@ -825,7 +816,7 @@ async function fetchHostedWebControlPlaneJson(input: {
       error,
       level: "warn",
       message: "Hosted runtime control-plane response returned non-OK.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: input.boundUserId,
     });
     throw error;
@@ -943,7 +934,7 @@ async function fetchHostedJson(input: {
       error,
       level: "warn",
       message: "Hosted runtime upstream response returned non-OK.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: null,
     });
     throw error;
@@ -986,7 +977,7 @@ async function fetchHostedResponse(input: {
       error,
       level: "warn",
       message: "Hosted runtime upstream request failed.",
-      phase: "side-effects.draining",
+      phase: "outbox",
       userId: null,
     });
     throw new Error(
@@ -1029,7 +1020,7 @@ function assertHostedOk(response: Response, description: string): void {
     error,
     level: "warn",
     message: "Hosted runtime upstream response returned non-OK.",
-    phase: "side-effects.draining",
+    phase: "outbox",
     userId: null,
   });
   throw error;
@@ -1050,26 +1041,6 @@ function readOptionalStringField(value: unknown, field: string): string | null {
   }
 
   return entry;
-}
-
-function parseHostedRuntimeTurnInputRefreshResponse(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted turn-input refresh response must be an object.");
-  }
-
-  const events = (value as Record<string, unknown>).events;
-  if (!Array.isArray(events)) {
-    throw new TypeError("Hosted turn-input refresh response.events must be an array.");
-  }
-
-  return {
-    events: events.map((event, index) =>
-      parseHostedRuntimeDrainEvent(
-        event,
-        `Hosted turn-input refresh response events[${index}]`,
-      )
-    ),
-  };
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

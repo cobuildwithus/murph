@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   deleteHostedSharePayload,
+  HOSTED_SHARE_PAYLOAD_SCHEMA,
   projectHostedSharePayloadState,
 } from "@/src/lib/hosted-share/shared";
 
@@ -64,8 +65,13 @@ export const GET = withJsonError(async (
   const payload = projectHostedSharePayloadState(record);
 
   return jsonOk({
-    ownerUserId,
-    pack: payload.pack,
-    shareId,
+    fetchedAt: now.toISOString(),
+    payload: {
+      ownerUserId,
+      pack: payload.pack,
+      payloadSchema: HOSTED_SHARE_PAYLOAD_SCHEMA,
+      shareId,
+    },
+    unavailable: null,
   });
 });

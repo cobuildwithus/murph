@@ -10,25 +10,25 @@ const mocks = vi.hoisted(() => ({
   incrementHostedLinqOutboundDailyState: vi.fn(),
   issueHostedInviteTx: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
-  materializeHostedIngressEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
-  nudgeHostedRunUserBestEffort: vi.fn(),
+  nudgeHostedRunnerUserBestEffort: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-ingress/lifecycle", () => ({
-  materializeHostedIngressEnvelopeTx: mocks.materializeHostedIngressEnvelopeTx,
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-ingress/control", () => ({
-  nudgeHostedRunUserBestEffort: mocks.nudgeHostedRunUserBestEffort,
+vi.mock("@/src/lib/hosted-runner/control", () => ({
+  nudgeHostedRunnerUserBestEffort: mocks.nudgeHostedRunnerUserBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -97,9 +97,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     });
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(undefined);
-    mocks.materializeHostedIngressEnvelopeTx.mockResolvedValue({ eventId: "evt_123" });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({ eventId: "evt_123" });
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
-    mocks.nudgeHostedRunUserBestEffort.mockResolvedValue(true);
+    mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue(true);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });
@@ -123,8 +123,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.materializeHostedIngressEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
@@ -192,8 +192,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.materializeHostedIngressEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("appends and hands off the active-member wake without any direct Linq send", async () => {
@@ -233,9 +233,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       recipientPhone: "+15550000000",
     });
-    expect(mocks.materializeHostedIngressEnvelopeTx).toHaveBeenCalledWith({
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       tx: prisma,
-      wake: expect.objectContaining({
+      envelope: expect.objectContaining({
         eventId: "evt_123",
         kind: "conversation.message",
         occurredAt: "2026-03-26T12:00:00.000Z",
@@ -248,7 +248,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         }),
       }),
     });
-    expect(mocks.nudgeHostedRunUserBestEffort).toHaveBeenCalledWith({
+    expect(mocks.nudgeHostedRunnerUserBestEffort).toHaveBeenCalledWith({
       context: "webhook:linq",
       userId: "member_123",
     });

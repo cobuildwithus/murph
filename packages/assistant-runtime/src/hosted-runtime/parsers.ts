@@ -1,10 +1,6 @@
 import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
-import {
-  parseHostedRuntimeDrainRequest,
-  parseHostedExecutionRunnerRequest,
-} from "@murphai/hosted-execution/parsers";
 
 import type {
   HostedAssistantWorkspaceRuntimeJobInput,
@@ -12,25 +8,10 @@ import type {
   HostedAssistantRuntimeManagedAutoReplyChannel,
   HostedAssistantRuntimeResolvedConfig,
   HostedAssistantRuntimeConfig,
-  HostedAssistantRuntimeJobInput,
-  HostedAssistantRuntimeJobRequest,
 } from "./models.ts";
 import {
   createDefaultHostedManagedAutoReplyChannels,
 } from "./managed-auto-reply.ts";
-
-export function parseHostedAssistantRuntimeJobInput(
-  value: unknown,
-): HostedAssistantRuntimeJobInput {
-  const record = requireObject(value, "Hosted assistant runtime job input");
-
-  return {
-    request: parseHostedAssistantRuntimeJobRequest(record.request),
-    ...(record.runtime === undefined || record.runtime === null
-      ? {}
-      : { runtime: parseHostedAssistantRuntimeConfig(record.runtime) }),
-  };
-}
 
 export function parseHostedAssistantWorkspaceRuntimeJobInput(
   value: unknown,
@@ -105,40 +86,6 @@ export function parseHostedAssistantWorkspaceRuntimeJobRequest(
       record.workspaceVersion,
       "Hosted assistant workspace runtime job request.workspaceVersion",
     ),
-  };
-}
-
-export function parseHostedAssistantRuntimeJobRequest(
-  value: unknown,
-): HostedAssistantRuntimeJobRequest {
-  const record = requireObject(value, "Hosted assistant runtime job request");
-
-  if (record.runDrain === undefined || record.runDrain === null) {
-    throw new TypeError("Hosted assistant runtime job request.runDrain is required.");
-  }
-
-  if (record.wake !== undefined) {
-    throw new TypeError(
-      "Hosted assistant runtime job request.wake is no longer supported; use request.runDrain.",
-    );
-  }
-
-  const runDrain = parseHostedRuntimeDrainRequest(record.runDrain);
-  const request = parseHostedExecutionRunnerRequest({
-    ...record,
-    runDrain,
-  });
-
-  return {
-    ...request,
-    ...(record.runToken === undefined
-      ? {}
-      : {
-          runToken: readNullableString(
-            record.runToken,
-            "Hosted assistant runtime job request runToken",
-          ),
-        }),
   };
 }
 

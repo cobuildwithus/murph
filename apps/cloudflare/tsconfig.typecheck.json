@@ -22,10 +22,8 @@
     "test/helpers/hosted-local-full-stack-scenario.ts",
     "test/helpers/hosted-local-linq-support.ts",
     "test/helpers/hosted-local-telegram-support.ts",
-    "test/helpers/hosted-local-test-worker-fixture.ts",
     "test/helpers/hosted-local-wake.test.ts",
     "test/helpers/hosted-local-wake.ts",
-    "test/hosted-local-duplicate-commit-e2e.test.ts",
     "test/hosted-local-linq-first-contact-e2e.test.ts",
     "test/hosted-local-linq-webhook-e2e.test.ts",
     "test/hosted-local-telegram-first-contact-e2e.test.ts"

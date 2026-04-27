@@ -12,10 +12,7 @@ import type {
 } from "./bundles.ts";
 import type { SharePack } from "@murphai/contracts";
 import type {
-  HostedExecutionRunContext,
-  HostedExecutionRunLevel,
-  HostedExecutionRunStatus,
-  HostedExecutionTimelineEntry,
+  HostedExecutionLogLevel,
 } from "./observability.ts";
 
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
@@ -46,10 +43,10 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "vault.sync.import",
 ] as const;
 
-export type HostedIngressKind =
+export type HostedExecutionWakeKind =
   (typeof HOSTED_EXECUTION_WAKE_KINDS)[number];
 export type HostedExecutionBaseWakeKind =
-  | HostedIngressKind
+  | HostedExecutionWakeKind
   | "runtime.timer";
 
 export const HOSTED_EXECUTION_CONVERSATION_MESSAGE_CHANNELS = [
@@ -204,26 +201,6 @@ export interface HostedExecutionRunnerVaultSyncImport {
   sourceSchemaVersion?: string | null;
 }
 
-export interface HostedRuntimeDrainEvent {
-  ingressEventId: string;
-  seq: string;
-  sharePack?: HostedExecutionRunnerSharePack | null;
-  vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
-  wake: HostedRuntimeEvent;
-}
-
-export interface HostedRuntimeDrainRequest {
-  acquiredAt: string;
-  committedResult?: HostedExecutionRunnerResult | null;
-  events: HostedRuntimeDrainEvent[];
-  inputCommittedSeq: string;
-  inputCursorVersion: string;
-  resumeFinalize?: boolean | null;
-  runId: string;
-  triggerKind: HostedRunTriggerKind;
-  userId: string;
-}
-
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionMemberChannelsUpdatedEvent
@@ -339,10 +316,10 @@ export interface HostedExecutionVaultSyncImportWake extends HostedExecutionBaseW
 
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
   kind: "runtime.timer";
-  triggerKind: HostedRunTriggerKind;
+  triggerKind: HostedRuntimeTimerTriggerKind;
 }
 
-export type HostedIngressEnvelope =
+export type HostedExecutionWake =
   | HostedExecutionConversationMessageWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
@@ -352,106 +329,27 @@ export type HostedIngressEnvelope =
   | HostedExecutionVaultSyncImportWake;
 
 export type HostedRuntimeEvent =
-  | HostedIngressEnvelope
+  | HostedExecutionWake
   | HostedExecutionRuntimeTimerWake;
 
-export type HostedExecutionWake = HostedIngressEnvelope;
-export type HostedIngressSystemEnvelope = Exclude<
-  HostedIngressEnvelope,
+export type HostedExecutionSystemWake = Exclude<
+  HostedExecutionWake,
   HostedExecutionConversationMessageWake
 >;
 
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
-export type HostedIngressSnapshotRef = HostedExecutionBundleRefState;
-
-export interface HostedExecutionRunnerRequest {
-  bundle: HostedExecutionBundlePayload;
-  currentBundleRef?: HostedIngressSnapshotRef | null;
-  run: HostedExecutionRunContext;
-  runDrain: HostedRuntimeDrainRequest;
-}
+export type HostedExecutionSnapshotRef = HostedExecutionBundleRefState;
 
 export interface HostedExecutionRedactedLogEntry {
   component: string;
   eventId?: string | null;
-  level: HostedExecutionRunLevel;
+  level: HostedExecutionLogLevel;
   message: string;
   phase: string;
   redacted?: Record<string, unknown> | null;
 }
 
-export interface HostedExecutionRunnerResult {
-  bundle: HostedExecutionBundlePayload;
-  result: {
-    adoptedCleanupTargets?: HostedRunCleanupTarget[];
-    adoptedEventResults?: HostedRunEventResult[];
-    eventsHandled: number;
-    nextWakeAt?: string | null;
-    redactedDetails?: Record<string, unknown> | null;
-    redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
-    summary: string;
-  };
-}
-
 export type HostedExecutionBundleRef = RuntimeHostedExecutionBundleRef;
-
-export interface HostedExecutionUserStatus {
-  bundleRef: HostedExecutionBundleRefState;
-  inFlight: boolean;
-  lastError: string | null;
-  lastErrorAt?: string | null;
-  lastErrorCode?: string | null;
-  lastEventId: string | null;
-  lastRunAt: string | null;
-  nextWakeAt: string | null;
-  pendingIngressEventCount: number;
-  run?: HostedExecutionRunStatus | null;
-  timeline?: HostedExecutionTimelineEntry[];
-  userId: string;
-}
-
-export interface HostedRunDrainResult {
-  committedSeq: string;
-  requestedTargetSeq: string | null;
-  targetReached: boolean;
-}
-
-export interface HostedRunNudgeResult {
-  accepted: boolean;
-  alarmScheduled: boolean;
-  alreadyRunning: boolean;
-}
-
-export const HOSTED_RUN_STALE_RUNNER_USER_ERROR_CODE = "HOSTED_RUN_STALE_RUNNER_USER";
-
-export const HOSTED_INGRESS_LIFECYCLE_STATES = [
-  "queued",
-  "backpressured",
-  "completed",
-  "replaced",
-  "quarantined",
-] as const;
-
-export type HostedIngressLifecycleState =
-  (typeof HOSTED_INGRESS_LIFECYCLE_STATES)[number];
-
-export const HOSTED_INGRESS_BEHAVIORS = [
-  "ordered",
-  "coalescing",
-] as const;
-
-export type HostedIngressBehavior =
-  (typeof HOSTED_INGRESS_BEHAVIORS)[number];
-
-export const HOSTED_INGRESS_PAYLOAD_SCHEMA = "murph.hosted-ingress-execution.v1";
-
-export const HOSTED_INGRESS_PAYLOAD_SCHEMAS = [
-  HOSTED_INGRESS_PAYLOAD_SCHEMA,
-] as const;
-
-export type HostedIngressPayloadSchema =
-  (typeof HOSTED_INGRESS_PAYLOAD_SCHEMAS)[number];
-
 
 export const HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA = "murph.hosted-browser-vault-replica-ref.v1";
 
@@ -468,292 +366,14 @@ export interface HostedBrowserVaultReplicaRef {
 
 export type HostedBrowserVaultReplicaCursorRef = HostedBrowserVaultReplicaRef | null;
 
-export interface HostedExecutionCursorState {
-  committedSeq: string;
-  createdAt: string;
-  nextSeq: string;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
-  snapshotRef: HostedIngressSnapshotRef;
-  updatedAt: string;
-  userId: string;
-  version: string;
-}
-
-interface HostedIngressEventBase {
-  behavior: HostedIngressBehavior;
-  coalescingKey?: string | null;
-  createdAt: string;
-  dedupeKey?: string | null;
-  id: string;
-  occurredAt: string;
-  payloadBytes?: number | null;
-  payloadCiphertext?: string | null;
-  quarantineCode?: string | null;
-  quarantinedAt?: string | null;
-  seq: string;
-  updatedAt: string;
-  userId: string;
-}
-
-export interface HostedConversationMessageWakeRecord extends HostedIngressEventBase {
-  kind: "conversation.message";
-  payloadSchema: typeof HOSTED_INGRESS_PAYLOAD_SCHEMA;
-}
-
-export interface HostedSystemWakeRecord extends HostedIngressEventBase {
-  kind: HostedIngressSystemEnvelope["kind"];
-  payloadSchema: typeof HOSTED_INGRESS_PAYLOAD_SCHEMA;
-}
-
-export type HostedIngressEvent =
-  | HostedConversationMessageWakeRecord
-  | HostedSystemWakeRecord;
-
-export interface HostedIngressAppendResponse {
-  duplicate: boolean;
-  inserted: boolean;
-  updatedExisting: boolean;
-  wake: HostedIngressEvent;
-}
-
-export const HOSTED_RUN_STATUSES = [
-  "acquired",
-  "running",
-  "finalizing",
-  "committed_needs_finalize",
-  "finalized",
-  "failed",
-  "superseded",
-] as const;
-
-export type HostedRunStatus = (typeof HOSTED_RUN_STATUSES)[number];
-
-export const HOSTED_RUN_TRIGGER_KINDS = [
+export const HOSTED_RUNTIME_TIMER_TRIGGER_KINDS = [
   "external_ingress",
   "runtime_timer",
   "manual_repair",
-  "retry_finalize",
 ] as const;
 
-export type HostedRunTriggerKind = (typeof HOSTED_RUN_TRIGGER_KINDS)[number];
-
-export const HOSTED_RUN_EXECUTOR_KINDS = [
-  "cloudflare-container",
-  "tee",
-  "local-replay",
-] as const;
-
-export type HostedRunExecutorKind = (typeof HOSTED_RUN_EXECUTOR_KINDS)[number];
-
-export const HOSTED_RUN_LOG_LEVELS = [
-  "debug",
-  "info",
-  "warn",
-  "error",
-] as const;
-
-export type HostedRunLogLevel = (typeof HOSTED_RUN_LOG_LEVELS)[number];
-
-export interface HostedRunRecord {
-  acquiredAt: string;
-  attempt: number;
-  committedAt?: string | null;
-  createdAt: string;
-  errorClass?: string | null;
-  errorCode?: string | null;
-  eventCount: number;
-  eventKinds: string[];
-  eventSeqs: string[];
-  executorKind: HostedRunExecutorKind;
-  executorCodeDigest?: string | null;
-  attestationRef?: string | null;
-  signedResultRef?: string | null;
-  failedAt?: string | null;
-  finalSnapshotRef?: HostedIngressSnapshotRef;
-  finalizedAt?: string | null;
-  id: string;
-  inputCommittedSeq: string;
-  inputCursorVersion: string;
-  inputSnapshotRef?: HostedIngressSnapshotRef;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  outputCommittedSeq?: string | null;
-  outputCursorVersion?: string | null;
-  preparedAt?: string | null;
-  preparedSnapshotRef?: HostedIngressSnapshotRef;
-  redactedSummary?: unknown | null;
-  startedAt?: string | null;
-  status: HostedRunStatus;
-  triggerKind: HostedRunTriggerKind;
-  updatedAt: string;
-  userId: string;
-  ingressEventIds: string[];
-}
-
-export interface HostedRunLogRecord {
-  at: string;
-  component: string;
-  createdAt: string;
-  id: string;
-  level: HostedRunLogLevel;
-  message: string;
-  phase: string;
-  redacted?: unknown | null;
-  runId: string;
-  userId: string;
-}
-
-export interface HostedRunAcquireRequest {
-  executorKind?: HostedRunExecutorKind | null;
-  executorCodeDigest?: string | null;
-  attestationRef?: string | null;
-  signedResultRef?: string | null;
-  limit?: number | null;
-  now?: string | null;
-  triggerKind?: HostedRunTriggerKind | null;
-}
-
-export interface HostedRunAcquireResponse {
-  acquired: boolean;
-  cursor: HostedExecutionCursorState;
-  events: HostedIngressEvent[];
-  pendingIngressEventCount: number;
-  resumeFinalize: boolean;
-  run: HostedRunRecord | null;
-  runToken?: string | null;
-}
-
-export interface HostedRunTurnInputPeekRequest {
-  afterSeq?: string | null;
-  limit?: number | null;
-  runId: string;
-  runToken: string;
-}
-
-export interface HostedRunTurnInputPeekResponse {
-  events: HostedIngressEvent[];
-  run: HostedRunRecord | null;
-}
-
-export interface HostedRunTurnInputAdoptRequest {
-  afterSeq?: string | null;
-  ingressEventIds: string[];
-  runId: string;
-  runToken: string;
-}
-
-export interface HostedRunTurnInputAdoptResponse {
-  adopted: boolean;
-  events: HostedIngressEvent[];
-  run: HostedRunRecord | null;
-}
-
-export interface HostedRunEventResult {
-  ingressEventId: string;
-  quarantineCode?: string | null;
-  state: "completed" | "quarantined";
-}
-
-export type HostedRunCleanupTarget =
-  | {
-      channel: "email";
-      eventId: string;
-      rawMessageKey: string;
-      userId: string;
-    }
-  | {
-      channel: "linq";
-      messageId: string;
-    }
-  | {
-      channel: "telegram";
-      messageId: string;
-      target: string;
-    };
-
-export interface HostedRunCommitRequest {
-  eventResults?: HostedRunEventResult[];
-  expectedCursorVersion: string;
-  failureClass?: string | null;
-  failureCode?: string | null;
-  finalizeRequired: boolean;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  outputCommittedSeq: string;
-  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
-  preparedSnapshotRef?: HostedIngressSnapshotRef;
-  redactedSummary?: unknown | null;
-  runId: string;
-  runToken: string;
-}
-
-export interface HostedRunCommitResponse {
-  committed: boolean;
-  cursor: HostedExecutionCursorState;
-  needsFinalize: boolean;
-  run: HostedRunRecord | null;
-}
-
-export interface HostedRunFinalizeRequest {
-  browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
-  finalSnapshotRef: HostedIngressSnapshotRef;
-  nextRuntimeWakeAt?: string | null;
-  nextRuntimeWakeReason?: string | null;
-  redactedSummary?: unknown | null;
-  runId: string;
-  runToken: string;
-}
-
-export interface HostedRunFinalizeResponse {
-  cursor: HostedExecutionCursorState;
-  finalized: boolean;
-  run: HostedRunRecord | null;
-}
-
-export interface HostedRunReleaseFinalizeRequest {
-  failureClass?: string | null;
-  failureCode?: string | null;
-  runId: string;
-  runToken: string;
-}
-
-export interface HostedRunReleaseFinalizeResponse {
-  cursor: HostedExecutionCursorState;
-  released: boolean;
-  run: HostedRunRecord | null;
-}
-
-export interface HostedRunLogRequest {
-  at?: string | null;
-  component: string;
-  level: HostedRunLogLevel;
-  message: string;
-  phase: string;
-  redacted?: unknown | null;
-  runId: string;
-  runToken: string;
-}
-
-export interface HostedRunLogResponse {
-  logged: boolean;
-  log: HostedRunLogRecord | null;
-}
-
-export interface HostedRunStatusRequest {
-  includeLogs?: boolean | null;
-  limit?: number | null;
-  runId?: string | null;
-}
-
-export interface HostedRunStatusResponse {
-  cursor: HostedExecutionCursorState;
-  logs?: HostedRunLogRecord[];
-  pendingIngressEventCount: number;
-  run: HostedRunRecord | null;
-  runs?: HostedRunRecord[];
-}
+export type HostedRuntimeTimerTriggerKind =
+  (typeof HOSTED_RUNTIME_TIMER_TRIGGER_KINDS)[number];
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
@@ -768,10 +388,10 @@ export type HostedExecutionDeviceSyncWakeHint =
 export const HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR =
   "Hosted execution wake handling is not configured.";
 
-export function isHostedIngressKind(
+export function isHostedExecutionWakeKind(
   kind: string,
-): kind is HostedIngressKind {
-  return HOSTED_EXECUTION_WAKE_KINDS.includes(kind as HostedIngressKind);
+): kind is HostedExecutionWakeKind {
+  return HOSTED_EXECUTION_WAKE_KINDS.includes(kind as HostedExecutionWakeKind);
 }
 
 export function isHostedConversationMessageChannel(
@@ -783,7 +403,7 @@ export function isHostedConversationMessageChannel(
 }
 
 export function isHostedConversationMessageWake(
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
 ): wake is HostedExecutionConversationMessageWake {
   return wake.kind === "conversation.message";
 }
@@ -795,13 +415,13 @@ export function isHostedRuntimeTimerWake(
 }
 
 export function isHostedSystemWake(
-  wake: HostedIngressEnvelope,
-): wake is HostedIngressSystemEnvelope {
+  wake: HostedExecutionWake,
+): wake is HostedExecutionSystemWake {
   return wake.kind !== "conversation.message";
 }
 
 export function isHostedLinqConversationMessageWake(
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
 ): wake is HostedExecutionConversationMessageWake & {
   message: HostedExecutionLinqConversationMessagePayload;
 } {
@@ -809,7 +429,7 @@ export function isHostedLinqConversationMessageWake(
 }
 
 export function isHostedTelegramConversationMessageWake(
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
 ): wake is HostedExecutionConversationMessageWake & {
   message: HostedExecutionTelegramConversationMessagePayload;
 } {
@@ -817,7 +437,7 @@ export function isHostedTelegramConversationMessageWake(
 }
 
 export function isHostedEmailConversationMessageWake(
-  wake: HostedIngressEnvelope,
+  wake: HostedExecutionWake,
 ): wake is HostedExecutionConversationMessageWake & {
   message: HostedExecutionEmailConversationMessagePayload;
 } {

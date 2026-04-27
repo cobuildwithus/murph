@@ -13,8 +13,8 @@ import {
   extractHostedAssistantNotificationRedactedDetails,
   formatHostedExecutionLogMessage,
   isHostedAssistantDeliveryKind,
-  isHostedExecutionRunLevel,
-  isHostedExecutionRunPhase,
+  isHostedExecutionLogLevel,
+  isHostedExecutionLogPhase,
   normalizeHostedExecutionErrorMessage,
   normalizeHostedExecutionOperatorMessage,
   parseHostedAssistantDeliveryRecord,
@@ -64,8 +64,8 @@ describe("hosted execution observability", () => {
     const cases: Array<[unknown, string]> = [
       [Object.assign(new Error("bad"), { name: "HostedExecutionConfigurationError" }), "configuration_error"],
       [new Error("HOSTED_EXECUTION_TOKEN must be configured."), "configuration_error"],
-      [new Error("durable commit failed"), "durable_commit_error"],
-      [new Error("durable finalize failed"), "durable_finalize_error"],
+      [new Error("checkpoint failed"), "checkpoint_error"],
+      [new Error("outbox failed"), "outbox_error"],
       [new Error("Runner returned HTTP 502"), "runner_http_error"],
       [new Error("forbidden by authorization policy"), "authorization_error"],
       [
@@ -104,10 +104,10 @@ describe("hosted execution observability", () => {
   });
 
   it("validates run phases, levels, and raw error-message normalization", () => {
-    expect(isHostedExecutionRunPhase("claimed")).toBe(true);
-    expect(isHostedExecutionRunPhase("not-a-phase")).toBe(false);
-    expect(isHostedExecutionRunLevel("warn")).toBe(true);
-    expect(isHostedExecutionRunLevel("verbose")).toBe(false);
+    expect(isHostedExecutionLogPhase("wake.running")).toBe(true);
+    expect(isHostedExecutionLogPhase("not-a-phase")).toBe(false);
+    expect(isHostedExecutionLogLevel("warn")).toBe(true);
+    expect(isHostedExecutionLogLevel("verbose")).toBe(false);
 
     expect(normalizeHostedExecutionErrorMessage(new Error("  boom  "))).toBe("boom");
     expect(
@@ -122,7 +122,7 @@ describe("hosted execution observability", () => {
 
     expect(
       normalizeHostedExecutionOperatorMessage(
-        "Authorization: Bearer secret-token hello user@example.com token=my-token "
+        "Authorization: Bearer placeholder hello user@example.com token=my-token "
         + "phone=+15551234567 eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
       ),
     ).toBe(
@@ -188,17 +188,11 @@ describe("hosted execution observability", () => {
       eventId: "evt_fallback",
       message: "  Bearer top-secret user@example.com  ",
       phase: "runtime.starting",
-      run: {
-        attempt: 2,
-        runId: "run_123",
-        startedAt: "2026-04-08T00:00:00.000Z",
-      },
       time: "2026-04-08T00:01:00.000Z",
       userId: "user_123",
     });
 
     expect(record).toMatchObject({
-      attempt: 2,
       component: "runner",
       details: {
         errorDetail: "wrong type",
@@ -211,7 +205,6 @@ describe("hosted execution observability", () => {
       message:
         "Bearer [redacted] [redacted-email] Hosted execution runtime failed. Detail: wrong type",
       phase: "runtime.starting",
-      runId: "run_123",
       schema: "murph.hosted-execution.log.v1",
       time: "2026-04-08T00:01:00.000Z",
       userId: "user_123",
@@ -222,7 +215,7 @@ describe("hosted execution observability", () => {
       component: "runner",
       error: Object.assign(new Error("plain failure"), { name: "TotallyCustomError" }),
       message: "started",
-      phase: "claimed",
+      phase: "wake.running",
     });
 
     expect(unsafeErrorRecord.errorName).toBeUndefined();
@@ -280,8 +273,8 @@ describe("hosted execution observability", () => {
     const record = buildHostedExecutionStructuredLogRecord({
       component: "runner",
       error,
-      message: "Hosted run drain failed after invoking the runtime.",
-      phase: "retry.scheduled",
+      message: "Hosted runtime checkpoint failed after invoking the runtime.",
+      phase: "scheduled",
     });
 
     expect(record).toMatchObject({
@@ -289,7 +282,7 @@ describe("hosted execution observability", () => {
       errorMessage: "Hosted bundle archive validation failed.",
       errorName: "HostedBundleArchiveValidationError",
       message:
-        "Hosted run drain failed after invoking the runtime. Hosted bundle archive validation failed. Detail: Hosted bundle archive is invalid. Code: bundle_archive_validation_error",
+        "Hosted runtime checkpoint failed after invoking the runtime. Hosted bundle archive validation failed. Detail: Hosted bundle archive is invalid. Code: bundle_archive_validation_error",
     });
     expect(record.details).toMatchObject({
       bundleArchiveOperation: "runner-input",
@@ -551,13 +544,13 @@ describe("hosted execution observability", () => {
       component: "runner",
       level: "info",
       message: "default info",
-      phase: "claimed",
+      phase: "wake.running",
     });
     expect(infoSpy).toHaveBeenCalledTimes(1);
     expect(JSON.parse(infoSpy.mock.calls[0]?.[0] as string)).toMatchObject({
       level: "info",
       message: "default info",
-      phase: "claimed",
+      phase: "wake.running",
     });
 
     process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "on";
@@ -565,7 +558,7 @@ describe("hosted execution observability", () => {
       component: "runner",
       level: "warn",
       message: "warn",
-      phase: "retry.scheduled",
+      phase: "scheduled",
     });
     emitHostedExecutionStructuredLog({
       component: "runner",
@@ -579,7 +572,7 @@ describe("hosted execution observability", () => {
     expect(JSON.parse(warnSpy.mock.calls[0]?.[0] as string)).toMatchObject({
       level: "warn",
       message: "warn",
-      phase: "retry.scheduled",
+      phase: "scheduled",
     });
 
     process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "off";
@@ -587,7 +580,7 @@ describe("hosted execution observability", () => {
       component: "runner",
       level: "info",
       message: "quiet again",
-      phase: "completed",
+      phase: "outbox",
     });
     expect(infoSpy).toHaveBeenCalledTimes(1);
   });
@@ -638,7 +631,7 @@ describe("hosted execution observability", () => {
     });
     error.stack = [
       "Error: Top level detail",
-      "    at first (/Users/example/project/index.ts:10:5)",
+      "    at first (/home/example/project/index.ts:10:5)",
       "    at second (/home/example/app/runtime.ts:4:1)",
     ].join("\n");
 

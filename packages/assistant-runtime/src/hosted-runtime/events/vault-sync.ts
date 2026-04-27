@@ -11,16 +11,16 @@ import {
 import { decodeHostedBundleBase64 } from "@murphai/runtime-state/node";
 import type {
   HostedExecutionRunnerVaultSyncImport,
-  HostedIngressEnvelope,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution";
 
-import type { HostedIngressEffect } from "../models.ts";
+import type { HostedMailboxEffect } from "../models.ts";
 
 export async function handleHostedVaultSyncImportWake(input: {
   vaultRoot: string;
   vaultSyncImport: HostedExecutionRunnerVaultSyncImport;
-  wake: Extract<HostedIngressEnvelope, { kind: "vault.sync.import" }>;
-}): Promise<HostedIngressEffect> {
+  wake: Extract<HostedExecutionWake, { kind: "vault.sync.import" }>;
+}): Promise<HostedMailboxEffect> {
   const importRef = input.wake.vaultSync;
   const pack = input.vaultSyncImport;
   const wakeSourceSchemaVersion = requireSupportedSourceSchemaVersion(

@@ -18,14 +18,15 @@ import type {
   HostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  HostedIngressEnvelope,
+  HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
-import { encryptHostedIngressNullableString } from "../hosted-ingress/encryption";
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
+import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
+import { encryptHostedMailboxNullableString } from "./encryption";
 
 export {
   HOSTED_MAILBOX_KINDS,
@@ -82,7 +83,7 @@ export interface FetchHostedMailboxItemsResult {
   items: HostedMailboxItemRecord[];
 }
 
-export type HostedMailboxProducerEnvelope = HostedIngressEnvelope;
+export type HostedMailboxProducerEnvelope = HostedExecutionWake;
 
 interface AppendHostedMailboxItemBaseInput {
   dedupeKey: string;
@@ -158,6 +159,11 @@ export async function appendHostedMailboxItemTx(
     ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
   const payloadBytes = requirePositivePayloadBytes(input.payloadBytes);
   const payloadHash = normalizeNullableString(input.payloadHash);
+  await acquireHostedMailboxDedupeLockTx({
+    dedupeKey,
+    tx: input.tx,
+    userId,
+  });
   const existing = await findHostedMailboxItemByDedupeKeyTx({
     dedupeKey,
     tx: input.tx,
@@ -165,16 +171,29 @@ export async function appendHostedMailboxItemTx(
   });
 
   if (existing) {
+    const dedupeConflict = hasHostedMailboxDedupeConflict({
+      existing,
+      kind,
+      lane,
+      payloadBytes,
+      payloadHash,
+      payloadSchema,
+    });
+    await recordHostedMailboxDedupeConflictLogTx({
+      dedupeConflict,
+      existing,
+      kind,
+      lane,
+      payloadBytes,
+      payloadHash,
+      payloadSchema,
+      tx: input.tx,
+      userId,
+    });
+
     return {
       duplicate: true,
-      dedupeConflict: hasHostedMailboxDedupeConflict({
-        existing,
-        kind,
-        lane,
-        payloadBytes,
-        payloadHash,
-        payloadSchema,
-      }),
+      dedupeConflict,
       inserted: false,
       item: await hydrateHostedMailboxItemTx({
         record: existing,
@@ -193,23 +212,99 @@ export async function appendHostedMailboxItemTx(
     tx: input.tx,
     userId,
   });
-  const item = await input.tx.hostedMailboxItem.create({
-    data: {
+  const inserted = await input.tx.$queryRaw<HostedMailboxItemRow[]>`
+    INSERT INTO hosted_mailbox_item (
+      id,
+      user_id,
+      lane,
+      lane_seq,
+      dedupe_key,
+      kind,
+      occurred_at,
+      payload_schema,
+      payload_inline_ciphertext,
+      payload_ref,
+      payload_bytes,
+      payload_hash,
+      expires_at,
+      updated_at
+    )
+    VALUES (
+      ${itemId},
+      ${userId},
+      ${lane},
+      ${laneSeq},
+      ${dedupeKey},
+      ${kind},
+      ${occurredAt},
+      ${payloadSchema},
+      ${payloadStorage.payloadInlineCiphertext},
+      ${payloadStorage.payloadRef},
+      ${payloadBytes},
+      ${payloadHash},
+      ${expiresAt},
+      NOW()
+    )
+    ON CONFLICT (user_id, dedupe_key) DO NOTHING
+    RETURNING
+      id,
+      user_id AS "userId",
+      lane,
+      lane_seq AS "laneSeq",
+      dedupe_key AS "dedupeKey",
+      kind,
+      occurred_at AS "occurredAt",
+      payload_schema AS "payloadSchema",
+      payload_inline_ciphertext AS "payloadInlineCiphertext",
+      payload_ref AS "payloadRef",
+      payload_bytes AS "payloadBytes",
+      payload_hash AS "payloadHash",
+      expires_at AS "expiresAt",
+      created_at AS "createdAt",
+      updated_at AS "updatedAt"
+  `;
+  const item = inserted[0] ?? null;
+
+  if (!item) {
+    const concurrentExisting = await findHostedMailboxItemByDedupeKeyTx({
       dedupeKey,
-      expiresAt,
-      id: itemId,
+      tx: input.tx,
+      userId,
+    });
+
+    if (!concurrentExisting) {
+      throw new Error("Hosted mailbox append conflict could not be resolved.");
+    }
+
+    const dedupeConflict = hasHostedMailboxDedupeConflict({
+      existing: concurrentExisting,
       kind,
       lane,
-      laneSeq,
-      occurredAt,
       payloadBytes,
       payloadHash,
-      payloadInlineCiphertext: payloadStorage.payloadInlineCiphertext,
-      payloadRef: payloadStorage.payloadRef,
       payloadSchema,
+    });
+    await recordHostedMailboxDedupeConflictLogTx({
+      dedupeConflict,
+      existing: concurrentExisting,
+      kind,
+      lane,
+      payloadBytes,
+      payloadHash,
+      payloadSchema,
+      tx: input.tx,
       userId,
-    },
-  });
+    });
+
+    return {
+      duplicate: true,
+      dedupeConflict,
+      inserted: false,
+      item: await hydrateHostedMailboxItemTx({
+        record: concurrentExisting,
+      }),
+    };
+  }
 
   if (payloadStorage.storage === "ref") {
     await input.tx.hostedMailboxPayload.create({
@@ -237,6 +332,15 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   const envelope = input.envelope;
+  await input.tx.hostedWorkspace.upsert({
+    create: {
+      userId: envelope.userId,
+    },
+    update: {},
+    where: {
+      userId: envelope.userId,
+    },
+  });
   const encodedPayload = encodeHostedMailboxStoredPayload({
     userId: envelope.userId,
     value: envelope,
@@ -355,6 +459,7 @@ export async function readHostedMailboxItemByDedupeKey(input: {
 }
 
 export async function fetchHostedMailboxPayload(input: {
+  dedupeKey: string;
   mailboxItemId: string;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
@@ -376,6 +481,7 @@ export async function fetchHostedMailboxPayload(input: {
 }
 
 export async function readHostedMailboxPayload(input: {
+  dedupeKey: string;
   mailboxItemId: string;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
@@ -386,6 +492,7 @@ export async function readHostedMailboxPayload(input: {
 }
 
 async function readHostedMailboxPayloadAvailability(input: {
+  dedupeKey: string;
   mailboxItemId: string;
   payloadRef?: string | null;
   prisma?: HostedMailboxStoreClient;
@@ -400,6 +507,10 @@ async function readHostedMailboxPayloadAvailability(input: {
   const mailboxItemId = requireNonEmptyString(
     input.mailboxItemId,
     "Hosted mailbox payload mailboxItemId",
+  );
+  const dedupeKey = requireNonEmptyString(
+    input.dedupeKey,
+    "Hosted mailbox payload dedupeKey",
   );
   const payloadRef = normalizeNullableString(input.payloadRef);
 
@@ -417,6 +528,7 @@ async function readHostedMailboxPayloadAvailability(input: {
   const fetchedAt = new Date();
   const item = await prisma.hostedMailboxItem.findFirst({
     where: {
+      dedupeKey,
       id: mailboxItemId,
       userId,
     },
@@ -503,6 +615,56 @@ export async function allocateHostedMailboxLaneSeqTx(input: {
   return rows[0].seq;
 }
 
+async function acquireHostedMailboxDedupeLockTx(input: {
+  dedupeKey: string;
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<void> {
+  await input.tx.$queryRaw`
+    SELECT pg_advisory_xact_lock(hashtext(${`hosted_mailbox:${input.userId}:${input.dedupeKey}`}))
+  `;
+}
+
+async function recordHostedMailboxDedupeConflictLogTx(input: {
+  dedupeConflict: boolean;
+  existing: HostedMailboxItemRow;
+  kind: HostedMailboxKind;
+  lane: HostedMailboxLane;
+  payloadBytes: number;
+  payloadHash: string | null;
+  payloadSchema: string;
+  tx: HostedMailboxMutationTx;
+  userId: string;
+}): Promise<void> {
+  if (!input.dedupeConflict) {
+    return;
+  }
+
+  await recordHostedRuntimeLogTx({
+    component: "mailbox",
+    eventCode: "mailbox.dedupe_conflict",
+    level: "warn",
+    mailboxLane: input.existing.lane,
+    mailboxSeqEnd: input.existing.laneSeq,
+    mailboxSeqStart: input.existing.laneSeq,
+    phase: "import",
+    redacted: {
+      existingBytes: input.existing.payloadBytes ?? null,
+      existingHasHash: input.existing.payloadHash != null,
+      existingKind: input.existing.kind,
+      existingLane: input.existing.lane,
+      existingSchema: input.existing.payloadSchema,
+      requestedBytes: input.payloadBytes,
+      requestedHasHash: input.payloadHash != null,
+      requestedKind: input.kind,
+      requestedLane: input.lane,
+      requestedSchema: input.payloadSchema,
+    },
+    tx: input.tx,
+    userId: input.userId,
+  });
+}
+
 export async function hydrateHostedMailboxItemTx(input: {
   record: HostedMailboxItemRow;
 }): Promise<HostedMailboxItemRecord> {
@@ -575,7 +737,7 @@ function encodeHostedMailboxStoredPayload(input: {
   });
 
   if (payloadBytes <= HOSTED_MAILBOX_MAX_INLINE_PAYLOAD_BYTES) {
-    const payloadInlineCiphertext = encryptHostedIngressNullableString({
+    const payloadInlineCiphertext = encryptHostedMailboxNullableString({
       field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
       userId: input.userId,
       value: serialized,
@@ -593,7 +755,7 @@ function encodeHostedMailboxStoredPayload(input: {
     };
   }
 
-  const payloadRefCiphertext = encryptHostedIngressNullableString({
+  const payloadRefCiphertext = encryptHostedMailboxNullableString({
     field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
     userId: input.userId,
     value: serialized,

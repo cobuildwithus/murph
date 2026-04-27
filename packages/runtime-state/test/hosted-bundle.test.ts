@@ -1151,6 +1151,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "portable",
   });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/hosted-mailbox.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/diagnostics/snapshot.json")).toMatchObject({
     classification: "operational",
     portability: "machine_local",
