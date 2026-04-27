@@ -2,8 +2,9 @@
 
 import { useRef } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
+
+import { SettingsStatusLine } from "./connected-account-card";
 import { useHostedEmailSettingsController } from "./hosted-email-settings-controller";
 import {
   HostedEmailSettingsContent,
@@ -21,54 +22,50 @@ export function HostedEmailSettings(props: {
     initialLinkedAccounts: props.initialLinkedAccounts,
   });
 
-  return (
-    <div className="space-y-5">
-      {controller.successMessage ? (
-        <Alert className="border-green-200 bg-green-50 text-green-700">
-          <AlertTitle>Email updated</AlertTitle>
-          <AlertDescription>{controller.successMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {controller.errorMessage ? (
-        <Alert variant="destructive">
-          <AlertTitle>Unable to update email</AlertTitle>
-          <AlertDescription>{controller.errorMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {controller.isSyncingEmailRoute ? (
-        <Alert className="border-stone-200 bg-stone-50">
-          <AlertTitle>Finishing email sync</AlertTitle>
-          <AlertDescription>
-            Saving your email&hellip;
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {!controller.canManageEmail ? (
+  if (!controller.canManageEmail) {
+    return (
+      <div className="space-y-5">
         <HostedSettingsSessionState
           authenticated={controller.authenticated}
           signedOutDescription="Sign in to manage your email."
         />
-      ) : (
-        <HostedEmailSettingsContent
-          currentEmail={controller.effectiveCurrentEmail}
-          currentVerifiedEmail={controller.effectiveVerifiedEmail}
-          emailAddress={controller.emailAddress}
-          emailInputRef={emailInputRef}
-          canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
-          isBusy={controller.isBusy}
-          isSendingCode={controller.isSendingCode}
-          isSyncingEmailRoute={controller.isSyncingEmailRoute}
-          pendingEmailAddress={controller.pendingEmailAddress}
-          onChangeEmailAddress={controller.setEmailAddress}
-          onOpenDialog={() => controller.setDialogOpen(true)}
-          onResendCode={controller.handleResendCode}
-          onSendCode={controller.handleSendCode}
-          onSyncVerifiedEmail={controller.handleSyncVerifiedEmail}
-        />
-      )}
+      </div>
+    );
+  }
+
+  const statusTone = controller.errorMessage
+    ? "destructive"
+    : controller.successMessage
+      ? "success"
+      : "neutral";
+  const statusMessage =
+    controller.errorMessage ??
+    controller.successMessage ??
+    (controller.isSyncingEmailRoute ? "Saving your email…" : null);
+
+  return (
+    <div className="space-y-5">
+      <HostedEmailSettingsContent
+        currentEmail={controller.effectiveCurrentEmail}
+        currentVerifiedEmail={controller.effectiveVerifiedEmail}
+        emailAddress={controller.emailAddress}
+        emailInputRef={emailInputRef}
+        canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
+        isBusy={controller.isBusy}
+        isSendingCode={controller.isSendingCode}
+        isSyncingEmailRoute={controller.isSyncingEmailRoute}
+        pendingEmailAddress={controller.pendingEmailAddress}
+        onChangeEmailAddress={controller.setEmailAddress}
+        onOpenDialog={() => controller.setDialogOpen(true)}
+        onResendCode={controller.handleResendCode}
+        onSendCode={controller.handleSendCode}
+        onSyncVerifiedEmail={controller.handleSyncVerifiedEmail}
+      />
+
+      <SettingsStatusLine
+        message={statusMessage}
+        tone={statusTone === "neutral" && controller.isSyncingEmailRoute ? "neutral" : statusTone}
+      />
 
       <HostedEmailVerificationDialog
         code={controller.code}

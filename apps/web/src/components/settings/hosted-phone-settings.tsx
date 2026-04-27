@@ -3,7 +3,6 @@
 import { useUser } from "@privy-io/react-auth";
 import { useMemo, useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import {
   extractHostedPrivyPhoneAccount,
@@ -13,7 +12,7 @@ import {
 
 import { HostedPhoneAuth } from "../hosted-onboarding/hosted-phone-auth";
 import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
-import { ConnectedAccountCard } from "./connected-account-card";
+import { ConnectedAccountCard, SettingsStatusLine } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { formatMaskedPhoneNumber, toErrorMessage } from "./hosted-settings-utils";
 
@@ -51,67 +50,62 @@ export function HostedPhoneSettings(props: {
       await props.onLinked?.(payload);
       setExpanded(false);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Your phone was linked, but we could not refresh the page state yet."));
+      setErrorMessage(toErrorMessage(error, "Could not refresh phone state."));
     }
   }
 
-  return (
-    <div className="space-y-5">
-      {successMessage ? (
-        <Alert className="border-green-200 bg-green-50 text-green-800">
-          <AlertTitle>Phone updated</AlertTitle>
-          <AlertDescription>{successMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {errorMessage ? (
-        <Alert variant="destructive">
-          <AlertTitle>Unable to refresh phone state</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {!props.authenticated ? (
+  if (!props.authenticated) {
+    return (
+      <div className="space-y-5">
         <HostedSettingsSessionState
           authenticated={props.authenticated}
           signedOutDescription="Sign in to manage your phone number."
         />
+      </div>
+    );
+  }
+
+  const statusTone = errorMessage ? "destructive" : successMessage ? "success" : "neutral";
+  const statusMessage = errorMessage ?? successMessage;
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Phone</h2>
+      </div>
+
+      {currentPhoneNumber ? (
+        <ConnectedAccountCard
+          label="Phone"
+          value={formatMaskedPhoneNumber(currentPhoneNumber)}
+          action={
+            <Button
+              type="button"
+              variant={showLinkForm ? "outline" : "default"}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {showLinkForm ? "Hide phone form" : "Change phone"}
+            </Button>
+          }
+        />
       ) : (
-        <div className="space-y-5">
-          <div className="space-y-2">
-            <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Phone</h2>
-            {!currentPhoneNumber ? (
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                Add a phone number if you want Murph to text you directly.
-              </p>
-            ) : null}
-          </div>
-
-          {currentPhoneNumber ? (
-            <ConnectedAccountCard
-              label="Phone"
-              value={formatMaskedPhoneNumber(currentPhoneNumber)}
-              action={
-                <Button
-                  type="button"
-                  variant={showLinkForm ? "outline" : "default"}
-                  onClick={() => setExpanded((value) => !value)}
-                >
-                  {showLinkForm ? "Hide phone form" : "Change phone"}
-                </Button>
-              }
-            />
-          ) : null}
-
-          {showLinkForm ? (
-            <HostedPhoneAuth
-              intent="link"
-              onLinked={handleLinked}
-              showPassiveConsentNotice={false}
-            />
-          ) : null}
-        </div>
+        <ConnectedAccountCard
+          label="Phone"
+          value="Not connected"
+          meta="Add a phone number if you want Murph to text you directly."
+          variant="empty"
+        />
       )}
+
+      {showLinkForm ? (
+        <HostedPhoneAuth
+          intent="link"
+          onLinked={handleLinked}
+          showPassiveConsentNotice={false}
+        />
+      ) : null}
+
+      <SettingsStatusLine message={statusMessage} tone={statusTone} />
     </div>
   );
 }

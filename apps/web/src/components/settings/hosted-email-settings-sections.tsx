@@ -58,11 +58,6 @@ export function HostedEmailSettingsContent(props: {
     <div className="space-y-5">
       <div className="space-y-2">
         <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Email</h2>
-        {!currentEmail ? (
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Add an email so Murph can reach you there.
-          </p>
-        ) : null}
       </div>
 
       {currentEmail ? (
@@ -83,7 +78,21 @@ export function HostedEmailSettingsContent(props: {
             ) : null
           }
         />
-      ) : null}
+      ) : (
+        <ConnectedAccountCard
+          label="Email"
+          value="Not connected"
+          meta="Add an email so Murph can reach you there."
+          variant="empty"
+          action={
+            !canSendEmailUpdateCode ? (
+              <Button type="button" onClick={() => void onSendCode()} disabled={isBusy}>
+                Link email
+              </Button>
+            ) : null
+          }
+        />
+      )}
 
       {canSendEmailUpdateCode ? (
         <div className="space-y-2">
@@ -113,12 +122,6 @@ export function HostedEmailSettingsContent(props: {
                   : "Send new code"}
             </Button>
           </div>
-        </div>
-      ) : !currentEmail ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={() => void onSendCode()} disabled={isBusy}>
-            Link email
-          </Button>
         </div>
       ) : null}
 
