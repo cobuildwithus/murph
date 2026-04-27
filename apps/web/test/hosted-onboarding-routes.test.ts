@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   completeHostedPrivyVerification: vi.fn(),
   confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
+  getHostedInviteStatus: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
     ...actual,
     abortHostedInvitePhoneCode: mocks.abortHostedInvitePhoneCode,
     confirmHostedInvitePhoneCode: mocks.confirmHostedInvitePhoneCode,
+    getHostedInviteStatus: mocks.getHostedInviteStatus,
     prepareHostedInvitePhoneCode: mocks.prepareHostedInvitePhoneCode,
   };
 });
@@ -128,8 +130,10 @@ describe("hosted onboarding routes", () => {
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: "member_123",
+      messagingSetupRequired: false,
       stage: "checkout",
     });
+    mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("checkout"));
     mocks.createHostedBillingCheckout.mockResolvedValue({
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
@@ -225,8 +229,10 @@ describe("hosted onboarding routes", () => {
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      messagingSetupRequired: false,
       ok: true,
       stage: "checkout",
+      status: createInviteStatus("checkout"),
     });
   });
 
@@ -1014,3 +1020,28 @@ describe("hosted onboarding routes", () => {
   });
 
 });
+
+function createInviteStatus(stage: "checkout") {
+  return {
+    billing: {
+      defaultPlanCode: "launch_monthly",
+      plans: [],
+    },
+    capabilities: {
+      billingReady: true,
+      phoneAuthReady: true,
+    },
+    invite: {
+      code: "invite-code",
+      expiresAt: "2026-03-27T12:00:00.000Z",
+      phoneHint: "*** 4567",
+    },
+    messagingSetupRequired: false,
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage,
+  };
+}

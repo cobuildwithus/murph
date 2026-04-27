@@ -37,7 +37,6 @@ export default async function JoinInvitePage(input: {
       <HostedPhoneCountryCodeBoundary>
         <JoinInviteShell>
           <JoinInviteClient
-            authenticated
             initialLinkedAccounts={[]}
             inviteCode={decodedInviteCode}
             initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
@@ -50,7 +49,7 @@ export default async function JoinInvitePage(input: {
     );
   }
 
-  const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
+  const { authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
   const initialStatus = await buildHostedInvitePageData({
     authenticatedMember,
     inviteCode: decodedInviteCode,
@@ -68,7 +67,6 @@ export default async function JoinInvitePage(input: {
     <HostedPhoneCountryCodeBoundary>
       <JoinInviteShell>
         <JoinInviteClient
-          authenticated={authenticated}
           initialLinkedAccounts={linkedAccounts}
           inviteCode={decodedInviteCode}
           initialStatus={initialStatus}

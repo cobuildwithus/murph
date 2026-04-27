@@ -2,10 +2,7 @@ import type {
   AcceptHostedShareResult,
   HostedSharePageData,
 } from "@/src/lib/hosted-share/service";
-import type {
-  HostedInviteStatusPayload,
-  HostedPrivyCompletionPayload,
-} from "@/src/lib/hosted-onboarding/types";
+import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 
@@ -15,22 +12,6 @@ export function hasResolvedHostedInviteVerification(
   status: HostedInviteStatusPayload,
 ): boolean {
   return status.stage !== "verify" || !status.session.authenticated;
-}
-
-export function resolveInviteStatusAfterPrivyCompletion(
-  status: HostedInviteStatusPayload,
-  payload: HostedPrivyCompletionPayload,
-): HostedInviteStatusPayload {
-  return {
-    ...status,
-    messagingSetupRequired: payload.messagingSetupRequired,
-    session: {
-      ...status.session,
-      authenticated: true,
-      matchesInvite: true,
-    },
-    stage: payload.stage,
-  };
 }
 
 export function resolveJoinInviteStatusFromRefresh(input: {

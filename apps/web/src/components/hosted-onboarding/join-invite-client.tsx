@@ -35,7 +35,6 @@ import {
 } from "./invite-status-client";
 import {
   hasResolvedHostedInviteVerification,
-  resolveInviteStatusAfterPrivyCompletion,
   resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteSubtitle,
   resolveJoinInviteTitle,
@@ -48,7 +47,6 @@ import {
 import { useJoinInviteShareImport } from "./use-join-invite-share-import";
 
 interface JoinInviteClientProps {
-  authenticated: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
@@ -58,7 +56,6 @@ interface JoinInviteClientProps {
 }
 
 export function JoinInviteClient({
-  authenticated: _authenticated,
   initialLinkedAccounts,
   initialStatus,
   inviteCode,
@@ -183,8 +180,10 @@ export function JoinInviteClient({
   }
 
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
-    const nextStatus = resolveInviteStatusAfterPrivyCompletion(status, payload);
-    setStatus(nextStatus);
+    applyRefreshedStatus(payload.status);
+    if (hasResolvedHostedInviteVerification(payload.status)) {
+      setHasCompletedInitialRefresh(true);
+    }
   }
 
   const eyebrow = resolveJoinInviteEyebrow(status.stage);
@@ -214,7 +213,6 @@ export function JoinInviteClient({
         ) : null}
 
         <JoinInviteStageContent
-          authenticated={status.session.authenticated}
           awaitingInviteSessionResolution={awaitingInviteSessionResolution}
           billingPlanCode={billingPlanCode}
           checkoutPending={checkoutPending}
@@ -242,7 +240,6 @@ export function JoinInviteClient({
 }
 
 export {
-  resolveInviteStatusAfterPrivyCompletion,
   resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteShareStateFromAccept,
   resolveJoinInviteShareStateFromStatus,

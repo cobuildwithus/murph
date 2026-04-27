@@ -40,7 +40,6 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
 
 import {
   JoinInviteClient,
-  resolveInviteStatusAfterPrivyCompletion,
   resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteShareStateFromAccept,
   resolveJoinInviteShareStateFromStatus,
@@ -77,7 +76,6 @@ afterEach(async () => {
 test("verify-stage invite copy stays neutral and does not expose the masked phone hint", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: false,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         capabilities: {
@@ -102,7 +100,6 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
 test("verify-stage invite passes only the masked phone hint to phone auth", () => {
   renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: false,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         capabilities: {
@@ -131,7 +128,6 @@ test("verify-stage invite passes only the masked phone hint to phone auth", () =
 test("verify-stage invite shows the session check while the server session is still settling", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: true,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         session: {
@@ -158,7 +154,6 @@ test("verify-stage invite shows the session check while the server session is st
 test("verify-stage invite keeps polling while the session is still settling", () => {
   renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: true,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         session: {
@@ -222,10 +217,43 @@ test("phone verification returns to the checkout plan picker without auto-launch
     await onCompleted(createCompletionPayload("checkout"));
   });
 
+  expect(mocks.fetchHostedInviteStatus).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(view.locationAssign).not.toHaveBeenCalled();
   assert.match(view.container.textContent ?? "", /Choose your plan/);
   assert.match(view.container.textContent ?? "", /Continue to checkout/);
+
+  await view.cleanup();
+});
+
+test("phone verification keeps checkout hidden until the server confirms invite auth", async () => {
+  const fetchMock = vi.fn<typeof fetch>();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteClientForEffects();
+  const onCompleted = readHostedInvitePhoneAuthOnCompleted();
+
+  await act(async () => {
+    await onCompleted(createCompletionPayload("checkout", {
+      capabilities: {
+        billingReady: true,
+        phoneAuthReady: true,
+      },
+      session: {
+        authenticated: false,
+        expiresAt: null,
+        matchesInvite: false,
+      },
+      stage: "verify",
+    }));
+  });
+
+  expect(mocks.fetchHostedInviteStatus).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(view.locationAssign).not.toHaveBeenCalled();
+  assert.doesNotMatch(view.container.textContent ?? "", /Continue to checkout/);
+  assert.match(view.container.textContent ?? "", /Confirm your number/);
+  assert.match(view.container.textContent ?? "", /Hosted invite phone auth/);
 
   await view.cleanup();
 });
@@ -494,7 +522,6 @@ test("already-active checkout refreshes return to verify when the invite session
 test("active invite state renders message and settings actions with client navigation markup", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: true,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         murphPhoneNumber: "+15550100001",
@@ -523,7 +550,6 @@ test("active invite state renders message and settings actions with client navig
 test("active invite state omits Murph contact actions when no assigned number is available", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: true,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         session: {
@@ -547,7 +573,6 @@ test("active invite state omits Murph contact actions when no assigned number is
 test("activating invite state explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: true,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         session: {
@@ -582,7 +607,6 @@ test("activating invite state explains when vault and assistant setup is still r
 test("invite share preview renders the generic bundle copy from the tiny summary", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
-      authenticated: false,
       initialLinkedAccounts: [],
       initialStatus: createStatus({
         capabilities: {
@@ -630,23 +654,6 @@ test("share status only resolves to completed after the async import is consumed
     resolveJoinInviteShareStateFromStatus(createShareStatus("consumed")),
     "completed",
   );
-});
-
-test("resolveInviteStatusAfterPrivyCompletion marks the invite session authenticated and matched", () => {
-  const nextStatus = resolveInviteStatusAfterPrivyCompletion(
-    createStatus({
-      stage: "verify",
-    }),
-    createCompletionPayload("checkout"),
-  );
-
-  expect(nextStatus).toMatchObject({
-    session: {
-      authenticated: true,
-      matchesInvite: true,
-    },
-    stage: "checkout",
-  });
 });
 
 test("verified invite sessions do not regress back to verify during later status refreshes", () => {
@@ -832,12 +839,30 @@ function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePage
   };
 }
 
-function createCompletionPayload(stage: HostedPrivyCompletionPayload["stage"]): HostedPrivyCompletionPayload {
+function createCompletionPayload(
+  stage: HostedPrivyCompletionPayload["stage"],
+  statusOverrides?: Partial<HostedInviteStatusPayload> & {
+    capabilities?: Partial<HostedInviteStatusPayload["capabilities"]>;
+  },
+): HostedPrivyCompletionPayload {
   return {
     inviteCode: "invite-code",
     joinUrl: "https://join.example.test/join/invite-code",
     messagingSetupRequired: false,
     stage,
+    status: createStatus({
+      capabilities: {
+        billingReady: true,
+        phoneAuthReady: true,
+      },
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage,
+      ...statusOverrides,
+    }),
   };
 }
 
@@ -857,7 +882,6 @@ async function renderJoinInviteClientForEffects(input?: {
   await act(async () => {
     root?.render(
       createElement(JoinInviteClient, {
-        authenticated: false,
         initialLinkedAccounts: [],
         initialStatus: input?.initialStatus ?? createStatus({
           capabilities: {
