@@ -760,7 +760,8 @@ describe("RunnerContainer", () => {
     expect(thrown).toBeInstanceOf(HostedExecutionConfigurationError);
     expect(thrown).toMatchObject({
       code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
-      message: "Hosted assistant defaults are missing.",
+      message:
+        "Hosted assistant defaults are missing. Code: HOSTED_ASSISTANT_CONFIG_REQUIRED. Status: 503.",
       name: "HostedExecutionConfigurationError",
     });
     expect(String(thrown)).not.toContain("secret stack");
@@ -809,10 +810,116 @@ describe("RunnerContainer", () => {
         errorDetail:
           "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
       },
-      message: "Invalid request.",
+      message:
+        "Invalid request. Detail: Hosted assistant runtime job input runtime.userEnv.[redacted-env-key] must be a string. Code: type_error. Status: 400.",
       name: "TypeError",
       status: 400,
       statusCode: 400,
+    });
+    expect(requireObject(thrown, "runner error").details).toMatchObject({
+      errorDetail:
+        "Hosted assistant runtime job input runtime.userEnv.OPENAI_API_KEY must be a string.",
+    });
+  });
+
+  it("bubbles runtime shell detail into the thrown container error message", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "runtime_error",
+          details: {
+            errorCodeDetail: "VAULT_FILE_MISSING",
+            errorDetail: "Missing required file \"vault.json\".",
+          },
+          error: "Hosted execution runtime failed.",
+          errorName: "Error",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 500,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_runtime_detail"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      code: "runtime_error",
+      details: {
+        errorCodeDetail: "VAULT_FILE_MISSING",
+        errorDetail: "Missing required file \"vault.json\".",
+      },
+      message:
+        "Hosted execution runtime failed. Detail: Missing required file \"vault.json\". Code: VAULT_FILE_MISSING. Status: 500.",
+      name: "Error",
+      status: 500,
+      statusCode: 500,
+    });
+  });
+
+  it("prefers sanitized inner runtime status over the container response status", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "runtime_error",
+          details: {
+            errorDetail: "Provider request was rate limited.",
+            errorStatus: 429,
+          },
+          error: "Hosted execution runtime failed.",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 500,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_runtime_inner_status"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({
+      details: {
+        errorDetail: "Provider request was rate limited.",
+        errorStatus: 429,
+      },
+      message:
+        "Hosted execution runtime failed. Detail: Provider request was rate limited. Code: runtime_error. Status: 429.",
+      status: 500,
+      statusCode: 500,
     });
   });
 
@@ -860,7 +967,8 @@ describe("RunnerContainer", () => {
         bundleArchiveOperation: "runner-input",
         bundleRefPresent: true,
       },
-      message: "Hosted bundle archive validation failed.",
+      message:
+        "Hosted bundle archive validation failed. Code: bundle_archive_validation_error. Status: 500.",
       name: "HostedBundleArchiveValidationError",
       status: 500,
       statusCode: 500,

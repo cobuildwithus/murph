@@ -5,7 +5,9 @@ import {
 import {
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
+  sanitizeHostedExecutionStructuredLogText,
   type HostedExecutionStructuredLogDetails,
+  type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
 import {
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
@@ -814,11 +816,6 @@ async function classifyHostedRunnerContainerErrorResponse(
     }
   }
 
-  const message = typeof payload?.error === "string" && payload.error.trim().length > 0
-    ? payload.error
-    : responseBodyPreview
-      ? `Hosted runner container returned HTTP ${response.status}: ${responseBodyPreview.slice(0, 200)}`
-      : `Hosted runner container returned HTTP ${response.status}.`;
   const code = typeof payload?.code === "string" && payload.code.trim().length > 0
     ? payload.code
     : null;
@@ -828,6 +825,16 @@ async function classifyHostedRunnerContainerErrorResponse(
       : {}),
     ...(responseBodyPreview ? { responseBodyPreview } : {}),
   });
+  const message = typeof payload?.error === "string" && payload.error.trim().length > 0
+    ? formatHostedRunnerContainerErrorMessage({
+        code,
+        details,
+        message: payload.error,
+        status: response.status,
+      })
+    : responseBodyPreview
+      ? `Hosted runner container returned HTTP ${response.status}: ${responseBodyPreview.slice(0, 200)}`
+      : `Hosted runner container returned HTTP ${response.status}.`;
   const payloadErrorName = typeof payload?.errorName === "string" && payload.errorName.trim().length > 0
     ? payload.errorName.trim()
     : null;
@@ -861,6 +868,109 @@ async function classifyHostedRunnerContainerErrorResponse(
   error.status = response.status;
   error.statusCode = response.status;
   return error;
+}
+
+function formatHostedRunnerContainerErrorMessage(input: {
+  code: string | null;
+  details: HostedExecutionStructuredLogDetails | null;
+  message: string;
+  status: number;
+}): string {
+  const fragments = [input.message];
+  const detail = readHostedRunnerContainerDiagnosticFragment(input.details?.errorDetail, {
+    redactEnvKeys: true,
+  });
+  const cause = readHostedRunnerContainerDiagnosticFragment(input.details?.errorCause, {
+    redactEnvKeys: true,
+  });
+  const code = readHostedRunnerContainerDiagnosticFragment(
+    input.details?.errorCodeDetail ?? input.code,
+    { redactEnvKeys: false },
+  );
+
+  if (detail) {
+    fragments.push(`Detail: ${detail}`);
+  }
+  if (cause) {
+    fragments.push(`Cause: ${cause}`);
+  }
+  if (code) {
+    fragments.push(`Code: ${code}`);
+  }
+  fragments.push(`Status: ${readHostedRunnerContainerDiagnosticStatus(input.details) ?? input.status}`);
+
+  return joinHostedRunnerContainerErrorFragments(fragments);
+}
+
+function readHostedRunnerContainerDiagnosticFragment(
+  value: HostedExecutionStructuredLogDetailValue | undefined,
+  options: {
+    redactEnvKeys: boolean;
+  },
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const sanitized = sanitizeHostedExecutionStructuredLogText(value);
+  return sanitized && options.redactEnvKeys
+    ? redactHostedRunnerContainerInlineEnvKeys(sanitized)
+    : sanitized;
+}
+
+function readHostedRunnerContainerDiagnosticStatus(
+  details: HostedExecutionStructuredLogDetails | null,
+): number | null {
+  const status = details?.errorStatus;
+  return typeof status === "number"
+    && Number.isInteger(status)
+    && status >= 100
+    && status <= 599
+    ? status
+    : null;
+}
+
+function joinHostedRunnerContainerErrorFragments(
+  fragments: readonly string[],
+): string {
+  const joined: string[] = [];
+
+  for (const fragment of fragments) {
+    const normalized = sanitizeHostedExecutionStructuredLogText(fragment);
+    if (!normalized) {
+      continue;
+    }
+
+    const fragmentWithPeriod = normalized.endsWith(".") ? normalized : `${normalized}.`;
+    if (joined.some((existing) => hostedRunnerContainerFragmentsOverlap(existing, fragmentWithPeriod))) {
+      continue;
+    }
+
+    joined.push(fragmentWithPeriod);
+  }
+
+  return joined.join(" ");
+}
+
+function redactHostedRunnerContainerInlineEnvKeys(value: string): string {
+  return value
+    .replace(
+      /\bruntime\.(userEnv|forwardedEnv|platformEnv)\.[A-Z][A-Z0-9_]{1,127}\b/gu,
+      "runtime.$1.[redacted-env-key]",
+    )
+    .replace(
+      /\b[A-Z][A-Z0-9_]{0,127}(?:API_KEY|TOKEN|SECRET|PASSWORD|PASSCODE|COOKIE|SET_COOKIE|ENCRYPTION_KEY)\b/gu,
+      "[redacted-env-key]",
+    );
+}
+
+function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boolean {
+  const normalizedLeft = left.trim().toLowerCase();
+  const normalizedRight = right.trim().toLowerCase();
+
+  return normalizedLeft.length > 0
+    && normalizedRight.length > 0
+    && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
 }
 
 function createRunnerOutboundHandler() {
