@@ -79,3 +79,19 @@ export function assertAllowedHostedRunnerWebControlRequest(input: {
     `Hosted runtime web-control route is not allowlisted for proxy transport: ${input.method} ${input.path}`,
   );
 }
+
+export function readHostedRunnerWebControlRoute(path: string): {
+  pathAndSearch: string;
+  pathname: string;
+} {
+  const base = new URL("https://hosted-runtime.invalid/");
+  const url = new URL(path, base);
+  if (url.origin !== base.origin) {
+    throw new TypeError("Hosted runtime web-control route must be relative.");
+  }
+
+  return {
+    pathAndSearch: `${url.pathname}${url.search}`,
+    pathname: url.pathname,
+  };
+}
