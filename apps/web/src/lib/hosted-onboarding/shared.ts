@@ -16,13 +16,6 @@ export async function lockHostedMemberRow(
   await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 
-export async function lockHostedAdvisoryKey(
-  tx: Prisma.TransactionClient,
-  key: string,
-): Promise<void> {
-  await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${key}))`;
-}
-
 export function extractLinqTextMessage(input: unknown): string | null {
   if (!input || typeof input !== "object") {
     return null;

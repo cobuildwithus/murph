@@ -4,7 +4,6 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
 const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
-const HOSTED_BLIND_INDEX_LOCK_PREFIX = "hblock";
 const HOSTED_OPAQUE_ID_PREFIX = "hbid";
 const MASKED_PHONE_HINT_PATTERN = /^\*{3}\s+\d{4}$/u;
 const HOSTED_BLIND_INDEX_PATTERN =
@@ -47,12 +46,6 @@ export function createHostedTelegramUserLookupKeyReadCandidates(
   value: string | null | undefined,
 ): string[] {
   return createHostedLookupKeyReadCandidates("telegram-user", normalizeHostedOpaqueInput(value));
-}
-
-export function createHostedTelegramUserLookupConflictLockToken(
-  value: string | null | undefined,
-): string | null {
-  return createHostedLookupConflictLockToken("telegram-user", normalizeHostedOpaqueInput(value));
 }
 
 export function createHostedEmailLookupKey(value: string | null | undefined): string | null {
@@ -101,12 +94,6 @@ export function createHostedStripeCustomerLookupKeyReadCandidates(
   return createHostedLookupKeyReadCandidates("stripe-customer", normalizeHostedOpaqueInput(value));
 }
 
-export function createHostedStripeCustomerLookupConflictLockToken(
-  value: string | null | undefined,
-): string | null {
-  return createHostedLookupConflictLockToken("stripe-customer", normalizeHostedOpaqueInput(value));
-}
-
 export function createHostedStripeSubscriptionLookupKey(value: string | null | undefined): string | null {
   return createHostedLookupKey("stripe-subscription", normalizeHostedOpaqueInput(value));
 }
@@ -115,15 +102,6 @@ export function createHostedStripeSubscriptionLookupKeyReadCandidates(
   value: string | null | undefined,
 ): string[] {
   return createHostedLookupKeyReadCandidates(
-    "stripe-subscription",
-    normalizeHostedOpaqueInput(value),
-  );
-}
-
-export function createHostedStripeSubscriptionLookupConflictLockToken(
-  value: string | null | undefined,
-): string | null {
-  return createHostedLookupConflictLockToken(
     "stripe-subscription",
     normalizeHostedOpaqueInput(value),
   );
@@ -269,22 +247,6 @@ function createHostedLookupKeyReadCandidates(
   return [...new Set(readVersions.map((version) => createHostedBlindIndex(kind, normalizedValue, version)))];
 }
 
-function createHostedLookupConflictLockToken(
-  kind: HostedBlindIndexKind,
-  normalizedValue: string | null,
-): string | null {
-  if (!normalizedValue) {
-    return null;
-  }
-
-  const stableVersion = readHostedPrivacyLockVersion();
-  return `${HOSTED_BLIND_INDEX_LOCK_PREFIX}:${kind}:${stableVersion}:${digestHostedPrivacyConflictLockValue(
-    kind,
-    stableVersion,
-    normalizedValue,
-  )}`;
-}
-
 function createHostedBlindIndex(
   kind: HostedBlindIndexKind,
   value: string,
@@ -295,16 +257,6 @@ function createHostedBlindIndex(
 
 function digestHostedPrivacyValue(kind: string, version: string, value: string): string {
   return createHmac("sha256", deriveHostedPrivacyKey(`blind-index:${kind}`, version))
-    .update(value)
-    .digest("hex");
-}
-
-function digestHostedPrivacyConflictLockValue(
-  kind: string,
-  version: string,
-  value: string,
-): string {
-  return createHmac("sha256", deriveHostedPrivacyKey(`blind-index-lock:${kind}`, version))
     .update(value)
     .digest("hex");
 }
@@ -327,19 +279,6 @@ function readHostedPrivacyKeyring(): {
   readVersions: readonly string[];
 } {
   return getHostedOnboardingEnvironment().contactPrivacyKeyring;
-}
-
-function readHostedPrivacyLockVersion(): string {
-  const { readVersions } = readHostedPrivacyKeyring();
-  let stableVersion = readVersions[0];
-
-  for (const version of readVersions.slice(1)) {
-    if (compareHostedPrivacyVersions(version, stableVersion) < 0) {
-      stableVersion = version;
-    }
-  }
-
-  return stableVersion;
 }
 
 function compareHostedPrivacyVersions(left: string, right: string): number {

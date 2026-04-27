@@ -10,10 +10,8 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
-  createHostedStripeCustomerLookupConflictLockToken,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
-  createHostedStripeSubscriptionLookupConflictLockToken,
   createHostedStripeSubscriptionLookupKey,
   createHostedStripeSubscriptionLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -24,7 +22,6 @@ import {
 } from "./member-private-codecs";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  lockHostedAdvisoryKey,
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
@@ -132,13 +129,25 @@ export async function writeHostedMemberStripeBillingRefTx(
 ): Promise<HostedMemberStripeBillingRefSnapshot> {
   await assertHostedMemberStripeBillingIdentifiersAvailableTx(input);
 
-  const billingRef = await input.tx.hostedMemberBillingRef.upsert({
-    where: {
-      memberId: input.memberId,
-    },
-    create: buildHostedMemberBillingRefCreateData(input),
-    update: buildHostedMemberBillingRefUpdateData(input),
-  });
+  let billingRef;
+
+  try {
+    billingRef = await input.tx.hostedMemberBillingRef.upsert({
+      where: {
+        memberId: input.memberId,
+      },
+      create: buildHostedMemberBillingRefCreateData(input),
+      update: buildHostedMemberBillingRefUpdateData(input),
+    });
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw buildHostedStripeBillingIdentityConflictError(
+        deriveHostedStripeBillingUniqueViolationField(input),
+      );
+    }
+
+    throw error;
+  }
 
   return projectHostedMemberStripeBillingRefSnapshot(billingRef);
 }
@@ -177,21 +186,31 @@ export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
     return projectHostedMemberStripeBillingRefSnapshot(currentBillingRef);
   }
 
-  const billingRef = await input.tx.hostedMemberBillingRef.upsert({
-    where: {
-      memberId: input.memberId,
-    },
-    create: {
-      ...billingPrivateColumns,
-      memberId: input.memberId,
-      stripeCustomerLookupKey,
-      stripeSubscriptionLookupKey: null,
-    },
-    update: {
-      stripeCustomerIdEncrypted: billingPrivateColumns.stripeCustomerIdEncrypted,
-      stripeCustomerLookupKey,
-    },
-  });
+  let billingRef;
+
+  try {
+    billingRef = await input.tx.hostedMemberBillingRef.upsert({
+      where: {
+        memberId: input.memberId,
+      },
+      create: {
+        ...billingPrivateColumns,
+        memberId: input.memberId,
+        stripeCustomerLookupKey,
+        stripeSubscriptionLookupKey: null,
+      },
+      update: {
+        stripeCustomerIdEncrypted: billingPrivateColumns.stripeCustomerIdEncrypted,
+        stripeCustomerLookupKey,
+      },
+    });
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw buildHostedStripeBillingIdentityConflictError("stripeCustomerId");
+    }
+
+    throw error;
+  }
 
   return projectHostedMemberStripeBillingRefSnapshot(billingRef);
 }
@@ -325,19 +344,6 @@ async function assertHostedMemberStripeBillingIdentifiersAvailableTx(input: {
   stripeSubscriptionId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  const lockTokens = [
-    input.stripeCustomerId === undefined
-      ? null
-      : createHostedStripeCustomerLookupConflictLockToken(input.stripeCustomerId),
-    input.stripeSubscriptionId === undefined
-      ? null
-      : createHostedStripeSubscriptionLookupConflictLockToken(input.stripeSubscriptionId),
-  ].filter((token): token is string => Boolean(token));
-
-  for (const lockToken of [...new Set(lockTokens)].sort()) {
-    await lockHostedAdvisoryKey(input.tx, lockToken);
-  }
-
   if (input.stripeCustomerId !== undefined) {
     await assertHostedStripeBillingLookupCandidatesAvailableTx({
       lookupKeys: createHostedStripeCustomerLookupKeyReadCandidates(input.stripeCustomerId),
@@ -355,6 +361,20 @@ async function assertHostedMemberStripeBillingIdentifiersAvailableTx(input: {
       violatedField: "stripeSubscriptionId",
     });
   }
+}
+
+function isPrismaUniqueConstraintError(
+  error: unknown,
+): error is Prisma.PrismaClientKnownRequestError {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function deriveHostedStripeBillingUniqueViolationField(
+  input: Pick<HostedMemberStripeBillingRefWriteInput, "stripeCustomerId" | "stripeSubscriptionId">,
+): HostedMemberStripeBillingLookupMatch {
+  return input.stripeCustomerId === undefined && input.stripeSubscriptionId !== undefined
+    ? "stripeSubscriptionId"
+    : "stripeCustomerId";
 }
 
 async function assertHostedStripeBillingLookupCandidatesAvailableTx(input: {
