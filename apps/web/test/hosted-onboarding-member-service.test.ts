@@ -744,6 +744,7 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     billingStatus: "not_started",
     createdAt: NOW,
     id: "member_123",
+    pendingActivationTimeZone: null,
     suspendedAt: null,
     updatedAt: NOW,
     ...overrides,

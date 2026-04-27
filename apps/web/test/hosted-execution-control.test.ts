@@ -32,8 +32,8 @@ describe("hosted execution control client", () => {
     });
     mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
     mocks.createCloudflareHostedControlClient.mockReturnValue({
-      getStatus: vi.fn(),
-      nudgeUserRun: vi.fn(),
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner: vi.fn(),
     });
   });
 

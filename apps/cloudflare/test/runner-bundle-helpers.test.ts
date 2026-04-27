@@ -264,6 +264,27 @@ describe("RunnerBundleSync", () => {
     expect(bucket.deleted).toEqual([]);
   });
 
+  it("rejects large malformed inline file contents without a regex stack overflow", async () => {
+    const bucket = createBucketStore();
+    const bundleSync = new RunnerBundleSync(
+      bucket.api,
+      bundleKey,
+      "v1",
+      {
+        v1: bundleKey,
+      },
+    );
+
+    await expect(bundleSync.applyRunnerResultBundles(
+      "member_123",
+      null,
+      encodeHostedBundleBase64(createLargeInvalidInlineContentsBundle()),
+    )).rejects.toBeInstanceOf(HostedBundleArchiveValidationError);
+
+    expect(bucket.values.size).toBe(0);
+    expect(bucket.deleted).toEqual([]);
+  });
+
   it("wraps acquired snapshot ref-integrity mismatches as deterministic runner input validation failures", async () => {
     const bucket = createBucketStore();
     const bundleStore = createHostedBundleStore({
@@ -946,6 +967,25 @@ function createInvalidInlineContentsBundle(): Uint8Array {
           {
             contentsBase64: "not@@base64",
             path: "notes/bad.txt",
+            root: "vault",
+          },
+        ],
+        kind: "vault",
+        schema: "murph.hosted-bundle.v1",
+      })),
+    ),
+  );
+}
+
+function createLargeInvalidInlineContentsBundle(): Uint8Array {
+  const contentsBase64 = `${Buffer.alloc(4 * 1024 * 1024, 120).toString("base64").slice(0, -1)}?`;
+  return Uint8Array.from(
+    gzipSync(
+      Buffer.from(JSON.stringify({
+        files: [
+          {
+            contentsBase64,
+            path: "notes/large-bad.txt",
             root: "vault",
           },
         ],

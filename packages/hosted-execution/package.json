@@ -46,6 +46,10 @@
       "types": "./dist/routes.d.ts",
       "default": "./dist/routes.js"
     },
+    "./runtime-control": {
+      "types": "./dist/runtime-control.d.ts",
+      "default": "./dist/runtime-control.js"
+    },
     "./side-effects": {
       "types": "./dist/side-effects.d.ts",
       "default": "./dist/side-effects.js"

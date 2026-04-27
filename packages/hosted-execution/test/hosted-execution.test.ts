@@ -224,7 +224,44 @@ describe("hosted execution coverage gaps", () => {
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
       "HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH",
+      "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
+      "HOSTED_RUNTIME_LOG_PATH",
+      "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
+      "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
+      "HOSTED_RUNTIME_SHARE_IMPORT_PATH",
+      "HOSTED_RUNTIME_STATUS_PATH",
+      "HOSTED_RUNTIME_USAGE_RECORD_PATH",
+      "HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH",
+      "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
+      "HOSTED_RUNTIME_WORKSPACE_PATH",
+      "buildHostedRuntimeSharePayloadPath",
+      "buildHostedRuntimeVaultSyncPayloadPath",
     ]);
+    expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
+      "/api/internal/hosted-mailbox/payload/fetch",
+    );
+    expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
+      "/api/internal/hosted-execution/usage/record",
+    );
+    expect(routeModule.HOSTED_RUNTIME_ISSUE_RECORD_PATH).toBe(
+      "/api/internal/hosted-execution/issues/record",
+    );
+    expect(routeModule.HOSTED_RUNTIME_SHARE_IMPORT_PATH).toBe(
+      "/api/internal/hosted-execution/share/import",
+    );
+    expect(routeModule.HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH).toBe(
+      "/api/internal/hosted-execution/vault-sync/import",
+    );
+    expect(
+      (routeModule.buildHostedRuntimeSharePayloadPath as (shareId: string) => string)(
+        "share 1",
+      ),
+    ).toBe("/api/internal/hosted-execution/share/share%201/payload");
+    expect(
+      (routeModule.buildHostedRuntimeVaultSyncPayloadPath as (sessionId: string) => string)(
+        "vsi/1",
+      ),
+    ).toBe("/api/internal/hosted-execution/vault-sync/vsi%2F1/payload");
   });
 
   it("parses hosted run turn-input peek and adopt contracts", () => {

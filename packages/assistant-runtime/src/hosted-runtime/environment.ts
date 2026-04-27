@@ -141,7 +141,7 @@ export function sanitizeHostedAssistantRuntimeForwardedEnv(
   );
 }
 
-function sanitizeHostedAssistantRuntimePlatformEnv(
+export function sanitizeHostedAssistantRuntimePlatformEnv(
   platformEnv: Readonly<Record<string, string>>,
 ): Record<string, string> {
   const allowedKeys = new Set<string>(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES);
@@ -150,7 +150,7 @@ function sanitizeHostedAssistantRuntimePlatformEnv(
   );
 }
 
-function sanitizeHostedAssistantRuntimeUserEnv(input: {
+export function sanitizeHostedAssistantRuntimeUserEnv(input: {
   forwardedEnv: Readonly<Record<string, string>>;
   userEnv: Readonly<Record<string, string>>;
 }): Record<string, string> {

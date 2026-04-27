@@ -23,6 +23,9 @@ import {
   readHostedIngressEncryptionEnvironment,
   type HostedIngressEncryptionEnvironment,
 } from "./hosted-ingress-encryption.ts";
+import {
+  assertHostedLocalInternalProxyEnvironment,
+} from "./local-loopback-proxy.ts";
 import type { StringEnvSource } from "./string-env.ts";
 
 export type HostedExecutionEnvironment = Omit<
@@ -54,6 +57,8 @@ export type HostedExecutionEnvironment = Omit<
 export function readHostedExecutionEnvironment(
   source: StringEnvSource = process.env,
 ): HostedExecutionEnvironment {
+  assertHostedLocalInternalProxyEnvironment(source);
+
   const {
     automationRecipientPrivateJwkJson,
     automationRecipientPrivateKeyringJson,

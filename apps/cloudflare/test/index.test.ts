@@ -303,12 +303,14 @@ describe("cloudflare worker routes", () => {
 
   it("routes local internal proxy requests onto the results.worker handler", async () => {
     const env = createWorkerEnv(undefined, {
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
+      ALLOW_LOCAL_INTERNAL_PROXY: "true",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
     });
 
     const missingProxyTokenResponse = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
+        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
         {
           method: "GET",
         },
@@ -323,7 +325,7 @@ describe("cloudflare worker routes", () => {
 
     const readResponse = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
+        "https://localhost:8787/__murph/local-internal-proxy/users/member_123/results.worker/messages/raw_local_internal",
         {
           headers: {
             [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
@@ -342,12 +344,14 @@ describe("cloudflare worker routes", () => {
 
   it("rejects local internal proxy requests when the proxy token is replayed against another user", async () => {
     const env = createWorkerEnv(undefined, {
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
+      ALLOW_LOCAL_INTERNAL_PROXY: "true",
+      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
     });
 
     const response = await worker.fetch(
       new Request(
-        "https://runner.example.test/__murph/local-internal-proxy/users/member_456/results.worker/messages/raw_local_internal",
+        "https://localhost:8787/__murph/local-internal-proxy/users/member_456/results.worker/messages/raw_local_internal",
         {
           headers: {
             [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
@@ -361,6 +365,38 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
       error: "Unauthorized",
+    });
+  });
+
+  it("hard-fails when the local internal proxy is configured outside development", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/health"),
+      createWorkerEnv(undefined, {
+        ALLOW_LOCAL_INTERNAL_PROXY: "true",
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://localhost:8787",
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request.",
+    });
+  });
+
+  it("rejects public local internal proxy ingress hosts even in development", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/health"),
+      createWorkerEnv(undefined, {
+        ALLOW_LOCAL_INTERNAL_PROXY: "true",
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "https://runner.example.test",
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request.",
     });
   });
 
@@ -507,15 +543,15 @@ describe("cloudflare worker routes", () => {
 
   it("reads canonical per-user status while keeping the per-event status route removed", async () => {
     const stub = createUserRunnerStub({
-      status: vi.fn(async () => ({
-        bundleRef: null,
+      runnerStatus: vi.fn(async () => ({
         inFlight: false,
-        lastError: null,
-        lastEventId: "evt_done",
         lastRunAt: "2026-04-16T10:05:00.000Z",
-        nextWakeAt: null,
-        pendingIngressEventCount: 0,
+        leaseGeneration: "7",
+        mailboxLag: [],
+        nextAlarmAt: null,
+        recentLogs: [],
         userId: "member_123",
+        workspace: null,
       })),
     });
 
@@ -528,9 +564,13 @@ describe("cloudflare worker routes", () => {
 
     expect(statusResponse.status).toBe(200);
     await expect(statusResponse.json()).resolves.toMatchObject({
-      lastEventId: "evt_done",
+      leaseGeneration: "7",
+      mailboxLag: [],
       userId: "member_123",
+      workspace: null,
     });
+    expect(stub.runnerStatus).toHaveBeenCalledTimes(1);
+    expect(stub.status).not.toHaveBeenCalled();
 
     const eventStatusResponse = await worker.fetch(
       await signControlRequest(new Request(
@@ -609,82 +649,21 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.getCalls.filter((key) => key.startsWith("users/browser-vault-replicas/"))).toEqual([]);
   });
 
-  it("accepts run requests by starting a direct background drain", async () => {
+  it("nudges the hosted runner without invoking the legacy run drain", async () => {
     const stub = createUserRunnerStub({
-      drainHostedRuns: vi.fn(async () => ({
-        committedSeq: "24",
-        requestedTargetSeq: null,
-        targetReached: true,
-      })),
-    });
-    const waitUntil = vi.fn((promise: Promise<unknown>) => {
-      void promise;
-    });
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        body: JSON.stringify({ ignored: true }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      createWorkerEnv(stub),
-      createExecutionContext(waitUntil),
-    );
-
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: false,
-    });
-    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
-    expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
-    expect(waitUntil).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns the nudge result without draining when a run is already in progress", async () => {
-    const stub = createUserRunnerStub({
-      nudgeHostedRun: vi.fn(async () => ({
-        accepted: true,
-        alarmScheduled: true,
-        alreadyRunning: true,
-      })),
-    });
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        method: "POST",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({
-      accepted: true,
-      alarmScheduled: true,
-      alreadyRunning: true,
-    });
-    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(1);
-    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the retry-arm nudge when the direct drain call fails", async () => {
-    const stub = createUserRunnerStub({
-      drainHostedRuns: vi.fn(async () => {
-        throw new Error("drain failed");
-      }),
-      nudgeHostedRun: vi.fn(async () => ({
+      nudgeHostedRunner: vi.fn(async () => ({
         accepted: true,
         alarmScheduled: true,
         alreadyRunning: false,
+        inFlight: false,
+        leaseGeneration: "7",
+        nextAlarmAt: "2026-04-26T00:00:00.000Z",
       })),
     });
 
     const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        body: JSON.stringify({ ignored: true }),
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
+        body: "{}",
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -698,9 +677,28 @@ describe("cloudflare worker routes", () => {
       accepted: true,
       alarmScheduled: true,
       alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "7",
+      nextAlarmAt: "2026-04-26T00:00:00.000Z",
     });
-    expect(stub.drainHostedRuns).toHaveBeenCalledTimes(1);
-    expect(stub.nudgeHostedRun).toHaveBeenCalledTimes(2);
+    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.nudgeHostedRun).not.toHaveBeenCalled();
+    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
+  });
+
+  it("does not expose the legacy hosted-run nudge route", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "POST",
+      })),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(404);
+    expect(stub.nudgeHostedRun).not.toHaveBeenCalled();
+    expect(stub.drainHostedRuns).not.toHaveBeenCalled();
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -1225,6 +1223,23 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       accepted: true,
       alarmScheduled: true,
       alreadyRunning: false,
+    })),
+    nudgeHostedRunner: vi.fn(async () => ({
+      accepted: true,
+      alarmScheduled: true,
+      alreadyRunning: false,
+      inFlight: false,
+      leaseGeneration: "0",
+      nextAlarmAt: null,
+    })),
+    runnerStatus: vi.fn(async () => ({
+      inFlight: false,
+      leaseGeneration: "0",
+      mailboxLag: [],
+      nextAlarmAt: null,
+      recentLogs: [],
+      userId: "member_123",
+      workspace: null,
     })),
     status: vi.fn(async () => ({
       bundleRef: null,

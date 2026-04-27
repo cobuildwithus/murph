@@ -614,6 +614,469 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("content-type")).toBeNull();
   });
 
+  it("routes hosted mailbox fetches through the worker proxy without run adoption fields", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [
+        {
+          createdAt: "2026-04-26T00:00:01.000Z",
+          dedupeKey: "conversation:test:1",
+          id: "mailbox_1",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "1",
+          occurredAt: "2026-04-26T00:00:00.000Z",
+          payloadBytes: 64,
+          payloadRef: "payload_1",
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: "2026-04-26T00:00:01.000Z",
+          userId: "member_123",
+        },
+      ],
+      maxSeqByLane: [
+        {
+          lane: "conversation",
+          maxSeq: "1",
+        },
+      ],
+      userId: "member_123",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.mailboxPort!.fetch({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_1",
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "mailbox fetch");
+    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-mailbox/fetch");
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    await expect(request.json()).resolves.toEqual({
+      lanes: [
+        {
+          importedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      limitPerLane: 10,
+      requestId: "request_mailbox_1",
+    });
+  });
+
+  it("threads checkpoint fencing fields through the workspace callback body", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      checkpointed: true,
+      workspace: {
+        checkpointedAt: "2026-04-26T00:00:04.000Z",
+        createdAt: "2026-04-26T00:00:00.000Z",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: {
+          importedConversationSeq: "1",
+        },
+        snapshotRef: null,
+        updatedAt: "2026-04-26T00:00:04.000Z",
+        userId: "member_123",
+        version: "5",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {
+        importedConversationSeq: "1",
+      },
+      snapshotRef: null,
+    });
+
+    expect(result.workspace.version).toBe("5");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "workspace checkpoint");
+    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-workspace/checkpoint");
+    expect(request.method).toBe("POST");
+    await expect(request.json()).resolves.toEqual({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {
+        importedConversationSeq: "1",
+      },
+      snapshotRef: null,
+    });
+  });
+
+  it("reads workspace state through the web callback route", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      workspace: {
+        checkpointedAt: "2026-04-26T00:00:04.000Z",
+        createdAt: "2026-04-26T00:00:00.000Z",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: {
+          importedConversationSeq: "1",
+        },
+        snapshotRef: null,
+        updatedAt: "2026-04-26T00:00:04.000Z",
+        userId: "member_123",
+        version: "5",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const readWorkspace = platform.workspacePort!.read;
+    if (typeof readWorkspace !== "function") {
+      throw new Error("Expected hosted workspace read port.");
+    }
+
+    const result = await readWorkspace();
+
+    expect(result.workspace?.version).toBe("5");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "workspace read");
+    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-workspace");
+    expect(request.method).toBe("GET");
+  });
+
+  it("writes only structured runtime logs through the web callback route", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      loggedCount: 1,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.logPort!.write({
+      entries: [
+        {
+          at: "2026-04-26T00:00:03.000Z",
+          attemptId: "attempt_1",
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          leaseGeneration: "9",
+          level: "info",
+          mailboxLane: "conversation",
+          mailboxSeqEnd: "1",
+          mailboxSeqStart: "1",
+          phase: "import",
+          redactedJson: {
+            importedCount: 1,
+          },
+          workspaceVersion: "4",
+        },
+      ],
+    });
+
+    expect(result.loggedCount).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "runtime log");
+    expect(request.url).toBe("http://web-control.worker/api/internal/hosted-runtime/log");
+    expect(request.method).toBe("POST");
+    await expect(request.json()).resolves.toEqual({
+      entries: [
+        {
+          at: "2026-04-26T00:00:03.000Z",
+          attemptId: "attempt_1",
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          leaseGeneration: "9",
+          level: "info",
+          mailboxLane: "conversation",
+          mailboxSeqEnd: "1",
+          mailboxSeqStart: "1",
+          phase: "import",
+          redactedJson: {
+            importedCount: 1,
+          },
+          workspaceVersion: "4",
+        },
+      ],
+    });
+  });
+
+  it("signs hosted share payload callbacks for the runtime-supplied owner user", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const result = await platform.sharePort!.fetchPayload({
+      ownerUserId: "member_sender",
+      requestId: "request_share_1",
+      shareId: "share_123",
+    });
+
+    expect(result.payload).toBeNull();
+    expect(result.unavailable).toEqual({
+      code: "not_found",
+      retryable: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "share payload fetch");
+    expect(String(url)).toBe(
+      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+    );
+    expect(init?.method).toBe("GET");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-hosted-execution-user-id")).toBe("member_sender");
+    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("omits hosted side-input request query strings from structured failure logs", async () => {
+    const fetchMock = vi.fn(async () => new Response("unavailable", {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+      },
+      status: 503,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.sharePort!.fetchPayload({
+      ownerUserId: "member_sender",
+      requestId: "request_share_1",
+      shareId: "share_123",
+    })).rejects.toThrow(/Hosted share payload fetch failed with HTTP 503/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          path: "/api/internal/hosted-execution/share/:shareId/payload",
+        }),
+        message: "Hosted runtime control-plane response returned non-OK.",
+      }),
+    );
+  });
+
+  it("carries hosted share owner signing through the worker proxy header", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      fetchedAt: "2026-04-26T00:00:05.000Z",
+      payload: null,
+      unavailable: {
+        code: "not_found",
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const result = await platform.sharePort!.fetchPayload({
+      ownerUserId: "member_sender",
+      requestId: "request_share_1",
+      shareId: "share_123",
+    });
+
+    expect(result.payload).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "proxied share payload fetch");
+    expect(request.url).toBe(
+      "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+    );
+    expect(request.method).toBe("GET");
+    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    expect(request.headers.get("x-hosted-runtime-web-control-user-id")).toBe("member_sender");
+  });
+
+  it("omits hosted side-input identifiers from proxied request failure logs", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    await expect(platform.sharePort!.fetchPayload({
+      ownerUserId: "member_sender",
+      requestId: "request_share_1",
+      shareId: "share_123",
+    })).rejects.toThrow(/Hosted share payload fetch request failed/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          path: "/api/internal/hosted-execution/share/:shareId/payload",
+        }),
+        message: "Hosted runtime upstream request failed.",
+      }),
+    );
+  });
+
+  it("routes hosted vault-sync payload fetch and import callbacks through the worker proxy", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "GET") {
+        return new Response(JSON.stringify({
+          fetchedAt: "2026-04-26T00:00:06.000Z",
+          payload: {
+            bundleBase64: "dmF1bHQ=",
+            payloadSchema: "murph.hosted-vault-sync-payload.v1",
+            sessionId: "vault_sync_123",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify({
+        recorded: true,
+        sessionId: "vault_sync_123",
+        status: "imported",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+    });
+
+    const fetchResult = await platform.vaultSyncPort!.fetchPayload({
+      requestId: "request_vault_sync_1",
+      sessionId: "vault_sync_123",
+    });
+    const importResult = await platform.vaultSyncPort!.recordImport({
+      importedAt: "2026-04-26T00:00:07.000Z",
+      sessionId: "vault_sync_123",
+      status: "imported",
+      summary: {
+        conflictCount: 0,
+        importedJsonlRecords: 1,
+        importedRawFiles: 0,
+        importedTextFiles: 1,
+        skippedDuplicates: 0,
+        skippedExcludedFiles: 0,
+      },
+    });
+
+    expect(fetchResult.payload?.sessionId).toBe("vault_sync_123");
+    expect(importResult.recorded).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const fetchRequest = requireFetchRequest(fetchMock.mock.calls[0], "vault-sync payload fetch");
+    expect(fetchRequest.url).toBe(
+      "http://web-control.worker/api/internal/hosted-execution/vault-sync/vault_sync_123/payload?requestId=request_vault_sync_1",
+    );
+    expect(fetchRequest.method).toBe("GET");
+    expect(fetchRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+
+    const importRequest = requireFetchRequest(fetchMock.mock.calls[1], "vault-sync import record");
+    expect(importRequest.url).toBe("http://web-control.worker/api/internal/hosted-execution/vault-sync/import");
+    expect(importRequest.method).toBe("POST");
+    await expect(importRequest.json()).resolves.toEqual({
+      importedAt: "2026-04-26T00:00:07.000Z",
+      sessionId: "vault_sync_123",
+      status: "imported",
+      summary: {
+        conflictCount: 0,
+        importedJsonlRecords: 1,
+        importedRawFiles: 0,
+        importedTextFiles: 1,
+        skippedDuplicates: 0,
+        skippedExcludedFiles: 0,
+      },
+    });
+  });
+
   it("exposes only the shared hosted effects port methods needed after the cutover", async () => {
     const rawMessage = new Uint8Array([0x61, 0x62, 0x63]);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

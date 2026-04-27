@@ -1,4 +1,4 @@
-import type { HostedRunNudgeResult } from "@murphai/hosted-execution";
+import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
@@ -6,14 +6,14 @@ import { formatHostedExecutionSafeLogError } from "../hosted-execution/logging";
 export async function nudgeHostedRunUser(input: {
   timeoutMs?: number;
   userId: string;
-}): Promise<HostedRunNudgeResult | null> {
+}): Promise<HostedRunnerNudgeResult | null> {
   const client = readHostedExecutionControlClientIfConfigured(input.timeoutMs);
 
   if (!client) {
     return null;
   }
 
-  return await client.nudgeUserRun(input.userId);
+  return await client.nudgeUserRunner(input.userId);
 }
 
 export async function nudgeHostedRunUserBestEffort(input: {
@@ -27,8 +27,8 @@ export async function nudgeHostedRunUserBestEffort(input: {
   } catch (error) {
     console.error(
       input.context
-        ? `Hosted run nudge failed (${input.context}).`
-        : "Hosted run nudge failed.",
+        ? `Hosted runner nudge failed (${input.context}).`
+        : "Hosted runner nudge failed.",
       formatHostedExecutionSafeLogError(error),
     );
     return false;

@@ -1,0 +1,568 @@
+import {
+  parseHostedMailboxFetchResponse,
+  parseHostedMailboxPayloadFetchResponse,
+  parseHostedRunnerStatusResponse,
+  parseHostedRuntimeLogResponse,
+  parseHostedWorkspaceCheckpointResponse,
+  parseHostedWorkspaceReadResponse,
+} from "@murphai/hosted-execution/parsers";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const FIXED_NOW = "2026-04-26T00:00:00.000Z";
+const MAILBOX_ITEM_2_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_item_2";
+const UNSAFE_SENTINEL = "UNSAFE_CONTENT_SENTINEL";
+
+const mocks = vi.hoisted(() => ({
+  checkpointHostedWorkspace: vi.fn(),
+  fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
+  fetchHostedMailboxPayload: vi.fn(),
+  listHostedRuntimeLogs: vi.fn(),
+  readHostedMailboxMaxSeqByLane: vi.fn(),
+  readHostedWorkspace: vi.fn(),
+  recordHostedRuntimeLog: vi.fn(),
+  requireHostedCloudflareCallbackRequest: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
+  readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
+  fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
+}));
+
+vi.mock("@/src/lib/hosted-workspace/store", () => ({
+  checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
+  listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
+  readHostedWorkspace: mocks.readHostedWorkspace,
+  recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
+}));
+
+type MailboxFetchRoute = typeof import("../app/api/internal/hosted-mailbox/fetch/route");
+type MailboxPayloadFetchRoute =
+  typeof import("../app/api/internal/hosted-mailbox/payload/fetch/route");
+type WorkspaceRoute = typeof import("../app/api/internal/hosted-workspace/route");
+type WorkspaceCheckpointRoute =
+  typeof import("../app/api/internal/hosted-workspace/checkpoint/route");
+type RuntimeLogRoute = typeof import("../app/api/internal/hosted-runtime/log/route");
+type RuntimeStatusRoute = typeof import("../app/api/internal/hosted-runtime/status/route");
+
+let mailboxFetchRoute: MailboxFetchRoute;
+let mailboxPayloadFetchRoute: MailboxPayloadFetchRoute;
+let workspaceRoute: WorkspaceRoute;
+let workspaceCheckpointRoute: WorkspaceCheckpointRoute;
+let runtimeLogRoute: RuntimeLogRoute;
+let runtimeStatusRoute: RuntimeStatusRoute;
+
+describe("hosted runtime internal web routes", () => {
+  beforeAll(async () => {
+    mailboxFetchRoute = await import("../app/api/internal/hosted-mailbox/fetch/route");
+    mailboxPayloadFetchRoute = await import(
+      "../app/api/internal/hosted-mailbox/payload/fetch/route"
+    );
+    workspaceRoute = await import("../app/api/internal/hosted-workspace/route");
+    workspaceCheckpointRoute = await import(
+      "../app/api/internal/hosted-workspace/checkpoint/route"
+    );
+    runtimeLogRoute = await import("../app/api/internal/hosted-runtime/log/route");
+    runtimeStatusRoute = await import("../app/api/internal/hosted-runtime/status/route");
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
+  });
+
+  it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-1",
+          expiresAt: null,
+          id: "mailbox_item_1",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_1",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "system-dedupe-1",
+          expiresAt: null,
+          id: "mailbox_item_2",
+          kind: "vault.sync.import",
+          lane: "system",
+          laneSeq: "3",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 128000,
+          payloadInlineCiphertext: null,
+          payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+      {
+        lane: "system",
+        maxSeq: "3",
+      },
+    ]);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "11",
+            lane: "conversation",
+          },
+          {
+            importedSeq: "2",
+            lane: "system",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_1",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
+      lanes: [
+        {
+          afterSeq: "11",
+          lane: "conversation",
+        },
+        {
+          afterSeq: "2",
+          lane: "system",
+        },
+      ],
+      limitPerLane: 10,
+      userId: "member_routes_1",
+    });
+    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+    expect(payload.items[1]).toMatchObject({
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+    });
+    expect(JSON.stringify(payload)).not.toContain("payloadCiphertext");
+  });
+
+  it("fetches a mailbox payload sidecar through the separate signed route", async () => {
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_item_2",
+        payloadCiphertext: "cipher_ref_2",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+      unavailable: null,
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        mailboxItemId: "mailbox_item_2",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        requestId: "request_payload_fetch_1",
+      },
+    ));
+    const payload = parseHostedMailboxPayloadFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_item_2",
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      requestId: "request_payload_fetch_1",
+      userId: "member_routes_1",
+    });
+    expect(payload.payload?.payloadCiphertext).toBe("cipher_ref_2");
+    expect(JSON.stringify(payload)).not.toContain(UNSAFE_SENTINEL);
+  });
+
+  it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+    mocks.checkpointHostedWorkspace
+      .mockResolvedValueOnce({
+        status: "updated",
+        workspace: buildWorkspaceRecord({
+          checkpointedAt: "2026-04-26T00:01:00.000Z",
+          redactedStatusJson: {
+            conversationImportedSeq: "12",
+            state: "idle",
+          },
+          version: "5",
+        }),
+      })
+      .mockResolvedValueOnce({
+        status: "conflict",
+        workspace: buildWorkspaceRecord({
+          snapshotRef: createBundleRef("snapshot_current"),
+          version: "6",
+        }),
+      });
+
+    const readResponse = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+      { method: "GET" },
+    ));
+    expect(parseHostedWorkspaceReadResponse(await readResponse.json()).workspace)
+      .toMatchObject({
+        userId: "member_routes_1",
+        version: "4",
+      });
+
+    const checkpointResponse = await workspaceCheckpointRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/checkpoint",
+      {
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "2",
+        nextWakeAt: "2026-04-26T00:05:00.000Z",
+        nextWakeReason: "mailbox",
+        reason: "import",
+        redactedStatus: {
+          conversationImportedSeq: "12",
+          state: "idle",
+        },
+        snapshotRef: createBundleRef("snapshot_2"),
+      },
+    ));
+    const checkpointPayload = parseHostedWorkspaceCheckpointResponse(
+      await checkpointResponse.json(),
+    );
+
+    expect(checkpointPayload).toMatchObject({
+      checkpointed: true,
+      workspace: {
+        version: "5",
+      },
+    });
+    expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:05:00.000Z",
+      nextWakeReason: "mailbox",
+      reason: "import",
+      redactedStatusJson: {
+        conversationImportedSeq: "12",
+        state: "idle",
+      },
+      snapshotRef: createBundleRef("snapshot_2"),
+      userId: "member_routes_1",
+    });
+
+    const conflictResponse = await workspaceCheckpointRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/checkpoint",
+      {
+        attemptId: "attempt_2",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "3",
+        reason: "idle",
+        snapshotRef: createBundleRef("snapshot_stale"),
+      },
+    ));
+    const conflictPayload = parseHostedWorkspaceCheckpointResponse(
+      await conflictResponse.json(),
+    );
+
+    expect(conflictPayload).toMatchObject({
+      checkpointed: false,
+      workspace: {
+        snapshotRef: createBundleRef("snapshot_current"),
+        version: "6",
+      },
+    });
+    expect(JSON.stringify(conflictPayload)).not.toMatch(/runId|committedSeq|finalizeRequired|source_cursor/u);
+  });
+
+  it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
+    mocks.recordHostedRuntimeLog.mockResolvedValue({
+      at: FIXED_NOW,
+      attemptId: "attempt_1",
+      checkpointVersion: null,
+      component: "mailbox",
+      createdAt: FIXED_NOW,
+      errorCode: null,
+      eventCode: "mailbox.imported",
+      id: "runtime_log_1",
+      leaseGeneration: "2",
+      level: "info",
+      mailboxLane: "conversation",
+      mailboxSeqEnd: "12",
+      mailboxSeqStart: "12",
+      outboxIntentRef: null,
+      phase: "import",
+      redactedJson: {
+        count: 1,
+        lane: "conversation",
+      },
+      userId: "member_routes_1",
+      workspaceVersion: "5",
+    });
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            attemptId: "attempt_1",
+            component: "mailbox",
+            eventCode: "mailbox.imported",
+            leaseGeneration: "2",
+            level: "info",
+            mailboxLane: "conversation",
+            mailboxSeqEnd: "12",
+            mailboxSeqStart: "12",
+            phase: "import",
+            redactedJson: {
+              count: 1,
+              lane: "conversation",
+            },
+            workspaceVersion: "5",
+          },
+        ],
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
+      loggedCount: 1,
+    });
+    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledWith(expect.objectContaining({
+      redacted: {
+        count: 1,
+        lane: "conversation",
+      },
+      userId: "member_routes_1",
+    }));
+
+    const rejectedResponse = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            component: "mailbox",
+            eventCode: "mailbox.imported",
+            level: "info",
+            message: UNSAFE_SENTINEL,
+            phase: "import",
+          },
+        ],
+      },
+    ));
+    const rejectedText = await rejectedResponse.text();
+
+    expect(rejectedResponse.status).toBe(400);
+    expect(rejectedText).not.toContain(UNSAFE_SENTINEL);
+    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
+
+    const unsafeCodeResponse = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            component: "mailbox",
+            errorCode: ["person", "example.test"].join("@"),
+            eventCode: "mailbox.imported",
+            level: "info",
+            phase: "import",
+          },
+        ],
+      },
+    ));
+    expect(unsafeCodeResponse.status).toBe(400);
+    expect(await unsafeCodeResponse.text()).not.toContain("example.test");
+
+    const unsafeRedactedResponse = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            component: "mailbox",
+            eventCode: "mailbox.imported",
+            level: "info",
+            phase: "import",
+            redactedJson: {
+              reason: `sent to ${["person", "example.test"].join("@")}`,
+            },
+          },
+        ],
+      },
+    ));
+    expect(unsafeRedactedResponse.status).toBe(400);
+    expect(await unsafeRedactedResponse.text()).not.toContain("example.test");
+
+    const oversizedResponse = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: Array.from({ length: 51 }, () => ({
+          at: FIXED_NOW,
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        })),
+      },
+    ));
+    expect(oversizedResponse.status).toBe(400);
+    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns redacted status from workspace state, mailbox high-water, and structured logs", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-04-26T00:10:00.000Z",
+      redactedStatusJson: {
+        conversationImportedSeq: "10",
+        state: "idle",
+        systemImportedSeq: "2",
+      },
+      version: "5",
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+      {
+        lane: "system",
+        maxSeq: "2",
+      },
+    ]);
+    mocks.listHostedRuntimeLogs.mockResolvedValue([
+      {
+        at: FIXED_NOW,
+        attemptId: "attempt_1",
+        checkpointVersion: "5",
+        component: "workspace",
+        createdAt: FIXED_NOW,
+        errorCode: null,
+        eventCode: "checkpoint.committed",
+        id: "runtime_log_2",
+        leaseGeneration: "2",
+        level: "info",
+        mailboxLane: null,
+        mailboxSeqEnd: null,
+        mailboxSeqStart: null,
+        outboxIntentRef: null,
+        phase: "checkpoint",
+        redactedJson: {
+          checkpointReason: "idle",
+        },
+        userId: "member_routes_1",
+        workspaceVersion: "5",
+      },
+    ]);
+
+    const response = await runtimeStatusRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-runtime/status?logLimit=5",
+      { method: "GET" },
+    ));
+    const payload = parseHostedRunnerStatusResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.listHostedRuntimeLogs).toHaveBeenCalledWith({
+      limit: 5,
+      userId: "member_routes_1",
+    });
+    expect(payload).toMatchObject({
+      inFlight: false,
+      leaseGeneration: "0",
+      mailboxLag: [
+        {
+          importedSeq: "10",
+          lag: "2",
+          lane: "conversation",
+          maxSeq: "12",
+        },
+        {
+          importedSeq: "2",
+          lag: "0",
+          lane: "system",
+          maxSeq: "2",
+        },
+      ],
+      workspace: {
+        redactedStatus: {
+          conversationImportedSeq: "10",
+          state: "idle",
+          systemImportedSeq: "2",
+        },
+        version: "5",
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain(UNSAFE_SENTINEL);
+    expect(JSON.stringify(payload)).not.toMatch(/payloadCiphertext|message|email|phone|token/u);
+  });
+});
+
+function jsonRequest(path: string, body: Record<string, unknown>): Request {
+  return new Request(`https://join.example.test${path}`, {
+    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+}
+
+function buildWorkspaceRecord(
+  overrides: Partial<{
+    browserVaultReplicaRef: Record<string, unknown> | null;
+    checkpointedAt: string | null;
+    createdAt: string;
+    nextWakeAt: string | null;
+    nextWakeReason: string | null;
+    redactedStatusJson: Record<string, unknown> | null;
+    snapshotRef: Record<string, unknown> | null;
+    updatedAt: string;
+    userId: string;
+    version: string;
+  }> = {},
+) {
+  return {
+    browserVaultReplicaRef: null,
+    checkpointedAt: null,
+    createdAt: FIXED_NOW,
+    nextWakeAt: null,
+    nextWakeReason: null,
+    redactedStatusJson: null,
+    snapshotRef: createBundleRef("snapshot_1"),
+    updatedAt: FIXED_NOW,
+    userId: "member_routes_1",
+    version: "4",
+    ...overrides,
+  };
+}
+
+function createBundleRef(id: string) {
+  return {
+    hash: `${id}_hash`,
+    key: `bundles/vault/${id}.bundle.json`,
+    size: 128,
+    updatedAt: FIXED_NOW,
+  };
+}

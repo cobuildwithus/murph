@@ -1,0 +1,1418 @@
+import {
+  assertContract,
+  sharePackSchema,
+} from "@murphai/contracts";
+import {
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  parseHostedExecutionDeviceSyncWakeHint,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
+  parseAssistantRuntimeIssueRecord,
+  parseAssistantUsageRecord,
+} from "@murphai/runtime-state/node";
+import {
+  HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
+  HOSTED_RUNTIME_SHARE_IMPORT_STATUSES,
+  HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA,
+  HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
+  HOSTED_RUNTIME_VAULT_SYNC_IMPORT_STATUSES,
+  HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
+  HOSTED_MAILBOX_KINDS,
+  HOSTED_MAILBOX_LANES,
+  HOSTED_RUNTIME_LOG_COMPONENTS,
+  HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_LOG_LEVELS,
+  HOSTED_RUNTIME_LOG_PHASES,
+  HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  HOSTED_WORKSPACE_RUN_REASONS,
+  HOSTED_WORKSPACE_RUN_STATUSES,
+  type HostedMailboxFetchRequest,
+  type HostedMailboxFetchResponse,
+  type HostedMailboxItem,
+  type HostedMailboxKind,
+  type HostedMailboxLane,
+  type HostedMailboxLaneCounterState,
+  type HostedMailboxLaneCursor,
+  type HostedMailboxLaneHighWater,
+  type HostedMailboxLaneLag,
+  type HostedMailboxPayload,
+  type HostedMailboxPayloadFetchRequest,
+  type HostedMailboxPayloadFetchResponse,
+  type HostedRunnerNudgeResult,
+  type HostedRunnerStatusResponse,
+  type HostedRuntimeDeviceSyncBridgeEnvelope,
+  type HostedRuntimeDeviceSyncBridgeKind,
+  type HostedRuntimeIssueExportRequest,
+  type HostedRuntimeIssueExportResponse,
+  type HostedRuntimeLogComponent,
+  type HostedRuntimeLogEntry,
+  type HostedRuntimeLogEventCode,
+  type HostedRuntimeLogLevel,
+  type HostedRuntimeLogPhase,
+  type HostedRuntimeLogRequest,
+  type HostedRuntimeLogResponse,
+  type HostedRuntimeRedactedJson,
+  type HostedRuntimeRedactedScalar,
+  type HostedRuntimeRedactedValue,
+  type HostedRuntimeShareImportRequest,
+  type HostedRuntimeShareImportResponse,
+  type HostedRuntimeShareImportStatus,
+  type HostedRuntimeSharePayload,
+  type HostedRuntimeSharePayloadFetchRequest,
+  type HostedRuntimeSharePayloadFetchResponse,
+  type HostedRuntimeSideInputUnavailable,
+  type HostedRuntimeSideInputUnavailableCode,
+  type HostedRuntimeUsageExportRequest,
+  type HostedRuntimeUsageExportResponse,
+  type HostedRuntimeVaultSyncImportPayload,
+  type HostedRuntimeVaultSyncImportRequest,
+  type HostedRuntimeVaultSyncImportResponse,
+  type HostedRuntimeVaultSyncImportStatus,
+  type HostedRuntimeVaultSyncImportSummary,
+  type HostedRuntimeVaultSyncPayloadFetchRequest,
+  type HostedRuntimeVaultSyncPayloadFetchResponse,
+  type HostedWorkspaceCheckpointReason,
+  type HostedWorkspaceCheckpointRequest,
+  type HostedWorkspaceCheckpointResponse,
+  type HostedWorkspaceReadResponse,
+  type HostedWorkspaceRunBudget,
+  type HostedWorkspaceRunReason,
+  type HostedWorkspaceRunRequest,
+  type HostedWorkspaceRunResult,
+  type HostedWorkspaceRunStatus,
+  type HostedWorkspaceState,
+} from "../runtime-control.ts";
+import {
+  requireArray,
+  requireBoolean,
+  requireNumber,
+  requireObject,
+  requireString,
+  readNullableString,
+} from "./assertions.ts";
+import {
+  parseHostedBrowserVaultReplicaRef,
+  parseHostedExecutionBundleRef,
+} from "./cursor.ts";
+
+const FORBIDDEN_REDACTED_KEY_PARTS = [
+  "address",
+  "authorization",
+  "body",
+  "cookie",
+  "email",
+  "header",
+  "message",
+  "path",
+  "payload",
+  "phone",
+  "prompt",
+  "raw",
+  "secret",
+  "text",
+  "token",
+] as const;
+const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 24;
+const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
+const HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH = 128;
+
+export function parseHostedMailboxItem(value: unknown): HostedMailboxItem {
+  const record = requireObject(value, "Hosted mailbox item");
+
+  return {
+    createdAt: requireString(record.createdAt, "Hosted mailbox item createdAt"),
+    dedupeKey: requireString(record.dedupeKey, "Hosted mailbox item dedupeKey"),
+    ...(record.expiresAt === undefined
+      ? {}
+      : { expiresAt: readNullableString(record.expiresAt, "Hosted mailbox item expiresAt") }),
+    id: requireString(record.id, "Hosted mailbox item id"),
+    kind: parseHostedMailboxKind(record.kind),
+    lane: parseHostedMailboxLane(record.lane),
+    laneSeq: requireNonNegativeBigIntString(record.laneSeq, "Hosted mailbox item laneSeq"),
+    occurredAt: requireString(record.occurredAt, "Hosted mailbox item occurredAt"),
+    ...(record.payloadBytes === undefined
+      ? {}
+      : {
+          payloadBytes: record.payloadBytes === null
+            ? null
+            : requireNonNegativeInteger(
+                record.payloadBytes,
+                "Hosted mailbox item payloadBytes",
+              ),
+        }),
+    ...(record.payloadInlineCiphertext === undefined
+      ? {}
+      : {
+          payloadInlineCiphertext: readNullableString(
+            record.payloadInlineCiphertext,
+            "Hosted mailbox item payloadInlineCiphertext",
+          ),
+        }),
+    ...(record.payloadRef === undefined
+      ? {}
+      : {
+          payloadRef: readNullableString(record.payloadRef, "Hosted mailbox item payloadRef"),
+        }),
+    payloadSchema: requireString(record.payloadSchema, "Hosted mailbox item payloadSchema"),
+    updatedAt: requireString(record.updatedAt, "Hosted mailbox item updatedAt"),
+    userId: requireString(record.userId, "Hosted mailbox item userId"),
+  };
+}
+
+export function parseHostedMailboxPayload(value: unknown): HostedMailboxPayload {
+  const record = requireObject(value, "Hosted mailbox payload");
+
+  return {
+    createdAt: requireString(record.createdAt, "Hosted mailbox payload createdAt"),
+    mailboxItemId: requireString(record.mailboxItemId, "Hosted mailbox payload mailboxItemId"),
+    payloadCiphertext: requireString(
+      record.payloadCiphertext,
+      "Hosted mailbox payload payloadCiphertext",
+    ),
+    payloadSchema: requireString(record.payloadSchema, "Hosted mailbox payload payloadSchema"),
+    userId: requireString(record.userId, "Hosted mailbox payload userId"),
+  };
+}
+
+export function parseHostedMailboxPayloadFetchRequest(
+  value: unknown,
+): HostedMailboxPayloadFetchRequest {
+  const record = requireObject(value, "Hosted mailbox payload fetch request");
+
+  return {
+    mailboxItemId: requireString(
+      record.mailboxItemId,
+      "Hosted mailbox payload fetch request mailboxItemId",
+    ),
+    ...(record.payloadRef === undefined
+      ? {}
+      : {
+          payloadRef: readNullableString(
+            record.payloadRef,
+            "Hosted mailbox payload fetch request payloadRef",
+          ),
+        }),
+    requestId: requireString(record.requestId, "Hosted mailbox payload fetch request requestId"),
+  };
+}
+
+export function parseHostedMailboxPayloadFetchResponse(
+  value: unknown,
+): HostedMailboxPayloadFetchResponse {
+  const record = requireObject(value, "Hosted mailbox payload fetch response");
+  const payload = record.payload === null ? null : parseHostedMailboxPayload(record.payload);
+  const unavailable = parseOptionalHostedRuntimeSideInputUnavailable(
+    record.unavailable,
+    "Hosted mailbox payload fetch response unavailable",
+  );
+
+  assertPayloadOrUnavailable(
+    payload,
+    unavailable,
+    "Hosted mailbox payload fetch response",
+  );
+
+  return {
+    fetchedAt: requireString(record.fetchedAt, "Hosted mailbox payload fetch response fetchedAt"),
+    payload,
+    ...(record.unavailable === undefined ? {} : { unavailable }),
+  };
+}
+
+export function parseHostedMailboxLaneCounterState(
+  value: unknown,
+): HostedMailboxLaneCounterState {
+  const record = requireObject(value, "Hosted mailbox lane counter");
+
+  return {
+    lane: parseHostedMailboxLane(record.lane),
+    nextSeq: requireNonNegativeBigIntString(
+      record.nextSeq,
+      "Hosted mailbox lane counter nextSeq",
+    ),
+    updatedAt: requireString(record.updatedAt, "Hosted mailbox lane counter updatedAt"),
+    userId: requireString(record.userId, "Hosted mailbox lane counter userId"),
+  };
+}
+
+export function parseHostedMailboxFetchRequest(value: unknown): HostedMailboxFetchRequest {
+  const record = requireObject(value, "Hosted mailbox fetch request");
+
+  return {
+    lanes: requireArray(record.lanes, "Hosted mailbox fetch request lanes")
+      .map((entry, index) => parseHostedMailboxLaneCursor(
+        entry,
+        `Hosted mailbox fetch request lanes[${index}]`,
+      )),
+    limitPerLane: requirePositiveInteger(
+      record.limitPerLane,
+      "Hosted mailbox fetch request limitPerLane",
+    ),
+    requestId: requireString(record.requestId, "Hosted mailbox fetch request requestId"),
+  };
+}
+
+export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFetchResponse {
+  const record = requireObject(value, "Hosted mailbox fetch response");
+
+  return {
+    fetchedAt: requireString(record.fetchedAt, "Hosted mailbox fetch response fetchedAt"),
+    items: requireArray(record.items, "Hosted mailbox fetch response items")
+      .map((entry) => parseHostedMailboxItem(entry)),
+    maxSeqByLane: requireArray(
+      record.maxSeqByLane,
+      "Hosted mailbox fetch response maxSeqByLane",
+    ).map((entry, index) => parseHostedMailboxLaneHighWater(
+      entry,
+      `Hosted mailbox fetch response maxSeqByLane[${index}]`,
+    )),
+    userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
+  };
+}
+
+export function parseHostedRuntimeSharePayload(value: unknown): HostedRuntimeSharePayload {
+  const record = requireObject(value, "Hosted runtime share payload");
+  const payloadSchema = requireString(record.payloadSchema, "Hosted runtime share payload payloadSchema");
+
+  if (payloadSchema !== HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA) {
+    throw new TypeError(
+      `Hosted runtime share payload payloadSchema must be ${HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA}.`,
+    );
+  }
+
+  return {
+    ownerUserId: requireString(record.ownerUserId, "Hosted runtime share payload ownerUserId"),
+    pack: assertContract(sharePackSchema, record.pack, "hosted runtime share pack"),
+    payloadSchema,
+    shareId: requireString(record.shareId, "Hosted runtime share payload shareId"),
+  };
+}
+
+export function parseHostedRuntimeSharePayloadFetchRequest(
+  value: unknown,
+): HostedRuntimeSharePayloadFetchRequest {
+  const record = requireObject(value, "Hosted runtime share payload fetch request");
+
+  return {
+    ownerUserId: requireString(
+      record.ownerUserId,
+      "Hosted runtime share payload fetch request ownerUserId",
+    ),
+    requestId: requireString(record.requestId, "Hosted runtime share payload fetch request requestId"),
+    shareId: requireString(record.shareId, "Hosted runtime share payload fetch request shareId"),
+  };
+}
+
+export function parseHostedRuntimeSharePayloadFetchResponse(
+  value: unknown,
+): HostedRuntimeSharePayloadFetchResponse {
+  const record = requireObject(value, "Hosted runtime share payload fetch response");
+  const payload = record.payload === null ? null : parseHostedRuntimeSharePayload(record.payload);
+  const unavailable = parseOptionalHostedRuntimeSideInputUnavailable(
+    record.unavailable,
+    "Hosted runtime share payload fetch response unavailable",
+  );
+
+  assertPayloadOrUnavailable(
+    payload,
+    unavailable,
+    "Hosted runtime share payload fetch response",
+  );
+
+  return {
+    fetchedAt: requireString(
+      record.fetchedAt,
+      "Hosted runtime share payload fetch response fetchedAt",
+    ),
+    payload,
+    ...(record.unavailable === undefined ? {} : { unavailable }),
+  };
+}
+
+export function parseHostedRuntimeShareImportRequest(
+  value: unknown,
+): HostedRuntimeShareImportRequest {
+  const record = requireObject(value, "Hosted runtime share import request");
+
+  return {
+    ...(record.errorCode === undefined
+      ? {}
+      : {
+          errorCode: readNullableString(
+            record.errorCode,
+            "Hosted runtime share import request errorCode",
+          ),
+        }),
+    importedAt: requireString(record.importedAt, "Hosted runtime share import request importedAt"),
+    ownerUserId: requireString(record.ownerUserId, "Hosted runtime share import request ownerUserId"),
+    shareId: requireString(record.shareId, "Hosted runtime share import request shareId"),
+    status: parseHostedRuntimeShareImportStatus(record.status),
+  };
+}
+
+export function parseHostedRuntimeShareImportResponse(
+  value: unknown,
+): HostedRuntimeShareImportResponse {
+  const record = requireObject(value, "Hosted runtime share import response");
+
+  return {
+    recorded: requireBoolean(record.recorded, "Hosted runtime share import response recorded"),
+    shareId: requireString(record.shareId, "Hosted runtime share import response shareId"),
+    status: parseHostedRuntimeShareImportStatus(record.status),
+  };
+}
+
+export function parseHostedRuntimeVaultSyncImportPayload(
+  value: unknown,
+): HostedRuntimeVaultSyncImportPayload {
+  const record = requireObject(value, "Hosted runtime vault-sync import payload");
+  const payloadSchema = requireString(
+    record.payloadSchema,
+    "Hosted runtime vault-sync import payload payloadSchema",
+  );
+
+  if (payloadSchema !== HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA) {
+    throw new TypeError(
+      `Hosted runtime vault-sync import payload payloadSchema must be ${HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA}.`,
+    );
+  }
+
+  return {
+    bundleBase64: requireString(
+      record.bundleBase64,
+      "Hosted runtime vault-sync import payload bundleBase64",
+    ),
+    ...(record.localManifestHash === undefined
+      ? {}
+      : {
+          localManifestHash: readNullableString(
+            record.localManifestHash,
+            "Hosted runtime vault-sync import payload localManifestHash",
+          ),
+        }),
+    payloadSchema,
+    sessionId: requireString(
+      record.sessionId,
+      "Hosted runtime vault-sync import payload sessionId",
+    ),
+    ...(record.sourceSchemaVersion === undefined
+      ? {}
+      : {
+          sourceSchemaVersion: readNullableString(
+            record.sourceSchemaVersion,
+            "Hosted runtime vault-sync import payload sourceSchemaVersion",
+          ),
+        }),
+  };
+}
+
+export function parseHostedRuntimeVaultSyncPayloadFetchRequest(
+  value: unknown,
+): HostedRuntimeVaultSyncPayloadFetchRequest {
+  const record = requireObject(value, "Hosted runtime vault-sync payload fetch request");
+
+  return {
+    requestId: requireString(
+      record.requestId,
+      "Hosted runtime vault-sync payload fetch request requestId",
+    ),
+    sessionId: requireString(
+      record.sessionId,
+      "Hosted runtime vault-sync payload fetch request sessionId",
+    ),
+  };
+}
+
+export function parseHostedRuntimeVaultSyncPayloadFetchResponse(
+  value: unknown,
+): HostedRuntimeVaultSyncPayloadFetchResponse {
+  const record = requireObject(value, "Hosted runtime vault-sync payload fetch response");
+  const payload = record.payload === null
+    ? null
+    : parseHostedRuntimeVaultSyncImportPayload(record.payload);
+  const unavailable = parseOptionalHostedRuntimeSideInputUnavailable(
+    record.unavailable,
+    "Hosted runtime vault-sync payload fetch response unavailable",
+  );
+
+  assertPayloadOrUnavailable(
+    payload,
+    unavailable,
+    "Hosted runtime vault-sync payload fetch response",
+  );
+
+  return {
+    fetchedAt: requireString(
+      record.fetchedAt,
+      "Hosted runtime vault-sync payload fetch response fetchedAt",
+    ),
+    payload,
+    ...(record.unavailable === undefined ? {} : { unavailable }),
+  };
+}
+
+export function parseHostedRuntimeVaultSyncImportSummary(
+  value: unknown,
+): HostedRuntimeVaultSyncImportSummary {
+  const record = requireObject(value, "Hosted runtime vault-sync import summary");
+
+  return {
+    conflictCount: requireNonNegativeInteger(
+      record.conflictCount,
+      "Hosted runtime vault-sync import summary conflictCount",
+    ),
+    importedJsonlRecords: requireNonNegativeInteger(
+      record.importedJsonlRecords,
+      "Hosted runtime vault-sync import summary importedJsonlRecords",
+    ),
+    importedRawFiles: requireNonNegativeInteger(
+      record.importedRawFiles,
+      "Hosted runtime vault-sync import summary importedRawFiles",
+    ),
+    importedTextFiles: requireNonNegativeInteger(
+      record.importedTextFiles,
+      "Hosted runtime vault-sync import summary importedTextFiles",
+    ),
+    skippedDuplicates: requireNonNegativeInteger(
+      record.skippedDuplicates,
+      "Hosted runtime vault-sync import summary skippedDuplicates",
+    ),
+    skippedExcludedFiles: requireNonNegativeInteger(
+      record.skippedExcludedFiles,
+      "Hosted runtime vault-sync import summary skippedExcludedFiles",
+    ),
+  };
+}
+
+export function parseHostedRuntimeVaultSyncImportRequest(
+  value: unknown,
+): HostedRuntimeVaultSyncImportRequest {
+  const record = requireObject(value, "Hosted runtime vault-sync import request");
+
+  return {
+    ...(record.errorCode === undefined
+      ? {}
+      : {
+          errorCode: readNullableString(
+            record.errorCode,
+            "Hosted runtime vault-sync import request errorCode",
+          ),
+        }),
+    importedAt: requireString(
+      record.importedAt,
+      "Hosted runtime vault-sync import request importedAt",
+    ),
+    sessionId: requireString(record.sessionId, "Hosted runtime vault-sync import request sessionId"),
+    status: parseHostedRuntimeVaultSyncImportStatus(record.status),
+    summary: parseHostedRuntimeVaultSyncImportSummary(record.summary),
+  };
+}
+
+export function parseHostedRuntimeVaultSyncImportResponse(
+  value: unknown,
+): HostedRuntimeVaultSyncImportResponse {
+  const record = requireObject(value, "Hosted runtime vault-sync import response");
+
+  return {
+    recorded: requireBoolean(record.recorded, "Hosted runtime vault-sync import response recorded"),
+    sessionId: requireString(record.sessionId, "Hosted runtime vault-sync import response sessionId"),
+    status: parseHostedRuntimeVaultSyncImportStatus(record.status),
+  };
+}
+
+export function parseHostedRuntimeDeviceSyncBridgeEnvelope(
+  value: unknown,
+): HostedRuntimeDeviceSyncBridgeEnvelope {
+  const record = requireObject(value, "Hosted runtime device-sync bridge envelope");
+  const kind = parseHostedRuntimeDeviceSyncBridgeKind(record.kind);
+  const requestId = requireString(record.requestId, "Hosted runtime device-sync bridge requestId");
+
+  switch (kind) {
+    case "device-sync.wake":
+      return {
+        ...(record.connectionId === undefined
+          ? {}
+          : {
+              connectionId: readNullableString(
+                record.connectionId,
+                "Hosted runtime device-sync bridge connectionId",
+              ),
+            }),
+        ...(record.hint === undefined
+          ? {}
+          : {
+              hint: parseHostedExecutionDeviceSyncWakeHint(record.hint),
+            }),
+        kind,
+        ...(record.provider === undefined
+          ? {}
+          : {
+              provider: readNullableString(
+                record.provider,
+                "Hosted runtime device-sync bridge provider",
+              ),
+            }),
+        requestId,
+      };
+    case "device-sync.snapshot":
+      return {
+        kind,
+        request: parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(record.request),
+        requestId,
+      };
+    case "device-sync.apply":
+      return {
+        kind,
+        request: parseHostedExecutionDeviceSyncRuntimeApplyRequest(record.request),
+        requestId,
+      };
+  }
+}
+
+export function parseHostedRuntimeUsageExportRequest(
+  value: unknown,
+): HostedRuntimeUsageExportRequest {
+  const record = requireObject(value, "Hosted runtime usage export request");
+
+  return {
+    usage: requireArray(record.usage, "Hosted runtime usage export request usage")
+      .map((entry) => parseAssistantUsageRecord(entry)),
+  };
+}
+
+export function parseHostedRuntimeUsageExportResponse(
+  value: unknown,
+): HostedRuntimeUsageExportResponse {
+  const response = parseHostedRuntimeRecordExportResponse(value, "usageIds");
+
+  return {
+    recorded: response.recorded,
+    usageIds: response.ids,
+  };
+}
+
+export function parseHostedRuntimeIssueExportRequest(
+  value: unknown,
+): HostedRuntimeIssueExportRequest {
+  const record = requireObject(value, "Hosted runtime issue export request");
+
+  return {
+    issues: requireArray(record.issues, "Hosted runtime issue export request issues")
+      .map((entry) => parseAssistantRuntimeIssueRecord(entry)),
+  };
+}
+
+export function parseHostedRuntimeIssueExportResponse(
+  value: unknown,
+): HostedRuntimeIssueExportResponse {
+  const response = parseHostedRuntimeRecordExportResponse(value, "issueIds");
+
+  return {
+    issueIds: response.ids,
+    recorded: response.recorded,
+  };
+}
+
+export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState {
+  const record = requireObject(value, "Hosted workspace state");
+
+  return {
+    ...(record.browserVaultReplicaRef === undefined
+      ? {}
+      : {
+          browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(
+            record.browserVaultReplicaRef,
+            "Hosted workspace state browserVaultReplicaRef",
+          ),
+        }),
+    ...(record.checkpointedAt === undefined
+      ? {}
+      : {
+          checkpointedAt: readNullableString(
+            record.checkpointedAt,
+            "Hosted workspace state checkpointedAt",
+          ),
+        }),
+    createdAt: requireString(record.createdAt, "Hosted workspace state createdAt"),
+    ...(record.nextWakeAt === undefined
+      ? {}
+      : { nextWakeAt: readNullableString(record.nextWakeAt, "Hosted workspace state nextWakeAt") }),
+    ...(record.nextWakeReason === undefined
+      ? {}
+      : {
+          nextWakeReason: readNullableString(
+            record.nextWakeReason,
+            "Hosted workspace state nextWakeReason",
+          ),
+        }),
+    ...(record.redactedStatus === undefined
+      ? {}
+      : {
+          redactedStatus: parseHostedRuntimeRedactedJson(
+            record.redactedStatus,
+            "Hosted workspace state redactedStatus",
+          ),
+        }),
+    snapshotRef: parseHostedExecutionBundleRef(
+      record.snapshotRef === undefined ? null : record.snapshotRef,
+      "Hosted workspace state snapshotRef",
+    ),
+    updatedAt: requireString(record.updatedAt, "Hosted workspace state updatedAt"),
+    userId: requireString(record.userId, "Hosted workspace state userId"),
+    version: requireNonNegativeBigIntString(record.version, "Hosted workspace state version"),
+  };
+}
+
+export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspaceReadResponse {
+  const record = requireObject(value, "Hosted workspace read response");
+
+  return {
+    fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
+    workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+export function parseHostedWorkspaceCheckpointRequest(
+  value: unknown,
+): HostedWorkspaceCheckpointRequest {
+  const record = requireObject(value, "Hosted workspace checkpoint request");
+
+  return {
+    attemptId: requireString(
+      record.attemptId,
+      "Hosted workspace checkpoint request attemptId",
+    ),
+    ...(record.browserVaultReplicaRef === undefined
+      ? {}
+      : {
+          browserVaultReplicaRef: parseHostedBrowserVaultReplicaRef(
+            record.browserVaultReplicaRef,
+            "Hosted workspace checkpoint request browserVaultReplicaRef",
+          ),
+        }),
+    expectedWorkspaceVersion: requireNonNegativeBigIntString(
+      record.expectedWorkspaceVersion,
+      "Hosted workspace checkpoint request expectedWorkspaceVersion",
+    ),
+    leaseGeneration: requireNonNegativeBigIntString(
+      record.leaseGeneration,
+      "Hosted workspace checkpoint request leaseGeneration",
+    ),
+    ...(record.nextWakeAt === undefined
+      ? {}
+      : {
+          nextWakeAt: readNullableString(
+            record.nextWakeAt,
+            "Hosted workspace checkpoint request nextWakeAt",
+          ),
+        }),
+    ...(record.nextWakeReason === undefined
+      ? {}
+      : {
+          nextWakeReason: readNullableString(
+            record.nextWakeReason,
+            "Hosted workspace checkpoint request nextWakeReason",
+          ),
+        }),
+    reason: parseHostedWorkspaceCheckpointReason(record.reason),
+    ...(record.redactedStatus === undefined
+      ? {}
+      : {
+          redactedStatus: parseHostedRuntimeRedactedJson(
+            record.redactedStatus,
+            "Hosted workspace checkpoint request redactedStatus",
+          ),
+        }),
+    snapshotRef: parseHostedExecutionBundleRef(
+      record.snapshotRef === undefined ? null : record.snapshotRef,
+      "Hosted workspace checkpoint request snapshotRef",
+    ),
+  };
+}
+
+export function parseHostedWorkspaceCheckpointResponse(
+  value: unknown,
+): HostedWorkspaceCheckpointResponse {
+  const record = requireObject(value, "Hosted workspace checkpoint response");
+
+  return {
+    checkpointed: requireBoolean(
+      record.checkpointed,
+      "Hosted workspace checkpoint response checkpointed",
+    ),
+    workspace: parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+export function parseHostedRuntimeLogEntry(value: unknown): HostedRuntimeLogEntry {
+  const record = requireObject(value, "Hosted runtime log entry");
+  assertNoForbiddenRuntimeLogKeys(record, "Hosted runtime log entry");
+
+  return {
+    at: requireString(record.at, "Hosted runtime log entry at"),
+    ...(record.attemptId === undefined
+      ? {}
+      : {
+          attemptId: readNullableHostedRuntimeLogString(
+            record.attemptId,
+            "Hosted runtime log entry attemptId",
+          ),
+        }),
+    ...(record.checkpointVersion === undefined
+      ? {}
+      : {
+          checkpointVersion: record.checkpointVersion === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.checkpointVersion,
+                "Hosted runtime log entry checkpointVersion",
+              ),
+        }),
+    component: parseHostedRuntimeLogComponent(record.component),
+    ...(record.errorCode === undefined
+      ? {}
+      : {
+          errorCode: readNullableHostedRuntimeLogString(
+            record.errorCode,
+            "Hosted runtime log entry errorCode",
+          ),
+        }),
+    eventCode: parseHostedRuntimeLogEventCode(record.eventCode),
+    ...(record.leaseGeneration === undefined
+      ? {}
+      : {
+          leaseGeneration: record.leaseGeneration === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.leaseGeneration,
+                "Hosted runtime log entry leaseGeneration",
+              ),
+        }),
+    level: parseHostedRuntimeLogLevel(record.level),
+    ...(record.mailboxLane === undefined
+      ? {}
+      : {
+          mailboxLane: record.mailboxLane === null
+            ? null
+            : parseHostedMailboxLane(record.mailboxLane),
+        }),
+    ...(record.mailboxSeqEnd === undefined
+      ? {}
+      : {
+          mailboxSeqEnd: record.mailboxSeqEnd === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.mailboxSeqEnd,
+                "Hosted runtime log entry mailboxSeqEnd",
+              ),
+        }),
+    ...(record.mailboxSeqStart === undefined
+      ? {}
+      : {
+          mailboxSeqStart: record.mailboxSeqStart === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.mailboxSeqStart,
+                "Hosted runtime log entry mailboxSeqStart",
+              ),
+        }),
+    ...(record.outboxIntentRef === undefined
+      ? {}
+      : {
+          outboxIntentRef: readNullableHostedRuntimeLogString(
+            record.outboxIntentRef,
+            "Hosted runtime log entry outboxIntentRef",
+          ),
+        }),
+    phase: parseHostedRuntimeLogPhase(record.phase),
+    ...(record.redactedJson === undefined
+      ? {}
+      : {
+          redactedJson: parseHostedRuntimeRedactedJson(
+            record.redactedJson,
+            "Hosted runtime log entry redactedJson",
+          ),
+        }),
+    ...(record.workspaceVersion === undefined
+      ? {}
+      : {
+          workspaceVersion: record.workspaceVersion === null
+            ? null
+            : requireNonNegativeBigIntString(
+                record.workspaceVersion,
+                "Hosted runtime log entry workspaceVersion",
+              ),
+        }),
+  };
+}
+
+export function parseHostedRuntimeLogRequest(value: unknown): HostedRuntimeLogRequest {
+  const record = requireObject(value, "Hosted runtime log request");
+  const entries = requireArray(record.entries, "Hosted runtime log request entries");
+
+  if (entries.length > HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES) {
+    throw new TypeError(
+      `Hosted runtime log request entries must contain at most ${HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES} entries.`,
+    );
+  }
+
+  return {
+    entries: entries.map((entry) => parseHostedRuntimeLogEntry(entry)),
+  };
+}
+
+export function parseHostedRuntimeLogResponse(value: unknown): HostedRuntimeLogResponse {
+  const record = requireObject(value, "Hosted runtime log response");
+
+  return {
+    loggedCount: requireNonNegativeInteger(
+      record.loggedCount,
+      "Hosted runtime log response loggedCount",
+    ),
+  };
+}
+
+export function parseHostedRunnerNudgeResult(value: unknown): HostedRunnerNudgeResult {
+  const record = requireObject(value, "Hosted runner nudge result");
+
+  return {
+    accepted: requireBoolean(record.accepted, "Hosted runner nudge result accepted"),
+    alarmScheduled: requireBoolean(
+      record.alarmScheduled,
+      "Hosted runner nudge result alarmScheduled",
+    ),
+    alreadyRunning: requireBoolean(
+      record.alreadyRunning,
+      "Hosted runner nudge result alreadyRunning",
+    ),
+    inFlight: requireBoolean(record.inFlight, "Hosted runner nudge result inFlight"),
+    leaseGeneration: requireNonNegativeBigIntString(
+      record.leaseGeneration,
+      "Hosted runner nudge result leaseGeneration",
+    ),
+    ...(record.nextAlarmAt === undefined
+      ? {}
+      : {
+          nextAlarmAt: readNullableString(
+            record.nextAlarmAt,
+            "Hosted runner nudge result nextAlarmAt",
+          ),
+        }),
+  };
+}
+
+export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerStatusResponse {
+  const record = requireObject(value, "Hosted runner status response");
+
+  return {
+    ...(record.heartbeatAt === undefined
+      ? {}
+      : {
+          heartbeatAt: readNullableString(
+            record.heartbeatAt,
+            "Hosted runner status response heartbeatAt",
+          ),
+        }),
+    inFlight: requireBoolean(record.inFlight, "Hosted runner status response inFlight"),
+    ...(record.lastErrorAt === undefined
+      ? {}
+      : {
+          lastErrorAt: readNullableString(
+            record.lastErrorAt,
+            "Hosted runner status response lastErrorAt",
+          ),
+        }),
+    ...(record.lastErrorCode === undefined
+      ? {}
+      : {
+          lastErrorCode: readNullableString(
+            record.lastErrorCode,
+            "Hosted runner status response lastErrorCode",
+          ),
+        }),
+    ...(record.lastRunAt === undefined
+      ? {}
+      : {
+          lastRunAt: readNullableString(
+            record.lastRunAt,
+            "Hosted runner status response lastRunAt",
+          ),
+        }),
+    leaseGeneration: requireNonNegativeBigIntString(
+      record.leaseGeneration,
+      "Hosted runner status response leaseGeneration",
+    ),
+    mailboxLag: requireArray(record.mailboxLag, "Hosted runner status response mailboxLag")
+      .map((entry, index) => parseHostedMailboxLaneLag(
+        entry,
+        `Hosted runner status response mailboxLag[${index}]`,
+      )),
+    ...(record.nextAlarmAt === undefined
+      ? {}
+      : {
+          nextAlarmAt: readNullableString(
+            record.nextAlarmAt,
+            "Hosted runner status response nextAlarmAt",
+          ),
+        }),
+    ...(record.recentLogs === undefined
+      ? {}
+      : {
+          recentLogs: requireArray(record.recentLogs, "Hosted runner status response recentLogs")
+            .map((entry) => parseHostedRuntimeLogEntry(entry)),
+        }),
+    userId: requireString(record.userId, "Hosted runner status response userId"),
+    workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
+  };
+}
+
+export function parseHostedWorkspaceRunRequest(value: unknown): HostedWorkspaceRunRequest {
+  const record = requireObject(value, "Hosted workspace run request");
+
+  rejectHostedWorkspaceRunRemovedField(record, "run");
+  rejectHostedWorkspaceRunRemovedField(record, "runDrain");
+  rejectHostedWorkspaceRunRemovedField(record, "runToken");
+  rejectHostedWorkspaceRunRemovedField(record, "targetCommittedSeqHint");
+  rejectHostedWorkspaceRunRemovedField(record, "wake");
+
+  return {
+    attemptId: requireString(record.attemptId, "Hosted workspace run request attemptId"),
+    ...(record.budget === undefined || record.budget === null
+      ? {}
+      : {
+          budget: parseHostedWorkspaceRunBudget(
+            record.budget,
+            "Hosted workspace run request budget",
+          ),
+        }),
+    leaseGeneration: requireNonNegativeBigIntString(
+      record.leaseGeneration,
+      "Hosted workspace run request leaseGeneration",
+    ),
+    reason: parseHostedWorkspaceRunReason(record.reason),
+    userId: requireString(record.userId, "Hosted workspace run request userId"),
+    workspaceVersion: requireNonNegativeBigIntString(
+      record.workspaceVersion,
+      "Hosted workspace run request workspaceVersion",
+    ),
+  };
+}
+
+export function parseHostedWorkspaceRunResult(value: unknown): HostedWorkspaceRunResult {
+  const record = requireObject(value, "Hosted workspace run result");
+
+  return {
+    ...(record.nextWakeAt === undefined
+      ? {}
+      : {
+          nextWakeAt: readNullableString(
+            record.nextWakeAt,
+            "Hosted workspace run result nextWakeAt",
+          ),
+        }),
+    ...(record.redactedStatus === undefined
+      ? {}
+      : {
+          redactedStatus: parseHostedRuntimeRedactedJson(
+            record.redactedStatus,
+            "Hosted workspace run result redactedStatus",
+          ),
+        }),
+    status: parseHostedWorkspaceRunStatus(record.status),
+  };
+}
+
+export function parseHostedMailboxLane(value: unknown): HostedMailboxLane {
+  return parseAllowedString(value, "Hosted mailbox lane", HOSTED_MAILBOX_LANES);
+}
+
+export function parseHostedMailboxKind(value: unknown): HostedMailboxKind {
+  return parseAllowedString(value, "Hosted mailbox kind", HOSTED_MAILBOX_KINDS);
+}
+
+function parseHostedWorkspaceCheckpointReason(
+  value: unknown,
+): HostedWorkspaceCheckpointReason {
+  return parseAllowedString(
+    value,
+    "Hosted workspace checkpoint reason",
+    HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  );
+}
+
+function parseHostedWorkspaceRunBudget(
+  value: unknown,
+  label: string,
+): HostedWorkspaceRunBudget {
+  const record = requireObject(value, label);
+
+  return {
+    ...(record.maxMailboxItems === undefined
+      ? {}
+      : {
+          maxMailboxItems: record.maxMailboxItems === null
+            ? null
+            : requirePositiveInteger(record.maxMailboxItems, `${label}.maxMailboxItems`),
+        }),
+    ...(record.maxRuntimeMs === undefined
+      ? {}
+      : {
+          maxRuntimeMs: record.maxRuntimeMs === null
+            ? null
+            : requirePositiveInteger(record.maxRuntimeMs, `${label}.maxRuntimeMs`),
+        }),
+  };
+}
+
+function parseHostedWorkspaceRunReason(value: unknown): HostedWorkspaceRunReason {
+  return parseAllowedString(
+    value,
+    "Hosted workspace run request reason",
+    HOSTED_WORKSPACE_RUN_REASONS,
+  );
+}
+
+function parseHostedWorkspaceRunStatus(value: unknown): HostedWorkspaceRunStatus {
+  return parseAllowedString(
+    value,
+    "Hosted workspace run result status",
+    HOSTED_WORKSPACE_RUN_STATUSES,
+  );
+}
+
+function rejectHostedWorkspaceRunRemovedField(
+  record: Record<string, unknown>,
+  field: string,
+): void {
+  if (record[field] !== undefined) {
+    throw new TypeError(`Hosted workspace run request.${field} is no longer supported.`);
+  }
+}
+
+function parseHostedRuntimeSideInputUnavailableCode(
+  value: unknown,
+): HostedRuntimeSideInputUnavailableCode {
+  return parseAllowedString(
+    value,
+    "Hosted runtime side-input unavailable code",
+    HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
+  );
+}
+
+function parseHostedRuntimeShareImportStatus(value: unknown): HostedRuntimeShareImportStatus {
+  return parseAllowedString(
+    value,
+    "Hosted runtime share import status",
+    HOSTED_RUNTIME_SHARE_IMPORT_STATUSES,
+  );
+}
+
+function parseHostedRuntimeVaultSyncImportStatus(
+  value: unknown,
+): HostedRuntimeVaultSyncImportStatus {
+  return parseAllowedString(
+    value,
+    "Hosted runtime vault-sync import status",
+    HOSTED_RUNTIME_VAULT_SYNC_IMPORT_STATUSES,
+  );
+}
+
+function parseHostedRuntimeDeviceSyncBridgeKind(
+  value: unknown,
+): HostedRuntimeDeviceSyncBridgeKind {
+  return parseAllowedString(
+    value,
+    "Hosted runtime device-sync bridge kind",
+    HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
+  );
+}
+
+function parseHostedRuntimeLogLevel(value: unknown): HostedRuntimeLogLevel {
+  return parseAllowedString(value, "Hosted runtime log level", HOSTED_RUNTIME_LOG_LEVELS);
+}
+
+function parseHostedRuntimeLogComponent(value: unknown): HostedRuntimeLogComponent {
+  return parseAllowedString(
+    value,
+    "Hosted runtime log component",
+    HOSTED_RUNTIME_LOG_COMPONENTS,
+  );
+}
+
+function parseHostedRuntimeLogPhase(value: unknown): HostedRuntimeLogPhase {
+  return parseAllowedString(value, "Hosted runtime log phase", HOSTED_RUNTIME_LOG_PHASES);
+}
+
+function parseHostedRuntimeLogEventCode(value: unknown): HostedRuntimeLogEventCode {
+  return parseAllowedString(
+    value,
+    "Hosted runtime log eventCode",
+    HOSTED_RUNTIME_LOG_EVENT_CODES,
+  );
+}
+
+function parseHostedMailboxLaneCursor(
+  value: unknown,
+  label: string,
+): HostedMailboxLaneCursor {
+  const record = requireObject(value, label);
+
+  return {
+    importedSeq: requireNonNegativeBigIntString(record.importedSeq, `${label}.importedSeq`),
+    lane: parseHostedMailboxLane(record.lane),
+  };
+}
+
+function parseHostedMailboxLaneHighWater(
+  value: unknown,
+  label: string,
+): HostedMailboxLaneHighWater {
+  const record = requireObject(value, label);
+
+  return {
+    lane: parseHostedMailboxLane(record.lane),
+    maxSeq: requireNonNegativeBigIntString(record.maxSeq, `${label}.maxSeq`),
+  };
+}
+
+function parseHostedMailboxLaneLag(value: unknown, label: string): HostedMailboxLaneLag {
+  const record = requireObject(value, label);
+
+  return {
+    importedSeq: requireNonNegativeBigIntString(record.importedSeq, `${label}.importedSeq`),
+    lag: requireNonNegativeBigIntString(record.lag, `${label}.lag`),
+    lane: parseHostedMailboxLane(record.lane),
+    maxSeq: requireNonNegativeBigIntString(record.maxSeq, `${label}.maxSeq`),
+  };
+}
+
+function parseOptionalHostedRuntimeSideInputUnavailable(
+  value: unknown,
+  label: string,
+): HostedRuntimeSideInputUnavailable | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+
+  return {
+    code: parseHostedRuntimeSideInputUnavailableCode(record.code),
+    retryable: requireBoolean(record.retryable, `${label}.retryable`),
+  };
+}
+
+function assertPayloadOrUnavailable(
+  payload: object | null,
+  unavailable: HostedRuntimeSideInputUnavailable | null,
+  label: string,
+): void {
+  if (payload === null && unavailable === null) {
+    throw new TypeError(`${label} requires payload or unavailable.`);
+  }
+
+  if (payload !== null && unavailable !== null) {
+    throw new TypeError(`${label} must not include both payload and unavailable.`);
+  }
+}
+
+function parseHostedRuntimeRecordExportResponse(
+  value: unknown,
+  idsFieldName: "issueIds" | "usageIds",
+): { ids: string[]; recorded: number } {
+  const record = requireObject(value, "Hosted runtime record export response");
+  const ids = requireArray(
+    record[idsFieldName],
+    `Hosted runtime record export response ${idsFieldName}`,
+  ).map((entry, index) => requireString(
+    entry,
+    `Hosted runtime record export response ${idsFieldName}[${index}]`,
+  ));
+
+  return {
+    ids,
+    recorded: requireNonNegativeInteger(
+      record.recorded,
+      "Hosted runtime record export response recorded",
+    ),
+  };
+}
+
+function parseAllowedString<T extends string>(
+  value: unknown,
+  label: string,
+  allowed: readonly T[],
+): T {
+  const text = requireString(value, label);
+
+  if (allowed.includes(text as T)) {
+    return text as T;
+  }
+
+  throw new TypeError(`${label} is not supported: ${text}`);
+}
+
+function requirePositiveInteger(value: unknown, label: string): number {
+  const parsed = requireNonNegativeInteger(value, label);
+
+  if (parsed === 0) {
+    throw new TypeError(`${label} must be a positive integer.`);
+  }
+
+  return parsed;
+}
+
+function requireNonNegativeInteger(value: unknown, label: string): number {
+  const parsed = requireNumber(value, label);
+
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new TypeError(`${label} must be a non-negative integer.`);
+  }
+
+  return parsed;
+}
+
+function requireNonNegativeBigIntString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+
+  if (!/^[0-9]+$/u.test(text)) {
+    throw new TypeError(`${label} must be a non-negative base-10 integer string.`);
+  }
+
+  return text;
+}
+
+function parseHostedRuntimeRedactedJson(
+  value: unknown,
+  label: string,
+): HostedRuntimeRedactedJson | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+  const entries = Object.entries(record);
+  const parsed: HostedRuntimeRedactedJson = {};
+
+  if (entries.length > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS} fields.`,
+    );
+  }
+
+  for (const [key, entryValue] of entries) {
+    assertAllowedRedactedKey(key, `${label}.${key}`);
+    parsed[key] = parseHostedRuntimeRedactedValue(entryValue, `${label}.${key}`);
+  }
+
+  return parsed;
+}
+
+function parseHostedRuntimeRedactedValue(
+  value: unknown,
+  label: string,
+): HostedRuntimeRedactedValue {
+  if (Array.isArray(value)) {
+    if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
+      throw new TypeError(
+        `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH} redacted values.`,
+      );
+    }
+
+    return value.map((entry, index) =>
+      parseHostedRuntimeRedactedScalar(entry, `${label}[${index}]`));
+  }
+
+  return parseHostedRuntimeRedactedScalar(value, label);
+}
+
+function parseHostedRuntimeRedactedScalar(
+  value: unknown,
+  label: string,
+): HostedRuntimeRedactedScalar {
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw new TypeError(`${label} must be a finite redacted value.`);
+    }
+
+    return value;
+  }
+
+  if (typeof value === "string") {
+    assertSafeRedactedString(value, label);
+    return value;
+  }
+
+  throw new TypeError(`${label} must be a shallow redacted scalar or scalar array.`);
+}
+
+function assertAllowedRedactedKey(key: string, label: string): void {
+  const normalized = key.toLowerCase();
+
+  for (const forbidden of FORBIDDEN_REDACTED_KEY_PARTS) {
+    if (normalized.includes(forbidden)) {
+      throw new TypeError(`${label} is not allowed in hosted runtime redacted JSON.`);
+    }
+  }
+}
+
+function assertNoForbiddenRuntimeLogKeys(
+  record: Record<string, unknown>,
+  label: string,
+): void {
+  for (const key of Object.keys(record)) {
+    assertAllowedRedactedKey(key, `${label}.${key}`);
+  }
+}
+
+function assertSafeRedactedString(value: string, label: string): void {
+  if (value.length > HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH) {
+    throw new TypeError(
+      `${label} must be at most ${HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH} characters.`,
+    );
+  }
+
+  if (/\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)) {
+    throw new TypeError(`${label} must not contain a local filesystem path.`);
+  }
+  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)) {
+    throw new TypeError(`${label} must not contain an email address.`);
+  }
+  if (/\+\d[\d().\s-]{7,}\d/u.test(value)) {
+    throw new TypeError(`${label} must not contain a phone number.`);
+  }
+  if (
+    /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
+      .test(value)
+    || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
+    || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
+    || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
+  ) {
+    throw new TypeError(`${label} must not contain secret-shaped content.`);
+  }
+}
+
+function readNullableHostedRuntimeLogString(
+  value: unknown,
+  label: string,
+): string | null {
+  const text = readNullableString(value, label);
+
+  if (text === null) {
+    return null;
+  }
+
+  assertSafeHostedRuntimeLogString(text, label);
+
+  return text;
+}
+
+function assertSafeHostedRuntimeLogString(value: string, label: string): void {
+  assertSafeRedactedString(value, label);
+
+  if (value.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
+    throw new TypeError(`${label} must be a bounded opaque identifier or code.`);
+  }
+}

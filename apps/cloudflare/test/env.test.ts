@@ -93,6 +93,18 @@ describe("readHostedExecutionEnvironment", () => {
     expect(environment.allowedRunnerSecretKeys).toBe("OPENAI_API_KEY,CUSTOM_API_KEY");
   });
 
+  it("hard-fails when the local internal proxy is configured outside development", () => {
+    expect(() =>
+      readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+        ALLOW_LOCAL_INTERNAL_PROXY: "true",
+        HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
+      })),
+    ).toThrow(
+      "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL and ALLOW_LOCAL_INTERNAL_PROXY are only supported when HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=development.",
+    );
+  });
+
   it("reads optional platform-envelope keyrings", () => {
     const previousKey = Buffer.alloc(32, 8).toString("base64");
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({

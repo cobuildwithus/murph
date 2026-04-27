@@ -4,6 +4,8 @@ import type {
   HostedRunDrainResult,
   HostedRunNudgeResult,
   HostedExecutionUserStatus,
+  HostedRunnerNudgeResult,
+  HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution";
 import type {
   HostedRunAcquireResponse,
@@ -251,6 +253,23 @@ export class HostedUserRunner {
     return this.composeUserStatus(record);
   }
 
+  async runnerStatus(): Promise<HostedRunnerStatusResponse> {
+    const record = await this.stateStore.readState();
+
+    return {
+      inFlight: this.runDrainLock !== null || record.inFlight,
+      ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
+      ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
+      ...(record.lastRunAt ? { lastRunAt: record.lastRunAt } : {}),
+      leaseGeneration: record.run?.attempt.toString() ?? "0",
+      mailboxLag: [],
+      nextAlarmAt: record.nextWakeAt,
+      recentLogs: [],
+      userId: record.userId,
+      workspace: null,
+    };
+  }
+
   async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
     if (this.runDrainLock !== null) {
       await this.runtimeAlarmScheduler.syncNextWake({
@@ -272,6 +291,22 @@ export class HostedUserRunner {
       accepted: true,
       alarmScheduled: true,
       alreadyRunning: false,
+    };
+  }
+
+  async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
+    const record = await this.runtimeAlarmScheduler.syncNextWake({
+      preferredWakeAt: new Date().toISOString(),
+    });
+    const alreadyRunning = this.runDrainLock !== null || record.inFlight;
+
+    return {
+      accepted: true,
+      alarmScheduled: record.nextWakeAt !== null,
+      alreadyRunning,
+      inFlight: alreadyRunning,
+      leaseGeneration: record.run?.attempt.toString() ?? "0",
+      nextAlarmAt: record.nextWakeAt,
     };
   }
 

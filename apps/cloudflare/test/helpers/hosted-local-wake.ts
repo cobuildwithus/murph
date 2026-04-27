@@ -1,9 +1,9 @@
 import {
   type HostedIngressAppendResponse,
-  type HostedRunNudgeResult,
   type HostedRunStatusResponse,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
+import type { HostedRunnerNudgeResult } from "@murphai/hosted-execution/runtime-control";
 import {
   appendHostedIngressEnvelopeForTest,
 } from "#hosted-web-testing";
@@ -27,7 +27,7 @@ export async function appendHostedWakeAndWakeWorker(input: {
   userId: string;
 }): Promise<{
   append: HostedIngressAppendResponse;
-  wakeResult: HostedRunNudgeResult;
+  wakeResult: HostedRunnerNudgeResult;
 }> {
   const append = await appendHostedWake(input);
   const wakeResult = await wakeHostedWorker({
@@ -107,9 +107,9 @@ export async function wakeHostedWorker(input: {
   harness: HostedLocalDevHarness;
   targetCommittedSeqHint?: string | null;
   userId: string;
-}): Promise<HostedRunNudgeResult> {
+}): Promise<HostedRunnerNudgeResult> {
   void input.targetCommittedSeqHint;
-  return await createHostedLocalCloudflareControlClient(input.harness).nudgeUserRun(input.userId);
+  return await createHostedLocalCloudflareControlClient(input.harness).nudgeUserRunner(input.userId);
 }
 
 export async function wakeHostedWorkerForLatestPendingWake(input: {

@@ -12,6 +12,8 @@ import {
   type HostedRunDrainResult,
   type HostedRunNudgeResult,
   type HostedExecutionUserStatus,
+  type HostedRunnerNudgeResult,
+  type HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -29,7 +31,10 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
+  assertHostedLocalInternalProxyEnvironment,
+  assertHostedLocalInternalProxyBaseUrl,
   isLocalLoopbackProxyProtocol,
+  normalizeLocalInternalProxyHostname,
 } from "./local-loopback-proxy.ts";
 import {
   verifyHostedExecutionVercelOidcRequest,
@@ -118,14 +123,14 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     beforeMethod(context, params) {
-      return requireBoundInternalRouteUser(context, params, "user-run");
+      return requireBoundInternalRouteUser(context, params, "runner-nudge");
     },
     async handle(context, params) {
-      return handleRunRoute(context, params.userId);
+      return handleRunnerNudgeRoute(context, params.userId);
     },
-    match: (pathname) => matchCloudflareHostedControlUserRoutePath("run", pathname),
-    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.run.method],
-    name: "user-run",
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("runnerNudge", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runnerNudge.method],
+    name: "runner-nudge",
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -165,6 +170,8 @@ export default {
     ctx?: ExecutionContext,
   ): Promise<Response> {
     try {
+      assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
+
       const url = new URL(request.url);
       const localInternalProxyResponse = await maybeHandleLocalInternalProxyRoute(
         request,
@@ -199,6 +206,8 @@ export default {
     env: WorkerEnvironmentSource,
     ctx?: ExecutionContext,
   ): Promise<void> {
+    assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
+
     await handleHostedEmailIngress(message, env, {
       waitUntil: ctx?.waitUntil.bind(ctx),
     });
@@ -227,8 +236,16 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.status();
   }
 
+  async runnerStatus(): Promise<HostedRunnerStatusResponse> {
+    return this.runner.runnerStatus();
+  }
+
   async nudgeHostedRun(): Promise<HostedRunNudgeResult> {
     return this.runner.nudgeHostedRun();
+  }
+
+  async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
+    return this.runner.nudgeHostedRunner();
   }
 
   async drainHostedRuns(input?: {
@@ -411,7 +428,7 @@ async function handleStatusRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(await stub.status());
+  return json(await stub.runnerStatus());
 }
 
 async function handleDeployContainerSmokeRoute(
@@ -437,7 +454,7 @@ function resolveDeployContainerSmokeObjectName(
     : "__deploy-smoke";
 }
 
-async function handleRunRoute(
+async function handleRunnerNudgeRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
@@ -448,62 +465,20 @@ async function handleRunRoute(
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
-        reason: "run-request-body-invalid",
-        routeName: "user-run",
+        reason: "runner-nudge-request-body-invalid",
+        routeName: "runner-nudge",
       }, context.request, userId),
       error,
       level: "warn",
-      message: "Hosted worker run route rejected an invalid request body.",
+      message: "Hosted worker runner nudge route rejected an invalid request body.",
       phase: "failed",
       userId,
     });
     throw error;
   }
+
   const stub = await resolveUserRunnerStub(context.env, userId);
-  const acceptedResponse = await stub.nudgeHostedRun();
-  if (acceptedResponse.alreadyRunning) {
-    return json(acceptedResponse, 202);
-  }
-
-  const drainPromise = stub.drainHostedRuns().then(() => acceptedResponse).catch(async (error) => {
-    emitHostedExecutionStructuredLog({
-      component: "hosted.runner",
-      details: buildWorkerRouteLogDetails({
-        reason: "run-background-drain-failed",
-        routeName: "user-run",
-      }, context.request, userId),
-      error,
-      level: "warn",
-      message: "Hosted run background drain failed after the run request was accepted.",
-      phase: "wake.running",
-      userId,
-    });
-
-    try {
-      return await stub.nudgeHostedRun();
-    } catch (fallbackError) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildWorkerRouteLogDetails({
-          reason: "run-retry-arm-fallback-failed",
-          routeName: "user-run",
-        }, context.request, userId),
-        error: fallbackError,
-        level: "error",
-        message: "Hosted run retry-arm fallback failed after the direct drain call failed.",
-        phase: "wake.running",
-        userId,
-      });
-      throw fallbackError;
-    }
-  });
-
-  if (context.waitUntil) {
-    context.waitUntil(drainPromise);
-    return json(acceptedResponse, 202);
-  }
-
-  return json(await drainPromise, 202);
+  return json(await stub.nudgeHostedRunner(), 202);
 }
 
 async function handleBrowserVaultSessionRoute(
@@ -837,18 +812,12 @@ function readLocalHostedInternalProxyIngressHost(
     return null;
   }
 
-  try {
-    const url = new URL(value);
-    return normalizeLocalHostedProxyHostname(url.hostname);
-  } catch {
-    return null;
-  }
+  const url = assertHostedLocalInternalProxyBaseUrl(value);
+  return normalizeLocalInternalProxyHostname(url.hostname);
 }
 
 function normalizeLocalHostedProxyHostname(value: string): string {
-  return value.startsWith("[") && value.endsWith("]")
-    ? value.slice(1, -1)
-    : value;
+  return normalizeLocalInternalProxyHostname(value);
 }
 
 function createLocalInternalProxyRequest(

@@ -2,6 +2,8 @@ import type {
   HostedRunDrainResult,
   HostedRunNudgeResult,
   HostedExecutionUserStatus,
+  HostedRunnerNudgeResult,
+  HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
@@ -16,7 +18,9 @@ import type {
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
+  nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
   nudgeHostedRun(): Promise<HostedRunNudgeResult>;
+  runnerStatus(): Promise<HostedRunnerStatusResponse>;
   status(): Promise<HostedExecutionUserStatus>;
   drainHostedRuns(input?: {
     targetCommittedSeqHint?: string | null;

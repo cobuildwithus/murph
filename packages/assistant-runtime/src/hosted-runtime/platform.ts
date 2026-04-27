@@ -3,6 +3,25 @@ import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
 import type {
+  HostedMailboxFetchRequest,
+  HostedMailboxFetchResponse,
+  HostedMailboxPayloadFetchRequest,
+  HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLogRequest,
+  HostedRuntimeLogResponse,
+  HostedRuntimeShareImportRequest,
+  HostedRuntimeShareImportResponse,
+  HostedRuntimeSharePayloadFetchRequest,
+  HostedRuntimeSharePayloadFetchResponse,
+  HostedRuntimeVaultSyncImportRequest,
+  HostedRuntimeVaultSyncImportResponse,
+  HostedRuntimeVaultSyncPayloadFetchRequest,
+  HostedRuntimeVaultSyncPayloadFetchResponse,
+  HostedWorkspaceCheckpointRequest,
+  HostedWorkspaceCheckpointResponse,
+  HostedWorkspaceReadResponse,
+} from "@murphai/hosted-execution";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -13,6 +32,7 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import type {
   AssistantTurnInputRefreshPhase,
+  AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
 import type {
   HostedEmailSendRequest,
@@ -71,6 +91,50 @@ export interface HostedRuntimeIssueExportPort {
   recordIssues(issues: readonly object[]): Promise<HostedRuntimeIssueRecordResponse>;
 }
 
+export interface HostedRuntimeMailboxPort {
+  fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
+  fetchPayload(
+    request: HostedMailboxPayloadFetchRequest,
+  ): Promise<HostedMailboxPayloadFetchResponse>;
+}
+
+export interface HostedRuntimeWorkspacePort {
+  read?(): Promise<HostedWorkspaceReadResponse>;
+  checkpoint(
+    request: HostedWorkspaceCheckpointRequest,
+  ): Promise<HostedWorkspaceCheckpointResponse>;
+}
+
+export interface HostedRuntimeLogPort {
+  write(request: HostedRuntimeLogRequest): Promise<HostedRuntimeLogResponse>;
+}
+
+export interface HostedRuntimeBeforeDeliveryMailboxRefreshInput {
+  requestId: string;
+}
+
+export type HostedRuntimeBeforeDeliveryMailboxRefresh = (
+  input: HostedRuntimeBeforeDeliveryMailboxRefreshInput,
+) => Promise<AssistantTurnInputRefreshResult>;
+
+export interface HostedRuntimeSharePort {
+  fetchPayload(
+    request: HostedRuntimeSharePayloadFetchRequest,
+  ): Promise<HostedRuntimeSharePayloadFetchResponse>;
+  recordImport(
+    request: HostedRuntimeShareImportRequest,
+  ): Promise<HostedRuntimeShareImportResponse>;
+}
+
+export interface HostedRuntimeVaultSyncPort {
+  fetchPayload(
+    request: HostedRuntimeVaultSyncPayloadFetchRequest,
+  ): Promise<HostedRuntimeVaultSyncPayloadFetchResponse>;
+  recordImport(
+    request: HostedRuntimeVaultSyncImportRequest,
+  ): Promise<HostedRuntimeVaultSyncImportResponse>;
+}
+
 export interface HostedRuntimeTurnInputPort {
   refresh(input: {
     afterSeq?: string | null;
@@ -87,8 +151,14 @@ export interface HostedRuntimePlatform {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   issueExportPort?: HostedRuntimeIssueExportPort | null;
+  logPort?: HostedRuntimeLogPort | null;
+  mailboxPort?: HostedRuntimeMailboxPort | null;
+  refreshMailboxBeforeDelivery?: HostedRuntimeBeforeDeliveryMailboxRefresh | null;
+  sharePort?: HostedRuntimeSharePort | null;
   turnInputPort?: HostedRuntimeTurnInputPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
+  vaultSyncPort?: HostedRuntimeVaultSyncPort | null;
+  workspacePort?: HostedRuntimeWorkspacePort | null;
 }
 
 export interface HostedRuntimeBillingStripeCustomerResponse {
