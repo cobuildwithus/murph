@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 
@@ -35,19 +34,17 @@ export function HostedBillingSettingsAction() {
   }
 
   return (
-    <div className="space-y-4">
-      {errorMessage ? (
-        <Alert variant="destructive">
-          <AlertTitle>Unable to open billing</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal}>
-          {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
-        </Button>
-      </div>
+    <div className="flex flex-col items-start gap-2 sm:items-end">
+      <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal}>
+        {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
+      </Button>
+      <p
+        role="alert"
+        aria-live="polite"
+        className="min-h-[1rem] text-xs leading-tight text-destructive sm:max-w-xs sm:text-right"
+      >
+        {errorMessage}
+      </p>
     </div>
   );
 }

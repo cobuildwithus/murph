@@ -13,8 +13,9 @@ import {
 
 import { HostedPhoneAuth } from "../hosted-onboarding/hosted-phone-auth";
 import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
+import { ConnectedAccountCard } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
-import { toErrorMessage } from "./hosted-settings-utils";
+import { formatMaskedPhoneNumber, toErrorMessage } from "./hosted-settings-utils";
 
 export function HostedPhoneSettings(props: {
   authenticated: boolean;
@@ -78,31 +79,28 @@ export function HostedPhoneSettings(props: {
       ) : (
         <div className="space-y-5">
           <div className="space-y-2">
-            <h2 className="text-lg font-semibold tracking-tight text-stone-900">Phone</h2>
-            <p className="text-sm leading-relaxed text-stone-500">
-              Add a phone number if you want Murph to text you directly.
-            </p>
+            <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Phone</h2>
+            {!currentPhoneNumber ? (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Add a phone number if you want Murph to text you directly.
+              </p>
+            ) : null}
           </div>
 
           {currentPhoneNumber ? (
-            <dl className="grid gap-4 rounded border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700 md:grid-cols-2">
-              <div className="space-y-1">
-                <dt className="font-semibold text-stone-500">Current phone</dt>
-                <dd>{currentPhoneNumber}</dd>
-              </div>
-              <div className="space-y-1">
-                <dt className="font-semibold text-stone-500">Status</dt>
-                <dd>Verified in Privy</dd>
-              </div>
-            </dl>
-          ) : null}
-
-          {currentPhoneNumber ? (
-            <div className="flex flex-wrap gap-3">
-              <Button type="button" variant={showLinkForm ? "outline" : "default"} onClick={() => setExpanded((value) => !value)}>
-                {showLinkForm ? "Hide phone form" : "Change phone"}
-              </Button>
-            </div>
+            <ConnectedAccountCard
+              label="Phone"
+              value={formatMaskedPhoneNumber(currentPhoneNumber)}
+              action={
+                <Button
+                  type="button"
+                  variant={showLinkForm ? "outline" : "default"}
+                  onClick={() => setExpanded((value) => !value)}
+                >
+                  {showLinkForm ? "Hide phone form" : "Change phone"}
+                </Button>
+              }
+            />
           ) : null}
 
           {showLinkForm ? (
