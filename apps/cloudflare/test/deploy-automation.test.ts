@@ -332,12 +332,11 @@ describe("hosted deploy automation helpers", () => {
       "Container rollout: \\`${{ inputs.container_rollout }}\\`",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 4",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",
-      "uses: docker/setup-buildx-action@v4",
-      "uses: docker/build-push-action@v7",
+      "uses: useblacksmith/setup-docker-builder@v1",
+      "uses: useblacksmith/build-push-action@v2",
       "file: Dockerfile.cloudflare-hosted-runner-base",
+      "load: true",
       "tags: murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en",
-      "cache-from: type=gha,scope=cloudflare-runner-base",
-      "cache-to: type=gha,mode=max,scope=cloudflare-runner-base",
       "name: Run focused Cloudflare checks and smoke runner container image",
       "pnpm --dir apps/cloudflare verify:parallel &",
       "pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base &",
@@ -350,6 +349,10 @@ describe("hosted deploy automation helpers", () => {
     }
     expect(workflow).not.toContain("Rebuild deploy artifacts for upload");
     expect(workflow).not.toContain("name: Smoke runner container image");
+    expect(workflow).not.toContain("uses: docker/setup-buildx-action@v4");
+    expect(workflow).not.toContain("uses: docker/build-push-action@v7");
+    expect(workflow).not.toContain("cache-from: type=gha,scope=cloudflare-runner-base");
+    expect(workflow).not.toContain("cache-to: type=gha,mode=max,scope=cloudflare-runner-base");
     const prepareArtifactsStepIndex = workflow.indexOf("- name: Prepare deploy artifacts");
     const prepareRunnerBaseImageStepIndex = workflow.indexOf("- name: Prepare runner base image");
     const parallelChecksAndSmokeStepIndex = workflow.indexOf(
