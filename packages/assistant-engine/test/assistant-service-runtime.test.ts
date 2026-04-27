@@ -1443,6 +1443,7 @@ describe("assistant turn finalizer seam", () => {
         session,
       }),
       session,
+      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T13:59:00.000Z",
       turnId: "turn-finalizer-1",
     });
@@ -1635,6 +1636,7 @@ describe("assistant turn finalizer seam", () => {
         session,
       }),
       session,
+      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T15:44:00.000Z",
       turnId: "turn-finalizer-tool-audit",
     });
@@ -1693,6 +1695,7 @@ describe("assistant turn finalizer seam", () => {
         session,
       }),
       session,
+      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T14:59:00.000Z",
       turnId: "turn-finalizer-2",
     });
@@ -1745,6 +1748,7 @@ describe("assistant turn finalizer seam", () => {
         session,
       }),
       session,
+      turnContinuityPolicy: "continuous-provider-thread",
       turnCreatedAt: "2026-04-08T15:59:00.000Z",
       turnId: "turn-finalizer-fallback",
     });

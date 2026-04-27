@@ -722,6 +722,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "cron", "runs"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "accepted-turn-inputs"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "diagnostics"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "outbox", ".quarantine"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "receipts"), { recursive: true });
@@ -754,6 +755,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, "raw", "notes.json"), "{\"keep\":true}\n");
     await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
     await writeFile(path.join(assistantRuntimeRoot, "automation-state.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
+    await writeFile(
+      path.join(assistantRuntimeRoot, "accepted-turn-inputs", "turn_accepted.json"),
+      "{\"schema\":\"murph.assistant-accepted-turn-input-journal.v1\"}\n",
+    );
     await writeFile(
       path.join(assistantRuntimeRoot, "cron", "automation-runtime.json"),
       "{\"version\":1,\"automations\":[{\"automationId\":\"automation_1\"}]}\n",
@@ -829,6 +834,11 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       {
         expected: "{\"intent\":\"deliver\"}\n",
         path: ".runtime/operations/assistant/outbox/intent_1.json",
+        root: "vault",
+      },
+      {
+        expected: "{\"schema\":\"murph.assistant-accepted-turn-input-journal.v1\"}\n",
+        path: ".runtime/operations/assistant/accepted-turn-inputs/turn_accepted.json",
         root: "vault",
       },
       {
@@ -962,6 +972,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "outbox", "intent_1.json"), "utf8"),
       "{\"intent\":\"deliver\"}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "accepted-turn-inputs", "turn_accepted.json"), "utf8"),
+      "{\"schema\":\"murph.assistant-accepted-turn-input-journal.v1\"}\n",
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "receipts", "turn_1.json"), "utf8"),
@@ -1120,6 +1134,10 @@ test("runtime-state portability defaults operational paths to machine-local unle
     portability: "portable",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/sessions/session_1.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/accepted-turn-inputs/turn_1.json")).toMatchObject({
     classification: "operational",
     portability: "portable",
   });

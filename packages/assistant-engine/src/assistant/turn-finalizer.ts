@@ -43,7 +43,7 @@ export async function persistAssistantTurnAndSession(input: {
   persistUserPromptToTranscript?: boolean
   providerResult: ExecutedAssistantProviderTurnResult
   session: AssistantSession
-  turnContinuityPolicy?: AssistantProviderTurnContinuityPolicy
+  turnContinuityPolicy: AssistantProviderTurnContinuityPolicy
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantSession> {
@@ -52,8 +52,7 @@ export async function persistAssistantTurnAndSession(input: {
   const assistantTranscriptText = input.assistantTranscriptText
     ?? input.providerResult.response
   const shouldPersistProviderResumeState =
-    (input.turnContinuityPolicy ?? 'continuous-provider-thread') ===
-      'continuous-provider-thread'
+    input.turnContinuityPolicy === 'continuous-provider-thread'
 
   if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     await state.transcripts.append(

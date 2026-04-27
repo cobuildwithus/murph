@@ -433,6 +433,63 @@ test('sendAssistantMessageLocal marks delivery as blocked when a late capture re
   assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
 })
 
+test('sendAssistantMessageLocal admits active-turn input before delivery and continues inside one receipt', async () => {
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+  mocks.executeProviderTurnWithRecovery
+    .mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        response: 'draft before late input',
+        session,
+      },
+    })
+    .mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        response: 'final after late input',
+        session,
+      },
+    })
+  const activeTurnInput = vi.fn(async (input) =>
+    input.providerRequestOrdinal === 0
+      ? {
+          kind: 'accepted' as const,
+          prompt: 'Initial prompt\n\nLate follow up',
+          receiptMetadata: {
+            captureIds: 'capture-1,capture-2',
+          },
+        }
+      : {
+          kind: 'no-new-input' as const,
+        },
+  )
+
+  const result = await sendAssistantMessageLocal({
+    activeTurnInput,
+    deliverResponse: true,
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
+  assert.equal(mocks.finalizeAssistantTurnReceipt.mock.calls.length, 0)
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    'Initial prompt\n\nLate follow up',
+  )
+  assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 1)
+  assert.equal(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.input.prompt,
+    'Initial prompt\n\nLate follow up',
+  )
+  assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
+  assert.equal(result.prompt, 'Initial prompt\n\nLate follow up')
+  assert.equal(result.response, 'final after late input')
+})
+
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
   const terminalError = new Error('provider failed hard')
   const recoveredSession = createAssistantSession({
@@ -1401,6 +1458,12 @@ async function loadLocalServiceModule(input?: {
     getAssistantChannelAdapter: mocks.getAssistantChannelAdapter,
   }))
   vi.doMock('../src/assistant/turn-input.js', () => ({
+    AssistantActiveTurnInputBudgetExceededError: class AssistantActiveTurnInputBudgetExceededError extends Error {
+      constructor() {
+        super('Active turn input kept arriving before delivery; retry the expanded turn later.')
+        this.name = 'AssistantActiveTurnInputBudgetExceededError'
+      }
+    },
     isAssistantTurnRevisionRequiredError: (value: unknown) =>
       value instanceof Error &&
       value.name === 'AssistantTurnRevisionRequiredError',

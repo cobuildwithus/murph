@@ -71,7 +71,11 @@ import {
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
-import { isAssistantTurnRevisionRequiredError } from './turn-input.js'
+import {
+  AssistantActiveTurnInputBudgetExceededError,
+  isAssistantTurnRevisionRequiredError,
+  type AssistantActiveTurnInputAdmissionResult,
+} from './turn-input.js'
 import {
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
@@ -80,11 +84,14 @@ import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
   AssistantTurnSharedPlan,
+  ExecutedAssistantProviderTurnResult,
   PersistedUserTurn,
 } from './service-contracts.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
+
+const MAX_ACTIVE_TURN_INPUT_CONTINUATIONS = 3
 
 async function persistUserTurn(
   input: AssistantMessageInput,
@@ -207,38 +214,73 @@ export async function sendAssistantMessageLocal(
         const turnContinuityPolicy = resolveAssistantProviderTurnContinuityPolicy({
           turnTrigger: input.turnTrigger ?? null,
         })
-        const providerOutcome = await executeProviderTurnWithRecovery({
-          input,
-          routes,
-          plan: sharedPlan,
-          profile: {
-            turnContinuityPolicy,
-          },
-          resolvedSession: resolved.session,
-          turnCreatedAt: userTurn.turnCreatedAt,
-          turnId: userTurn.turnId,
-        })
-        if (providerOutcome.kind === 'failed_terminal') {
-          throw providerOutcome.error
+        let currentInput = input
+        let currentSession = resolved.session
+        let providerResult: ExecutedAssistantProviderTurnResult | null = null
+        for (
+          let providerRequestOrdinal = 0;
+          providerRequestOrdinal <= MAX_ACTIVE_TURN_INPUT_CONTINUATIONS;
+          providerRequestOrdinal += 1
+        ) {
+          const providerOutcome = await executeProviderTurnWithRecovery({
+            input: currentInput,
+            routes,
+            plan: sharedPlan,
+            profile: {
+              turnContinuityPolicy,
+            },
+            resolvedSession: currentSession,
+            turnCreatedAt: userTurn.turnCreatedAt,
+            turnId: userTurn.turnId,
+          })
+          if (providerOutcome.kind === 'failed_terminal') {
+            throw providerOutcome.error
+          }
+
+          providerResult = providerOutcome.providerTurn
+          currentSession = providerResult.session
+          responseText = providerResult.response
+
+          const activeTurnInput = await currentInput.activeTurnInput?.({
+            providerRequestOrdinal,
+            response: providerResult.response,
+            sessionId: providerResult.session.sessionId,
+            turnId: userTurn.turnId,
+            vault: currentInput.vault,
+          })
+          if (activeTurnInput?.kind === 'accepted') {
+            if (providerRequestOrdinal >= MAX_ACTIVE_TURN_INPUT_CONTINUATIONS) {
+              throw new AssistantActiveTurnInputBudgetExceededError()
+            }
+            currentInput = buildActiveTurnContinuationInput({
+              acceptedInput: activeTurnInput,
+              input: currentInput,
+            })
+            continue
+          }
+
+          await currentInput.beforeDelivery?.({
+            response: providerResult.response,
+            sessionId: providerResult.session.sessionId,
+            turnId: userTurn.turnId,
+            vault: currentInput.vault,
+          })
+          break
         }
 
-        const providerResult = providerOutcome.providerTurn
-        responseText = providerResult.response
+        if (!providerResult) {
+          throw new Error('Assistant provider turn did not produce a result.')
+        }
+
         const usagePersistenceInput = {
           executionContext,
           providerResult,
           turnId: userTurn.turnId,
-          vault: input.vault,
+          vault: currentInput.vault,
         }
-        await input.beforeDelivery?.({
-          response: providerResult.response,
-          sessionId: providerResult.session.sessionId,
-          turnId: userTurn.turnId,
-          vault: input.vault,
-        })
         await persistPendingAssistantUsageEvent(usagePersistenceInput)
         const session = await finalizeAssistantTurnArtifacts({
-          input,
+          input: currentInput,
           plan: sharedPlan,
           providerResult,
           turnContinuityPolicy,
@@ -247,7 +289,7 @@ export async function sendAssistantMessageLocal(
           turnId: userTurn.turnId,
         })
         const deliveryOutcome = await dispatchAssistantReply({
-          input,
+          input: currentInput,
           response: providerResult.response,
           session,
           sharedPlan,
@@ -269,7 +311,7 @@ export async function sendAssistantMessageLocal(
         return normalizeAssistantAskResultForReturn({
           vault: redactAssistantDisplayPath(input.vault),
           status: 'completed',
-          prompt: input.prompt,
+          prompt: currentInput.prompt,
           response: providerResult.response,
           session: deliveryOutcome.session,
           delivery: deliveryOutcome.kind === 'sent' ? deliveryOutcome.delivery : null,
@@ -433,4 +475,29 @@ async function runAssistantTurnBestEffort(
   try {
     await task()
   } catch {}
+}
+
+function buildActiveTurnContinuationInput(input: {
+  acceptedInput: Extract<
+    AssistantActiveTurnInputAdmissionResult,
+    { kind: 'accepted' }
+  >
+  input: AssistantMessageInput
+}): AssistantMessageInput {
+  return {
+    ...input.input,
+    deliveryReplyToMessageId:
+      input.acceptedInput.deliveryReplyToMessageId === undefined
+        ? input.input.deliveryReplyToMessageId
+        : input.acceptedInput.deliveryReplyToMessageId,
+    prompt: input.acceptedInput.prompt,
+    receiptMetadata:
+      input.acceptedInput.receiptMetadata === undefined
+        ? input.input.receiptMetadata
+        : input.acceptedInput.receiptMetadata,
+    userMessageContent:
+      input.acceptedInput.userMessageContent === undefined
+        ? input.input.userMessageContent
+        : input.acceptedInput.userMessageContent,
+  }
 }

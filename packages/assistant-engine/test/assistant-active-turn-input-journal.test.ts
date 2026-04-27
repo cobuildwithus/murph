@@ -158,7 +158,6 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     const withProviderRequest = await recordAssistantAcceptedTurnInputProviderRequest({
-      acceptedInputIds: ['input_initial', 'input_late'],
       continuation: {
         kind: 'provider-state-optimization',
         responseId: 'resp_1',
@@ -286,10 +285,19 @@ describe('assistant accepted active-turn input journal', () => {
         turnId: 'turn_identity',
         vault: vaultRoot,
       }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TURN_INPUT_JOURNAL_INVALID_PROVIDER_REQUEST',
+    })
+    await expect(
+      recordAssistantAcceptedTurnInputProviderRequest({
+        ordinal: 0,
+        turnId: 'turn_identity',
+        vault: vaultRoot,
+      }),
     ).resolves.toMatchObject({
       providerRequests: [
         {
-          acceptedInputIds: ['input_initial'],
+          acceptedInputIds: ['input_initial', 'input_late'],
           ordinal: 0,
         },
       ],
@@ -337,6 +345,41 @@ describe('assistant accepted active-turn input journal', () => {
     })
   })
 
+  it('rejects appending input while closing current-turn admission', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-close-with-append-',
+    )
+
+    await appendAssistantAcceptedTurnInputItems({
+      inputs: [
+        {
+          id: 'input_initial',
+          source: 'initial',
+        },
+      ],
+      sessionId: 'session_close_with_append',
+      turnId: 'turn_close_with_append',
+      vault: vaultRoot,
+    })
+
+    await expect(
+      appendAssistantAcceptedTurnInputItems({
+        admissionState: 'passive-input-next-turn',
+        inputs: [
+          {
+            id: 'input_late',
+            source: 'manual',
+          },
+        ],
+        sessionId: 'session_close_with_append',
+        turnId: 'turn_close_with_append',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
+    })
+  })
+
   it('rejects corrupted provider request metadata when reading a persisted journal', async () => {
     const { paths, vaultRoot } = await createAssistantPaths(
       'assistant-active-turn-input-corrupt-provider-',
@@ -359,7 +402,6 @@ describe('assistant accepted active-turn input journal', () => {
       vault: vaultRoot,
     })
     const journal = await recordAssistantAcceptedTurnInputProviderRequest({
-      acceptedInputIds: ['input_initial'],
       now: new Date('2026-04-22T10:01:00.000Z'),
       ordinal: 0,
       turnId: 'turn_corrupt_provider_request',
