@@ -170,9 +170,6 @@ export function HostedAuthenticatedPhoneAuthState({
             ? "You already started signing in."
             : "You already started signup."}
         </AlertTitle>
-        <AlertDescription>
-          Keep going with this number, or sign out and use a different one.
-        </AlertDescription>
         <div className="mt-3 flex flex-wrap gap-3">
           <Button
             type="button"

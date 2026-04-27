@@ -301,6 +301,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /Unable to continue/);
     assert.match(markup, /We could not sign you out cleanly\./);
     assert.match(markup, /You already started signing in\./);
+    assert.doesNotMatch(markup, /Keep going with this number/);
     assert.match(markup, /Continue sign in/);
     assert.match(markup, /Use a different number/);
   });
