@@ -1,7 +1,10 @@
 import { Button } from "@/src/components/ui/button";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { ConnectedAccountCard } from "./connected-account-card";
+import { ConnectedAccountCard, SettingsContactLink } from "./connected-account-card";
+
+const MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
+const MURPH_TELEGRAM_BOT_URL = `https://t.me/${MURPH_TELEGRAM_BOT_USERNAME}`;
 
 export function HostedTelegramSettingsContent(props: {
   botLink: string | null;
@@ -31,18 +34,26 @@ export function HostedTelegramSettingsContent(props: {
 
       {currentTelegram && telegramValue ? (
         <ConnectedAccountCard
-          label="Telegram"
           value={telegramValue}
           action={
             <>
-              <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy}>
-                {isLinkingTelegram ? "Relinking..." : "Relink"}
+              <Button
+                type="button"
+                onClick={() => void props.onLinkTelegram()}
+                disabled={isBusy}
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {isLinkingTelegram ? "Changing..." : "Change"}
               </Button>
               {botLink ? (
                 <Button
                   render={<a href={botLink} target="_blank" rel="noreferrer" />}
                   nativeButton={false}
-                  variant="outline"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
                 >
                   Open bot
                 </Button>
@@ -66,6 +77,14 @@ export function HostedTelegramSettingsContent(props: {
           ) : null}
         </div>
       )}
+
+      <SettingsContactLink
+        href={MURPH_TELEGRAM_BOT_URL}
+        label={`Message @${MURPH_TELEGRAM_BOT_USERNAME} on Telegram`}
+        external
+      >
+        Message @{MURPH_TELEGRAM_BOT_USERNAME}
+      </SettingsContactLink>
     </div>
   );
 }

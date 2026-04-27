@@ -136,6 +136,8 @@ describe("HostedEmailSettings", () => {
     assert.match(markup, /id="settings-email-address"[^>]*value="verified@example\.com"/);
     assert.doesNotMatch(markup, /stale@example\.com/);
     assert.match(markup, /Save verified email/);
+    assert.match(markup, /href="mailto:murph@mail\.withmurph\.ai"/);
+    assert.match(markup, /Email murph@mail\.withmurph\.ai/);
   });
 
   it("uses Privy's email link flow when the hosted account has no email yet", async () => {
@@ -153,6 +155,8 @@ describe("HostedEmailSettings", () => {
       (candidate) => candidate.textContent?.includes("Link email"),
     );
     expect(linkButton).toBeTruthy();
+    const contactLink = container.querySelector('a[href="mailto:murph@mail.withmurph.ai"]');
+    expect(contactLink?.textContent).toContain("Email murph@mail.withmurph.ai");
     expect(container.querySelector('input[id="settings-email-address"]')).toBeNull();
 
     await act(async () => {

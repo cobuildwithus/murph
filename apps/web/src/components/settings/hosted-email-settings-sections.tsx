@@ -17,7 +17,9 @@ import { isHostedPrivyEmailAccountVerified } from "@/src/lib/hosted-onboarding/p
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 
-import { ConnectedAccountCard } from "./connected-account-card";
+import { ConnectedAccountCard, SettingsContactLink } from "./connected-account-card";
+
+const MURPH_CONTACT_EMAIL = "murph@mail.withmurph.ai";
 
 export function HostedEmailSettingsContent(props: {
   currentEmail: HostedPrivyEmailAccount | null;
@@ -62,7 +64,6 @@ export function HostedEmailSettingsContent(props: {
 
       {currentEmail ? (
         <ConnectedAccountCard
-          label="Email"
           value={currentEmail.address}
           meta={isVerified ? null : "Unverified"}
           action={
@@ -80,19 +81,29 @@ export function HostedEmailSettingsContent(props: {
         />
       ) : (
         <ConnectedAccountCard
-          label="Email"
           value="Not connected"
-          meta="Add an email so Murph can reach you there."
           variant="empty"
           action={
             !canSendEmailUpdateCode ? (
-              <Button type="button" onClick={() => void onSendCode()} disabled={isBusy}>
+              <Button
+                type="button"
+                onClick={() => void onSendCode()}
+                disabled={isBusy}
+                size="sm"
+              >
                 Link email
               </Button>
             ) : null
           }
         />
       )}
+
+      <SettingsContactLink
+        href={`mailto:${MURPH_CONTACT_EMAIL}`}
+        label={`Email Murph at ${MURPH_CONTACT_EMAIL}`}
+      >
+        Email {MURPH_CONTACT_EMAIL}
+      </SettingsContactLink>
 
       {canSendEmailUpdateCode ? (
         <div className="space-y-2">
