@@ -16,6 +16,9 @@ import {
   buildHostedExecutionVaultSyncImportWake,
 } from "../src/builders.ts";
 import {
+  parseHostedBrowserVaultReplicaRef,
+} from "../src/browser-vault.ts";
+import {
   HOSTED_EXECUTION_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
@@ -24,6 +27,7 @@ import {
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA,
 } from "../src/contracts.ts";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -31,6 +35,7 @@ import {
 } from "../src/env.ts";
 import {
   parseHostedExecutionWake,
+  parseHostedExecutionSnapshotRef,
 } from "../src/parsers.ts";
 
 function decodeUtf8(buffer: ArrayBuffer): string {
@@ -38,6 +43,33 @@ function decodeUtf8(buffer: ArrayBuffer): string {
 }
 
 describe("hosted execution coverage gaps", () => {
+  it("exposes a browser-vault-only parser surface without runtime-control helpers", () => {
+    const ref = {
+      byteLength: 128,
+      dataVersion: "browser-data-v1",
+      generatedAt: "2026-04-27T00:00:00.000Z",
+      keyId: "browser-vault-replica:key",
+      objectKey: "users/browser-vault-replicas/user/replica.json",
+      replicaSchema: "murph.browser-vault-replica.v1",
+      schema: "murph.hosted-browser-vault-replica-ref.v1",
+      sourceBundleHash: "sha256:source",
+    };
+
+    expect(parseHostedBrowserVaultReplicaRef(ref)).toEqual(ref);
+    expect(parseHostedBrowserVaultReplicaRef(null)).toBeNull();
+    expect(parseHostedExecutionSnapshotRef(undefined)).toBeNull();
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      replicaSchema: "murph.other-replica.v1",
+    })).toThrow(/replicaSchema/u);
+    expect(() => parseHostedBrowserVaultReplicaRef({
+      ...ref,
+      schema: "murph.other-browser-vault-replica-ref.v1",
+    })).toThrow(
+      new RegExp(HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    );
+  });
+
   it("parses hosted AI usage billing mode with a disabled default", () => {
     expect(readHostedAiUsageBillingMode({})).toBe("disabled");
     expect(readHostedAiUsageBillingMode({
@@ -186,6 +218,7 @@ describe("hosted execution coverage gaps", () => {
     expect(exportKeys).toEqual([
       ".",
       "./auth",
+      "./browser-vault",
       "./bundles",
       "./contracts",
       "./env",
@@ -202,6 +235,7 @@ describe("hosted execution coverage gaps", () => {
     expect(exportKeys).not.toContain("./outbox-payload");
 
     const rootModule = await import("@murphai/hosted-execution");
+    const browserVaultModule = await import("../src/browser-vault.ts") as Record<string, unknown>;
     const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
     const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
       string,
@@ -216,6 +250,8 @@ describe("hosted execution coverage gaps", () => {
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
     expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);
+    expect(typeof browserVaultModule.parseHostedBrowserVaultReplicaRef).toBe("function");
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
     expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);

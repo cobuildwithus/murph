@@ -30,6 +30,10 @@
       "types": "./dist/bundles.d.ts",
       "default": "./dist/bundles.js"
     },
+    "./browser-vault": {
+      "types": "./dist/browser-vault.d.ts",
+      "default": "./dist/browser-vault.js"
+    },
     "./env": {
       "types": "./dist/env.d.ts",
       "default": "./dist/env.js"

@@ -24,8 +24,10 @@ import {
   parseBrowserVaultReplica,
   type BrowserVaultQueryClient,
 } from "@murphai/query/browser";
-import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
-import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedBrowserVaultReplicaRef,
+  type HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/browser-vault";
 
 export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
 
