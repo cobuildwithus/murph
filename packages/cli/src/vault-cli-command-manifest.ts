@@ -1467,26 +1467,13 @@ export const vaultCliCommandDescriptors = [
         output: healthListResultSchema,
       },
       {
-        path: ['supplement', 'scaffold'],
-        description: 'Emit a payload template for one supplement product.',
-        output: createHealthScaffoldResultSchema('supplement'),
-      },
-      {
         path: ['supplement', 'show'],
         description: 'Show one supplement by canonical id or slug.',
         output: healthShowResultSchema,
       },
       {
-        path: ['supplement', 'import-json'],
-        description: 'Import one supplement from an explicit JSON payload file or stdin.',
-      },
-      {
         path: ['supplement', 'save'],
         description: 'Create or update one supplement from typed command fields.',
-      },
-      {
-        path: ['supplement', 'rename'],
-        description: 'Rename one supplement product while preserving its canonical id.',
       },
       {
         path: ['supplement', 'stop'],
@@ -1503,10 +1490,8 @@ export const vaultCliCommandDescriptors = [
     ],
     directVaultServiceBindings: {
       core: [
-        'scaffoldSupplement',
-        'upsertSupplement',
-        'renameSupplement',
-        'stopSupplement',
+        'upsertRegimen',
+        'stopRegimen',
       ],
       query: [
         'showSupplement',

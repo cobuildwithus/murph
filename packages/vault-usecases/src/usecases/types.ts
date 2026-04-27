@@ -60,13 +60,9 @@ export interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string
 }
 
-export interface StopSupplementInput extends CommandContext {
-  regimenId: string
-  stoppedOn?: string
-}
-
 export interface StopRegimenInput extends CommandContext {
   regimenId: string
+  group?: string
   stoppedOn?: string
 }
 
@@ -932,18 +928,6 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   projectAssessment(
     input: ProjectAssessmentInput,
   ): Promise<AssessmentProjectionResult>
-  scaffoldSupplement(
-    input: CommandContext,
-  ): Promise<{
-    vault: string
-    noun: 'supplement'
-    payload: JsonObject
-  }>
-  upsertSupplement(
-    input: CommandContext & {
-      input: string
-    },
-  ): Promise<UpsertRecordResult & { regimenId: string }>
   scaffoldRegimen(
     input: CommandContext,
   ): Promise<{
@@ -956,16 +940,8 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
       input: string
     },
   ): Promise<UpsertRecordResult & { regimenId: string }>
-  renameSupplement(
-    input: CommandContext & {
-      lookup: string
-      title: string
-      slug?: string
-    },
-  ): Promise<UpsertRecordResult & { regimenId: string }>
   upsertPrivateProtocol(input: PrivateProtocolUpsertInput): Promise<PrivateProtocolUpsertResult>
   stopRegimen(input: StopRegimenInput): Promise<StopRegimenResult>
-  stopSupplement(input: StopSupplementInput): Promise<StopRegimenResult>
 }
 
 export interface ImporterServices {
@@ -1378,6 +1354,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   }>
   stopRegimen(input: {
     vaultRoot: string
+    group?: string
     regimenId: string
     stoppedOn?: string
   }): Promise<{

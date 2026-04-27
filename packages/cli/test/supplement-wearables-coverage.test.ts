@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
-import { rm, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import { rm } from 'node:fs/promises'
 
 import { Cli } from 'incur'
 import { afterEach, test, vi } from 'vitest'
@@ -71,7 +70,7 @@ async function getGroupCommandRun<Context>(
   return command.run as (context: Context) => Promise<unknown>
 }
 
-test('supplement commands exercise scaffold, import-json, read, compound, rename, and stop paths in-process', async () => {
+test('supplement commands exercise typed save, read, compound, and stop paths in-process', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-cli-supplement-coverage-',
   )
@@ -87,48 +86,6 @@ test('supplement commands exercise scaffold, import-json, read, compound, rename
   assert.equal(initResult.exitCode, null)
   assert.equal(requireData(initResult.envelope).created, true)
 
-  const scaffold = await runInProcessJsonCli<{
-    noun: 'supplement'
-    payload: Record<string, unknown>
-    vault: string
-  }>(cli, [
-    'supplement',
-    'scaffold',
-    '--vault',
-    vaultRoot,
-  ])
-  assert.equal(scaffold.exitCode, null)
-  assert.equal(requireData(scaffold.envelope).noun, 'supplement')
-
-  const payloadPath = path.join(parentRoot, 'supplement.json')
-  const supplementPayload = {
-    title: 'Liposomal Vitamin C',
-    kind: 'supplement',
-    status: 'active',
-    startedOn: '2026-03-01',
-    brand: 'LivOn Labs',
-    manufacturer: 'LivOn Laboratories',
-    servingSize: '1 packet',
-    ingredients: [
-      {
-        compound: 'Vitamin C',
-        label: 'Ascorbic acid',
-        amount: 500,
-        unit: 'mg',
-      },
-      {
-        compound: 'Phosphatidylcholine',
-        amount: 1200,
-        unit: 'mg',
-      },
-    ],
-  }
-  await writeFile(
-    payloadPath,
-    `${JSON.stringify(supplementPayload, null, 2)}\n`,
-    'utf8',
-  )
-
   const upserted = await runInProcessJsonCli<{
     created: boolean
     lookupId: string
@@ -137,9 +94,24 @@ test('supplement commands exercise scaffold, import-json, read, compound, rename
     vault: string
   }>(cli, [
     'supplement',
-    'import-json',
-    '--input',
-    `@${payloadPath}`,
+    'save',
+    'Liposomal Vitamin C',
+    '--started-on',
+    '2026-03-01',
+    '--brand',
+    'LivOn Labs',
+    '--manufacturer',
+    'LivOn Laboratories',
+    '--serving-size',
+    '1 packet',
+    '--compound',
+    'Vitamin C',
+    '--ingredient-label',
+    'Ascorbic acid',
+    '--amount',
+    '500',
+    '--unit',
+    'mg',
     '--vault',
     vaultRoot,
   ])
@@ -229,25 +201,6 @@ test('supplement commands exercise scaffold, import-json, read, compound, rename
   ])
   assert.equal(stopped.exitCode, null)
   assert.equal(requireData(stopped.envelope).status, 'stopped')
-
-  const renamed = await runInProcessJsonCli<{
-    regimenId: string
-    lookupId: string
-    path?: string
-    created: boolean
-  }>(cli, [
-    'supplement',
-    'rename',
-    requireData(upserted.envelope).lookupId,
-    '--title',
-    'Magnesium Glycinate 200',
-    '--slug',
-    'magnesium-glycinate-200',
-    '--vault',
-    vaultRoot,
-  ])
-  assert.equal(renamed.exitCode, null)
-  assert.equal(requireData(renamed.envelope).lookupId.length > 0, true)
 
   const compoundList = await runInProcessJsonCli<{
     filters: {
