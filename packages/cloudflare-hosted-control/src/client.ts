@@ -8,22 +8,20 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  parseHostedRunnerNudgeResult,
+  parseHostedRunnerStatusResponse,
   parseHostedBrowserVaultReplicaRef,
-  parseHostedRunNudgeResult,
   type HostedBrowserVaultReplicaRef,
-  type HostedRunNudgeResult,
-  type HostedExecutionUserStatus,
+  type HostedRunnerNudgeResult,
+  type HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
-import {
-  parseHostedExecutionUserStatus,
-} from "@murphai/hosted-execution/parsers";
 
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlUserRunnerNudgePath,
   buildCloudflareHostedControlUserStatusPath,
-  buildCloudflareHostedControlUserRunPath,
 } from "./routes.ts";
 import { requireCloudflareHostedControlUserId } from "./user-id.ts";
 
@@ -50,9 +48,11 @@ export interface CloudflareHostedControlClient {
     replicaRef: HostedBrowserVaultReplicaRef;
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
-  getStatus(userId: string): Promise<HostedExecutionUserStatus>;
-  nudgeUserRun(userId: string): Promise<HostedRunNudgeResult>;
+  getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  nudgeUserRunner(userId: string): Promise<HostedRunnerNudgeResult>;
 }
+
+export type CloudflareHostedRunnerControlClient = CloudflareHostedControlClient;
 
 export interface CloudflareHostedControlClientOptions {
   allowHttpHosts?: readonly string[];
@@ -126,7 +126,7 @@ export function createCloudflareHostedControlClient(
         throw error;
       });
     },
-    getStatus(userId) {
+    getRunnerStatus(userId) {
       const expectedUserId = requireCloudflareHostedControlUserId(userId);
 
       return requestHostedExecutionAuthorizedJson({
@@ -134,14 +134,14 @@ export function createCloudflareHostedControlClient(
         boundUserId: expectedUserId,
         fetchImpl,
         getAuthorizationHeader,
-        label: "status",
-        parse: (value) => parseHostedExecutionUserStatusForExpectedUser(value, expectedUserId),
+        label: "runner status",
+        parse: (value) => parseHostedRunnerStatusForExpectedUser(value, expectedUserId),
         path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
         timeoutMs: options.timeoutMs,
       });
     },
-    nudgeUserRun(userId) {
+    nudgeUserRunner(userId) {
       const expectedUserId = requireCloudflareHostedControlUserId(userId);
 
       return requestHostedExecutionAuthorizedJson({
@@ -149,9 +149,9 @@ export function createCloudflareHostedControlClient(
         boundUserId: expectedUserId,
         fetchImpl,
         getAuthorizationHeader,
-        label: "run",
-        parse: parseHostedRunNudgeResult,
-        path: buildCloudflareHostedControlUserRunPath(expectedUserId),
+        label: "runner nudge",
+        parse: parseHostedRunnerNudgeResult,
+        path: buildCloudflareHostedControlUserRunnerNudgePath(expectedUserId),
         request: {
           body: "{}",
           headers: {
@@ -329,14 +329,26 @@ function parseCloudflareHostedControlBrowserVaultReplicaAad(
   };
 }
 
-function parseHostedExecutionUserStatusForExpectedUser(
+function parseHostedRunnerStatusForExpectedUser(
   value: unknown,
   expectedUserId: string,
-): HostedExecutionUserStatus {
-  const status = parseHostedExecutionUserStatus(value);
+): HostedRunnerStatusResponse {
+  const status = parseHostedRunnerStatusResponse(value);
 
-  if (status.userId !== expectedUserId) {
-    throw new TypeError("Hosted execution status userId must match the requested userId.");
+  assertMatchingString(
+    status.userId,
+    expectedUserId,
+    "Hosted runner status userId",
+    "the requested userId",
+  );
+
+  if (status.workspace) {
+    assertMatchingString(
+      status.workspace.userId,
+      expectedUserId,
+      "Hosted runner status workspace.userId",
+      "the requested userId",
+    );
   }
 
   return status;

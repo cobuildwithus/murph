@@ -8,9 +8,9 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "browser-vault/session",
   },
-  run: {
+  runnerNudge: {
     method: "POST",
-    suffix: "run",
+    suffix: "nudge",
   },
   status: {
     method: "GET",
@@ -27,8 +27,8 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
   return buildCloudflareHostedControlUserRoutePath("status", userId);
 }
 
-export function buildCloudflareHostedControlUserRunPath(userId: string): string {
-  return buildCloudflareHostedControlUserRoutePath("run", userId);
+export function buildCloudflareHostedControlUserRunnerNudgePath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("runnerNudge", userId);
 }
 
 export function buildCloudflareHostedControlBrowserVaultSessionPath(userId: string): string {
