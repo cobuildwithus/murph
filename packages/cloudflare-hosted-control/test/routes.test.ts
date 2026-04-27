@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlUserRunPath,
+  buildCloudflareHostedControlUserRunnerNudgePath,
   buildCloudflareHostedControlUserStatusPath,
   matchCloudflareHostedControlUserRoutePath,
 } from "../src/routes.ts";
@@ -20,15 +20,15 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlUserStatusPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/status",
     );
-    expect(buildCloudflareHostedControlUserRunPath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/run",
+    expect(buildCloudflareHostedControlUserRunnerNudgePath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/nudge",
     );
   });
 
   it("rejects blank user identifiers before building routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
-      buildCloudflareHostedControlUserRunPath,
+      buildCloudflareHostedControlUserRunnerNudgePath,
       buildCloudflareHostedControlUserStatusPath,
     ]) {
       expect(() => buildPath("  \t")).toThrow("Cloudflare hosted control userId must not be blank.");
@@ -47,8 +47,8 @@ describe("cloudflare hosted control routes", () => {
     ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
-        "run",
-        buildCloudflareHostedControlUserRunPath(userId),
+        "runnerNudge",
+        buildCloudflareHostedControlUserRunnerNudgePath(userId),
       ),
     ).toEqual({ userId: encodedUserId });
     expect(
@@ -58,19 +58,19 @@ describe("cloudflare hosted control routes", () => {
       ),
     ).toEqual({ userId: encodedUserId });
     expect(
-      matchCloudflareHostedControlUserRoutePath(
-        "status",
-        buildCloudflareHostedControlUserRunPath(userId),
-      ),
+      matchCloudflareHostedControlUserRoutePath("status", "/internal/users/user_123/run"),
     ).toBeNull();
     expect(
       matchCloudflareHostedControlUserRoutePath("status", "/internal/users//status"),
     ).toBeNull();
-    expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toMatchObject({
+    expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
-      run: { method: "POST", suffix: "run" },
+      runnerNudge: { method: "POST", suffix: "nudge" },
       status: { method: "GET", suffix: "status" },
     });
+    expect(Object.values(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS)).not.toContainEqual(
+      expect.objectContaining({ suffix: "run" }),
+    );
   });
 
   it("publishes only the surviving focused subpath exports", async () => {
@@ -99,6 +99,7 @@ describe("cloudflare hosted control routes", () => {
       "specifier",
       "return import(specifier);",
     ) as (specifier: string) => Promise<unknown>;
+    const routesModule = await import("@murphai/cloudflare-hosted-control/routes");
 
     await expect(
       importBySpecifier(["@murphai", "cloudflare-hosted-control"].join("/")),
@@ -106,9 +107,17 @@ describe("cloudflare hosted control routes", () => {
     await expect(import("@murphai/cloudflare-hosted-control/client")).resolves.toMatchObject({
       createCloudflareHostedControlClient: expect.any(Function),
     });
-    await expect(import("@murphai/cloudflare-hosted-control/routes")).resolves.toMatchObject({
+    expect(Object.keys(routesModule).sort()).toEqual([
+      "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
+      "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
+      "buildCloudflareHostedControlBrowserVaultSessionPath",
+      "buildCloudflareHostedControlUserRunnerNudgePath",
+      "buildCloudflareHostedControlUserStatusPath",
+      "matchCloudflareHostedControlUserRoutePath",
+    ]);
+    expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
-      buildCloudflareHostedControlUserRunPath: expect.any(Function),
+      buildCloudflareHostedControlUserRunnerNudgePath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
       matchCloudflareHostedControlUserRoutePath: expect.any(Function),
     });

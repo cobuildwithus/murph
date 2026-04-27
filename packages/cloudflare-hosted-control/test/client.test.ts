@@ -21,8 +21,8 @@ describe("createCloudflareHostedControlClient", () => {
 
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
-      "getStatus",
-      "nudgeUserRun",
+      "getRunnerStatus",
+      "nudgeUserRunner",
     ]);
   });
 
@@ -59,25 +59,25 @@ describe("createCloudflareHostedControlClient", () => {
     const client = createCloudflareHostedControlClient({
       allowHttpLocalhost: true,
       baseUrl: "http://127.0.0.1:8787",
-      fetchImpl: vi.fn(async () => createJsonResponse(createUserStatus())) as typeof fetch,
+      fetchImpl: vi.fn(async () => createJsonResponse(createRunnerStatus())) as typeof fetch,
       getBearerToken: async () => "token-123",
     });
 
-    await expect(client.getStatus("user_123")).resolves.toEqual(createUserStatus());
+    await expect(client.getRunnerStatus("user_123")).resolves.toEqual(createRunnerStatus());
   });
 
   it("rejects blank user identifiers before issuing requests", () => {
-    const fetchImpl = vi.fn(async () => createJsonResponse(createUserStatus())) as typeof fetch;
+    const fetchImpl = vi.fn(async () => createJsonResponse(createRunnerStatus())) as typeof fetch;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
       fetchImpl,
       getBearerToken: async () => "token-123",
     });
 
-    expect(() => client.getStatus("  \t")).toThrow(
+    expect(() => client.getRunnerStatus("  \t")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
-    expect(() => client.nudgeUserRun("")).toThrow(
+    expect(() => client.nudgeUserRunner("")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
@@ -102,9 +102,9 @@ describe("createCloudflareHostedControlClient", () => {
         new Response("provider_token=secret-value", { status: 500 })) as typeof fetch,
       getBearerToken: async () => "Bearer token-123",
     });
-    const promise = client.getStatus("user_123");
+    const promise = client.getRunnerStatus("user_123");
 
-    await expect(promise).rejects.toThrow("Hosted execution status failed with HTTP 500.");
+    await expect(promise).rejects.toThrow("Hosted execution runner status failed with HTTP 500.");
     await expect(promise).rejects.not.toThrow(/provider_token/u);
   });
 
@@ -425,21 +425,20 @@ describe("createCloudflareHostedControlClient", () => {
     })).rejects.toThrow("Cloudflare browser vault session encryptedReplica must be an object.");
   });
 
-  it("fetches user status with the expected request shape", async () => {
+  it("fetches runner status without a run record contract", async () => {
     let observedRequest: ObservedRequest | null = null;
+    const status = createRunnerStatus({ userId: "user_123" });
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
         observedRequest = { init, url: String(url) };
-        return createJsonResponse(createUserStatus({ userId: "user_123" }));
+        return createJsonResponse(status);
       }) as typeof fetch,
       getBearerToken: async () => "  Bearer token-123  ",
       timeoutMs: 2_500,
     });
 
-    await expect(client.getStatus("user_123")).resolves.toEqual(
-      createUserStatus({ userId: "user_123" }),
-    );
+    await expect(client.getRunnerStatus("user_123")).resolves.toEqual(status);
 
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/status");
@@ -448,50 +447,63 @@ describe("createCloudflareHostedControlClient", () => {
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.redirect).toBe("error");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
+    expectNoRunContractFields(status);
   });
 
-  it("rejects user status responses for another user", async () => {
+  it("rejects runner status responses for another user", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async () =>
-        createJsonResponse(createUserStatus({ userId: "user_other" }))) as typeof fetch,
+        createJsonResponse(createRunnerStatus({ userId: "user_other" }))) as typeof fetch,
       getBearerToken: async () => "Bearer token-123",
       timeoutMs: 2_500,
     });
 
-    await expect(client.getStatus("user_123")).rejects.toThrow(
-      "Hosted execution status userId must match the requested userId.",
+    await expect(client.getRunnerStatus("user_123")).rejects.toThrow(
+      "Hosted runner status userId must match the requested userId.",
     );
   });
 
-  it("posts run requests without a synchronous drain contract", async () => {
+  it("rejects runner status responses with a workspace for another user", async () => {
+    const status = createRunnerStatus({ userId: "user_123" });
+    status.workspace.userId = "user_other";
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () => createJsonResponse(status)) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.getRunnerStatus("user_123")).rejects.toThrow(
+      "Hosted runner status workspace.userId must match the requested userId.",
+    );
+  });
+
+  it("posts runner nudge requests without run identifiers or committed sequence fields", async () => {
     let observedRequest: ObservedRequest | null = null;
+    const result = createRunnerNudgeResult({
+      accepted: true,
+      alreadyRunning: true,
+      inFlight: true,
+      leaseGeneration: "7",
+    });
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
         observedRequest = { init, url: String(url) };
-        return createJsonResponse(createWakeNudgeResult({
-          accepted: true,
-          alreadyRunning: true,
-        }));
+        return createJsonResponse(result);
       }) as typeof fetch,
       getBearerToken: async () => "Bearer token-123",
       timeoutMs: 2_500,
     });
 
-    await expect(
-      client.nudgeUserRun("user_123"),
-    ).resolves.toEqual(createWakeNudgeResult({
-      accepted: true,
-      alreadyRunning: true,
-    }));
+    await expect(client.nudgeUserRunner("user_123")).resolves.toEqual(result);
 
     const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/run");
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/nudge");
     expect(request.init?.method).toBe("POST");
-    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
-    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.body).toBe("{}");
+    expectNoRunContractFields(result);
   });
 
 });
@@ -590,40 +602,102 @@ function createReplicaKeyEnvelope() {
   };
 }
 
-function createUserStatus(
-  input: Partial<{
-    bundleRef: unknown;
-    inFlight: boolean;
-    lastError: string | null;
-    lastEventId: string | null;
-    lastRunAt: string | null;
-    nextWakeAt: string | null;
-    pendingIngressEventCount: number;
-    userId: string;
-  }> = {},
-) {
-  return {
-    bundleRef: input.bundleRef ?? null,
-    inFlight: input.inFlight ?? false,
-    lastError: input.lastError ?? null,
-    lastEventId: input.lastEventId ?? null,
-    lastRunAt: input.lastRunAt ?? null,
-    nextWakeAt: input.nextWakeAt ?? null,
-    pendingIngressEventCount: input.pendingIngressEventCount ?? 0,
-    userId: input.userId ?? "user_123",
-  };
-}
-
-function createWakeNudgeResult(
+function createRunnerNudgeResult(
   input: Partial<{
     accepted: boolean;
     alarmScheduled: boolean;
     alreadyRunning: boolean;
+    inFlight: boolean;
+    leaseGeneration: string;
+    nextAlarmAt: string | null;
   }> = {},
 ) {
   return {
     accepted: input.accepted ?? true,
     alarmScheduled: input.alarmScheduled ?? false,
     alreadyRunning: input.alreadyRunning ?? false,
+    inFlight: input.inFlight ?? false,
+    leaseGeneration: input.leaseGeneration ?? "1",
+    nextAlarmAt: input.nextAlarmAt ?? null,
   };
+}
+
+function createRunnerStatus(
+  input: Partial<{
+    heartbeatAt: string | null;
+    inFlight: boolean;
+    lastErrorAt: string | null;
+    lastErrorCode: string | null;
+    lastRunAt: string | null;
+    leaseGeneration: string;
+    nextAlarmAt: string | null;
+    userId: string;
+  }> = {},
+) {
+  return {
+    heartbeatAt: input.heartbeatAt ?? "2026-04-26T00:00:01.000Z",
+    inFlight: input.inFlight ?? false,
+    lastErrorAt: input.lastErrorAt ?? null,
+    lastErrorCode: input.lastErrorCode ?? null,
+    lastRunAt: input.lastRunAt ?? null,
+    leaseGeneration: input.leaseGeneration ?? "3",
+    mailboxLag: [
+      {
+        importedSeq: "2",
+        lag: "1",
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ],
+    nextAlarmAt: input.nextAlarmAt ?? null,
+    recentLogs: [],
+    userId: input.userId ?? "user_123",
+    workspace: {
+      checkpointedAt: "2026-04-26T00:00:00.000Z",
+      createdAt: "2026-04-26T00:00:00.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      redactedStatus: {
+        importedConversationSeq: "2",
+      },
+      snapshotRef: null,
+      updatedAt: "2026-04-26T00:00:00.000Z",
+      userId: input.userId ?? "user_123",
+      version: "4",
+    },
+  };
+}
+
+function expectNoRunContractFields(value: unknown): void {
+  const disallowedKeys = new Set([
+    "committedSeq",
+    "requestedTargetSeq",
+    "runId",
+    "targetCommittedSeqHint",
+    "targetSeq",
+  ]);
+  const keys = collectPropertyKeys(value);
+
+  expect(keys.filter((key) => disallowedKeys.has(key))).toEqual([]);
+}
+
+function collectPropertyKeys(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectPropertyKeys(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => [
+    key,
+    ...collectPropertyKeys(nestedValue),
+  ]);
 }
