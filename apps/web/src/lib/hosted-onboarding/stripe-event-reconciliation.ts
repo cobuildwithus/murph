@@ -28,6 +28,7 @@ import {
 import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
+  sanitizeHostedOnboardingLogString,
 } from "./http";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -46,6 +47,15 @@ const STRIPE_EVENT_RETRY_DELAYS_MS = [
   15 * 60 * 1000,
   60 * 60 * 1000,
 ] as const;
+const STRIPE_EVENT_LOG_STRING_MAX_LENGTH = 500;
+const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
+  "column",
+  "constraint",
+  "field_name",
+  "modelName",
+  "table",
+  "target",
+]);
 
 export type HostedStripeEventReconcileResult = {
   activatedMemberId: string | null;
@@ -441,6 +451,13 @@ async function processClaimedHostedStripeEvent(
       status: "completed",
     };
   } catch (error) {
+    logHostedStripeEventReconciliationFailure({
+      attemptCount: claimed.attemptCount,
+      error,
+      eventId: claimed.eventId,
+      eventType: claimed.type,
+      poisoned: claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
+    });
     await prisma.hostedStripeEvent.update({
       where: {
         eventId: claimed.eventId,
@@ -473,6 +490,106 @@ async function processClaimedHostedStripeEvent(
       status: "failed",
     };
   }
+}
+
+function logHostedStripeEventReconciliationFailure(input: {
+  attemptCount: number;
+  error: unknown;
+  eventId: string;
+  eventType: string;
+  poisoned: boolean;
+}): void {
+  console.error("Hosted Stripe event reconciliation failed.", {
+    attemptCount: input.attemptCount,
+    errorName: deriveHostedOnboardingTimingErrorName(input.error),
+    eventIdSuffix: input.eventId.slice(-6),
+    eventType: sanitizeHostedOnboardingLogString(
+      input.eventType,
+      STRIPE_EVENT_LOG_STRING_MAX_LENGTH,
+    ) ?? "unknown",
+    poisoned: input.poisoned,
+    ...describeHostedStripeEventReconciliationErrorForLog(input.error),
+  });
+}
+
+function describeHostedStripeEventReconciliationErrorForLog(
+  error: unknown,
+): Record<string, unknown> {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    const prismaMessage = sanitizeHostedOnboardingLogString(
+      error.message,
+      STRIPE_EVENT_LOG_STRING_MAX_LENGTH,
+    );
+    const prismaMeta = sanitizeHostedStripeEventPrismaMeta(error.meta);
+
+    return {
+      errorCode: error.code,
+      prismaClientVersion: error.clientVersion,
+      prismaCode: error.code,
+      ...(prismaMessage ? { prismaMessage } : {}),
+      ...(prismaMeta ? { prismaMeta } : {}),
+    };
+  }
+
+  if (error instanceof Prisma.PrismaClientInitializationError) {
+    const prismaMessage = sanitizeHostedOnboardingLogString(
+      error.message,
+      STRIPE_EVENT_LOG_STRING_MAX_LENGTH,
+    );
+
+    return {
+      ...(typeof error.errorCode === "string" && error.errorCode
+        ? { errorCode: error.errorCode, prismaCode: error.errorCode }
+        : {}),
+      ...(typeof error.clientVersion === "string" && error.clientVersion
+        ? { prismaClientVersion: error.clientVersion }
+        : {}),
+      ...(prismaMessage ? { prismaMessage } : {}),
+    };
+  }
+
+  const errorMessage = error instanceof Error
+    ? sanitizeHostedOnboardingLogString(error.message, STRIPE_EVENT_LOG_STRING_MAX_LENGTH)
+    : sanitizeHostedOnboardingLogString(String(error), STRIPE_EVENT_LOG_STRING_MAX_LENGTH);
+
+  return errorMessage ? { errorMessage } : {};
+}
+
+function sanitizeHostedStripeEventPrismaMeta(meta: unknown): Record<string, unknown> | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    return null;
+  }
+
+  const entries = Object.entries(meta).flatMap(([key, value]) => {
+    if (!STRIPE_EVENT_SAFE_PRISMA_META_KEYS.has(key)) {
+      return [];
+    }
+
+    const sanitizedValue = sanitizeHostedStripeEventPrismaMetaValue(value);
+    return sanitizedValue === null ? [] : [[key, sanitizedValue] as const];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function sanitizeHostedStripeEventPrismaMetaValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return sanitizeHostedOnboardingLogString(value, STRIPE_EVENT_LOG_STRING_MAX_LENGTH);
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const sanitized = value
+      .map((entry) => sanitizeHostedStripeEventPrismaMetaValue(entry))
+      .filter((entry) => entry !== null);
+
+    return sanitized.length > 0 ? sanitized : null;
+  }
+
+  return null;
 }
 
 async function fetchHostedStripeEventForReconciliation(eventId: string): Promise<Stripe.Event> {
