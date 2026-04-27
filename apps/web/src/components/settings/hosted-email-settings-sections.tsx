@@ -17,6 +17,8 @@ import { isHostedPrivyEmailAccountVerified } from "@/src/lib/hosted-onboarding/p
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 
+import { ConnectedAccountCard } from "./connected-account-card";
+
 export function HostedEmailSettingsContent(props: {
   currentEmail: HostedPrivyEmailAccount | null;
   currentVerifiedEmail: (HostedPrivyEmailAccount & { verifiedAt: number }) | null;
@@ -49,25 +51,38 @@ export function HostedEmailSettingsContent(props: {
     onSendCode,
     onSyncVerifiedEmail,
   } = props;
+
+  const isVerified = currentEmail ? isHostedPrivyEmailAccountVerified(currentEmail) : false;
+
   return (
-    <>
-      <div className="mb-4 space-y-1">
-        <h2 className="text-lg font-semibold tracking-tight text-stone-900">Email</h2>
-        <p className="text-sm leading-relaxed text-stone-500">
-          {currentEmail
-            ? isHostedPrivyEmailAccountVerified(currentEmail)
-              ? `Connected as ${currentEmail.address}.`
-              : `${currentEmail.address} (unverified).`
-            : "Add an email so Murph can reach you there."}
-        </p>
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <h2 className="font-serif text-lg font-medium tracking-tight text-foreground">Email</h2>
+        {!currentEmail ? (
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Add an email so Murph can reach you there.
+          </p>
+        ) : null}
       </div>
 
-      {currentVerifiedEmail ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={() => void onSyncVerifiedEmail()} disabled={isBusy} variant="outline">
-            {isSyncingEmailRoute ? "Saving..." : "Save verified email"}
-          </Button>
-        </div>
+      {currentEmail ? (
+        <ConnectedAccountCard
+          label="Email"
+          value={currentEmail.address}
+          meta={isVerified ? null : "Unverified"}
+          action={
+            currentVerifiedEmail ? (
+              <Button
+                type="button"
+                onClick={() => void onSyncVerifiedEmail()}
+                disabled={isBusy}
+                variant="outline"
+              >
+                {isSyncingEmailRoute ? "Saving..." : "Save verified email"}
+              </Button>
+            ) : null
+          }
+        />
       ) : null}
 
       {canSendEmailUpdateCode ? (
@@ -99,19 +114,20 @@ export function HostedEmailSettingsContent(props: {
             </Button>
           </div>
         </div>
-      ) : (
+      ) : !currentEmail ? (
         <div className="flex flex-wrap items-center gap-3">
           <Button type="button" onClick={() => void onSendCode()} disabled={isBusy}>
             Link email
           </Button>
         </div>
-      )}
+      ) : null}
 
       {pendingEmailAddress ? (
-        <Alert className="border-stone-200 bg-white">
+        <Alert className="border-border bg-card">
           <AlertDescription className="flex flex-wrap items-center gap-3">
-            <span>
-              We sent a verification code to <strong className="text-stone-900">{pendingEmailAddress}</strong>.
+            <span className="text-sm text-muted-foreground">
+              We sent a verification code to{" "}
+              <strong className="text-foreground">{pendingEmailAddress}</strong>.
             </span>
             <Button type="button" onClick={onOpenDialog} disabled={isBusy} variant="outline">
               Enter code
@@ -127,8 +143,7 @@ export function HostedEmailSettingsContent(props: {
           </AlertDescription>
         </Alert>
       ) : null}
-
-    </>
+    </div>
   );
 }
 
