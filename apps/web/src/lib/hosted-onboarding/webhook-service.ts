@@ -23,6 +23,7 @@ import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
+  toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import {
   drainHostedLinqSideEffectsDirect,
@@ -72,7 +73,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     eventId = event.event_id;
     eventType = event.event_type;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
-      eventIdSuffix: toHostedWebhookLogIdSuffix(eventId),
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
@@ -85,7 +86,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const planTiming = startHostedOnboardingTiming(
       "hosted-onboarding.webhook.linq.plan",
       {
-        eventIdSuffix: toHostedWebhookLogIdSuffix(event.event_id),
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
         eventType: event.event_type,
       },
     );
@@ -136,7 +137,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     finishHostedOnboardingTiming(timing, "completed", {
       duplicate: Boolean(plan.response.duplicate),
-      eventIdSuffix: toHostedWebhookLogIdSuffix(eventId),
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
@@ -145,7 +146,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
-      eventIdSuffix: toHostedWebhookLogIdSuffix(eventId),
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
@@ -247,13 +248,4 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
   return typeof prisma.$transaction === "function"
     ? prisma.$transaction(callback)
     : callback(prisma as Prisma.TransactionClient);
-}
-
-function toHostedWebhookLogIdSuffix(value: string | null | undefined): string | null {
-  const trimmed = value?.trim() ?? "";
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  return trimmed.slice(-6);
 }

@@ -88,20 +88,14 @@ describe("HostedUserRunner alarm routing", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
-        details: expect.objectContaining({
-          pendingNudge: false,
-          workspaceWakeDue: false,
-        }),
-        message: "Hosted runner alarm evaluated wake state.",
-        phase: "wake.running",
-        userId: "member_123",
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "hosted.runner",
         message: "Hosted runner alarm skipped because no wake is due.",
         phase: "scheduled",
+        details: expect.objectContaining({
+          pendingNudge: false,
+          runnerNextWakePresent: false,
+          workspaceNextWakePresent: true,
+          workspaceWakeDue: false,
+        }),
         userId: "member_123",
       }),
     );
@@ -133,6 +127,8 @@ describe("HostedUserRunner alarm routing", () => {
         component: "hosted.runner",
         details: expect.objectContaining({
           pendingNudge: true,
+          runnerNextWakePresent: true,
+          workspaceNextWakePresent: true,
           workspaceWakeDue: false,
         }),
         message: "Hosted runner alarm starting workspace invocation.",

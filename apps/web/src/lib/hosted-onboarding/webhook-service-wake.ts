@@ -4,6 +4,7 @@ import {
 import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
+  toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type { HostedWebhookServiceResponse } from "./webhook-service-types";
 
@@ -28,10 +29,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
       deferred: Boolean(input.defer),
-      eventIdSuffix: toLogIdSuffix(input.eventId),
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       responseReason: input.response.reason,
       userIdPresent: true,
-      userIdSuffix: toLogIdSuffix(memberId),
+      userIdSuffix: toHostedOnboardingLogIdSuffix(memberId),
     },
   );
 
@@ -74,10 +75,10 @@ async function handoffHostedExecutionWebhookWake(input: {
     `hosted-onboarding.webhook.${input.source}.wake-nudge`,
     {
       deferred: input.deferred,
-      eventIdSuffix: toLogIdSuffix(input.eventId),
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       responseReason: input.responseReason,
       userIdPresent: true,
-      userIdSuffix: toLogIdSuffix(input.userId),
+      userIdSuffix: toHostedOnboardingLogIdSuffix(input.userId),
     },
   );
   const result = await nudgeHostedRunnerUserBestEffortResult({
@@ -93,13 +94,4 @@ async function handoffHostedExecutionWebhookWake(input: {
     inFlight: result.inFlight,
     nextAlarmAtPresent: result.nextAlarmAtPresent,
   });
-}
-
-function toLogIdSuffix(value: string | null | undefined): string | null {
-  const trimmed = value?.trim() ?? "";
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  return trimmed.slice(-6);
 }

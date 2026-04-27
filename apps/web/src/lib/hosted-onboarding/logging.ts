@@ -52,6 +52,17 @@ export function deriveHostedOnboardingTimingErrorName(error: unknown): string {
   return "UnknownError";
 }
 
+export function toHostedOnboardingLogIdSuffix(
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return trimmed.slice(-6);
+}
+
 function logHostedOnboardingTiming(input: {
   details?: HostedOnboardingTimingDetails;
   outcome: string;
