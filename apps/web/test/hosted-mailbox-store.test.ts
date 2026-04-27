@@ -139,7 +139,7 @@ describe("appendHostedMailboxItemTx", () => {
         payloadInlineCiphertext: "cipher_first_1",
       },
     });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         component: "mailbox",
@@ -757,10 +757,6 @@ function createHostedMailboxTx(input: {
   return Object.assign(Object.create(null), {
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join("?");
-      if (sql.includes("pg_advisory_xact_lock")) {
-        return [];
-      }
-
       if (sql.includes("hosted_mailbox_lane_counter")) {
         return [{ seq: 1n }];
       }
