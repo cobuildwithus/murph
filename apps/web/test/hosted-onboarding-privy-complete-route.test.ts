@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
+  getHostedInviteStatus: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
 }));
 
@@ -12,6 +13,10 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
   completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
+  getHostedInviteStatus: mocks.getHostedInviteStatus,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
@@ -37,8 +42,10 @@ describe("hosted onboarding Privy completion route", () => {
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       memberId: "member_123",
+      messagingSetupRequired: false,
       stage: "checkout",
     });
+    mocks.getHostedInviteStatus.mockResolvedValue(createInviteStatus("checkout"));
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
@@ -71,8 +78,10 @@ describe("hosted onboarding Privy completion route", () => {
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
+      messagingSetupRequired: false,
       ok: true,
       stage: "checkout",
+      status: createInviteStatus("checkout"),
     });
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
       identity: {
@@ -96,8 +105,10 @@ describe("hosted onboarding Privy completion route", () => {
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       memberId: "member_123",
+      messagingSetupRequired: false,
       stage: "active",
     });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
 
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
@@ -112,8 +123,10 @@ describe("hosted onboarding Privy completion route", () => {
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
+      messagingSetupRequired: false,
       ok: true,
       stage: "active",
+      status: createInviteStatus("active"),
     });
   });
 
@@ -190,3 +203,28 @@ describe("hosted onboarding Privy completion route", () => {
     expect(mocks.completeHostedPrivyVerification.mock.calls[0]?.[0]).not.toHaveProperty("timeZone");
   });
 });
+
+function createInviteStatus(stage: "active" | "checkout") {
+  return {
+    billing: {
+      defaultPlanCode: "launch_monthly",
+      plans: [],
+    },
+    capabilities: {
+      billingReady: true,
+      phoneAuthReady: true,
+    },
+    invite: {
+      code: "invite_123",
+      expiresAt: "2026-03-27T12:00:00.000Z",
+      phoneHint: "*** 0000",
+    },
+    messagingSetupRequired: false,
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage,
+  };
+}

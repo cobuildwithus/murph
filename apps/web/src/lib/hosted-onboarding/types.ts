@@ -46,4 +46,5 @@ export interface HostedPrivyCompletionPayload {
   joinUrl: string;
   messagingSetupRequired: boolean;
   stage: HostedPostVerificationStage;
+  status: HostedInviteStatusPayload;
 }

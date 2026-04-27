@@ -9,6 +9,7 @@ import {
 } from "@/src/lib/hosted-onboarding/logging";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 
@@ -30,6 +31,10 @@ export const POST = withJsonError(async (request: Request) => {
       ...(timeZone ? { timeZone } : {}),
       verifiedPrivyUser: auth.verifiedPrivyUser,
     });
+    const status = await getHostedInviteStatus({
+      authenticatedSessionIdentity: auth.identity,
+      inviteCode: result.inviteCode,
+    });
 
     finishHostedOnboardingTiming(timing, "completed", {
       stage: result.stage,
@@ -42,6 +47,7 @@ export const POST = withJsonError(async (request: Request) => {
       messagingSetupRequired: result.messagingSetupRequired,
       ok: true,
       stage: result.stage,
+      status,
     });
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {

@@ -22,7 +22,6 @@ interface JoinInviteSharePreviewAlertProps {
 }
 
 interface JoinInviteStageContentProps {
-  authenticated: boolean;
   awaitingInviteSessionResolution: boolean;
   billingPlanCode: HostedInviteStatusPayload["billing"]["defaultPlanCode"];
   checkoutPending: boolean;
@@ -66,7 +65,6 @@ export function JoinInviteSharePreviewAlert({ sharePreview }: JoinInviteSharePre
 }
 
 export function JoinInviteStageContent({
-  authenticated,
   awaitingInviteSessionResolution,
   billingPlanCode,
   checkoutPending,
@@ -118,7 +116,7 @@ export function JoinInviteStageContent({
 
       {status.stage === "checkout" && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
-          authenticated={authenticated}
+          authenticated={status.session.authenticated}
           initialLinkedAccounts={initialLinkedAccounts}
           onRefreshStatus={onRefreshStatus}
         />
