@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { Experiment } from "@/src/types/experiments";
 import { StudyCard } from "./study-card";
+import { splitBulletLead } from "./format";
 
 interface ResearchTabProps {
   experiment: Experiment;
@@ -13,12 +14,17 @@ export function ResearchTab({ experiment }: ResearchTabProps) {
     researchLandscape,
     researchGroups,
     studies,
+    protocolKeepInMind,
   } = experiment;
 
   return (
     <div className="flex flex-col gap-8">
       {researchLandscape ? (
         <ResearchLandscapeReadout landscape={researchLandscape} />
+      ) : null}
+
+      {protocolKeepInMind.length > 0 ? (
+        <ReadingResultsNotes items={protocolKeepInMind} />
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
@@ -105,6 +111,41 @@ export function ResearchTab({ experiment }: ResearchTabProps) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ReadingResultsNotes({ items }: { items: ReadonlyArray<string> }) {
+  return (
+    <section className="flex flex-col gap-5 rounded-xl border border-secondary/25 bg-card/90 p-7">
+      <SectionLabel>Read results carefully</SectionLabel>
+      <ul
+        role="list"
+        className="grid gap-x-10 gap-y-6 md:grid-cols-3 md:divide-x md:divide-border/60"
+      >
+        {items.map((item) => {
+          const { lead, rest } = splitBulletLead(item);
+          return (
+            <li
+              key={item}
+              className="flex flex-col gap-1.5 text-[14px]/6 text-foreground text-pretty md:px-6 md:first:pl-0 md:last:pr-0"
+            >
+              {lead ? (
+                <>
+                  <strong className="font-semibold text-foreground">
+                    {lead}
+                  </strong>
+                  {rest ? (
+                    <span className="text-muted-foreground">{rest}</span>
+                  ) : null}
+                </>
+              ) : (
+                <span>{item}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
