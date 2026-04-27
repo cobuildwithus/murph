@@ -73,7 +73,6 @@ function AccountMenu() {
 
   useEffect(() => {
     if (!userKey) {
-      setDeviceSyncStatusState(null);
       return;
     }
 

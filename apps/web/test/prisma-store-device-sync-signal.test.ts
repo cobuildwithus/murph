@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -33,6 +33,10 @@ type MutableWebhookTrace = {
 };
 
 const BLIND_INDEX_KEY = Buffer.alloc(32, 7);
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function createSignalStore(seed: MutableSignal[] = []) {
   const signals = new Map<number, MutableSignal>(
@@ -279,6 +283,9 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
 
 describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
   it("persists the webhook trace claim lifecycle for hosted control-plane dedupe", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-27T00:06:00.000Z"));
+
     const { store, traces } = createWebhookTraceStore([
       {
         provider: "oura",
