@@ -132,10 +132,9 @@ describe("HostedEmailSettings", () => {
       }),
     );
 
-    assert.match(markup, /Connected as verified@example\.com\./);
     assert.match(markup, /verified@example\.com/);
     assert.match(markup, /id="settings-email-address"[^>]*value="verified@example\.com"/);
-    assert.doesNotMatch(markup, /Connected as stale@example\.com\./);
+    assert.doesNotMatch(markup, /stale@example\.com/);
     assert.match(markup, /Save verified email/);
   });
 
