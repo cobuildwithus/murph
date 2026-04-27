@@ -48,10 +48,10 @@ export function isHostedWebDevFileSystemCacheEnabled(
   const normalized = environment[hostedWebDevFileSystemCacheEnvVarName]?.trim().toLowerCase();
 
   if (!normalized) {
-    return true;
+    return false;
   }
 
-  return normalized !== "0" && normalized !== "false" && normalized !== "no";
+  return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
 export function resolveHostedWebDistDir(

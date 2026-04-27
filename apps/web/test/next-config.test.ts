@@ -96,8 +96,8 @@ test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", 
   );
 });
 
-test("hosted web dev filesystem cache defaults on and allows explicit opt-out", () => {
-  assert.equal(isHostedWebDevFileSystemCacheEnabled(), true);
+test("hosted web dev filesystem cache defaults off and allows explicit opt-in", () => {
+  assert.equal(isHostedWebDevFileSystemCacheEnabled(), false);
   assert.equal(
     isHostedWebDevFileSystemCacheEnabled(
       createProcessEnv({
@@ -110,6 +110,14 @@ test("hosted web dev filesystem cache defaults on and allows explicit opt-out", 
     isHostedWebDevFileSystemCacheEnabled(
       createProcessEnv({
         MURPH_NEXT_DEV_FILESYSTEM_CACHE: "yes",
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isHostedWebDevFileSystemCacheEnabled(
+      createProcessEnv({
+        MURPH_NEXT_DEV_FILESYSTEM_CACHE: "true",
       }),
     ),
     true,
@@ -138,7 +146,7 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.equal(productionNextConfig.typescript, undefined);
 });
 
-test("next.config enables the Turbopack dev filesystem cache by default and honors explicit opt-out", () => {
+test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 
   try {
@@ -146,14 +154,14 @@ test("next.config enables the Turbopack dev filesystem cache by default and hono
     assert.equal(
       buildHostedWebNextConfig(PHASE_DEVELOPMENT_SERVER).experimental
         ?.turbopackFileSystemCacheForDev,
-      true,
+      false,
     );
 
-    process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE = "0";
+    process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE = "1";
     assert.equal(
       buildHostedWebNextConfig(PHASE_DEVELOPMENT_SERVER).experimental
         ?.turbopackFileSystemCacheForDev,
-      false,
+      true,
     );
   } finally {
     if (previousValue === undefined) {
