@@ -4,12 +4,24 @@ export const HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES = [
   "LINQ_WEBHOOK_SECRET",
 ] as const;
 
-// Platform-owned Telegram routing vars must never be user-controlled because
-// privileged Telegram requests embed the bot token in the request URL.
-export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
+export const HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES = [
+  "HOSTED_WAKE_ENCRYPTION_KEY",
+  "HOSTED_WAKE_ENCRYPTION_KEYRING_JSON",
+  "HOSTED_WAKE_ENCRYPTION_KEY_VERSION",
+] as const;
+
+export const HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES = [
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
+] as const;
+
+// Platform-owned runtime vars must never be user-controlled. Telegram routing
+// vars authorize privileged Bot API traffic, and wake encryption vars decrypt
+// hosted mailbox payloads.
+export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
+  ...HOSTED_SHARED_MAILBOX_PLATFORM_ENV_NAMES,
+  ...HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
 ] as const;
 
 export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {

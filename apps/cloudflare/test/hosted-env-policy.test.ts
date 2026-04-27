@@ -66,6 +66,24 @@ describe("buildHostedRunnerContainerEnv", () => {
       },
     )).toBe(false);
   });
+
+  it("does not allow runner secrets to override hosted control-plane prefixes", () => {
+    const source = {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
+        "HOSTED_WAKE_ENCRYPTION_KEY_VERSION",
+        "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
+      ].join(","),
+    };
+
+    expect(isHostedRunnerSecretKeyAllowed(
+      "HOSTED_WAKE_ENCRYPTION_KEY_VERSION",
+      source,
+    )).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed(
+      "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
+      source,
+    )).toBe(false);
+  });
 });
 
 describe("hosted runner log categories", () => {

@@ -100,6 +100,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
     },
     platformEnv: {
       HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -119,6 +120,8 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       OPENAI_API_KEY: "worker-openai-secret",
     },
     platformEnv: {
+      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -226,11 +229,14 @@ test("hosted runtime platform env selector and timeout parser are reusable outsi
   assert.deepEqual(
     buildHostedRuntimePlatformEnv({
       HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
     }),
     {
+      HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+      HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -427,6 +433,7 @@ test("hosted platform-backed env strips non-platform entries from platform env",
       },
       platformEnv: {
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         OPENAI_API_KEY: "platform-openai-secret",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },

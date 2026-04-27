@@ -436,7 +436,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
-  it("treats explicit platform env as Telegram-only and does not backfill missing keys from forwarded env", () => {
+  it("treats explicit platform env as platform-owned and does not backfill missing keys from forwarded env", () => {
     expect(buildHostedRunnerJobRuntime({
       forwardedEnv: {
         OPENAI_API_KEY: "sk-worker",
@@ -445,6 +445,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       },
       platformEnv: {
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       } as Record<string, string>,
@@ -455,6 +456,8 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         OPENAI_API_KEY: "sk-worker",
       },
       platformEnv: {
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
+        HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v1",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
       resolvedConfig: {
@@ -483,6 +486,9 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       forwardedEnv: {
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         OPENAI_API_KEY: "sk-worker",
+      },
+      platformEnv: {
+        HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
       },
       userEnv: {},
     });

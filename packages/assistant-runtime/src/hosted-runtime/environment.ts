@@ -1,6 +1,7 @@
 import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/runtime-config";
 
 import {
+  HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
   HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
 } from "../hosted-env-categories.ts";
@@ -129,7 +130,7 @@ export function buildHostedPlatformBackedRuntimeEnv(input: {
 }): Record<string, string> {
   return {
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
-    ...sanitizeHostedAssistantRuntimePlatformEnv(input.platformEnv ?? {}),
+    ...sanitizeHostedAssistantRuntimeChannelPlatformEnv(input.platformEnv ?? {}),
   };
 }
 
@@ -145,6 +146,15 @@ export function sanitizeHostedAssistantRuntimePlatformEnv(
   platformEnv: Readonly<Record<string, string>>,
 ): Record<string, string> {
   const allowedKeys = new Set<string>(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES);
+  return Object.fromEntries(
+    Object.entries(platformEnv).filter(([key]) => allowedKeys.has(key)),
+  );
+}
+
+function sanitizeHostedAssistantRuntimeChannelPlatformEnv(
+  platformEnv: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const allowedKeys = new Set<string>(HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES);
   return Object.fromEntries(
     Object.entries(platformEnv).filter(([key]) => allowedKeys.has(key)),
   );
