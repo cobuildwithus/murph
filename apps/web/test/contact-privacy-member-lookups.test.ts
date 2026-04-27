@@ -7,10 +7,8 @@ import {
   createHostedPrivyUserLookupKey,
   createHostedStripeBillingEventLookupKey,
   createHostedStripeCheckoutSessionLookupKey,
-  createHostedStripeCustomerLookupConflictLockToken,
   createHostedStripeCustomerLookupKey,
   createHostedStripeSubscriptionLookupKey,
-  createHostedTelegramUserLookupConflictLockToken,
   createHostedWalletAddressLookupKey,
   hostedPhoneLookupKeyMatchesValue,
   parseHostedBlindIndex,
@@ -85,25 +83,6 @@ describe("hosted member lookup keys", () => {
       expect(candidates).toHaveLength(2);
       expect(parseHostedBlindIndex(candidates[0])?.version).toBe("v2");
       expect(parseHostedBlindIndex(candidates[1])?.version).toBe("v1");
-    } finally {
-      restore();
-    }
-  });
-
-  it("keeps Telegram and Stripe conflict-lock tokens stable across current-version flips", () => {
-    const telegramLockTokenV1 = createHostedTelegramUserLookupConflictLockToken("456");
-    const stripeLockTokenV1 = createHostedStripeCustomerLookupConflictLockToken("cus_123");
-
-    const restore = configureHostedContactPrivacyKeyringForTest({
-      currentVersion: "v2",
-      entries: { ...TEST_KEYRING_ENTRIES },
-    });
-
-    try {
-      expect(createHostedTelegramUserLookupConflictLockToken("456")).toBe(telegramLockTokenV1);
-      expect(createHostedStripeCustomerLookupConflictLockToken("cus_123")).toBe(stripeLockTokenV1);
-      expect(telegramLockTokenV1).toMatch(/^hblock:telegram-user:v1:/u);
-      expect(stripeLockTokenV1).toMatch(/^hblock:stripe-customer:v1:/u);
     } finally {
       restore();
     }

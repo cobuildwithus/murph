@@ -6,7 +6,6 @@ import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-w
 
 import { getPrisma } from "../prisma";
 import {
-  createHostedTelegramUserLookupConflictLockToken,
   createHostedTelegramUserLookupKey,
   createHostedTelegramUserLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -17,7 +16,6 @@ import {
 } from "./member-private-codecs";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  lockHostedAdvisoryKey,
 } from "./shared";
 
 export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
@@ -128,15 +126,10 @@ async function assertHostedMemberTelegramRoutingBindingAvailableTx(input: {
   const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
     input.telegramUserId,
   );
-  const telegramUserConflictLockToken = createHostedTelegramUserLookupConflictLockToken(
-    input.telegramUserId,
-  );
 
-  if (telegramUserLookupKeys.length === 0 || !telegramUserConflictLockToken) {
+  if (telegramUserLookupKeys.length === 0) {
     throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
   }
-
-  await lockHostedAdvisoryKey(input.prisma, telegramUserConflictLockToken);
 
   const existingBindings = await input.prisma.hostedMemberRouting.findMany({
     where: {
