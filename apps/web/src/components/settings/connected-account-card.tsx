@@ -49,7 +49,7 @@ export function ConnectedAccountCard(props: {
 }
 
 export function SettingsContactLink(props: {
-  children: ReactNode;
+  children?: ReactNode;
   href: string;
   label: string;
   external?: boolean;

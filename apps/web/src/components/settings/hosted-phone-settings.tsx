@@ -12,14 +12,23 @@ import {
 
 import { HostedPhoneAuth } from "../hosted-onboarding/hosted-phone-auth";
 import type { HostedPhoneLinkPayload } from "../hosted-onboarding/hosted-phone-auth-types";
-import { ConnectedAccountCard, SettingsStatusLine } from "./connected-account-card";
+import {
+  ConnectedAccountCard,
+  SettingsContactLink,
+  SettingsStatusLine,
+} from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
-import { formatMaskedPhoneNumber, toErrorMessage } from "./hosted-settings-utils";
+import {
+  formatContactPhoneNumber,
+  formatMaskedPhoneNumber,
+  toErrorMessage,
+} from "./hosted-settings-utils";
 
 export function HostedPhoneSettings(props: {
   authenticated: boolean;
   autoOpen?: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  murphPhoneNumber?: string | null;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
 }) {
   const { refreshUser, user } = useUser();
@@ -96,6 +105,15 @@ export function HostedPhoneSettings(props: {
           variant="empty"
         />
       )}
+
+      {props.murphPhoneNumber ? (
+        <SettingsContactLink
+          href={`sms:${props.murphPhoneNumber}`}
+          label={`Message Murph at ${formatContactPhoneNumber(props.murphPhoneNumber)}`}
+        >
+          Message {formatContactPhoneNumber(props.murphPhoneNumber)}
+        </SettingsContactLink>
+      ) : null}
 
       {showLinkForm ? (
         <HostedPhoneAuth

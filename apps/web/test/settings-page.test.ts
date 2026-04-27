@@ -6,6 +6,7 @@ import { expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
+  getPrisma: vi.fn(),
   HostedBillingSettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted billing settings ${String(props.authenticated)}`)),
   HostedDeviceSyncSettings: vi.fn((props: {
@@ -19,11 +20,15 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted email settings ${String(props.authenticated)} ${String(props.initialLinkedAccounts.length)}`,
     )),
-  HostedPhoneSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
+  HostedPhoneSettings: vi.fn((props: {
+    authenticated: boolean;
+    initialLinkedAccounts: unknown[];
+    murphPhoneNumber?: string | null;
+  }) =>
     React.createElement(
       "div",
       null,
-      `Hosted phone settings ${String(props.authenticated)} ${String(props.initialLinkedAccounts.length)}`,
+      `Hosted phone settings ${String(props.authenticated)} ${String(props.initialLinkedAccounts.length)} ${String(props.murphPhoneNumber ?? "")}`,
     )),
   HostedTelegramSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
     React.createElement(
@@ -36,6 +41,8 @@ const mocks = vi.hoisted(() => ({
     member: { billingStatus: string; id: string; suspendedAt: Date | null } | null;
   }) =>
     React.createElement("div", null, `Hosted vault sync settings ${String(props.authenticated)} ${String(props.member?.id ?? "")}`)),
+  prisma: {},
+  readHostedMemberRoutingState: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -50,6 +57,14 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-country-code-boundary", () => ({
@@ -114,6 +129,7 @@ test("SettingsPage metadata uses the shared preview image", async () => {
 });
 
 test("SettingsPage reads the server-side Privy session and threads it into the settings tree", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -131,23 +147,45 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
     memberLookup: null,
     session: null,
   });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: "+15550100001",
+    memberId: "member_123",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
   const markup = renderToStaticMarkup(await SettingsPage());
 
   assert.match(markup, /Hosted billing settings/);
-  assert.match(markup, /Hosted phone settings/);
+  assert.match(markup, /Hosted phone settings true 1 \+15550100001/);
   assert.match(markup, /Hosted email settings/);
   assert.match(markup, /Hosted Telegram settings/);
   assert.match(markup, /Hosted vault sync settings/);
   assert.match(markup, /Hosted device sync settings/);
+  assert.ok(
+    markup.indexOf("Hosted device sync settings") < markup.indexOf("Hosted vault sync settings"),
+  );
   assert.match(markup, /Your account/);
   assert.match(markup, /Subscription, connected accounts, vault sync, and wearables\./);
   assert.match(markup, /data-phone-country-code="CA"/);
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
+  }), undefined);
+  expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: mocks.prisma,
+  });
+  expect(mocks.HostedPhoneSettings).toHaveBeenCalledWith(expect.objectContaining({
+    authenticated: true,
+    initialLinkedAccounts: expect.any(Array),
+    murphPhoneNumber: "+15550100001",
   }), undefined);
   expect(mocks.HostedEmailSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
