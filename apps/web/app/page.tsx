@@ -13,6 +13,7 @@ import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { formatHostedLandingPricingLongSummary } from "@/src/lib/hosted-onboarding/billing-plans";
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { StickyNav } from "./sticky-nav";
@@ -36,7 +37,10 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default async function HomePage() {
-  const { authenticated } = await getHostedPageAuthSnapshot();
+  const [{ authenticated }, githubStarCount] = await Promise.all([
+    getHostedPageAuthSnapshot(),
+    getMurphGithubStarCount(),
+  ]);
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
   const launchPricingSummary = formatHostedLandingPricingLongSummary();
@@ -65,7 +69,7 @@ export default async function HomePage() {
     <HostedPhoneCountryCodeBoundary>
       <style>{`#global-footer { display: none; }`}</style>
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
-        <StickyNav authenticated={authenticated} />
+        <StickyNav authenticated={authenticated} githubStarCount={githubStarCount} />
         <HeroSection authenticated={authenticated} />
         <HowItWorksSection />
         <AssistantSection />
