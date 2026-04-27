@@ -155,10 +155,33 @@ describe("HostedUserRunner alarm routing", () => {
         details: expect.objectContaining({
           alarmScheduled: true,
           alreadyRunning: false,
-          pendingNudge: false,
+          pendingNudge: true,
         }),
         message: "Hosted runner nudge accepted.",
         phase: "scheduled",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("runs the workspace invocation when an idle nudge alarm fires", async () => {
+    const { runner } = createRunnerHarness();
+    await runner.bindUser("member_123");
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(createWebStatusResponseBody());
+
+    await runner.nudgeHostedRunner();
+    await runner.alarm();
+
+    expect(runner.runCalls).toEqual(["alarm"]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        details: expect.objectContaining({
+          pendingNudge: true,
+          workspaceWakeDue: false,
+        }),
+        message: "Hosted runner alarm starting workspace invocation.",
+        phase: "wake.running",
         userId: "member_123",
       }),
     );
