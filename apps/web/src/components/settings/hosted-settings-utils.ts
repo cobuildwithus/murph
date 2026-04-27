@@ -20,3 +20,13 @@ export function formatMaskedPhoneNumber(phoneNumber: string): string {
   const last4 = digits.slice(-4).padStart(4, "•");
   return `•••• ${last4}`;
 }
+
+export function formatContactPhoneNumber(phoneNumber: string): string {
+  const digits = phoneNumber.replace(/\D/g, "");
+
+  if (/^1\d{10}$/u.test(digits)) {
+    return `+1 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+
+  return phoneNumber;
+}

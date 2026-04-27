@@ -8,7 +8,9 @@ import { HostedEmailSettings } from "@/src/components/settings/hosted-email-sett
 import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
 import { HostedVaultSyncSettings } from "@/src/components/settings/hosted-vault-sync-settings";
+import { getPrisma } from "@/src/lib/prisma";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -22,6 +24,13 @@ export default async function SettingsPage() {
   if (!authenticated) {
     redirect("/");
   }
+
+  const routing = authenticatedMember
+    ? await readHostedMemberRoutingState({
+        memberId: authenticatedMember.id,
+        prisma: getPrisma(),
+      })
+    : null;
 
   return (
     <HostedPhoneCountryCodeBoundary>
@@ -50,7 +59,11 @@ export default async function SettingsPage() {
             Messaging
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <HostedPhoneSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
+            <HostedPhoneSettings
+              authenticated={authenticated}
+              initialLinkedAccounts={linkedAccounts}
+              murphPhoneNumber={routing?.linqRecipientPhone ?? null}
+            />
             <HostedTelegramSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
             <HostedEmailSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
           </div>
@@ -58,9 +71,9 @@ export default async function SettingsPage() {
 
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Vault
+            Wearables
           </div>
-          <HostedVaultSyncSettings
+          <HostedDeviceSyncSettings
             authenticated={authenticated}
             member={authenticatedMember}
           />
@@ -68,9 +81,9 @@ export default async function SettingsPage() {
 
         <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Wearables
+            Vault
           </div>
-          <HostedDeviceSyncSettings
+          <HostedVaultSyncSettings
             authenticated={authenticated}
             member={authenticatedMember}
           />
