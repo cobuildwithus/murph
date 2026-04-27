@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/src/lib/utils";
 
 export function ConnectedAccountCard(props: {
-  label: string;
+  label?: string;
   value: ReactNode;
   meta?: ReactNode;
   action?: ReactNode;
@@ -16,29 +16,56 @@ export function ConnectedAccountCard(props: {
   return (
     <div
       className={cn(
-        "flex flex-col gap-4 rounded-xl border border-border bg-card p-5",
-        isEmpty && "bg-muted/40",
+        "flex flex-col gap-4 rounded-xl border border-border bg-muted/40 p-5",
         className,
       )}
     >
-      <div className="flex flex-col gap-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-          {label}
-        </span>
-        <span
-          className={cn(
-            "font-serif text-xl leading-tight tracking-tight",
-            isEmpty ? "text-muted-foreground" : "text-foreground",
-          )}
-        >
-          {value}
-        </span>
-        {meta ? (
-          <span className="text-sm leading-relaxed text-muted-foreground">{meta}</span>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex flex-col gap-1.5">
+          {label ? (
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+              {label}
+            </span>
+          ) : null}
+          <span
+            className={cn(
+              "font-serif leading-tight tracking-tight [overflow-wrap:anywhere]",
+              isEmpty ? "text-muted-foreground" : "text-foreground",
+              isEmpty ? "text-lg" : "text-xl",
+            )}
+          >
+            {value}
+          </span>
+          {meta ? (
+            <span className="text-sm leading-relaxed text-muted-foreground">{meta}</span>
+          ) : null}
+        </div>
+        {action ? (
+          <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">{action}</div>
         ) : null}
       </div>
-      {action ? <div className="flex flex-wrap gap-2">{action}</div> : null}
     </div>
+  );
+}
+
+export function SettingsContactLink(props: {
+  children: ReactNode;
+  href: string;
+  label: string;
+  external?: boolean;
+}) {
+  return (
+    <p className="text-xs leading-relaxed text-muted-foreground">
+      <a
+        href={props.href}
+        aria-label={props.label}
+        target={props.external ? "_blank" : undefined}
+        rel={props.external ? "noreferrer" : undefined}
+        className="font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+      >
+        {props.children}
+      </a>
+    </p>
   );
 }
 

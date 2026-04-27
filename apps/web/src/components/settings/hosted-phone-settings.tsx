@@ -76,21 +76,21 @@ export function HostedPhoneSettings(props: {
 
       {currentPhoneNumber ? (
         <ConnectedAccountCard
-          label="Phone"
           value={formatMaskedPhoneNumber(currentPhoneNumber)}
           action={
             <Button
               type="button"
-              variant={showLinkForm ? "outline" : "default"}
+              variant="ghost"
+              size="sm"
               onClick={() => setExpanded((value) => !value)}
+              className="text-muted-foreground hover:text-foreground"
             >
-              {showLinkForm ? "Hide phone form" : "Change phone"}
+              {showLinkForm ? "Cancel" : "Change"}
             </Button>
           }
         />
       ) : (
         <ConnectedAccountCard
-          label="Phone"
           value="Not connected"
           meta="Add a phone number if you want Murph to text you directly."
           variant="empty"

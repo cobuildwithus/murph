@@ -102,7 +102,9 @@ describe("HostedTelegramSettings", () => {
     cleanupRender = cleanup;
 
     expect(container.textContent).toContain("@murph_user");
-    expect(container.textContent).toContain("Relink");
+    expect(container.textContent).toContain("Change");
+    const contactLink = container.querySelector('a[href="https://t.me/withmurph_bot"]');
+    expect(contactLink?.textContent).toContain("Message @withmurph_bot");
     expect(container.textContent).not.toContain("Save connection");
 
     await vi.waitFor(() => {
@@ -114,10 +116,10 @@ describe("HostedTelegramSettings", () => {
       });
     });
 
-    const relinkButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Relink"),
+    const changeButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Change"),
     );
-    expect(relinkButton?.disabled).toBe(false);
+    expect(changeButton?.disabled).toBe(false);
     expect(container.textContent).not.toContain("Finishing Telegram sync");
     expect(container.textContent).not.toContain("Telegram updated");
 
@@ -172,13 +174,13 @@ describe("HostedTelegramSettings", () => {
       });
     });
 
-    const relinkButton = Array.from(container.querySelectorAll("button")).find(
-      (candidate) => candidate.textContent?.includes("Relink"),
+    const changeButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.includes("Change"),
     );
-    expect(relinkButton).toBeTruthy();
+    expect(changeButton).toBeTruthy();
 
     await act(async () => {
-      relinkButton?.dispatchEvent(new Event("click", { bubbles: true }));
+      changeButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
     await vi.waitFor(() => {

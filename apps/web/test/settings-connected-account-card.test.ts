@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   ConnectedAccountCard,
+  SettingsContactLink,
   SettingsStatusLine,
 } from "@/src/components/settings/connected-account-card";
 import { formatMaskedPhoneNumber } from "@/src/components/settings/hosted-settings-utils";
@@ -33,16 +34,17 @@ describe("ConnectedAccountCard", () => {
         label: "Phone",
         value: "•••• 7706",
         meta: "Verified",
-        action: React.createElement("button", { type: "button" }, "Change phone"),
+        action: React.createElement("button", { type: "button" }, "Change"),
       }),
     );
 
     expect(markup).toContain("Phone");
     expect(markup).toContain("•••• 7706");
     expect(markup).toContain("Verified");
-    expect(markup).toContain("Change phone");
-    expect(markup).toContain("bg-card");
+    expect(markup).toContain("Change");
+    expect(markup).toContain("bg-muted/40");
     expect(markup).toContain("border-border");
+    expect(markup).toContain("sm:justify-end");
   });
 
   test("omits the meta block when meta is not provided", () => {
@@ -58,22 +60,40 @@ describe("ConnectedAccountCard", () => {
     expect(markup).not.toContain("undefined");
   });
 
-  test("muted empty-state variant uses muted card surface and muted value text", () => {
+  test("muted empty-state variant uses the shared card surface and muted value text", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ConnectedAccountCard, {
         label: "Email",
         value: "Not connected",
-        meta: "Add an email so Murph can reach you there.",
         variant: "empty",
         action: React.createElement("button", { type: "button" }, "Link email"),
       }),
     );
 
     expect(markup).toContain("Not connected");
-    expect(markup).toContain("Add an email so Murph can reach you there.");
     expect(markup).toContain("Link email");
     expect(markup).toContain("text-muted-foreground");
+    expect(markup).toContain("text-lg");
     expect(markup).toContain("bg-muted/40");
+    expect(markup).toContain("sm:justify-end");
+  });
+
+  test("renders a quiet contact link", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        SettingsContactLink,
+        {
+          href: "mailto:murph@mail.withmurph.ai",
+          label: "Email Murph",
+        },
+        "Email murph@mail.withmurph.ai",
+      ),
+    );
+
+    expect(markup).toContain("mailto:murph@mail.withmurph.ai");
+    expect(markup).toContain("Email murph@mail.withmurph.ai");
+    expect(markup).toContain("text-xs");
+    expect(markup).toContain("hover:underline");
   });
 });
 
