@@ -32,10 +32,17 @@ import {
   resolveHostedSystemMailboxNextWakeAt,
 } from "./system-mailbox.ts";
 import type {
+  HostedAssistantDeliveryOutcome,
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedRestoredExecutionContext,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import {
+  buildHostedRuntimeLogContextFields,
+  summarizeHostedRuntimeStatusCounts,
+  toHostedRuntimeLogCode,
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 import type {
   HostedWorkspaceRunnerAssistantPhaseInput,
   HostedWorkspaceRunnerAssistantPhaseResult,
@@ -92,6 +99,25 @@ export async function runHostedWorkspaceAssistantPhase(
         : await resolveHostedSystemMailboxNextWakeAt({
             vaultRoot: input.restored.vaultRoot,
           });
+      await writeHostedSystemMailboxRuntimeLog({
+        input,
+        nextWakeAt: systemMailboxWakeAt,
+        recorded: null,
+        recordFailed: null,
+        status: systemMailboxPreparation.status,
+        ...("item" in systemMailboxPreparation
+          ? {
+              attemptCount: systemMailboxPreparation.item.attemptCount,
+              routeAction: systemMailboxPreparation.item.routeAction,
+              wakeKind: systemMailboxPreparation.item.wake.kind,
+            }
+          : {
+              attemptCount: null,
+              errorCode: systemMailboxPreparation.errorCode,
+              routeAction: null,
+              wakeKind: null,
+            }),
+      });
       return {
         ...(systemMailboxPreparation.status === "processed"
             || systemMailboxPreparation.status === "recording"
@@ -101,6 +127,16 @@ export async function runHostedWorkspaceAssistantPhase(
                   item: systemMailboxPreparation.item,
                   runtime: input.runtime,
                   vaultRoot: input.restored.vaultRoot,
+                });
+                await writeHostedSystemMailboxRuntimeLog({
+                  attemptCount: systemMailboxPreparation.item.attemptCount,
+                  input,
+                  nextWakeAt: statusCallback.nextWakeAt,
+                  recorded: statusCallback.recorded,
+                  recordFailed: statusCallback.failed,
+                  routeAction: systemMailboxPreparation.item.routeAction,
+                  status: "recorded",
+                  wakeKind: systemMailboxPreparation.item.wake.kind,
                 });
                 return {
                   checkpointReason: "system_mailbox_receipt",
@@ -168,6 +204,14 @@ export async function runHostedWorkspaceAssistantPhase(
       nextWakeAt,
     }, deliveryEffects.length)
       || consumedScheduledWorkspaceWake(input);
+    await writeHostedAssistantPassRuntimeLog({
+      assistantMetrics,
+      deliveryEffectCount: deliveryEffects.length,
+      input,
+      nextWakeAt,
+      progressed,
+      systemMailboxWakeAt,
+    });
 
     return {
       ...(deliveryEffects.length > 0
@@ -195,6 +239,11 @@ export async function runHostedWorkspaceAssistantPhase(
                 ),
                 postSystemMailboxWakeAt,
               );
+              await writeHostedOutboxDeliveryRuntimeLog({
+                input,
+                outcomes,
+                postNextWakeAt,
+              });
               return {
                 checkpointReason: "outbox_receipt",
                 nextWakeAt: postNextWakeAt,
@@ -227,6 +276,115 @@ export async function runHostedWorkspaceAssistantPhase(
   } finally {
     typingAbortController.abort();
   }
+}
+
+async function writeHostedSystemMailboxRuntimeLog(input: {
+  attemptCount: number | null;
+  errorCode?: string | null;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  nextWakeAt: string | null;
+  recorded: number | null;
+  recordFailed: number | null;
+  routeAction: string | null;
+  status: "processed" | "recorded" | "recording" | "retryable_failed";
+  wakeKind: string | null;
+}): Promise<void> {
+  const errorCode = toHostedRuntimeLogCode(input.errorCode);
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      ...(input.errorCode ? { errorCode } : {}),
+      component: "mailbox",
+      eventCode: "mailbox.system_processed",
+      level: input.status === "retryable_failed" || (input.recordFailed ?? 0) > 0 ? "warn" : "info",
+      phase: "checkpoint",
+      redactedJson: {
+        attemptCount: input.attemptCount,
+        errorCode: input.errorCode ? errorCode : null,
+        nextWakeAtPresent: input.nextWakeAt !== null,
+        recordFailed: input.recordFailed,
+        recorded: input.recorded,
+        routeAction: input.routeAction,
+        status: input.status,
+        wakeKind: input.wakeKind,
+      },
+    },
+    platform: input.input.platform,
+  });
+}
+
+async function writeHostedAssistantPassRuntimeLog(input: {
+  assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantRuntimeTimerLane>>;
+  deliveryEffectCount: number;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  nextWakeAt: string | null;
+  progressed: boolean;
+  systemMailboxWakeAt: string | null;
+}): Promise<void> {
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "assistant",
+      eventCode: "assistant.pass_finished",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        automationLogCount: input.assistantMetrics.redactedLogEntries?.length ?? 0,
+        deliveryEffectCount: input.deliveryEffectCount,
+        nextWakeAtPresent: input.nextWakeAt !== null,
+        parserProcessed: input.assistantMetrics.parserProcessed,
+        progressed: input.progressed,
+        systemWakeAtPresent: input.systemMailboxWakeAt !== null,
+      },
+    },
+    platform: input.input.platform,
+  });
+}
+
+async function writeHostedOutboxDeliveryRuntimeLog(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  outcomes: HostedAssistantDeliveryOutcome[];
+  postNextWakeAt: string | null;
+}): Promise<void> {
+  const statuses = input.outcomes.map((outcome) => outcome.deliveryStatus);
+  const sent = input.outcomes.filter((outcome) => outcome.deliveryStatus === "sent").length;
+  const retryable = input.outcomes.filter((outcome) => outcome.retryable).length;
+  const failed = input.outcomes.filter((outcome) =>
+    outcome.deliveryStatus === "failed"
+      || outcome.deliveryStatus === "failed_ambiguous"
+      || outcome.deliveryStatus === "missing-result"
+      || outcome.deliveryStatus === "threw"
+  ).length;
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "outbox",
+      eventCode: "outbox.delivery_finished",
+      level: failed > 0 || retryable > 0 ? "warn" : "info",
+      phase: "outbox",
+      redactedJson: {
+        ...summarizeHostedRuntimeStatusCounts(statuses),
+        attempted: input.outcomes.length,
+        failed,
+        nextWakeAtPresent: input.postNextWakeAt !== null,
+        retryable,
+        sent,
+      },
+    },
+    platform: input.input.platform,
+  });
 }
 
 function consumedScheduledWorkspaceWake(input: HostedWorkspaceRuntimeAssistantPhaseInput): boolean {

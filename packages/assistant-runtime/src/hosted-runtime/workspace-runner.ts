@@ -26,6 +26,12 @@ import type {
   HostedRuntimePlatform,
   HostedRuntimeWorkspacePort,
 } from "./platform.ts";
+import {
+  buildHostedRuntimeLogContextFields,
+  compactHostedRuntimeLogCodes,
+  type HostedRuntimeLogContext,
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -111,6 +117,7 @@ export interface HostedWorkspaceRunnerInput {
   limitPerLane: number;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
   runAssistantPhase?: (
     input: HostedWorkspaceRunnerAssistantPhaseInput,
   ) => Promise<HostedWorkspaceRunnerAssistantPhaseResult>;
@@ -302,7 +309,7 @@ async function importHostedMailboxForWorkspaceRunner(input: {
   lanes?: readonly ("conversation" | "system")[];
   requestId: string;
 }): Promise<HostedMailboxImportCheckpointResult> {
-  return importHostedMailboxPrefixAndCheckpoint({
+  const result = await importHostedMailboxPrefixAndCheckpoint({
     checkpointReason: input.checkpointReason,
     createCheckpointRequest: (requestInput) =>
       input.checkpointRequestBuilder.createRequest({
@@ -318,6 +325,58 @@ async function importHostedMailboxForWorkspaceRunner(input: {
     requestId: input.requestId,
     vaultRoot: input.input.vaultRoot,
     workspacePort: input.input.platform.workspacePort,
+  });
+  await writeHostedMailboxImportRuntimeLog({
+    checkpointReason: input.checkpointReason,
+    lanes: input.lanes,
+    result,
+    runnerInput: input.input,
+  });
+
+  return result;
+}
+
+async function writeHostedMailboxImportRuntimeLog(input: {
+  checkpointReason: HostedWorkspaceCheckpointReason;
+  lanes?: readonly ("conversation" | "system")[];
+  result: HostedMailboxImportCheckpointResult;
+  runnerInput: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  const lanes = input.lanes ?? ["system", "conversation"];
+  const singleLane = lanes.length === 1 ? lanes[0] : null;
+  const blocked = input.result.importResult.blocked;
+  const retryableBlockedCount = blocked.filter((item) => item.retryable).length;
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.runnerInput.runtimeLogContext),
+      ...(singleLane
+        ? {
+            mailboxLane: singleLane,
+            mailboxSeqEnd: input.result.state.watermarks[singleLane],
+            mailboxSeqStart: input.result.previousState.watermarks[singleLane],
+          }
+        : {}),
+      component: "mailbox",
+      eventCode: "mailbox.imported",
+      level: blocked.length > 0 ? "warn" : "info",
+      phase: input.checkpointReason === "before_delivery_refresh" ? "before_delivery" : "import",
+      redactedJson: {
+        blockCodes: compactHostedRuntimeLogCodes(blocked.map((item) => item.reasonCode)),
+        blockedCount: blocked.length,
+        checkpointed: input.result.checkpoint?.checkpointed ?? false,
+        conversationSeqEnd: input.result.state.watermarks.conversation,
+        conversationSeqStart: input.result.previousState.watermarks.conversation,
+        fetchedCount: input.result.importResult.fetchedCount,
+        importedCount: input.result.importResult.importedCount,
+        laneCount: lanes.length,
+        retryableBlockedCount,
+        stateChanged: input.result.stateChanged,
+        systemSeqEnd: input.result.state.watermarks.system,
+        systemSeqStart: input.result.previousState.watermarks.system,
+      },
+    },
+    now: input.runnerInput.now,
+    platform: input.runnerInput.platform,
   });
 }
 

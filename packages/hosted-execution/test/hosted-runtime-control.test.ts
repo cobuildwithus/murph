@@ -827,6 +827,27 @@ describe("hosted runtime control contracts", () => {
         checks: [true, false, null, "ok", 1],
       },
     });
+    expect(parseHostedRuntimeLogEntry({
+      at: "2026-04-26T00:00:04.000Z",
+      component: "assistant",
+      eventCode: "assistant.pass_finished",
+      level: "info",
+      phase: "invoke",
+    }).eventCode).toBe("assistant.pass_finished");
+    expect(parseHostedRuntimeLogEntry({
+      at: "2026-04-26T00:00:05.000Z",
+      component: "mailbox",
+      eventCode: "mailbox.system_processed",
+      level: "info",
+      phase: "checkpoint",
+    }).eventCode).toBe("mailbox.system_processed");
+    expect(parseHostedRuntimeLogEntry({
+      at: "2026-04-26T00:00:06.000Z",
+      component: "outbox",
+      eventCode: "outbox.delivery_finished",
+      level: "info",
+      phase: "outbox",
+    }).eventCode).toBe("outbox.delivery_finished");
   });
 
   it("parses runner nudge and status without run identifiers or committed sequence targets", () => {

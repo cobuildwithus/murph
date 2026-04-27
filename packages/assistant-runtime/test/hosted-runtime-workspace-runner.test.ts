@@ -15,6 +15,7 @@ import type {
   HostedMailboxItem,
   HostedMailboxPayloadFetchRequest,
   HostedMailboxPayloadFetchResponse,
+  HostedRuntimeLogRequest,
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -68,6 +69,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     ];
     const { mailboxPort } = createMailboxPort({ items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
       async onCheckpoint() {
@@ -95,10 +97,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         limitPerLane: 10,
         platform: createPlatform({
+          logRequests,
           mailboxPort,
           workspacePort,
         }),
         requestId: "request_synthetic_runner_001",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_001",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
         async runAssistantPhase(input) {
           events.push("assistant");
           assert.equal(input.workspace, null);
@@ -110,6 +118,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         vaultRoot,
         workspace: null,
+        now: () => TEST_NOW,
       });
 
       assert.deepEqual(events, ["import:1", "checkpoint:import", "assistant"]);
@@ -127,6 +136,107 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxImportedCount: 1,
         hostedMailboxRetryableBlockedCount: 0,
         hostedMailboxSystemImportedSeq: "0",
+      });
+      assert.deepEqual(logRequests, [
+        {
+          entries: [
+            {
+              at: TEST_NOW,
+              attemptId: "attempt_synthetic_runner_001",
+              component: "mailbox",
+              eventCode: "mailbox.imported",
+              leaseGeneration: "1",
+              level: "info",
+              phase: "import",
+              redactedJson: {
+                blockCodes: [],
+                blockedCount: 0,
+                checkpointed: true,
+                conversationSeqEnd: "1",
+                conversationSeqStart: "0",
+                fetchedCount: 1,
+                importedCount: 1,
+                laneCount: 2,
+                retryableBlockedCount: 0,
+                stateChanged: true,
+                systemSeqEnd: "0",
+                systemSeqStart: "0",
+              },
+              workspaceVersion: "0",
+            },
+          ],
+        },
+      ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("writes a warning mailbox import log when import is blocked", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_blocked",
+          laneSeq: "2",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_blocked",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "2",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run for a blocked prefix gap.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_blocked",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_blocked",
+          leaseGeneration: "2",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase() {
+          return {};
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(logRequests[0]?.entries[0]?.eventCode, "mailbox.imported");
+      assert.equal(logRequests[0]?.entries[0]?.level, "warn");
+      assert.deepEqual(logRequests[0]?.entries[0]?.redactedJson, {
+        blockCodes: ["lane.gap"],
+        blockedCount: 1,
+        checkpointed: false,
+        conversationSeqEnd: "0",
+        conversationSeqStart: "0",
+        fetchedCount: 1,
+        importedCount: 0,
+        laneCount: 2,
+        retryableBlockedCount: 1,
+        stateChanged: false,
+        systemSeqEnd: "0",
+        systemSeqStart: "0",
       });
     } finally {
       await rm(vaultRoot, {
@@ -217,6 +327,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
     });
@@ -240,10 +351,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           },
           limitPerLane: 10,
           platform: createPlatform({
+            logRequests,
             mailboxPort,
             workspacePort,
           }),
           requestId: "request_synthetic_runner_revision",
+          runtimeLogContext: {
+            attemptId: "attempt_synthetic_runner_revision",
+            leaseGeneration: "4",
+            workspaceVersion: "0",
+          },
           async runAssistantPhase(input) {
             items.push(createMailboxItem({
               id: "mailbox_item_runner_late",
@@ -328,6 +445,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           },
           vaultRoot,
           workspace: createWorkspaceState({ version: "0" }),
+          now: () => TEST_NOW,
         });
       } catch (error) {
         caught = error;
@@ -352,6 +470,37 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
+      assert.deepEqual(
+        logRequests.map((request) => request.entries[0]?.eventCode),
+        ["mailbox.imported", "mailbox.imported"],
+      );
+      assert.deepEqual(logRequests[1]?.entries[0], {
+        at: TEST_NOW,
+        attemptId: "attempt_synthetic_runner_revision",
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        leaseGeneration: "4",
+        level: "info",
+        mailboxLane: "conversation",
+        mailboxSeqEnd: "2",
+        mailboxSeqStart: "1",
+        phase: "before_delivery",
+        redactedJson: {
+          blockCodes: [],
+          blockedCount: 0,
+          checkpointed: true,
+          conversationSeqEnd: "2",
+          conversationSeqStart: "1",
+          fetchedCount: 1,
+          importedCount: 1,
+          laneCount: 1,
+          retryableBlockedCount: 0,
+          stateChanged: true,
+          systemSeqEnd: "0",
+          systemSeqStart: "0",
+        },
+        workspaceVersion: "0",
+      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -392,6 +541,73 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.assistantPhaseResult, null);
       assert.equal(result.initialMailboxImport.stateChanged, false);
       assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("checkpoints assistant post-commit status after a progressed phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_post_checkpoint",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "3",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_post_checkpoint",
+        async runAssistantPhase() {
+          return {
+            afterCheckpoint: async () => ({
+              checkpointReason: "outbox_receipt",
+              nextWakeAt: "2026-04-26T00:05:00.000Z",
+              nextWakeReason: "assistant",
+              redactedStatus: {
+                hostedOutboxDeliveryAttempted: 1,
+                hostedOutboxDeliverySent: 1,
+              },
+            }),
+            checkpointReason: "outbox_sending",
+            progressed: true,
+            redactedStatus: {
+              hostedOutboxPendingDeliveryEffects: 1,
+            },
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+      });
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "outbox_sending",
+        "outbox_receipt",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0", "1"],
+      );
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+        hostedOutboxDeliveryAttempted: 1,
+        hostedOutboxDeliverySent: 1,
+      });
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -697,6 +913,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 });
 
 function createPlatform(input: {
+  logRequests?: HostedRuntimeLogRequest[];
   mailboxPort: HostedRuntimeMailboxPort;
   workspacePort: HostedRuntimeWorkspacePort;
 }) {
@@ -717,6 +934,18 @@ function createPlatform(input: {
         return undefined;
       },
     },
+    ...(input.logRequests
+      ? {
+          logPort: {
+            async write(request: HostedRuntimeLogRequest) {
+              input.logRequests?.push(request);
+              return {
+                loggedCount: request.entries.length,
+              };
+            },
+          },
+        }
+      : {}),
     mailboxPort: input.mailboxPort,
     workspacePort: input.workspacePort,
   };
@@ -798,6 +1027,7 @@ async function runBeforeDeliveryRefreshSummaryScenario(input: {
     payloadsUnavailable: input.payloadsUnavailable,
   });
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+  const logRequests: HostedRuntimeLogRequest[] = [];
   let refreshResult: AssistantTurnInputRefreshResult | null = null;
 
   try {
@@ -816,6 +1046,7 @@ async function runBeforeDeliveryRefreshSummaryScenario(input: {
       },
       limitPerLane: 10,
       platform: createPlatform({
+        logRequests,
         mailboxPort,
         workspacePort: createWorkspacePort({ checkpointRequests }),
       }),
