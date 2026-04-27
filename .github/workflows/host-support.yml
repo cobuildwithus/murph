@@ -48,6 +48,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace
+        env:
+          # The macOS host leg is the portability check, not the build-speed lane.
+          # Keep package-script builds serial there so downstream `tsc -b --force`
+          # scripts do not rewrite shared project-reference declarations at once.
+          MURPH_BUILD_WORKSPACE_CONCURRENCY: ${{ matrix.os == 'macos-latest' && '1' || '4' }}
         run: pnpm build
 
       - name: Prepare built CLI runtime artifacts
