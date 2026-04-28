@@ -72,6 +72,7 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
+  latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
   recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
@@ -438,6 +439,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder,
 ): HostedWorkspaceCheckpointRequestSession {
   let expectedWorkspaceVersion: string | null = null;
+  let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
 
   return {
@@ -457,10 +459,14 @@ function createHostedWorkspaceCheckpointRequestSession(
         request,
       });
     },
+    latestMailboxImport() {
+      return latestMailboxImport;
+    },
     latestWorkspace() {
       return latestWorkspace;
     },
     recordCheckpointResult(result) {
+      latestMailboxImport = result;
       if (result.checkpoint?.checkpointed === true) {
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
         latestWorkspace = result.checkpoint.workspace;
@@ -528,21 +534,23 @@ async function checkpointHostedWorkspaceActiveTurnInputAcceptance(input: {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   workspacePort: HostedRuntimeWorkspacePort;
 }): Promise<void> {
+  const mailboxImport =
+    input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
-    input.initialMailboxImport,
+    mailboxImport,
     {
       acceptedInputCount: input.checkpointInput.acceptedInputIds.length,
       providerRequestOrdinal: input.checkpointInput.providerRequestOrdinal,
     },
   );
   const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
-    importResult: input.initialMailboxImport.importResult,
+    importResult: mailboxImport.importResult,
     nextWakeAt: null,
     nextWakeReason: null,
-    previousState: input.initialMailboxImport.state,
+    previousState: mailboxImport.state,
     reason: "active_turn_acceptance",
     redactedStatus,
-    state: input.initialMailboxImport.state,
+    state: mailboxImport.state,
   });
   const checkpoint = await input.workspacePort.checkpoint({
     ...checkpointRequest,
