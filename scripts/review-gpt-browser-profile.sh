@@ -193,26 +193,37 @@ murph_review_gpt_profile_browser_binary() {
 
 murph_review_gpt_profile_open_chatgpt() {
   local profile_slug="$1"
-  local browser_binary user_data_dir
-  browser_binary="$(murph_review_gpt_profile_browser_binary "$profile_slug")" || return 1
-  user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
+  local browser_endpoint browser_binary profile_app user_data_dir
+  browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
   murph_review_gpt_load_profile "$profile_slug" || return 1
 
+  if murph_review_gpt_profile_endpoint_ready "$profile_slug"; then
+    curl --silent --show-error --fail --max-time 2 \
+      --request PUT \
+      "${browser_endpoint%/}/json/new?https://chatgpt.com/" >/dev/null
+    if [[ "${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-0}" =~ ^(1|true|yes|on)$ ]]; then
+      murph_review_gpt_profile_activate "$profile_slug"
+    fi
+    return 0
+  fi
+
+  browser_binary="$(murph_review_gpt_profile_browser_binary "$profile_slug")" || return 1
+  profile_app="$(murph_review_gpt_profile_app_path "$profile_slug")" || return 1
+  user_data_dir="$(murph_review_gpt_profile_user_data_dir "$profile_slug")" || return 1
   mkdir -p "$user_data_dir"
 
   # Keep managed research profiles in one window; repeated recovery opens tabs.
-  if [[ "${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-1}" =~ ^(0|false|no|off)$ ]]; then
-    nohup "$browser_binary" \
+  if [[ "${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-0}" =~ ^(1|true|yes|on)$ ]]; then
+    open -a "$profile_app" --args \
       "--user-data-dir=$user_data_dir" \
       "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
       "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
       --new-tab \
-      "https://chatgpt.com/" \
-      >/dev/null 2>&1 &
+      "https://chatgpt.com/"
     return 0
   fi
 
-  open -g -a "$MURPH_REVIEW_GPT_PROFILE_ROOT/$MURPH_REVIEW_GPT_PROFILE_NAME.app" --args \
+  open -g -j -a "$profile_app" --args \
     "--user-data-dir=$user_data_dir" \
     "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
     "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
