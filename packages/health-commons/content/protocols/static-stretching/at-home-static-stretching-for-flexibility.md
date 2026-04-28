@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:static-stretching/at-home-static-stretching-for-flexibility
 slug: protocols/static-stretching/at-home-static-stretching-for-flexibility
-title: At Home Static Stretching For Flexibility
-summary: A low-burden home routine that uses gentle self-applied static holds to test whether one target range-of-motion measure improves over about six weeks.
+title: At Home Static Stretching
+summary: A low-burden home routine that uses gentle self-applied static holds to test whether one target range-of-motion measure improves.
 status: draft
 quality: usable
 aliases:
@@ -19,6 +19,12 @@ categories:
 - home-experiment
 - manual-measurement
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-at-home-static-stretching-latest.jpeg
+    mediaType: image/jpeg
+    caption: At Home Static Stretching
 relations:
 -
   type: parent_family
@@ -632,7 +638,7 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:toe-touch-distance
-  description: "Repeated back-of-leg holds can increase tolerated reach and range of motion. Fingertips may move closer to the floor over the run."
+  description: "Repeated back-of-leg holds can increase tolerated reach and range of motion, letting fingertips move closer to the floor."
 -
   biomarkerKey: biomarker:sit-and-reach-distance
   description: "Hamstring and back-of-leg stretching can make the seated reach position more tolerable. Sit-and-reach distance may improve if that target area is trained."
@@ -641,10 +647,10 @@ expectedSignalDescriptions:
   description: "Calf and ankle holds can increase how far the ankle bends forward. Knee-to-wall distance may rise when the ankle target is part of the routine."
 -
   biomarkerKey: biomarker:shoulder-reach-distance
-  description: "Shoulder, chest, or upper-back holds can change the selected reach pattern. The measure may improve when the same side and reach are trained."
+  description: "Repeated shoulder, chest, or upper-back holds can increase tolerance and range in the trained reach pattern."
 -
   biomarkerKey: biomarker:perceived-stiffness
-  description: "Gentle repeated holds can change stretch sensation and reduce the feeling of tightness. This may improve even when measured range changes only a little."
+  description: "Gentle repeated holds can alter stretch sensation and reduce tightness, even when range changes only a little."
 -
   biomarkerKey: biomarker:stretching-adherence-sessions
   description: "A short home routine lowers setup cost and makes repeated exposure easier. Completed sessions may increase when the routine feels manageable."
@@ -654,8 +660,8 @@ expectedSignalDescriptions:
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: Hey Murph, I want to explore at-home static stretching for flexibility.
-    intentSummary: Explore At Home Static Stretching For Flexibility
+    displayPrompt: Hey Murph, I want to explore at-home static stretching.
+    intentSummary: Explore At Home Static Stretching
   contextReview:
     vaultChecks:
     -
@@ -880,9 +886,9 @@ experimentOnboarding:
     missedLogFollowupCopy: Want to log whether yesterday’s stretching happened, or skip that entry?
     confirmationPrompt: Before I create the run, confirm the protocol reference, target area, measurement, 7-day baseline, 42-day intervention, 5-days-per-week schedule, logging fields, stop rules, safety-screen routing, and reminder preference.
 whyItWorks:
-- Repeated static holds can increase measured flexibility and ROM over acute and chronic windows, with adult static-stretching synthesis supporting ROM change while cautioning that results vary by dose, target area, and study context [source_artifact:pmid-39614059; source_artifact:pmid-36719536].
-- 'A time-under-stretch frame is more defensible than a magic-stretch frame: the extracted dose synthesis points to weekly target-muscle exposure, while classic hamstring dose trials support 30-second holds as a practical low-burden default [source_artifact:pmid-39614059; source_artifact:pmid-8066111; source_artifact:pmid-9327823].'
-- Some ROM gains may reflect stretch tolerance, altered sensation, or context-dependent stiffness changes rather than simple tissue lengthening, so perceived stiffness should be logged separately from the measured ROM test [source_artifact:pmid-20075147; source_artifact:pmid-40180774; source_artifact:pmid-37560703].
+- Repeated static holds can increase measured flexibility and ROM over acute and chronic windows, with adult static-stretching synthesis supporting ROM change while cautioning that results vary by dose, target area, and study context.
+- 'A time-under-stretch frame is more defensible than a magic-stretch frame: the extracted dose synthesis points to weekly target-muscle exposure, while classic hamstring dose trials support 30-second holds as a practical low-burden default.'
+- Some ROM gains may reflect stretch tolerance, altered sensation, or context-dependent stiffness changes rather than simple tissue lengthening, so perceived stiffness should be logged separately from the measured ROM test.
 claims:
 -
   claimId: scope-static-stretching-family-rom-primary
@@ -1837,7 +1843,7 @@ safety:
   - Absence of adverse-event reporting in many trials is not proof of safety for forced, clinical, high-risk, or mismatched contexts.
 ---
 
-At Home Static Stretching For Flexibility is a simple static-hold routine for testing one practical question: **did a repeated home stretching dose improve the ROM measure I chose before starting?**
+At Home Static Stretching is a simple static-hold routine for testing one practical question: **did a repeated home stretching dose improve the ROM measure I chose before starting?**
 
 The default is deliberately narrow. It is not a yoga plan, PNF/contract-relax routine, foam-rolling stack, strength-through-range program, athletic warm-up, injury-prevention plan, pain-treatment plan, or clinical rehabilitation protocol. Those can be useful, but they are different protocol variants or adjacent evidence buckets.
 

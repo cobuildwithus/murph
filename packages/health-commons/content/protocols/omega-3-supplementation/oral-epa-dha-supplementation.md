@@ -7,6 +7,7 @@ title: Oral EPA/DHA Supplementation
 summary: Test whether a stable oral preformed EPA/DHA supplement changes omega-3 status, triglycerides, or tolerability over about 12 weeks without treating it as cardiovascular-event prevention or disease therapy.
 status: field-testing
 quality: usable
+hidden: true
 aliases:
 - oral EPA/DHA
 - EPA/DHA supplementation
@@ -22,6 +23,12 @@ categories:
 - lipids
 - lab-marker
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-04.png
+    mediaType: image/png
+    caption: Oral EPA/DHA Supplementation
 relations:
 -
   type: parent_family
@@ -551,16 +558,16 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:omega-3-index
-  description: EPA/DHA supplements can raise EPA and DHA in red blood cells over weeks when intake is consistent. This is the clearest dose signal for the protocol.
+  description: EPA/DHA supplements can get built into red blood cells over weeks when intake is consistent.
 -
   biomarkerKey: biomarker:fasting-triglycerides
   description: EPA/DHA can lower fasting triglycerides in some people, especially when baseline triglycerides are high. The likely path is liver fat handling and fewer particles carrying triglycerides.
 -
   biomarkerKey: biomarker:ldl-cholesterol
-  description: EPA/DHA can move LDL-C differently by dose, baseline lipids, and EPA/DHA mix. Some DHA-heavy or higher-dose contexts may raise LDL-C, so a rise would matter.
+  description: EPA/DHA alter how the liver makes and clears triglyceride-rich particles. As those particles are remodeled, LDL-C can shift, especially with higher-dose or DHA-heavy patterns.
 -
   biomarkerKey: biomarker:non-hdl-cholesterol
-  description: Non-HDL-C may change if LDL-C or particles carrying triglycerides shift during the run. It shows whether the lipid panel moved broadly or only in triglycerides.
+  description: Non-HDL-C may change when LDL-C or particles carrying triglycerides shift during the run.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -900,11 +907,11 @@ experimentOnboarding:
     missedLogFollowupCopy: You missed an EPA/DHA log. Did you take the planned serving, skip it, or change the dose/product?
     confirmationPrompt: I can set this up as a 14-day baseline plus 12-week oral EPA/DHA run, with safety boundaries and exact EPA/DHA logging. Please confirm the product and measurement plan before I create the experiment.
 whyItWorks:
-- 'Preformed EPA and DHA can raise blood EPA/DHA status when intake exceeds baseline diet and the product is taken consistently; response depends on baseline status, dose, duration, formulation, meal context, and adherence. Source keys: source_artifact:pmid-31396625, source_artifact:pmid-36742439, source_artifact:pmid-24252845, source_artifact:pmid-32276315.'
-- 'RBC EPA+DHA/omega-3 index is a slower exposure marker than acute plasma fatty acids, so before/after testing should use a consistent sample matrix after a sufficiently long intervention window. Source keys: source_artifact:pmid-36742439, source_artifact:pmid-17053155, source_artifact:pmid-24079284, source_artifact:pmid-19733159.'
-- 'Triglycerides are the most consistent lipid signal for oral EPA/DHA-style interventions, but LDL-C and other lipid markers can move differently by dose, baseline phenotype, and EPA/DHA mix. Source keys: source_artifact:pmid-37264945, source_artifact:pmid-18774613, source_artifact:pmid-38317191, source_artifact:pmid-22113870.'
-- 'Mechanistic or biomarker movement does not prove cardiovascular-event, mood, cognition, dry-eye, recovery, or inflammation benefit in a self-experiment. Source keys: source_artifact:pmid-29387889, source_artifact:pmid-32114706, source_artifact:pmid-35914448, source_artifact:pmid-31647041, source_artifact:pmid-40836005.'
-- 'Prescription labels and safety references are safety-boundary sources, not proof that high-dose or prescription-style omega-3 use belongs in an ordinary wellness self-experiment. Source keys: source_artifact:dailymed-lovaza-label-2026-04-25, source_artifact:dailymed-vascepa-label-2026-04-25, source_artifact:dailymed-icosapent-ethyl-label-2026-04-25, source_artifact:ods-omega-3-fatty-acids-health-professional-2026-04-25.'
+- 'Preformed EPA and DHA can raise blood EPA/DHA status when intake exceeds baseline diet and the product is taken consistently; response depends on baseline status, dose, duration, formulation, meal context, and adherence.'
+- 'RBC EPA+DHA/omega-3 index is a slower exposure marker than acute plasma fatty acids, so before/after testing should use a consistent sample matrix after a sufficiently long intervention window.'
+- 'Triglycerides are the most consistent lipid signal for oral EPA/DHA-style interventions, but LDL-C and other lipid markers can move differently by dose, baseline phenotype, and EPA/DHA mix.'
+- 'Mechanistic or biomarker movement does not prove cardiovascular-event, mood, cognition, dry-eye, recovery, or inflammation benefit in a self-experiment.'
+- 'Prescription labels and safety references are safety-boundary sources, not proof that high-dose or prescription-style omega-3 use belongs in an ordinary wellness self-experiment.'
 claims:
 -
   claimId: oral-epa-dha-raises-blood-status
@@ -1313,4 +1320,4 @@ This is a moderate-caution supplement protocol. The starter version is intended 
 
 ## Evidence snapshot
 
-The direct evidence supports EPA/DHA exposure/status measurement and a triglyceride-focused lipid signal. The broader landscape is mixed: cardiovascular event prevention, mood/cognition, dry-eye, recovery, and inflammation outcomes are either population-specific, heterogeneous, null, or adjacent to this protocol rather than default claims. Every protocol claim above cites source keys from the omega-3 supplementation source ledger.
+The direct evidence supports EPA/DHA exposure/status measurement and a triglyceride-focused lipid signal. The broader landscape is mixed: cardiovascular event prevention, mood/cognition, dry-eye, recovery, and inflammation outcomes are either population-specific, heterogeneous, null, or adjacent to this protocol rather than default claims. The evidence section preserves those distinctions without turning adjacent sources into default protocol claims.

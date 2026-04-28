@@ -1576,6 +1576,7 @@ export const healthCommonsPageFrontmatterSchema = z
     summary: longStringSchema.optional(),
     status: z.enum(["draft", "field-testing", "reviewed", "deprecated", "community"]).optional(),
     quality: z.enum(["stub", "usable", "reviewed", "excellent"]).optional(),
+    hidden: z.boolean().optional(),
     aliases: z.array(shortStringSchema).optional(),
     categories: z.array(shortStringSchema).optional(),
     relations: z.array(healthCommonsRelationSchema).optional(),

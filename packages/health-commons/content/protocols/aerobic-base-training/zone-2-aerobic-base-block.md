@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:aerobic-base-training/zone-2-aerobic-base-block
 slug: protocols/aerobic-base-training/zone-2-aerobic-base-block
-title: Zone 2 Aerobic Base Block
-summary: Do three 35-60 minute sessions per week of easy conversational cardio for 4 weeks, using Zone 2 as a practical alias rather than a lab or wearable mandate.
+title: Zone 2 Cardio
+summary: Do easy conversational cardio using Zone 2 as a practical alias rather than a lab or wearable mandate.
 status: draft
 quality: usable
 aliases:
@@ -20,6 +20,12 @@ categories:
   - zone-2
   - behavior-change
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-zone-2-cardio.jpeg
+    mediaType: image/jpeg
+    caption: Zone 2 Cardio
 relations:
   -
     type: parent_family
@@ -117,13 +123,13 @@ expectedSignalDescriptions:
     description: "Regular easy cardio trains the heart, blood vessels, and muscles to deliver and use oxygen better. Over several weeks, that may lift a wearable cardio-fitness estimate."
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: "As aerobic fitness improves, the heart may move more blood with each beat. That can let resting pulse drift lower."
+    description: "As aerobic fitness improves, the heart can pump more blood with each beat. Resting pulse can fall when fewer beats are needed."
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: "Easy aerobic work may help the body spend more time in recovery mode. If the dose stays manageable, HRV can rise or stay steadier."
+    description: "Easy aerobic work can build fitness without a large stress load. If recovery stays ahead of the dose, HRV can become steadier."
   -
     biomarkerKey: biomarker:morning-blood-pressure
-    description: "Regular aerobic activity can help blood vessels relax and control pressure. Morning blood pressure may ease down if that adaptation shows up."
+    description: "Regular aerobic activity can help blood vessels relax and reduce resistance, so morning pressure may ease down."
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

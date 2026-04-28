@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence
 slug: protocols/alcohol-abstinence/short-term-alcohol-abstinence
-title: Short-Term Alcohol Abstinence Challenge
-summary: Run a voluntary 7-, 14-, or 30-day alcohol-free interval with safety screening, daily adherence and symptom logs, wearable or optional lab review, and a non-moral off-ramp plan.
+title: Short-Term Alcohol Abstinence
+summary: Run a voluntary alcohol-free interval with safety screening, adherence and symptom logs, wearable or optional lab review, and a non-moral off-ramp plan.
 status: draft
 quality: usable
 aliases:
@@ -25,6 +25,12 @@ categories:
 - cardiometabolic
 - safety-screened
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-short-term-alcohol-abstinence.jpeg
+    mediaType: image/jpeg
+    caption: Short-Term Alcohol Abstinence
 relations:
 -
   type: parent_family
@@ -1003,10 +1009,10 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:alcohol-free-days
-  description: This shows whether the challenge happened. More alcohol-free days mean less alcohol exposure during the chosen interval.
+  description: Each alcohol-free day removes that day's alcohol exposure and its overnight effects on sleep, pulse, and craving.
 -
   biomarkerKey: biomarker:alcohol-withdrawal-symptoms
-  description: Stopping alcohol can uncover withdrawal symptoms in people who drink heavily or are dependent. This safety signal should come before sleep or wearable changes.
+  description: Stopping alcohol can uncover withdrawal symptoms in people who drink heavily or are dependent. Safety comes before sleep or wearable changes.
 -
   biomarkerKey: biomarker:alcohol-craving
   description: Removing alcohol changes cues, rewards, and social routines. Craving may rise early or settle as new coping patterns form.
@@ -1021,12 +1027,12 @@ expectedSignalDescriptions:
   description: Alcohol can fragment sleep even when it feels sedating at first. Abstinence may improve sleep continuity after the early adjustment period.
 -
   biomarkerKey: biomarker:sleep-onset-latency
-  description: If alcohol was a sleep cue, stopping can change how long it takes to fall asleep. The direction may vary in the first week.
+  description: If alcohol was a bedtime cue, removing it can make early nights harder to start until a new sleep routine takes over.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: Hey Murph, I want to try an alcohol-free challenge.
-    intentSummary: Explore a Short-Term Alcohol-Free Challenge
+    displayPrompt: Hey Murph, I want to try short-term alcohol abstinence.
+    intentSummary: Explore Short-Term Alcohol Abstinence
   contextReview:
     vaultChecks:
     -
@@ -1216,10 +1222,10 @@ experimentOnboarding:
       object: assistantSupport
       field: reminderPolicy
 whyItWorks:
-- 'Removing alcohol for a bounded interval can remove an acute exposure that is associated with worse early-night autonomic recovery and can make RHR, HRV, and sleep continuity worth tracking; source basis: source_artifact:pmid-29549064, source_artifact:pmid-33378539, source_artifact:pmid-35040799, source_artifact:pmid-36016077.'
-- 'A full month is long enough for some direct studies to observe changes in blood pressure, heart rate, GGT/liver enzymes, liver biochemistry, HOMA/insulin-resistance-style markers, weight, or lipid panels, while the evidence remains limited by non-randomized, selected, or small samples; source basis: source_artifact:pmid-10024322, source_artifact:pmid-29730627, source_artifact:pmid-29726886.'
-- 'The behavioral mechanism is partly measurement and self-efficacy: daily alcohol-free logging, coping plans, and non-moral review can show which cues, social contexts, and support needs drive adherence; direct subjective evidence includes source_artifact:doi-10.1080-07347324.2024.2419616, while Dry January campaign sources such as source_artifact:pmid-26690637, source_artifact:pmid-28957493, and source_artifact:pmid-32216557 remain adjacent implementation and review context.'
-- 'The same mechanism can be unsafe for people with dependence or withdrawal risk because abrupt cessation can require clinical assessment and supported withdrawal care; source basis: source_artifact:nice-alcohol-physical-complications-2017-04-12, source_artifact:nice-alcohol-dependence-assessment-2014-10-21, source_artifact:pmid-32511109.'
+- 'Removing alcohol for a bounded interval can remove an acute exposure that is associated with worse early-night autonomic recovery and can make RHR, HRV, and sleep continuity worth tracking.'
+- 'A full month is long enough for some direct studies to observe changes in blood pressure, heart rate, GGT/liver enzymes, liver biochemistry, HOMA/insulin-resistance-style markers, weight, or lipid panels, while the evidence remains limited by non-randomized, selected, or small samples.'
+- 'The behavioral mechanism is partly measurement and self-efficacy: daily alcohol-free logging, coping plans, and non-moral review can show which cues, social contexts, and support needs drive adherence; subjective and Dry January campaign evidence remains adjacent implementation and review context.'
+- 'The same mechanism can be unsafe for people with dependence or withdrawal risk because abrupt cessation can require clinical assessment and supported withdrawal care.'
 claims:
 -
   claimId: safety-screening-comes-before-the-challenge

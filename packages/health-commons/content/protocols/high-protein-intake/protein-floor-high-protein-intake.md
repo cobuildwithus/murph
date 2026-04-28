@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:high-protein-intake/protein-floor-high-protein-intake
 slug: protocols/high-protein-intake/protein-floor-high-protein-intake
-title: 'Protein Floor: High-Protein Intake Target (1.5–2.0 g/kg/day)'
-summary: Raise daily dietary protein toward a declared 1.5–2.0 g/kg/day floor while logging achieved intake, energy balance, source quality, tolerability, and safety context.
+title: High Protein Intake
+summary: Raise dietary protein toward a declared target while logging achieved intake, energy balance, source quality, tolerability, and safety context.
 status: field-testing
 quality: usable
 aliases:
@@ -20,6 +20,12 @@ categories:
 - body-composition
 - satiety
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-high-protein-intake.jpeg
+    mediaType: image/jpeg
+    caption: High Protein Intake
 relations:
 -
   type: parent_family
@@ -62,7 +68,7 @@ lineage:
   rationale: Default Murph protein-floor variant for a food-first daily 1.5–2.0 g/kg/day target, kept separate from ketogenic diets, supplement-only protocols, protein pacing, resistance-training cointerventions, athlete cutting, pregnancy nutrition, and renal clinical nutrition.
 attribution:
   ownerType: murph
-  note: Drafted from the Protein Floor research package and canonical source ledger.
+  note: Drafted from the High Protein Intake research package and canonical source ledger.
 protocol:
   doseSignature: daily · 1.5–2.0 g/kg/day protein floor · food-first, supplement-assisted only as needed · 7–14 day baseline + 8-week intervention
   target: Reach a declared 1.5–2.0 g/kg/day target using a declared denominator. Default to 1.5–1.6; use 1.8–2.0 only with a negative screen, suitable denominator, fiber/diet plan, and documented or clinician-guided rationale. Do not exceed 2.0.
@@ -91,7 +97,7 @@ protocol:
   - This protocol tests achieved daily protein intake; an assigned target that is not reached is not the same exposure.
   - The best-supported body-composition signals come mainly from energy-restriction or adjacent training contexts, so weight-stable users should keep expectations conservative.
   - The upper end of the band is not proven better for everyone. More protein can increase cost, planning burden, GI load, saturated-fat drift, or kidney/gout/stone relevance in susceptible users.
-  - Wearables are context for sleep, activity, and recovery, not primary evidence that Protein Floor worked.
+  - Wearables are context for sleep, activity, and recovery, not primary evidence that High Protein Intake worked.
   logFields:
   - body_weight_denominator
   - target_protein_g_per_kg
@@ -152,44 +158,44 @@ testPlans:
   targetAdherenceSessions: 56
   notes:
   - Use the primary biomarker as achieved exposure, not as an outcome win.
-  - Body-composition, appetite, and weight outcomes must be interpreted by energy balance and training context; source keys for this guardrail include source_artifact:pmid-18990242, source_artifact:pmid-19158228, source_artifact:pmid-23739654, source_artifact:pmid-33975325, and source_artifact:pmid-19246357
-  - Safety labs are optional for low-risk users but important when kidney, gout, stone, metabolic, lipid, age, diabetes-related renal-risk, or clinician context makes them relevant; source keys include source_artifact:pmid-38490803, source_artifact:pmid-32829751, source_artifact:pmid-24857648, source_artifact:eau-urolithiasis-guidelines-2026-04-26, and source_artifact:pmid-32391934
+  - Body-composition, appetite, and weight outcomes must be interpreted by energy balance and training context.
+  - Safety labs are optional for low-risk users but important when kidney, gout, stone, metabolic, lipid, age, diabetes-related renal-risk, or clinician context makes them relevant.
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:daily-protein-g-per-kg
-  description: This is the achieved dose, not a health outcome. It shows whether daily protein reached the chosen g/kg target for the body weight used in the plan.
+  description: A protein floor only changes exposure if meals actually reach the chosen g/kg target.
 -
   biomarkerKey: biomarker:daily-protein-grams
-  description: This checks the actual grams eaten each day. It separates a real higher-protein dose from a target that was assigned but not reached.
+  description: Daily grams need to rise before any higher-protein mechanism can happen.
 -
   biomarkerKey: biomarker:daily-energy-intake-kcal
-  description: Higher protein can change meal structure and fullness. Calories show whether any weight or body-composition change may be tied to energy balance rather than protein alone.
+  description: Higher protein reshapes meals and fullness. Calories can fall when it replaces less filling foods, or rise when it is simply added.
 -
   biomarkerKey: biomarker:subjective-satiety
-  description: Protein can increase fullness for some people. Satiety ratings show whether that happens in this run instead of assuming it.
+  description: Protein tends to digest slowly and can trigger fullness. Satiety may rise when meals hit the planned dose.
 -
   biomarkerKey: biomarker:body-weight
-  description: Protein may affect scale weight through fullness, calories, and body-composition changes. The direction depends on energy balance and training.
+  description: Protein can increase fullness and change calories. Scale weight moves only if that changes energy balance, training, or body composition.
 -
   biomarkerKey: biomarker:body-fat-percent
-  description: When calories are lower or training changes, higher protein may shift weight change more toward fat loss than lean loss. This is less clear in weight-stable runs.
+  description: When calories are lower or training changes, higher protein can push weight change more toward fat loss than lean loss. The link is less clear when weight is stable.
 -
   biomarkerKey: biomarker:lean-mass
-  description: Adequate protein supports muscle repair and rebuilding, especially with resistance training. Lean-mass change still depends strongly on training, calories, and measurement method.
+  description: Adequate protein supports muscle repair and rebuilding, especially with resistance training. Lean mass still depends on training and calories.
 -
   biomarkerKey: biomarker:digestive-comfort
-  description: A higher-protein plan can change stool pattern, reflux, bloating, or nausea, especially if food sources change or fiber gets crowded out. Digestive comfort shows whether the dose is tolerable.
+  description: A higher-protein plan can alter digestion when food sources shift, portions grow, or fiber gets crowded out.
 -
   biomarkerKey: biomarker:dietary-fiber-g-day
-  description: Protein-focused meals can crowd out legumes, whole grains, fruit, and other plant foods. Fiber shows whether the plan stayed balanced.
+  description: Protein-focused meals can crowd out legumes, whole grains, fruit, and other plant foods, which can lower fiber.
 -
   biomarkerKey: biomarker:saturated-fat-g-day
-  description: The same protein target can come from lean foods or higher-saturated-fat foods. Saturated fat shows whether the source mix changed in a heart-relevant way.
+  description: A protein target built from fatty meats or dairy can raise saturated fat; leaner sources may not.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing Protein Floor.
-    intentSummary: Explore Protein Floor high-protein intake target
+    displayPrompt: Hey Murph, I want to explore doing High Protein Intake.
+    intentSummary: Explore High Protein Intake
   contextReview:
     vaultChecks:
     -
@@ -499,9 +505,9 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you get a protein log for today? Totally fine either way — I just want the experiment record to reflect what happened.
     confirmationPrompt: Show the protocol key, selected testPlanId, dose denominator, body-weight value, target g/kg/day and grams/day, baseline/intervention dates, safety-screen outcome, primary outcome, logging fields, confounders, and reminder policy before creating any private run or automation.
 whyItWorks:
-- 'A higher daily protein floor can change body-composition partitioning, satiety, and diet structure in some contexts, but the most direct favorable signals come mainly from energy-restricted trials around 1.5–1.6 g/kg/day rather than from a universal weight-loss mechanism (sources: source_artifact:pmid-18990242, source_artifact:pmid-19158228, source_artifact:pmid-22691622, source_artifact:pmid-23739654, source_artifact:pmid-33975325).'
-- 'Protein can increase fullness or reduce short-term energy intake in some preload and short feeding contexts, but those mechanisms do not guarantee durable free-living weight loss; this is why satiety and calories are logged rather than assumed (sources: source_artifact:pmid-26947338, source_artifact:pmid-32768415, source_artifact:pmid-16434457, source_artifact:pmid-16735482).'
-- 'Protein quality, source mix, fiber preservation, energy balance, and training context are part of the mechanism and interpretation because the same gram target can be implemented as lean food-first meals, supplement-assisted gaps, high-saturated-fat drift, low-fiber displacement, or a training cointervention (sources: source_artifact:pmid-31161217, source_artifact:pmid-22170364, source_artifact:pmid-21389180, source_artifact:pmid-41640738, source_artifact:pmid-28698222).'
+- 'A higher daily protein floor can change body-composition partitioning, satiety, and diet structure in some contexts, but the most direct favorable signals come mainly from energy-restricted trials around 1.5–1.6 g/kg/day rather than from a universal weight-loss mechanism.'
+- 'Protein can increase fullness or reduce short-term energy intake in some preload and short feeding contexts, but those mechanisms do not guarantee durable free-living weight loss; this is why satiety and calories are logged rather than assumed.'
+- 'Protein quality, source mix, fiber preservation, energy balance, and training context are part of the mechanism and interpretation because the same gram target can be implemented as lean food-first meals, supplement-assisted gaps, high-saturated-fat drift, low-fiber displacement, or a training cointervention.'
 claims:
 -
   claimId: protein-floor-target-boundary
@@ -746,7 +752,7 @@ claims:
 -
   claimId: wearables-are-context-not-primary-outcomes
   type: evidence_scope
-  text: 'Wearables should be treated as context rather than primary biomarkers for this protocol: sleep and activity data can explain adherence, appetite, and recovery patterns, but the extraction set does not support claims that Protein Floor improves HRV, resting heart rate, VO2max, or sleep as primary outcomes.'
+  text: 'Wearables should be treated as context rather than primary biomarkers for this protocol: sleep and activity data can explain adherence, appetite, and recovery patterns, but the extraction set does not support claims that High Protein Intake improves HRV, resting heart rate, VO2max, or sleep as primary outcomes.'
   strength: low
   sourceKeys:
   - source_artifact:pmid-26864362
@@ -760,7 +766,7 @@ claims:
 researchLandscape:
   bottomLine: 'Best read as a bounded nutrition self-experiment: hit and verify a declared 1.5–2.0 g/kg/day protein floor, then interpret body composition, appetite, weight, labs, and tolerability through energy balance, training context, source quality, and safety boundaries.'
   confidenceLabel: mixed
-  primaryClaim: For appropriate adults, the most defensible evidence-based reason to test Protein Floor is body-composition partitioning, satiety or meal-structure support, and adherence learning—not guaranteed weight loss, lean-mass gain, or cardiometabolic improvement.
+  primaryClaim: For appropriate adults, the most defensible evidence-based reason to test High Protein Intake is body-composition partitioning, satiety or meal-structure support, and adherence learning—not guaranteed weight loss, lean-mass gain, or cardiometabolic improvement.
   mainCaveat: The strongest direct anchors are mostly hypocaloric, overweight/obesity, or controlled contexts near 1.5–1.6 g/kg/day, while many other sources are adjacent variants, mechanisms, safety boundaries, or external guidelines.
   groups:
   -
@@ -1398,11 +1404,11 @@ After a stable baseline, can you reliably hit a declared daily protein floor wit
 
 ## Simple version
 
-Run a 70-day experiment: 14 baseline days, then 56 intervention days. Choose a denominator, calculate the daily protein grams for a 1.5–2.0 g/kg/day target, and log whether you actually reach it. The page’s direct-evidence claims cite the target-dose and mixed-endpoint source keys in the `claims` and `researchLandscape` blocks.
+Run a 70-day experiment: 14 baseline days, then 56 intervention days. Choose a denominator, calculate the daily protein grams for a 1.5–2.0 g/kg/day target, and log whether you actually reach it. The evidence section preserves the target-dose and mixed-endpoint caveats without turning them into universal claims.
 
 ## What to watch
 
-The main read is not “did protein magically work?” It is whether achieved daily protein, energy balance, source quality, training context, and tolerability line up with a useful personal outcome. Body-composition and satiety signals are plausible but mixed (sources: source_artifact:pmid-18990242, source_artifact:pmid-19158228, source_artifact:pmid-22691622, source_artifact:pmid-33975325, source_artifact:pmid-19246357, source_artifact:pmid-26947338, source_artifact:pmid-32768415); kidney, gout, stone, pregnancy, liver, lipid, and digestive boundaries are kept stronger than the efficacy language (sources: source_artifact:pmid-38490803, source_artifact:pmid-32829751, source_artifact:pmid-24857648, source_artifact:pmid-32391934, source_artifact:who-high-protein-pregnancy-2023-08-09, source_artifact:pmid-30144956, source_artifact:pmid-30712783).
+The main read is not “did protein magically work?” It is whether achieved daily protein, energy balance, source quality, training context, and tolerability line up with a useful personal outcome. Body-composition and satiety signals are plausible but mixed; kidney, gout, stone, pregnancy, liver, lipid, and digestive boundaries are kept stronger than the efficacy language.
 
 ## What to log every day
 

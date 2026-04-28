@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:caffeine-timing/caffeine-curfew-dose-reset
 slug: protocols/caffeine-timing/caffeine-curfew-dose-reset
-title: Caffeine Curfew + Dose Reset
-summary: For 14 days, move ordinary caffeine before the earlier of 10-11am or 8 hours before intended bedtime, while logging dose, source, sleep, withdrawal symptoms, and safety boundaries.
+title: Caffeine Curfew
+summary: Move ordinary caffeine away from the sleep window while logging dose, source, sleep, withdrawal symptoms, and safety boundaries.
 status: draft
 quality: usable
 aliases:
@@ -19,6 +19,12 @@ categories:
   - circadian
   - behavior-change
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-caffeine-curfew.jpeg
+    mediaType: image/jpeg
+    caption: Caffeine Curfew
 relations:
   -
     type: parent_family
@@ -117,13 +123,13 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: Caffeine blocks part of the brain's sleep-pressure signal. Moving it earlier may make it easier to fall asleep if late caffeine kept the body alert.
+    description: Caffeine blocks part of the brain's sleep-pressure cue. Moving it earlier may make it easier to fall asleep if late caffeine kept the body alert.
   -
     biomarkerKey: biomarker:sleep-efficiency
     description: If earlier caffeine makes sleep onset easier or reduces waking, more time in bed may be spent asleep.
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: Late caffeine can lighten or break up sleep. Moving it earlier may leave more room for stable early-night deep sleep, though this is a less reliable signal.
+    description: Late caffeine can lighten or break up sleep. Moving it earlier may leave more room for stable early-night deep sleep.
   -
     biomarkerKey: biomarker:hrv-rmssd
     description: Less late stimulation and steadier sleep may lower overnight strain. HRV may rise or stabilize if the curfew helps recovery more than it adds withdrawal stress.

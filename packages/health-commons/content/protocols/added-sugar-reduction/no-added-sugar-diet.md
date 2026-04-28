@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:added-sugar-reduction/no-added-sugar-diet
 slug: protocols/added-sugar-reduction/no-added-sugar-diet
-title: No Added Sugar Diet
-summary: A 21-day label-defined experiment that removes added sugars while preserving adequate food, carbohydrates, hydration, and non-moralizing flexibility.
+title: No Added Sugar
+summary: Remove added sugars by label while preserving adequate food, carbohydrates, hydration, and non-moralizing flexibility.
 status: field-testing
 quality: usable
 aliases:
@@ -21,6 +21,12 @@ categories:
 - behavior-change
 - metabolic-health
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-no-added-sugar.jpeg
+    mediaType: image/jpeg
+    caption: No Added Sugar
 relations:
 -
   type: parent_family
@@ -416,7 +422,7 @@ protocol:
   - Many supporting studies use free-sugar, sugar-sweetened-beverage, pediatric, clinical, or substitution designs; these are adjacent to, not identical with, a strict adult no-added-sugar diet.
   - Pregnancy, children, diabetes medication, underweight or frailty, heavy athletic training, and eating-disorder history need a clinician-aligned or adapted approach.
   - This protocol should feel like a bounded measurement experiment, not a moral rule about food.
-  - 'The 0 g/day boundary, 7/21-day structure, and 14-session minimum are Murph run-quality defaults, not evidence-derived clinical thresholds; extracted interventions used heterogeneous windows including short counseling/logging, 4-week, 8-week, and 12-week designs. Source keys: source_artifact:pmid-41788948; source_artifact:pmid-37850088; source_artifact:pmid-30667502; source_artifact:pmid-39973355.'
+  - 'The 0 g/day boundary, 7/21-day structure, and 14-session minimum are Murph run-quality defaults, not evidence-derived clinical thresholds; extracted interventions used heterogeneous windows including short counseling/logging, 4-week, 8-week, and 12-week designs.'
   - Adherence targets never override stop conditions; treating low blood sugar or eating enough food counts as safety care, not failure.
   - A stricter free-sugar boundary is not a default upgrade; it is a separate boundary choice and should be avoided in special-population, medical-diet, food-insecurity, or underfueling contexts unless clinician-guided.
   - Omit weight, waist, or glucose tracking if the measurement itself increases distress, restriction, compulsion, or unsafe behavior.
@@ -495,21 +501,21 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:added-sugar-intake
-  description: This is the part the protocol changes directly. Label checks and food logs can show whether regular added-sugar sources were removed or replaced.
+  description: Removing regular sweet drinks, desserts, and packaged sugar sources means fewer added-sugar grams enter the diet.
 -
   biomarkerKey: biomarker:body-weight
-  description: Removing added sugar can lower calories for some people, especially when sweet drinks or snacks are not replaced. Weight may move if that calorie gap lasts.
+  description: Removing added sugar can lower calories, especially when sweet drinks or snacks are not replaced. Scale weight can fall if that calorie gap lasts.
 -
   biomarkerKey: biomarker:waist-circumference
-  description: If added-sugar reduction keeps calories lower, waist size may change with body fat over time. A 21-day run is short, so this is a weaker read.
+  description: If added-sugar reduction keeps calories lower, body fat may fall slowly, and waist size may follow.
 -
   biomarkerKey: biomarker:morning-blood-pressure
-  description: Less added sugar may affect blood pressure by lowering calories, weight, or sugary drinks. Evidence is mixed, so this should stay a cautious read.
+  description: Less added sugar may lower blood pressure when it reduces calories, body weight, or sugary drinks. The effect is not consistent.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: Hey Murph, I want to explore doing a No Added Sugar Diet experiment.
-    intentSummary: Explore No Added Sugar Diet
+    displayPrompt: Hey Murph, I want to explore doing a No Added Sugar experiment.
+    intentSummary: Explore No Added Sugar
   contextReview:
     vaultChecks:
     -
@@ -712,10 +718,10 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you get a chance to log yesterday's added-sugar sources? Totally fine either way — I just want the experiment record to stay accurate.
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, selected testPlanId, baseline and intervention dates, boundary rule, logging method, replacement plan, safety outcome, stop conditions, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-- 'The protocol works first as an exposure-reduction and measurement-fidelity experiment: Nutrition Facts labels make packaged-food Added Sugars observable, while food diaries, 24-hour recalls, FFQs, or label logs can capture unlabeled sources with measurement error rather than perfect consistency. Source keys: source_artifact:fda-added-sugars-label-2026-03-04; source_artifact:pmid-38233923.'
-- 'Reducing added or free sugars is most plausible when the user identifies recurring high-frequency sources and replaces them deliberately, especially sugar-sweetened drinks and packaged snack or sweet foods. Source keys: source_artifact:pmid-39973355; source_artifact:pmid-16510646; source_artifact:pmid-22998339; source_artifact:pmid-34550904.'
-- 'Downstream signals such as weight, waist, glucose, lipids, blood pressure, dental outcomes, cravings, and sweet taste can move for some people, but the evidence is mixed and often mediated by total energy intake, replacement foods, clinical context, or longer exposure windows. Source keys: source_artifact:pmid-23321486; source_artifact:pmid-37850088; source_artifact:pmid-24808490; source_artifact:pmid-24323509; source_artifact:pmid-26607941.'
-- 'The safety mechanism is restraint: the protocol removes added sugar without removing needed calories, carbohydrates, fruit, dairy or alternatives, meals, hydration, or medically indicated fast carbohydrates. Source keys: source_artifact:endotext-dietary-advice-diabetes-2024-04-28; source_artifact:pmid-31000505; source_artifact:pmid-35306388; source_artifact:acog-healthy-eating-pregnancy-2026-04-25.'
+- 'The protocol works first as an exposure-reduction and measurement-fidelity experiment: Nutrition Facts labels make packaged-food Added Sugars observable, while food diaries, 24-hour recalls, FFQs, or label logs can capture unlabeled sources with measurement error rather than perfect consistency.'
+- 'Reducing added or free sugars is most plausible when the user identifies recurring high-frequency sources and replaces them deliberately, especially sugar-sweetened drinks and packaged snack or sweet foods.'
+- 'Downstream signals such as weight, waist, glucose, lipids, blood pressure, dental outcomes, cravings, and sweet taste can move for some people, but the evidence is mixed and often mediated by total energy intake, replacement foods, clinical context, or longer exposure windows.'
+- 'The safety mechanism is restraint: the protocol removes added sugar without removing needed calories, carbohydrates, fruit, dairy or alternatives, meals, hydration, or medically indicated fast carbohydrates.'
 claims:
 -
   claimId: dose-implementation-001-label-and-definition-guardrail
@@ -1522,7 +1528,7 @@ communityOutcomeSummary:
   placeholder: No public Murph community outcome summary is available yet for this protocol.
 ---
 
-No Added Sugar Diet is a bounded Murph self-experiment for reducing **added sugar** while keeping the diet adequate, flexible, and interpretable.
+No Added Sugar is a bounded Murph self-experiment for reducing **added sugar** while keeping the diet adequate, flexible, and interpretable.
 
 ## What counts as “no added sugar” here
 

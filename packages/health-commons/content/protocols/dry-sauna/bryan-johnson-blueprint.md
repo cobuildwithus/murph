@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:dry-sauna/bryan-johnson-blueprint
 slug: protocols/dry-sauna/bryan-johnson-blueprint
 title: Bryan Johnson Sauna
-summary: "Source-attributed Blueprint dry-sauna routine: 20 minutes at about 93 C / 200 F after workouts, with hydration and source-specific cooling tactics; read the research as heat-load and safety context, not proof of Bryan Johnson's personal outcomes."
+summary: "Source-attributed Blueprint dry-sauna routine with hydration and source-specific cooling tactics; read the research as heat-load and safety context, not proof of Bryan Johnson's personal outcomes."
 status: field-testing
 quality: usable
 aliases:
@@ -19,6 +19,12 @@ categories:
   - external-protocol
   - source-attributed
   - dry-sauna
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-bryan-johnson-sauna.jpg
+    mediaType: image/jpeg
+    caption: Bryan Johnson Sauna
 relations:
   -
     type: parent_family
@@ -182,10 +188,10 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: Daily high-heat sauna after workouts raises heat load and heart rate during the session. With heat adaptation, resting strain may fall. If the dose is too much, resting pulse can rise.
+    description: Daily high heat after workouts makes the heart work harder to move heat out. If heat adaptation improves cooling, resting pulse may fall; if recovery lags, it may rise.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: Heat and post-workout strain can push the body toward stress or recovery. HRV may rise if recovery catches up, or fall if daily heat is too much.
+    description: Heat after training stacks two stressors. HRV may rise only if the user adapts and recovers well; it may fall when the combined load is too high.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

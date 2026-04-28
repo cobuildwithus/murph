@@ -1,8 +1,44 @@
 import { describe, expect, it } from "vitest";
+import {
+  healthCommonsCatalogSchema,
+  type HealthCommonsCatalog,
+} from "@murphai/contracts";
+import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.json";
 
-import { healthCommonsCatalog } from "@/src/lib/health-commons/catalog";
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
-import { resolveProtocolImage } from "@/src/lib/health-commons/experiment-detail-media";
+import {
+  createHealthCommonsCatalogReader,
+} from "@/src/lib/health-commons/catalog";
+import {
+  listHealthCommonsExperimentProtocols,
+  resolveHealthCommonsExperimentProtocol,
+} from "@/src/lib/health-commons/experiment-detail";
+
+const SUPPLEMENT_PROTOCOL_FIXTURES = [
+  {
+    key: "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
+    routeId: "hydrolyzed-collagen-peptides",
+  },
+  {
+    key: "protocol_variant:creatine-supplementation/creatine-monohydrate",
+    routeId: "creatine-monohydrate",
+  },
+  {
+    key: "protocol_variant:omega-3-supplementation/oral-epa-dha-supplementation",
+    routeId: "oral-epa-dha-supplementation",
+  },
+  {
+    key: "protocol_variant:psyllium-husk/psyllium-husk-for-cholesterol",
+    routeId: "psyllium-husk-for-cholesterol",
+  },
+  {
+    key: "protocol_variant:red-yeast-rice/red-yeast-rice-for-cholesterol",
+    routeId: "red-yeast-rice-for-cholesterol",
+  },
+  {
+    key: "protocol_variant:vitamin-d-supplementation/daily-vitamin-d3-supplementation",
+    routeId: "daily-vitamin-d3-supplementation",
+  },
+] as const;
 
 describe("Health Commons experiment protocol metadata", () => {
   it("uses the simplified protocol title", () => {
@@ -40,6 +76,43 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-red-light-glasses-before-bed.jpeg");
   });
 
+  it("omits protocols hidden by Health Commons frontmatter from the public experiments library", () => {
+    const catalog = createFixtureCatalog();
+
+    for (const supplementProtocol of SUPPLEMENT_PROTOCOL_FIXTURES) {
+      const protocolIndex = catalog.entities.findIndex(
+        (entity) => entity.key === supplementProtocol.key,
+      );
+      const protocol = catalog.entities[protocolIndex];
+
+      expect(protocol?.entityType).toBe("protocol_variant");
+      if (!protocol || protocol.entityType !== "protocol_variant") {
+        return;
+      }
+
+      catalog.entities[protocolIndex] = {
+        ...protocol,
+        hidden: true,
+      };
+    }
+
+    const protocols = listHealthCommonsExperimentProtocols(
+      createHealthCommonsCatalogReader(catalog),
+    );
+    const protocolIds = protocols.map((entry) => entry.id);
+
+    for (const supplementProtocol of SUPPLEMENT_PROTOCOL_FIXTURES) {
+      expect(protocolIds).not.toContain(supplementProtocol.routeId);
+    }
+    expect(protocolIds).toContain("bryan-johnson-blueprint");
+    expect(
+      resolveHealthCommonsExperimentProtocol(
+        "hydrolyzed-collagen-peptides",
+        createHealthCommonsCatalogReader(catalog),
+      )?.title,
+    ).toBe("Hydrolyzed Collagen Peptides");
+  });
+
   it("prefers page-owned cold plunge artwork when the protocol declares media", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("cold-plunge");
 
@@ -64,33 +137,12 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Resting Heart Rate")?.description,
     ).toBe(
-      "Repeated cold exposure can train the body to react less sharply to cold. If that stress response gets smaller, resting pulse may drift lower too.",
+      "Repeated cold exposure can blunt the stress response to the plunge. A lower baseline stress response can reduce resting pulse, but only if the body is less taxed between sessions.",
     );
   });
 
-  it("prefers page-owned media over the route-mapped fallback image", () => {
-    const protocol = healthCommonsCatalog.findByKey(
-      "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
-    );
-
-    expect(protocol).not.toBeNull();
-    if (!protocol) {
-      return;
-    }
-
-    const protocolWithPageMedia = {
-      ...protocol,
-      media: [
-        {
-          kind: "image",
-          relativePath: "/design-assets/hero-boundary-test.jpeg",
-          mediaType: "image/jpeg",
-        },
-      ],
-    };
-
-    expect(resolveProtocolImage(protocolWithPageMedia, "finnish-sauna")).toBe(
-      "/design-assets/hero-boundary-test.jpeg",
-    );
-  });
 });
+
+function createFixtureCatalog(): HealthCommonsCatalog {
+  return structuredClone(healthCommonsCatalogSchema.parse(healthCommonsCatalogJson));
+}

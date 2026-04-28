@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
 slug: protocols/tabata-interval-training/tabata-20-10-interval-training
 title: Tabata 20/10 Interval Training
-summary: Run a conservative, fidelity-logged 20 seconds hard / 10 seconds rest interval block to test whether cardiorespiratory-fitness signals improve without excessive recovery or safety burden.
+summary: Run a conservative, fidelity-logged interval block to test whether cardiorespiratory-fitness signals improve without excessive recovery or safety burden.
 status: field-testing
 quality: usable
 aliases:
@@ -23,6 +23,12 @@ categories:
   - tabata
   - vo2max
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-tabata-20-10-interval-training.jpeg
+    mediaType: image/jpeg
+    caption: Tabata 20/10 Interval Training
 relations:
   -
     type: parent_family
@@ -441,7 +447,7 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:estimated-vo2max
-    description: "A true 20/10 block can push oxygen demand high in a short time. Repeated sessions may improve cardio-fitness signals if enough work is completed safely."
+    description: "A true 20/10 block can push oxygen demand high in a short time. Repeated sessions may improve cardio fitness if enough work is completed safely."
   -
     biomarkerKey: biomarker:resting-heart-rate
     description: "High-intensity aerobic work can improve how much blood the heart moves per beat. If that adaptation builds, resting pulse may drift lower."
@@ -689,10 +695,10 @@ experimentOnboarding:
     missedLogFollowupCopy: You missed a Tabata log. Record whether the session happened, completed rounds, symptoms, and recovery rather than guessing later.
     confirmationPrompt: Create a 7-day baseline plus 6-week Tabata 20/10 experiment with one conservative 8-round block twice weekly, safety stop rules, and recovery logging?
 whyItWorks:
-  - The 20/10 structure can create high aerobic and anaerobic stress when intensity, completion, and rest fidelity are controlled (Sources: source_artifact:pmid-8897392; source_artifact:pmid-9139179; source_artifact:pmid-29486169; source_artifact:pmid-33083103).
-  - The most appropriate self-experiment target is cardiorespiratory-fitness trend or work-capacity context, while the strongest direct evidence remains small and supervised rather than broad home-workout proof (Sources: source_artifact:pmid-8897392; source_artifact:doi-10.7600/jspfsm.72.189; source_artifact:pmid-24901767; source_artifact:kul-tabata-cycling-calisthenics-2022-07-15).
-  - Completed rounds, modality, and true rests matter because very high nominal intensity can change total completed work and time near high oxygen uptake (Sources: source_artifact:pmid-29486169; source_artifact:pmid-33083103).
-  - Recovery context matters because acute autonomic load, soreness, heat, rhabdomyolysis, and musculoskeletal evidence show that short workouts can still carry meaningful burden (Sources: source_artifact:pmid-28796128; source_artifact:doi-10.2478/bhk-2024-0021; source_artifact:pmid-27734446; source_artifact:pmid-31681002).
+  - The 20/10 structure can create high aerobic and anaerobic stress when intensity, completion, and rest fidelity are controlled.
+  - The most appropriate self-experiment target is cardiorespiratory-fitness trend or work-capacity context, while the strongest direct evidence remains small and supervised rather than broad home-workout proof.
+  - Completed rounds, modality, and true rests matter because very high nominal intensity can change total completed work and time near high oxygen uptake.
+  - Recovery context matters because acute autonomic load, soreness, heat, rhabdomyolysis, and musculoskeletal evidence show that short workouts can still carry meaningful burden.
 claims:
   -
     claimId: original-lab-evidence-is-small-supervised-cycling

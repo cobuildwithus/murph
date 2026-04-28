@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:norwegian-4x4/norwegian-4x4
 slug: protocols/norwegian-4x4/norwegian-4x4
 title: Norwegian 4x4 Intervals
-summary: "Use a repeatable hard-aerobic 4x4 workout to test whether cardio fitness improves over about six weeks without pushing symptoms or recovery in the wrong direction."
+summary: "Use a repeatable hard-aerobic 4x4 workout to test whether cardio fitness improves without pushing symptoms or recovery in the wrong direction."
 status: field-testing
 quality: usable
 aliases:
@@ -18,6 +18,12 @@ categories:
   - hiit
   - vo2max
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-norwegian-4x4-latest.jpeg
+    mediaType: image/jpeg
+    caption: Norwegian 4x4 Intervals
 relations:
   -
     type: parent_family
@@ -198,7 +204,7 @@ expectedSignalDescriptions:
     description: "If the heart pumps more blood per beat after training, it may need fewer beats at rest. Resting heart rate can drift lower as that adaptation builds."
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: "Hard intervals tax the nervous system, but better aerobic fitness can also support stronger recovery between efforts. HRV may rise or stabilize if the dose fits."
+    description: "Hard intervals tax the nervous system at first. If fitness improves and recovery keeps up, overnight HRV may rise or stabilize."
   -
     biomarkerKey: biomarker:sleep-efficiency
     description: "Hard aerobic work can increase sleep pressure and recovery need. Sleep efficiency may improve when the dose is well matched, or stall if the sessions are too taxing."

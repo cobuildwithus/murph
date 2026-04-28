@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:morning-light-exposure/morning-outdoor-light-exposure
 slug: protocols/morning-light-exposure/morning-outdoor-light-exposure
 title: Morning Outdoor Light Exposure
-summary: Go outside soon after waking for a short, repeatable ambient daylight exposure to test whether subjective sleep quality, sleep timing, and morning alertness improve without light, mood, UV, or heat side effects.
+summary: Go outside after waking for repeatable ambient daylight exposure to test whether subjective sleep quality and alertness improve without light, mood, UV, or heat side effects.
 status: field-testing
 quality: usable
 aliases:
@@ -22,6 +22,12 @@ categories:
   - outdoor-light
   - morning-routine
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-morning-outdoor-light-exposure.jpeg
+    mediaType: image/jpeg
+    caption: Morning Outdoor Light Exposure
 relations:
   -
     type: parent_family
@@ -310,13 +316,13 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-quality
-    description: Morning outdoor light may strengthen the body's day-night timing cue. For some users, the next night may feel more settled or restorative.
+    description: Morning outdoor light anchors the body clock early in the day. That can make evening sleep timing feel steadier and the next night more restorative.
   -
     biomarkerKey: biomarker:sleep-onset-latency
     description: Bright morning light can help anchor the body clock earlier in the day. If evening timing lines up better, falling asleep may become easier.
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: A stronger light-dark rhythm may support less broken sleep for some people, though this is a weaker read than the main expected change.
+    description: A stronger light-dark rhythm may reduce night waking for some people, especially when late timing was the problem.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -534,9 +540,9 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you get outside for your morning-light session today? Totally fine if not — I just want the experiment record to be accurate.
     confirmationPrompt: Show the protocol key plus pageRevisionId and runSpecRevisionId, the chosen testPlanId, safety-screen outcome, baseline and intervention dates, usual wake time, target morning window, target minutes, backup policy, logging fields, and reminder policy before creating the active experiment or automations.
 whyItWorks:
-  - Light is a primary circadian time cue. In a self-experiment, post-wake outdoor light is meant to strengthen the contrast between bright daytime and dimmer evening/night exposure rather than act as a sedative; mechanistic and field support comes from source_artifact:pmid-23910656, source_artifact:pmid-28162893, source_artifact:pmid-35298459, and source_artifact:pmid-32248548.
-  - Outdoor daylight can deliver more melanopic/circadian-relevant stimulation than many indoor environments, but the real dose changes with weather, season, latitude, shade, windows, glasses, and device placement; implementation support comes from source_artifact:doi-10.25039-s026.2018, source_artifact:doi-10.25039-ps.b2twa77g, source_artifact:doi-10.1016-j.buildenv.2025.112771, source_artifact:pmid-8639941, and source_artifact:pmid-29056090.
-  - The expected user-level signal is modest and personal: more consistent morning light may help sleep timing, subjective sleep quality, or morning alertness for some users, but direct evidence is sparse and broader adult data are observational or mixed; see source_artifact:pmid-28786887, source_artifact:doi-10.31086-tjgeri.2020.147, source_artifact:pmid-41053799, source_artifact:pmid-39077837, and source_artifact:pmid-41426466.
+  - Light is a primary circadian time cue. In a self-experiment, post-wake outdoor light is meant to strengthen the contrast between bright daytime and dimmer evening/night exposure rather than act as a sedative.
+  - Outdoor daylight can deliver more melanopic/circadian-relevant stimulation than many indoor environments, but the real dose changes with weather, season, latitude, shade, windows, glasses, and device placement.
+  - The expected user-level signal is modest and personal: more consistent morning light may help sleep timing, subjective sleep quality, or morning alertness for some users, but direct evidence is sparse and broader adult data are observational or mixed.
   - Because evening light, bedtime drift, exercise, caffeine, alcohol, travel, stress, illness, heat, and UV protection can change both exposure and sleep, the protocol treats adherence and confounder logging as part of the mechanism rather than administrative overhead.
 claims:
   -
@@ -958,7 +964,7 @@ expectedSignal:
 
 After a stable baseline, does a deliberate outdoor morning-light session improve your subjective sleep quality, sleep timing, or morning alertness enough to be worth keeping?
 
-The closest direct evidence is short and population-bounded: older nursing-home or long-term-care residents had better subjective sleep-quality signals after prescribed morning natural-light exposure, while broader adult evidence mostly links daytime or morning outdoor light to sleep and circadian outcomes without proving the exact self-experiment dose. Cite direct intervention sources as `source_artifact:pmid-28786887`, `source_artifact:doi-10.31086-tjgeri.2020.147`, and `source_artifact:pmid-19560724`; use adult free-living context such as `source_artifact:pmid-41053799`, `source_artifact:pmid-39077837`, `source_artifact:pmid-41426466`, and `source_artifact:pmid-34488088` as context rather than proof.
+The closest direct evidence is short and population-bounded: older nursing-home or long-term-care residents had better subjective sleep-quality signals after prescribed morning natural-light exposure, while broader adult evidence mostly links daytime or morning outdoor light to sleep and circadian outcomes without proving the exact self-experiment dose.
 
 ## Simple version
 

@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
 slug: protocols/pre-sleep-downshift-practices/pre-sleep-resonance-breathing-and-meditation
-title: Resonance Breathing Before Bed And Silent Meditation Before Bed
+title: Resonance Breathing Before Bed
 summary: "Use this as a conservative pre-sleep downshift chooser: test either gentle resonance-like breathing or silent meditation before bed, and treat a combined breathing-plus-meditation run as exploratory rather than a proven stacked protocol."
 status: draft
 quality: usable
@@ -24,6 +24,12 @@ categories:
   - nervous-system-downshift
   - wearable-measured
   - murph-research-umbrella
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-resonance-breathing-before-bed.jpeg
+    mediaType: image/jpeg
+    caption: Resonance Breathing Before Bed
 relations:
   -
     type: parent_family
@@ -162,7 +168,7 @@ expectedSignalDescriptions:
     description: A gentle breathing or meditation routine may lower pre-sleep arousal and make falling asleep feel less effortful.
   -
     biomarkerKey: biomarker:pre-sleep-arousal
-    description: This is the closest sign that the routine is working. Slow breathing or quiet attention may reduce feeling wired, keyed-up, or mentally active before bed.
+    description: Slow breathing or quiet attention may reduce feeling wired, keyed-up, or mentally active before bed.
   -
     biomarkerKey: biomarker:sleep-efficiency
     description: If the practice lowers arousal and shortens the restless start of the night, a larger share of time in bed may be spent asleep.
@@ -173,9 +179,9 @@ expectedSignalDescriptions:
     biomarkerKey: biomarker:resting-heart-rate
     description: A calmer pre-sleep state may lower overnight stress load. Resting heart rate might drift lower if the routine improves recovery.
 whyItWorks:
-  - "Gentle slow breathing near 5-6 breaths per minute can increase cardiorespiratory coupling and vagal/HRV signals, which supports a plausible calming mechanism but not a guarantee of better sleep. Sources include source_artifact:pmid-25234581, source_artifact:pmid-32366866, source_artifact:pmid-11380537, and source_artifact:pmid-23342715."
-  - "Mindfulness and meditation interventions can reduce cognitive or emotional arousal in some insomnia-adjacent contexts, but the extracted evidence is mostly guided, structured, clinical, or bundled rather than silent unguided bedtime meditation. Sources include source_artifact:pmid-41027036, source_artifact:pmid-25142566, and source_artifact:pmid-27663102."
-  - "The common practical mechanism is downshifting pre-sleep arousal and building a stable bedtime cue, not forcing sleep or optimizing sleep stages. Measurement and arousal context sources include source_artifact:pmid-8604352, source_artifact:pmid-23106072, source_artifact:pmid-25142566, and source_artifact:pmid-29991437."
+  - "Gentle slow breathing near 5-6 breaths per minute can increase cardiorespiratory coupling and vagal/HRV signals, which supports a plausible calming mechanism but not a guarantee of better sleep."
+  - "Mindfulness and meditation interventions can reduce cognitive or emotional arousal in some insomnia-adjacent contexts, but the extracted evidence is mostly guided, structured, clinical, or bundled rather than silent unguided bedtime meditation."
+  - "The common practical mechanism is downshifting pre-sleep arousal and building a stable bedtime cue, not forcing sleep or optimizing sleep stages; measurement should keep arousal context visible."
 claims:
   -
     claimId: combined-slug-should-remain-research-umbrella
@@ -993,16 +999,16 @@ safety:
 
 ## How to use this page
 
-This page is intentionally a chooser and research umbrella. For a clean Murph experiment, choose **one** child practice for the intervention window: gentle resonance-like breathing before bed, or silent meditation before bed. The exact combined stack of resonance breathing followed by silent meditation has not been directly established in the extracted research corpus, so a combined run should be labeled exploratory and analyzed separately. Key source anchors for this materialization decision are `source_artifact:pmid-25234581`, `source_artifact:pmid-32366866`, `source_artifact:pmid-41886931`, `source_artifact:pmid-41027036`, `source_artifact:pmid-25142566`, and `source_artifact:pmid-27663102`.
+This page is intentionally a chooser and research umbrella. For a clean Murph experiment, choose **one** child practice for the intervention window: gentle resonance-like breathing before bed, or silent meditation before bed. The exact combined stack of resonance breathing followed by silent meditation has not been directly established in the extracted research corpus, so a combined run should be labeled exploratory and analyzed separately.
 
 ## Default self-test
 
-Only run this default self-test if the sleep issue is mild, non-urgent, and not explained by red flags. Do not use the 21-night self-test to delay care for chronic or impairing insomnia, suspected or diagnosed sleep apnea, PAP/CPAP questions, severe daytime sleepiness, sleep attacks, drowsy driving, restless legs or limb movements, parasomnia behaviors, circadian rhythm problems, pregnancy/postpartum/lactation sleep disruption, medication changes, severe mood symptoms, panic/respiratory symptoms, trauma/dissociation, psychosis, mania, or pediatric/adolescent sleep concerns. Source anchors: `source_artifact:healthquality-va-gov-insomnia-osa-cpg-2025-04-22`, `source_artifact:pmid-19960649`, `source_artifact:pmid-34743789`, `source_artifact:pmid-39324694`, `source_artifact:pmid-31271339`, `source_artifact:pmid-35419652`, `source_artifact:pmid-33312842`, and `source_artifact:pmid-24347088`.
+Only run this default self-test if the sleep issue is mild, non-urgent, and not explained by red flags. Do not use the 21-night self-test to delay care for chronic or impairing insomnia, suspected or diagnosed sleep apnea, PAP/CPAP questions, severe daytime sleepiness, sleep attacks, drowsy driving, restless legs or limb movements, parasomnia behaviors, circadian rhythm problems, pregnancy/postpartum/lactation sleep disruption, medication changes, severe mood symptoms, panic/respiratory symptoms, trauma/dissociation, psychosis, mania, or pediatric/adolescent sleep concerns.
 
 Use seven baseline nights, then fourteen intervention nights. During intervention, keep the chosen practice short, gentle, and repeatable. The minimum useful adherence target is ten completed practice nights, with twelve or more as the preferred target.
 
-The primary practical outcome is whether you fall asleep more easily or feel less keyed-up before sleep. Use wearable sleep onset, sleep efficiency, HRV, and resting heart rate as context rather than proof. Consumer sleep devices and actigraphy can misclassify quiet wakefulness, so pair device trends with a brief log. Measurement-context source anchors include `source_artifact:pmid-31994153`, `source_artifact:pmid-17520797`, `source_artifact:pmid-29991437`, `source_artifact:pmid-29734997`, `source_artifact:pmid-34314344`, and `source_artifact:pmid-41792005`.
+The primary practical outcome is whether you fall asleep more easily or feel less keyed-up before sleep. Use wearable sleep onset, sleep efficiency, HRV, and resting heart rate as context rather than proof. Consumer sleep devices and actigraphy can misclassify quiet wakefulness, so pair device trends with a brief log.
 
 ## Boundary from clinical care
 
-This protocol is not a substitute for CBT-I, sleep-disorder evaluation, PAP therapy, or medication guidance. Persistent or impairing insomnia, suspected obstructive sleep apnea, restless legs, circadian rhythm disorder, severe mood symptoms, pregnancy or peripartum sleep problems, and medication decisions belong in clinical care pathways. Clinical-boundary source anchors include `source_artifact:healthquality-va-gov-insomnia-osa-cpg-2025-04-22`, `source_artifact:pmid-33164742`, `source_artifact:pmid-27136449`, `source_artifact:pmid-38016484`, and `source_artifact:pmid-27998379`.
+This protocol is not a substitute for CBT-I, sleep-disorder evaluation, PAP therapy, or medication guidance. Persistent or impairing insomnia, suspected obstructive sleep apnea, restless legs, circadian rhythm disorder, severe mood symptoms, pregnancy or peripartum sleep problems, and medication decisions belong in clinical care pathways.

@@ -135,11 +135,11 @@ researchCoverage:
   claimUseCounts: {"context-only":153,"do-not-use":5,"safety-only":42,"supports-protocol":13}
   notes:
     - Source pages were materialized from canonical source-ledger metadata and reducer notes.
-    - These source pages preserve source keys, directness, claim-use labels, priorities, and reducer notes, but do not add unextracted sample sizes or effect sizes.
+    - These source pages preserve traceability metadata, directness, claim-use labels, priorities, and reducer notes, but do not add unextracted sample sizes or effect sizes.
     - Copyrighted PDFs are not included in Git or the artifact manifest.
 ---
 
-Iliotibial Band Syndrome Rehabilitation is the family for active, conservative runner ITBS care and return-to-run tracking. The first Murph variant is **IT Band Syndrome Rehab And Return To Run**.
+Iliotibial Band Syndrome Rehabilitation is the family for active, conservative runner ITBS care and return-to-run tracking. The first Murph variant is **IT Band Rehab**.
 
 ## Family boundary
 

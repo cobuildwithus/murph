@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: "protocol_variant:evening-screen-curfew/digital-sunset"
 slug: "protocols/evening-screen-curfew/digital-sunset"
-title: "Digital Sunset: No Personal Screens Before Bed"
-summary: Stop personal screen use before bed for a defined 30–60 minute wind-down window, then test whether evenings feel less wired and sleep onset becomes easier without sacrificing safety, access, or sleep opportunity.
+title: "Digital Sunset: No Screens Before Bed"
+summary: Stop personal screen use before bed, then test whether evenings feel less wired and sleep onset becomes easier without sacrificing safety, access, or sleep opportunity.
 status: draft
 quality: usable
 aliases:
@@ -24,6 +24,12 @@ categories:
 - behavior-change
 - wearable-measured
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-digital-sunset.jpeg
+    mediaType: image/jpeg
+    caption: Digital Sunset: No Screens Before Bed
 relations:
 -
   type: parent_family
@@ -798,10 +804,10 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you end up doing the screen cutoff last night? Totally fine either way — I just want the experiment record to be accurate.
     confirmationPrompt: Show the protocol key, bedtime anchor, curfew window, phone-location plan, exceptions, logging expectations, stop conditions, test plan, and reminder policy before creating the active experiment or any automations.
 whyItWorks:
-- "The rule can lower several bedtime inputs at once: personal-screen light exposure, emotionally or cognitively stimulating content, message and work loops, notifications, bedtime procrastination, and in-bed pickups. Sources: source_artifact:pmid-38657359, source_artifact:pmid-20673649, source_artifact:pmid-37542973, source_artifact:pmid-32040492, source_artifact:pmid-37354745, source_artifact:doi-10.1037/ppm0000156."
-- "Light is one plausible pathway because evening room and display light can affect melatonin timing, alertness, circadian markers, and sleep latency, but filter-only and light-manipulation findings are mixed; stopping screens is not the same intervention as changing screen color. Sources: source_artifact:pmid-10922269, source_artifact:pmid-21193540, source_artifact:pmid-22850476, source_artifact:pmid-25535358, source_artifact:pmid-33867308, source_artifact:pmid-34176370."
-- "Arousal and displacement may be the most user-visible pathways. If the cutoff moves phone-stop time and lights-out earlier, or lowers pre-sleep wiredness, sleep onset may become easier. Sources: source_artifact:pmid-32040492, source_artifact:pmid-37542973, source_artifact:pmid-29313721, source_artifact:pmid-40081281."
-- "The protocol fails as a safety intervention if it makes the user sleep less, feel anxious, or miss necessary contact. That is why planned exceptions, gradual ramps, and sleep-opportunity stop rules are part of the dose rather than afterthoughts. Sources: source_artifact:pmid-37038440, source_artifact:pmid-23973762, source_artifact:pmid-26039963, source_artifact:doi-10.1111/jcc4.12109, source_artifact:pmid-41752850."
+- "The rule can lower several bedtime inputs at once: personal-screen light exposure, emotionally or cognitively stimulating content, message and work loops, notifications, bedtime procrastination, and in-bed pickups."
+- "Light is one plausible pathway because evening room and display light can affect melatonin timing, alertness, circadian markers, and sleep latency, but filter-only and light-manipulation findings are mixed; stopping screens is not the same intervention as changing screen color."
+- "Arousal and displacement may be the most user-visible pathways. If the cutoff moves phone-stop time and lights-out earlier, or lowers pre-sleep wiredness, sleep onset may become easier."
+- "The protocol fails as a safety intervention if it makes the user sleep less, feel anxious, or miss necessary contact. That is why planned exceptions, gradual ramps, and sleep-opportunity stop rules are part of the dose rather than afterthoughts."
 claims:
 -
   claimId: identity-direct-definition-personal-screen-curfew
@@ -1455,29 +1461,29 @@ Secondary or exploratory signals:
 - sleep efficiency and WASO;
 - optional exploratory wearable trends such as HRV RMSSD or resting heart rate, interpreted only as supporting context and not as pass/fail outcomes.
 
-A useful signal should repeat across several adherent nights and still make sense after checking caffeine, alcohol, exercise, naps, illness, stress, work or social pressure, travel, room light, brightness/filter changes, and new supplements or medication changes. Sources: source_artifact:pmid-22294820, source_artifact:pmid-32040492, source_artifact:pmid-29313721, source_artifact:pmid-37542973, source_artifact:pmid-31372507.
+A useful signal should repeat across several adherent nights and still make sense after checking caffeine, alcohol, exercise, naps, illness, stress, work or social pressure, travel, room light, brightness/filter changes, and new supplements or medication changes.
 
 ## Why this version
 
-The 30-minute minimum is the closest adult-style direct dose in the extracted corpus, while 60 minutes is a larger screen-free window supported mostly by adolescent, pediatric, and guidance context; the extracted corpus does not show that 60 minutes is superior to 30 minutes. Fixed 9 pm or 22:00 rules exist in the evidence, but they are less portable for people with variable schedules. Sources: source_artifact:pmid-32040492, source_artifact:pmid-29313721, source_artifact:pmid-29073407, source_artifact:cdc-about-sleep-2024-05-15, source_artifact:sleepeducation-healthy-sleep-habits-2021-04-02.
+The 30-minute minimum is the closest adult-style direct dose in the extracted corpus, while 60 minutes is a larger screen-free window supported mostly by adolescent, pediatric, and guidance context; the extracted corpus does not show that 60 minutes is superior to 30 minutes. Fixed 9 pm or 22:00 rules exist in the evidence, but they are less portable for people with variable schedules.
 
-Boundary evidence should stay visible: athlete device-restriction/removal studies found no clear benefit or only limited first-night timing effects, and the REST-O pilot improved in active-control as well as intervention arms. Use these as mixed/null boundary findings, not as disproof for users whose baseline bedtime screens are a clear problem. Sources: source_artifact:pmid-29073407, source_artifact:pmid-28081034, source_artifact:pmid-30741866, source_artifact:pmid-40081281.
+Boundary evidence should stay visible: athlete device-restriction/removal studies found no clear benefit or only limited first-night timing effects, and the REST-O pilot improved in active-control as well as intervention arms. Use these as mixed/null boundary findings, not as disproof for users whose baseline bedtime screens are a clear problem.
 
-Registry-only and protocol-only sources should be tracked for future results, but not cited as outcome evidence. Sources: source_artifact:pmid-39163119, source_artifact:clinicaltrials-nct05820555-2026-04-24, source_artifact:clinicaltrials-nct06306092-2026-04-24, source_artifact:isrctn12324806-screen-before-bed-2026-04-24.
+Registry-only and protocol-only sources should be tracked for future results, but not cited as outcome evidence.
 
-This protocol is intentionally narrower than total screen-time reduction or social-media detox. Adjacent total-screen-time and social-media-detox studies are cited only as exclusion context, not as direct Digital Sunset efficacy evidence. The Digital Sunset test itself stays focused on the sleep window: whether a bedtime personal-screen cutoff changes phone-stop time, lights-out timing, pre-sleep wiredness, sleep onset, notifications, or in-bed pickups enough to matter for you. Adjacent exclusion sources: source_artifact:pmid-35604678, source_artifact:pmid-36194912, source_artifact:pmid-39985031, source_artifact:pmid-38481298, source_artifact:pmid-41284297. Direct or closer protocol sources: source_artifact:pmid-32040492, source_artifact:pmid-37542973, source_artifact:pmid-29313721, source_artifact:pmid-40081281.
+This protocol is intentionally narrower than total screen-time reduction or social-media detox. Adjacent total-screen-time and social-media-detox studies are cited only as exclusion context, not as direct Digital Sunset efficacy evidence. The Digital Sunset test itself stays focused on the sleep window: whether a bedtime personal-screen cutoff changes phone-stop time, lights-out timing, pre-sleep wiredness, sleep onset, notifications, or in-bed pickups enough to matter for you.
 
 ## Product and safety notes
 
 Do not treat a missed curfew as failure. Log the actual exposure and the reason: work, caregiving, safety, social obligation, habit, anxiety, or another exception. This makes the experiment more interpretable and less punitive.
 
-A screen curfew never outranks safety or care. Use screens when needed for medical alerts, accessibility, caregiving, emergency contact, crisis support, or on-call duties; log it as a planned exception rather than a failure. Test any Do Not Disturb, VIP-call, app-lock, alarm, or phone-placement setup before relying on it overnight. Sources: source_artifact:pmid-15588276, source_artifact:pmid-39078844, source_artifact:pmid-36704540, source_artifact:pmid-38258934, source_artifact:isrctn12324806-screen-before-bed-2026-04-24.
+A screen curfew never outranks safety or care. Use screens when needed for medical alerts, accessibility, caregiving, emergency contact, crisis support, or on-call duties; log it as a planned exception rather than a failure. Test any Do Not Disturb, VIP-call, app-lock, alarm, or phone-placement setup before relying on it overnight.
 
-Do not start an unsupervised Digital Sunset run during current suicidal thoughts, self-harm urges, psychosis, crisis-level distress, rapidly worsening severe depression/anxiety, recent mania or hypomania, or unstable mood. In those cases, appropriate clinical or crisis support takes priority over a bedtime habit experiment. Source context: source_artifact:pmid-22728900 supports adolescent nighttime-phone mental-health context only; add a dedicated clinical/crisis guidance source before final publication.
+Do not start an unsupervised Digital Sunset run during current suicidal thoughts, self-harm urges, psychosis, crisis-level distress, rapidly worsening severe depression/anxiety, recent mania or hypomania, or unstable mood. In those cases, appropriate clinical or crisis support takes priority over a bedtime habit experiment.
 
-Do not substitute Night Shift, dimming, amber glasses, or blue-light filters and call it the same protocol. Those are adjacent light-dose variants. Sources: source_artifact:pmid-37192881, source_artifact:pmid-33867308, source_artifact:pmid-34176370, source_artifact:pmid-31191118.
+Do not substitute Night Shift, dimming, amber glasses, or blue-light filters and call it the same protocol. Those are adjacent light-dose variants.
 
-Do not use this as treatment for chronic insomnia, suspected sleep apnea, unsafe daytime sleepiness, drowsy driving, bipolar/mania vulnerability, circadian rhythm sleep-wake disorder, persistent mood instability, severe phone-separation distress, or problematic smartphone use. In those contexts, get clinician guidance before framing this as an unsupervised experiment. Sources: source_artifact:cdc-about-sleep-2024-05-15, source_artifact:doi-10.7326/m15-1782, source_artifact:pmid-27136449, source_artifact:pmid-28875581, source_artifact:pmid-38016484, source_artifact:pmid-37038440, source_artifact:pmid-41752850, source_artifact:doi-10.1111/jcc4.12109, source_artifact:pmid-32062303.
+Do not use this as treatment for chronic insomnia, suspected sleep apnea, unsafe daytime sleepiness, drowsy driving, bipolar/mania vulnerability, circadian rhythm sleep-wake disorder, persistent mood instability, severe phone-separation distress, or problematic smartphone use. In those contexts, get clinician guidance before framing this as an unsupervised experiment.
 
 ## Off-ramp
 

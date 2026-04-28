@@ -63,13 +63,13 @@ researchCoverage:
 
 ## Family boundary
 
-Skin photobiomodulation in Murph means **non-ablative red or near-infrared light delivered to skin** with the device, wavelength, dose, treatment area, geometry, and eye-protection setup recorded. Mechanistic reviews describe photoreceptor and mitochondrial signaling hypotheses, but those mechanisms are not a substitute for region-specific human outcome evidence. [source_artifact:pmid-38309304; source_artifact:pmid-38307144; source_artifact:pmid-38674067; source_artifact:pmid-24049929]
+Skin photobiomodulation in Murph means **non-ablative red or near-infrared light delivered to skin** with the device, wavelength, dose, treatment area, geometry, and eye-protection setup recorded. Mechanistic reviews describe photoreceptor and mitochondrial signaling hypotheses, but those mechanisms are not a substitute for region-specific human outcome evidence.
 
-This family is separate from acne blue-light protocols, lasers, IPL, PDT or photosensitizer protocols, ophthalmology or myopia PBM, transcranial or intranasal PBM, infrared sauna or heat protocols, and whole-body wellness panels. Those areas may share light-related vocabulary, but they use different targets, doses, risks, and outcomes. [source_artifact:pmid-29356026; source_artifact:pmid-36310510; source_artifact:pmid-40253006; source_artifact:pmid-41032498]
+This family is separate from acne blue-light protocols, lasers, IPL, PDT or photosensitizer protocols, ophthalmology or myopia PBM, transcranial or intranasal PBM, infrared sauna or heat protocols, and whole-body wellness panels. Those areas may share light-related vocabulary, but they use different targets, doses, risks, and outcomes.
 
 ## Current canonical protocol
 
-- **Red And Near Infrared Light For Skin Texture And Photoaging** — a constrained adult facial/periocular red+NIR LED/IRED mask starter focused on standardized photos, region-specific texture/wrinkle outcomes, adherence, and tolerability.
+- **Red Light For Skin** — a constrained adult facial/periocular red+NIR LED/IRED mask starter focused on standardized photos, region-specific texture/wrinkle outcomes, adherence, and tolerability.
 
 ## Review posture
 

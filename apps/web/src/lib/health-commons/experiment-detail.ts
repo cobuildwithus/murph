@@ -6,6 +6,7 @@ import type {
   HealthCommonsProtocolSpec,
   HealthCommonsSafety,
   HealthCommonsTestPlan,
+  StoredMedia,
 } from "@murphai/contracts";
 
 import {
@@ -22,7 +23,6 @@ import {
   toExpectedSignal,
 } from "./experiment-detail-biomarkers";
 import { toExpert } from "./experiment-detail-experts";
-import { resolveProtocolImage } from "./experiment-detail-media";
 import {
   countResearchStudies,
   findProtocolEvidenceAppraisal,
@@ -42,6 +42,7 @@ const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const RED_LIGHT_GLASSES_ROUTE_ID = "red-light-glasses-before-bed";
 const BRYAN_JOHNSON_SAUNA_ROUTE_ID = "bryan-johnson-blueprint";
+const DEFAULT_PROTOCOL_IMAGE = "/design-assets/hero-04.png";
 
 const QUALITY_TO_EVIDENCE_LEVEL: Record<string, number> = {
   stub: 1,
@@ -79,6 +80,7 @@ export function listHealthCommonsExperimentProtocols(
     .listByEntityType("protocol_variant")
     .filter((protocol) => protocol.entityType === "protocol_variant")
     .filter((protocol) => protocol.status !== "deprecated")
+    .filter((protocol) => protocol.hidden !== true)
     .map((protocol) => toExperimentDetail(protocol, catalog))
     .sort(compareExperimentProtocolOrder);
 }
@@ -178,7 +180,7 @@ function toExperimentDetail(
     id: routeId,
     title: protocol.title,
     category: formatProtocolCategory(protocol),
-    image: resolveProtocolImage(protocol, routeId),
+    image: resolveProtocolPageImage(protocol) ?? DEFAULT_PROTOCOL_IMAGE,
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
     studyCount: hasMixedResearchAndProvenanceSources({
@@ -288,6 +290,69 @@ function buildProtocolRouteAliases(protocol: HealthCommonsCatalogEntity): string
     protocol.slug,
     protocol.slug.split("/").at(-1) ?? null,
   ]);
+}
+
+function resolveProtocolPageImage(protocol: HealthCommonsCatalogEntity): string | null {
+  const imageEntry = readProtocolMedia(protocol).find(isProtocolImageMedia);
+
+  if (!imageEntry) {
+    return null;
+  }
+
+  return imageEntry.relativePath.startsWith("/")
+    ? imageEntry.relativePath
+    : `/${imageEntry.relativePath}`;
+}
+
+function readProtocolMedia(protocol: HealthCommonsCatalogEntity): StoredMedia[] {
+  const protocolRecord = protocol as Record<string, unknown>;
+  const media = protocolRecord["media"];
+
+  if (!Array.isArray(media)) {
+    return [];
+  }
+
+  return media.filter(isStoredMediaEntry);
+}
+
+function isStoredMediaEntry(value: unknown): value is StoredMedia {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  const kind = record["kind"];
+  const relativePath = record["relativePath"];
+  const mediaType = record["mediaType"];
+  const caption = record["caption"];
+
+  if (
+    kind !== "photo" &&
+    kind !== "video" &&
+    kind !== "gif" &&
+    kind !== "image" &&
+    kind !== "other"
+  ) {
+    return false;
+  }
+
+  if (typeof relativePath !== "string" || relativePath.length === 0) {
+    return false;
+  }
+
+  if (typeof mediaType !== "string" || mediaType.length === 0) {
+    return false;
+  }
+
+  return caption === undefined || typeof caption === "string";
+}
+
+function isProtocolImageMedia(media: StoredMedia): boolean {
+  return (
+    media.kind === "photo" ||
+    media.kind === "image" ||
+    media.mediaType?.startsWith("image/") === true
+  );
 }
 
 function toMeasurementPaths(

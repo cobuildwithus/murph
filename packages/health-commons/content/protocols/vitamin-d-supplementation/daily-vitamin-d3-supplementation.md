@@ -7,6 +7,7 @@ title: Daily Vitamin D3 Supplementation
 summary: Take a consistent daily oral vitamin D3 dose and use 25(OH)D lab feedback, safety screening, and confounder logs to test whether vitamin D status changes without overclaiming clinical benefits.
 status: draft
 quality: usable
+hidden: true
 aliases:
   - daily cholecalciferol
   - daily D3
@@ -19,6 +20,12 @@ categories:
   - vitamin-d
   - biomarker-feedback
   - lab-guided
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-04.png
+    mediaType: image/png
+    caption: Daily Vitamin D3 Supplementation
 relations:
   -
     type: parent_family
@@ -55,7 +62,7 @@ protocol:
   steps:
     - Before starting, review current vitamin D from all supplements, multivitamins, fortified products, and prescriptions; avoid stacking products that silently raise total daily intake.
     - Do not start this ordinary self-directed variant without clinician guidance if you have kidney disease or reduced kidney function; a history of kidney stones; high serum calcium, high urine calcium, hypercalcemia, hypercalciuria, hyperparathyroidism, or unexplained calcium/PTH abnormalities; sarcoidosis or another granulomatous-disease context; clinician warnings about vitamin D or calcium handling; pregnancy, trying to conceive, breastfeeding, or pediatric/adolescent use; diagnosed vitamin D deficiency or a prescribed repletion/loading plan; malabsorption, cystic fibrosis, bariatric surgery, short bowel, or intestinal-rehabilitation context; or use of calcitriol, alfacalcidol, paricalcitol, calcifediol, prescription/high-dose vitamin D, high-dose calcium products, or a medication plan where calcium or kidney-function changes would be clinically important.
-    - Choose one oral cholecalciferol/D3 product with a clearly labeled IU dose and take it once daily with a consistent routine cue; this extraction did not support a specific meal, fat, morning, or evening timing instruction (`source_artifact:pmid-17456248`, `source_artifact:pmid-32365732`, `source_artifact:pmid-27724992`, `source_artifact:pmid-38676447`).
+    - Choose one oral cholecalciferol/D3 product with a clearly labeled IU dose and take it once daily with a consistent routine cue; this extraction did not support a specific meal, fat, morning, or evening timing instruction.
     - For a low-risk adult self-experiment after a negative safety screen, 800–1000 IU/day can be used as a conservative common starting/maintenance range; do not use this as treatment for diagnosed deficiency, do not chase a high 25(OH)D target, and treat 4000 IU/day as an adult upper-intake ceiling rather than a goal.
     - Record a baseline 25(OH)D value if available, plus the lab unit, date, season, latitude or travel context, sun/UV exposure, diet/fortified-food pattern, body-weight context, and current supplements.
     - Take the same daily dose for 8–12 weeks only while no stop condition is present, logging missed doses, extra doses, dose changes, product changes, new supplements or medications, calcium products, major sun/UV or travel changes, diet/fortified-food changes, and symptoms that could suggest calcium or kidney-stone issues.
@@ -104,7 +111,7 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:serum-25-hydroxyvitamin-d
-    description: Daily D3 gives the body vitamin D it can convert into the blood marker 25(OH)D over weeks. This is the direct lab signal for the protocol.
+    description: Daily D3 gives the body vitamin D it can convert into the blood marker 25(OH)D over weeks.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -304,9 +311,9 @@ experimentOnboarding:
     missedLogFollowupCopy: Log missed D3 doses as context; do not double up just because a log was missed.
     confirmationPrompt: Confirm the daily dose, safety screen, supplement stack, and lab-feedback plan before creating the experiment.
 whyItWorks:
-  - Cholecalciferol supplementation supplies vitamin D3 that can raise circulating 25(OH)D over weeks; this is the direct biomarker effect tested by the protocol (`source_artifact:pmid-12499343`, `source_artifact:pmid-19064513`, `source_artifact:pmid-26037521`, `source_artifact:pmid-32365732`, `source_artifact:pmid-37764770`).
-  - Baseline status, body size, sun exposure, diet, season, and population context modify response, so Murph treats the protocol as a logged N-of-1 lab-feedback experiment rather than a fixed-dose guarantee (`source_artifact:pmid-26037521`, `source_artifact:pmid-32365732`, `source_artifact:pmid-33954783`, `source_artifact:pmid-36648947`).
-  - Safety is calcium-centered: adult upper-intake guidance is a ceiling, and higher daily doses or special medical contexts require caution rather than casual escalation (`source_artifact:doi-10.17226-13050`, `source_artifact:doi-10.2903-j.efsa.2023.8145`, `source_artifact:nih-ods-vitamin-d-fact-sheet-2025-06-27`, `source_artifact:pmid-36853379`).
+  - Cholecalciferol supplementation supplies vitamin D3 that can raise circulating 25(OH)D over weeks; this is the direct biomarker effect tested by the protocol.
+  - Baseline status, body size, sun exposure, diet, season, and population context modify response, so Murph treats the protocol as a logged N-of-1 lab-feedback experiment rather than a fixed-dose guarantee.
+  - Safety is calcium-centered: adult upper-intake guidance is a ceiling, and higher daily doses or special medical contexts require caution rather than casual escalation.
 claims:
   -
     claimId: dose-implementation-001-direct-daily-d3-dose-response
@@ -695,7 +702,7 @@ claims:
       - source_artifact:pmid-37764770
     caveats:
       - 25(OH)D is a biochemical exposure/status metric, not proof of downstream clinical benefit.
-      - Threshold targets differ across sources and professional frameworks; threshold/testing sources are context-only rather than direct protocol evidence (`source_artifact:pmid-38676447`, `source_artifact:pmid-38828931`).
+      - Threshold targets differ across sources and professional frameworks; threshold/testing sources are context-only rather than direct protocol evidence.
       - Assay standardization and unit differences can complicate comparison across labs.
   -
     claimId: outcome-metrics-002-25ohd-follow-up-window-and-response-variability
@@ -1198,25 +1205,25 @@ safety:
     - Calcium products, calcifediol, active vitamin D analogues, prescription/high-dose vitamin D, weekly/monthly/bolus/loading schedules, or medication changes requiring calcium/kidney review are started.
     - A new kidney, calcium, urine-calcium, parathyroid, granulomatous, pregnancy/lactation, pediatric/adolescent, malabsorption/bariatric, clinician-flagged vitamin D/calcium risk, deficiency-treatment, or active-analogue context arises.
   notes:
-    - The 4000 IU/day adult upper-intake value is a ceiling, not a protocol target (`source_artifact:doi-10.17226-13050`, `source_artifact:doi-10.2903-j.efsa.2023.8145`, `source_artifact:nih-ods-vitamin-d-fact-sheet-2025-06-27`).
-    - Hypercalcemia and hypercalciuria are the main extracted adverse-event signals, especially with upper-end daily dosing, calcium co-use, or higher-risk contexts (`source_artifact:pmid-27604776`, `source_artifact:pmid-31746327`, `source_artifact:pmid-24937025`, `source_artifact:pmid-30415629`, `source_artifact:pmid-31669447`, `source_artifact:pmid-36648947`, `source_artifact:pmid-18541590`).
-    - Kidney-stone risk is mixed and context-dependent: vitamin-D-only pooled evidence did not show a statistically significant stone increase, calcium plus D evidence increased stones in WHI/USPSTF-reviewed evidence, and stone-former evidence is small and clinically specific (`source_artifact:pmid-27604776`, `source_artifact:pmid-16481635`, `source_artifact:pmid-29677308`, `source_artifact:nih-ods-vitamin-d-fact-sheet-2025-06-27`, `source_artifact:pmid-29562593`, `source_artifact:pmid-27765695`, `source_artifact:pmid-35140313`).
-    - Named medication-interaction tables were not supported by this extraction; keep medication and supplement review broad unless source-specific appraisals are added (`source_artifact:pmid-18541590`, `source_artifact:pmid-26121531`, `source_artifact:pmid-39993397`).
+    - The 4000 IU/day adult upper-intake value is a ceiling, not a protocol target.
+    - Hypercalcemia and hypercalciuria are the main extracted adverse-event signals, especially with upper-end daily dosing, calcium co-use, or higher-risk contexts.
+    - Kidney-stone risk is mixed and context-dependent: vitamin-D-only pooled evidence did not show a statistically significant stone increase, calcium plus D evidence increased stones in WHI/USPSTF-reviewed evidence, and stone-former evidence is small and clinically specific.
+    - Named medication-interaction tables were not supported by this extraction; keep medication and supplement review broad unless source-specific appraisals are added.
 ---
 Daily Vitamin D3 Supplementation is a simple daily oral cholecalciferol experiment whose main measurable outcome is **serum 25(OH)D**. The useful question is whether a consistent daily D3 dose changes vitamin D status for this person under logged conditions, not whether vitamin D becomes a guaranteed cure or disease-prevention intervention.
 
 ## What this protocol is for
 
-Use this protocol when the experiment is daily oral D3, low-risk adult self-tracking after a negative safety screen, and focused on 25(OH)D lab feedback. The strongest direct evidence supports a dose-related biomarker rise over weeks to months (`source_artifact:pmid-12499343`, `source_artifact:pmid-19064513`, `source_artifact:pmid-26037521`, `source_artifact:pmid-32365732`, `source_artifact:pmid-37764770`).
+Use this protocol when the experiment is daily oral D3, low-risk adult self-tracking after a negative safety screen, and focused on 25(OH)D lab feedback. The strongest direct evidence supports a dose-related biomarker rise over weeks to months.
 
 ## What to track
 
-Track dose, adherence, product, baseline and follow-up 25(OH)D with units, supplement stack, calcium products, sun or UV exposure, travel/latitude, season, diet or fortified-food changes, and symptoms that could suggest calcium or kidney-stone problems. Baseline status, body size, season, sun exposure, diet, and population context can all change the observed response (`source_artifact:pmid-26037521`, `source_artifact:pmid-32365732`, `source_artifact:pmid-33954783`, `source_artifact:pmid-36648947`).
+Track dose, adherence, product, baseline and follow-up 25(OH)D with units, supplement stack, calcium products, sun or UV exposure, travel/latitude, season, diet or fortified-food changes, and symptoms that could suggest calcium or kidney-stone problems. Baseline status, body size, season, sun exposure, diet, and population context can all change the observed response.
 
 ## What not to overread
 
-Do not promote a 25(OH)D rise as proof of better fractures, falls, respiratory outcomes, fatigue, mood, cardiovascular outcomes, or mortality. Those outcomes are mixed, long-horizon, population-dependent, or not well suited to a short personal experiment (`source_artifact:pmid-30415629`, `source_artifact:pmid-31923341`, `source_artifact:pmid-35939577`, `source_artifact:pmid-33847712`, `source_artifact:pmid-38828931`).
+Do not promote a 25(OH)D rise as proof of better fractures, falls, respiratory outcomes, fatigue, mood, cardiovascular outcomes, or mortality. Those outcomes are mixed, long-horizon, population-dependent, or not well suited to a short personal experiment.
 
 ## Safety posture
 
-Safety is stronger than efficacy when the dose, medical context, or supplement stack is uncertain. Treat adult upper-intake guidance as a ceiling rather than a target, and route kidney disease, stones, high serum or urine calcium, hyperparathyroidism, granulomatous-disease contexts, pregnancy/lactation, pediatric or adolescent use, malabsorption/bariatric contexts, deficiency treatment, calcifediol or active vitamin D analogues, non-daily schedules, high-dose calcium products, unknown total intake, or medication plans where calcium or kidney changes matter to clinician guidance (`source_artifact:doi-10.17226-13050`, `source_artifact:doi-10.2903-j.efsa.2023.8145`, `source_artifact:nih-ods-vitamin-d-fact-sheet-2025-06-27`, `source_artifact:pmid-34008842`, `source_artifact:pmid-26903303`, `source_artifact:pmid-30675420`).
+Safety is stronger than efficacy when the dose, medical context, or supplement stack is uncertain. Treat adult upper-intake guidance as a ceiling rather than a target, and route kidney disease, stones, high serum or urine calcium, hyperparathyroidism, granulomatous-disease contexts, pregnancy/lactation, pediatric or adolescent use, malabsorption/bariatric contexts, deficiency treatment, calcifediol or active vitamin D analogues, non-daily schedules, high-dose calcium products, unknown total intake, or medication plans where calcium or kidney changes matter to clinician guidance.

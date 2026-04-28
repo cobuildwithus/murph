@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
 slug: protocols/prolonged-fasting/prolonged-fasting-24-72-hours
-title: Prolonged Fasting (24–72 Hours)
-summary: Run one carefully screened, hydrated 24–72 hour fast as an acute metabolic-and-safety experiment, with explicit stop rules, symptom logging, and a planned refeed rather than durable benefit promises.
+title: Prolonged Fasting
+summary: Run one carefully screened, hydrated fast as an acute metabolic-and-safety experiment, with explicit stop rules, symptom logging, and a planned refeed rather than durable benefit promises.
 status: draft
 quality: usable
 aliases:
@@ -24,6 +24,12 @@ categories:
   - safety-screened
   - symptom-log
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-prolonged-fasting.jpeg
+    mediaType: image/jpeg
+    caption: Prolonged Fasting
 relations:
   -
     type: parent_family
@@ -157,36 +163,36 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:fasting-tolerance-symptom-log
-    description: A 24-72 hour fast stresses fuel intake, hydration, and the body's stress state. Symptoms show whether the chosen duration was tolerated safely.
+    description: A 24-72 hour fast stresses fuel intake, hydration, and the body's stress state. Symptoms can rise when the duration is too much.
   -
     biomarkerKey: biomarker:refeed-tolerance-symptom-log
-    description: Refeeding tests how the body handles the first meals after the fast. Symptoms after refeed can matter more than ketones or weight change.
+    description: After fasting, the first meals restart gut work and shift glucose, insulin, fluid, and electrolytes. Symptoms can rise if refeeding is too abrupt.
   -
     biomarkerKey: biomarker:continuous-glucose
-    description: With no incoming calories, glucose may shift as stored carbohydrate falls and stress hormones rise. The direction can be mixed, so this is context rather than proof of improvement.
+    description: With no incoming calories, glucose may fall as stored carbohydrate drops, or rise if stress hormones push it up.
   -
     biomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
     description: As stored carbohydrate and insulin fall, the body may make more beta-hydroxybutyrate, a blood ketone, from fat. Higher ketones confirm fuel switching, not better health by themselves.
   -
     biomarkerKey: biomarker:body-weight
-    description: Body weight often drops during a fast from less gut content, lower glycogen, and water shifts. This is not the same as durable fat loss.
+    description: Body weight often drops during a fast from less gut content, lower glycogen, and water shifts, not just fat loss.
   -
     biomarkerKey: biomarker:morning-blood-pressure
-    description: Fasting can change blood pressure through fluid balance, salt intake, stress hormones, and how well you tolerate standing. Low or unstable readings are safety context.
+    description: Fasting changes fluid balance, salt intake, stress hormones, and standing tolerance, so blood pressure can drop or become less stable.
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: Resting pulse may rise or fall during fasting depending on hydration, stress, sleep, and fuel response. It helps show whether the fast added strain.
+    description: Resting pulse can rise with dehydration, poor sleep, or stress during fasting; it can fall if the fast feels easy and recovery stays stable.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: Fasting can shift stress and recovery through hunger, sleep disruption, hydration, and strain. HRV may move, but it is context rather than a success target.
+    description: Fasting can lower HRV when hunger, poor sleep, dehydration, or stress add strain. It may rise if the fast feels calm and recovery stays stable.
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: Hunger, caffeine changes, stress, and ketone shifts can change sleep continuity during a fast. Sleep efficiency shows whether the fast disrupted rest.
+    description: Hunger, caffeine changes, stress, and ketone shifts can break up sleep during a fast.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
     displayPrompt: Hey Murph, I want to explore doing a 24–72 hour fast.
-    intentSummary: Explore Prolonged Fasting (24–72 Hours)
+    intentSummary: Explore Prolonged Fasting
   contextReview:
     vaultChecks:
       -
