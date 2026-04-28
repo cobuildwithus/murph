@@ -134,23 +134,12 @@ export function hasInboxMultimodalAttachmentEvidenceCandidate(
     | InboxShowResult['capture']['attachments'][number]
     | InboxModelAttachmentBundle,
 ): boolean {
-  const storedPath = normalizeNullableString(attachment.storedPath)
-  if (!storedPath) {
-    return false
-  }
-
   const routingImage =
     'routingImage' in attachment
       ? attachment.routingImage
       : getRoutingImageEligibility(attachment)
 
-  return (
-    routingImage.eligible ||
-    isPdfAttachment({
-      fileName: attachment.fileName ?? null,
-      mime: attachment.mime ?? null,
-    })
-  )
+  return routingImage.eligible || isRoutingPdfFallbackCandidate(attachment)
 }
 
 export async function prepareInboxMultimodalUserMessageContent(input: {
@@ -236,20 +225,12 @@ export async function prepareInboxMultimodalUserMessageContent(input: {
 }
 
 export function isRoutingPdfFallbackCandidate(
-  attachment: InboxModelAttachmentBundle,
+  attachment:
+    | InboxShowResult['capture']['attachments'][number]
+    | InboxModelAttachmentBundle,
 ): boolean {
-  return (
-    attachment.kind === 'document' &&
-    isPdfAttachment({
-      fileName: attachment.fileName,
-      mime: attachment.mime,
-    }) &&
-    typeof attachment.storedPath === 'string' &&
-    attachment.storedPath.length > 0 &&
-    attachment.parseState !== 'pending' &&
-    attachment.parseState !== 'running' &&
-    !attachment.fragments.some((fragment) => fragment.kind !== 'attachment_metadata')
-  )
+  void attachment
+  return false
 }
 
 function buildMetadataFragment(
@@ -263,7 +244,6 @@ function buildMetadataFragment(
     `mime: ${attachment.mime ?? 'unknown'}`,
     `fileName: ${attachment.fileName ?? 'unknown'}`,
     `byteSize: ${attachment.byteSize ?? 'unknown'}`,
-    `storedPath: ${attachment.storedPath ?? 'missing'}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
       ? [
@@ -274,6 +254,7 @@ function buildMetadataFragment(
     `routingImageReason: ${routingImage.reason}`,
     `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
     `routingImageExtension: ${routingImage.extension ?? 'unknown'}`,
+    `routingPdfEligible: ${String(isRoutingPdfFallbackCandidate(attachment))}`,
   ]
   const text = metadataLines.join('\n')
   return {
@@ -536,15 +517,6 @@ function normalizeAnchoredVaultRelativePath(
   } catch {
     return null
   }
-}
-
-function isPdfAttachment(input: {
-  fileName: string | null
-  mime: string | null
-}): boolean {
-  const fileName = input.fileName?.toLowerCase() ?? ''
-  const mime = input.mime?.toLowerCase() ?? ''
-  return fileName.endsWith('.pdf') || mime === 'application/pdf'
 }
 
 async function readParserManifest(

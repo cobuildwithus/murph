@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   createConfiguredParserRegistry: vi.fn(),
   createHostedLinqAttachmentDownloadDriver: vi.fn(),
   createHostedTelegramAttachmentDownloadDriver: vi.fn(),
+  createInboxParserService: vi.fn(),
+  createInboxPipeline: vi.fn(),
   createParsedInboxPipeline: vi.fn(),
   normalizeHostedEmailConversationCapture: vi.fn(),
   normalizeHostedLinqConversationCapture: vi.fn(),
@@ -24,6 +26,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/inboxd", () => ({
+  createInboxPipeline: mocks.createInboxPipeline,
   createParsedInboxPipeline: mocks.createParsedInboxPipeline,
   openInboxRuntime: mocks.openInboxRuntime,
 }));
@@ -36,6 +39,7 @@ vi.mock("@murphai/inboxd/connectors/hosted-conversation", () => ({
 
 vi.mock("@murphai/parsers", () => ({
   createConfiguredParserRegistry: mocks.createConfiguredParserRegistry,
+  createInboxParserService: mocks.createInboxParserService,
 }));
 
 vi.mock("../src/hosted-runtime/events/email.ts", () => ({
@@ -89,10 +93,9 @@ beforeEach(() => {
     ffmpeg: undefined,
     registry: Symbol("parser-registry"),
   });
-  mocks.createParsedInboxPipeline.mockImplementation(async (input) => ({
+  mocks.createInboxPipeline.mockImplementation(async (input) => ({
     close: vi.fn(),
     processCapture: vi.fn(async () => {
-      await input.onParserDrain?.([{} as never, {} as never]);
       return {
         captureId: "capture_123",
         createdAt: "2026-04-08T00:00:00.000Z",
@@ -103,6 +106,9 @@ beforeEach(() => {
     }),
     runtime: input.runtime,
   }));
+  mocks.createInboxParserService.mockReturnValue({
+    drain: vi.fn(async () => [{} as never, {} as never]),
+  });
 });
 
 afterEach(() => {
@@ -135,12 +141,10 @@ describe("ingestHostedConversationMessageWake", () => {
       };
     });
     const pipelineClose = vi.fn();
-    mocks.createParsedInboxPipeline.mockImplementation(async (input) => ({
+    mocks.createInboxPipeline.mockImplementation(async (input) => ({
       close: pipelineClose,
       processCapture: vi.fn(async (capture) => {
-        const persisted = await processCapture(capture);
-        await input.onParserDrain?.([{} as never, {} as never]);
-        return persisted;
+        return processCapture(capture);
       }),
       runtime: input.runtime,
     }));
@@ -275,9 +279,10 @@ describe("ingestHostedConversationMessageWake", () => {
       source: "email",
       threadTarget: null,
     });
-    expect(mocks.openInboxRuntime).toHaveBeenCalledTimes(3);
+    expect(mocks.openInboxRuntime).toHaveBeenCalledTimes(6);
     expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(3);
-    expect(mocks.createParsedInboxPipeline).toHaveBeenCalledTimes(3);
+    expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(3);
+    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(3);
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
@@ -299,12 +304,12 @@ describe("ingestHostedConversationMessageWake", () => {
     });
   });
 
-  it("closes the inbox runtime when parsed pipeline creation fails before a pipeline exists", async () => {
+  it("closes the inbox runtime when plain pipeline creation fails before a pipeline exists", async () => {
     const runtimeClose = vi.fn();
     mocks.openInboxRuntime.mockResolvedValue({
       close: runtimeClose,
     });
-    mocks.createParsedInboxPipeline.mockRejectedValue(new Error("pipeline failed"));
+    mocks.createInboxPipeline.mockRejectedValue(new Error("pipeline failed"));
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValue({
       source: "linq",
     });
@@ -335,11 +340,10 @@ describe("ingestHostedConversationMessageWake", () => {
 
   it("marks inbound Linq chats read after parsed inbox persistence without failing ingestion", async () => {
     const order: string[] = [];
-    mocks.createParsedInboxPipeline.mockImplementation(async (input) => ({
+    mocks.createInboxPipeline.mockImplementation(async (input) => ({
       close: vi.fn(),
       processCapture: vi.fn(async () => {
         order.push("processCapture");
-        await input.onParserDrain?.([{} as never]);
         return {
           captureId: "capture_123",
           createdAt: "2026-04-08T00:00:00.000Z",
@@ -350,6 +354,9 @@ describe("ingestHostedConversationMessageWake", () => {
       }),
       runtime: input.runtime,
     }));
+    mocks.createInboxParserService.mockReturnValueOnce({
+      drain: vi.fn(async () => [{} as never]),
+    });
     mocks.markLinqChatRead.mockImplementationOnce(async () => {
       order.push("markRead");
       throw new Error("provider unavailable");
@@ -401,6 +408,65 @@ describe("ingestHostedConversationMessageWake", () => {
         },
       }),
     );
+  });
+
+  it("keeps persisted conversation import successful when post-persistence parser setup fails", async () => {
+    const order: string[] = [];
+    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
+      close: vi.fn(),
+      processCapture: vi.fn(async () => {
+        order.push("processCapture");
+        return {
+          captureId: "capture_after_parser_setup_failure",
+          createdAt: "2026-04-08T00:00:00.000Z",
+          deduped: false,
+          envelopePath: "raw/inbox/linq/capture_after_parser_setup_failure/envelope.json",
+          eventId: "evt_capture_after_parser_setup_failure",
+        };
+      }),
+      runtime: input.runtime,
+    }));
+    mocks.createConfiguredParserRegistry.mockRejectedValueOnce(
+      new Error("parser registry unavailable"),
+    );
+    mocks.markLinqChatRead.mockImplementationOnce(async () => {
+      order.push("markRead");
+    });
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    const metrics = await ingestHostedConversationMessageWake({
+      runtime: {
+        ...createRuntime(),
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      },
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_parser_setup_failure",
+        linqMessage: {
+          chatId: "chat_after_parser_setup_failure",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(order).toEqual(["processCapture", "markRead"]);
+    expect(metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 0,
+    });
+    expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(1);
+    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
+    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
   });
 
   it("does not mark self-authored Linq messages as read", async () => {

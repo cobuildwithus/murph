@@ -1062,7 +1062,7 @@ describe('assistant provider watchdog', () => {
 })
 
 describe('assistant auto-reply prompt builder support', () => {
-  it('defers pending captures and skips prompts that never produce usable text', () => {
+  it('renders pending attachment status and skips prompts that never produce usable text', () => {
     expect(
       buildAssistantAutoReplyPrompt([
         createPromptCapture({
@@ -1074,8 +1074,10 @@ describe('assistant auto-reply prompt builder support', () => {
         }),
       ]),
     ).toEqual({
-      kind: 'defer',
-      reason: 'waiting for parser completion',
+      kind: 'ready',
+      prompt: expect.stringContaining(
+        'Attachment parser status: parser output is not available yet.',
+      ),
     })
 
     expect(
@@ -1273,7 +1275,7 @@ describe('assistant auto-reply prompt builder support', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed attachment text is available. Use attached image or PDF evidence if present, but do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+        'No parsed attachment text is available. Use attached image evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
       ),
       userMessageContent: [
         {

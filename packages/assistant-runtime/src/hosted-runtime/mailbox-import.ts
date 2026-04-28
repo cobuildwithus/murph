@@ -38,6 +38,7 @@ export type HostedMailboxItemImportOutcome =
   | {
       status: "imported" | "skipped";
       reasonCode?: string | null;
+      afterCheckpoint?: (() => Promise<void>) | null;
     };
 
 export interface HostedMailboxResolvedImportItem {

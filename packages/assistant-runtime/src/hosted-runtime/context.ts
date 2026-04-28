@@ -527,3 +527,15 @@ export async function prepareHostedLocalRuntime(
     vault: vaultRoot,
   });
 }
+
+export async function prepareHostedLocalRuntimeForConversationImport(
+  vaultRoot: string,
+  requestId: string,
+): Promise<void> {
+  const inboxServices = createIntegratedInboxServices();
+  await inboxServices.init({
+    rebuild: false,
+    requestId,
+    vault: vaultRoot,
+  });
+}

@@ -160,6 +160,11 @@ describe("appendHostedMailboxItemTx", () => {
         payloadInlineCiphertext: "cipher_first_1",
       },
     });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    const executeRawMock = vi.mocked(tx.$executeRaw);
+    expect(readHostedMailboxRawSql(executeRawMock.mock.calls[0])).toContain(
+      "pg_advisory_xact_lock",
+    );
     expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -794,6 +799,7 @@ function createHostedMailboxTx(input: {
   hostedMailboxPayload: ReturnType<typeof createHostedMailboxPayloadDelegate>;
 }) {
   return Object.assign(Object.create(null), {
+    $executeRaw: vi.fn(async () => 1),
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join("?");
       if (sql.includes("hosted_mailbox_lane_counter")) {
@@ -851,6 +857,11 @@ function createHostedMailboxTx(input: {
       upsert: vi.fn(async () => null),
     },
   }) as Parameters<typeof appendHostedMailboxItemTx>[0]["tx"];
+}
+
+function readHostedMailboxRawSql(call: unknown[] | undefined): string {
+  const strings = call?.[0] as TemplateStringsArray | undefined;
+  return strings ? strings.join("?") : "";
 }
 
 function createHostedMailboxClient(input: {

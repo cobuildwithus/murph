@@ -116,20 +116,20 @@ export async function scanAssistantAutomationOnce(input: {
     AssistantPreserveDocumentAttachmentsResult
   >()
 
-  const preserveCandidateDocuments = async (
+  const preserveCandidateDocumentsBestEffort = async (
     candidate: AssistantAutomationCandidate,
-  ): Promise<boolean> => {
+  ): Promise<void> => {
     if (!applyCanonicalWrites) {
-      return true
+      return
     }
 
     if (candidate.summary.attachmentCount === 0) {
-      return true
+      return
     }
 
     const existing = preservedCaptureResults.get(candidate.summary.captureId)
     if (existing) {
-      return true
+      return
     }
 
     try {
@@ -141,7 +141,6 @@ export async function scanAssistantAutomationOnce(input: {
       if (preserved) {
         preservedCaptureResults.set(candidate.summary.captureId, preserved)
       }
-      return true
     } catch (error) {
       const nextWakeAt = computeAssistantAutomationRetryAt(
         ASSISTANT_DOCUMENT_PRESERVATION_RETRY_DELAY_MS,
@@ -153,13 +152,12 @@ export async function scanAssistantAutomationOnce(input: {
       input.onEvent?.({
         type: 'capture.failed',
         captureId: candidate.summary.captureId,
-        details: `automatic document preservation failed: ${errorMessage(error)}`,
+        details: `nonblocking document preservation failed: ${errorMessage(error)}`,
       })
-      return false
     }
   }
 
-  scanLoop: for (let index = 0; index < candidates.length; index += 1) {
+  for (let index = 0; index < candidates.length; index += 1) {
     if (input.signal?.aborted) {
       break
     }
@@ -179,17 +177,6 @@ export async function scanAssistantAutomationOnce(input: {
     const context = createAssistantAutoReplyGroupContext(group.items)
     if (!context) {
       continue
-    }
-
-    for (const item of context.items) {
-      const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
-      if (!groupCandidate) {
-        continue
-      }
-
-      if (!(await preserveCandidateDocuments(groupCandidate))) {
-        break scanLoop
-      }
     }
 
     replies.considered += context.captureCount
@@ -220,6 +207,15 @@ export async function scanAssistantAutomationOnce(input: {
         updateAutoReplyChannelCursor(scanState, context.firstItem.summary.source, cursor)
       },
     })
+
+    for (const item of context.items) {
+      const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
+      if (!groupCandidate) {
+        continue
+      }
+
+      await preserveCandidateDocumentsBestEffort(groupCandidate)
+    }
 
     await persistScanState()
 
