@@ -81,7 +81,6 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
     () => selectFeaturedCards(filteredCards),
     [filteredCards],
   );
-  const privateDataCount = libraryCards.filter((card) => card.hasPrivateData).length;
   const nonAuthError = status === "error" && !isAuthRequiredBrowserVaultError(error);
 
   return (
@@ -89,13 +88,13 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
       <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Library · {protocols.length} experiments
+            Library
           </span>
           <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
             Experiments
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Browse the public library. When Murph has browser-vault data, your private run state appears on the matching cards.
+            Browse the public protocol library.
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto lg:items-center">
@@ -132,11 +131,6 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
             <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
               Featured
             </span>
-            <p className="text-xs text-muted-foreground">
-              {privateDataCount > 0
-                ? "Dry sauna and 4x4 stay pinned; your private overlays appear on matching cards."
-                : "Dry sauna and Norwegian 4x4 are pinned from the public experiment library."}
-            </p>
           </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2">

@@ -280,7 +280,3 @@ function readHostedPrivacyKeyring(): {
 } {
   return getHostedOnboardingEnvironment().contactPrivacyKeyring;
 }
-
-function compareHostedPrivacyVersions(left: string, right: string): number {
-  return Number.parseInt(left.slice(1), 10) - Number.parseInt(right.slice(1), 10);
-}

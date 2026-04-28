@@ -42,7 +42,6 @@ export default async function OGImage() {
         }}
       >
         {/* Hero background */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={heroData}
           alt=""

@@ -20,6 +20,8 @@ export function ExpertCard({
     <div className="flex grow shrink basis-0 items-center gap-3.5 rounded-xl border border-secondary/25 bg-card/90 px-5 py-4">
       <Avatar className="size-12 shrink-0 overflow-hidden bg-secondary">
         {showProfileImage ? (
+          // Dynamic expert images may come from local or externally curated profile URLs.
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={profileImageUrl}
             alt={name}

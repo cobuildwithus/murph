@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePrivy, useUser } from "@privy-io/react-auth";
@@ -52,7 +53,14 @@ const sidebarThemeStyle = {
 function BrandMark() {
   return (
     <Link href="/overview" className="flex items-center px-2 py-1">
-      <img src="/logo-dark.svg" alt="Murph" className="h-6" />
+      <Image
+        src="/logo-dark.svg"
+        alt="Murph"
+        width={197}
+        height={44}
+        className="h-6 w-auto"
+        priority
+      />
     </Link>
   );
 }
