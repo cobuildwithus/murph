@@ -1,13 +1,7 @@
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import {
-  formatHostedSharePreviewSummary,
-} from "../hosted-share/hosted-share-preview";
-import type { JoinInviteShareImportState } from "./join-invite-state";
 import {
   JoinInviteActivePanel,
   JoinInviteCheckoutPanel,
@@ -15,11 +9,6 @@ import {
   JoinInviteSignedInMismatchAlert,
   JoinInviteVerificationPanel,
 } from "./join-invite-stage-panels";
-import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
-
-interface JoinInviteSharePreviewAlertProps {
-  sharePreview: HostedSharePreview;
-}
 
 interface JoinInviteStageContentProps {
   awaitingInviteSessionResolution: boolean;
@@ -27,13 +16,9 @@ interface JoinInviteStageContentProps {
   checkoutPending: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   inviteCode: string;
-  pendingAction: "checkout" | "share" | null;
-  shareImportState: JoinInviteShareImportState;
-  sharePreview: HostedSharePreview | null;
   status: HostedInviteStatusPayload;
   statusRefreshErrorMessage: string | null;
   statusRefreshRetryPending: boolean;
-  onAcceptShare: () => Promise<void>;
   onCheckout: () => Promise<void>;
   onSelectBillingPlan: (
     billingPlanCode: NonNullable<HostedInviteStatusPayload["billing"]["defaultPlanCode"]>,
@@ -44,39 +29,15 @@ interface JoinInviteStageContentProps {
   onSignOut: () => Promise<void>;
 }
 
-export function JoinInviteSharePreviewAlert({ sharePreview }: JoinInviteSharePreviewAlertProps) {
-  const sharePreviewSummary = formatHostedSharePreviewSummary(sharePreview);
-
-  return (
-    <Alert className="border-green-200 bg-green-50 text-green-800">
-      <AlertTitle>Add after signup: {describeHostedSharePreview(sharePreview)}</AlertTitle>
-      {sharePreviewSummary ? (
-        <AlertDescription className="text-green-700">
-          {sharePreviewSummary}
-        </AlertDescription>
-      ) : null}
-      {sharePreview.logMealAfterImport ? (
-        <AlertDescription className="text-green-700">
-          Murph will also log the shared food after import.
-        </AlertDescription>
-      ) : null}
-    </Alert>
-  );
-}
-
 export function JoinInviteStageContent({
   awaitingInviteSessionResolution,
   billingPlanCode,
   checkoutPending,
   initialLinkedAccounts,
   inviteCode,
-  pendingAction,
-  shareImportState,
-  sharePreview,
   status,
   statusRefreshErrorMessage,
   statusRefreshRetryPending,
-  onAcceptShare,
   onCheckout,
   onSelectBillingPlan,
   onPhoneVerified,
@@ -136,11 +97,7 @@ export function JoinInviteStageContent({
       {isHostedOnboardingAccessibleStage(status.stage) ? (
         <JoinInviteActivePanel
           murphPhoneNumber={status.murphPhoneNumber ?? null}
-          pendingAction={pendingAction}
-          shareImportState={shareImportState}
-          sharePreview={sharePreview}
           stage={status.stage}
-          onAcceptShare={onAcceptShare}
         />
       ) : null}
     </>

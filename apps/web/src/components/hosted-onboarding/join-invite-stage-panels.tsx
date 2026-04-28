@@ -8,7 +8,6 @@ import { CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
-import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
@@ -20,8 +19,6 @@ import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-s
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
-import type { JoinInviteShareImportState } from "./join-invite-state";
-import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
 import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
 import { HostedTelegramSettings } from "../settings/hosted-telegram-settings";
 
@@ -278,18 +275,10 @@ export function JoinInviteCheckoutPanel({
 
 export function JoinInviteActivePanel({
   murphPhoneNumber,
-  pendingAction,
-  shareImportState,
-  sharePreview,
   stage,
-  onAcceptShare,
 }: {
   murphPhoneNumber: string | null;
-  pendingAction: "checkout" | "share" | null;
-  shareImportState: JoinInviteShareImportState;
-  sharePreview: HostedSharePreview | null;
   stage: HostedAccessibleOnboardingStage;
-  onAcceptShare: () => Promise<void>;
 }) {
   const activationPending = stage === "activating";
 
@@ -305,11 +294,6 @@ export function JoinInviteActivePanel({
             <p className="leading-relaxed text-olive/85">
               {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
             </p>
-            {sharePreview ? (
-              <p className="leading-relaxed text-olive/85">
-                {JOIN_INVITE_ACTIVATION_PENDING_COPY.shareImportDescription}
-              </p>
-            ) : null}
           </div>
         </div>
       ) : (
@@ -322,35 +306,6 @@ export function JoinInviteActivePanel({
       )}
 
       <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
-
-      {sharePreview ? (
-        <div>
-          {shareImportState === "completed" ? (
-            <p className="text-sm text-olive">
-              {describeHostedSharePreview(sharePreview)} has been added to your
-              account.
-            </p>
-          ) : shareImportState === "processing" ? (
-            <p className="text-sm text-muted-foreground">
-              {describeHostedSharePreview(sharePreview)} is being added to your
-              account.
-            </p>
-          ) : (
-            <Button
-              type="button"
-              onClick={onAcceptShare}
-              disabled={pendingAction !== null}
-              size="lg"
-            >
-              {pendingAction === "share"
-                ? "Adding shared bundle..."
-                : `Add ${describeHostedSharePreview(
-                    sharePreview
-                  ).toLowerCase()}`}
-            </Button>
-          )}
-        </div>
-      ) : null}
 
       <div className="border-t border-[#c4a882]/25 pt-6">
         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">

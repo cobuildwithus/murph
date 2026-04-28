@@ -128,17 +128,11 @@ describe('assistant CLI tool catalogs', () => {
             provider,
             providerLabel: provider,
           }),
-          issueShareLink: async () => ({
-            shareCode: 'share_123',
-            shareUrl: 'https://example.com/share/share_123',
-            url: 'https://example.com/share/share_123',
-          }),
         },
       } satisfies NonNullable<AssistantToolContext['executionContext']>,
     }).map((tool) => tool.name)
     expect(outwardNames).toEqual([
       'murph.device.connect',
-      'vault.share.createLink',
     ])
   })
 

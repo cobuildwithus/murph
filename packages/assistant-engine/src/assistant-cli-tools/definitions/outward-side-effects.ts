@@ -1,4 +1,3 @@
-import { buildSharePackFromVault } from '@murphai/core'
 import { z } from 'zod'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantCapabilityDefinition } from '../../model-harness.js'
@@ -9,17 +8,6 @@ import {
   normalizeAssistantHostedDeviceConnectProviderKey,
   normalizeAssistantHostedDeviceConnectProviders,
 } from '../../assistant/execution-context.js'
-
-const isoTimestampSchema = z.string().min(1)
-const shareEntitySelectorSchema = z
-  .object({
-    id: z.string().min(1).optional(),
-    slug: z.string().min(1).optional(),
-    group: z.string().min(1).optional(),
-  })
-  .refine((value) => Boolean(value.id || value.slug), {
-    message: 'Provide either an id or slug.',
-  })
 
 export function createOutwardSideEffectToolDefinitions(
   input: AssistantToolContext,
@@ -58,72 +46,6 @@ export function createOutwardSideEffectToolDefinitions(
             providerList,
             supportedProviders,
           }),
-      }),
-    )
-  }
-
-  if (input.executionContext?.hosted?.issueShareLink) {
-    tools.push(
-      defineHostedApiBackedTool({
-        name: 'vault.share.createLink',
-        description:
-          'Create a one-time hosted share link for remembered foods, recipes, and regimens. When a food has attached regimen ids, keep includeAttachedRegimens=true so the recipient gets the full smoothie + supplement bundle.',
-        inputSchema: z.object({
-          title: z.string().min(1).optional(),
-          foods: z.array(shareEntitySelectorSchema).optional(),
-          regimens: z.array(shareEntitySelectorSchema).optional(),
-          recipes: z.array(shareEntitySelectorSchema).optional(),
-          includeAttachedRegimens: z.boolean().optional(),
-          logMeal: z.object({
-            food: shareEntitySelectorSchema,
-            note: z.string().min(1).optional(),
-            occurredAt: isoTimestampSchema.optional(),
-          }).optional(),
-          recipientPhoneNumber: z.string().min(1).optional(),
-          inviteCode: z.string().min(1).optional(),
-          expiresInHours: z.number().int().positive().max(24 * 30).optional(),
-        }),
-        inputExample: {
-          foods: [
-            {
-              slug: 'morning-smoothie',
-            },
-          ],
-          includeAttachedRegimens: true,
-          logMeal: {
-            food: {
-              slug: 'morning-smoothie',
-            },
-          },
-        },
-        execute: async ({
-          expiresInHours,
-          foods,
-          includeAttachedRegimens,
-          inviteCode,
-          logMeal,
-          regimens,
-          recipientPhoneNumber,
-          recipes,
-          title,
-        }) => {
-          const pack = await buildSharePackFromVault({
-            vaultRoot: input.vault,
-            title,
-            foods,
-            regimens,
-            recipes,
-            includeAttachedRegimens,
-            logMeal,
-          })
-
-          return input.executionContext!.hosted!.issueShareLink!({
-            pack,
-            expiresInHours,
-            inviteCode,
-            recipientPhoneNumber,
-          })
-        },
       }),
     )
   }

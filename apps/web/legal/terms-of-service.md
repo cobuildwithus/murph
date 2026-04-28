@@ -37,7 +37,7 @@ Murph is a health assistant and health-organization tool that may include, depen
 - AI-generated summaries, suggestions, reminders, pattern-spotting, and follow-up prompts;
 - phone-based onboarding and identity verification;
 - subscription billing, account management, and hosted settings;
-- share links, invite links, and other import/export flows; and
+- invite links and other import/export flows; and
 - local-first and hosted workflows that may interact with one another.
 
 Some features may be available only in Local Software, while others may be available only in the Hosted Service. We may add, remove, or change features, providers, and integrations over time.
@@ -138,9 +138,9 @@ You represent and warrant that:
 3. if you upload, sync, or share information about another person, you have any consent required by law; and
 4. you will not submit content that is unlawful, infringing, defamatory, fraudulent, or intentionally misleading in a way that could foreseeably cause harm.
 
-## 9. Share Links, Invites, Imports, and Shared Content
+## 9. Invites, Imports, and Shared Content
 
-Murph may allow you to create share links, invite links, or similar features that allow another person to view, claim, or import content.
+Murph may allow you to create invite links or similar features that allow another person to join, view, claim, or import content.
 
 If you use these features:
 
@@ -150,9 +150,9 @@ If you use these features:
 - you must not disclose another person’s private, health, or sensitive information without authorization; and
 - you must not access, redeem, intercept, or use a link that was not intended for you.
 
-Share links may be single-use, time-limited, automatically expiring, or disabled after claim. For privacy and security reasons, some share links may expire on a short schedule shown in the product.
+Invite and import links may be single-use, time-limited, automatically expiring, or disabled after claim. For privacy and security reasons, some links may expire on a short schedule shown in the product.
 
-We may refuse, revoke, expire, or invalidate share links, invite links, or import flows at any time for security, abuse, legal, policy, or operational reasons.
+We may refuse, revoke, expire, or invalidate invite links or import flows at any time for security, abuse, legal, policy, or operational reasons.
 
 ## 10. Privacy, Sensitive Information, and HIPAA
 
@@ -217,7 +217,7 @@ If you purchased through an app store, marketplace, or reseller, that third part
 
 We may modify, update, suspend, or discontinue all or part of the Hosted Service at any time.
 
-We do not guarantee that any feature, model provider, Connected Service, wearable integration, channel, share flow, or import or export pathway will remain available.
+We do not guarantee that any feature, model provider, Connected Service, wearable integration, channel, invite flow, or import or export pathway will remain available.
 
 We will use commercially reasonable efforts to provide support, but these Terms do **not** entitle you to any guaranteed level of support, uptime, response time, availability, or turnaround time.
 
@@ -238,7 +238,7 @@ You may not use the Hosted Service to, or help others to:
 7. send spam, scams, or unsolicited commercial communications through Murph channels or integrations;
 8. use Murph for emergency triage, clinical decision support, medication-dosing decisions, or other high-risk uses where inaccurate or delayed output could reasonably cause death, bodily injury, or significant property damage;
 9. use Murph to make decisions about another person’s employment, housing, insurance, credit, education, benefits, or legal status;
-10. misuse share links, invite links, or imported content to exfiltrate or expose another person’s information; or
+10. misuse invite links or imported content to exfiltrate or expose another person’s information; or
 11. use the Hosted Service in a way that damages, disables, overburdens, or impairs Murph or other users.
 
 We may investigate suspected violations and take any action we reasonably believe is appropriate, including suspending accounts, revoking sessions, blocking integrations, removing content where permitted, and cooperating with law enforcement or affected third parties.

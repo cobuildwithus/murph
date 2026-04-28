@@ -7,7 +7,6 @@ import {
   parseJoinInvitePreviewStage,
 } from "@/src/components/hosted-onboarding/join-invite-preview";
 import { JoinInviteShell } from "@/src/components/hosted-onboarding/join-invite-shell";
-import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -22,7 +21,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 export default async function JoinInvitePage(input: {
   params: Promise<{ inviteCode: string }>;
-  searchParams: Promise<{ share?: string; preview?: string }>;
+  searchParams: Promise<{ preview?: string }>;
 }) {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
@@ -40,8 +39,6 @@ export default async function JoinInvitePage(input: {
             initialLinkedAccounts={[]}
             inviteCode={decodedInviteCode}
             initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
-            shareCode={null}
-            sharePreview={null}
             preview
           />
         </JoinInviteShell>
@@ -54,14 +51,6 @@ export default async function JoinInvitePage(input: {
     authenticatedMember,
     inviteCode: decodedInviteCode,
   });
-  const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
-  const shareData = shareCode
-    ? await buildHostedSharePageData({
-        authenticatedMember,
-        inviteCode: decodedInviteCode,
-        shareCode,
-      })
-    : null;
 
   return (
     <HostedPhoneCountryCodeBoundary>
@@ -70,8 +59,6 @@ export default async function JoinInvitePage(input: {
           initialLinkedAccounts={linkedAccounts}
           inviteCode={decodedInviteCode}
           initialStatus={initialStatus}
-          shareCode={shareCode}
-          sharePreview={shareData?.share?.preview ?? null}
         />
       </JoinInviteShell>
     </HostedPhoneCountryCodeBoundary>

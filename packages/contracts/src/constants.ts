@@ -22,7 +22,6 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   regimenFrontmatter: "murph.frontmatter.regimen.v1",
   protocolFrontmatter: "murph.frontmatter.protocol.v1",
   sample: "murph.sample.v1",
-  sharePack: "murph.share-pack.v1",
   vault: "murph.vault.v1",
 } as const);
 

@@ -13,8 +13,6 @@ import {
   parseHostedMailboxFetchResponse,
   parseHostedMailboxPayloadFetchResponse,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeShareImportResponse,
-  parseHostedRuntimeSharePayloadFetchResponse,
   parseHostedRuntimeVaultSyncImportResponse,
   parseHostedRuntimeVaultSyncPayloadFetchResponse,
   parseHostedWorkspaceCheckpointResponse,
@@ -27,11 +25,9 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
-  HOSTED_RUNTIME_SHARE_IMPORT_PATH,
   HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
-  buildHostedRuntimeSharePayloadPath,
   buildHostedRuntimeVaultSyncPayloadPath,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -177,12 +173,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport: hostedWebControlTransport,
           }),
           mailboxPort: createHostedWebMailboxPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport: hostedWebControlTransport,
-          }),
-          sharePort: createHostedWebSharePort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,
@@ -650,53 +640,6 @@ function createHostedWebRuntimeLogPort(input: {
   };
 }
 
-function createHostedWebSharePort(input: {
-  boundUserId: string;
-  fetchImpl: typeof fetch;
-  timeoutMs: number;
-  transport: HostedWebControlTransport;
-}) {
-  return {
-    async fetchPayload(
-      request: Parameters<NonNullable<HostedRuntimePlatform["sharePort"]>["fetchPayload"]>[0],
-    ) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        boundUserId: input.boundUserId,
-        description: "Hosted share payload fetch",
-        fetchImpl: input.fetchImpl,
-        method: "GET",
-        path: appendHostedRuntimeRequestIdQuery(
-          buildHostedRuntimeSharePayloadPath(request.shareId),
-          request.requestId,
-          {
-            eventId: request.eventId,
-            ownerUserId: request.ownerUserId,
-          },
-        ),
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
-
-      return parseHostedRuntimeSharePayloadFetchResponse(payload);
-    },
-    async recordImport(
-      request: Parameters<NonNullable<HostedRuntimePlatform["sharePort"]>["recordImport"]>[0],
-    ) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
-        boundUserId: input.boundUserId,
-        description: "Hosted share import record",
-        fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_SHARE_IMPORT_PATH,
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
-
-      return parseHostedRuntimeShareImportResponse(payload);
-    },
-  };
-}
-
 function createHostedWebVaultSyncPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -868,9 +811,6 @@ function createHostedWebControlProxyUrl(path: string): URL {
 
 function createHostedWebControlLogPath(path: string): string {
   const url = new URL(path.replace(/^\/+/u, ""), "https://hosted-runtime.invalid/");
-  if (/^\/api\/internal\/hosted-execution\/share\/[^/]+\/payload$/u.test(url.pathname)) {
-    return "/api/internal/hosted-execution/share/:shareId/payload";
-  }
   if (/^\/api\/internal\/hosted-execution\/vault-sync\/[^/]+\/payload$/u.test(url.pathname)) {
     return "/api/internal/hosted-execution/vault-sync/:sessionId/payload";
   }

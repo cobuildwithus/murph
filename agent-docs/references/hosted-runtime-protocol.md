@@ -16,7 +16,7 @@ The live ownership split is:
   coalescing, container invocation, encrypted object plumbing, and signed
   callback transport.
 - `packages/assistant-runtime` restores the local runtime, imports mailbox
-  rows, runs assistant/device/share/vault-sync work, and checkpoints the
+  rows, runs assistant/device/vault-sync work, and checkpoints the
   resulting workspace.
 
 The final seam is:
@@ -71,7 +71,6 @@ projections. Non-assistant `.runtime/**` paths remain descriptor-gated.
 - `HostedRuntimeLog`
 - runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
 - hosted member identity/routing/billing/email authorization
-- hosted share metadata and share payloads
 - hosted vault-sync sessions and encrypted import payloads
 - hosted device-sync authority
 - hosted AI usage ledger

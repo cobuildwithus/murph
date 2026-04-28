@@ -1257,7 +1257,6 @@ describe("assistant execution context normalization", () => {
 
   it("normalizes hosted context and preserves callable helpers only", () => {
     const issueDeviceConnectLink = vi.fn();
-    const issueShareLink = vi.fn();
     const defaultTarget = createAssistantModelTarget({
       model: "gpt-5.4",
       provider: "openai-compatible",
@@ -1273,7 +1272,6 @@ describe("assistant execution context normalization", () => {
             { label: "bad", provider: "not allowed!" },
           ],
           issueDeviceConnectLink,
-          issueShareLink,
           memberId: " member-1 ",
           stripeCustomerId: " cus_123 ",
           userEnvKeys: [" OPENAI_API_KEY ", "", " CUSTOM_KEY ", "   "],
@@ -1286,7 +1284,6 @@ describe("assistant execution context normalization", () => {
           { label: "Oura", provider: "oura" },
         ],
         issueDeviceConnectLink,
-        issueShareLink,
         memberId: "member-1",
         stripeCustomerId: "cus_123",
         userEnvKeys: ["OPENAI_API_KEY", "CUSTOM_KEY"],

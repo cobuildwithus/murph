@@ -41,7 +41,6 @@ export interface HostedBillingCheckoutInput {
   member?: HostedBillingCheckoutAuthenticatedMember;
   now?: Date;
   prisma?: PrismaClient;
-  shareCode?: string | null;
 }
 
 export interface HostedBillingCheckoutAuthenticatedMember {
@@ -80,10 +79,8 @@ export async function createHostedBillingCheckout(
   const prisma = input.prisma ?? getPrisma();
   const billingPlanCode = input.billingPlanCode ?? getHostedDefaultBillingPlanCode();
   const now = input.now ?? new Date();
-  const shareCode = normalizeNullableString(input.shareCode);
   const timing = startHostedOnboardingTiming("hosted-onboarding.billing.create-checkout", {
     billingPlanCode,
-    shareCodeProvided: Boolean(shareCode),
   });
 
   try {
@@ -160,13 +157,12 @@ export async function createHostedBillingCheckout(
       inviteCode: invite.inviteCode,
       memberId: invite.member.id,
       priceId,
-      shareCode,
       stripeCustomerId: customerId,
       usagePriceId,
       verifiedEmail,
     });
     const checkoutSession = await stripe.checkout.sessions.create({
-      cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, shareCode),
+      cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode),
       client_reference_id: invite.member.id,
       ...(customerId ? { customer: customerId } : {}),
       ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
@@ -180,7 +176,7 @@ export async function createHostedBillingCheckout(
       subscription_data: {
         metadata: checkoutMetadata,
       },
-      success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode, shareCode),
+      success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode),
     }, {
       idempotencyKey: checkoutIdempotencyKey,
     });
@@ -250,12 +246,10 @@ export function buildHostedBillingCheckoutIdempotencyKey(input: {
   inviteCode: string;
   memberId: string;
   priceId: string;
-  shareCode?: string | null;
   stripeCustomerId?: string | null;
   usagePriceId?: string | null;
   verifiedEmail?: string | null;
 }): string {
-  const shareKey = normalizeNullableString(input.shareCode) ?? "direct";
   const customerBindingKey = deriveHostedBillingCheckoutCustomerBindingKey({
     stripeCustomerId: input.stripeCustomerId,
     verifiedEmail: input.verifiedEmail,
@@ -270,7 +264,6 @@ export function buildHostedBillingCheckoutIdempotencyKey(input: {
     input.inviteCode,
     input.billingPlanCode,
     lineItemBindingKey,
-    shareKey,
     customerBindingKey,
   ].join(":");
 }

@@ -48,11 +48,6 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
-        action: "import-vault-share",
-        kind: "vault.share.accepted",
-        lane: "system",
-      },
-      {
         action: "import-vault-sync",
         kind: "vault.sync.import",
         lane: "system",
@@ -85,7 +80,6 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
-    assert.equal(resolveExpectedLaneForHostedMailboxKind("vault.share.accepted"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("vault.sync.import"), "system");
   });
 

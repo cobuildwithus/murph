@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type {
   HostedInviteStatusPayload,
@@ -40,18 +39,12 @@ import {
   resolveJoinInviteTitle,
   shouldAwaitHostedInviteSessionResolution,
 } from "./join-invite-state";
-import {
-  JoinInviteSharePreviewAlert,
-  JoinInviteStageContent,
-} from "./join-invite-sections";
-import { useJoinInviteShareImport } from "./use-join-invite-share-import";
+import { JoinInviteStageContent } from "./join-invite-sections";
 
 interface JoinInviteClientProps {
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
-  shareCode: string | null;
-  sharePreview: HostedSharePreview | null;
   preview?: boolean;
 }
 
@@ -59,8 +52,6 @@ export function JoinInviteClient({
   initialLinkedAccounts,
   initialStatus,
   inviteCode,
-  shareCode,
-  sharePreview,
   preview = false,
 }: JoinInviteClientProps) {
   const [status, setStatus] = useState(initialStatus);
@@ -71,7 +62,7 @@ export function JoinInviteClient({
   const [billingPlanCode, setBillingPlanCode] = useState<HostedBillingPlanCode | null>(
     initialStatus.billing.defaultPlanCode,
   );
-  const [pendingAction, setPendingAction] = useState<"checkout" | "share" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"checkout" | null>(null);
   const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
   const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
 
@@ -80,13 +71,6 @@ export function JoinInviteClient({
     status,
   });
   const checkoutPending = pendingAction === "checkout";
-  const { handleAcceptShare, shareImportState } = useJoinInviteShareImport({
-    inviteCode,
-    onErrorMessage: setErrorMessage,
-    onPendingAction: setPendingAction,
-    shareCode,
-    statusStage: status.stage,
-  });
 
   function applyRefreshedStatus(payload: HostedInviteStatusPayload) {
     setStatus((currentStatus) => resolveJoinInviteStatusFromRefresh({
@@ -159,7 +143,6 @@ export function JoinInviteClient({
       const payload = await requestHostedBillingCheckout({
         billingPlanCode,
         inviteCode,
-        shareCode,
       });
 
       if (payload.alreadyActive) {
@@ -208,23 +191,15 @@ export function JoinInviteClient({
           </Alert>
         ) : null}
 
-        {sharePreview ? (
-          <JoinInviteSharePreviewAlert sharePreview={sharePreview} />
-        ) : null}
-
         <JoinInviteStageContent
           awaitingInviteSessionResolution={awaitingInviteSessionResolution}
           billingPlanCode={billingPlanCode}
           checkoutPending={checkoutPending}
           initialLinkedAccounts={initialLinkedAccounts}
           inviteCode={inviteCode}
-          pendingAction={pendingAction}
-          shareImportState={shareImportState}
-          sharePreview={sharePreview}
           status={status}
           statusRefreshErrorMessage={statusRefreshErrorMessage}
           statusRefreshRetryPending={statusRefreshRetryPending}
-          onAcceptShare={handleAcceptShare}
           onCheckout={startCheckout}
           onSelectBillingPlan={setBillingPlanCode}
           onPhoneVerified={handlePhoneVerified}
@@ -241,7 +216,5 @@ export function JoinInviteClient({
 
 export {
   resolveJoinInviteStatusFromRefresh,
-  resolveJoinInviteShareStateFromAccept,
-  resolveJoinInviteShareStateFromStatus,
   shouldAwaitHostedInviteSessionResolution,
 } from "./join-invite-state";

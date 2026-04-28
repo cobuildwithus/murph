@@ -55,7 +55,6 @@ test("verify-stage success page keeps the copy neutral while sign-in settles", (
       initialStatus: createStatus("verify"),
       inviteCode: "invite-code",
       sessionId: null,
-      shareCode: null,
     }),
   );
 
@@ -71,7 +70,6 @@ test("blocked success page does not pretend setup is still running", () => {
       initialStatus: createStatus("blocked"),
       inviteCode: "invite-code",
       sessionId: null,
-      shareCode: null,
     }),
   );
 
@@ -87,7 +85,6 @@ test("activating success page explains when vault and assistant setup is still r
       initialStatus: createStatus("activating"),
       inviteCode: "invite-code",
       sessionId: null,
-      shareCode: null,
     }),
   );
 
@@ -279,7 +276,6 @@ async function renderJoinInviteSuccessClientForEffects(input?: {
         initialStatus: input?.initialStatus ?? createStatus("checkout"),
         inviteCode: "invite-code",
         sessionId: input?.sessionId ?? "cs_123",
-        shareCode: null,
       }),
     );
   });

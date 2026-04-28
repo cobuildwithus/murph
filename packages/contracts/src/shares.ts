@@ -6,7 +6,6 @@ import {
   CONDITION_CLINICAL_STATUSES,
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
-  CONTRACT_SCHEMA_VERSION,
   FOOD_STATUSES,
   GOAL_HORIZONS,
   GOAL_STATUSES,
@@ -35,7 +34,7 @@ import {
   recipeRelationLinkSchema,
   regimenRelationLinkSchema,
 } from "./relation-links.ts";
-import { isStrictIsoDate, isStrictIsoDateTime } from "./time.ts";
+import { isStrictIsoDate } from "./time.ts";
 
 function withContractMetadata<TSchema extends z.ZodTypeAny>(
   schema: TSchema,
@@ -71,13 +70,6 @@ function isoDateString(): z.ZodType<string> {
     .string()
     .meta({ format: "date" })
     .refine((value) => isStrictIsoDate(value), "Invalid ISO date string.");
-}
-
-function isoDateTimeString(): z.ZodType<string> {
-  return z
-    .string()
-    .meta({ format: "date-time" })
-    .refine((value) => isStrictIsoDateTime(value), "Invalid ISO date-time string.");
 }
 
 function integerSchema(minimum?: number, maximum?: number): z.ZodType<number> {
@@ -149,7 +141,6 @@ function uniqueArray<TSchema extends z.ZodTypeAny>(
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
 const GROUP_PATTERN = "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$";
-const SHARE_ENTITY_REF_PATTERN = "^[a-z][a-z0-9:._-]{1,79}$";
 
 const slugSchema = patternedString(SLUG_PATTERN);
 const allergyIdSchema = patternedString(idPattern(ID_PREFIXES.allergy));
@@ -159,7 +150,6 @@ const conditionIdSchema = patternedString(idPattern(ID_PREFIXES.condition));
 const regimenIdSchema = patternedString(idPattern(ID_PREFIXES.regimen));
 const experimentIdSchema = patternedString(idPattern(ID_PREFIXES.experiment));
 const variantIdSchema = patternedString(idPattern(ID_PREFIXES.variant));
-const shareEntityRefSchema = patternedString(SHARE_ENTITY_REF_PATTERN);
 
 export const attachedRegimenIdsSchema = uniqueArray(regimenIdSchema, {
   maxItems: 32,
@@ -500,150 +490,6 @@ export const regimenUpsertPayloadSchema = withContractMetadata(
   "Murph Regimen Upsert Payload",
 );
 
-export const sharePackFoodPayloadSchema = withContractMetadata(
-  foodUpsertPayloadSchema
-    .omit({
-      attachedRegimenIds: true,
-      foodId: true,
-    })
-    .extend({
-      attachedRegimenRefs: uniqueArray(shareEntityRefSchema, {
-        maxItems: 32,
-        uniqueItems: true,
-      }).optional(),
-    })
-    .strict(),
-  "@murphai/contracts/share-pack-food-payload.schema.json",
-  "Murph Share Pack Food Payload",
-);
-
-export const sharePackRecipePayloadSchema = withContractMetadata(
-  recipeUpsertPayloadSchema.omit({ recipeId: true }).strict(),
-  "@murphai/contracts/share-pack-recipe-payload.schema.json",
-  "Murph Share Pack Recipe Payload",
-);
-
-export const sharePackRegimenPayloadSchema = withContractMetadata(
-  regimenUpsertPayloadSchema.omit({ regimenId: true }).strict(),
-  "@murphai/contracts/share-pack-regimen-payload.schema.json",
-  "Murph Share Pack Regimen Payload",
-);
-
-export const sharePackEntitySchema = withContractMetadata(
-  z.discriminatedUnion("kind", [
-    z
-      .object({
-        kind: z.literal("food"),
-        ref: shareEntityRefSchema,
-        payload: sharePackFoodPayloadSchema,
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal("recipe"),
-        ref: shareEntityRefSchema,
-        payload: sharePackRecipePayloadSchema,
-      })
-      .strict(),
-    z
-      .object({
-        kind: z.literal("regimen"),
-        ref: shareEntityRefSchema,
-        payload: sharePackRegimenPayloadSchema,
-      })
-      .strict(),
-  ]),
-  "@murphai/contracts/share-pack-entity.schema.json",
-  "Murph Share Pack Entity",
-);
-
-export const sharePackSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.sharePack),
-      title: boundedString(1, 160),
-      createdAt: isoDateTimeString().optional(),
-      entities: uniqueArray(sharePackEntitySchema, {
-        minItems: 1,
-        maxItems: 32,
-      }),
-      afterImport: z
-        .object({
-          logMeal: z
-            .object({
-              foodRef: shareEntityRefSchema,
-              occurredAt: isoDateTimeString().optional(),
-              note: boundedString(1, 4000).optional(),
-            })
-            .strict()
-            .optional(),
-        })
-        .strict()
-        .optional(),
-    })
-    .strict()
-    .superRefine((value, context) => {
-      const refs = value.entities.map((entity) => entity.ref);
-      const duplicateRefs = refs.filter((ref, index) => refs.indexOf(ref) !== index);
-
-      if (duplicateRefs.length > 0) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Duplicate share entity refs are not allowed: ${[...new Set(duplicateRefs)].join(", ")}.`,
-          path: ["entities"],
-        });
-      }
-
-      const refKinds = new Map(value.entities.map((entity) => [entity.ref, entity.kind] as const));
-      value.entities.forEach((entity, index) => {
-        if (entity.kind === "food") {
-          for (const [attachedIndex, attachedRef] of (entity.payload.attachedRegimenRefs ?? []).entries()) {
-            const attachedKind = refKinds.get(attachedRef);
-
-            if (!attachedKind) {
-              context.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: `Food entity references unknown regimen ref \"${attachedRef}\".`,
-                path: ["entities", index, "payload", "attachedRegimenRefs", attachedIndex],
-              });
-              continue;
-            }
-
-            if (attachedKind !== "regimen") {
-              context.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: `Food entity refs must target regimen share entities, but \"${attachedRef}\" is a ${attachedKind}.`,
-                path: ["entities", index, "payload", "attachedRegimenRefs", attachedIndex],
-              });
-            }
-          }
-        }
-      });
-
-      const logMealRef = value.afterImport?.logMeal?.foodRef;
-
-      if (logMealRef) {
-        const logMealKind = refKinds.get(logMealRef);
-
-        if (!logMealKind) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `afterImport.logMeal.foodRef references unknown share entity ref \"${logMealRef}\".`,
-            path: ["afterImport", "logMeal", "foodRef"],
-          });
-        } else if (logMealKind !== "food") {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `afterImport.logMeal.foodRef must target a food share entity, but \"${logMealRef}\" is a ${logMealKind}.`,
-            path: ["afterImport", "logMeal", "foodRef"],
-          });
-        }
-      }
-    }),
-  "@murphai/contracts/share-pack.schema.json",
-  "Murph Share Pack",
-);
-
 export type FoodUpsertPayload = z.infer<typeof foodUpsertPayloadSchema>;
 export type RecipeUpsertPayload = z.infer<typeof recipeUpsertPayloadSchema>;
 export type WorkoutFormatUpsertPayload = z.infer<typeof workoutFormatUpsertPayloadSchema>;
@@ -656,8 +502,3 @@ export type FamilyMemberUpsertPayload = z.infer<typeof familyMemberUpsertPayload
 export type FamilyMemberUpsertPatchPayload = z.infer<typeof familyMemberUpsertPatchPayloadSchema>;
 export type GeneticVariantUpsertPayload = z.infer<typeof geneticVariantUpsertPayloadSchema>;
 export type GeneticVariantUpsertPatchPayload = z.infer<typeof geneticVariantUpsertPatchPayloadSchema>;
-export type SharePackFoodPayload = z.infer<typeof sharePackFoodPayloadSchema>;
-export type SharePackRecipePayload = z.infer<typeof sharePackRecipePayloadSchema>;
-export type SharePackRegimenPayload = z.infer<typeof sharePackRegimenPayloadSchema>;
-export type SharePackEntity = z.infer<typeof sharePackEntitySchema>;
-export type SharePack = z.infer<typeof sharePackSchema>;

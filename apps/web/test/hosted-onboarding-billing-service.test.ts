@@ -182,7 +182,6 @@ describe("createHostedBillingCheckout", () => {
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
         prisma: prisma as never,
-        shareCode: "share_123",
       }),
     ).resolves.toEqual({
       alreadyActive: false,
@@ -193,7 +192,7 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        cancel_url: "https://join.example.test/join/invite-code/cancel?share=share_123",
+        cancel_url: "https://join.example.test/join/invite-code/cancel",
         client_reference_id: "member_123",
         customer_email: "member@example.test",
         line_items: [
@@ -212,11 +211,10 @@ describe("createHostedBillingCheckout", () => {
             memberId: "member_123",
           },
         },
-        success_url:
-          "https://join.example.test/join/invite-code/success?session_id={CHECKOUT_SESSION_ID}&share=share_123",
+        success_url: "https://join.example.test/join/invite-code/success?session_id={CHECKOUT_SESSION_ID}",
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:share_123:email:8ba467122dd5",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
       },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
@@ -224,7 +222,7 @@ describe("createHostedBillingCheckout", () => {
     expect(checkoutSessionRequest).not.toHaveProperty("automatic_tax");
     expect(checkoutSessionRequest).not.toHaveProperty("customer_update");
     expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:share_123:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
     });
     expect(consoleInfo).toHaveBeenCalledWith(
       "Hosted onboarding timing.",
@@ -239,7 +237,6 @@ describe("createHostedBillingCheckout", () => {
       expect.objectContaining({
         alreadyActive: false,
         outcome: "completed",
-        shareCodeProvided: true,
         step: "hosted-onboarding.billing.create-checkout",
       }),
     );
@@ -339,7 +336,7 @@ describe("createHostedBillingCheckout", () => {
         customer: "cus_existing",
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:direct:customer:cus_existing",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:cus_existing",
       },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
@@ -367,7 +364,7 @@ describe("createHostedBillingCheckout", () => {
         customer: expect.anything(),
       }),
       {
-        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:direct:customer:none",
+        idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:none",
       },
     );
     const checkoutSessionRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
@@ -391,7 +388,6 @@ describe("createHostedBillingCheckout", () => {
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
         prisma: prisma as never,
-        shareCode: "share_123",
       }),
       createHostedBillingCheckout({
         inviteCode: "invite-code",
@@ -405,7 +401,6 @@ describe("createHostedBillingCheckout", () => {
         member: makeAuthenticatedMember(),
         now: new Date("2026-03-27T12:00:00.000Z"),
         prisma: prisma as never,
-        shareCode: "share_123",
       }),
     ])).resolves.toEqual([
       {
@@ -424,10 +419,10 @@ describe("createHostedBillingCheckout", () => {
 
     expect(firstCall?.[0]).toEqual(secondCall?.[0]);
     expect(firstCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:share_123:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
     });
     expect(secondCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:share_123:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
     });
   });
 
@@ -466,10 +461,10 @@ describe("createHostedBillingCheckout", () => {
     const secondCall = mocks.stripe.checkout.sessions.create.mock.calls[1];
 
     expect(firstCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:direct:customer:none",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:none",
     });
     expect(secondCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:7f85637f3414:direct:customer:none",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:7f85637f3414:customer:none",
     });
   });
 
@@ -503,7 +498,6 @@ describe("createHostedBillingCheckout", () => {
       member: makeAuthenticatedMember(),
       now: new Date("2026-03-27T12:00:00.000Z"),
       prisma: prisma as never,
-      shareCode: "share_123",
     });
 
     await createHostedBillingCheckout({
@@ -518,7 +512,6 @@ describe("createHostedBillingCheckout", () => {
       member: makeAuthenticatedMember(),
       now: new Date("2026-03-27T12:00:05.000Z"),
       prisma: prisma as never,
-      shareCode: "share_123",
     });
 
     const firstCall = mocks.stripe.checkout.sessions.create.mock.calls[0];
@@ -529,14 +522,14 @@ describe("createHostedBillingCheckout", () => {
     });
     expect(firstCall?.[0]).not.toHaveProperty("customer");
     expect(firstCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:share_123:email:8ba467122dd5",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:email:8ba467122dd5",
     });
     expect(secondCall?.[0]).toMatchObject({
       customer: "cus_existing",
     });
     expect(secondCall?.[0]).not.toHaveProperty("customer_email");
     expect(secondCall?.[1]).toEqual({
-      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:share_123:customer:cus_existing",
+      idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:items:30af00ed2fa0:customer:cus_existing",
     });
   });
 });

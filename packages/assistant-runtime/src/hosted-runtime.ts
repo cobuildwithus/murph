@@ -14,7 +14,7 @@ import {
 } from "./hosted-runtime/billing.ts";
 import {
   createHostedAssistantChannelTypingDependencies,
-} from "./hosted-runtime/channel-typing.ts";
+} from "./hosted-runtime/channel-activity.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobInput,
 } from "./hosted-runtime/models.ts";
@@ -84,7 +84,6 @@ export type {
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
-  HostedRuntimeSharePort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeUsageExportPort,
   HostedRuntimeVaultSyncPort,
@@ -111,7 +110,7 @@ export {
 } from "./hosted-runtime/utils.ts";
 export {
   createHostedAssistantChannelTypingDependencies,
-} from "./hosted-runtime/channel-typing.ts";
+} from "./hosted-runtime/channel-activity.ts";
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";

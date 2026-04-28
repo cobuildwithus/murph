@@ -21,7 +21,6 @@ describe("hosted onboarding timing logging", () => {
       checkoutUrl: "https://stripe.example.test/session_123",
       inviteCode: "invite_123",
       nonFiniteNumber: Number.NaN,
-      shareCodeProvided: true,
     });
 
     finishHostedOnboardingTiming(timing, "completed", {
@@ -35,7 +34,6 @@ describe("hosted onboarding timing logging", () => {
       inviteCode: "invite_123",
       memberEmail: "<redacted-email>",
       outcome: "completed",
-      shareCodeProvided: true,
       stage: "checkout",
       step: "hosted-onboarding.route.billing-checkout",
     });

@@ -27,7 +27,6 @@ describe("hosted retention cron route", () => {
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.runHostedRetentionCleanup.mockResolvedValue({
       completedVaultSyncPayloadsDeleted: 1,
-      expiredSharePayloadsDeleted: 2,
       expiredVaultSyncPayloadsDeleted: 3,
       expiredVaultSyncSessionsDeleted: 4,
       expiredVaultSyncSessionsMarked: 5,
@@ -49,7 +48,6 @@ describe("hosted retention cron route", () => {
     await expect(response.json()).resolves.toEqual({
       cleanup: {
         completedVaultSyncPayloadsDeleted: 1,
-        expiredSharePayloadsDeleted: 2,
         expiredVaultSyncPayloadsDeleted: 3,
         expiredVaultSyncSessionsDeleted: 4,
         expiredVaultSyncSessionsMarked: 5,

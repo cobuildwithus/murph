@@ -87,18 +87,10 @@ export function coerceStripeInvoiceSubscriptionId(
   return coerceStripeSubscriptionId(invoice.parent?.subscription_details?.subscription as never);
 }
 
-export function buildStripeSuccessUrl(baseUrl: string, inviteCode: string, shareCode?: string | null): string {
-  const shareParam = shareCode ? `&share=${encodeURIComponent(shareCode)}` : "";
-  return `${baseUrl}/join/${encodeURIComponent(inviteCode)}/success?session_id={CHECKOUT_SESSION_ID}${shareParam}`;
+export function buildStripeSuccessUrl(baseUrl: string, inviteCode: string): string {
+  return `${baseUrl}/join/${encodeURIComponent(inviteCode)}/success?session_id={CHECKOUT_SESSION_ID}`;
 }
 
-export function buildStripeCancelUrl(baseUrl: string, inviteCode: string, shareCode?: string | null): string {
-  const params = new URLSearchParams();
-
-  if (shareCode) {
-    params.set("share", shareCode);
-  }
-
-  const query = params.toString();
-  return `${baseUrl}/join/${encodeURIComponent(inviteCode)}/cancel${query ? `?${query}` : ""}`;
+export function buildStripeCancelUrl(baseUrl: string, inviteCode: string): string {
+  return `${baseUrl}/join/${encodeURIComponent(inviteCode)}/cancel`;
 }

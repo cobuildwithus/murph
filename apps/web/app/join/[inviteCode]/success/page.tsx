@@ -17,12 +17,11 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 export default async function JoinInviteSuccessPage(input: {
   params: Promise<{ inviteCode: string }>;
-  searchParams: Promise<{ session_id?: string; share?: string; preview?: string }>;
+  searchParams: Promise<{ session_id?: string; preview?: string }>;
 }) {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
-  const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
   const sessionId = typeof searchParams.session_id === "string"
     ? decodeURIComponent(searchParams.session_id)
     : null;
@@ -39,7 +38,6 @@ export default async function JoinInviteSuccessPage(input: {
           initialStatus={buildJoinInvitePreviewStatus(previewStage, decodedInviteCode)}
           inviteCode={decodedInviteCode}
           sessionId={null}
-          shareCode={null}
           preview
         />
       </JoinInviteShell>
@@ -58,7 +56,6 @@ export default async function JoinInviteSuccessPage(input: {
         initialStatus={initialStatus}
         inviteCode={decodedInviteCode}
         sessionId={sessionId}
-        shareCode={shareCode}
       />
     </JoinInviteShell>
   );

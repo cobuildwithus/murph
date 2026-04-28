@@ -380,33 +380,6 @@ CREATE TABLE "hosted_stripe_event" (
 );
 
 -- CreateTable
-CREATE TABLE "hosted_share_link" (
-    "id" TEXT NOT NULL,
-    "code_hash" TEXT NOT NULL,
-    "sender_member_id" TEXT NOT NULL,
-    "preview_json" JSONB NOT NULL,
-    "expires_at" TIMESTAMP(3) NOT NULL,
-    "accepted_at" TIMESTAMP(3),
-    "accepted_by_member_id" TEXT,
-    "consumed_at" TIMESTAMP(3),
-    "consumed_by_member_id" TEXT,
-    "last_event_id" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "hosted_share_link_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "hosted_share_payload" (
-    "share_id" TEXT NOT NULL,
-    "payload_schema" TEXT NOT NULL DEFAULT 'murph.hosted-share-payload.v1',
-    "payload_encrypted" TEXT NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMP(3) NOT NULL
-);
-
--- CreateTable
 CREATE TABLE "hosted_vault_sync_session" (
     "id" TEXT NOT NULL,
     "member_id" TEXT NOT NULL,
@@ -749,24 +722,6 @@ CREATE INDEX "hosted_stripe_event_status_next_attempt_at_stripe_created_a_idx" O
 CREATE INDEX "hosted_stripe_event_claim_expires_at_idx" ON "hosted_stripe_event"("claim_expires_at");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_share_link_code_hash_key" ON "hosted_share_link"("code_hash");
-
--- CreateIndex
-CREATE INDEX "hosted_share_link_sender_member_id_created_at_idx" ON "hosted_share_link"("sender_member_id", "created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_share_link_expires_at_idx" ON "hosted_share_link"("expires_at");
-
--- CreateIndex
-CREATE INDEX "hosted_share_link_accepted_by_member_id_accepted_at_idx" ON "hosted_share_link"("accepted_by_member_id", "accepted_at");
-
--- CreateIndex
-CREATE INDEX "hosted_share_link_consumed_by_member_id_consumed_at_idx" ON "hosted_share_link"("consumed_by_member_id", "consumed_at");
-
--- CreateIndex
-CREATE UNIQUE INDEX "hosted_share_payload_share_id_key" ON "hosted_share_payload"("share_id");
-
--- CreateIndex
 CREATE UNIQUE INDEX "hosted_vault_sync_session_pairing_code_hash_key" ON "hosted_vault_sync_session"("pairing_code_hash");
 
 -- CreateIndex
@@ -900,9 +855,6 @@ ALTER TABLE "hosted_ingress_payload" ADD CONSTRAINT "hosted_ingress_payload_ingr
 
 -- AddForeignKey
 ALTER TABLE "hosted_invite" ADD CONSTRAINT "hosted_invite_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "hosted_share_payload" ADD CONSTRAINT "hosted_share_payload_share_id_fkey" FOREIGN KEY ("share_id") REFERENCES "hosted_share_link"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_vault_sync_session" ADD CONSTRAINT "hosted_vault_sync_session_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;

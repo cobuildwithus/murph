@@ -1,5 +1,4 @@
 import type {
-  ImportSharePackIntoVaultResult,
   VaultSyncImportMergeResult,
 } from "@murphai/core";
 import type {
@@ -106,14 +105,11 @@ export interface HostedAssistantDeliveryOutcome {
   targetKind: string | null;
 }
 
-export type HostedShareImportResult = ImportSharePackIntoVaultResult;
 export type HostedVaultSyncImportResult = VaultSyncImportMergeResult;
 
 export interface HostedMailboxEffect {
   conversationMetrics: HostedConversationWakeMetrics | null;
   redactedLogEntries?: HostedExecutionRedactedLogEntry[] | null;
-  shareImportResult: HostedShareImportResult | null;
-  shareImportTitle: string | null;
   vaultSyncImportResult: HostedVaultSyncImportResult | null;
 }
 
@@ -128,7 +124,6 @@ export type HostedMailboxLane =
   | "device-sync"
   | "member-activated"
   | "member-channels-updated"
-  | "vault-share-accepted"
   | "vault-sync-import";
 
 export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {

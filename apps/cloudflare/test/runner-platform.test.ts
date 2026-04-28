@@ -916,20 +916,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
-  it("signs hosted share payload callbacks as the bound runner and carries the owner query", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      fetchedAt: "2026-04-26T00:00:05.000Z",
-      payload: null,
-      unavailable: {
-        code: "not_found",
-        retryable: false,
-      },
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
+  it("does not expose the deleted hosted share web-control port", () => {
+    const fetchMock = vi.fn(async () => new Response("unexpected", { status: 200 }));
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
       HOSTED_WEB_BASE_URL: "https://web.example.test",
     }));
@@ -940,31 +928,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       webControlBaseUrl: "https://web.example.test",
     });
 
-    const result = await platform.sharePort!.fetchPayload({
-      eventId: "event_accepted_123",
-      ownerUserId: "member_sender",
-      requestId: "request_share_1",
-      shareId: "share_123",
-    });
-
-    expect(result.payload).toBeNull();
-    expect(result.unavailable).toEqual({
-      code: "not_found",
-      retryable: false,
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const { init, input: url } = requireFetchCallArgs(fetchMock.mock.calls[0], "share payload fetch");
-    expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&eventId=event_accepted_123&ownerUserId=member_sender",
-    );
-    expect(init?.method).toBe("GET");
-    expect(init?.body).toBeUndefined();
-    const headers = new Headers(init?.headers);
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    expect("sharePort" in platform).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("omits hosted side-input request query strings from structured failure logs", async () => {
+  it("omits hosted vault-sync side-input request query strings from structured failure logs", async () => {
     const fetchMock = vi.fn(async () => new Response("unavailable", {
       headers: {
         "content-type": "text/plain; charset=utf-8",
@@ -981,64 +949,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       webControlBaseUrl: "https://web.example.test",
     });
 
-    await expect(platform.sharePort!.fetchPayload({
-      eventId: "event_accepted_123",
-      ownerUserId: "member_sender",
-      requestId: "request_share_1",
-      shareId: "share_123",
-    })).rejects.toThrow(/Hosted share payload fetch failed with HTTP 503/u);
+    await expect(platform.vaultSyncPort!.fetchPayload({
+      requestId: "request_vault_sync_1",
+      sessionId: "vault_sync_123",
+    })).rejects.toThrow(/Hosted vault-sync payload fetch failed with HTTP 503/u);
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          path: "/api/internal/hosted-execution/share/:shareId/payload",
+          path: "/api/internal/hosted-execution/vault-sync/:sessionId/payload",
         }),
         message: "Hosted runtime control-plane response returned non-OK.",
       }),
     );
   });
 
-  it("carries hosted share owner signing through the worker proxy header", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      fetchedAt: "2026-04-26T00:00:05.000Z",
-      payload: null,
-      unavailable: {
-        code: "not_found",
-        retryable: false,
-      },
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      internalWorkerProxyToken: "runner-proxy-token",
-    });
-
-    const result = await platform.sharePort!.fetchPayload({
-      eventId: "event_accepted_123",
-      ownerUserId: "member_sender",
-      requestId: "request_share_1",
-      shareId: "share_123",
-    });
-
-    expect(result.payload).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(fetchMock.mock.calls[0], "proxied share payload fetch");
-    expect(request.url).toBe(
-      "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&eventId=event_accepted_123&ownerUserId=member_sender",
-    );
-    expect(request.method).toBe("GET");
-    expect(request.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
-      "runner-proxy-token",
-    );
-    expect(request.headers.get("x-hosted-runtime-web-control-user-id")).toBeNull();
-  });
-
-  it("omits hosted side-input identifiers from proxied request failure logs", async () => {
+  it("omits hosted vault-sync side-input identifiers from proxied request failure logs", async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error("network down");
     });
@@ -1048,17 +974,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       internalWorkerProxyToken: "runner-proxy-token",
     });
 
-    await expect(platform.sharePort!.fetchPayload({
-      eventId: "event_accepted_123",
-      ownerUserId: "member_sender",
-      requestId: "request_share_1",
-      shareId: "share_123",
-    })).rejects.toThrow(/Hosted share payload fetch request failed/u);
+    await expect(platform.vaultSyncPort!.fetchPayload({
+      requestId: "request_vault_sync_1",
+      sessionId: "vault_sync_123",
+    })).rejects.toThrow(/Hosted vault-sync payload fetch request failed/u);
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          path: "/api/internal/hosted-execution/share/:shareId/payload",
+          path: "/api/internal/hosted-execution/vault-sync/:sessionId/payload",
         }),
         message: "Hosted runtime upstream request failed.",
       }),

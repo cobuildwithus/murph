@@ -83,13 +83,11 @@ export async function requestHostedOnboardingJson<T>(input: {
 export async function requestHostedBillingCheckout(input: {
   billingPlanCode?: HostedBillingPlanCode | null;
   inviteCode: string;
-  shareCode?: string | null;
 }): Promise<HostedBillingCheckoutResponse> {
   return requestHostedOnboardingJson<HostedBillingCheckoutResponse>({
     payload: {
       ...(input.billingPlanCode ? { billingPlanCode: input.billingPlanCode } : {}),
       inviteCode: input.inviteCode,
-      ...(input.shareCode ? { shareCode: input.shareCode } : {}),
     },
     url: "/api/hosted-onboarding/billing/checkout",
   });

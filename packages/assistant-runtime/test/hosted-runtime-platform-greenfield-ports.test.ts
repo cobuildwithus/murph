@@ -10,7 +10,6 @@ import type {
   HostedMailboxPayload,
   HostedMailboxPayloadFetchRequest,
   HostedRuntimeLogRequest,
-  HostedRuntimeSharePayloadFetchRequest,
   HostedRuntimeVaultSyncPayloadFetchRequest,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceState,
@@ -20,7 +19,6 @@ import type {
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
-  HostedRuntimeSharePort,
   HostedRuntimeVaultSyncPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -35,7 +33,6 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 type HostedRuntimePlatformWithGreenfieldPorts = HostedRuntimePlatform & {
   logPort: HostedRuntimeLogPort;
   mailboxPort: HostedRuntimeMailboxPort;
-  sharePort: HostedRuntimeSharePort;
   vaultSyncPort: HostedRuntimeVaultSyncPort;
   workspacePort: HostedRuntimeWorkspacePort;
 };
@@ -176,44 +173,6 @@ test("hosted runtime platform can write structured logs through an injected fake
   });
 });
 
-test("hosted runtime platform can fetch and record share side inputs through an injected fake port", async () => {
-  const { shareFetchRequests, shareImportRequests, platform } = createFakeHostedRuntimePlatform();
-  const fetchRequest = {
-    eventId: "event_synthetic_share_001",
-    ownerUserId: TEST_USER_ID,
-    requestId: "request_synthetic_share_001",
-    shareId: "share_synthetic_001",
-  } satisfies HostedRuntimeSharePayloadFetchRequest;
-
-  const fetchResponse = await platform.sharePort.fetchPayload(fetchRequest);
-
-  assert.deepEqual(shareFetchRequests, [fetchRequest]);
-  assert.deepEqual(fetchResponse, {
-    fetchedAt: TEST_NOW,
-    payload: null,
-    unavailable: {
-      code: "not_found",
-      retryable: false,
-    },
-  });
-
-  const importRequest = {
-    eventId: "event_synthetic_share_001",
-    importedAt: TEST_NOW,
-    ownerUserId: TEST_USER_ID,
-    shareId: "share_synthetic_001",
-    status: "skipped",
-  } as const;
-  const importResponse = await platform.sharePort.recordImport(importRequest);
-
-  assert.deepEqual(shareImportRequests, [importRequest]);
-  assert.deepEqual(importResponse, {
-    recorded: true,
-    shareId: "share_synthetic_001",
-    status: "skipped",
-  });
-});
-
 test("hosted runtime platform can fetch and record vault-sync side inputs through an injected fake port", async () => {
   const { platform, vaultSyncFetchRequests, vaultSyncImportRequests } =
     createFakeHostedRuntimePlatform();
@@ -267,8 +226,6 @@ function createFakeHostedRuntimePlatform(input: {
   mailboxFetchRequests: HostedMailboxFetchRequest[];
   mailboxPayloadFetchRequests: HostedMailboxPayloadFetchRequest[];
   platform: HostedRuntimePlatformWithGreenfieldPorts;
-  shareFetchRequests: HostedRuntimeSharePayloadFetchRequest[];
-  shareImportRequests: Parameters<HostedRuntimeSharePort["recordImport"]>[0][];
   vaultSyncFetchRequests: HostedRuntimeVaultSyncPayloadFetchRequest[];
   vaultSyncImportRequests: Parameters<HostedRuntimeVaultSyncPort["recordImport"]>[0][];
 } {
@@ -279,8 +236,6 @@ function createFakeHostedRuntimePlatform(input: {
   const mailboxPayloadFetchRequests: HostedMailboxPayloadFetchRequest[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const logRequests: HostedRuntimeLogRequest[] = [];
-  const shareFetchRequests: HostedRuntimeSharePayloadFetchRequest[] = [];
-  const shareImportRequests: Parameters<HostedRuntimeSharePort["recordImport"]>[0][] = [];
   const vaultSyncFetchRequests: HostedRuntimeVaultSyncPayloadFetchRequest[] = [];
   const vaultSyncImportRequests: Parameters<HostedRuntimeVaultSyncPort["recordImport"]>[0][] = [];
   let workspace = input.workspace ?? createWorkspaceState();
@@ -326,27 +281,6 @@ function createFakeHostedRuntimePlatform(input: {
           payload: mailboxPayloads.find((payload) =>
             payload.mailboxItemId === request.mailboxItemId
           ) ?? null,
-        };
-      },
-    },
-    sharePort: {
-      async fetchPayload(request) {
-        shareFetchRequests.push(request);
-        return {
-          fetchedAt: TEST_NOW,
-          payload: null,
-          unavailable: {
-            code: "not_found",
-            retryable: false,
-          },
-        };
-      },
-      async recordImport(request) {
-        shareImportRequests.push(request);
-        return {
-          recorded: true,
-          shareId: request.shareId,
-          status: request.status,
         };
       },
     },
@@ -407,8 +341,6 @@ function createFakeHostedRuntimePlatform(input: {
     mailboxFetchRequests,
     mailboxPayloadFetchRequests,
     platform,
-    shareFetchRequests,
-    shareImportRequests,
     vaultSyncFetchRequests,
     vaultSyncImportRequests,
   };

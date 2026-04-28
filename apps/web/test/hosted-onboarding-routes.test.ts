@@ -864,48 +864,6 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("forwards share state through the hosted billing checkout route when present", async () => {
-    mocks.requireHostedInviteCodeFromRequest.mockResolvedValue({
-      body: {
-        inviteCode: "invite-code",
-        shareCode: "share_123",
-      },
-      inviteCode: "invite-code",
-    });
-    const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
-      body: JSON.stringify({
-        inviteCode: "invite-code",
-        shareCode: "share_123",
-      }),
-      headers: SAME_ORIGIN_HEADERS,
-      method: "POST",
-    });
-
-    const response = await billingCheckoutRoute.POST(request);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(request);
-    expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
-      inviteCode: "invite-code",
-      linkedAccounts: [
-        {
-          address: "user@example.com",
-          type: "email",
-        },
-      ],
-      member: {
-        id: "member_123",
-        suspendedAt: null,
-      },
-      shareCode: "share_123",
-    });
-    await expect(response.json()).resolves.toEqual({
-      alreadyActive: false,
-      url: "https://billing.example.test/session_123",
-    });
-  });
-
   it("logs sanitized development diagnostics for unexpected hosted billing checkout failures", async () => {
     setHostedOnboardingTestNodeEnv("development");
 

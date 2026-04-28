@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os'
 import { test as baseTest, vi } from 'vitest'
 import {
   initializeVault,
-  upsertFood,
-  upsertRegimen,
 } from '@murphai/core'
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import { writeAssistantChatResultArtifacts } from '@murphai/assistant-engine/assistant/automation/artifacts'
@@ -1951,201 +1949,23 @@ test('createDefaultAssistantToolCatalog food importJson writes payload files and
   }
 })
 
-test('createDefaultAssistantToolCatalog share-link tool exports attached protocols through the injected hosted capability', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-'))
-  let recordedRequest:
-    | {
-        expiresInHours?: number
-        inviteCode?: string
-        pack: Record<string, unknown>
-        recipientPhoneNumber?: string
-      }
-    | undefined
-
-  try {
-    await initializeVault({ vaultRoot })
-    const creatine = await upsertRegimen({
-      vaultRoot,
-      title: 'Creatine monohydrate',
-      kind: 'supplement',
-      group: 'supplement',
-      startedOn: '2026-03-01',
-      schedule: 'daily',
-    })
-    await upsertFood({
-      vaultRoot,
-      title: 'Morning Smoothie',
-      kind: 'smoothie',
-      attachedRegimenIds: [creatine.record.entity.regimenId],
-    })
-
-    const catalog = createDefaultAssistantToolCatalog(
-      {
-        executionContext: {
-          hosted: {
-            issueShareLink: async (input) => {
-              recordedRequest = input as typeof recordedRequest
-              return {
-                shareCode: 'share_123',
-                shareUrl: 'https://share.example.test/share/share_123',
-                url: 'https://share.example.test/share/share_123',
-              }
-            },
-            memberId: 'member_123',
-            userEnvKeys: ['OPENAI_API_KEY'],
-          },
+test('createDefaultAssistantToolCatalog does not expose removed share-link tooling in hosted context', () => {
+  const catalog = createDefaultAssistantToolCatalog(
+    {
+      executionContext: {
+        hosted: {
+          memberId: 'member_123',
+          userEnvKeys: ['OPENAI_API_KEY'],
         },
-        requestId: 'req_share',
-        vault: vaultRoot,
-        vaultServices: createStubVaultServices(),
       },
-      { includeQueryTools: false },
-    )
+      requestId: 'req_share_removed',
+      vault: path.join(tmpdir(), 'murph-share-link-removed'),
+      vaultServices: createStubVaultServices(),
+    },
+    { includeQueryTools: false },
+  )
 
-    assert.equal(catalog.hasTool('vault.share.createLink'), true)
-
-    const results = await catalog.executeCalls({
-      calls: [
-        {
-          tool: 'vault.share.createLink',
-          input: {
-            foods: [{ slug: 'morning-smoothie' }],
-            includeAttachedRegimens: true,
-            logMeal: {
-              food: { slug: 'morning-smoothie' },
-            },
-          },
-        },
-      ],
-      mode: 'apply',
-    })
-
-    assert.equal(results[0]?.status, 'succeeded')
-    assert.equal((recordedRequest?.pack as { title?: string })?.title, 'Morning Smoothie')
-    assert.equal(
-      Array.isArray((recordedRequest?.pack as { entities?: unknown[] })?.entities),
-      true,
-    )
-    assert.equal(
-      ((recordedRequest?.pack as {
-        entities?: Array<{ kind: string; payload?: { attachedRegimenRefs?: string[] } }>
-      })?.entities ?? []).some(
-        (entity) =>
-          entity.kind === 'food'
-          && Array.isArray(entity.payload?.attachedRegimenRefs)
-          && entity.payload.attachedRegimenRefs.length === 1,
-      ),
-      true,
-    )
-    assert.deepEqual(results[0]?.result, {
-      shareCode: 'share_123',
-      shareUrl: 'https://share.example.test/share/share_123',
-      url: 'https://share.example.test/share/share_123',
-    })
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test('createDefaultAssistantToolCatalog only exposes the share-link tool when a hosted share capability is injected', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-hosted-'))
-
-  try {
-    await initializeVault({ vaultRoot })
-    await upsertFood({
-      vaultRoot,
-      title: 'Morning Smoothie',
-      kind: 'smoothie',
-    })
-
-    const catalog = createDefaultAssistantToolCatalog(
-      {
-        executionContext: {
-          hosted: {
-            memberId: 'member_123',
-            userEnvKeys: ['OPENAI_API_KEY'],
-          },
-        },
-        requestId: 'req_share_hosted',
-        vault: vaultRoot,
-        vaultServices: createStubVaultServices(),
-      },
-      { includeQueryTools: false },
-    )
-    const hostedCatalog = createDefaultAssistantToolCatalog(
-      {
-        executionContext: {
-          hosted: {
-            issueShareLink: async () => ({
-              shareCode: 'share_456',
-              shareUrl: 'https://share.example.test/share/share_456',
-              url: 'https://share.example.test/share/share_456',
-            }),
-            memberId: 'member_123',
-            userEnvKeys: ['OPENAI_API_KEY'],
-          },
-        },
-        requestId: 'req_share_hosted_capability',
-        vault: vaultRoot,
-        vaultServices: createStubVaultServices(),
-      },
-      { includeQueryTools: false },
-    )
-
-    assert.equal(catalog.hasTool('vault.share.createLink'), false)
-    assert.equal(hostedCatalog.hasTool('vault.share.createLink'), true)
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test('createDefaultAssistantToolCatalog share-link tool surfaces injected hosted capability errors', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-error-'))
-
-  try {
-    await initializeVault({ vaultRoot })
-    await upsertFood({
-      vaultRoot,
-      title: 'Morning Smoothie',
-      kind: 'smoothie',
-    })
-
-    const catalog = createDefaultAssistantToolCatalog(
-      {
-        executionContext: {
-          hosted: {
-            issueShareLink: async () => {
-              throw new Error('Hosted share link creation failed upstream.')
-            },
-            memberId: 'member_123',
-            userEnvKeys: ['OPENAI_API_KEY'],
-          },
-        },
-        requestId: 'req_share_error',
-        vault: vaultRoot,
-        vaultServices: createStubVaultServices(),
-      },
-      { includeQueryTools: false },
-    )
-
-    const results = await catalog.executeCalls({
-      calls: [
-        {
-          tool: 'vault.share.createLink',
-          input: {
-            foods: [{ slug: 'morning-smoothie' }],
-          },
-        },
-      ],
-      mode: 'apply',
-    })
-
-    assert.equal(results[0]?.status, 'failed')
-    assert.equal(results[0]?.errorCode, 'ASSISTANT_TOOL_EXECUTION_FAILED')
-    assert.match(results[0]?.errorMessage ?? '', /Hosted share link creation failed upstream\./u)
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
+  assert.equal(catalog.hasTool('vault.share.createLink'), false)
 })
 
 test('createDefaultAssistantToolCatalog health import-json tools write payload files and call the goal service with input', async () => {

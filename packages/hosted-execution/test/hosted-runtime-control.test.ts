@@ -15,7 +15,6 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
-  HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA,
   HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
@@ -40,11 +39,6 @@ import {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeShareImportRequest,
-  parseHostedRuntimeShareImportResponse,
-  parseHostedRuntimeSharePayload,
-  parseHostedRuntimeSharePayloadFetchRequest,
-  parseHostedRuntimeSharePayloadFetchResponse,
   parseHostedRuntimeUsageExportRequest,
   parseHostedRuntimeUsageExportResponse,
   parseHostedRuntimeWebStatusResponse,
@@ -61,7 +55,6 @@ import {
   parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceState,
 } from "../src/parsers.ts";
-import { TEST_HOSTED_SHARE_PACK } from "./test-fixtures.ts";
 
 describe("hosted runtime control contracts", () => {
   it("freezes the mailbox lanes, item kinds, checkpoint reasons, and log codes", () => {
@@ -75,7 +68,6 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
-      "vault.share.accepted",
       "vault.sync.import",
     ]);
     expect(HOSTED_WORKSPACE_CHECKPOINT_REASONS).toEqual([
@@ -337,83 +329,6 @@ describe("hosted runtime control contracts", () => {
         retryable: false,
       },
     })).toThrow(/must not include both/u);
-  });
-
-  it("parses share payload fetch and import contracts with contract-owned packs", () => {
-    const payload = {
-      ownerUserId: "member_owner",
-      pack: TEST_HOSTED_SHARE_PACK,
-      payloadSchema: HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA,
-      shareId: "share_123",
-    };
-
-    expect(parseHostedRuntimeSharePayload(payload)).toEqual(payload);
-    expect(parseHostedRuntimeSharePayloadFetchRequest({
-      eventId: "event_accepted_123",
-      ownerUserId: "member_owner",
-      requestId: "share-fetch-1",
-      shareId: "share_123",
-    })).toEqual({
-      eventId: "event_accepted_123",
-      ownerUserId: "member_owner",
-      requestId: "share-fetch-1",
-      shareId: "share_123",
-    });
-    expect(parseHostedRuntimeSharePayloadFetchResponse({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload,
-    })).toEqual({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload,
-    });
-    expect(parseHostedRuntimeSharePayloadFetchResponse({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload: null,
-      unavailable: {
-        code: "expired",
-        retryable: false,
-      },
-    })).toEqual({
-      fetchedAt: "2026-04-26T00:00:02.000Z",
-      payload: null,
-      unavailable: {
-        code: "expired",
-        retryable: false,
-      },
-    });
-    expect(parseHostedRuntimeShareImportRequest({
-      eventId: "event_accepted_123",
-      importedAt: "2026-04-26T00:00:05.000Z",
-      ownerUserId: "member_owner",
-      shareId: "share_123",
-      status: "imported",
-    })).toEqual({
-      eventId: "event_accepted_123",
-      importedAt: "2026-04-26T00:00:05.000Z",
-      ownerUserId: "member_owner",
-      shareId: "share_123",
-      status: "imported",
-    });
-    expect(parseHostedRuntimeShareImportResponse({
-      recorded: true,
-      shareId: "share_123",
-      status: "imported",
-    })).toEqual({
-      recorded: true,
-      shareId: "share_123",
-      status: "imported",
-    });
-    expect(() => parseHostedRuntimeSharePayload({
-      ...payload,
-      payloadSchema: "wrong",
-    })).toThrow(/payloadSchema/u);
-    expect(() => parseHostedRuntimeShareImportRequest({
-      eventId: "event_accepted_123",
-      importedAt: "2026-04-26T00:00:05.000Z",
-      ownerUserId: "member_owner",
-      shareId: "share_123",
-      status: "finalized",
-    })).toThrow(/share import status/u);
   });
 
   it("parses vault-sync payload fetch and sanitized import result contracts", () => {

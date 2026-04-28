@@ -12,7 +12,6 @@ import {
   buildHostedExecutionRuntimeTimerWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
-  buildHostedExecutionVaultShareAcceptedWake,
 } from "../src/builders.ts";
 import {
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
@@ -286,27 +285,6 @@ describe("hosted execution wake builders", () => {
       occurredAt,
       provider: null,
       reason: "connected",
-      userId: "user_123",
-    });
-
-    expect(
-      buildHostedExecutionVaultShareAcceptedWake({
-        eventId: "share-accepted-1",
-        memberId: "user_123",
-        occurredAt,
-        share: {
-          ownerUserId: "owner_123",
-          shareId: "share_123",
-        },
-      }),
-    ).toEqual({
-      eventId: "share-accepted-1",
-      kind: "vault.share.accepted",
-      occurredAt,
-      share: {
-        ownerUserId: "owner_123",
-        shareId: "share_123",
-      },
       userId: "user_123",
     });
   });

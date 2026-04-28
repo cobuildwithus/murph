@@ -5,11 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
-  buildHostedExecutionVaultShareAcceptedWake,
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
-  handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
@@ -46,10 +44,6 @@ vi.mock("@murphai/gateway-local", () => ({
 
 vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
   ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
-}));
-
-vi.mock("../src/hosted-runtime/events/share.ts", () => ({
-  handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
 }));
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
@@ -94,10 +88,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
-  mocks.handleHostedShareAcceptedWake.mockResolvedValue({
-    shareImportResult: null,
-    shareImportTitle: null,
-  });
   mocks.ingestHostedConversationMessageWake.mockResolvedValue({
     nextWakeAt: null,
     parserProcessed: 0,
@@ -141,8 +131,6 @@ describe("hosted runtime event coverage", () => {
       conversationMetrics: null,
       mailboxLane: "member-activated",
       redactedLogEntries: [],
-      shareImportResult: null,
-      shareImportTitle: null,
       vaultSyncImportResult: null,
     });
   });
@@ -169,8 +157,6 @@ describe("hosted runtime event coverage", () => {
       conversationMetrics: null,
       mailboxLane: "device-sync",
       redactedLogEntries: [],
-      shareImportResult: null,
-      shareImportTitle: null,
       vaultSyncImportResult: null,
     });
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith({
@@ -179,56 +165,6 @@ describe("hosted runtime event coverage", () => {
       timeoutMs: null,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake: deviceSyncWake,
-    });
-  });
-
-  it("delegates hydrated share acceptance to the share handler", async () => {
-    mocks.handleHostedShareAcceptedWake.mockResolvedValue({
-      shareImportResult: "imported",
-      shareImportTitle: "Shared export",
-    });
-    const wake = buildHostedExecutionVaultShareAcceptedWake({
-      eventId: "evt_share",
-      memberId: "member_123",
-      occurredAt: "2026-04-08T00:15:00.000Z",
-      share: {
-        ownerUserId: "member_sender",
-        shareId: "share_123",
-      },
-    });
-    const sharePack = {
-      ownerUserId: "member_sender",
-      pack: {
-        createdAt: "2026-04-08T00:15:00.000Z",
-        entities: [],
-        schemaVersion: "murph.share-pack.v1" as const,
-        title: "Shared export",
-      },
-      shareId: "share_123",
-    };
-
-    const result = await executeHostedMailboxEvent({
-      wake,
-      executionContext,
-      runtime: createRuntime(),
-      runtimeEnv: {},
-      sharePack,
-      vaultRoot: "/tmp/assistant-runtime-events-coverage",
-    });
-
-    expect(mocks.handleHostedShareAcceptedWake).toHaveBeenCalledWith({
-      wake,
-      sharePack,
-      vaultRoot: "/tmp/assistant-runtime-events-coverage",
-    });
-    assert.deepEqual(result, {
-      bootstrapResult: null,
-      conversationMetrics: null,
-      mailboxLane: "vault-share-accepted",
-      redactedLogEntries: [],
-      shareImportResult: "imported",
-      shareImportTitle: "Shared export",
-      vaultSyncImportResult: null,
     });
   });
 

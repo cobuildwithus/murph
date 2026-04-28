@@ -166,7 +166,7 @@ export function inferAssistantToolProvenance(name: string): AssistantToolProvena
     }
   }
 
-  if (name === 'vault.share.createLink' || name === 'murph.device.connect') {
+  if (name === 'murph.device.connect') {
     return {
       origin: 'hosted-api-backed',
       localOnly: false,
@@ -249,7 +249,7 @@ function inferAssistantCapabilityMutationSemantics(
     return 'mixed'
   }
 
-  if (name.startsWith('vault.share.') || name.startsWith('murph.device.')) {
+  if (name.startsWith('murph.device.')) {
     return 'outward-side-effect'
   }
 

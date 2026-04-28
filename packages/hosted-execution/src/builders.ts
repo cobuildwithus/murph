@@ -16,8 +16,6 @@ import type {
   HostedExecutionTelegramMessage,
   HostedExecutionTelegramConversationMessagePayload,
   HostedRuntimeTimerTriggerKind,
-  HostedExecutionVaultShareAcceptedEvent,
-  HostedExecutionVaultShareAcceptedWake,
   HostedExecutionVaultSyncImportEvent,
   HostedExecutionVaultSyncImportWake,
 } from "./contracts.ts";
@@ -75,7 +73,6 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
-  | HostedExecutionVaultShareAcceptedWake
   | HostedExecutionVaultSyncImportWake;
 
 function buildHostedExecutionMemberOwnedWakeBase<
@@ -308,23 +305,6 @@ export function buildHostedExecutionDeviceSyncWake(input: {
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     reason: input.reason,
     userId: input.userId,
-  };
-}
-
-export function buildHostedExecutionVaultShareAcceptedWake(input: {
-  eventId: string;
-  memberId: string;
-  occurredAt: string;
-  share: HostedExecutionVaultShareAcceptedEvent["share"];
-}): HostedExecutionVaultShareAcceptedWake {
-  return {
-    ...buildHostedExecutionMemberOwnedWakeBase({
-      eventId: input.eventId,
-      kind: "vault.share.accepted",
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
-    }),
-    share: input.share,
   };
 }
 

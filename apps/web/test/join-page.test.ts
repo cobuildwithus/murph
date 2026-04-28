@@ -7,7 +7,6 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   buildHostedInvitePageData: vi.fn(),
-  buildHostedSharePageData: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
 }));
 
@@ -15,22 +14,15 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
   JoinInviteClient(input: {
     initialStatus: unknown;
     inviteCode: string;
-    shareCode: string | null;
-    sharePreview: unknown;
   }) {
     return createElement(
       "div",
       {
         "data-invite-code": input.inviteCode,
-        "data-share-code": input.shareCode ?? "",
       },
       "Join invite client",
     );
   },
-}));
-
-vi.mock("@/src/lib/hosted-share/service", () => ({
-  buildHostedSharePageData: mocks.buildHostedSharePageData,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
@@ -100,29 +92,15 @@ beforeEach(() => {
     },
     stage: "verify",
   });
-  mocks.buildHostedSharePageData.mockResolvedValue({
-    share: {
-      preview: {
-        kinds: ["regimen"],
-        counts: {
-          foods: 0,
-          recipes: 0,
-          regimens: 1,
-          total: 1,
-        },
-        logMealAfterImport: false,
-      },
-    },
-  });
 });
 
-test("JoinInvitePage passes invite status and share data into the client tree", async () => {
+test("JoinInvitePage passes invite status into the client tree without legacy share state", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
 
   const markup = renderToStaticMarkup(
     await JoinInvitePage({
       params: Promise.resolve({ inviteCode: "invite-code" }),
-      searchParams: Promise.resolve({ share: "share-code" }),
+      searchParams: Promise.resolve({}),
     }),
   );
 
@@ -136,20 +114,9 @@ test("JoinInvitePage passes invite status and share data into the client tree", 
     },
     inviteCode: "invite-code",
   });
-  expect(mocks.buildHostedSharePageData).toHaveBeenCalledWith({
-    authenticatedMember: {
-      billingStatus: "active",
-      createdAt: new Date("2025-03-27T08:00:00.000Z"),
-      id: "member_123",
-      suspendedAt: null,
-      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
-    },
-    inviteCode: "invite-code",
-    shareCode: "share-code",
-  });
   assert.match(markup, /data-phone-country-code="GB"/);
   assert.match(markup, /data-invite-code="invite-code"/);
-  assert.match(markup, /data-share-code="share-code"/);
+  assert.doesNotMatch(markup, /data-share-code/);
 });
 
 test("JoinInvitePage keeps route copy and inherits the shared Open Graph image", async () => {
@@ -224,4 +191,16 @@ test("JoinInviteCancelPage keeps the shared preview image and pause copy", async
       height: 630,
     }),
   ]);
+});
+
+test("JoinInviteCancelPage returns to the invite without legacy share state", async () => {
+  const { default: JoinInviteCancelPage } = await import("../app/join/[inviteCode]/cancel/page");
+  const input = {
+    params: Promise.resolve({ inviteCode: "invite-code" }),
+  };
+
+  const markup = renderToStaticMarkup(await JoinInviteCancelPage(input));
+
+  assert.match(markup, /href="\/join\/invite-code"/);
+  assert.doesNotMatch(markup, /\?share=/);
 });

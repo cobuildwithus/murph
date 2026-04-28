@@ -484,16 +484,16 @@ describe('model harness runtime helpers', () => {
       name: 'vault.cli.run',
     })
     const hostedCapability = defineAssistantCapability({
-      description: 'Create a share link.',
+      description: 'Create a hosted device connection link.',
       executionBindings: {
-        'native-local': async ({ captureId }: { captureId: string }) => ({
-          captureId,
+        'native-local': async ({ provider }: { provider: string }) => ({
+          provider,
         }),
       },
       inputSchema: z.object({
-        captureId: z.string(),
+        provider: z.string(),
       }),
-      name: 'vault.share.createLink',
+      name: 'murph.device.connect',
     })
     const webCapability = defineAssistantCapability({
       description: 'Read a web page.',

@@ -568,7 +568,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("routes Telegram deliveries through the shared Telegram runtime with platform-backed env", async () => {
+  it("routes Telegram deliveries through the shared Telegram runtime with Telegram-only env", async () => {
     const effect = createEffect();
     mocks.sendTelegramMessage.mockResolvedValueOnce({
       providerMessageId: "provider_123",
@@ -594,6 +594,7 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
       forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
         OPENAI_API_KEY: "sk-runtime",
       },
       platformEnv: {
@@ -613,7 +614,6 @@ describe("hosted runtime callbacks", () => {
       target: "chat_123",
     }, {
       env: {
-        OPENAI_API_KEY: "sk-runtime",
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",

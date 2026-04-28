@@ -1,8 +1,4 @@
 import {
-  assertContract,
-  sharePackSchema,
-} from "@murphai/contracts";
-import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncWakeHint,
@@ -13,8 +9,6 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
-  HOSTED_RUNTIME_SHARE_IMPORT_STATUSES,
-  HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_VAULT_SYNC_IMPORT_STATUSES,
   HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA,
@@ -57,12 +51,6 @@ import {
   type HostedRuntimeRedactedScalar,
   type HostedRuntimeRedactedValue,
   type HostedRuntimeWebStatusResponse,
-  type HostedRuntimeShareImportRequest,
-  type HostedRuntimeShareImportResponse,
-  type HostedRuntimeShareImportStatus,
-  type HostedRuntimeSharePayload,
-  type HostedRuntimeSharePayloadFetchRequest,
-  type HostedRuntimeSharePayloadFetchResponse,
   type HostedRuntimeSideInputUnavailable,
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageExportRequest,
@@ -303,100 +291,6 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
-  };
-}
-
-export function parseHostedRuntimeSharePayload(value: unknown): HostedRuntimeSharePayload {
-  const record = requireObject(value, "Hosted runtime share payload");
-  const payloadSchema = requireString(record.payloadSchema, "Hosted runtime share payload payloadSchema");
-
-  if (payloadSchema !== HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA) {
-    throw new TypeError(
-      `Hosted runtime share payload payloadSchema must be ${HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA}.`,
-    );
-  }
-
-  return {
-    ownerUserId: requireString(record.ownerUserId, "Hosted runtime share payload ownerUserId"),
-    pack: assertContract(sharePackSchema, record.pack, "hosted runtime share pack"),
-    payloadSchema,
-    shareId: requireString(record.shareId, "Hosted runtime share payload shareId"),
-  };
-}
-
-export function parseHostedRuntimeSharePayloadFetchRequest(
-  value: unknown,
-): HostedRuntimeSharePayloadFetchRequest {
-  const record = requireObject(value, "Hosted runtime share payload fetch request");
-
-  return {
-    eventId: requireString(record.eventId, "Hosted runtime share payload fetch request eventId"),
-    ownerUserId: requireString(
-      record.ownerUserId,
-      "Hosted runtime share payload fetch request ownerUserId",
-    ),
-    requestId: requireString(record.requestId, "Hosted runtime share payload fetch request requestId"),
-    shareId: requireString(record.shareId, "Hosted runtime share payload fetch request shareId"),
-  };
-}
-
-export function parseHostedRuntimeSharePayloadFetchResponse(
-  value: unknown,
-): HostedRuntimeSharePayloadFetchResponse {
-  const record = requireObject(value, "Hosted runtime share payload fetch response");
-  const payload = record.payload === null ? null : parseHostedRuntimeSharePayload(record.payload);
-  const unavailable = parseOptionalHostedRuntimeSideInputUnavailable(
-    record.unavailable,
-    "Hosted runtime share payload fetch response unavailable",
-  );
-
-  assertPayloadOrUnavailable(
-    payload,
-    unavailable,
-    "Hosted runtime share payload fetch response",
-  );
-
-  return {
-    fetchedAt: requireString(
-      record.fetchedAt,
-      "Hosted runtime share payload fetch response fetchedAt",
-    ),
-    payload,
-    ...(record.unavailable === undefined ? {} : { unavailable }),
-  };
-}
-
-export function parseHostedRuntimeShareImportRequest(
-  value: unknown,
-): HostedRuntimeShareImportRequest {
-  const record = requireObject(value, "Hosted runtime share import request");
-
-  return {
-    ...(record.errorCode === undefined
-      ? {}
-      : {
-          errorCode: readNullableString(
-            record.errorCode,
-            "Hosted runtime share import request errorCode",
-          ),
-        }),
-    eventId: requireString(record.eventId, "Hosted runtime share import request eventId"),
-    importedAt: requireString(record.importedAt, "Hosted runtime share import request importedAt"),
-    ownerUserId: requireString(record.ownerUserId, "Hosted runtime share import request ownerUserId"),
-    shareId: requireString(record.shareId, "Hosted runtime share import request shareId"),
-    status: parseHostedRuntimeShareImportStatus(record.status),
-  };
-}
-
-export function parseHostedRuntimeShareImportResponse(
-  value: unknown,
-): HostedRuntimeShareImportResponse {
-  const record = requireObject(value, "Hosted runtime share import response");
-
-  return {
-    recorded: requireBoolean(record.recorded, "Hosted runtime share import response recorded"),
-    shareId: requireString(record.shareId, "Hosted runtime share import response shareId"),
-    status: parseHostedRuntimeShareImportStatus(record.status),
   };
 }
 
@@ -1169,14 +1063,6 @@ function parseHostedRuntimeSideInputUnavailableCode(
     value,
     "Hosted runtime side-input unavailable code",
     HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
-  );
-}
-
-function parseHostedRuntimeShareImportStatus(value: unknown): HostedRuntimeShareImportStatus {
-  return parseAllowedString(
-    value,
-    "Hosted runtime share import status",
-    HOSTED_RUNTIME_SHARE_IMPORT_STATUSES,
   );
 }
 

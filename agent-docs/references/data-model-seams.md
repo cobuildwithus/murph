@@ -505,7 +505,7 @@ Contracts own the canonical `bank/preferences.json` document contract, core owns
 
 #### D. Keep hosted execution event, builder, and parser ownership in `@murphai/hosted-execution`
 
-**Seam:** `packages/hosted-execution/src/contracts.ts` (`HostedExecutionEvent`, `HostedExecutionDispatchRequest`), `packages/hosted-execution/src/builders.ts`, `packages/hosted-execution/src/parsers.ts`, `apps/web/src/lib/hosted-onboarding/member-activation.ts`, `apps/web/src/lib/hosted-share/shared.ts`, `apps/web/src/lib/device-sync/hosted-dispatch.ts`, `packages/assistant-runtime/src/hosted-runtime/events.ts`
+**Seam:** `packages/hosted-execution/src/contracts.ts` (`HostedExecutionEvent`, `HostedExecutionDispatchRequest`), `packages/hosted-execution/src/builders.ts`, `packages/hosted-execution/src/parsers.ts`, `apps/web/src/lib/hosted-onboarding/member-activation.ts`, `apps/web/src/lib/device-sync/hosted-dispatch.ts`, `packages/assistant-runtime/src/hosted-runtime/events.ts`
 
 This is another seam that is already simple enough.
 The hosted-execution package owns the event kind vocabulary, the request shape, the shared builders, and the boundary parsers.

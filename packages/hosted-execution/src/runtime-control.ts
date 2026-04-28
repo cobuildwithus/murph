@@ -11,9 +11,6 @@ import type {
   AssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 import type {
-  SharePack,
-} from "@murphai/contracts";
-import type {
   HostedBrowserVaultReplicaCursorRef,
 } from "./contracts.ts";
 
@@ -30,7 +27,6 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
-  "vault.share.accepted",
   "vault.sync.import",
 ] as const;
 
@@ -38,7 +34,6 @@ export type HostedMailboxKind = (typeof HOSTED_MAILBOX_KINDS)[number];
 
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";
 export const HOSTED_MAILBOX_PAYLOAD_SCHEMA = "murph.hosted-mailbox-payload.v1";
-export const HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA = "murph.hosted-share-payload.v1";
 export const HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_SCHEMA =
   "murph.hosted-vault-sync-payload.v1";
 
@@ -122,50 +117,6 @@ export interface HostedMailboxFetchResponse {
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
   userId: string;
-}
-
-export interface HostedRuntimeSharePayload {
-  ownerUserId: string;
-  pack: SharePack;
-  payloadSchema: typeof HOSTED_RUNTIME_SHARE_PAYLOAD_SCHEMA;
-  shareId: string;
-}
-
-export interface HostedRuntimeSharePayloadFetchRequest {
-  eventId: string;
-  ownerUserId: string;
-  requestId: string;
-  shareId: string;
-}
-
-export interface HostedRuntimeSharePayloadFetchResponse {
-  fetchedAt: string;
-  payload: HostedRuntimeSharePayload | null;
-  unavailable?: HostedRuntimeSideInputUnavailable | null;
-}
-
-export const HOSTED_RUNTIME_SHARE_IMPORT_STATUSES = [
-  "imported",
-  "quarantined",
-  "skipped",
-] as const;
-
-export type HostedRuntimeShareImportStatus =
-  (typeof HOSTED_RUNTIME_SHARE_IMPORT_STATUSES)[number];
-
-export interface HostedRuntimeShareImportRequest {
-  errorCode?: string | null;
-  eventId: string;
-  importedAt: string;
-  ownerUserId: string;
-  shareId: string;
-  status: HostedRuntimeShareImportStatus;
-}
-
-export interface HostedRuntimeShareImportResponse {
-  recorded: boolean;
-  shareId: string;
-  status: HostedRuntimeShareImportStatus;
 }
 
 export interface HostedRuntimeVaultSyncImportPayload {
@@ -340,7 +291,6 @@ export const HOSTED_RUNTIME_LOG_COMPONENTS = [
   "outbox",
   "runner",
   "runtime",
-  "share",
   "vault-sync",
   "workspace",
 ] as const;

@@ -17,7 +17,6 @@ import {
   goalUpsertPayloadSchema,
   recipeUpsertPayloadSchema,
   regimenUpsertPayloadSchema,
-  sharePackSchema,
 } from "../src/shares.ts";
 
 describe("memory parse and render coverage", () => {
@@ -238,101 +237,4 @@ describe("shares schema coverage", () => {
     ).toThrow("Expected unique array items.");
   });
 
-  it("validates share-pack ref integrity for duplicates, attached regimens, and afterImport targets", () => {
-    expect(
-      sharePackSchema.parse({
-        schemaVersion: CONTRACT_SCHEMA_VERSION.sharePack,
-        title: "Breakfast pack",
-        createdAt: "2026-04-08T04:00:00.000Z",
-        entities: [
-          {
-            kind: "regimen",
-            ref: "reg:vitamin-d",
-            payload: {
-              title: "Vitamin D",
-            },
-          },
-          {
-            kind: "food",
-            ref: "food:yogurt",
-            payload: {
-              title: "Greek yogurt",
-              attachedRegimenRefs: ["reg:vitamin-d"],
-            },
-          },
-        ],
-        afterImport: {
-          logMeal: {
-            foodRef: "food:yogurt",
-            occurredAt: "2026-04-08T04:05:00.000Z",
-          },
-        },
-      }),
-    ).toMatchObject({
-      afterImport: {
-        logMeal: {
-          foodRef: "food:yogurt",
-          occurredAt: "2026-04-08T04:05:00.000Z",
-        },
-      },
-    });
-
-    expect(() =>
-      sharePackSchema.parse({
-        schemaVersion: CONTRACT_SCHEMA_VERSION.sharePack,
-        title: "Broken pack",
-        entities: [
-          {
-            kind: "food",
-            ref: "food:duplicate",
-            payload: {
-              title: "Yogurt",
-              attachedRegimenRefs: ["reg:missing"],
-            },
-          },
-          {
-            kind: "recipe",
-            ref: "food:duplicate",
-            payload: {
-              title: "Parfait",
-            },
-          },
-        ],
-        afterImport: {
-          logMeal: {
-            foodRef: "food:duplicate",
-          },
-        },
-      }),
-    ).toThrow(/Duplicate share entity refs are not allowed: food:duplicate\./u);
-
-    expect(() =>
-      sharePackSchema.parse({
-        schemaVersion: CONTRACT_SCHEMA_VERSION.sharePack,
-        title: "Wrong targets",
-        entities: [
-          {
-            kind: "recipe",
-            ref: "recipe:breakfast",
-            payload: {
-              title: "Parfait",
-            },
-          },
-          {
-            kind: "food",
-            ref: "food:yogurt",
-            payload: {
-              title: "Greek yogurt",
-              attachedRegimenRefs: ["recipe:breakfast"],
-            },
-          },
-        ],
-        afterImport: {
-          logMeal: {
-            foodRef: "recipe:breakfast",
-          },
-        },
-      }),
-    ).toThrow(/must target regimen share entities|must target a food share entity/u);
-  });
 });

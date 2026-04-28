@@ -100,8 +100,6 @@ describe("handleHostedVaultSyncImportWake", () => {
     });
     assert.deepEqual(result, {
       conversationMetrics: null,
-      shareImportResult: null,
-      shareImportTitle: null,
       vaultSyncImportResult: mergeResult,
     });
   });

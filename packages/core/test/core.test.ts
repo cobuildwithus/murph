@@ -67,6 +67,7 @@ import {
   validateVault,
   VaultError,
 } from "../src/index.ts";
+import * as core from "../src/index.ts";
 import {
   buildVaultMetadata,
   detectVaultMetadataFormatVersion,
@@ -232,6 +233,11 @@ test("core constants stay aligned with canonical contracts constants", () => {
   assert.equal(CORE_AUDIT_ACTORS, CONTRACT_AUDIT_ACTORS);
   assert.equal(CORE_AUDIT_STATUSES, CONTRACT_AUDIT_STATUSES);
   assert.equal(CORE_FILE_CHANGE_OPERATIONS, CONTRACT_FILE_CHANGE_OPERATIONS);
+});
+
+test("core root entrypoint does not expose deleted share-pack helpers", () => {
+  assert.equal("buildSharePackFromVault" in core, false);
+  assert.equal("importSharePackIntoVault" in core, false);
 });
 
 test("initializeVault bootstraps the baseline contract layout and passes validation", async () => {
