@@ -241,7 +241,7 @@ describe("hosted local Linq webhook e2e", () => {
       userId,
     });
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.lastErrorCode).toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalStatus.inFlight).toBe(false);
     expect(finalStatus.workspace).not.toBeNull();

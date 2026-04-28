@@ -47,6 +47,23 @@ describe("runner bundle runtime artifact staging", () => {
     ]);
   });
 
+  it("defaults runner bundle workspace builds to serial package execution", () => {
+    expect(
+      buildHostedRunnerWorkspaceBuildArgs(
+        ["@murphai/contracts", "@murphai/runtime-state"],
+        {},
+      ),
+    ).toEqual([
+      "--workspace-concurrency=1",
+      "--filter",
+      "@murphai/contracts",
+      "--filter",
+      "@murphai/runtime-state",
+      "run",
+      "build",
+    ]);
+  });
+
   it("rejects invalid runner bundle build concurrency", () => {
     expect(() =>
       buildHostedRunnerWorkspaceBuildArgs(["@murphai/contracts"], {

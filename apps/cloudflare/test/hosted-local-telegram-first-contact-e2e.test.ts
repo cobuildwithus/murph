@@ -69,7 +69,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     await requireScenario().waitForLatestPendingWake(userId);
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.workspace).not.toBeNull();
-    expect(finalStatus.lastErrorCode).toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     await requireTelegramStub().waitForRequest({

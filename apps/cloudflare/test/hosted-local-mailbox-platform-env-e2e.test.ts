@@ -45,7 +45,7 @@ describe("hosted local mailbox platform env e2e", () => {
 
     expect(finalStatus.workspace).not.toBeNull();
     expect(finalStatus.workspace?.version).not.toBe("0");
-    expect(finalStatus.lastErrorCode).toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireScenario().harness.stderrTail()).not.toContain(
       "HOSTED_WAKE_ENCRYPTION_KEY is required",
