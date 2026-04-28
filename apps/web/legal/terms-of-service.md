@@ -113,7 +113,7 @@ Murph does not own or control Connected Services and is not responsible for thei
 
 ## 8. User Content and Data Rights
 
-“**User Content**” means information you submit to Murph or authorize Murph to access, including messages, notes, logs, attachments, chats, health-related text, wearable data, imported data, account metadata, and content shared through share or invite features.
+“**User Content**” means information you submit to Murph or authorize Murph to access, including messages, notes, logs, attachments, chats, health-related text, wearable data, imported data, exported data, account metadata, and content disclosed through invite, import, export, or other user-directed features.
 
 As between you and Murph, you retain ownership of your User Content.
 

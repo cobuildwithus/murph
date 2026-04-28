@@ -96,11 +96,12 @@ beforeEach(() => {
 
 test("JoinInvitePage passes invite status into the client tree without legacy share state", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  const legacyShareSearchParams = { preview: undefined, share: "share-code" };
 
   const markup = renderToStaticMarkup(
     await JoinInvitePage({
       params: Promise.resolve({ inviteCode: "invite-code" }),
-      searchParams: Promise.resolve({}),
+      searchParams: Promise.resolve(legacyShareSearchParams),
     }),
   );
 
