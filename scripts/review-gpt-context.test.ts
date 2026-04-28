@@ -22,6 +22,7 @@ function runPackageScript(scriptName: string, outDir: string, name: string) {
   );
 
   expect(result.status, result.stderr || result.stdout).toBe(0);
+  expect(result.stderr).not.toContain("Warning: excluding path from audit package:");
 
   const zipPath = result.stdout.match(/^ZIP: (.*) \(/m)?.[1]?.trim();
   expect(zipPath).toBeTruthy();
