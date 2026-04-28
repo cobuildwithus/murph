@@ -47,14 +47,13 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: {
-    intent?: string;
     showPassiveConsentNotice?: boolean;
     suppressAuthenticatedSessionIssue?: boolean;
   }) {
     return createElement(
       "div",
       {
-        "data-hosted-phone-auth": input.intent ?? "signup",
+        "data-hosted-phone-auth": "mounted",
         "data-hosted-phone-auth-passive-consent":
           input.showPassiveConsentNotice === false ? "hidden" : "shown",
         "data-hosted-phone-auth-suppressed":
@@ -101,7 +100,6 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
 
   const { cleanup, container } = await renderClientComponent(
     createElement(HostedAuthPanel, {
-      intent: "signup",
       methods: ["phone", "telegram", "email"],
       showLegalNotice: true,
     }),
@@ -112,13 +110,13 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
     container.querySelectorAll("button"),
   ) as HTMLButtonElement[];
 
-  expect(container.querySelector('[data-hosted-phone-auth="signup"]')).toBeTruthy();
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth-passive-consent="hidden"]')).toBeTruthy();
   expect(container.querySelector('[data-hosted-phone-auth-suppressed="no"]')).toBeTruthy();
   expect(container.querySelectorAll("[data-privy-captcha]").length).toBe(1);
   expect(telegramButton?.textContent).toContain("Telegram");
   expect(emailButton?.textContent).toContain("Email");
-  expect(container.textContent).toContain("By signing up, you agree to our");
+  expect(container.textContent).toContain("By continuing, you agree to our");
 
   await act(async () => {
     telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));

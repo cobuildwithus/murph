@@ -10,8 +10,7 @@ const mocks = vi.hoisted(() => ({
     (props: {
       authenticated: boolean;
       context: "nav" | "hero" | "footer";
-      showSignIn?: boolean;
-      signupLabel: string;
+      authLabel: string;
     }) =>
       createElement(
         "div",
@@ -20,7 +19,7 @@ const mocks = vi.hoisted(() => ({
             props.authenticated
           ),
           "data-root-landing-auth-actions-context": props.context,
-          "data-root-landing-auth-actions-label": props.signupLabel,
+          "data-root-landing-auth-actions-label": props.authLabel,
         },
         "Landing auth actions"
       )
@@ -73,7 +72,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "nav",
-      signupLabel: "Sign up",
+      authLabel: "Log in or sign up",
     },
     undefined
   );
@@ -82,8 +81,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "hero",
-      showSignIn: false,
-      signupLabel: "See what works for your body",
+      authLabel: "See what works for your body",
     },
     undefined
   );
@@ -92,8 +90,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "footer",
-      showSignIn: false,
-      signupLabel: "Get started",
+      authLabel: "Get started",
     },
     undefined
   );
@@ -102,7 +99,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "footer",
-      signupLabel: "Start your first experiment",
+      authLabel: "Start your first experiment",
     },
     undefined
   );
@@ -117,7 +114,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /class="block text-\[#d4b87a\] lg:whitespace-nowrap">Now let(?:'|&#x27;)s experiment with it\./
   );
-  assert.match(markup, /data-root-landing-auth-actions-label="Sign up"/);
+  assert.match(markup, /data-root-landing-auth-actions-label="Log in or sign up"/);
   assert.match(
     markup,
     /data-root-landing-auth-actions-label="See what works for your body"/
@@ -183,8 +180,7 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
     {
       authenticated: true,
       context: "footer",
-      showSignIn: false,
-      signupLabel: "Open settings",
+      authLabel: "Open settings",
     },
     undefined
   );

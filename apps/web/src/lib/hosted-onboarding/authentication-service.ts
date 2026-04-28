@@ -3,7 +3,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import { type HostedAuthenticationIntent } from "./authentication-intent";
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
@@ -39,7 +38,6 @@ import {
 } from "./invite-service";
 import {
   ensureHostedMemberForPrivyIdentity,
-  requireExistingHostedMemberForPrivyIdentity,
   reconcileHostedPrivyIdentityOnMember,
 } from "./member-identity-service";
 import type { HostedPostVerificationStage } from "./stage";
@@ -47,7 +45,6 @@ import type { HostedPostVerificationStage } from "./stage";
 export async function completeHostedPrivyVerification(input: {
   identity: HostedPrivyIdentity;
   inviteCode?: string | null;
-  intent?: HostedAuthenticationIntent;
   now?: Date;
   prisma?: PrismaClient;
   timeZone?: string | null;
@@ -88,17 +85,11 @@ export async function completeHostedPrivyVerification(input: {
             now,
           });
         })()
-      : input.intent === "signin"
-        ? await requireExistingHostedMemberForPrivyIdentity({
-            identity: input.identity,
-            now,
-            prisma,
-          })
-        : await ensureHostedMemberForPrivyIdentity({
-            identity: input.identity,
-            prisma,
-            now,
-          });
+      : await ensureHostedMemberForPrivyIdentity({
+          identity: input.identity,
+          prisma,
+          now,
+        });
 
     assertHostedMemberNotSuspended(member);
 

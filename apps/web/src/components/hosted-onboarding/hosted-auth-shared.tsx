@@ -1,12 +1,9 @@
 "use client";
 
-import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import { cn } from "@/lib/utils";
 
 const HOSTED_TERMS_URL = "/legal/terms.pdf";
 const HOSTED_PRIVACY_URL = "/legal/privacy.pdf";
-
-export type HostedAuthIntent = HostedAuthenticationIntent;
 
 export function normalizeEmailAddress(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -40,7 +37,7 @@ export function HostedAuthLegalNotice({
 }) {
   return (
     <p className={cn("text-xs leading-relaxed text-stone-500", className)}>
-      By signing up, you agree to our{" "}
+      By continuing, you agree to our{" "}
       <a href={HOSTED_TERMS_URL} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">
         Terms
       </a>{" "}

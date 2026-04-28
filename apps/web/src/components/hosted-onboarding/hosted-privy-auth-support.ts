@@ -1,4 +1,3 @@
-import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
@@ -49,20 +48,17 @@ export async function runHostedPrivyFinalizationAttempt({
 }
 
 export function buildHostedPrivyCompletionRequestPayload(input: {
-  intent: HostedAuthenticationIntent;
   inviteCode?: string | null;
 }): Record<string, string> {
   const timeZone = resolveHostedBrowserTimeZone();
 
   return {
-    intent: input.intent,
     ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
     ...(timeZone ? { timeZone } : {}),
   };
 }
 
 export async function requestHostedPrivyCompletionWithRetry(input: {
-  intent: HostedAuthenticationIntent;
   inviteCode?: string | null;
 }): Promise<HostedPrivyCompletionPayload> {
   let lastError: unknown = null;

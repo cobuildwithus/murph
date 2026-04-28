@@ -21,7 +21,7 @@ interface HostedPhoneAuthProps {
 }
 
 export function HostedPhoneAuth({
-  intent = "signup",
+  intent = "auth",
   onCompleted,
   onLinked,
   onSignOut,
@@ -43,7 +43,6 @@ export function HostedPhoneAuth({
       description={controller.authenticatedSessionDescription}
       disabled={controller.flowDisabled}
       errorMessage={controller.errorMessage}
-      intent={intent}
       pendingAction={controller.pendingAction}
       secondaryActionSize="lg"
       title={controller.authenticatedLoadingTitle}

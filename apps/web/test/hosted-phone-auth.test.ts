@@ -229,7 +229,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /Text me a code/);
-    assert.doesNotMatch(markup, /By signing up, you agree to our/);
+      assert.doesNotMatch(markup, /By continuing, you agree to our/);
   });
 
   it("uses unique phone input ids for separate public auth instances", async () => {
@@ -240,7 +240,7 @@ describe("HostedPhoneAuth", () => {
         React.createElement(HostedPhoneAuth, {
         }),
         React.createElement(HostedPhoneAuth, {
-          intent: "signin",
+          intent: "auth",
         }),
       ),
     );
@@ -266,8 +266,8 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup\./);
-    assert.match(markup, /Continue signup/);
+    assert.match(markup, /You already started logging in or signing up\./);
+    assert.match(markup, /Continue/);
     assert.match(markup, /Use a different number/);
     assert.doesNotMatch(markup, /data-privy-captcha="mounted"/);
     assert.doesNotMatch(markup, /Preparing your account/);
@@ -286,7 +286,6 @@ describe("HostedPhoneAuth", () => {
           description: "Continue or sign out.",
           disabled: false,
           errorMessage: "We could not sign you out cleanly.",
-          intent: "signin",
           pendingAction: null,
           secondaryActionSize: "lg",
           title: "Signing you in...",
@@ -300,9 +299,9 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Unable to continue/);
     assert.match(markup, /We could not sign you out cleanly\./);
-    assert.match(markup, /You already started signing in\./);
+    assert.match(markup, /You already started logging in or signing up\./);
     assert.doesNotMatch(markup, /Keep going with this number/);
-    assert.match(markup, /Continue sign in/);
+    assert.match(markup, /Continue/);
     assert.match(markup, /Use a different number/);
   });
 
@@ -318,7 +317,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /Phone number/);
     assert.match(markup, /Enter the number that received your Murph invite\./);
     assert.match(markup, /Text me a code/);
-    assert.match(markup, /By signing up, you agree to our/);
+    assert.match(markup, /By continuing, you agree to our/);
     assert.match(markup, /data-privy-captcha="mounted"/);
     assert.doesNotMatch(markup, /text a 6-digit code to your phone\./);
     assert.doesNotMatch(markup, /\*\*\* 4567/);
@@ -335,7 +334,7 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "signup",
+        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -367,7 +366,7 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "signup",
+        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -388,7 +387,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Phone number/);
     assert.match(markup, /Text me a code/);
-    assert.match(markup, /By signing up, you agree to our/);
+    assert.match(markup, /By continuing, you agree to our/);
     assert.match(markup, /disabled=""/);
   });
 
@@ -400,7 +399,7 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "signup",
+        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: "Enter the number that received your Murph invite.",
         phoneFieldLabel: "Phone number",
@@ -421,7 +420,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Phone number/);
     assert.match(markup, /Text me a code/);
-    assert.match(markup, /By signing up, you agree to our/);
+    assert.match(markup, /By continuing, you agree to our/);
     assert.doesNotMatch(markup, /disabled=""/);
   });
 
@@ -854,156 +853,11 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup\./);
-    assert.match(markup, /Continue signup/);
+    assert.match(markup, /You already started logging in or signing up\./);
+    assert.match(markup, /Continue/);
     assert.match(markup, /Use a different number/);
     assert.match(markup, /class="[^"]*h-11[^"]*w-full[^"]*"/);
     assert.doesNotMatch(markup, /Preparing your account/);
-  });
-
-  it("shows a direct no-account state after a verified sign-in method misses Murph membership", async () => {
-    vi.resetModules();
-    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", async () => {
-      const actual = await vi.importActual<
-        typeof import("@/src/components/hosted-onboarding/hosted-phone-auth-views")
-      >("@/src/components/hosted-onboarding/hosted-phone-auth-views");
-
-      return {
-        ...actual,
-        HostedPhoneAuthFlow() {
-          return React.createElement("div", { "data-phone-flow": "true" });
-        },
-      };
-    });
-
-    mocks.usePrivy.mockReturnValue({
-      authenticated: true,
-      logout: mocks.logout,
-      ready: true,
-    });
-    mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
-      user: {
-        linkedAccounts: [
-          {
-            latest_verified_at: 1741194420,
-            phone_number: "+14155552671",
-            type: "phone",
-          },
-          {
-            address: "0x0000000000000000000000000000000000000001",
-            chain_type: "ethereum",
-            connector_type: "embedded",
-            wallet_client: "privy",
-            type: "wallet",
-          },
-        ],
-      },
-    });
-    mocks.refreshUser.mockResolvedValue({
-      linkedAccounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+14155552671",
-          type: "phone",
-        },
-        {
-          address: "0x0000000000000000000000000000000000000001",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          wallet_client: "privy",
-          type: "wallet",
-        },
-      ],
-    });
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const payload = typeof init?.body === "string"
-        ? JSON.parse(init.body) as { intent?: string }
-        : {};
-
-      if (payload.intent === "signin") {
-        return new Response(JSON.stringify({
-          error: {
-            code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
-            message: "No Murph account found.",
-          },
-        }), {
-          headers: { "content-type": "application/json" },
-          status: 403,
-        });
-      }
-
-      if (payload.intent === "signup") {
-        return new Response(JSON.stringify({
-          activationPending: false,
-          inviteCode: "invite-code",
-          joinUrl: "/join/invite-code",
-          messagingSetupRequired: false,
-          stage: "active",
-        }), {
-          headers: { "content-type": "application/json" },
-          status: 200,
-        });
-      }
-
-      throw new Error(`Unexpected payload ${JSON.stringify(payload)}`);
-    });
-    vi.stubGlobal("fetch", fetch);
-
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-    const { cleanup, container, assign } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "signin",
-      }),
-    );
-
-    try {
-      assert.match(container.textContent ?? "", /You already started signing in\./);
-
-      const continueButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Continue sign in") as
-          | HTMLButtonElement
-          | undefined;
-      assert.ok(continueButton);
-
-      await act(async () => {
-        continueButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      assert.match(container.textContent ?? "", /No Murph account found/);
-      assert.match(container.textContent ?? "", /Sign up instead/);
-      assert.match(container.textContent ?? "", /Try another sign-in method/);
-      assert.doesNotMatch(container.textContent ?? "", /You already started signing in\./);
-      expect(mocks.logout).not.toHaveBeenCalled();
-
-      const signupButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Sign up instead") as
-          | HTMLButtonElement
-          | undefined;
-      assert.ok(signupButton);
-
-      await act(async () => {
-        signupButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      const payloads = fetch.mock.calls.map(([, init]) =>
-        typeof init?.body === "string" ? JSON.parse(init.body) : {},
-      );
-      assert.deepEqual(payloads.map((payload) => payload.intent), [
-        "signin",
-        "signup",
-      ]);
-      expect(assign).toHaveBeenCalledWith("/settings");
-    } finally {
-      await cleanup();
-      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
-      vi.resetModules();
-      vi.unstubAllGlobals();
-    }
   });
 
   it("switches from manual resume to sign-out recovery when the Privy account conflicts", async () => {
@@ -1063,15 +917,15 @@ describe("HostedPhoneAuth", () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
       React.createElement(HostedPhoneAuth, {
-        intent: "signin",
+        intent: "auth",
       }),
     );
 
     try {
-      assert.match(container.textContent ?? "", /You already started signing in\./);
+      assert.match(container.textContent ?? "", /You already started logging in or signing up\./);
 
       const continueButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Continue sign in") as
+        .find((button) => button.textContent === "Continue") as
           | HTMLButtonElement
           | undefined;
       assert.ok(continueButton);
@@ -1084,8 +938,8 @@ describe("HostedPhoneAuth", () => {
 
       assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
       assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
-      assert.doesNotMatch(container.textContent ?? "", /Continue sign in/);
-      assert.match(container.textContent ?? "", /This browser needs a fresh phone sign-in\./);
+      assert.doesNotMatch(container.textContent ?? "", /Continue/);
+      assert.match(container.textContent ?? "", /This browser needs a fresh phone verification\./);
       assert.match(container.textContent ?? "", /cannot use that phone number/);
 
       const resetButton = [...container.querySelectorAll("button")]
@@ -1164,15 +1018,15 @@ describe("HostedPhoneAuth", () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
       React.createElement(HostedPhoneAuth, {
-        intent: "signin",
+        intent: "auth",
       }),
     );
 
     try {
-      assert.match(container.textContent ?? "", /You already started signing in\./);
+      assert.match(container.textContent ?? "", /You already started logging in or signing up\./);
 
       const continueButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Continue sign in") as
+        .find((button) => button.textContent === "Continue") as
           | HTMLButtonElement
           | undefined;
       assert.ok(continueButton);
@@ -1185,8 +1039,8 @@ describe("HostedPhoneAuth", () => {
 
       assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
       assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
-      assert.doesNotMatch(container.textContent ?? "", /Continue sign in/);
-      assert.match(container.textContent ?? "", /This browser needs a fresh phone sign-in\./);
+      assert.doesNotMatch(container.textContent ?? "", /Continue/);
+      assert.match(container.textContent ?? "", /This browser needs a fresh phone verification\./);
       assert.match(container.textContent ?? "", /cannot use that phone number/);
 
       const resetButton = [...container.querySelectorAll("button")]
@@ -1314,7 +1168,7 @@ describe("HostedPhoneAuth", () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
     const { cleanup, container } = await renderClientComponent(
       React.createElement(HostedPhoneAuth, {
-        intent: "signin",
+        intent: "auth",
       }),
     );
 
@@ -1355,8 +1209,8 @@ describe("HostedPhoneAuth", () => {
       expect(mocks.loginWithCode).toHaveBeenCalledWith({ code: "123456" });
       assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
       assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
-      assert.doesNotMatch(container.textContent ?? "", /Continue sign in/);
-      assert.match(container.textContent ?? "", /This browser needs a fresh phone sign-in\./);
+      assert.doesNotMatch(container.textContent ?? "", /Continue/);
+      assert.match(container.textContent ?? "", /This browser needs a fresh phone verification\./);
       assert.match(container.textContent ?? "", /cannot use that phone number/);
     } finally {
       await cleanup();
@@ -1364,147 +1218,6 @@ describe("HostedPhoneAuth", () => {
       vi.unstubAllGlobals();
       vi.resetModules();
     }
-  });
-
-  it("uses the sign-out path when the no-account secondary action is used", async () => {
-    mocks.usePrivy.mockReturnValue({
-      authenticated: true,
-      logout: mocks.logout,
-      ready: true,
-    });
-    mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
-      user: {
-        linkedAccounts: [
-          {
-            latest_verified_at: 1741194420,
-            phone_number: "+14155552671",
-            type: "phone",
-          },
-          {
-            address: "0x0000000000000000000000000000000000000001",
-            chain_type: "ethereum",
-            connector_type: "embedded",
-            wallet_client: "privy",
-            type: "wallet",
-          },
-        ],
-      },
-    });
-    mocks.refreshUser.mockResolvedValue({
-      linkedAccounts: [
-        {
-          latest_verified_at: 1741194420,
-          phone_number: "+14155552671",
-          type: "phone",
-        },
-        {
-          address: "0x0000000000000000000000000000000000000001",
-          chain_type: "ethereum",
-          connector_type: "embedded",
-          wallet_client: "privy",
-          type: "wallet",
-        },
-      ],
-    });
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const payload = typeof init?.body === "string"
-        ? JSON.parse(init.body) as { intent?: string }
-        : {};
-
-      if (payload.intent === "signin") {
-        return new Response(JSON.stringify({
-          error: {
-            code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
-            message: "No Murph account found.",
-          },
-        }), {
-          headers: { "content-type": "application/json" },
-          status: 403,
-        });
-      }
-
-      throw new Error(`Unexpected payload ${JSON.stringify(payload)}`);
-    });
-    vi.stubGlobal("fetch", fetch);
-
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-    const { cleanup, container } = await renderClientComponent(
-      React.createElement(HostedPhoneAuth, {
-        intent: "signin",
-      }),
-    );
-
-    try {
-      const continueButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Continue sign in") as
-          | HTMLButtonElement
-          | undefined;
-      assert.ok(continueButton);
-
-      await act(async () => {
-        continueButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      const resetButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Try another sign-in method") as
-          | HTMLButtonElement
-          | undefined;
-      assert.ok(resetButton);
-
-      await act(async () => {
-        resetButton.dispatchEvent(new Event("click", { bubbles: true }));
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      assert.doesNotMatch(container.textContent ?? "", /No Murph account found/);
-      expect(mocks.logout).toHaveBeenCalledTimes(1);
-    } finally {
-      await cleanup();
-      vi.unstubAllGlobals();
-      vi.resetModules();
-    }
-  });
-
-  it("suppresses the phone-only restart banner while an alternate Privy method is active", async () => {
-    mocks.usePrivy.mockReturnValue({
-      authenticated: true,
-      logout: mocks.logout,
-      ready: true,
-    });
-    mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
-      user: {
-        linkedAccounts: [
-          {
-            id: "telegram-user-1",
-            telegramUserId: "telegram-user-1",
-            type: "telegram",
-            username: "murph_test",
-          },
-        ],
-      },
-    });
-
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-
-    const defaultMarkup = renderToStaticMarkup(
-      React.createElement(HostedPhoneAuth, {}),
-    );
-    const suppressedMarkup = renderToStaticMarkup(
-      React.createElement(HostedPhoneAuth, {
-        suppressAuthenticatedSessionIssue: true,
-      }),
-    );
-
-    assert.match(defaultMarkup, /This browser needs a fresh phone signup\./);
-    assert.match(defaultMarkup, /Your current Privy session is missing a verified phone number\./);
-    assert.doesNotMatch(suppressedMarkup, /This browser needs a fresh phone signup\./);
-    assert.doesNotMatch(suppressedMarkup, /You already started signup\./);
-    assert.match(suppressedMarkup, /Text me a code/);
   });
 
   it("uses tall secondary actions for the public homepage code step", async () => {
@@ -1518,7 +1231,7 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "signup",
+        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -1543,7 +1256,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
-  it("switches the public homepage copy into sign-in language", async () => {
+  it("switches the public homepage copy into unified auth language", async () => {
     const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const phoneEntryMarkup = renderToStaticMarkup(
@@ -1551,7 +1264,7 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
-        intent: "signin",
+        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -1578,7 +1291,7 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
-        intent: "signin",
+        intent: "auth",
         pendingAction: null,
         phoneFieldDescription: null,
         phoneFieldLabel: null,
@@ -1597,12 +1310,12 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(phoneEntryMarkup, /Phone number/);
+    assert.match(phoneEntryMarkup, /Your phone/);
     assert.doesNotMatch(phoneEntryMarkup, /Phone number on your account/);
     assert.match(phoneEntryMarkup, /Text me a code/);
     assert.doesNotMatch(phoneEntryMarkup, /Text me a sign-in code/);
-    assert.match(codeEntryMarkup, /We texted the latest sign-in code to \*\*\* 2671\./);
-    assert.match(codeEntryMarkup, />Sign in</);
+    assert.match(codeEntryMarkup, /We texted the latest code to \*\*\* 2671\./);
+    assert.match(codeEntryMarkup, />Verify phone</);
   });
 
   it("builds the active verification attempt with a masked phone hint", async () => {
@@ -1702,8 +1415,8 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup\./);
-    assert.match(markup, /Continue signup/);
+    assert.match(markup, /You already started logging in or signing up\./);
+    assert.match(markup, /Continue/);
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
@@ -1832,57 +1545,20 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("includes the auth intent in hosted Privy completion requests", async () => {
+  it("omits legacy auth intent from hosted Privy completion requests", async () => {
     const { buildHostedPrivyCompletionRequestPayload } = await import("@/src/components/hosted-onboarding/hosted-privy-auth-support");
 
     assert.deepEqual(
-      buildHostedPrivyCompletionRequestPayload({
-        intent: "signin",
-      }),
-      {
-        intent: "signin",
-      },
+      buildHostedPrivyCompletionRequestPayload({}),
+      {},
     );
     assert.deepEqual(
       buildHostedPrivyCompletionRequestPayload({
-        intent: "signup",
         inviteCode: "invite-code",
       }),
       {
-        intent: "signup",
         inviteCode: "invite-code",
       },
-    );
-  });
-
-  it("classifies only lookup-only sign-in misses as no-account sign-in errors", async () => {
-    const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
-    const { isHostedSignInMemberNotFoundError } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
-    const error = new HostedOnboardingApiError({
-      code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
-      message: "No Murph account found.",
-    });
-
-    assert.equal(
-      isHostedSignInMemberNotFoundError({
-        error,
-        intent: "signin",
-      }),
-      true,
-    );
-    assert.equal(
-      isHostedSignInMemberNotFoundError({
-        error,
-        intent: "signup",
-      }),
-      false,
-    );
-    assert.equal(
-      isHostedSignInMemberNotFoundError({
-        error: new Error("No Murph account found."),
-        intent: "signin",
-      }),
-      false,
     );
   });
 
@@ -1901,11 +1577,8 @@ describe("HostedPhoneAuth", () => {
 
     try {
       assert.deepEqual(
-        buildHostedPrivyCompletionRequestPayload({
-          intent: "signup",
-        }),
+        buildHostedPrivyCompletionRequestPayload({}),
         {
-          intent: "signup",
           timeZone: "America/Los_Angeles",
         },
       );
@@ -1954,7 +1627,6 @@ describe("HostedPhoneAuth", () => {
 
       await finalizeHostedPrivyVerification({
         createWallet: vi.fn(),
-        intent: "signup",
         user: null,
       });
     } finally {
@@ -1964,9 +1636,7 @@ describe("HostedPhoneAuth", () => {
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      intent: "signup",
-    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -2009,7 +1679,6 @@ describe("HostedPhoneAuth", () => {
 
       await finalizeHostedPrivyVerification({
         createWallet: vi.fn(),
-        intent: "signup",
         refreshUser,
         user: null,
       });
@@ -2024,9 +1693,7 @@ describe("HostedPhoneAuth", () => {
       linkedAccounts: [{ type: "phone" }],
     });
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      intent: "signup",
-    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/settings");
   });
@@ -2084,7 +1751,6 @@ describe("HostedPhoneAuth", () => {
 
       await finalizeHostedPrivyVerification({
         createWallet: vi.fn(),
-        intent: "signup",
         user: null,
       });
     } finally {
@@ -2093,12 +1759,8 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      intent: "signup",
-    });
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
-      intent: "signup",
-    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -2154,7 +1816,6 @@ describe("HostedPhoneAuth", () => {
 
       await finalizeHostedPrivyVerification({
         createWallet: vi.fn(),
-        intent: "signup",
         user: null,
       });
     } finally {
@@ -2163,12 +1824,8 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {
-      intent: "signup",
-    });
-    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
-      intent: "signup",
-    });
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload, {});
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {});
     assert.equal(assign.mock.calls.length, 1);
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
@@ -2303,7 +1960,7 @@ function createHostedInvitePhoneAuthControllerHarness(
       activeAttempt,
       code: "",
       disabled: false,
-      intent: "signup" as const,
+      intent: "auth" as const,
       onCodeChange: vi.fn(),
       onPhoneCountryChange: vi.fn(),
       onPhoneNumberChange: vi.fn(),

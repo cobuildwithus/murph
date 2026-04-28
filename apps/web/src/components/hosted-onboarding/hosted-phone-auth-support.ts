@@ -1,6 +1,5 @@
 import type { FormEvent } from "react";
 
-import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import {
   maskPhoneNumber,
   normalizePhoneNumberForCountry,
@@ -65,22 +64,10 @@ type HostedPhoneResendTarget =
 
 const HOSTED_INVITE_SEND_CONFIRM_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY = "murph.hosted-onboarding.invite-phone-code-mutation";
-const HOSTED_SIGNIN_MEMBER_NOT_FOUND_CODE = "HOSTED_SIGNIN_MEMBER_NOT_FOUND";
 const HOSTED_PRIVY_ACCOUNT_CONFLICT_CODES = new Set([
   "PRIVY_USER_MISMATCH",
   "PRIVY_WALLET_MISMATCH",
 ]);
-
-export function isHostedSignInMemberNotFoundError(input: {
-  error: unknown;
-  intent: string;
-}): boolean {
-  return (
-    input.intent === "signin"
-    && input.error instanceof HostedOnboardingApiError
-    && input.error.code === HOSTED_SIGNIN_MEMBER_NOT_FOUND_CODE
-  );
-}
 
 export function isHostedPrivyAccountConflictError(error: unknown): boolean {
   return (
@@ -143,12 +130,10 @@ export function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | und
 
 export async function finalizeHostedPrivyVerification(input: HostedPrivyClientSessionInput & {
   inviteCode?: string | null;
-  intent: HostedAuthenticationIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
 }) {
   const result = await completeHostedPrivyAuth({
     createWallet: input.createWallet,
-    intent: input.intent,
     inviteCode: input.inviteCode,
     refreshUser: input.refreshUser,
     requirePhone: true,

@@ -88,9 +88,9 @@ export function StickyNav({
           </span>
         </a>
         <LandingAuthActions
+          authLabel="Log in or sign up"
           authenticated={authenticated}
           context="nav"
-          signupLabel="Sign up"
         />
       </div>
     </nav>

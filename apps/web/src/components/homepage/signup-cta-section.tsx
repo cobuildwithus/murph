@@ -45,10 +45,9 @@ export function SignupCtaSection({
 
         <div className="mt-8 flex justify-center">
           <LandingAuthActions
+            authLabel={signupCta.signupLabel}
             authenticated={authenticated}
             context="footer"
-            showSignIn={false}
-            signupLabel={signupCta.signupLabel}
           />
         </div>
 

@@ -72,7 +72,6 @@ export function buildIgnoredLinqWebhookPlan(
 }
 
 export function buildSignupLinkResponse(input: {
-  activeSubscription: boolean;
   chatId: string;
   inviteCode: string;
   inviteId: string;
@@ -88,7 +87,7 @@ export function buildSignupLinkResponse(input: {
         inviteId: input.inviteId,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
-        template: input.activeSubscription ? "invite_signin" : "invite_signup",
+        template: "invite_signup",
       }),
     ],
     response: {

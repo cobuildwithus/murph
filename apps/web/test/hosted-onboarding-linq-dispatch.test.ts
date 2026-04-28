@@ -295,7 +295,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("builds the inactive signup invite with the concise Murph positioning line", () => {
     expect(buildHostedInviteReply({
-      activeSubscription: false,
       joinUrl: "https://join.example.test/join/code_first_text",
     })).toBe(`Welcome to Murph, your personal health assistant.
 
@@ -1018,7 +1017,6 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         message: buildHostedInviteReply({
-          activeSubscription: false,
           joinUrl: "https://join.example.test/join/code_first_text",
         }),
         replyToMessageId: "msg_123",
@@ -1221,7 +1219,6 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         message: buildHostedInviteReply({
-          activeSubscription: false,
           joinUrl: "https://join.example.test/join/code_deferred",
         }),
         replyToMessageId: "msg_123",
@@ -1297,7 +1294,6 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         message: buildHostedInviteReply({
-          activeSubscription: false,
           joinUrl: "https://join.example.test/join/code_aborted",
         }),
         replyToMessageId: "msg_123",
@@ -1385,7 +1381,6 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         message: buildHostedInviteReply({
-          activeSubscription: false,
           joinUrl: "https://join.example.test/join/code_non_text",
         }),
         replyToMessageId: "msg_123",

@@ -69,7 +69,6 @@ function HomepageTelegramAuthButtonHarness() {
   return (
     <HostedTelegramAuthButton
       active={active}
-      intent="signup"
       onActivate={() => setActive(true)}
     />
   );
@@ -88,7 +87,6 @@ test("HomepageTelegramAuthButton logs in with Telegram and redirects through the
   expect(mocks.login).toHaveBeenCalledTimes(1);
   expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
     createWallet: mocks.createWallet,
-    intent: "signup",
     refreshUser: expect.any(Function),
     user: null,
   });

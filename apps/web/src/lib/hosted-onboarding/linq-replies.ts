@@ -1,13 +1,7 @@
 export function buildHostedInviteReply(input: {
-  activeSubscription: boolean;
   joinUrl: string;
 }): string {
-  return input.activeSubscription
-    ? `Murph access is already active for this number.
-
-Sign in here:
-${input.joinUrl}`
-    : `Welcome to Murph, your personal health assistant.
+  return `Welcome to Murph, your personal health assistant.
 
 Verify your phone to finish signup here:
 ${input.joinUrl}`;

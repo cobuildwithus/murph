@@ -31,10 +31,9 @@ export function HeroSection({ authenticated }: { authenticated: boolean }) {
 
           <div className="mt-8">
             <LandingAuthActions
+              authLabel="See what works for your body"
               authenticated={authenticated}
               context="hero"
-              showSignIn={false}
-              signupLabel="See what works for your body"
             />
           </div>
 

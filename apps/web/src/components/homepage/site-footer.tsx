@@ -16,9 +16,9 @@ export function SiteFooter({ authenticated }: { authenticated: boolean }) {
             analysis, cancel anytime.
           </p>
           <LandingAuthActions
+            authLabel="Start your first experiment"
             authenticated={authenticated}
             context="footer"
-            signupLabel="Start your first experiment"
           />
         </div>
         <p className="border-t border-[#f5f0e8]/8 py-4 text-[0.75rem] leading-relaxed text-[#f5f0e8]/60">

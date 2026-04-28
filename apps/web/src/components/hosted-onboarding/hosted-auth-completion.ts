@@ -1,4 +1,3 @@
-import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import {
   ensureHostedPrivyPhoneReady,
   ensureHostedPrivyWalletReady,
@@ -20,7 +19,6 @@ export interface HostedPrivyClientSessionInput {
 }
 
 interface HostedAuthCompletionInput extends HostedPrivyClientSessionInput {
-  intent: HostedAuthenticationIntent;
   inviteCode?: string | null;
 }
 
@@ -50,12 +48,10 @@ export async function completeHostedPrivyAuth(
   }
 
   const payload = await requestHostedPrivyCompletionWithRetry({
-    intent: input.intent,
     inviteCode: input.inviteCode,
   });
   await input.refreshUser?.().catch(() => null);
   const redirectUrl = await resolveHostedAuthRedirectUrl({
-    intent: input.intent,
     payload,
   });
 
@@ -66,14 +62,13 @@ export async function completeHostedPrivyAuth(
 }
 
 async function resolveHostedAuthRedirectUrl(input: {
-  intent: HostedAuthenticationIntent;
   payload: HostedPrivyCompletionPayload;
 }): Promise<string> {
   if (input.payload.stage === "checkout") {
     return input.payload.joinUrl;
   }
 
-  if (input.intent === "signin" || isHostedOnboardingAccessibleStage(input.payload.stage)) {
+  if (isHostedOnboardingAccessibleStage(input.payload.stage)) {
     return "/settings";
   }
 

@@ -220,7 +220,6 @@ describe("hosted onboarding routes", () => {
           type: "wallet",
         },
       },
-      intent: "signup",
       inviteCode: "invite-code",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -264,7 +263,6 @@ describe("hosted onboarding routes", () => {
           type: "wallet",
         },
       },
-      intent: "signup",
       inviteCode: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -303,7 +301,6 @@ describe("hosted onboarding routes", () => {
           type: "wallet",
         },
       },
-      intent: "signup",
       inviteCode: "invite-code",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -311,7 +308,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("passes an explicit sign-in intent through the completion route", async () => {
+  it("ignores legacy sign-in intent values on the completion route", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
@@ -329,8 +326,10 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      intent: "signin",
       inviteCode: "invite-code",
+    }));
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.not.objectContaining({
+      intent: expect.any(String),
     }));
   });
 
