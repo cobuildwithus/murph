@@ -61,6 +61,10 @@ import type { HostedExecutionContainerNamespaceLike } from "./runner-container.t
 import type { HostedEmailWorkerRequest } from "./hosted-email.ts";
 import { handleHostedEmailIngress } from "./hosted-email/worker-ingress.ts";
 import {
+  enqueueHostedRunnerWake,
+  handleHostedRunnerWakeQueue,
+} from "./runner-wake-queue.ts";
+import {
   createBrowserVaultReplicaAadFields,
   createHostedBrowserVaultReplicaStore,
   HostedBrowserVaultReplicaOwnershipError,
@@ -72,6 +76,7 @@ import {
 import { handleRunnerOutboundRequest } from "./runner-outbound.ts";
 import {
   asWorkerStringEnvironment,
+  type WorkerQueueMessageBatchLike,
 } from "./worker-contracts.ts";
 import {
   decodeRouteParam,
@@ -173,7 +178,6 @@ export default {
   async fetch(
     request: Request,
     env: WorkerEnvironmentSource,
-    ctx?: ExecutionContext,
   ): Promise<Response> {
     try {
       assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
@@ -200,7 +204,6 @@ export default {
           environment,
           request,
           url,
-          waitUntil: ctx?.waitUntil.bind(ctx),
         })
       ) ?? notFound();
     } catch (error) {
@@ -210,13 +213,17 @@ export default {
   async email(
     message: HostedEmailWorkerRequest,
     env: WorkerEnvironmentSource,
-    ctx?: ExecutionContext,
   ): Promise<void> {
     assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
 
-    await handleHostedEmailIngress(message, env, {
-      waitUntil: ctx?.waitUntil.bind(ctx),
-    });
+    await handleHostedEmailIngress(message, env);
+  },
+  async queue(
+    batch: WorkerQueueMessageBatchLike,
+    env: WorkerEnvironmentSource,
+  ): Promise<void> {
+    assertHostedLocalInternalProxyEnvironment(asWorkerStringEnvironment(env));
+    await handleHostedRunnerWakeQueue(batch, env);
   },
 };
 
@@ -494,7 +501,20 @@ async function handleRunnerNudgeRoute(
   }
 
   const stub = await resolveUserRunnerStub(context.env, userId);
-  return json(await stub.nudgeHostedRunner(), 202);
+  const nudge = await stub.nudgeHostedRunner();
+  if (!nudge.alreadyRunning) {
+    await enqueueHostedRunnerWake({
+      component: "hosted.runner",
+      details: buildWorkerRouteLogDetails({
+        reason: "runner-wake-queue",
+        routeName: "runner-nudge",
+      }, context.request, userId),
+      env: context.env,
+      userId,
+    });
+  }
+
+  return json(nudge, 202);
 }
 
 async function handleBrowserVaultSessionRoute(

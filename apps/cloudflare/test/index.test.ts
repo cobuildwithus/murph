@@ -14,6 +14,9 @@ import {
 } from "../src/web-callback-auth.ts";
 import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
 import {
+  HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+} from "../src/runner-wake-queue.ts";
+import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
 } from "../src/storage-paths.ts";
@@ -62,14 +65,6 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
   kid: "test-kid",
   use: "sig",
 };
-
-function createExecutionContext(waitUntil: ExecutionContext["waitUntil"]): ExecutionContext {
-  return {
-    passThroughOnException() {},
-    props: undefined,
-    waitUntil,
-  };
-}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -711,7 +706,7 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.getCalls.filter((key) => key.startsWith("users/browser-vault-replicas/"))).toEqual([]);
   });
 
-  it("nudges the hosted runner without invoking the legacy run drain", async () => {
+  it("nudges the hosted runner and queues an immediate workspace invocation wake", async () => {
     const stub = createUserRunnerStub({
       nudgeHostedRunner: vi.fn(async () => ({
         accepted: true,
@@ -721,6 +716,7 @@ describe("cloudflare worker routes", () => {
         nextAlarmAt: "2026-04-26T00:00:00.000Z",
       })),
     });
+    const env = createWorkerEnv(stub);
 
     const response = await worker.fetch(
       await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
@@ -730,7 +726,7 @@ describe("cloudflare worker routes", () => {
         },
         method: "POST",
       })),
-      createWorkerEnv(stub),
+      env,
     );
 
     expect(response.status).toBe(202);
@@ -743,6 +739,75 @@ describe("cloudflare worker routes", () => {
     });
     expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
     expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(env.__runnerWakeQueue.send).toHaveBeenCalledWith({
+      reason: "nudge",
+      requestedAt: expect.any(String),
+      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+      userId: "member_123",
+    });
+  });
+
+  it("does not start another workspace invocation when the nudge is already running", async () => {
+    const stub = createUserRunnerStub({
+      nudgeHostedRunner: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: true,
+        alreadyRunning: true,
+        inFlight: true,
+        nextAlarmAt: "2026-04-26T00:00:00.000Z",
+      })),
+    });
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      alreadyRunning: true,
+      inFlight: true,
+    });
+    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(env.__runnerWakeQueue.send).not.toHaveBeenCalled();
+  });
+
+  it("accepts runner nudges when queue send fails because the Durable Object alarm remains armed", async () => {
+    const stub = createUserRunnerStub({
+      nudgeHostedRunner: vi.fn(async () => ({
+        accepted: true,
+        alarmScheduled: true,
+        alreadyRunning: false,
+        inFlight: false,
+        nextAlarmAt: "2026-04-26T00:00:00.000Z",
+      })),
+    });
+    const env = createWorkerEnv(stub);
+    env.__runnerWakeQueue.send.mockRejectedValueOnce(new Error("queue failed"));
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(202);
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(stub.nudgeHostedRunner).toHaveBeenCalledTimes(1);
+    expect(env.__runnerWakeQueue.send).toHaveBeenCalledTimes(1);
   });
 
   it("rejects runner nudge route/user mismatches before touching the Durable Object", async () => {
@@ -764,6 +829,63 @@ describe("cloudflare worker routes", () => {
     });
     expect(stub.bindUser).not.toHaveBeenCalled();
     expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+  });
+
+  it("runs queued hosted runner wake messages through the Durable Object", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub);
+    const message = createQueueMessage({
+      reason: "nudge",
+      requestedAt: "2026-04-26T00:00:00.000Z",
+      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+      userId: "member_123",
+    });
+
+    await worker.queue(createQueueBatch([message]), env);
+
+    expect(stub.bindUser).toHaveBeenCalledWith("member_123");
+    expect(stub.runUntilIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
+    expect(message.ack).toHaveBeenCalledTimes(1);
+    expect(message.retry).not.toHaveBeenCalled();
+  });
+
+  it("retries queued hosted runner wake messages when the Durable Object run fails", async () => {
+    const stub = createUserRunnerStub({
+      runUntilIdleOrBudget: vi.fn(async () => {
+        throw new Error("runner failed");
+      }),
+    });
+    const env = createWorkerEnv(stub);
+    const message = createQueueMessage({
+      reason: "nudge",
+      requestedAt: "2026-04-26T00:00:00.000Z",
+      schema: HOSTED_RUNNER_WAKE_QUEUE_MESSAGE_SCHEMA,
+      userId: "member_123",
+    });
+
+    await worker.queue(createQueueBatch([message]), env);
+
+    expect(stub.runUntilIdleOrBudget).toHaveBeenCalledWith({ reason: "nudge" });
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+  });
+
+  it("acks invalid queued hosted runner wake messages without touching a Durable Object", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub);
+    const message = createQueueMessage({
+      reason: "nudge",
+      requestedAt: "2026-04-26T00:00:00.000Z",
+      schema: "invalid",
+      userId: "member_123",
+    });
+
+    await worker.queue(createQueueBatch([message]), env);
+
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledTimes(1);
+    expect(message.retry).not.toHaveBeenCalled();
   });
 
   it("does not expose the legacy hosted-run nudge route", async () => {
@@ -1071,8 +1193,10 @@ describe("cloudflare worker routes", () => {
 
 type WorkerTestEnv = WorkerEnvironmentSource & {
   __bucketStore: ReturnType<typeof createBucketStore>;
+  __runnerWakeQueue: RunnerWakeQueueTestBinding;
 } & Record<string, unknown>;
 
+type RunnerWakeQueueTestBinding = ReturnType<typeof createRunnerWakeQueueBinding>;
 type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
 
 function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTAINER"] {
@@ -1121,6 +1245,7 @@ function createWorkerEnv(
   overrides: Partial<WorkerEnvironmentSource & Record<string, unknown>> = {},
 ): WorkerTestEnv {
   const bucketStore = createBucketStore();
+  const runnerWakeQueue = createRunnerWakeQueueBinding();
   const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
   const defaultUserRunnerNamespace: WorkerEnvironmentSource["USER_RUNNER"] = {
     getByName(userId: string) {
@@ -1133,7 +1258,9 @@ function createWorkerEnv(
     ...createHostedExecutionTestEnv(),
     BUNDLES: bucketStore.api,
     RUNNER_CONTAINER: createRunnerContainerNamespace(),
+    RUNNER_WAKE_QUEUE: runnerWakeQueue,
     ...overrides,
+    __runnerWakeQueue: runnerWakeQueue,
     USER_RUNNER: {
       getByName(userId: string) {
         return userRunnerNamespace.getByName(userId);
@@ -1161,6 +1288,36 @@ function createWorkerEnv(
     wrappedUserRunnerStubs.set(userId, wrappedStub);
     return wrappedStub;
   }
+}
+
+function createRunnerWakeQueueBinding() {
+  const messages: unknown[] = [];
+  return {
+    messages,
+    send: vi.fn(async (message: unknown) => {
+      messages.push(message);
+    }),
+  };
+}
+
+function createQueueMessage(body: unknown) {
+  return {
+    ack: vi.fn(),
+    attempts: 1,
+    body,
+    id: "message_123",
+    retry: vi.fn(),
+    timestamp: new Date("2026-04-26T00:00:00.000Z"),
+  };
+}
+
+function createQueueBatch(messages: ReturnType<typeof createQueueMessage>[]) {
+  return {
+    ackAll: vi.fn(),
+    messages,
+    queue: "runner-wake",
+    retryAll: vi.fn(),
+  };
 }
 
 function callRunnerOutbound(

@@ -87,6 +87,23 @@ export function buildHostedWranglerDeployConfig(
         preview_bucket_name: environment.bundlesPreviewBucketName,
       },
     ],
+    queues: {
+      producers: [
+        {
+          binding: "RUNNER_WAKE_QUEUE",
+          queue: environment.runnerWakeQueueName,
+        },
+      ],
+      consumers: [
+        {
+          queue: environment.runnerWakeQueueName,
+          max_batch_size: 1,
+          max_batch_timeout: 1,
+          max_retries: 10,
+          retry_delay: 30,
+        },
+      ],
+    },
     ...(sendEmailBindings.length > 0
       ? {
           send_email: sendEmailBindings,

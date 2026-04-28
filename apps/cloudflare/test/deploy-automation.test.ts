@@ -173,6 +173,19 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      queues?: {
+        consumers: Array<{
+          max_batch_size?: number;
+          max_batch_timeout?: number;
+          max_retries?: number;
+          queue: string;
+          retry_delay?: number;
+        }>;
+        producers: Array<{
+          binding: string;
+          queue: string;
+        }>;
+      };
       send_email?: Array<{
         allowed_sender_addresses?: string[];
         name: string;
@@ -219,6 +232,23 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(config.placement).toEqual({ mode: "smart" });
+    expect(config.queues).toEqual({
+      consumers: [
+        {
+          max_batch_size: 1,
+          max_batch_timeout: 1,
+          max_retries: 10,
+          queue: "hosted-worker-runner-wake",
+          retry_delay: 30,
+        },
+      ],
+      producers: [
+        {
+          binding: "RUNNER_WAKE_QUEUE",
+          queue: "hosted-worker-runner-wake",
+        },
+      ],
+    });
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
     expect(config.observability).toEqual({
       enabled: true,
@@ -276,7 +306,7 @@ describe("hosted deploy automation helpers", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
+      CF_WORKER_NAME: "murph-hosted",
     });
     const generatedConfig = buildHostedWranglerDeployConfig(environment) as {
       containers: Array<{
@@ -302,6 +332,19 @@ describe("hosted deploy automation helpers", () => {
       }>;
       placement: {
         mode: string;
+      };
+      queues?: {
+        consumers: Array<{
+          max_batch_size?: number;
+          max_batch_timeout?: number;
+          max_retries?: number;
+          queue: string;
+          retry_delay?: number;
+        }>;
+        producers: Array<{
+          binding: string;
+          queue: string;
+        }>;
       };
       version_metadata?: {
         binding: string;
@@ -332,6 +375,19 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      queues?: {
+        consumers: Array<{
+          max_batch_size?: number;
+          max_batch_timeout?: number;
+          max_retries?: number;
+          queue: string;
+          retry_delay?: number;
+        }>;
+        producers: Array<{
+          binding: string;
+          queue: string;
+        }>;
+      };
       version_metadata?: {
         binding: string;
       };
@@ -348,6 +404,7 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
+    expect(checkedInConfig.queues).toEqual(generatedConfig.queues);
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
   });
 
@@ -367,6 +424,7 @@ describe("hosted deploy automation helpers", () => {
     for (const expectedLine of [
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
+      "CF_RUNNER_WAKE_QUEUE: ${{ vars.CF_RUNNER_WAKE_QUEUE }}",
       "CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
@@ -389,6 +447,7 @@ describe("hosted deploy automation helpers", () => {
       "if: ${{ !inputs.deploy_worker }}",
       "run: pnpm --dir apps/cloudflare verify:parallel",
       "run: pnpm --dir apps/cloudflare deploy:artifacts",
+      "Runner wake queue: \\`${CF_RUNNER_WAKE_QUEUE:-${CF_WORKER_NAME}-runner-wake}\\`",
     ]) {
       expect(workflow).toContain(expectedLine);
     }

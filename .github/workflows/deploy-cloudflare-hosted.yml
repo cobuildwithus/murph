@@ -64,6 +64,7 @@ jobs:
       CF_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.CF_RUNNER_COMMIT_TIMEOUT_MS }}
       CF_RUNNER_READY_TIMEOUT_MS: ${{ vars.CF_RUNNER_READY_TIMEOUT_MS }}
       CF_RUNNER_TIMEOUT_MS: ${{ vars.CF_RUNNER_TIMEOUT_MS }}
+      CF_RUNNER_WAKE_QUEUE: ${{ vars.CF_RUNNER_WAKE_QUEUE }}
       CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}
       CF_TRACE_HEAD_SAMPLING_RATE: ${{ vars.CF_TRACE_HEAD_SAMPLING_RATE }}
       CF_WORKER_NAME: ${{ vars.CF_WORKER_NAME }}
@@ -267,6 +268,7 @@ jobs:
             echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
             echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"
             echo "- Container max instances: \`${CF_CONTAINER_MAX_INSTANCES}\`"
+            echo "- Runner wake queue: \`${CF_RUNNER_WAKE_QUEUE:-${CF_WORKER_NAME}-runner-wake}\`"
             echo "- Native container image: base prepared from \`Dockerfile.cloudflare-hosted-runner-base\`; app layer built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
             echo "- Deployed versions: \`${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}\`"
             echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"

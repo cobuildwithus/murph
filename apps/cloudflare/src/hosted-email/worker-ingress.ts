@@ -9,6 +9,7 @@ import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
   HostedEmailWorkerRequest,
 } from "../hosted-email.ts";
+import { enqueueHostedRunnerWake } from "../runner-wake-queue.ts";
 import {
   deleteHostedEmailRawMessage,
   readHostedEmailConfig,
@@ -29,9 +30,6 @@ import { appendHostedEmailIngressWakeInWeb } from "../web-control-plane-email-in
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
-  runtime: {
-    waitUntil?: (promise: Promise<unknown>) => void;
-  } = {},
 ): Promise<void> {
   const stringEnv = asWorkerStringEnvironment(env);
   const environment = readHostedExecutionEnvironment(stringEnv);
@@ -203,63 +201,31 @@ export async function handleHostedEmailIngress(
       return;
     }
 
-    const runPromise = stub.runUntilIdleOrBudget({ reason: "nudge" }).catch(async (error) => {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.email",
-        details: buildHostedEmailIngressLogDetails({
-          eventId,
-          identityId: route.identityId,
-          reason: "runner-background-run-failed",
-          routeAddress: route.routeAddress,
-          to: message.to,
-        }),
-        error,
-        level: "warn",
-        message: "Hosted email background runner invocation failed after appending the canonical ingress event.",
-        phase: "wake.running",
-        userId: route.userId,
-      });
-
-      try {
-        await stub.nudgeHostedRunner();
-      } catch (fallbackError) {
-        emitHostedExecutionStructuredLog({
-          component: "hosted.email",
-          details: buildHostedEmailIngressLogDetails({
-            eventId,
-            identityId: route.identityId,
-            reason: "runner-retry-arm-fallback-failed",
-            routeAddress: route.routeAddress,
-            to: message.to,
-          }),
-          error: fallbackError,
-          level: "error",
-          message: "Hosted email retry-arm fallback failed after the direct runner invocation failed.",
-          phase: "wake.running",
-          userId: route.userId,
-        });
-        throw fallbackError;
-      }
+    await enqueueHostedRunnerWake({
+      component: "hosted.email",
+      details: buildHostedEmailIngressLogDetails({
+        eventId,
+        identityId: route.identityId,
+        reason: "runner-wake-queue",
+        routeAddress: route.routeAddress,
+        to: message.to,
+      }),
+      env,
+      userId: route.userId,
     });
-
-    if (runtime.waitUntil) {
-      runtime.waitUntil(runPromise);
-    } else {
-      await runPromise;
-    }
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "hosted.email",
       details: buildHostedEmailIngressLogDetails({
         eventId,
         identityId: route.identityId,
-        reason: "runner-background-run-setup-failed",
+        reason: "runner-wake-queue-setup-failed",
         routeAddress: route.routeAddress,
         to: message.to,
       }),
       error,
       level: "warn",
-      message: "Hosted email background runner setup failed after appending the canonical ingress event.",
+      message: "Hosted email runner wake queue setup failed after appending the canonical ingress event.",
       phase: "wake.running",
       userId: route.userId,
     });
