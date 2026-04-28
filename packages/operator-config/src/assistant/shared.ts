@@ -59,6 +59,23 @@ export function isAssistantVercelAIGatewayBaseUrl(
   return matchesAssistantHttpsHost(value, 'ai-gateway.vercel.sh')
 }
 
+export function isAssistantLocalDevelopmentBaseUrl(
+  value: string | null | undefined,
+): boolean {
+  const parsed = parseAssistantBaseUrl(value)
+  if (!parsed) {
+    return false
+  }
+
+  return [
+    '127.0.0.1',
+    '::1',
+    'host.containers.internal',
+    'host.docker.internal',
+    'localhost',
+  ].includes(parsed.hostname.toLowerCase())
+}
+
 function matchesAssistantHttpsHost(
   value: string | null | undefined,
   expectedHostname: string,

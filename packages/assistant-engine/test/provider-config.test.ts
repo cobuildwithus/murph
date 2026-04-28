@@ -57,4 +57,26 @@ describe('assistant provider config model spec', () => {
     })
     expect(customSpec).not.toHaveProperty('responsesRequestPolicy')
   })
+
+  it('allows Vercel gateway responses policy for local development stubs', () => {
+    const localGatewaySpec = resolveAssistantModelSpecFromProviderConfig({
+      baseUrl: 'http://127.0.0.1:4111/v1',
+      gatewayOnlyProviders: ['openai'],
+      model: 'openai/gpt-5.5',
+      presetId: 'vercel-ai-gateway',
+      provider: 'openai-compatible',
+      providerName: 'vercel-ai-gateway',
+      zeroDataRetention: true,
+    })
+
+    expect(localGatewaySpec).toMatchObject({
+      baseUrl: 'http://127.0.0.1:4111/v1',
+      executionDriver: 'responses',
+      model: 'openai/gpt-5.5',
+      responsesRequestPolicy: {
+        gatewayOnlyProviders: ['openai'],
+        gatewayZeroDataRetention: true,
+      },
+    })
+  })
 })

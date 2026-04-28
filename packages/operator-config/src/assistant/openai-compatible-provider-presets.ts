@@ -1,5 +1,6 @@
 import {
   assistantBaseUrlsShareOrigin,
+  isAssistantLocalDevelopmentBaseUrl,
   normalizeNullableString,
   parseAssistantBaseUrl,
 } from './shared.js'
@@ -404,9 +405,15 @@ export function resolveOpenAICompatibleProviderTargetPresetId(input: {
 
   const normalizedBaseUrl = normalizeNullableString(input.baseUrl)
   if (normalizedBaseUrl !== null) {
-    return (
+    const baseUrlPresetId =
       resolveOpenAICompatibleProviderPresetFromBaseUrl(normalizedBaseUrl)?.id ?? null
-    )
+    if (baseUrlPresetId) {
+      return baseUrlPresetId
+    }
+
+    return explicitPresetId && isAssistantLocalDevelopmentBaseUrl(normalizedBaseUrl)
+      ? explicitPresetId
+      : null
   }
 
   return (
