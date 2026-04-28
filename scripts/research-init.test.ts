@@ -47,15 +47,24 @@ function runResearchRun(args: string[], env: NodeJS.ProcessEnv = process.env) {
 }
 
 async function startFakeCdpServer(visibleTargets: string[]) {
+  const targetsDir = mkdtempSync(path.join(os.tmpdir(), "murph-fake-cdp-"));
+  const targetsPath = path.join(targetsDir, "targets.json");
+  const writeVisibleTargets = (targets: string[]) => {
+    writeFileSync(targetsPath, `${JSON.stringify(targets)}\n`, "utf8");
+  };
+  writeVisibleTargets(visibleTargets);
+
   const fakeBrowserServer = spawn(
     process.execPath,
     [
       "-e",
       `
+const { readFileSync } = require("node:fs");
 const http = require("node:http");
-const visibleTargets = JSON.parse(process.argv[1]);
+const targetsPath = process.argv[1];
 const server = http.createServer((request, response) => {
   if (request.url === "/json/list" || request.url === "/json") {
+    const visibleTargets = JSON.parse(readFileSync(targetsPath, "utf8"));
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(visibleTargets.map((target, index) => ({
       id: "target-" + index,
@@ -82,7 +91,7 @@ process.on("SIGTERM", () => {
   server.close(() => process.exit(0));
 });
 	`,
-      JSON.stringify(visibleTargets),
+      targetsPath,
     ],
     {
       cwd: repoRoot,
@@ -115,14 +124,20 @@ process.on("SIGTERM", () => {
   });
 
   return {
+    setVisibleTargets: writeVisibleTargets,
     endpoint,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        const cleanup = () => rmSync(targetsDir, { recursive: true, force: true });
         if (fakeBrowserServer.exitCode !== null) {
+          cleanup();
           resolve();
           return;
         }
-        fakeBrowserServer.once("exit", () => resolve());
+        fakeBrowserServer.once("exit", () => {
+          cleanup();
+          resolve();
+        });
         fakeBrowserServer.once("error", reject);
         fakeBrowserServer.kill("SIGTERM");
       }),
@@ -310,7 +325,7 @@ describe("research init scaffold", () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-"));
     const outDir = path.join(tempRoot, "lane-state");
-    const phlebasBrowser = await startFakeCdpServer(["research-run-test"]);
+    const phlebasBrowser = await startFakeCdpServer([]);
     const herculesBrowser = await startFakeCdpServer(["research-run-test"]);
     const mountainBrowser = await startFakeCdpServer([
       "https://example.com/c/research-run-test",
@@ -612,7 +627,10 @@ exit 64
           "--lane",
           "phlebas",
         ],
-        env,
+        {
+          ...env,
+          RESEARCH_ALLOW_RESEND_WITH_EXISTING_CHAT_URL: "1",
+        },
       );
 
       expect(resendResult.status).toBe(0);
@@ -659,6 +677,353 @@ exit 64
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("--lane is required for send");
     } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to send into a lane with restored ChatGPT conversation tabs", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-guard-"));
+    const outDir = path.join(tempRoot, "send-guard");
+    const foreignOwnerDir = mkdtempSync(
+      path.join(researchOutputRoot, "tmp-research-run-send-guard-owner-"),
+    );
+    const browser = await startFakeCdpServer([
+      "restored-thread",
+      "https://chatgpt.com/?temporary-chat=true",
+    ]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      mkdirSync(path.join(foreignOwnerDir, "state", "seams"), { recursive: true });
+      writeTextFileSync(
+        path.join(foreignOwnerDir, "state", "seams", "02-discovery.json"),
+        `${JSON.stringify(
+          {
+            chatUrl: "https://chatgpt.com/c/restored-thread",
+            schemaVersion: "murph.research.seam-run.v1",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(
+        commandPath,
+        "#!/usr/bin/env bash\nprintf 'send command should not run\\n' > state/send-ran.txt\n",
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        [
+          "--workspace",
+          path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "vonneumann",
+        ],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Refusing to send 01-charter on lane vonneumann");
+      expect(result.stderr).toContain("https://chatgpt.com/c/restored-thread");
+      expect(result.stderr).toContain("https://chatgpt.com/?temporary-chat=true");
+      expect(result.stderr).toContain("non-conversation ChatGPT tab or temporary draft");
+      expect(result.stderr).toContain("tmp-research-run-send-guard-owner-");
+      expect(result.stderr).toContain(":02-discovery");
+      expect(existsSync(path.join(outDir, "state", "send-ran.txt"))).toBe(false);
+    } finally {
+      await browser.close();
+      rmSync(foreignOwnerDir, { recursive: true, force: true });
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to resend a seam with an existing recorded ChatGPT URL", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-clear-"));
+    const outDir = path.join(tempRoot, "send-clear");
+    const browser = await startFakeCdpServer([]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", "01-charter.txt");
+      mkdirSync(path.dirname(seamStatePath), { recursive: true });
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/stale-thread\n");
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            chatUrl: "https://chatgpt.com/c/stale-thread",
+            schemaVersion: "murph.research.seam-run.v1",
+            seam: "01-charter",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(commandPath, "#!/usr/bin/env bash\nexit 65\n");
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        [
+          "--workspace",
+          path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "hercules",
+        ],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Refusing to resend 01-charter");
+      expect(result.stderr).toContain("https://chatgpt.com/c/stale-thread");
+      expect(existsSync(chatUrlPath)).toBe(true);
+      const seamState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        chatUrl?: string;
+        send?: { status: string };
+      };
+      expect(seamState.chatUrl).toBe("https://chatgpt.com/c/stale-thread");
+      expect(seamState.send).toBeUndefined();
+    } finally {
+      await browser.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("clears stale chat URL scratch files before a fresh resend attempt starts", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-clear-"));
+    const outDir = path.join(tempRoot, "send-clear");
+    const browser = await startFakeCdpServer([]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", "01-charter.txt");
+      mkdirSync(path.dirname(seamStatePath), { recursive: true });
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/stale-thread\n");
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            schemaVersion: "murph.research.seam-run.v1",
+            seam: "01-charter",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(commandPath, "#!/usr/bin/env bash\nexit 65\n");
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        [
+          "--workspace",
+          path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "hercules",
+        ],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(65);
+      expect(existsSync(chatUrlPath)).toBe(false);
+      const seamState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        chatUrl?: string;
+        send: { status: string };
+      };
+      expect("chatUrl" in seamState).toBe(false);
+      expect(seamState.send.status).toBe("failed");
+    } finally {
+      await browser.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses concurrent sends on the same browser lane", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-lock-"));
+    const outDir = path.join(tempRoot, "send-lock");
+    const browser = await startFakeCdpServer([]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(
+        commandPath,
+        `#!/usr/bin/env bash
+printf 'started\\n' > '${path.join(outDir, "state", "send-command-started.txt")}'
+sleep 2
+`,
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const workspaceArg = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
+      const env = {
+        ...process.env,
+        MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+      };
+      const first = spawn(
+        "node",
+        [
+          runScriptPath,
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "testsendlock",
+        ],
+        {
+          cwd: repoRoot,
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      const lockPath = path.join(researchOutputRoot, "_locks", "send-testsendlock.lock.json");
+      for (let attempt = 0; attempt < 50 && !existsSync(lockPath); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(existsSync(lockPath)).toBe(true);
+
+      const commandStartedPath = path.join(outDir, "state", "send-command-started.txt");
+      for (let attempt = 0; attempt < 50 && !existsSync(commandStartedPath); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(existsSync(commandStartedPath)).toBe(true);
+
+      browser.setVisibleTargets(["target-opened-by-first-send"]);
+      const second = runResearchRun(
+        [
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "testsendlock",
+        ],
+        env,
+      );
+      expect(second.status).toBe(1);
+      expect(second.stderr).toContain("another send is already staging");
+      expect(second.stderr).not.toContain("open ChatGPT conversation or draft tabs");
+
+      await new Promise<void>((resolve) => {
+        first.on("exit", () => resolve());
+      });
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      await browser.close();
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
