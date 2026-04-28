@@ -1,6 +1,9 @@
 import type {
   HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution";
+import {
+  isHostedLinqConversationMessageWake,
+} from "@murphai/hosted-execution";
 
 import type {
   HostedMailboxItemImportOutcome,
@@ -13,6 +16,13 @@ import type {
 import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "./events/conversation.ts";
+import {
+  prepareHostedWakeContext,
+} from "./context.ts";
+import {
+  recordHostedProviderCleanupBeforeCommit,
+  type HostedProviderCleanupCheckpoint,
+} from "./provider-cleanup.ts";
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -52,11 +62,26 @@ export interface HostedConversationMailboxLocalImportResult {
 export type HostedConversationMailboxLocalImporter = (input: {
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv"
+    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<HostedConversationMailboxLocalImportResult>;
+
+export type HostedConversationMailboxWakeContextPreparer = (input: {
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "forwardedEnv" | "resolvedConfig" | "userEnv"
+  >;
+  vaultRoot: string;
+  wake: HostedExecutionConversationMessageWake;
+}) => Promise<void>;
+
+export type HostedConversationMailboxProviderCleanupRecorder = (input: {
+  checkpoint: HostedProviderCleanupCheckpoint;
+  linqMessageIds?: readonly string[] | null;
+  vaultRoot: string;
+}) => Promise<void>;
 
 export type HostedConversationMailboxImportOutcome =
   | {
@@ -84,9 +109,11 @@ export type HostedConversationMailboxImportOutcome =
 export function createHostedConversationMailboxImportItem(input: {
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
+  prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
+  recordProviderCleanupBeforeCommit?: HostedConversationMailboxProviderCleanupRecorder;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv"
+    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   vaultRoot: string;
 }): (item: HostedMailboxResolvedImportItem) => Promise<HostedMailboxItemImportOutcome> {
@@ -100,10 +127,12 @@ export function createHostedConversationMailboxImportItem(input: {
 export async function importHostedConversationMailboxItem(input: {
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
+  prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
+  recordProviderCleanupBeforeCommit?: HostedConversationMailboxProviderCleanupRecorder;
   item: HostedMailboxResolvedImportItem;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv"
+    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxImportOutcome> {
@@ -150,11 +179,28 @@ export async function importHostedConversationMailboxItem(input: {
 
   const importConversationWake =
     input.importConversationWake ?? importHostedConversationWakeWithLocalInbox;
+  const prepareWakeContext =
+    input.prepareWakeContext ?? prepareHostedConversationMailboxWakeContext;
+  await prepareWakeContext({
+    runtime: input.runtime,
+    vaultRoot: input.vaultRoot,
+    wake: decoded.wake,
+  });
   const imported = await importConversationWake({
     runtime: input.runtime,
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
+  const linqProviderMessageId = resolveHostedConversationProviderCleanupMessageId(decoded.wake);
+  if (linqProviderMessageId) {
+    await (input.recordProviderCleanupBeforeCommit ?? recordHostedProviderCleanupBeforeCommit)({
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      linqMessageIds: [linqProviderMessageId],
+      vaultRoot: input.vaultRoot,
+    });
+  }
 
   if (imported.deduped) {
     return {
@@ -172,10 +218,20 @@ export async function importHostedConversationMailboxItem(input: {
   };
 }
 
+function resolveHostedConversationProviderCleanupMessageId(
+  wake: HostedExecutionConversationMessageWake,
+): string | null {
+  if (!isHostedLinqConversationMessageWake(wake)) {
+    return null;
+  }
+
+  return wake.message.linqMessage.messageId.trim() || null;
+}
+
 async function importHostedConversationWakeWithLocalInbox(input: {
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv"
+    "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
@@ -196,6 +252,25 @@ function decodedWakeMatchesMailboxItem(
     && wake.userId === item.userId
     && wake.occurredAt === item.occurredAt
     && wake.eventId === item.dedupeKey;
+}
+
+async function prepareHostedConversationMailboxWakeContext(input: {
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "forwardedEnv" | "resolvedConfig" | "userEnv"
+  >;
+  vaultRoot: string;
+  wake: HostedExecutionConversationMessageWake;
+}): Promise<void> {
+  await prepareHostedWakeContext(
+    input.vaultRoot,
+    input.wake,
+    {
+      ...input.runtime.forwardedEnv,
+      ...input.runtime.userEnv,
+    },
+    input.runtime.resolvedConfig,
+  );
 }
 
 function normalizeConversationMailboxReasonCode(

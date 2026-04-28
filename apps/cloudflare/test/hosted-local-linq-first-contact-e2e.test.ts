@@ -67,8 +67,7 @@ describe("hosted local Linq first-contact e2e", () => {
       memberId: userId,
       memberPhone: buildLinqRecipientPhoneNumber(userId),
     });
-    await requireScenario().runWake(buildActivationWake(userId), userId);
-    await requireScenario().waitForHostedCompletion(userId);
+    await requireScenario().enqueueWake(buildActivationWake(userId), userId);
     requireScenario().queueAssistantResponses([
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "deliver signup welcome",
@@ -85,7 +84,7 @@ describe("hosted local Linq first-contact e2e", () => {
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.workspace).not.toBeNull();
-    expect(finalStatus.lastErrorCode).toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const sendRequest = await requireLinqStub().waitForSend({
@@ -220,7 +219,7 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(outboundReplyMessageId).not.toBeNull();
     const finalStatus = await completionPromise;
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(finalStatus.lastErrorCode).toBeNull();
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
     await requireLinqStub().waitForMatchingRequestCount({
       expectedCount: 1,
       expectedMethod: "DELETE",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { describe, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import type {
   HostedExecutionConversationMessageWake,
@@ -11,6 +11,14 @@ import type {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
+
+const mocks = vi.hoisted(() => ({
+  recordHostedProviderCleanupBeforeCommit: vi.fn(),
+}));
+
+vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
+  recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
+}));
 
 import {
   createHostedConversationMailboxImportItem,
@@ -30,12 +38,18 @@ import type {
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_conversation_import";
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
+});
+
 describe("hosted mailbox conversation import adapter", () => {
   test("decodes conversation.message through the injected seam and imports it through the local inbox path", async () => {
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake();
     const decodeCalls: unknown[] = [];
     const importedWakeIds: string[] = [];
+    const preparedWakeIds: string[] = [];
 
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: {
@@ -58,6 +72,9 @@ describe("hosted mailbox conversation import adapter", () => {
           },
         };
       },
+      async prepareWakeContext(input) {
+        preparedWakeIds.push(input.wake.eventId);
+      },
       item,
       runtime: createRuntime(),
       vaultRoot: "synthetic-vault-root",
@@ -76,6 +93,7 @@ describe("hosted mailbox conversation import adapter", () => {
         payloadSource: "inline",
       },
     ]);
+    assert.deepEqual(preparedWakeIds, ["evt_synthetic_conversation_001"]);
     assert.deepEqual(importedWakeIds, ["evt_synthetic_conversation_001"]);
     assert.deepEqual(outcome, {
       captureId: "cap_synthetic_conversation_001",
@@ -84,6 +102,57 @@ describe("hosted mailbox conversation import adapter", () => {
         parserProcessed: 0,
       },
       status: "imported",
+    });
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+  });
+
+  test("records Linq provider message ids for post-commit cleanup after local import", async () => {
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_synthetic",
+          from: "+15550100000",
+          isFromMe: false,
+          messageId: " msg_linq_cleanup_123 ",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+          ],
+        },
+        phoneLookupKey: "+15550100000",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+        return {
+          captureId: "cap_synthetic_linq_conversation_001",
+          deduped: false,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    assert.equal(outcome.status, "imported");
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      linqMessageIds: ["msg_linq_cleanup_123"],
+      vaultRoot: "synthetic-vault-root",
     });
   });
 
@@ -101,6 +170,7 @@ describe("hosted mailbox conversation import adapter", () => {
           },
         };
       },
+      async prepareWakeContext() {},
       runtime: createRuntime(),
       vaultRoot: "synthetic-vault-root",
     });
@@ -309,7 +379,7 @@ function createConversationWake(
 
 function createRuntime(): Pick<
   NormalizedHostedAssistantRuntimeConfig,
-  "forwardedEnv" | "platform" | "platformEnv"
+  "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
 > {
   return {
     forwardedEnv: {},
@@ -328,5 +398,30 @@ function createRuntime(): Pick<
       },
     },
     platformEnv: {},
+    resolvedConfig: {
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+      managedAutoReplyChannels: [
+        {
+          capabilityReady: false,
+          channel: "email",
+          memberChannel: "email",
+        },
+        {
+          capabilityReady: true,
+          channel: "linq",
+          memberChannel: "linq",
+        },
+        {
+          capabilityReady: false,
+          channel: "telegram",
+          memberChannel: "telegram",
+        },
+      ],
+    },
+    userEnv: {},
   };
 }

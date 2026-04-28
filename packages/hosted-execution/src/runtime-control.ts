@@ -364,6 +364,7 @@ export type HostedRuntimeLogPhase = (typeof HOSTED_RUNTIME_LOG_PHASES)[number];
 export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "checkpoint.cas_conflict",
   "checkpoint.committed",
+  "assistant.automation_detail",
   "assistant.pass_finished",
   "mailbox.appended",
   "mailbox.dedupe_conflict",

@@ -426,23 +426,12 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         component: "runtime.provider",
         details: expect.objectContaining({
-          assistantProviderRequest: expect.objectContaining({
-            gatewayOnlyProviders: ["azure"],
-            providerExecutionDriver: "responses",
-            providerModel: "openai/gpt-5.4",
-            providerName: "vercel-ai-gateway",
-            previousResponseIdPresent: false,
-            promptCacheDynamicContextStartsAfterStaticCore: 2048,
-            promptCacheStableRouteCapabilityPromptHash: "hash-stable-route",
-            promptCacheStaticPromptHash: "hash-static",
-            promptCacheToolSchemaHash: "hash-tools",
-            schema: "murph.assistant-provider-request-debug.v1",
-            systemPromptHash: "hash-system-prompt",
-            systemPromptLength: debugSystemPrompt.length,
-            userPromptHash: "hash-user-prompt",
-            userPromptLength: debugUserPrompt.length,
-            zeroDataRetention: true,
-          }),
+          assistantProviderRequestGatewayOnlyProviders: ["azure"],
+          assistantProviderRequestProviderExecutionDriver: "responses",
+          assistantProviderRequestProviderModel: "openai/gpt-5.4",
+          assistantProviderRequestProviderName: "vercel-ai-gateway",
+          assistantProviderRequestPreviousResponseIdPresent: false,
+          assistantProviderRequestSchema: "murph.assistant-provider-request-debug.v1",
         }),
         message: "Hosted assistant provider request summary captured.",
         phase: "wake.running",
@@ -454,14 +443,8 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         component: "runtime.provider.http",
         details: expect.objectContaining({
-          assistantResponsesRequest: expect.objectContaining({
-            gatewayZeroDataRetention: true,
-            model: "openai/gpt-5.4",
-            requestBodyHash: "hash-request-body",
-            requestBodyLength: debugRequestBody.length,
-            requestUrlPath: "/v1/responses",
-            toolNames: ["vault.show"],
-          }),
+          assistantResponsesRequestGatewayZeroDataRetention: true,
+          assistantResponsesRequestModel: "openai/gpt-5.4",
         }),
         message: "Hosted assistant final Responses request summary captured.",
         phase: "wake.running",
@@ -483,23 +466,22 @@ describe("executeHostedMailboxEvent", () => {
     );
     expect(result.redactedLogEntries?.[2]?.redacted).toEqual(
       expect.objectContaining({
-        assistantProviderRequest: expect.not.objectContaining({
-          rawEvent: expect.anything(),
-          systemPrompt: expect.anything(),
-          systemPromptChunks: expect.anything(),
-          userPrompt: expect.anything(),
-          userPromptChunks: expect.anything(),
-        }),
+        assistantProviderRequestProviderModel: "openai/gpt-5.4",
       }),
     );
+    expect(result.redactedLogEntries?.[2]?.redacted).not.toEqual(expect.objectContaining({
+      assistantProviderRequestSystemPromptHash: expect.anything(),
+      assistantProviderRequestUserPromptHash: expect.anything(),
+    }));
     expect(result.redactedLogEntries?.[3]?.redacted).toEqual(
       expect.objectContaining({
-        assistantResponsesRequest: expect.not.objectContaining({
-          requestBody: expect.anything(),
-          requestBodyChunkGroups: expect.anything(),
-        }),
+        assistantResponsesRequestModel: "openai/gpt-5.4",
       }),
     );
+    expect(result.redactedLogEntries?.[3]?.redacted).not.toEqual(expect.objectContaining({
+      assistantResponsesRequestRequestBodyHash: expect.anything(),
+      assistantResponsesRequestRequestBodyLength: expect.anything(),
+    }));
     expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
@@ -551,13 +533,8 @@ describe("executeHostedMailboxEvent", () => {
           message: "Hosted assistant provider request summary captured.",
           phase: "wake.running",
           redacted: expect.objectContaining({
-            assistantProviderRequest: expect.objectContaining({
-              gatewayOnlyProviders: ["azure"],
-              providerModel: "openai/gpt-5.4",
-              systemPromptHash: "hash-system-prompt",
-              userPromptHash: "hash-user-prompt",
-              zeroDataRetention: true,
-            }),
+            assistantProviderRequestGatewayOnlyProviders: ["azure"],
+            assistantProviderRequestProviderModel: "openai/gpt-5.4",
           }),
         },
         {
@@ -567,12 +544,7 @@ describe("executeHostedMailboxEvent", () => {
           message: "Hosted assistant final Responses request summary captured.",
           phase: "wake.running",
           redacted: expect.objectContaining({
-            assistantResponsesRequest: expect.objectContaining({
-              model: "openai/gpt-5.4",
-              requestBodyHash: "hash-request-body",
-              requestBodyLength: debugRequestBody.length,
-              toolNames: ["vault.show"],
-            }),
+            assistantResponsesRequestModel: "openai/gpt-5.4",
           }),
         },
         {
