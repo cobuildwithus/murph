@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimeResolvedConfig,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   readHostedRuntimeCommitTimeoutConfigValue,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
@@ -114,6 +115,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       LINQ_API_BASE_URL: "http://localhost:4011",
@@ -124,6 +126,8 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+        "http://host.docker.internal:4111/v1",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://host.docker.internal:4012/",
       TELEGRAM_FILE_BASE_URL: "http://host.docker.internal:4013/",
@@ -135,6 +139,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://host.docker.internal:8787",
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "linq,telegram",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
@@ -144,6 +149,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
       LINQ_API_BASE_URL: "http://localhost:4011",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]: "http://127.0.0.1:4111/v1",
       NODE_ENV: "production",
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",

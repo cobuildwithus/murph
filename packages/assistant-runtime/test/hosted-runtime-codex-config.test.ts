@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,6 +11,9 @@ import { afterEach, test } from "vitest";
 import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+} from "../src/hosted-runtime/launch-spec.ts";
 
 import {
   buildHostedCodexConfigToml,
@@ -109,6 +115,101 @@ test("hosted Codex runtime config preserves explicit model and reasoning env", a
   assert.match(config, /model_reasoning_effort = "high"/u);
 });
 
+test("hosted Codex runtime config installs a local E2E app-server stub when configured", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const result = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot,
+    runtimeEnv: {
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+        "http://host.docker.internal:4123/v1",
+      NODE_ENV: "test",
+      VERCEL_AI_API_KEY: "secret-vercel-key",
+    },
+  });
+
+  const shimBinDir = path.join(result.codexHome!, "bin");
+  const shimPath = path.join(shimBinDir, "codex");
+  assert.equal(
+    result.runtimeEnv.PATH?.startsWith(`${shimBinDir}${path.delimiter}`),
+    true,
+  );
+  const shimSource = await readFile(shimPath, "utf8");
+  assert.match(shimSource, /^#!\/usr\/bin\/env node/u);
+  assert.match(shimSource, /hosted-local-codex-shim/u);
+  assert.match(shimSource, /http:\/\/host\.docker\.internal:4123\/v1/u);
+  const shimMode = (await stat(shimPath)).mode & 0o777;
+  assert.equal(shimMode, 0o700);
+});
+
+test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to Responses", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+  const requests: string[] = [];
+  const server = await startResponsesStubServer({
+    requests,
+    responseText: "shim response",
+  });
+
+  try {
+    const result = await prepareHostedCodexRuntimeEnvironment({
+      operatorHomeRoot,
+      runtimeEnv: {
+        HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+        [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+          `${readServerBaseUrl(server)}/v1`,
+        NODE_ENV: "test",
+        PATH: process.env.PATH ?? "",
+        VERCEL_AI_API_KEY: "secret-vercel-key",
+      },
+    });
+    const child = spawn(path.join(result.codexHome!, "bin", "codex"), ["app-server"], {
+      env: {
+        ...process.env,
+        PATH: result.runtimeEnv.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const messages = await runHostedLocalCodexStubTurn(child);
+
+    assert.equal(requests.length, 1);
+    assert.match(requests[0]!, /hello hosted local/u);
+    assert.deepEqual(
+      messages.find((message) => message.type === "item.completed"),
+      {
+        item: {
+          id: "msg_turn_hosted_local_1",
+          text: "shim response",
+          type: "assistant.message",
+        },
+        type: "item.completed",
+      },
+    );
+  } finally {
+    await closeHttpServer(server);
+  }
+});
+
+test("hosted Codex runtime config rejects the local E2E app-server stub for non-local hosts", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+            "https://provider.example.test/v1",
+          VERCEL_AI_API_KEY: "secret-vercel-key",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes("local test host"),
+  );
+});
+
 test("hosted Codex runtime config fails closed without the configured model credential env", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
 
@@ -179,4 +280,160 @@ async function createTemporaryDirectory(): Promise<string> {
   const target = await mkdtemp(path.join(tmpdir(), "hosted-codex-config-"));
   temporaryPaths.push(target);
   return target;
+}
+
+async function startResponsesStubServer(input: {
+  requests: string[];
+  responseText: string;
+}): Promise<Server> {
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => {
+      chunks.push(Buffer.from(chunk));
+    });
+    request.on("end", () => {
+      input.requests.push(Buffer.concat(chunks).toString("utf8"));
+
+      if (request.method !== "POST" || request.url !== "/v1/responses") {
+        response.statusCode = 404;
+        response.end("not found");
+        return;
+      }
+
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(JSON.stringify({
+        output: [
+          {
+            content: [
+              {
+                text: input.responseText,
+              },
+            ],
+          },
+        ],
+      }));
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  return server;
+}
+
+function readServerBaseUrl(server: Server): string {
+  const address = server.address();
+  assert(address && typeof address === "object");
+  return `http://127.0.0.1:${(address as AddressInfo).port}`;
+}
+
+async function closeHttpServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+async function runHostedLocalCodexStubTurn(
+  child: ReturnType<typeof spawn>,
+): Promise<Record<string, unknown>[]> {
+  const childStdin = child.stdin;
+  const childStdout = child.stdout;
+  const childStderr = child.stderr;
+  assert(childStdin);
+  assert(childStdout);
+  assert(childStderr);
+
+  const messages: Record<string, unknown>[] = [];
+  let stdoutBuffer = "";
+  let stderr = "";
+
+  const completed = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for hosted local Codex stub turn. stderr: ${stderr}`));
+    }, 5_000);
+    let resolved = false;
+
+    const finish = (error?: Error): void => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      clearTimeout(timeout);
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    };
+
+    child.once("error", finish);
+    child.once("exit", (code, signal) => {
+      if (resolved) {
+        return;
+      }
+
+      finish(new Error(
+        `Hosted local Codex stub exited before completing turn: ${code ?? signal}. stderr: ${stderr}`,
+      ));
+    });
+    childStderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    childStdout.on("data", (chunk) => {
+      stdoutBuffer += String(chunk);
+      const lines = stdoutBuffer.split(/\r?\n/u);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+
+        const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+        messages.push(parsed);
+        if (parsed.method === "turn/completed") {
+          finish();
+        }
+      }
+    });
+  });
+
+  try {
+    childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({ id: 2, method: "thread/start", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({
+      id: 3,
+      method: "turn/start",
+      params: {
+        input: [
+          {
+            text: "hello hosted local",
+            type: "text",
+          },
+        ],
+        threadId: "thread_test",
+      },
+    })}\n`);
+
+    await completed;
+    return messages;
+  } finally {
+    childStdin.end();
+    child.kill();
+  }
 }

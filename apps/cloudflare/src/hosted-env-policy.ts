@@ -4,6 +4,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-assistant-env-constants";
 import {
   buildHostedRuntimeForwardedEnv,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILES_ENV,
   HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS,
@@ -159,6 +160,7 @@ export function buildHostedRunnerAmbientEnv(
 }
 
 const CONTAINER_REWRITABLE_RUNNER_URL_KEYS = new Set([
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   "LINQ_ATTACHMENT_CDN_BASE_URL",
   "LINQ_API_BASE_URL",
   "TELEGRAM_API_BASE_URL",

@@ -50,6 +50,7 @@ export {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   buildHostedRuntimeResolvedConfig,
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
   HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILES_ENV,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
