@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   normalizeHostedTelegramConversationCapture: vi.fn(),
   openInboxRuntime: vi.fn(),
   readHostedRawEmailMessage: vi.fn(),
+  markLinqChatRead: vi.fn(),
   resolveHostedEmailSelfAddresses: vi.fn(),
 }));
 
@@ -50,6 +51,10 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
   createHostedTelegramAttachmentDownloadDriver: mocks.createHostedTelegramAttachmentDownloadDriver,
 }));
 
+vi.mock("@murphai/operator-config/linq-runtime", () => ({
+  markLinqChatRead: mocks.markLinqChatRead,
+}));
+
 vi.mock("@murphai/hosted-execution/hosted-email", () => ({
   resolveHostedEmailSelfAddresses: mocks.resolveHostedEmailSelfAddresses,
 }));
@@ -75,6 +80,7 @@ function createRuntime() {
 }
 
 beforeEach(() => {
+  mocks.markLinqChatRead.mockResolvedValue(undefined);
   mocks.openInboxRuntime.mockResolvedValue({
     close: vi.fn(),
   });
@@ -274,6 +280,15 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
+    expect(mocks.markLinqChatRead).toHaveBeenCalledTimes(1);
+    expect(mocks.markLinqChatRead).toHaveBeenCalledWith(
+      {
+        chatId: "chat_123",
+      },
+      expect.objectContaining({
+        env: runtime.platformEnv,
+      }),
+    );
     expect(pipelineClose).toHaveBeenCalledTimes(3);
     expect(linqMetrics).toEqual({
       nextWakeAt: null,
@@ -312,6 +327,98 @@ describe("ingestHostedConversationMessageWake", () => {
     ).rejects.toThrow("pipeline failed");
 
     expect(runtimeClose).toHaveBeenCalledTimes(1);
+    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
+  });
+
+  it("marks inbound Linq chats read after parsed inbox persistence without failing ingestion", async () => {
+    const order: string[] = [];
+    mocks.createParsedInboxPipeline.mockImplementation(async (input) => ({
+      close: vi.fn(),
+      processCapture: vi.fn(async () => {
+        order.push("processCapture");
+        await input.onParserDrain?.([{} as never]);
+        return {
+          captureId: "capture_123",
+          createdAt: "2026-04-08T00:00:00.000Z",
+          deduped: false,
+          envelopePath: "raw/inbox/linq/capture_123/envelope.json",
+          eventId: "evt_capture_123",
+        };
+      }),
+      runtime: input.runtime,
+    }));
+    mocks.markLinqChatRead.mockImplementationOnce(async () => {
+      order.push("markRead");
+      throw new Error("provider unavailable");
+    });
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    const metrics = await ingestHostedConversationMessageWake({
+      runtime: {
+        ...createRuntime(),
+        platformEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      },
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq",
+        linqMessage: {
+          chatId: "chat_after_import",
+          from: "+15551234567",
+          isFromMe: false,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(order).toEqual(["processCapture", "markRead"]);
+    expect(metrics).toEqual({
+      nextWakeAt: null,
+      parserProcessed: 1,
+    });
+    expect(mocks.markLinqChatRead).toHaveBeenCalledWith(
+      {
+        chatId: "chat_after_import",
+      },
+      expect.objectContaining({
+        env: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      }),
+    );
+  });
+
+  it("does not mark self-authored Linq messages as read", async () => {
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+
+    await ingestHostedConversationMessageWake({
+      runtime: createRuntime(),
+      vaultRoot: "/tmp/assistant-runtime-conversation",
+      wake: buildHostedExecutionLinqConversationMessageWake({
+        eventId: "evt_linq_from_me",
+        linqMessage: {
+          chatId: "chat_from_me",
+          from: "+15551234567",
+          isFromMe: true,
+          messageId: "msg_123",
+          parts: [],
+        },
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        phoneLookupKey: "15551234567",
+        userId: "member_123",
+      }),
+    });
+
+    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
 
   it("fails closed on unsupported conversation wake kinds before opening the inbox runtime", async () => {
