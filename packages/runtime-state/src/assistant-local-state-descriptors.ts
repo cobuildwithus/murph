@@ -98,6 +98,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/hosted-mailbox.json",
     "Hosted mailbox import watermarks and compact quarantine status that must move with hosted runtime continuity.",
   ),
+  definePortableAssistantFile(
+    ".runtime/operations/assistant/hosted-system-mailbox.json",
+    "Hosted system mailbox pending item state that must move with hosted runtime continuity.",
+  ),
   definePortableAssistantDirectory(
     ".runtime/operations/assistant/cron",
     "Assistant cron container for portable scheduling and automation continuity descendants.",
