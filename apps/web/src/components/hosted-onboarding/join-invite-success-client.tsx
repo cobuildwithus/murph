@@ -21,7 +21,6 @@ interface JoinInviteSuccessClientProps {
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
   sessionId: string | null;
-  shareCode: string | null;
   preview?: boolean;
 }
 
@@ -37,7 +36,6 @@ export function JoinInviteSuccessClient({
   initialStatus,
   inviteCode,
   sessionId,
-  shareCode,
   preview = false,
 }: JoinInviteSuccessClientProps) {
   const [status, setStatus] = useState(initialStatus);
@@ -115,7 +113,7 @@ export function JoinInviteSuccessClient({
     };
   }, [preview, sessionId, shouldPoll, status.stage]);
 
-  const href = `/join/${encodeURIComponent(inviteCode)}${shareCode ? `?share=${encodeURIComponent(shareCode)}` : ""}`;
+  const href = `/join/${encodeURIComponent(inviteCode)}`;
   const successState = resolveHostedInviteSuccessState(status);
   const supportMailtoHref = buildHostedCheckoutSuccessSupportMailto({
     inviteCode,

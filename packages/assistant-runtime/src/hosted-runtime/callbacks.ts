@@ -34,7 +34,7 @@ import type {
 import type {
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
-import { buildHostedPlatformBackedRuntimeEnv } from "./environment.ts";
+import { buildHostedTelegramChannelEnv } from "./channel-activity.ts";
 
 const HOSTED_MAX_CHECKPOINTED_ASSISTANT_DELIVERY_EFFECTS = 1;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
@@ -174,7 +174,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantDeliveryOutcome[]> {
-  const telegramEnv = buildHostedPlatformBackedRuntimeEnv({
+  const telegramEnv = buildHostedTelegramChannelEnv({
     forwardedEnv: input.forwardedEnv ?? {},
     platformEnv: input.platformEnv,
   }) as NodeJS.ProcessEnv;

@@ -6,7 +6,6 @@ import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
-  HOSTED_RUNTIME_SHARE_IMPORT_PATH,
   HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -23,8 +22,6 @@ export const HOSTED_WEB_STRIPE_CUSTOMER_LOOKUP_PATH =
   "/api/internal/hosted-execution/billing/stripe/customer/resolve";
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/providers\/[^/]+\/connect-link$/u;
-const HOSTED_RUNTIME_SHARE_PAYLOAD_PATH =
-  /^\/api\/internal\/hosted-execution\/share\/[^/]+\/payload$/u;
 const HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_PATH =
   /^\/api\/internal\/hosted-execution\/vault-sync\/[^/]+\/payload$/u;
 
@@ -44,7 +41,6 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
 }): boolean {
   if (input.method === "GET") {
     return input.path === HOSTED_RUNTIME_WORKSPACE_PATH
-      || HOSTED_RUNTIME_SHARE_PAYLOAD_PATH.test(input.path)
       || HOSTED_RUNTIME_VAULT_SYNC_PAYLOAD_PATH.test(input.path);
   }
 
@@ -58,7 +54,6 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
     || path === HOSTED_RUNTIME_LOG_PATH
     || path === HOSTED_RUNTIME_MAILBOX_FETCH_PATH
     || path === HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
-    || path === HOSTED_RUNTIME_SHARE_IMPORT_PATH
     || path === HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH
     || path === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     || path === HOSTED_WEB_ISSUE_RECORD_PATH

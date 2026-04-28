@@ -2,7 +2,6 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  type HostedExecutionRunnerSharePack,
   type HostedExecutionRunnerVaultSyncImport,
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
@@ -10,7 +9,6 @@ import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 import type {
-  HostedRuntimeShareImportRequest,
   HostedRuntimeVaultSyncImportRequest,
   HostedRuntimeVaultSyncImportSummary,
 } from "@murphai/hosted-execution/runtime-control";
@@ -26,7 +24,7 @@ import {
 
 import {
   createHostedAssistantChannelTypingDependencies,
-} from "./channel-typing.ts";
+} from "./channel-activity.ts";
 import {
   executeHostedMailboxEvent,
 } from "./events.ts";
@@ -38,9 +36,6 @@ import type {
   HostedMailboxExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
-import type {
-  HostedRuntimePlatform,
-} from "./platform.ts";
 import {
   createHostedVaultSyncImportSummary,
   resolveHostedVaultSyncImportStatus,
@@ -54,16 +49,11 @@ type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
   | "dispatch-assistant-notification"
-  | "import-vault-share"
   | "import-vault-sync"
   | "run-device-sync-wake";
 
 type HostedSystemMailboxRecordRequest =
-  | {
-      kind: "share-import";
-      request: HostedRuntimeShareImportRequest;
-    }
-  | {
+  {
       kind: "vault-sync-import";
       request: HostedRuntimeVaultSyncImportRequest;
     };
@@ -315,23 +305,6 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   }
 
   try {
-    if (input.item.postCheckpointRecord.kind === "share-import") {
-      const sharePort = input.runtime.platform.sharePort ?? null;
-      if (!sharePort) {
-        throw new TypeError("Hosted share import receipt requires a share port.");
-      }
-      const response = await sharePort.recordImport(input.item.postCheckpointRecord.request);
-      await removeHostedSystemMailboxPendingItem({
-        itemId: input.item.itemId,
-        vaultRoot: input.vaultRoot,
-      });
-      return {
-        failed: 0,
-        nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
-        recorded: response.recorded ? 1 : 0,
-      };
-    }
-
     if (input.item.postCheckpointRecord.kind === "vault-sync-import") {
       const vaultSyncPort = input.runtime.platform.vaultSyncPort ?? null;
       if (!vaultSyncPort) {
@@ -376,19 +349,6 @@ function buildHostedSystemMailboxRecordRequest(input: {
   metrics: HostedMailboxExecutionMetrics;
 }): HostedSystemMailboxRecordRequest | null {
   const importedAt = input.item.lastAttemptAt ?? new Date().toISOString();
-  if (input.item.wake.kind === "vault.share.accepted" && input.metrics.shareImportResult) {
-    return {
-      kind: "share-import",
-      request: {
-        eventId: input.item.wake.eventId,
-        importedAt,
-        ownerUserId: input.item.wake.share.ownerUserId,
-        shareId: input.item.wake.share.shareId,
-        status: "imported",
-      },
-    };
-  }
-
   if (input.item.wake.kind === "vault.sync.import" && input.metrics.vaultSyncImportResult) {
     return {
       kind: "vault-sync-import",
@@ -428,7 +388,7 @@ async function executePendingHostedSystemMailboxItem(input: {
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
         forwardedEnv: input.runtime.forwardedEnv,
         platformEnv: input.runtime.platformEnv,
-        runtimeEnv: input.runtimeEnv,
+        userEnv: input.runtime.userEnv,
       }),
       memberId: input.pendingItem.wake.userId,
       userEnvKeys: Object.keys(input.runtime.userEnv),
@@ -450,12 +410,6 @@ async function executePendingHostedSystemMailboxItem(input: {
     forceQueueOnlyAssistantNotification: true,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
-    sharePack: await fetchHostedSharePackForWake({
-      attemptedAt: input.pendingItem.lastAttemptAt,
-      platform: input.runtime.platform,
-      requestId: input.pendingItem.requestId,
-      wake: input.pendingItem.wake,
-    }),
     vaultRoot: input.vaultRoot,
     wake: input.pendingItem.wake,
   });
@@ -515,7 +469,7 @@ async function executePendingHostedVaultSyncImport(input: {
         channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
           forwardedEnv: input.runtime.forwardedEnv,
           platformEnv: input.runtime.platformEnv,
-          runtimeEnv: input.runtimeEnv,
+          userEnv: input.runtime.userEnv,
         }),
         memberId: input.pendingItem.wake.userId,
         userEnvKeys: Object.keys(input.runtime.userEnv),
@@ -533,51 +487,6 @@ async function executePendingHostedVaultSyncImport(input: {
   }
 
   return metrics;
-}
-
-async function fetchHostedSharePackForWake(input: {
-  attemptedAt: string | null;
-  platform: HostedRuntimePlatform;
-  requestId: string | null;
-  wake: HostedExecutionSystemWake;
-}): Promise<HostedExecutionRunnerSharePack | null> {
-  if (input.wake.kind !== "vault.share.accepted") {
-    return null;
-  }
-
-  if (!input.platform.sharePort) {
-    throw new TypeError("Hosted share accepted wake requires a share port.");
-  }
-
-  const response = await input.platform.sharePort.fetchPayload({
-    eventId: input.wake.eventId,
-    ownerUserId: input.wake.share.ownerUserId,
-    requestId: input.requestId ?? input.wake.eventId,
-    shareId: input.wake.share.shareId,
-  });
-
-  if (!response.payload) {
-    const unavailable = response.unavailable ?? null;
-    if (unavailable?.retryable === false) {
-      throw new HostedSystemMailboxTerminalRecordError({
-        message: `Hosted share accepted wake payload unavailable: ${unavailable.code}.`,
-        recordRequest: {
-          kind: "share-import",
-          request: {
-            errorCode: `share_payload.${unavailable.code}`,
-            eventId: input.wake.eventId,
-            importedAt: input.attemptedAt ?? new Date().toISOString(),
-            ownerUserId: input.wake.share.ownerUserId,
-            shareId: input.wake.share.shareId,
-            status: "quarantined",
-          },
-        },
-      });
-    }
-    throw new TypeError("Hosted share accepted wake payload is missing.");
-  }
-
-  return response.payload;
 }
 
 async function removeHostedSystemMailboxPendingItem(input: {
@@ -686,6 +595,9 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
     throw new TypeError("hosted system mailbox pending item must be an object.");
   }
   const record = value as Record<string, unknown>;
+  if (isLegacySharePendingRecord(record)) {
+    throw new TypeError("hosted system mailbox legacy share-import pending state is unsupported.");
+  }
   const wake = parseHostedExecutionWake(record.wake);
   if (wake.kind === "conversation.message") {
     throw new TypeError("hosted system mailbox wake must be a system wake.");
@@ -729,6 +641,24 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
   };
 }
 
+function isLegacySharePendingRecord(record: Record<string, unknown>): boolean {
+  const wake = record.wake;
+  const postCheckpointRecord = record.postCheckpointRecord;
+  return record.routeAction === "import-vault-share"
+    || (
+      !!wake
+      && typeof wake === "object"
+      && !Array.isArray(wake)
+      && (wake as { kind?: unknown }).kind === "vault.share.accepted"
+    )
+    || (
+      !!postCheckpointRecord
+      && typeof postCheckpointRecord === "object"
+      && !Array.isArray(postCheckpointRecord)
+      && (postCheckpointRecord as { kind?: unknown }).kind === "share-import"
+    );
+}
+
 function readHostedSystemMailboxRouteAction(
   item: HostedMailboxResolvedImportItem,
 ): HostedSystemMailboxRouteAction | null {
@@ -736,7 +666,6 @@ function readHostedSystemMailboxRouteAction(
     item.route.action === "apply-member-activation"
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "dispatch-assistant-notification"
-    || item.route.action === "import-vault-share"
     || item.route.action === "import-vault-sync"
     || item.route.action === "run-device-sync-wake"
   ) {
@@ -751,7 +680,6 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     value === "apply-member-activation"
     || value === "apply-member-channels-update"
     || value === "dispatch-assistant-notification"
-    || value === "import-vault-share"
     || value === "import-vault-sync"
     || value === "run-device-sync-wake"
   ) {
@@ -801,27 +729,7 @@ function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMail
   const requestRecord = request as Record<string, unknown>;
 
   if (record.kind === "share-import") {
-    const status = requestRecord.status;
-    if (status !== "imported" && status !== "quarantined" && status !== "skipped") {
-      throw new TypeError("hosted system mailbox share import status is invalid.");
-    }
-    return {
-      kind: "share-import",
-      request: {
-        errorCode: readOptionalString(requestRecord.errorCode, "hosted system mailbox share errorCode"),
-        eventId: readRequiredString(requestRecord.eventId, "hosted system mailbox share eventId"),
-        importedAt: readRequiredString(
-          requestRecord.importedAt,
-          "hosted system mailbox share importedAt",
-        ),
-        ownerUserId: readRequiredString(
-          requestRecord.ownerUserId,
-          "hosted system mailbox share ownerUserId",
-        ),
-        shareId: readRequiredString(requestRecord.shareId, "hosted system mailbox share shareId"),
-        status,
-      },
-    };
+    throw new TypeError("hosted system mailbox legacy share-import pending state is unsupported.");
   }
 
   if (record.kind === "vault-sync-import") {

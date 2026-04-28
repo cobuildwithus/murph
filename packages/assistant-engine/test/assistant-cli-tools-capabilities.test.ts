@@ -4,7 +4,6 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import * as coreModule from '@murphai/core'
 import type { InboxServices } from '@murphai/inbox-services'
 import * as operatorConfigModule from '@murphai/operator-config/operator-config'
 import {
@@ -517,12 +516,6 @@ describe('assistant CLI tool capability seam', () => {
       importerCalls,
       queryCalls,
     })
-    const buildSharePackSpy = vi.spyOn(coreModule, 'buildSharePackFromVault').mockResolvedValue({
-      createdAt: '2026-04-08T00:00:00.000Z',
-      entities: [],
-      schemaVersion: 'murph.share-pack.v1',
-      title: 'Morning Smoothie',
-    })
     const context = createToolContext({
       captureId: 'cap_123',
       executionContext: {
@@ -538,11 +531,6 @@ describe('assistant CLI tool capability seam', () => {
             expiresAt: '2026-04-09T00:00:00.000Z',
             provider,
             providerLabel: provider,
-          })),
-          issueShareLink: vi.fn(async () => ({
-            shareCode: 'share_123',
-            shareUrl: 'https://example.com/share/share_123',
-            url: 'https://example.com/share/share_123',
           })),
         },
       } satisfies NonNullable<AssistantToolContext['executionContext']>,
@@ -1100,42 +1088,9 @@ describe('assistant CLI tool capability seam', () => {
       provider: 'whoop',
       providerLabel: 'whoop',
     })
-    expect(await executeTool(outwardTools, 'vault.share.createLink', {
-      title: 'Morning Smoothie',
-      foods: [{ slug: 'morning-smoothie' }],
-      includeAttachedRegimens: true,
-      logMeal: {
-        food: {
-          slug: 'morning-smoothie',
-        },
-      },
-      recipientPhoneNumber: '+15555550123',
-      inviteCode: 'invite_123',
-      expiresInHours: 12,
-    })).toMatchObject({
-      shareCode: 'share_123',
-      url: 'https://example.com/share/share_123',
-    })
-    expect(buildSharePackSpy).toHaveBeenCalledWith({
-      vaultRoot,
-      title: 'Morning Smoothie',
-      foods: [{ slug: 'morning-smoothie' }],
-      regimens: undefined,
-      recipes: undefined,
-      includeAttachedRegimens: true,
-      logMeal: {
-        food: {
-          slug: 'morning-smoothie',
-        },
-      },
-    })
-    expect(() =>
-      outwardTools
-        .find((tool) => tool.name === 'vault.share.createLink')
-        ?.inputSchema.parse({
-          foods: [{ group: 'bundle' }],
-        }),
-    ).toThrow('Provide either an id or slug.')
+    expect(outwardTools.map((tool) => tool.name)).toEqual([
+      'murph.device.connect',
+    ])
   })
 
   it('executes Health Commons read-only tools against the public catalog', async () => {

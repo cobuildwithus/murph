@@ -12,12 +12,9 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 export default async function JoinInviteCancelPage(input: {
   params: Promise<{ inviteCode: string }>;
-  searchParams: Promise<{ share?: string }>;
 }) {
   const { inviteCode } = await input.params;
-  const searchParams = await input.searchParams;
-  const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
-  const href = `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}${shareCode ? `?share=${encodeURIComponent(shareCode)}` : ""}`;
+  const href = `/join/${encodeURIComponent(decodeURIComponent(inviteCode))}`;
 
   return (
     <main className="grid min-h-screen place-items-center px-5 py-12">

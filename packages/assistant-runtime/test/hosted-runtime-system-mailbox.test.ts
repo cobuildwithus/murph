@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import path from "node:path";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 
 import {
-  buildHostedExecutionVaultShareAcceptedWake,
   buildHostedExecutionVaultSyncImportWake,
 } from "@murphai/hosted-execution";
 import type {
@@ -10,11 +10,10 @@ import type {
 } from "@murphai/core";
 import type {
   HostedMailboxItem,
-  HostedRuntimeShareImportRequest,
-  HostedRuntimeSharePayloadFetchRequest,
   HostedRuntimeVaultSyncImportRequest,
   HostedRuntimeVaultSyncPayloadFetchRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import { describe, it } from "vitest";
 
 import type {
@@ -22,7 +21,6 @@ import type {
 } from "../src/hosted-runtime/mailbox-import.ts";
 import type {
   HostedRuntimePlatform,
-  HostedRuntimeSharePort,
   HostedRuntimeVaultSyncPort,
 } from "../src/hosted-runtime/platform.ts";
 import {
@@ -105,103 +103,64 @@ describe("hosted system mailbox checkpoint records", () => {
     assert.equal(runtimeEntrypoint.includes("vault-sync-mailbox-import"), false);
   });
 
-  it("checkpoints non-retryable share side-input misses before recording quarantine to web", async () => {
+  it("fails closed when old serialized share-import pending records are restored", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
-    const payloadFetchRequests: HostedRuntimeSharePayloadFetchRequest[] = [];
-    const recordImportRequests: HostedRuntimeShareImportRequest[] = [];
-    const sharePort: HostedRuntimeSharePort = {
-      async fetchPayload(request) {
-        payloadFetchRequests.push(request);
-        return {
-          fetchedAt: FIXED_NOW,
-          payload: null,
-          unavailable: {
-            code: "gone",
-            retryable: false,
-          },
-        };
-      },
-      async recordImport(request) {
-        recordImportRequests.push(request);
-        return {
-          recorded: true,
-          shareId: request.shareId,
-          status: request.status,
-        };
-      },
-    };
-    const runtime = createRuntime({
-      sharePort,
-    });
 
     try {
-      const wake = createShareWake();
-      assert.deepEqual(
-        await enqueueHostedSystemMailboxItem({
-          item: createResolvedShareItem(),
-          vaultRoot: workspace.vaultRoot,
-          wake,
-        }),
-        {
-          reasonCode: "system_mailbox.queued",
-          status: "imported",
-        },
+      const statePath = path.join(
+        resolveAssistantStatePaths(workspace.vaultRoot).assistantStateRoot,
+        "hosted-system-mailbox.json",
       );
-
-      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
-        now: () => FIXED_NOW,
-        runtime,
-        runtimeEnv: {},
-        vaultRoot: workspace.vaultRoot,
-      });
-
-      assert.equal(prepared?.status, "recording");
-      if (!prepared || prepared.status !== "recording") {
-        assert.fail("Expected terminal share side-input miss to prepare a recording receipt.");
-      }
-      assert.deepEqual(payloadFetchRequests, [
-        {
-          eventId: "event_share_accepted_123",
-          ownerUserId: "member_sender",
-          requestId: "event_share_accepted_123",
-          shareId: "share_123",
+      await mkdir(path.dirname(statePath), { recursive: true });
+      await writeFile(statePath, JSON.stringify({
+        schema: "murph.hosted-system-mailbox-state.v1",
+        schemaVersion: 1,
+        value: {
+          pending: [{
+            attemptCount: 0,
+            itemId: "mailbox_item_legacy_share",
+            lastAttemptAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            mailboxDedupeKey: "event_share_accepted_123",
+            nextAttemptAt: null,
+            occurredAt: FIXED_NOW,
+            postCheckpointRecord: {
+              kind: "share-import",
+              request: {
+                eventId: "event_share_accepted_123",
+                importedAt: FIXED_NOW,
+                ownerUserId: "member_sender",
+                shareId: "share_123",
+                status: "quarantined",
+              },
+            },
+            requestId: null,
+            routeAction: "import-vault-share",
+            status: "recording",
+            wake: {
+              eventId: "event_share_accepted_123",
+              kind: "vault.share.accepted",
+              occurredAt: FIXED_NOW,
+              share: {
+                ownerUserId: "member_sender",
+                shareId: "share_123",
+              },
+              userId: "member_123",
+            },
+          }],
         },
-      ]);
-      assert.deepEqual(recordImportRequests, []);
-      assert.deepEqual(prepared.item.postCheckpointRecord, {
-        kind: "share-import",
-        request: {
-          errorCode: "share_payload.gone",
-          eventId: "event_share_accepted_123",
-          importedAt: FIXED_NOW,
-          ownerUserId: "member_sender",
-          shareId: "share_123",
-          status: "quarantined",
-        },
-      });
+      }), "utf8");
 
-      assert.deepEqual(
-        await recordHostedSystemMailboxItemAfterCheckpoint({
-          item: prepared.item,
-          runtime,
+      await assert.rejects(
+        prepareHostedSystemMailboxItemForCheckpoint({
+          now: () => FIXED_NOW,
+          runtime: createRuntime({}),
+          runtimeEnv: {},
           vaultRoot: workspace.vaultRoot,
         }),
-        {
-          failed: 0,
-          nextWakeAt: null,
-          recorded: 1,
-        },
+        /legacy share-import pending state is unsupported/u,
       );
-      assert.deepEqual(recordImportRequests, [
-        {
-          errorCode: "share_payload.gone",
-          eventId: "event_share_accepted_123",
-          importedAt: FIXED_NOW,
-          ownerUserId: "member_sender",
-          shareId: "share_123",
-          status: "quarantined",
-        },
-      ]);
     } finally {
       await workspace.cleanup();
     }
@@ -356,18 +315,6 @@ function createRuntime(
   };
 }
 
-function createShareWake() {
-  return buildHostedExecutionVaultShareAcceptedWake({
-    eventId: "event_share_accepted_123",
-    memberId: "member_123",
-    occurredAt: FIXED_NOW,
-    share: {
-      ownerUserId: "member_sender",
-      shareId: "share_123",
-    },
-  });
-}
-
 function createVaultSyncWake() {
   return buildHostedExecutionVaultSyncImportWake({
     eventId: "vault-sync.import:vsi_runtime",
@@ -381,47 +328,6 @@ function createVaultSyncWake() {
       sourceVaultTitle: "Local Vault",
     },
   });
-}
-
-function createResolvedShareItem(): HostedMailboxResolvedImportItem {
-  const item: HostedMailboxItem = {
-    createdAt: FIXED_NOW,
-    dedupeKey: "event_share_accepted_123",
-    expiresAt: null,
-    id: "mailbox_item_system_share",
-    kind: "vault.share.accepted",
-    lane: "system",
-    laneSeq: "1",
-    occurredAt: FIXED_NOW,
-    payloadBytes: 64,
-    payloadInlineCiphertext: "ciphertext",
-    payloadRef: null,
-    payloadSchema: "murph.hosted-mailbox-item.v1",
-    updatedAt: FIXED_NOW,
-    userId: "member_123",
-  };
-
-  return {
-    item,
-    payload: {
-      payloadCiphertext: "ciphertext",
-      payloadSchema: "murph.hosted-mailbox-payload.v1",
-      requestId: null,
-      source: "inline",
-      status: "resolved",
-    },
-    route: {
-      action: "import-vault-share",
-      advanceProgress: true,
-      itemRef: {
-        id: item.id,
-        kind: item.kind,
-        lane: item.lane,
-        laneSeq: item.laneSeq,
-      },
-      state: "route",
-    },
-  };
 }
 
 function createResolvedVaultSyncItem(): HostedMailboxResolvedImportItem {

@@ -86,8 +86,6 @@ export async function handleHostedVaultSyncImportWake(input: {
 
     return {
       conversationMetrics: null,
-      shareImportResult: null,
-      shareImportTitle: null,
       vaultSyncImportResult,
     };
   } finally {

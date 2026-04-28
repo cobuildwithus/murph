@@ -41,11 +41,8 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
 import {
   JoinInviteClient,
   resolveJoinInviteStatusFromRefresh,
-  resolveJoinInviteShareStateFromAccept,
-  resolveJoinInviteShareStateFromStatus,
   shouldAwaitHostedInviteSessionResolution,
 } from "@/src/components/hosted-onboarding/join-invite-client";
-import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import {
   getHostedDefaultBillingPlanCode,
@@ -84,8 +81,6 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
         },
       }),
       inviteCode: "invite-code",
-      shareCode: null,
-      sharePreview: null,
     }),
   );
 
@@ -113,8 +108,6 @@ test("verify-stage invite passes only the masked phone hint to phone auth", () =
         },
       }),
       inviteCode: "invite-code",
-      shareCode: null,
-      sharePreview: null,
     }),
   );
 
@@ -141,8 +134,6 @@ test("verify-stage invite shows the session check while the server session is st
         },
       }),
       inviteCode: "invite-code",
-      shareCode: null,
-      sharePreview: null,
     }),
   );
 
@@ -167,8 +158,6 @@ test("verify-stage invite keeps polling while the session is still settling", ()
         },
       }),
       inviteCode: "invite-code",
-      shareCode: null,
-      sharePreview: null,
     }),
   );
 
@@ -326,7 +315,6 @@ test("manual checkout surfaces API errors and can retry", async () => {
       },
       stage: "checkout",
     }),
-    shareCode: "share-code",
   });
   const checkoutButton = findButtonByText(view.container, /Continue to checkout/);
 
@@ -343,7 +331,6 @@ test("manual checkout surfaces API errors and can retry", async () => {
     body: JSON.stringify({
       billingPlanCode: "launch_monthly",
       inviteCode: "invite-code",
-      shareCode: "share-code",
     }),
     method: "POST",
   }));
@@ -533,8 +520,6 @@ test("active invite state renders message and settings actions with client navig
         stage: "active",
       }),
       inviteCode: "invite-code",
-      shareCode: null,
-      sharePreview: null,
     }),
   );
 
@@ -560,8 +545,6 @@ test("active invite state omits Murph contact actions when no assigned number is
         stage: "active",
       }),
       inviteCode: "invite-code",
-      shareCode: null,
-      sharePreview: null,
     }),
   );
 
@@ -583,17 +566,6 @@ test("activating invite state explains when vault and assistant setup is still r
         stage: "activating",
       }),
       inviteCode: "invite-code",
-      shareCode: "share-code",
-      sharePreview: {
-        kinds: ["food"],
-        counts: {
-          foods: 1,
-          recipes: 0,
-          regimens: 0,
-          total: 1,
-        },
-        logMealAfterImport: false,
-      },
     }),
   );
 
@@ -601,59 +573,6 @@ test("activating invite state explains when vault and assistant setup is still r
   assert.match(markup, /Setup finishes in about ten seconds\./);
   assert.match(markup, /Setting up your vault and assistant/);
   assert.match(markup, /This takes about ten seconds\. We’ll update here when it’s done\./);
-  assert.match(markup, /We’ll add your shared bundle once setup finishes\./);
-});
-
-test("invite share preview renders the generic bundle copy from the tiny summary", () => {
-  const markup = renderToStaticMarkup(
-    createElement(JoinInviteClient, {
-      initialLinkedAccounts: [],
-      initialStatus: createStatus({
-        capabilities: {
-          billingReady: true,
-          phoneAuthReady: true,
-        },
-      }),
-      inviteCode: "invite-code",
-      shareCode: "share-code",
-      sharePreview: {
-        kinds: ["food", "recipe"],
-        counts: {
-          foods: 1,
-          recipes: 1,
-          regimens: 0,
-          total: 2,
-        },
-        logMealAfterImport: true,
-      },
-    }),
-  );
-
-  assert.match(markup, /Add after signup: Shared bundle/);
-  assert.match(markup, /1 food · 1 recipe/);
-  assert.match(markup, /Murph will also log the shared food after import\./);
-});
-
-test("pending share acceptance stays in processing instead of announcing success", () => {
-  assert.equal(
-    resolveJoinInviteShareStateFromAccept({
-      alreadyImported: false,
-      imported: false,
-      pending: true,
-    }),
-    "processing",
-  );
-});
-
-test("share status only resolves to completed after the async import is consumed", () => {
-  assert.equal(
-    resolveJoinInviteShareStateFromStatus(createShareStatus("processing")),
-    "processing",
-  );
-  assert.equal(
-    resolveJoinInviteShareStateFromStatus(createShareStatus("consumed")),
-    "completed",
-  );
 });
 
 test("verified invite sessions do not regress back to verify during later status refreshes", () => {
@@ -813,32 +732,6 @@ function createStatus(
   };
 }
 
-function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePageData {
-  return {
-    inviteCode: "invite-code",
-    session: {
-      active: true,
-      authenticated: true,
-    },
-    share: {
-      acceptedByCurrentMember: true,
-      consumed: stage === "consumed",
-      expiresAt: "2026-03-27T12:00:00.000Z",
-      preview: {
-        kinds: ["food"],
-        counts: {
-          foods: 1,
-          recipes: 0,
-          regimens: 0,
-          total: 1,
-        },
-        logMealAfterImport: false,
-      },
-    },
-    stage,
-  };
-}
-
 function createCompletionPayload(
   stage: HostedPrivyCompletionPayload["stage"],
   statusOverrides?: Partial<HostedInviteStatusPayload> & {
@@ -868,7 +761,6 @@ function createCompletionPayload(
 
 async function renderJoinInviteClientForEffects(input?: {
   initialStatus?: HostedInviteStatusPayload;
-  shareCode?: string | null;
 }) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
   const locationAssign = vi.fn();
@@ -890,8 +782,6 @@ async function renderJoinInviteClientForEffects(input?: {
           },
         }),
         inviteCode: "invite-code",
-        shareCode: input?.shareCode ?? null,
-        sharePreview: null,
       }),
     );
   });

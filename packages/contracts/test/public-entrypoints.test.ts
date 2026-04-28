@@ -55,6 +55,8 @@ describe("@murphai/contracts public entrypoint", () => {
   it("exposes representative package surfaces through the root module", () => {
     expect(contracts.VAULT_LAYOUT.memoryDocument).toBe("bank/memory.md");
     expect(contracts.VAULT_SHARDS.events).toBe("ledger/events/YYYY/YYYY-MM.jsonl");
+    expect("sharePack" in contracts.CONTRACT_SCHEMA_VERSION).toBe(false);
+    expect("sharePackSchema" in contracts).toBe(false);
     expect(contracts.exampleVaultMetadata.formatVersion).toBe(
       contracts.CURRENT_VAULT_FORMAT_VERSION,
     );

@@ -220,7 +220,6 @@ export * from "./history/index.ts";
 export * from "./family/index.ts";
 export * from "./genetics/index.ts";
 
-export * from "./shares.ts";
 export {
   buildActivitySessionEventDraft,
   buildBodyMeasurementEventDraft,

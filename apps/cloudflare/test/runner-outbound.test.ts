@@ -459,22 +459,10 @@ describe("handleRunnerOutboundRequest", () => {
     )).toThrow("Hosted runtime web-control route must be relative.");
   });
 
-  it("signs share payload proxy calls as the bound runner while carrying the owner query", async () => {
+  it("rejects deleted share payload proxy calls", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
-    ): Promise<Response> => new Response(JSON.stringify({
-      fetchedAt: "2026-04-26T00:00:05.000Z",
-      payload: null,
-      unavailable: {
-        code: "not_found",
-        retryable: false,
-      },
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
+    ): Promise<Response> => new Response("unexpected", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -492,35 +480,14 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the share payload web-control fetch to run.");
-    }
-    const [url, init] = firstCall;
-    expect(String(url)).toBe(
-      "https://web.example.test/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1&eventId=event_accepted_123&ownerUserId=member_sender",
-    );
-    expect(init?.method).toBe("GET");
-    const headers = new Headers(init?.headers);
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("signs share import proxy calls as the bound runner", async () => {
+  it("rejects deleted share import proxy calls", async () => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
-    ): Promise<Response> => new Response(JSON.stringify({
-      recorded: true,
-      shareId: "share_123",
-      status: "imported",
-    }), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
-    }));
+    ): Promise<Response> => new Response("unexpected", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
@@ -544,26 +511,8 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstCall = fetchMock.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the share import web-control fetch to run.");
-    }
-    const [url, init] = firstCall;
-    expect(String(url)).toBe("https://web.example.test/api/internal/hosted-execution/share/import");
-    expect(init?.method).toBe("POST");
-    expect(init?.body).toBe(JSON.stringify({
-      eventId: "event_accepted_123",
-      importedAt: "2026-04-26T00:00:05.000Z",
-      ownerUserId: "member_sender",
-      shareId: "share_123",
-      status: "imported",
-    }));
-    const headers = new Headers(init?.headers);
-    expect(headers.get("content-type")).toBe("application/json");
-    expect(headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("ignores legacy signed-user override headers on web-control proxy paths", async () => {
@@ -629,10 +578,10 @@ describe("handleRunnerOutboundRequest", () => {
     );
     const postGetOnlyResponse = await handleRunnerOutboundRequest(
       new Request(
-        "http://web-control.worker/api/internal/hosted-execution/share/share_123/payload?requestId=request_share_1",
+        "http://web-control.worker/api/internal/hosted-execution/vault-sync/vsi_123/payload?requestId=request_vault_sync_1",
         {
           body: JSON.stringify({
-            requestId: "request_share_1",
+            requestId: "request_vault_sync_1",
           }),
           headers: createRunnerProxyHeaders({
             "content-type": "application/json; charset=utf-8",

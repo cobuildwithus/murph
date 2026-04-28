@@ -539,9 +539,6 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murphai/core':
-        specifier: workspace:*
-        version: link:../core
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd

@@ -1,7 +1,6 @@
 import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
-import type { SharePack } from '@murphai/contracts'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { normalizeNullableString } from './shared.js'
 
@@ -26,19 +25,6 @@ export interface AssistantHostedDeviceConnectRequest {
   provider: string
 }
 
-export interface AssistantHostedShareLink {
-  shareCode: string
-  shareUrl?: string
-  url: string
-}
-
-export interface AssistantHostedShareLinkRequest {
-  expiresInHours?: number
-  inviteCode?: string
-  pack: SharePack
-  recipientPhoneNumber?: string
-}
-
 export interface AssistantHostedExecutionContext {
   channelTypingDependencies?: AssistantChannelTypingDependencies
   defaultTarget?: AssistantModelTarget | null
@@ -46,10 +32,6 @@ export interface AssistantHostedExecutionContext {
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
-  // Share-link issuance is browser-authenticated by default and must be injected explicitly.
-  issueShareLink?(
-    input: AssistantHostedShareLinkRequest,
-  ): Promise<AssistantHostedShareLink>
   memberId: string
   stripeCustomerId?: string | null
   userEnvKeys: readonly string[]
@@ -83,11 +65,6 @@ export function normalizeAssistantExecutionContext(
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
             issueDeviceConnectLink: hosted.issueDeviceConnectLink,
-          }
-        : {}),
-      ...(typeof hosted?.issueShareLink === 'function'
-        ? {
-            issueShareLink: hosted.issueShareLink,
           }
         : {}),
       ...(defaultTarget

@@ -338,7 +338,6 @@ export function verifyWorkspaceImportPolicy({
       "parseHostedExecutionCursorState",
       "parseHostedExecutionEvent",
       "parseHostedExecutionUserStatus",
-      "parseHostedExecutionSharePack",
       "parseHostedExecutionBundlePayload",
       "parseHostedExecutionBundleRef",
       "parseHostedExecutionRunnerRequest",
@@ -453,7 +452,6 @@ export function verifyWorkspaceImportPolicy({
     && specifier === "@murphai/cloudflare-hosted-control"
     && importsNamedBindingsFromSpecifier(source, specifier, [
       "buildCloudflareHostedControlPendingUsageUsersPath",
-      "buildCloudflareHostedControlSharePackPath",
       "buildCloudflareHostedControlUserPendingUsagePath",
       "buildCloudflareHostedControlUserRunPath",
       "buildCloudflareHostedControlUserStatusPath",

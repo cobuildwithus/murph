@@ -10,7 +10,6 @@ import type {
   HostedExecutionBundlePayload,
   HostedExecutionBundleRefState,
 } from "./bundles.ts";
-import type { SharePack } from "@murphai/contracts";
 import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
@@ -26,7 +25,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
-  "vault.share.accepted",
   "vault.sync.import",
 ] as const;
 
@@ -39,7 +37,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
-  "vault.share.accepted",
   "vault.sync.import",
 ] as const;
 
@@ -166,16 +163,6 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
-export interface HostedExecutionShareReference {
-  ownerUserId: string;
-  shareId: string;
-}
-
-export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionBaseEvent {
-  kind: "vault.share.accepted";
-  share: HostedExecutionShareReference;
-}
-
 export interface HostedExecutionVaultSyncImportReference {
   localManifestHash: string;
   sessionId: string;
@@ -189,12 +176,6 @@ export interface HostedExecutionVaultSyncImportEvent extends HostedExecutionBase
   vaultSync: HostedExecutionVaultSyncImportReference;
 }
 
-export interface HostedExecutionRunnerSharePack {
-  ownerUserId: string;
-  pack: SharePack;
-  shareId: string;
-}
-
 export interface HostedExecutionRunnerVaultSyncImport {
   bundleBase64: string;
   sessionId: string;
@@ -206,7 +187,6 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionVaultShareAcceptedEvent
   | HostedExecutionVaultSyncImportEvent;
 
 export interface HostedExecutionBaseWake {
@@ -304,11 +284,6 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
 }
 
-export interface HostedExecutionVaultShareAcceptedWake extends HostedExecutionBaseWake {
-  kind: "vault.share.accepted";
-  share: HostedExecutionShareReference;
-}
-
 export interface HostedExecutionVaultSyncImportWake extends HostedExecutionBaseWake {
   kind: "vault.sync.import";
   vaultSync: HostedExecutionVaultSyncImportReference;
@@ -325,7 +300,6 @@ export type HostedExecutionWake =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
-  | HostedExecutionVaultShareAcceptedWake
   | HostedExecutionVaultSyncImportWake;
 
 export type HostedRuntimeEvent =

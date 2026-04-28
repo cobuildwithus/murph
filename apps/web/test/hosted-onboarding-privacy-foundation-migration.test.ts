@@ -143,7 +143,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_routing"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_email_authorization"');
-    expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_share_payload"');
+    expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_share_link"');
+    expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_share_payload"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_vault_sync_session"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_vault_sync_payload"');
     expect(baselineMigrationSql).toContain(
@@ -340,59 +341,4 @@ function readPrismaModelBlock(schema: string, modelName: string): string {
   }
 
   return match[0];
-}
-
-function readSqlCreateTableBlock(sql: string, tableName: string): string {
-  const match = sql.match(
-    new RegExp(String.raw`CREATE TABLE "${tableName}" \(([\s\S]*?)\n\);`, "u"),
-  );
-
-  if (!match) {
-    throw new Error(`Expected migration table ${tableName} to exist.`);
-  }
-
-  return match[0];
-}
-
-function readSqlTableColumns(sql: string, tableName: string): Set<string> {
-  return new Set(
-    readSqlCreateTableBlock(sql, tableName)
-      .split("\n")
-      .map((line) => line.trim().replace(/,$/u, ""))
-      .filter((line) => line.startsWith('"')),
-  );
-}
-
-function readSqlTableConstraints(sql: string, tableName: string): Set<string> {
-  return new Set(
-    readSqlCreateTableBlock(sql, tableName)
-      .split("\n")
-      .map((line) => line.trim().replace(/,$/u, ""))
-      .filter((line) => line.startsWith("CONSTRAINT ")),
-  );
-}
-
-function readSqlTableIndexes(sql: string, tableName: string): Set<string> {
-  return new Set(
-    [...sql.matchAll(
-      new RegExp(
-        String.raw`^CREATE (?:UNIQUE )?INDEX "[^"]+" ON "${tableName}"\([^\n]+\)(?: WHERE [^\n]+)?;$`,
-        "gmu",
-      ),
-    )]
-      .map((match) => match[0].trim().replace(/;$/u, "")),
-  );
-}
-
-function readSqlTableForeignKeys(sql: string, tableName: string): Set<string> {
-  return new Set(
-    sql
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => (
-        line.startsWith(`ALTER TABLE "${tableName}" ADD CONSTRAINT `)
-        && line.includes(" FOREIGN KEY ")
-      ))
-      .map((line) => line.replace(/;$/u, "")),
-  );
 }

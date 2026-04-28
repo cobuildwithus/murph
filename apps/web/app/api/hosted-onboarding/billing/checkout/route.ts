@@ -38,12 +38,10 @@ export const POST = withJsonError(async (request: Request) => {
         id: auth.member.id,
         suspendedAt: auth.member.suspendedAt,
       },
-      ...(typeof body.shareCode === "string" ? { shareCode: body.shareCode } : {}),
     });
 
     finishHostedOnboardingTiming(timing, "completed", {
       alreadyActive: checkout.alreadyActive,
-      shareCodeProvided: typeof body.shareCode === "string",
     });
 
     return jsonOk(checkout);

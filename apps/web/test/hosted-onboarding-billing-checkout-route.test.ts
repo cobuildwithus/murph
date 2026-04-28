@@ -53,9 +53,7 @@ describe("hosted onboarding billing checkout route", () => {
       stage: "checkout",
     });
     mocks.requireHostedInviteCodeFromRequest.mockResolvedValue({
-      body: {
-        shareCode: "share_123",
-      },
+      body: {},
       inviteCode: "invite_123",
     });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
@@ -91,7 +89,6 @@ describe("hosted onboarding billing checkout route", () => {
       new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
         body: JSON.stringify({
           inviteCode: "invite_123",
-          shareCode: "share_123",
         }),
         headers: {
           origin: "https://join.example.test",
@@ -134,7 +131,6 @@ describe("hosted onboarding billing checkout route", () => {
         id: "member_123",
         suspendedAt: null,
       },
-      shareCode: "share_123",
     });
     expect(mocks.completeHostedPrivyVerification.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.createHostedBillingCheckout.mock.invocationCallOrder[0] ?? 0);

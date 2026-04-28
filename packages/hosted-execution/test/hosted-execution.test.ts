@@ -187,7 +187,6 @@ describe("hosted execution coverage gaps", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
-      "vault.share.accepted",
       "vault.sync.import",
     ]);
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
@@ -278,13 +277,11 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_LOG_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
-      "HOSTED_RUNTIME_SHARE_IMPORT_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
-      "buildHostedRuntimeSharePayloadPath",
       "buildHostedRuntimeVaultSyncPayloadPath",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
@@ -296,17 +293,11 @@ describe("hosted execution coverage gaps", () => {
     expect(routeModule.HOSTED_RUNTIME_ISSUE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/issues/record",
     );
-    expect(routeModule.HOSTED_RUNTIME_SHARE_IMPORT_PATH).toBe(
-      "/api/internal/hosted-execution/share/import",
-    );
     expect(routeModule.HOSTED_RUNTIME_VAULT_SYNC_IMPORT_PATH).toBe(
       "/api/internal/hosted-execution/vault-sync/import",
     );
-    expect(
-      (routeModule.buildHostedRuntimeSharePayloadPath as (shareId: string) => string)(
-        "share 1",
-      ),
-    ).toBe("/api/internal/hosted-execution/share/share%201/payload");
+    expect("HOSTED_RUNTIME_SHARE_IMPORT_PATH" in routeModule).toBe(false);
+    expect("buildHostedRuntimeSharePayloadPath" in routeModule).toBe(false);
     expect(
       (routeModule.buildHostedRuntimeVaultSyncPayloadPath as (sessionId: string) => string)(
         "vsi/1",

@@ -73,9 +73,7 @@ const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
         "agent-*.test.ts",
         "hosted-execution-*.test.ts",
         "hosted-member-email-runtime-boundary.test.ts",
-        "hosted-share-*.test.ts",
         "internal.test.ts",
-        "share-link-client.test.ts",
       ],
     },
     {

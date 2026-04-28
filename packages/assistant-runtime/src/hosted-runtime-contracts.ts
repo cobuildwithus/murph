@@ -22,7 +22,6 @@ export type {
   HostedRuntimeLogPort,
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
-  HostedRuntimeSharePort,
   HostedRuntimeUsageExportPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeVaultSyncPort,

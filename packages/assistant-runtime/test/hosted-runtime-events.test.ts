@@ -9,7 +9,6 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionTelegramConversationMessageWake,
-  buildHostedExecutionVaultShareAcceptedWake,
 } from "@murphai/hosted-execution";
 import {
   createHostedRuntimeEffectsPortStub,
@@ -18,7 +17,6 @@ import {
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
-  handleHostedShareAcceptedWake: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   ingestHostedConversationMessageWake: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
@@ -56,11 +54,10 @@ vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
   ingestHostedConversationMessageWake: mocks.ingestHostedConversationMessageWake,
 }));
 
-vi.mock("../src/hosted-runtime/events/share.ts", () => ({
-  handleHostedShareAcceptedWake: mocks.handleHostedShareAcceptedWake,
-}));
-
-import { executeHostedMailboxEvent } from "../src/hosted-runtime/events.ts";
+import {
+  emitHostedAssistantProviderTraceLog,
+  executeHostedMailboxEvent,
+} from "../src/hosted-runtime/events.ts";
 import { emitHostedAssistantContextTraceLog } from "../src/hosted-runtime/context-diagnostics.ts";
 
 const executionContext = {
@@ -96,10 +93,6 @@ afterEach(() => {
   mocks.emitHostedExecutionStructuredLog.mockReset();
   mocks.prepareHostedWakeContext.mockResolvedValue(null);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
-  mocks.handleHostedShareAcceptedWake.mockResolvedValue({
-    shareImportResult: null,
-    shareImportTitle: null,
-  });
   mocks.ingestHostedConversationMessageWake.mockResolvedValue({
     nextWakeAt: null,
     parserProcessed: 0,
@@ -163,6 +156,86 @@ describe("executeHostedMailboxEvent", () => {
     expect(entry?.redacted).not.toHaveProperty("sessionTurnCount");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-session-id");
+  });
+
+  it("keeps Responses function-call output diagnostics shape-only in hosted logs", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_responses_shape",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply to the current message.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-responses-request-debug.v1",
+          type: "assistant.responses.request.debug",
+          functionCallCount: 1,
+          functionCallNames: ["vault_cli_run"],
+          functionCallOutputCount: 1,
+          functionCallOutputHashes: [
+            "a".repeat(64),
+          ],
+          functionCallOutputKinds: ["string"],
+          functionCallOutputLongestLength: 128,
+          functionCallOutputNonStringCount: 0,
+          functionCallOutputOrphanCount: 0,
+          functionCallOutputStringJsonObjectCount: 1,
+          functionCallOutputStringLengths: [128],
+          gatewayZeroDataRetention: true,
+          inputEntryCount: 3,
+          inputEntryKinds: [
+            "message:user",
+            "function_call:vault_cli_run",
+            "function_call_output:string",
+          ],
+          model: "openai/gpt-5.5",
+          requestBodyHash: "b".repeat(64),
+          requestBodyLength: 4096,
+        },
+      },
+      wake,
+    });
+
+    expect(entry?.redacted).toEqual(
+      expect.objectContaining({
+        assistantResponsesRequestFunctionCallCount: 1,
+        assistantResponsesRequestFunctionCallNames: ["vault_cli_run"],
+        assistantResponsesRequestFunctionCallOutputCount: 1,
+        assistantResponsesRequestFunctionCallOutputHashes: ["a".repeat(64)],
+        assistantResponsesRequestFunctionCallOutputKinds: ["string"],
+        assistantResponsesRequestFunctionCallOutputLongestLength: 128,
+        assistantResponsesRequestFunctionCallOutputOrphanCount: 0,
+        assistantResponsesRequestFunctionCallOutputStringJsonObjectCount: 1,
+        assistantResponsesRequestFunctionCallOutputStringLengths: [128],
+        assistantResponsesRequestGatewayZeroDataRetention: true,
+        assistantResponsesRequestInputEntryCount: 3,
+        assistantResponsesRequestInputEntryKinds: [
+          "message:user",
+          "function_call:vault_cli_run",
+          "function_call_output:string",
+        ],
+        assistantResponsesRequestModel: "openai/gpt-5.5",
+      }),
+    );
+    expect(entry?.redacted).not.toEqual(expect.objectContaining({
+      assistantResponsesRequestRequestBodyHash: expect.anything(),
+      assistantResponsesRequestRequestBodyLength: expect.anything(),
+    }));
   });
 
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
@@ -570,8 +643,6 @@ describe("executeHostedMailboxEvent", () => {
           }),
         },
       ],
-      shareImportResult: null,
-      shareImportTitle: null,
       vaultSyncImportResult: null,
     });
   });
@@ -982,8 +1053,6 @@ describe("executeHostedMailboxEvent", () => {
           }),
         },
       ],
-      shareImportResult: null,
-      shareImportTitle: null,
       vaultSyncImportResult: null,
     });
   });
@@ -1014,35 +1083,8 @@ describe("executeHostedMailboxEvent", () => {
       conversationMetrics: null,
       mailboxLane: "member-channels-updated",
       redactedLogEntries: [],
-      shareImportResult: null,
-      shareImportTitle: null,
       vaultSyncImportResult: null,
     });
-  });
-
-  it("requires a hydrated share pack for hosted share acceptance", async () => {
-    const wake = buildHostedExecutionVaultShareAcceptedWake({
-      eventId: "evt_share",
-      memberId: "member_123",
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      share: {
-        ownerUserId: "member_sender",
-        shareId: "share_123",
-      },
-    });
-
-    await expect(
-      executeHostedMailboxEvent({
-        wake,
-        executionContext,
-        runtime: createRuntime(),
-        runtimeEnv: {},
-        vaultRoot: "/tmp/assistant-runtime-events",
-      }),
-    ).rejects.toThrow(
-      "Hosted share accepted wake requires a hydrated runner sharePack.",
-    );
-    expect(mocks.handleHostedShareAcceptedWake).not.toHaveBeenCalled();
   });
 
 });

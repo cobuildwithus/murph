@@ -1,8 +1,5 @@
 import {
-  assertContract,
   normalizeIanaTimeZone,
-  sharePackSchema,
-  type SharePack,
 } from "@murphai/contracts";
 
 import { isHostedConversationMessageChannel, isHostedExecutionWakeKind } from "./contracts.ts";
@@ -23,8 +20,6 @@ import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
-  HostedExecutionShareReference,
-  HostedExecutionVaultShareAcceptedEvent,
   HostedExecutionVaultSyncImportEvent,
 } from "./contracts.ts";
 import type {
@@ -42,7 +37,6 @@ import {
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionTelegramConversationMessageWake,
-  buildHostedExecutionVaultShareAcceptedWake,
   buildHostedExecutionVaultSyncImportWake,
 } from "./builders.ts";
 import {
@@ -93,11 +87,6 @@ export {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeShareImportRequest,
-  parseHostedRuntimeShareImportResponse,
-  parseHostedRuntimeSharePayload,
-  parseHostedRuntimeSharePayloadFetchRequest,
-  parseHostedRuntimeSharePayloadFetchResponse,
   parseHostedRuntimeUsageExportRequest,
   parseHostedRuntimeUsageExportResponse,
   parseHostedRuntimeWebStatusResponse,
@@ -189,13 +178,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
             }),
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId: wireUserId,
-      });
-    case "vault.share.accepted":
-      return buildHostedExecutionVaultShareAcceptedWake({
-        eventId,
-        memberId: wireUserId,
-        occurredAt,
-        share: parseHostedExecutionShareReference(record.share),
       });
     case "vault.sync.import":
       return buildHostedExecutionVaultSyncImportWake({
@@ -469,12 +451,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
-    case "vault.share.accepted":
-      return {
-        kind,
-        share: parseHostedExecutionShareReference(record.share),
-        userId,
-      } satisfies HostedExecutionVaultShareAcceptedEvent;
     case "vault.sync.import":
       return {
         kind,
@@ -671,19 +647,6 @@ function parseHostedExecutionMemberChannels(
   };
 }
 
-export function parseHostedExecutionShareReference(value: unknown): HostedExecutionShareReference {
-  const record = requireObject(value, "Hosted execution share reference");
-
-  return {
-    ownerUserId: requireString(
-      record.ownerUserId,
-      "Hosted execution share reference ownerUserId",
-    ),
-    shareId: requireString(record.shareId, "Hosted execution share reference shareId"),
-  };
-}
-
-
 export function parseHostedExecutionVaultSyncImportReference(
   value: unknown,
 ): HostedExecutionVaultSyncImportEvent["vaultSync"] {
@@ -723,10 +686,6 @@ export function parseHostedExecutionVaultSyncImportReference(
           ),
         }),
   };
-}
-
-export function parseHostedExecutionSharePack(value: unknown): SharePack {
-  return assertContract(sharePackSchema, value, "share pack");
 }
 
 function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExecutionWakeKind {

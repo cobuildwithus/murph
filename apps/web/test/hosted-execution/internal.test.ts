@@ -147,9 +147,9 @@ describe("requireHostedCloudflareCallbackRequest", () => {
   it("accepts a correctly signed Cloudflare callback and rejects its replay", async () => {
     const nonceStore = new MemoryNonceStore();
     const request = await createSignedCallbackRequest({
-      body: JSON.stringify({ eventId: "evt_123", shareId: "share_123" }),
+      body: JSON.stringify({ eventId: "evt_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/share/share_123/payload",
+      path: "/api/internal/hosted-execution/vault-sync/import",
       privateJwkJson: currentPrivateJwkJson,
       search: "?attempt=1",
       userId: "member_123",
@@ -163,9 +163,9 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     ).resolves.toBe("member_123");
 
     const replayedRequest = await createSignedCallbackRequest({
-      body: JSON.stringify({ eventId: "evt_123", shareId: "share_123" }),
+      body: JSON.stringify({ eventId: "evt_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/share/share_123/payload",
+      path: "/api/internal/hosted-execution/vault-sync/import",
       privateJwkJson: currentPrivateJwkJson,
       search: "?attempt=1",
       userId: "member_123",

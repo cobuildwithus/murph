@@ -2,7 +2,6 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionConversationMessageWake,
   HostedExecutionRedactedLogEntry,
-  HostedExecutionRunnerSharePack,
   HostedExecutionRunnerVaultSyncImport,
   HostedExecutionLogLevel,
   HostedExecutionSystemWake,
@@ -29,7 +28,6 @@ import {
 } from "./context.ts";
 import { ingestHostedConversationMessageWake } from "./events/conversation.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
-import { handleHostedShareAcceptedWake } from "./events/share.ts";
 import { handleHostedVaultSyncImportWake } from "./events/vault-sync.ts";
 import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
 import type {
@@ -59,7 +57,6 @@ export async function executeHostedMailboxEvent(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
-  sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxExecutionMetrics> {
@@ -77,7 +74,6 @@ export async function executeHostedMailboxEvent(input: {
     executionContext: bootstrappedExecutionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification === true,
     runtime: input.runtime,
-    sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
     vaultSyncImport: input.vaultSyncImport ?? null,
   });
@@ -87,8 +83,6 @@ export async function executeHostedMailboxEvent(input: {
     conversationMetrics: mailboxEffect.conversationMetrics,
     mailboxLane: mailboxEffect.mailboxLane,
     redactedLogEntries: mailboxEffect.redactedLogEntries ?? [],
-    shareImportResult: mailboxEffect.shareImportResult,
-    shareImportTitle: mailboxEffect.shareImportTitle,
     vaultSyncImportResult: mailboxEffect.vaultSyncImportResult,
   };
 }
@@ -101,7 +95,6 @@ async function handleHostedMailboxEvent(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
-  sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxOutcome> {
@@ -118,7 +111,6 @@ async function handleHostedMailboxEvent(input: {
     executionContext: input.executionContext,
     forceQueueOnlyAssistantNotification: input.forceQueueOnlyAssistantNotification,
     runtime: input.runtime,
-    sharePack: input.sharePack ?? null,
     vaultRoot: input.vaultRoot,
     vaultSyncImport: input.vaultSyncImport ?? null,
   });
@@ -128,7 +120,7 @@ async function executeHostedConversationWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "platform" | "platformEnv"
+    "forwardedEnv" | "platform" | "platformEnv" | "userEnv"
   >;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -152,7 +144,6 @@ async function executeHostedSystemWake(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "platform" | "resolvedConfig"
   >;
-  sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;
   vaultSyncImport?: HostedExecutionRunnerVaultSyncImport | null;
 }): Promise<HostedMailboxOutcome> {
@@ -186,21 +177,6 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "device-sync",
       });
-    case "vault.share.accepted":
-      if (!input.sharePack) {
-        throw new TypeError("Hosted share accepted wake requires a hydrated runner sharePack.");
-      }
-      return {
-        ...(await handleHostedShareAcceptedWake({
-          wake: input.wake,
-          sharePack: input.sharePack,
-          vaultRoot: input.vaultRoot,
-        })),
-        conversationMetrics: null,
-        redactedLogEntries: [],
-        vaultSyncImportResult: null,
-        mailboxLane: "vault-share-accepted",
-      };
     case "vault.sync.import":
       if (!input.vaultSyncImport) {
         throw new TypeError("Hosted vault sync import wake requires a hydrated runner vaultSyncImport.");
@@ -339,8 +315,6 @@ function createNoopMailboxEffect(input: {
     conversationMetrics: input.conversationMetrics,
     mailboxLane: input.mailboxLane,
     redactedLogEntries: input.redactedLogEntries ?? [],
-    shareImportResult: null,
-    shareImportTitle: null,
     vaultSyncImportResult: null,
   };
 }
@@ -523,10 +497,12 @@ function isHostedProviderTraceDetailValueSafeForRuntimeLog(
   value: unknown,
 ): value is null | boolean | number | string | Array<null | boolean | number | string> {
   if (Array.isArray(value)) {
-    return value.every(isHostedProviderTraceDetailScalarSafeForRuntimeLog);
+    return value.length > 0
+      && value.every(isHostedProviderTraceDetailScalarSafeForRuntimeLog);
   }
 
-  return isHostedProviderTraceDetailScalarSafeForRuntimeLog(value);
+  return value !== null
+    && isHostedProviderTraceDetailScalarSafeForRuntimeLog(value);
 }
 
 function isHostedProviderTraceDetailScalarSafeForRuntimeLog(
@@ -644,12 +620,41 @@ function buildHostedResponsesRequestSummary(
   return {
     contextManagementPresent:
       readHostedProviderDebugBoolean(debug, "contextManagementPresent"),
+    functionCallCount:
+      readHostedProviderDebugNumber(debug, "functionCallCount"),
+    functionCallNames:
+      readHostedProviderDebugStringArray(debug, "functionCallNames"),
+    functionCallOutputArrayCount:
+      readHostedProviderDebugNumber(debug, "functionCallOutputArrayCount"),
+    functionCallOutputCount:
+      readHostedProviderDebugNumber(debug, "functionCallOutputCount"),
+    functionCallOutputHashes:
+      readHostedProviderDebugStringArray(debug, "functionCallOutputHashes"),
+    functionCallOutputKinds:
+      readHostedProviderDebugStringArray(debug, "functionCallOutputKinds"),
+    functionCallOutputLongestLength:
+      readHostedProviderDebugNumber(debug, "functionCallOutputLongestLength"),
+    functionCallOutputMissingCount:
+      readHostedProviderDebugNumber(debug, "functionCallOutputMissingCount"),
+    functionCallOutputNonStringCount:
+      readHostedProviderDebugNumber(debug, "functionCallOutputNonStringCount"),
+    functionCallOutputOrphanCount:
+      readHostedProviderDebugNumber(debug, "functionCallOutputOrphanCount"),
+    functionCallOutputStringJsonArrayCount:
+      readHostedProviderDebugNumber(debug, "functionCallOutputStringJsonArrayCount"),
+    functionCallOutputStringJsonObjectCount:
+      readHostedProviderDebugNumber(debug, "functionCallOutputStringJsonObjectCount"),
+    functionCallOutputStringLengths:
+      readHostedProviderDebugNumberArray(debug, "functionCallOutputStringLengths"),
     gatewayOnlyProviderCount:
       readHostedProviderDebugNumber(debug, "gatewayOnlyProviderCount"),
     gatewayTagsCount: readHostedProviderDebugNumber(debug, "gatewayTagsCount"),
     gatewayUserPresent: readHostedProviderDebugBoolean(debug, "gatewayUserPresent"),
     gatewayZeroDataRetention:
       readHostedProviderDebugBoolean(debug, "gatewayZeroDataRetention"),
+    inputEntryCount: readHostedProviderDebugNumber(debug, "inputEntryCount"),
+    inputEntryKinds:
+      readHostedProviderDebugStringArray(debug, "inputEntryKinds"),
     inputMessageCount: readHostedProviderDebugNumber(debug, "inputMessageCount"),
     inputRoles: readHostedProviderDebugStringArray(debug, "inputRoles"),
     inputTextFieldCount:
@@ -715,6 +720,19 @@ function readHostedProviderDebugStringArray(
     ? value.filter(
         (entry): entry is string =>
           typeof entry === "string" && entry.trim().length > 0,
+      )
+    : [];
+}
+
+function readHostedProviderDebugNumberArray(
+  debug: Record<string, unknown>,
+  key: string,
+): number[] {
+  const value = debug[key];
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is number =>
+          typeof entry === "number" && Number.isFinite(entry),
       )
     : [];
 }

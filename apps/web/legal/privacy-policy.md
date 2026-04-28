@@ -58,7 +58,7 @@ Murph is built around information you choose to provide, generate, connect, or i
 - heart rate, movement, temperature, respiration, blood oxygen, readiness, recovery, activity, or similar measured or derived data, where available through connected services or your own inputs;
 - prompts, questions, conversations, messages, and other content you send to Murph;
 - files, attachments, photos, audio, transcripts, parsed content, and related metadata; and
-- information included in share links, invite flows, or imported or shared record bundles.
+- information included in invite flows or imported record bundles.
 
 Some of this information may constitute **health data**, **sensitive personal information**, **special category data**, or **consumer health data** under applicable law.
 
@@ -81,14 +81,14 @@ We may collect:
 - prompts, chat history, tool inputs, tool outputs, and related context needed to provide assistant, search, or automation features; and
 - records of how privacy, support, or account requests were handled.
 
-### E. Sharing, invite, and collaboration data
+### E. Invite and collaboration data
 
-If you use Murph sharing features, we may collect:
+If you use Murph invite or collaboration features, we may collect:
 
-- invite codes, share codes, and share-link metadata;
+- invite codes and invite metadata;
 - recipient contact details or lookup values;
 - preview metadata, acceptance status, and consumption or expiry data; and
-- records of whether and when a shared pack, invite, or imported item was accepted, rejected, expired, or consumed.
+- records of whether and when an invite or imported item was accepted, rejected, expired, or consumed.
 
 ### F. Billing and transaction information
 
@@ -121,7 +121,7 @@ We collect information from several sources:
 - **From connected providers or integrations**, when you choose to link them to Murph.
 - **From identity and authentication providers**, when you sign in, verify an account, or complete an onboarding flow through them.
 - **From payment processors**, when you purchase or subscribe to hosted services.
-- **From other Murph users**, such as when someone sends you an invite or share link.
+- **From other Murph users**, such as when someone sends you an invite link.
 - **From service providers and security tools**, where needed to operate, support, analyze, or secure Murph.
 
 ## 5. How we use information
@@ -237,9 +237,9 @@ If you connect Murph to devices, wearable providers, messaging channels, identit
 
 When you direct Murph to share information with a third-party provider, that provider may act as an independent controller of the information it receives under its own privacy policy and terms. Please review those policies carefully before enabling a connection.
 
-### C. Sharing, invites, and user-directed disclosures
+### C. Invites and user-directed disclosures
 
-If you create, send, or accept a Murph share link, invite, or similar user-directed sharing flow, Murph may disclose the information reasonably necessary to complete that flow to the intended recipient or the service providers involved in carrying it out. Depending on the feature, this may include preview information, invite status, or the shared records themselves.
+If you create, send, or accept a Murph invite or similar user-directed flow, Murph may disclose the information reasonably necessary to complete that flow to the intended recipient or the service providers involved in carrying it out. Depending on the feature, this may include preview information, invite status, or imported records.
 
 Information you intentionally make available to other users or recipients may become visible to them under the settings or permissions you choose.
 
@@ -336,7 +336,7 @@ Depending on how you use Murph, you may also be able to:
 - disconnect linked integrations or providers;
 - change device, browser, or app permissions;
 - manage account settings and preferences;
-- delete or revoke certain share flows or invitations;
+- delete or revoke certain invite flows or invitations;
 - export or copy data directly from local or self-hosted environments you control; or
 - request account deletion.
 
@@ -360,7 +360,7 @@ Depending on how you use Murph, Murph may collect categories of consumer health 
 - wearable, device, sleep, activity, recovery, body-state, and physiological measurement data;
 - derived or inferred wellness information, trends, summaries, recommendations, or other outputs generated from your data;
 - files, attachments, messages, or transcripts that identify or describe your physical or mental health status; and
-- information included in imported records, share links, or invite bundles that contains health-related information.
+- information included in imported records or invite bundles that contains health-related information.
 
 ### B. Sources of consumer health data
 
@@ -389,7 +389,7 @@ Murph may disclose consumer health data to:
 
 - service providers and processors acting on Murph’s behalf;
 - connected services or integrations you enable;
-- recipients you choose through Murph share links, invites, exports, or similar user-directed disclosures;
+- recipients you choose through Murph invites, exports, or similar user-directed disclosures;
 - parties involved in legal compliance, protection, or corporate transactions as described in this Privacy Policy; and
 - other third parties with your consent or at your direction.
 

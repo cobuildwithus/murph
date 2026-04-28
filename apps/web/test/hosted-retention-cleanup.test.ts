@@ -15,7 +15,6 @@ describe("hosted retention cleanup", () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const hostedMailboxItemDeleteMany = vi.fn().mockResolvedValue({ count: 7 });
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
-    const hostedSharePayloadDeleteMany = vi.fn().mockResolvedValue({ count: 2 });
     const hostedVaultSyncSessionUpdateMany = vi.fn().mockResolvedValue({ count: 3 });
     const hostedVaultSyncPayloadDeleteMany = vi.fn()
       .mockResolvedValueOnce({ count: 4 })
@@ -27,9 +26,6 @@ describe("hosted retention cleanup", () => {
       },
       hostedRuntimeLog: {
         deleteMany: hostedRuntimeLogDeleteMany,
-      },
-      hostedSharePayload: {
-        deleteMany: hostedSharePayloadDeleteMany,
       },
       hostedVaultSyncPayload: {
         deleteMany: hostedVaultSyncPayloadDeleteMany,
@@ -46,21 +42,12 @@ describe("hosted retention cleanup", () => {
     })).resolves.toEqual({
       completedVaultSyncPayloadsDeleted: 5,
       expiredMailboxItemsDeleted: 7,
-      expiredSharePayloadsDeleted: 2,
       expiredVaultSyncPayloadsDeleted: 4,
       expiredVaultSyncSessionsDeleted: 6,
       expiredVaultSyncSessionsMarked: 3,
       oldRuntimeLogsDeleted: 8,
     });
 
-    expect(hostedSharePayloadDeleteMany).toHaveBeenCalledWith({
-      where: {
-        OR: [
-          { share: { is: { expiresAt: { lte: now } } } },
-          { share: { is: { consumedAt: { not: null } } } },
-        ],
-      },
-    });
     expect(hostedVaultSyncSessionUpdateMany).toHaveBeenCalledWith({
       data: {
         agentTokenHash: null,

@@ -412,40 +412,6 @@ model HostedStripeEvent {
   @@map("hosted_stripe_event")
 }
 
-model HostedShareLink {
-  id                 String    @id
-  codeHash           String    @unique @map("code_hash")
-  senderMemberId     String    @map("sender_member_id")
-  previewJson        Json      @map("preview_json")
-  expiresAt          DateTime  @map("expires_at")
-  acceptedAt         DateTime? @map("accepted_at")
-  acceptedByMemberId String?   @map("accepted_by_member_id")
-  consumedAt         DateTime? @map("consumed_at")
-  consumedByMemberId String?   @map("consumed_by_member_id")
-  lastEventId        String?   @map("last_event_id")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  payload            HostedSharePayload?
-
-  @@index([senderMemberId, createdAt])
-  @@index([expiresAt])
-  @@index([acceptedByMemberId, acceptedAt])
-  @@index([consumedByMemberId, consumedAt])
-  @@map("hosted_share_link")
-}
-
-model HostedSharePayload {
-  shareId          String          @unique @map("share_id")
-  payloadSchema    String          @default("murph.hosted-share-payload.v1") @map("payload_schema")
-  payloadEncrypted String          @map("payload_encrypted")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @updatedAt @map("updated_at")
-  share            HostedShareLink @relation(fields: [shareId], references: [id], onDelete: Cascade)
-
-  @@map("hosted_share_payload")
-}
-
-
 model HostedVaultSyncSession {
   id                   String    @id
   memberId             String    @map("member_id")

@@ -74,7 +74,6 @@
     "node": ">=24.14.1"
   },
   "dependencies": {
-    "@murphai/core": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
@@ -83,7 +82,6 @@
     "zod": "^4.1.8"
   },
   "bundleDependencies": [
-    "@murphai/core",
     "@murphai/device-syncd",
     "@murphai/importers",
     "@murphai/runtime-state"

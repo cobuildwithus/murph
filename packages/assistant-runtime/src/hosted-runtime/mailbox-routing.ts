@@ -15,7 +15,6 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "apply-member-channels-update",
   "dispatch-assistant-notification",
   "run-device-sync-wake",
-  "import-vault-share",
   "import-vault-sync",
 ] as const;
 
@@ -62,7 +61,6 @@ const ACTION_BY_KIND = {
   "device-sync.wake": "run-device-sync-wake",
   "member.activated": "apply-member-activation",
   "member.channels.updated": "apply-member-channels-update",
-  "vault.share.accepted": "import-vault-share",
   "vault.sync.import": "import-vault-sync",
 } satisfies Record<HostedMailboxKind, HostedMailboxImportAction>;
 
