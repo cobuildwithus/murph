@@ -345,20 +345,6 @@ function normalizeChatConversationUrl(chatUrl) {
   return `https://chatgpt.com/c/${conversationId}`;
 }
 
-function isCleanChatGptHomeUrl(targetUrl) {
-  try {
-    const parsed = new URL(targetUrl);
-    return (
-      parsed.hostname === "chatgpt.com" &&
-      parsed.pathname === "/" &&
-      parsed.search === "" &&
-      parsed.hash === ""
-    );
-  } catch {
-    return false;
-  }
-}
-
 function clearChatUrl(workspaceDir, seam) {
   const chatUrlPath = chatUrlPathFor(workspaceDir, seam);
   if (existsSync(chatUrlPath)) {
@@ -443,54 +429,6 @@ function assertSendHasNoExistingChatUrl({ existingState, seam, workspaceDir }) {
       `Quarantine or clear ${toPosixRelative(statePathFor(workspaceDir, seam))} first if this is an intentional retry.`,
     ].join("\n"),
   );
-}
-
-function findVisibleChatGptSendBlockers(browserEndpoint) {
-  const targets = readBrowserTargets(browserEndpoint);
-  return targets
-    .map((target) => {
-      if (!target || typeof target !== "object") {
-        return null;
-      }
-      const targetUrl = typeof target.url === "string" ? target.url : "";
-      if (!targetUrl.startsWith("https://chatgpt.com/")) {
-        return null;
-      }
-      if (isCleanChatGptHomeUrl(targetUrl)) {
-        return null;
-      }
-      const chatUrl = normalizeChatConversationUrl(targetUrl);
-      return {
-        chatUrl,
-        targetUrl,
-        title: typeof target.title === "string" ? target.title : "",
-      };
-    })
-    .filter(Boolean);
-}
-
-function assertSendLaneHasNoForeignChatTargets({ browserEndpoint, lane, seam, workspaceDir }) {
-  const visibleTargets = findVisibleChatGptSendBlockers(browserEndpoint);
-
-  if (visibleTargets.length > 0) {
-    throw new Error(
-      [
-        `Refusing to send ${seam} on lane ${lane}: that browser profile has open ChatGPT conversation or draft tabs.`,
-        "Until autosend can prove it is submitting from a fresh new-chat composer, sends require a lane with only clean ChatGPT home tabs visible. Harvests may keep existing conversation tabs open.",
-        ...visibleTargets.flatMap((target) => {
-          const owners = target.chatUrl
-            ? findActiveChatUrlOwners(target.chatUrl, workspaceDir, seam)
-            : [];
-          const ownerLines = target.chatUrl
-            ? owners.length > 0
-              ? owners.map((owner) => `  owner: ${owner}`)
-              : ["  owner: untracked by active research state"]
-            : ["  owner: non-conversation ChatGPT tab or temporary draft"];
-          return [`- ${target.chatUrl || target.targetUrl}`, ...ownerLines];
-        }),
-      ].join("\n"),
-    );
-  }
 }
 
 function readBrowserTargets(browserEndpoint) {
@@ -788,19 +726,7 @@ function main(argv) {
       workspaceDir,
     });
     releaseSendLaneLock = acquireSendLaneLock(lane, workspaceDir, seam);
-    try {
-      assertSendLaneHasNoForeignChatTargets({
-        browserEndpoint,
-        lane,
-        seam,
-        workspaceDir,
-      });
-      clearChatUrl(workspaceDir, seam);
-    } catch (error) {
-      releaseSendLaneLock();
-      releaseSendLaneLock = () => {};
-      throw error;
-    }
+    clearChatUrl(workspaceDir, seam);
   }
 
   if (laneSelection.exploratoryMismatch) {

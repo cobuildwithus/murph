@@ -925,7 +925,7 @@ run_thread_wake() {
 }
 
 close_harvest_thread_tab() {
-  case "\${RESEARCH_CLOSE_HARVEST_TAB:-1}" in
+  case "\${RESEARCH_CLOSE_HARVEST_TAB:-0}" in
     0|false|FALSE|no|NO)
       return 0
       ;;
