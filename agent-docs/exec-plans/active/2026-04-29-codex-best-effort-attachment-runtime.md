@@ -2,133 +2,185 @@
 
 ## Goal
 
-Make Codex assistant turns robust when inbox parsing, document preservation, or restored runtime state is incomplete.
+Make Codex assistant turns robust when inbox parsing, document preservation, restored runtime state, or hosted mailbox sequencing is imperfect.
 
 Success means:
 
-- A hosted capture that was accepted by the webhook is durable before parser setup or enrichment runs.
-- Codex can reply from the best available context instead of waiting for perfect parser output.
-- Parser failures, pending parser jobs, missing inbox runtime config, and document preservation failures do not block the assistant reply path.
-- Voice memos have a first-class route into the prompt through transcript text when Whisper output is available.
-- Raw PDF/image evidence can still reach Codex when the parser is pending or failed and a stored attachment exists.
-- `.runtime` restore is simple: include runtime state by default, denylist secrets and process-local files, and bootstrap missing non-secret config when needed.
+- A hosted mailbox item cannot create a permanent lane gap when duplicate webhook appends race.
+- A hosted capture that was accepted by the webhook is persisted and checkpointed before parser setup, parser drain, rebuild, or preservation work can run.
+- Codex replies from the best available context instead of waiting for perfect parser output.
+- Parser failures, pending parser jobs, missing non-secret inbox config, and document preservation failures do not block the assistant reply path.
+- Voice memos have a first-class route into the prompt through `transcriptText` when Whisper output is available.
+- Attachment prompt text only claims evidence that is actually available to the model.
+- Hosted snapshots preserve durable operational runtime state while excluding projections, caches, temp files, secrets, process-local state, and secret-like unknown files.
 
 ## Problem
 
-The current assistant path lets enrichment work gate the primary reply path.
+The current assistant path lets enrichment and runtime maintenance work gate the primary reply path.
 
 Observed failure shape:
 
 - The incoming conversation webhook was accepted.
 - The hosted assistant scan found the capture.
 - Document attachment preservation ran before the reply.
-- Preservation called inbox initialization and failed because the restored hosted runtime did not have inbox runtime config.
+- Preservation called inbox initialization and failed because restored hosted runtime state was incomplete.
 - The scan emitted a capture failure and stopped before outbox/reply work.
 - The user saw no assistant reply.
 
 That failure is the wrong ownership boundary. Document preservation is useful enrichment. It is not required for Codex to understand and answer a message.
 
-There is a second related problem in the prompt assembly path. Attachment parser state is treated as a global readiness gate. If any attachment is `pending` or `running`, `prepareAssistantAutoReplyInput` defers even when useful context already exists: message text, stored raw file, attachment metadata, image evidence, or a prior transcript.
+The stress review found three more loss windows that need to be treated as part of the same robustness problem:
 
-There is a third related problem in hosted ingestion. The parsed inbox pipeline is constructed before the capture is persisted. If parser registry setup fails before persistence, a capture that reached hosted infrastructure may never become visible to Codex.
+- Hosted mailbox append can burn a lane sequence number when duplicate webhook retries race, leaving a permanent `lane.gap`.
+- Hosted conversation import currently uses the parsed inbox pipeline. That pipeline persists first, but it only returns after parser drain. Hosted checkpointing happens after import returns, so parser drain failure or hang can still delay durable hosted checkpointing.
+- Hosted wake context prep can run rebuild work before local capture import. A stale/corrupt prior inbox record should not block persistence of a new accepted message.
+
+There is also a prompt assembly problem. Attachment parser state is treated as a global readiness gate. If any attachment is `pending` or `running`, both the legacy string prompt path and the prepared multimodal path can defer even when useful context already exists: message text, attachment metadata, image evidence, or a prior transcript.
 
 ## Architectural Invariant
 
-Accepted user input is the product-critical lane. Parsing and preservation are enrichment lanes.
+Accepted user input is the product-critical lane. Parsing, preservation, projection rebuild, and canonical import are enrichment lanes.
 
 The assistant should operate from:
 
 1. Message text.
 2. Parsed attachment text or transcript when available.
-3. Raw stored attachment evidence when the model/runtime can consume it.
-4. Attachment metadata and explicit parser status when no richer evidence exists.
+3. Raw image evidence when it is actually attached to the model input.
+4. File/PDF evidence only when the provider route proves file-part support.
+5. Attachment metadata and explicit parser status when no richer evidence exists.
 
-No parser, preservation, or canonical import step should be able to make Codex silent after the system has accepted a user message.
+No parser, preservation, projection rebuild, raw artifact materialization, or canonical import step should be able to make Codex silent after the system has accepted a user message.
 
 ## Design Principles
 
 - Keep one primary state machine: assistant reply/outbox state.
 - Keep parser state in the existing attachment parser fields.
-- Do not add a broad second queue for document preservation unless retries need stronger guarantees later.
-- Convert enrichment failures into structured diagnostics and retry hints, not reply-path failures.
-- Make prompt input assembly pure or close to pure: it should read capture state and build best-effort model input, not mutate runtime state.
-- Prefer small helpers with explicit inputs over a new cross-package orchestration layer.
-- Treat raw attachments and transcripts as sensitive user data. Do not add raw content to logs.
+- Do not add a document-preservation queue or retry state in the first pass.
+- Use existing assistant scan/wake behavior for opportunistic enrichment retries.
+- Convert enrichment failures into privacy-safe diagnostics and wake hints, not reply-path failures.
+- Make prompt input assembly read-only and best-effort: it should classify available evidence and build model input without mutating runtime state.
+- Prefer one shared attachment evidence classifier over parallel legacy/prepared prompt branches.
+- Treat local paths, raw attachments, transcripts, contact identifiers, and provider payloads as sensitive. Do not render local paths into model text or diagnostics.
 
-## Proposed Shape
+## Final Shape
 
-### 1. Persist First, Parse Later
+### 0. Close Hosted Mailbox Lane Gaps
 
-Change hosted conversation ingestion so capture persistence happens before parser registry construction or parser drains.
+Before the attachment/runtime changes, fix the mailbox append sequencing risk.
+
+Current high-risk shape:
+
+1. Append checks for an existing dedupe key.
+2. Append allocates the next lane sequence.
+3. Insert uses `ON CONFLICT DO NOTHING`.
+4. Under a duplicate race, one transaction can burn a sequence number without inserting a row.
+5. The next real message gets a later sequence and the hosted runtime sees a permanent lane gap.
+
+Proposed shape:
+
+- Serialize append per `(userId, lane)`, or allocate the lane sequence only in the transaction that wins the dedupe insert.
+- Add a concurrent duplicate append test proving duplicate retries do not create lane gaps.
+- Treat this as Phase 0 because no amount of parser best-effort behavior helps if the mailbox lane is already gapped.
+
+Expected code targets:
+
+- `apps/web/src/lib/hosted-mailbox/store.ts`
+- Focused hosted mailbox store tests
+
+### 1. Persist and Checkpoint Before Parse
+
+Change hosted conversation ingestion so capture persistence and hosted checkpointing happen before parser registry construction, parser drain, rebuild, channel reconciliation, or document preservation.
 
 Current high-risk shape:
 
 1. Normalize hosted conversation capture.
-2. Open inbox runtime.
-3. Create configured parser registry.
-4. Create parsed inbox pipeline.
-5. Persist capture and drain parsers through that pipeline.
+2. Prepare hosted wake context, including rebuild work.
+3. Open inbox runtime.
+4. Create configured parser registry.
+5. Create parsed inbox pipeline.
+6. Persist capture and drain parsers through that pipeline.
+7. Return from import.
+8. Hosted mailbox checkpoint/watermark commits.
 
 Proposed shape:
 
 1. Normalize hosted conversation capture.
-2. Open or bootstrap inbox runtime.
+2. Open vault and create missing non-secret inbox config only.
 3. Persist capture through the plain inbox pipeline.
-4. Mark the hosted conversation read only after successful persistence.
-5. Start a best-effort parse drain for the persisted capture.
-6. If parser setup or parser execution fails, record a diagnostic and leave the capture visible to Codex.
+4. Return the persisted capture to the mailbox checkpoint path.
+5. Commit hosted mailbox checkpoint/watermark.
+6. Start parser registry setup and parser drain as bounded best-effort post-checkpoint work.
+7. Run rebuild, channel reconciliation, and document preservation after capture persistence.
+
+Parser setup or parser drain failures should return imported capture metrics plus diagnostics. They should not make the mailbox import look failed after capture persistence.
+
+Email has one extra durability condition: the raw email object must still exist. If the raw object is missing, the mailbox item should remain retryable and watermarks should not advance.
 
 Expected code targets:
 
 - `packages/assistant-runtime/src/hosted-runtime/events/conversation.ts`
+- `packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts`
+- `packages/assistant-runtime/src/hosted-runtime/mailbox-checkpoint.ts`
+- `packages/assistant-runtime/src/hosted-runtime/context.ts`
+- `packages/assistant-runtime/src/hosted-runtime/events/email.ts`
 - The plain inbox pipeline owner in `packages/inboxd`
-- Existing parser registry/drain helpers in `packages/parsers` and `packages/inboxd`
 
-The important behavior is simple: parsing can lag; persistence cannot.
+The important behavior is simple: parser work can lag; accepted capture persistence and checkpointing cannot.
 
-### 2. Best-Effort Assistant Input Assembly
+### 2. Shared Best-Effort Attachment Evidence Classifier
 
-Change assistant prompt construction so pending parser state is not a global defer.
+Replace the global pending-attachment defer with per-attachment evidence classification.
 
 Current high-risk shape:
 
-- `prepareAssistantAutoReplyInput` calls `hasAssistantAutoReplyPendingAttachments`.
-- Any `pending` or `running` attachment returns `kind: "defer"`.
-- Hosted and active-turn paths can wait forever if parser jobs are stuck, missing runtime state, or not drainable in the current environment.
+- `buildAssistantAutoReplyPrompt` calls `hasAssistantAutoReplyPendingAttachments`.
+- `prepareAssistantAutoReplyInput` also calls `hasAssistantAutoReplyPendingAttachments`.
+- Any `pending` or `running` attachment can return `kind: "defer"`.
+- Metadata-only attachments are often invisible because `renderPreparedAttachmentPromptSection` drops attachments with no parsed text and no rich image/PDF candidate.
 
-Proposed shape:
+Proposed classifier output:
 
-- Always build attachment bundles for captures under consideration.
-- Include parsed text when `extractedText` exists.
-- Include transcript text when `transcriptText` exists.
-- Include raw PDF/image evidence when the stored path exists and the model input layer can attach it.
-- Include metadata and parser status for pending, running, and failed attachments.
-- Use explicit prompt language for missing parser output, for example:
-  - "Transcript unavailable yet."
-  - "Attachment parser is still running."
-  - "Attachment parser failed; use the visible/raw evidence if available."
-- Skip only when there is no usable message text, no attachment evidence, and no metadata worth surfacing.
+- `parsed_text`: `extractedText` or derived parser text is available.
+- `transcript`: `transcriptText` is available.
+- `raw_image`: image bytes are attached to model input.
+- `raw_file_supported`: file/PDF bytes are attached to model input through a provider route that supports file parts.
+- `metadata_status`: bounded attachment metadata and parser state only.
+- `unusable`: no safe evidence can be shown.
+
+Prompt assembly should:
+
+- Remove both pending/running global defers.
+- Build attachment bundles for captures under consideration.
+- Render transcript text as transcript content when `transcriptText` exists.
+- Render parser state for pending, running, failed, and unavailable parser output.
+- Render metadata/status for pending or failed audio/PDF/image attachments even without parsed text.
+- Avoid rendering `storedPath` and `derivedPath` into model text.
+- Attach raw image evidence only when it is actually passed to the provider.
+- Attach PDF/file evidence only when the provider capability route supports file parts.
+- Generate prompt wording from actual attached content, not from candidate intent.
 
 Expected code targets:
 
 - `packages/assistant-engine/src/assistant/automation/prompt-builder.ts`
 - `packages/assistant-engine/src/inbox-multimodal.ts`
-- Shared active-turn input path in `packages/assistant-engine/src/assistant/automation/reply.ts`
+- `packages/assistant-engine/src/assistant/automation/reply.ts`
+- Provider capability/rich-content routing code if PDF/file support is added in this pass
 
-This makes the behavior monotonic. More parser output improves the prompt, but missing parser output does not erase the input.
+This keeps the behavior monotonic. More parser output improves the prompt, but missing parser output does not erase the input.
 
 ### 3. Voice Memo Path
 
-Keep audio parsing first class through transcript text.
+Keep audio parsing first class through `transcriptText`.
 
 The current parse completion path writes audio/video parser output to `transcriptText`. The prompt path already has support for `attachment_transcript` fragments. The issue is the readiness gate before prompt assembly.
 
 Desired behavior:
 
-- If Whisper/transcription output is available, Codex sees it as a transcript, not as a generic blob.
-- If transcription is pending, Codex still sees the sender text and attachment metadata.
+- If Whisper/transcription output is available, Codex sees it as a transcript.
+- If transcription is pending, Codex still sees sender text and bounded attachment status.
 - If transcription failed, Codex sees that the audio transcript is unavailable.
-- Raw audio should not be added as a new model input type in this pass unless the provider/runtime already supports it cleanly.
+- Raw audio should not be added as a model input type in this pass unless the provider/runtime already supports it through a clean interface.
+- A no-text voice memo can produce metadata/status input instead of a parser wait loop.
 
 Expected code targets:
 
@@ -139,7 +191,7 @@ Expected code targets:
 
 Non-goal: replace Whisper or redesign parser artifacts.
 
-### 4. Document Preservation as Enrichment
+### 4. Document Preservation as Nonblocking Enrichment
 
 Keep `preserveDocumentAttachments` because it imports canonical document attachments into the vault. Move it out of the pre-reply gate.
 
@@ -151,14 +203,11 @@ Current high-risk shape:
 Proposed shape:
 
 - Remove preservation from the critical pre-reply path.
-- Run document preservation after reply input has been accepted, after the reply attempt, or in a separate enrichment pass.
-- Wrap preservation in a helper that returns a structured result:
-  - `succeeded`
-  - `skipped`
-  - `retryable_failed`
-  - `terminal_failed`
-- On `INBOX_NOT_INITIALIZED`, bootstrap safe missing config when possible and retry later.
-- Do not advance assistant reply cursors or suppress reply attempts based on preservation failure.
+- Run document preservation after the reply attempt, or in a later assistant scan pass.
+- Use a single best-effort helper such as `runDocumentPreservationBestEffort`.
+- Catch preservation errors and emit a privacy-safe diagnostic.
+- Optionally request a later wake, but do not add a durable preservation queue in the first pass.
+- Do not advance or suppress assistant reply cursors based on preservation failure.
 
 Expected code targets:
 
@@ -168,108 +217,202 @@ Expected code targets:
 
 The preservation function can still enforce its own invariants. The change is where its failures are allowed to propagate.
 
-### 5. Runtime Continuity and Bootstrap
+### 5. Hosted Runtime Snapshot and Bootstrap
 
-Store and restore `.runtime` broadly with a denylist, then bootstrap any missing non-secret config.
+Codify and harden the current hosted snapshot policy rather than redesigning it.
 
-The current allowlist/descriptor approach makes important runtime state easy to omit. The safer hosted default is:
+Current reality:
 
-- Include `.runtime/**` by default.
-- Exclude secrets.
-- Exclude process-local files.
-- Exclude temp/cache/build artifacts.
-- Exclude locks, sockets, pid files, and active process control files.
-- Keep explicit tests for the denylist so secret-like files are never serialized.
+- Hosted snapshots already include durable `.runtime/operations/**` by default unless excluded.
+- Hosted snapshots exclude `.runtime/projections/**`, `.runtime/cache/**`, and `.runtime/tmp/**`.
+- Inbox config and state can round-trip even though their descriptors say `machine_local`.
+- Descriptors are taxonomy/audit metadata; the hosted snapshot predicate is the hosted portability gate.
 
-At minimum, hosted restore must preserve or recreate:
+Proposed shape:
 
-- `.runtime/operations/inbox/config.json`
-- Assistant runtime state needed to resume reply/outbox state.
-- Parser job state and attachment metadata when those live in runtime-backed stores.
+- Preserve durable `.runtime/operations/**` by default.
+- Keep projections, cache, temp, locks, pid/socket files, quarantine, device-sync state, parser toolchain overrides, and process-local files excluded.
+- Harden the denylist for secret-like unknown files, including token/key/credential/private-key/cookie/session basenames and process logs.
+- Centralize this in one helper such as `isHostedRuntimeSecretLikeBasename`.
+- Restore snapshot files with private file permissions where the runtime requires it.
+- Rebuild `.runtime/projections/inboxd.sqlite` from canonical inbox evidence on hosted restore/open if it is missing.
+- Use `ensureConfigFile` for missing non-secret inbox config.
+- Never overwrite invalid existing config.
+- Never fabricate connector credentials or secrets.
 
 Expected code targets:
 
 - `packages/runtime-state/src/hosted-bundles.ts`
+- `packages/runtime-state/src/hosted-bundle-node.ts`
+- `packages/runtime-state/src/local-state-taxonomy.ts`
 - `packages/runtime-state/src/inbox-local-state-descriptors.ts`
 - Hosted workspace restore/bootstrap code under `packages/assistant-runtime/src/hosted-runtime/**`
 - `packages/inbox-services/src/inbox-services/state.ts`
 
-Bootstrap rule:
+This gives the user the practical "restore runtime broadly" behavior without serializing arbitrary runtime secrets or rebuildable projections.
 
-- If a required non-secret config file is missing, create the minimal valid file.
-- If a secret or credential is missing, fail the dependent integration clearly but do not block unrelated assistant reply work.
+### 6. Raw Artifact Materialization
+
+Best-effort prompt assembly should not assume externalized raw artifacts are already present on disk after hosted restore.
+
+Proposed shape:
+
+- Before attempting raw image or supported file/PDF evidence, materialize the needed externalized artifact if the restore path skipped it.
+- If materialization fails or the provider route does not support that evidence type, degrade to metadata/status.
+- Do not throw from per-attachment raw evidence reads.
+- Do not tell the model to inspect evidence that was not attached.
+
+Expected code targets:
+
+- `packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts`
+- `packages/runtime-state/src/hosted-bundles.ts`
+- `packages/assistant-engine/src/inbox-multimodal.ts`
+- Rich-content routing/provider capability code
+
+## Cursor and Reply Semantics
+
+Parser and preservation outcomes must not decide whether the assistant reply cursor advances.
+
+Cursor behavior should be explicit:
+
+- Successful reply creation or queued outbox delivery advances according to existing reply result rules.
+- Provider/model failure before an outbox intent should hold the cursor for retry.
+- Prompt assembly should degrade per attachment. A raw evidence read failure should not throw the whole group into a generic failure path.
+- Whole-input assembly failures that prevent any model attempt should hold the cursor, not mark the capture handled.
+- Parser completion after a best-effort reply should not trigger a duplicate reply for the same capture.
+- Active-turn late input should accept metadata/status-only captures when useful, or gracefully treat them as no-new-input. It should not convert pending parser state into a budget-exhaustion error.
+
+## Diagnostics
+
+Use concrete, privacy-safe diagnostic categories:
+
+- `mailbox_lane_gap_prevented`
+- `parser_registry_unavailable`
+- `parser_drain_failed`
+- `preservation_failed_nonblocking`
+- `inbox_config_bootstrapped`
+- `inbox_projection_rebuilt`
+- `raw_artifact_unavailable`
+- `best_effort_attachment_prompt`
+
+Diagnostics may include:
+
+- Capture id.
+- Attachment id or ordinal.
+- Parser state.
+- Failure category.
+- Retry/wake hint.
+
+Diagnostics must not include:
+
+- Raw attachment content.
+- Message text or transcripts.
+- Local filesystem paths.
+- Phone numbers, emails, chat ids, provider ids, auth headers, or secrets.
+- Provider request/response payloads.
 
 ## Detailed Flow
 
 ### Incoming Hosted Message
 
-1. Webhook normalizes the message into a capture.
-2. Hosted runtime opens or bootstraps inbox runtime config.
-3. The plain inbox pipeline persists the capture and raw attachments.
-4. The hosted source is marked read or acknowledged.
-5. Parser drain starts best-effort.
-6. Assistant automation wakes.
-7. Prompt assembly reads the capture and builds best available input.
-8. Codex replies or records a model/provider failure.
-9. Enrichment work preserves canonical documents and retries failed parser/preservation work where appropriate.
+1. Webhook appends the mailbox item without creating lane gaps.
+2. Hosted runtime receives the mailbox item.
+3. Runtime performs only minimal vault/bootstrap work needed to persist input.
+4. Plain inbox pipeline persists the capture and raw attachment references.
+5. Hosted mailbox checkpoint/watermark commits.
+6. Parser drain, rebuild, channel reconciliation, and preservation run best-effort.
+7. Assistant automation wakes.
+8. Prompt assembly classifies available attachment evidence.
+9. Codex replies or records a model/provider failure.
+10. Enrichment work continues opportunistically.
 
-### Pending PDF
+### Pending Attachment
 
-1. Capture has text plus a PDF attachment with a stored path.
-2. Parser state is `pending` or `running`.
-3. Prompt assembly includes message text, attachment metadata, parser status, and raw PDF evidence if supported.
-4. Codex can answer immediately.
-5. Parser completion later adds extracted text for future context.
+1. Capture has text plus an attachment with parser state `pending` or `running`.
+2. Prompt assembly includes message text and bounded attachment status.
+3. If actual raw image evidence is attached, prompt text says image evidence is attached.
+4. If PDF/file support is not available, prompt text does not claim the file is attached.
+5. Codex can answer immediately from available context.
+6. Parser completion later improves future context without duplicating the already-handled reply.
 
 ### Voice Memo
 
 1. Capture has an audio attachment.
-2. Before transcription, Codex sees message text and attachment metadata.
+2. Before transcription, Codex sees message text if present plus audio attachment status.
 3. After transcription, parser completion writes `transcriptText`.
-4. Prompt assembly includes the transcript as an attachment transcript section.
+4. Prompt assembly includes the transcript as first-class attachment transcript content.
 
 ### Missing Inbox Runtime Config
 
 1. Hosted workspace restore lacks inbox config.
-2. Runtime bootstrap creates minimal non-secret inbox config before persistence/enrichment.
-3. If preservation still fails, the assistant reply path continues.
-4. A retry/diagnostic records the enrichment failure without marking the user message handled as failed.
+2. Runtime calls the narrow missing-only `ensureConfigFile` path.
+3. Persistence and reply continue.
+4. Invalid existing config fails clearly in the dependent path but does not cause unrelated assistant reply work to go silent.
 
 ## Tests
 
 Add focused regression tests before or with implementation.
 
+### Hosted Mailbox
+
+- Concurrent duplicate appends do not burn lane sequence numbers.
+- A real message after duplicate retries receives the next contiguous sequence.
+- A lane gap is not introduced by `ON CONFLICT DO NOTHING`.
+
 ### Hosted Ingestion
 
-- Hosted conversation import persists the capture even when parser registry creation fails.
-- Hosted conversation import persists raw attachments before parser drain.
-- Parser drain failure records a diagnostic and does not remove or hide the capture.
+- Hosted conversation import persists and checkpoints the capture before parser registry creation.
+- Parser registry creation failure after persistence does not prevent checkpointing.
+- Parser drain hang/failure after persistence does not prevent checkpointing.
+- Hosted wake prep rebuild failure does not block persistence of a new accepted capture.
+- Missing raw email object leaves the mailbox item retryable and does not advance watermarks.
+- Hosted conversation import persists raw attachment references before parser drain.
 
 ### Assistant Reply Path
 
 - `preserveDocumentAttachments` throwing `INBOX_NOT_INITIALIZED` does not prevent a reply attempt or outbox intent.
-- A pending PDF with a stored path does not produce `kind: "defer"`.
-- A failed PDF parser state still produces prompt input with status and raw evidence when available.
-- A text message plus pending voice memo does not defer solely because transcription is pending.
-- A voice memo with `transcriptText` renders transcript text as first-class attachment content.
+- Preservation failure does not decide reply cursor advancement.
+- Parser failure does not block reply.
+- Provider failure before outbox holds the cursor.
+- Queued outbox advances the cursor according to existing reply rules.
+- Parser completion after a best-effort reply does not trigger a duplicate reply.
+- A pending attachment does not produce `kind: "defer"` in either prompt path.
+- A pending audio attachment with no text can produce metadata/status input instead of a wait loop.
+- A failed parser state still produces bounded status input when safe.
 - Active-turn late input with a pending attachment does not throw only because parser output is not ready.
+
+### Evidence and Prompt Safety
+
+- Voice memo `transcriptText` renders as first-class transcript content.
+- Prompt text does not include `storedPath` or `derivedPath`.
+- Prompt text does not claim image/file/PDF evidence is attached unless the content part is actually routed to the provider.
+- Raw image read failure degrades to metadata/status.
+- PDF/file evidence is either capability-supported and tested end to end, or represented as metadata/status only.
+- Restored externalized raw image/PDF artifacts are materialized before raw evidence use, or safely degrade to metadata/status.
 
 ### Runtime Restore
 
-- Hosted restore round-trips inbox runtime config.
-- Hosted restore bootstraps missing non-secret inbox config.
-- Hosted snapshot denylist excludes secret-like files and process-local files under `.runtime`.
-- Hosted automation does not skip solely because inbox runtime config was absent before bootstrap.
+- Hosted restore round-trips `.runtime/operations/inbox/config.json`.
+- Hosted restore bootstraps missing non-secret inbox config with `ensureConfigFile`.
+- Invalid existing inbox config fails clearly and is not overwritten.
+- Hosted snapshot excludes projections, cache, temp, process-local files, quarantines, parser toolchain overrides, and device-sync state.
+- Hosted snapshot excludes secret-like basenames outside `secrets/`, including token/key/credential/private-key/cookie/session/log files.
+- Restored runtime files use private permissions where required.
+- Hosted restore/open rebuilds missing inbox projections from canonical inbox evidence.
+- Hosted automation does not skip solely because inbox config was absent before missing-only bootstrap.
 
 ### Diagnostics
 
 - Parser and preservation failures emit privacy-safe structured diagnostics.
-- Diagnostics include capture id and failure category, but not raw attachment content, raw paths, phone numbers, emails, auth headers, or secrets.
+- Diagnostics use known categories.
+- Diagnostics include capture id and attachment id/ordinal where useful.
+- Diagnostics do not include raw content, local paths, contact identifiers, auth headers, provider payloads, or secrets.
 
 ## Verification Plan
 
 For implementation, run focused checks first:
 
+- `pnpm --dir apps/web test -- hosted-mailbox`
 - `pnpm --dir packages/assistant-engine test -- assistant-automation-runtime.test.ts`
 - `pnpm --dir packages/assistant-engine typecheck`
 - `pnpm --dir packages/assistant-runtime test -- hosted-runtime-linq-document-preservation-e2e.test.ts`
@@ -282,70 +425,90 @@ Then run broader checks before landing:
 - `pnpm typecheck`
 - `pnpm test:diff <touched test files>`
 - `git diff --check`
-- Privacy scan over touched files for local usernames, home paths, secrets, auth headers, phone numbers, and emails.
+- Privacy scan over touched files for local usernames, home paths, secrets, auth headers, phone numbers, emails, and local paths in generated diagnostics/prompts.
 
 Docs-only edits for this plan only need exact-file diff checks and privacy scanning.
 
 ## Migration Plan
 
-Phase 1: Persist-first hosted ingestion.
+Phase 0: Hosted mailbox lane sequencing.
 
-- Split hosted conversation import into durable persistence and best-effort parser drain.
-- Add the parser-registry-failure persistence regression.
+- Fix duplicate append sequencing so dedupe conflicts cannot burn lane sequence numbers.
+- Add concurrent duplicate append regression coverage.
 
-Phase 2: Best-effort prompt input.
+Phase 1: Persist and checkpoint before parser drain.
 
-- Remove pending/running attachment global defer.
+- Split hosted conversation import into durable plain-pipeline persistence and post-checkpoint best-effort parser drain.
+- Split minimal pre-import bootstrap from rebuild/enrichment work.
+- Add parser-registry, parser-drain, rebuild, and missing-raw-email regressions.
+
+Phase 2: Shared best-effort prompt input.
+
+- Remove both pending/running attachment global defers.
+- Replace them with a per-attachment evidence classifier.
 - Render parser status and missing transcript/extracted text explicitly.
-- Allow raw PDF/image evidence while parser state is pending or failed when stored evidence exists.
+- Unify or retire the legacy string prompt path so it cannot drift from the prepared multimodal path.
+- Capability-gate PDF/file evidence and avoid overclaiming.
 
 Phase 3: Preservation enrichment.
 
 - Remove document preservation from the scan pre-reply gate.
-- Add best-effort preservation result handling.
-- Add focused no-silent-reply regression coverage.
+- Add the best-effort preservation helper with privacy-safe diagnostics.
+- Keep retry opportunistic through existing scan/wake behavior.
 
-Phase 4: Runtime continuity.
+Phase 4: Runtime continuity hardening.
 
-- Preserve `.runtime` by default with a denylist.
-- Bootstrap missing non-secret inbox config during hosted restore/open.
-- Add snapshot and bootstrap tests.
+- Codify current hosted snapshot behavior: durable operational runtime included, projections/cache/tmp excluded.
+- Harden denylist coverage for secret-like unknown runtime files.
+- Add private restore permission tests.
+- Add missing-only inbox config bootstrap and projection rebuild coverage.
 
 Phase 5: Cleanup.
 
 - Update durable runtime docs after behavior is implemented.
 - Remove obsolete comments or tests that assume parser completion is a reply precondition.
+- Keep descriptors documented as taxonomy/audit metadata, not the hosted snapshot gate.
 
 ## Risks and Tradeoffs
 
-- Codex may reply before a transcript or extracted PDF text is ready. That is acceptable if the prompt clearly marks missing parser output.
-- Raw PDF/image evidence may increase model input cost. Limit this to stored evidence that the current prompt builder already knows how to attach.
-- Preservation retry can duplicate work if idempotency is weak. Keep current canonical match checks and add tests before adding any retry loop.
-- Broad `.runtime` inclusion can accidentally capture sensitive files. The denylist must be explicit, tested, and privacy-reviewed.
-- Bootstrap must not fabricate secrets. Only create non-secret structural config.
+- Codex may reply before a transcript or extracted document text is ready. That is acceptable if prompt text clearly marks missing parser output.
+- Metadata-only replies can be less helpful than waiting. This is still better than silence, and product behavior can add a small audio grace window later if evidence supports it.
+- Raw image/file evidence can increase model input cost. Only attach evidence the provider route can actually consume.
+- PDF support may require provider capability work. Do not claim PDF evidence is available until that path is tested end to end.
+- Preservation retry can duplicate work if idempotency is weak. Keep current canonical match checks and avoid a new retry queue in the first pass.
+- Broad operational runtime inclusion can accidentally capture sensitive files. The denylist must be explicit, table-tested, and privacy-reviewed.
+- Projection rebuild must be reliable enough that excluding `.runtime/projections/**` does not hide persisted captures after restore.
 
 ## Non-Goals
 
 - Do not replace the parser stack.
 - Do not add a new broad assistant/enrichment state machine.
+- Do not add a durable preservation queue in the first pass.
 - Do not make canonical document import required for reply.
 - Do not pass raw audio to Codex unless the provider/runtime supports it through an existing clean interface.
+- Do not snapshot `.runtime/projections/**`, cache, temp, or process-local state.
 - Do not weaken secret handling to make snapshot restore easier.
-- Do not log raw attachment content or local filesystem paths for debugging.
+- Do not log raw attachment content, local filesystem paths, contact identifiers, or provider payloads for debugging.
 
 ## Open Questions
 
 - Should audio attachments get a short grace window before reply when the message contains no text, or should Codex always reply best-effort immediately?
-- Should document preservation retry be opportunistic during assistant scans, or should it become a narrow maintenance pass?
-- Which `.runtime` paths are definitely process-local and should be denied before the default-include policy lands?
+- Should document preservation retry stay opportunistic forever, or become a narrow maintenance pass after evidence shows retries are needed?
+- Which exact secret-like basenames should the hosted runtime denylist cover beyond token/key/credential/private-key/cookie/session/log patterns?
 - Should parser completion trigger a follow-up assistant wake only when no reply has happened yet, or also when the transcript materially changes available context?
+- Should PDF/file support be added to the Codex provider route in this pass, or deferred until after metadata/status robustness lands?
 
 ## Working Set
 
 Likely implementation files:
 
+- `apps/web/src/lib/hosted-mailbox/store.ts`
 - `packages/assistant-runtime/src/hosted-runtime/events/conversation.ts`
-- `packages/assistant-runtime/src/hosted-runtime/**`
+- `packages/assistant-runtime/src/hosted-runtime/events/email.ts`
+- `packages/assistant-runtime/src/hosted-runtime/mailbox-conversation-import.ts`
+- `packages/assistant-runtime/src/hosted-runtime/mailbox-checkpoint.ts`
+- `packages/assistant-runtime/src/hosted-runtime/context.ts`
+- `packages/assistant-runtime/src/hosted-runtime/workspace-restore.ts`
 - `packages/assistant-engine/src/assistant/automation/scanner.ts`
 - `packages/assistant-engine/src/assistant/automation/prompt-builder.ts`
 - `packages/assistant-engine/src/assistant/automation/reply.ts`
@@ -353,4 +516,6 @@ Likely implementation files:
 - `packages/inbox-services/src/inbox-services/promotions.ts`
 - `packages/inbox-services/src/inbox-services/state.ts`
 - `packages/runtime-state/src/hosted-bundles.ts`
+- `packages/runtime-state/src/hosted-bundle-node.ts`
+- `packages/runtime-state/src/local-state-taxonomy.ts`
 - `packages/runtime-state/src/inbox-local-state-descriptors.ts`
