@@ -92,7 +92,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
           events.push(`import:${item.item.laneSeq}`);
-          return { status: "imported" };
+          return {
+            afterCheckpoint: async () => {
+              events.push("mailbox:afterCheckpoint");
+            },
+            status: "imported",
+          };
         },
         limitPerLane: 10,
         platform: createPlatform({
@@ -120,7 +125,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.deepEqual(events, ["import:1", "checkpoint:import", "assistant"]);
+      assert.deepEqual(events, [
+        "import:1",
+        "checkpoint:import",
+        "assistant",
+        "mailbox:afterCheckpoint",
+      ]);
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.attemptId, "attempt_synthetic_runner_001");
@@ -166,6 +176,73 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           ],
         },
       ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("runs mailbox post-checkpoint effects when the assistant phase throws", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_after_checkpoint_error",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: "attempt_synthetic_runner_after_checkpoint_error",
+              expectedWorkspaceVersion: "0",
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem(item) {
+              events.push(`import:${item.item.laneSeq}`);
+              return {
+                afterCheckpoint: async () => {
+                  events.push("mailbox:afterCheckpoint");
+                },
+                status: "imported",
+              };
+            },
+            limitPerLane: 10,
+            platform: createPlatform({
+              mailboxPort,
+              workspacePort: createWorkspacePort({ checkpointRequests }),
+            }),
+            requestId: "request_synthetic_runner_after_checkpoint_error",
+            async runAssistantPhase() {
+              events.push("assistant");
+              throw new Error("assistant failed after mailbox checkpoint");
+            },
+            vaultRoot,
+            workspace: null,
+            now: () => TEST_NOW,
+          }),
+        /assistant failed after mailbox checkpoint/u,
+      );
+
+      assert.deepEqual(events, [
+        "import:1",
+        "assistant",
+        "mailbox:afterCheckpoint",
+      ]);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "import");
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -369,7 +446,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
             const turnInputPort: AssistantTurnInputPort = {
               async refresh(refreshInput) {
-                assert.equal(refreshInput.phase, "after_provider");
+                assert.equal(refreshInput.phase, "request_boundary");
                 const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
                 if (typeof refreshMailbox !== "function") {
                   throw new Error("Expected hosted mailbox refresh to be installed.");
@@ -415,7 +492,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               },
             };
             await turnInputPort.refresh({
-              phase: "after_provider",
+              phase: "request_boundary",
             });
             const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
             if (typeof checkpointActiveTurnInput !== "function") {

@@ -669,6 +669,7 @@ function createPhaseInput(input: {
 
   return {
     initialMailboxImport: {
+      afterCheckpointEffects: [],
       checkpoint: null,
       importResult: {
         blocked: [],

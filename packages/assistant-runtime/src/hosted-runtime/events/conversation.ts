@@ -38,13 +38,14 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
+const HOSTED_CONVERSATION_PARSER_DRAIN_MAX_JOBS = 4;
+
 export async function ingestHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
-  await result.afterCheckpoint?.();
   return result.metrics;
 }
 
@@ -71,11 +72,6 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       vaultRoot: input.vaultRoot,
     });
     const persistedCapture = await pipeline.processCapture(capture);
-    await markHostedConversationReadBestEffort({
-      forwardedEnv: input.runtime.forwardedEnv,
-      userEnv: input.runtime.userEnv,
-      wake: input.wake,
-    });
 
     const metrics: HostedConversationWakeMetrics = {
       nextWakeAt: null,
@@ -83,7 +79,12 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     };
     return {
       afterCheckpoint: async () => {
-        metrics.parserProcessed = await drainHostedConversationParsersBestEffort({
+        await markHostedConversationReadBestEffort({
+          forwardedEnv: input.runtime.forwardedEnv,
+          userEnv: input.runtime.userEnv,
+          wake: input.wake,
+        });
+        await drainHostedConversationParsersBestEffort({
           captureId: persistedCapture.captureId,
           input,
         });
@@ -161,42 +162,48 @@ async function drainHostedConversationParsersBestEffort(input: {
 }): Promise<number> {
   let phase: "parser_registry_unavailable" | "parser_drain_failed" =
     "parser_registry_unavailable";
-  let runtime: Awaited<ReturnType<typeof openInboxRuntime>> | null = null;
 
   try {
+    let runtime: Awaited<ReturnType<typeof openInboxRuntime>> | null = null;
     const configured = await createConfiguredParserRegistry({
       vaultRoot: input.input.vaultRoot,
     });
     phase = "parser_drain_failed";
-    runtime = await openInboxRuntime({
-      vaultRoot: input.input.vaultRoot,
-    });
-    const parserService = createInboxParserService({
-      ffmpeg: configured.ffmpeg,
-      registry: configured.registry,
-      runtime,
-      vaultRoot: input.input.vaultRoot,
-    });
-    const results = await parserService.drain({
-      captureId: input.captureId,
-    });
-    if (results.length > 0) {
-      const failed = results.filter((result) => result.status === "failed").length;
-      emitHostedExecutionStructuredLog({
-        component: "runtime",
-        details: {
-          captureId: input.captureId,
-          diagnostic: "parser_drain_completed",
-          failed,
-          processed: results.length,
-          succeeded: results.length - failed,
-        },
-        message: "Hosted conversation parser drain completed after mailbox checkpoint.",
-        phase: "wake.running",
-        wake: input.input.wake,
+    try {
+      runtime = await openInboxRuntime({
+        vaultRoot: input.input.vaultRoot,
       });
+      const parserService = createInboxParserService({
+        ffmpeg: configured.ffmpeg,
+        registry: configured.registry,
+        runtime,
+        vaultRoot: input.input.vaultRoot,
+      });
+      const results = await parserService.drain({
+        captureId: input.captureId,
+        maxJobs: HOSTED_CONVERSATION_PARSER_DRAIN_MAX_JOBS,
+      });
+
+      if (results.length > 0) {
+        const failed = results.filter((result) => result.status === "failed").length;
+        emitHostedExecutionStructuredLog({
+          component: "runtime",
+          details: {
+            captureId: input.captureId,
+            diagnostic: "parser_drain_completed",
+            failed,
+            processed: results.length,
+            succeeded: results.length - failed,
+          },
+          message: "Hosted conversation parser drain completed after mailbox checkpoint.",
+          phase: "wake.running",
+          wake: input.input.wake,
+        });
+      }
+      return results.length;
+    } finally {
+      runtime?.close();
     }
-    return results.length;
   } catch {
     emitHostedExecutionStructuredLog({
       component: "runtime",
@@ -209,7 +216,5 @@ async function drainHostedConversationParsersBestEffort(input: {
       wake: input.input.wake,
     });
     return 0;
-  } finally {
-    runtime?.close();
   }
 }

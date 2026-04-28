@@ -159,8 +159,8 @@ export async function appendHostedMailboxItemTx(
     ?? HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA;
   const payloadBytes = requirePositivePayloadBytes(input.payloadBytes);
   const payloadHash = normalizeNullableString(input.payloadHash);
-  await acquireHostedMailboxLaneAppendLockTx({
-    lane,
+  await acquireHostedMailboxDedupeAppendLockTx({
+    dedupeKey,
     tx: input.tx,
     userId,
   });
@@ -637,13 +637,13 @@ export async function allocateHostedMailboxLaneSeqTx(input: {
   return rows[0].seq;
 }
 
-async function acquireHostedMailboxLaneAppendLockTx(input: {
-  lane: HostedMailboxLane;
+async function acquireHostedMailboxDedupeAppendLockTx(input: {
+  dedupeKey: string;
   tx: HostedMailboxMutationTx;
   userId: string;
 }): Promise<void> {
   await input.tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.lane}))
+    SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.dedupeKey}))
   `;
 }
 

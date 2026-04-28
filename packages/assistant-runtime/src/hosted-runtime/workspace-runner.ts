@@ -76,6 +76,7 @@ interface HostedWorkspaceCheckpointRequestSession
   latestWorkspace(): HostedWorkspaceState | null;
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
   recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
+  takeMailboxPostCheckpointEffects(): readonly (() => Promise<void>)[];
 }
 
 export interface HostedWorkspaceRunnerCheckpointRequestInput
@@ -220,6 +221,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
 
   if (!input.runAssistantPhase) {
+    await runHostedMailboxPostCheckpointEffectsBestEffort(
+      checkpointRequestSession.takeMailboxPostCheckpointEffects(),
+    );
     return {
       assistantPhaseResult: null,
       initialMailboxImport,
@@ -235,39 +239,45 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     input,
     platform: input.platform,
   });
-  const assistantPhaseResult = await input.runAssistantPhase({
-    initialMailboxImport,
-    platform,
-    workspace: input.workspace,
-  });
-  await checkpointHostedWorkspaceAssistantPhase({
-    assistantPhaseResult,
-    checkpointRequestBuilder: checkpointRequestSession,
-    expectedUserId: input.expectedUserId,
-    initialMailboxImport,
-    workspacePort: input.platform.workspacePort,
-  });
-  if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
-    throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a committed checkpoint.");
-  }
-  const postCheckpoint = await assistantPhaseResult.afterCheckpoint?.();
-  if (postCheckpoint) {
-    await checkpointHostedWorkspacePostAssistantPhase({
+  try {
+    const assistantPhaseResult = await input.runAssistantPhase({
+      initialMailboxImport,
+      platform,
+      workspace: input.workspace,
+    });
+    await checkpointHostedWorkspaceAssistantPhase({
+      assistantPhaseResult,
       checkpointRequestBuilder: checkpointRequestSession,
       expectedUserId: input.expectedUserId,
       initialMailboxImport,
-      postCheckpoint,
       workspacePort: input.platform.workspacePort,
     });
-  }
+    if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
+      throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a committed checkpoint.");
+    }
+    const postCheckpoint = await assistantPhaseResult.afterCheckpoint?.();
+    if (postCheckpoint) {
+      await checkpointHostedWorkspacePostAssistantPhase({
+        checkpointRequestBuilder: checkpointRequestSession,
+        expectedUserId: input.expectedUserId,
+        initialMailboxImport,
+        postCheckpoint,
+        workspacePort: input.platform.workspacePort,
+      });
+    }
 
-  return {
-    assistantPhaseResult,
-    initialMailboxImport,
-    latestWorkspace: checkpointRequestSession.latestWorkspace()
-      ?? initialMailboxImport.checkpoint?.workspace
-      ?? input.workspace,
-  };
+    return {
+      assistantPhaseResult,
+      initialMailboxImport,
+      latestWorkspace: checkpointRequestSession.latestWorkspace()
+        ?? initialMailboxImport.checkpoint?.workspace
+        ?? input.workspace,
+    };
+  } finally {
+    await runHostedMailboxPostCheckpointEffectsBestEffort(
+      checkpointRequestSession.takeMailboxPostCheckpointEffects(),
+    );
+  }
 }
 
 function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): void {
@@ -441,6 +451,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder,
 ): HostedWorkspaceCheckpointRequestSession {
   let expectedWorkspaceVersion: string | null = null;
+  const mailboxPostCheckpointEffects: Array<() => Promise<void>> = [];
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
 
@@ -469,6 +480,7 @@ function createHostedWorkspaceCheckpointRequestSession(
     },
     recordCheckpointResult(result) {
       latestMailboxImport = result;
+      mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
         latestWorkspace = result.checkpoint.workspace;
@@ -480,7 +492,23 @@ function createHostedWorkspaceCheckpointRequestSession(
         latestWorkspace = response.workspace;
       }
     },
+    takeMailboxPostCheckpointEffects() {
+      return mailboxPostCheckpointEffects.splice(0);
+    },
   };
+}
+
+async function runHostedMailboxPostCheckpointEffectsBestEffort(
+  effects: readonly (() => Promise<void>)[],
+): Promise<void> {
+  for (const effect of effects) {
+    try {
+      await effect();
+    } catch {
+      // Mailbox post-checkpoint effects are enrichment only. They must not roll
+      // back durable mailbox or assistant checkpoints.
+    }
+  }
 }
 
 async function checkpointHostedWorkspaceAssistantPhase(input: {

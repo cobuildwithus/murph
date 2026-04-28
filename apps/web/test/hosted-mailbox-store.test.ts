@@ -165,6 +165,7 @@ describe("appendHostedMailboxItemTx", () => {
     expect(readHostedMailboxRawSql(executeRawMock.mock.calls[0])).toContain(
       "pg_advisory_xact_lock",
     );
+    expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_existing_1");
     expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(tx.hostedRuntimeLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

@@ -50,6 +50,7 @@ export interface HostedMailboxImportCheckpointRequestInput {
 }
 
 export interface HostedMailboxImportCheckpointResult {
+  afterCheckpointEffects: readonly (() => Promise<void>)[];
   checkpoint: HostedWorkspaceCheckpointResponse | null;
   importResult: HostedMailboxImportLoopResult;
   previousState: HostedMailboxImportState;
@@ -118,6 +119,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
 
   if (!stateChanged) {
     return {
+      afterCheckpointEffects: [],
       checkpoint: null,
       importResult,
       previousState,
@@ -168,16 +170,8 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     throw error;
   }
 
-  for (const effect of afterCheckpointEffects) {
-    try {
-      await effect();
-    } catch {
-      // Post-checkpoint effects are enrichment only. They must not roll back an
-      // already durable mailbox checkpoint.
-    }
-  }
-
   return {
+    afterCheckpointEffects,
     checkpoint,
     importResult,
     previousState,

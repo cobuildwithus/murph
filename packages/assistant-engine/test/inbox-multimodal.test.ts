@@ -1,14 +1,12 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
-import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
   buildInboxModelAttachmentBundle,
   hasInboxMultimodalAttachmentEvidenceCandidate,
   isRoutingPdfFallbackCandidate,
+  MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES,
   prepareInboxMultimodalUserMessageContent,
 } from '../src/inbox-multimodal.ts'
-import { createTempVaultContext } from './test-helpers.ts'
 
 describe('buildInboxModelAttachmentBundle', () => {
   it('notes that image attachments are automatically scanned for QR and barcode text', async () => {
@@ -36,60 +34,88 @@ describe('buildInboxModelAttachmentBundle', () => {
     expect(bundle.combinedText).toContain('automaticImageCodeScan:')
   })
 
-  it('keeps stored PDFs as metadata until provider file evidence support is proven', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-assistant-engine-pdf-evidence-',
-    )
+  it('keeps stored PDFs as metadata-only until raw file provider support is wired', async () => {
     const storedPath = 'raw/inbox/capture-1/attachments/01__scan.pdf'
+    const pdfBytes = Buffer.from('%PDF-1.7\n% fixture\n')
 
-    try {
-      await mkdir(path.join(vaultRoot, path.dirname(storedPath)), {
-        recursive: true,
-      })
-      await writeFile(
-        path.join(vaultRoot, storedPath),
-        Buffer.from('%PDF-1.7\n% fixture\n'),
-      )
+    const bundle = await buildInboxModelAttachmentBundle({
+      attachment: {
+        attachmentId: 'attachment-pdf',
+        ordinal: 1,
+        kind: 'document',
+        mime: 'application/pdf',
+        fileName: 'scan.pdf',
+        byteSize: pdfBytes.byteLength,
+        storedPath,
+        extractedText: null,
+        transcriptText: null,
+        derivedPath: null,
+        parseState: 'failed',
+      } as never,
+      captureId: 'capture-1',
+      vaultRoot: '/tmp',
+    })
 
-      const bundle = await buildInboxModelAttachmentBundle({
-        attachment: {
-          attachmentId: 'attachment-pdf',
-          ordinal: 1,
-          kind: 'document',
-          mime: 'application/pdf',
-          fileName: 'scan.pdf',
-          storedPath,
-          extractedText: null,
-          transcriptText: null,
-          derivedPath: null,
-          parseState: 'failed',
-        } as never,
-        captureId: 'capture-1',
-        vaultRoot,
-      })
+    expect(isRoutingPdfFallbackCandidate(bundle)).toBe(false)
+    expect(hasInboxMultimodalAttachmentEvidenceCandidate(bundle)).toBe(false)
+    expect(bundle.routingPdf).toEqual({
+      byteSize: pdfBytes.byteLength,
+      eligible: false,
+      maxBytes: MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES,
+      path: storedPath,
+      reason: 'raw-pdf-disabled',
+    })
+    expect(bundle.combinedText).toContain('routingPdfEligible: false')
+    expect(bundle.combinedText).toContain('routingPdfReason: raw-pdf-disabled')
+    expect(bundle.combinedText).not.toContain('pdfEvidencePath:')
 
-      expect(isRoutingPdfFallbackCandidate(bundle)).toBe(false)
-      expect(hasInboxMultimodalAttachmentEvidenceCandidate(bundle)).toBe(false)
-      expect(bundle.combinedText).toContain('routingPdfEligible: false')
+    const prepared = await prepareInboxMultimodalUserMessageContent({
+      attachmentSources: [
+        {
+          attachment: bundle,
+          captureId: 'capture-1',
+        },
+      ],
+      prompt: 'Read the attached PDF.',
+      vaultRoot: '/tmp',
+    })
 
-      const prepared = await prepareInboxMultimodalUserMessageContent({
-        attachmentSources: [
-          {
-            attachment: bundle,
-            captureId: 'capture-1',
-          },
-        ],
-        prompt: 'Read the attached PDF.',
-        vaultRoot,
-      })
-
-      expect(prepared).toEqual({
-        fallbackError: null,
-        inputMode: 'text-only',
-        userMessageContent: null,
-      })
-    } finally {
-      await rm(parentRoot, { force: true, recursive: true })
-    }
+    expect(prepared).toEqual({
+      fallbackError: null,
+      inputMode: 'text-only',
+      userMessageContent: null,
+    })
   })
+
+  it('does not mark PDFs as local evidence when the declared size is over the cap', async () => {
+    const bundle = await buildInboxModelAttachmentBundle({
+      attachment: {
+        attachmentId: 'attachment-pdf',
+        ordinal: 1,
+        kind: 'document',
+        mime: 'application/pdf',
+        fileName: 'scan.pdf',
+        byteSize: MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES + 1,
+        storedPath: 'raw/inbox/capture-1/attachments/01__scan.pdf',
+        extractedText: null,
+        transcriptText: null,
+        derivedPath: null,
+        parseState: 'failed',
+      } as never,
+      captureId: 'capture-1',
+      vaultRoot: '/tmp',
+    })
+
+    expect(isRoutingPdfFallbackCandidate(bundle)).toBe(false)
+    expect(bundle.routingPdf).toEqual({
+      byteSize: MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES + 1,
+      eligible: false,
+      maxBytes: MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES,
+      path: 'raw/inbox/capture-1/attachments/01__scan.pdf',
+      reason: 'declared-too-large',
+    })
+    expect(bundle.combinedText).toContain('routingPdfEligible: false')
+    expect(bundle.combinedText).toContain('routingPdfReason: declared-too-large')
+  })
+
 })

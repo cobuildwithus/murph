@@ -146,7 +146,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
     }
   });
 
-  test("runs imported item post-checkpoint effects only after durable checkpoint", async () => {
+  test("returns imported item post-checkpoint effects only after durable checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
     const item = createMailboxItem({
       id: "mailbox_item_conversation_001",
@@ -196,6 +196,9 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       });
 
       assert.equal(result.stateChanged, true);
+      assert.deepEqual(order, ["import", "checkpoint"]);
+      assert.equal(result.afterCheckpointEffects.length, 1);
+      await result.afterCheckpointEffects[0]?.();
       assert.deepEqual(order, ["import", "checkpoint", "afterCheckpoint"]);
     } finally {
       await rm(vaultRoot, {
@@ -205,7 +208,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
     }
   });
 
-  test("does not roll back a committed checkpoint when a post-checkpoint effect fails", async () => {
+  test("does not run post-checkpoint effects inside the mailbox checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
     const item = createMailboxItem({
       id: "mailbox_item_conversation_001",
@@ -214,6 +217,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
     const { mailboxPort } = createMailboxPort({
       items: [item],
     });
+    let effectRan = false;
     const workspacePort: HostedRuntimeWorkspacePort = {
       async checkpoint(request): Promise<HostedWorkspaceCheckpointResponse> {
         return createCheckpointResponse(request);
@@ -238,7 +242,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         async importItem() {
           return {
             afterCheckpoint: async () => {
-              throw new Error("parser drain failed");
+              effectRan = true;
             },
             status: "imported",
           };
@@ -252,6 +256,8 @@ describe("hosted mailbox import checkpoint wrapper", () => {
       });
 
       assert.equal(result.stateChanged, true);
+      assert.equal(effectRan, false);
+      assert.equal(result.afterCheckpointEffects.length, 1);
       assert.equal(result.state.watermarks.conversation, "1");
       assert.equal(
         (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,

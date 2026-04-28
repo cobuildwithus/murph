@@ -5,7 +5,6 @@ import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantTurnInputPort } from '../turn-input.js'
-import { errorMessage } from '../shared.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
   applyAssistantAutoReplyProcessResult,
@@ -14,11 +13,9 @@ import {
 } from './reply.js'
 import {
   compareAssistantCaptureOrder,
-  computeAssistantAutomationRetryAt,
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
   cursorFromCapture,
-  earliestAssistantAutomationWakeAt,
   normalizeScanLimit,
   type AssistantAutomationScanResult,
   type AssistantAutomationScanStateProgress,
@@ -35,8 +32,6 @@ type AssistantPreserveDocumentAttachmentsResult = Awaited<
 interface AssistantAutomationCandidate {
   summary: AssistantInboxCaptureSummary
 }
-
-const ASSISTANT_DOCUMENT_PRESERVATION_RETRY_DELAY_MS = 30 * 1000
 
 export async function scanAssistantAutomationOnce(input: {
   applyCanonicalWrites?: boolean
@@ -141,18 +136,14 @@ export async function scanAssistantAutomationOnce(input: {
       if (preserved) {
         preservedCaptureResults.set(candidate.summary.captureId, preserved)
       }
-    } catch (error) {
-      const nextWakeAt = computeAssistantAutomationRetryAt(
-        ASSISTANT_DOCUMENT_PRESERVATION_RETRY_DELAY_MS,
-      )
-      replies.nextWakeAt = earliestAssistantAutomationWakeAt(
-        replies.nextWakeAt,
-        nextWakeAt,
-      )
+    } catch {
       input.onEvent?.({
-        type: 'capture.failed',
+        type: 'capture.reply-progress',
         captureId: candidate.summary.captureId,
-        details: `nonblocking document preservation failed: ${errorMessage(error)}`,
+        details: 'nonblocking document preservation failed',
+        safeDetails: 'document_preservation_failed_nonblocking',
+        providerKind: 'status',
+        providerState: 'completed',
       })
     }
   }
@@ -208,6 +199,8 @@ export async function scanAssistantAutomationOnce(input: {
       },
     })
 
+    await persistScanState()
+
     for (const item of context.items) {
       const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
       if (!groupCandidate) {
@@ -216,8 +209,6 @@ export async function scanAssistantAutomationOnce(input: {
 
       await preserveCandidateDocumentsBestEffort(groupCandidate)
     }
-
-    await persistScanState()
 
     if (stopReplyScan) {
       break
