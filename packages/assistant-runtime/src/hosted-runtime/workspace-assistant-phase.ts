@@ -24,6 +24,9 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
 import {
+  resolveHostedVercelAiGatewayStripeCustomerId,
+} from "./billing.ts";
+import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
 import {
@@ -82,6 +85,12 @@ export async function runHostedWorkspaceAssistantPhase(
     triggerKind: "runtime_timer",
     userId: input.request.userId,
   });
+  const stripeCustomerId = await resolveHostedVercelAiGatewayStripeCustomerId({
+    billingPort: input.runtime.platform.billingPort,
+    forwardedEnv: input.runtime.forwardedEnv,
+    userEnv: input.runtime.userEnv,
+    wake,
+  });
   const executionContext: AssistantExecutionContext = await hydrateHostedExecutionDefaultTarget({
     hosted: {
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
@@ -92,12 +101,14 @@ export async function runHostedWorkspaceAssistantPhase(
       }),
       deviceConnectProviders: resolveHostedWorkspaceDeviceConnectProviders(input.runtime),
       memberId: input.request.userId,
+      ...(stripeCustomerId ? { stripeCustomerId } : {}),
       userEnvKeys: Object.keys(input.runtime.userEnv),
     },
   });
 
   try {
     const systemMailboxPreparation = await prepareHostedSystemMailboxItemForCheckpoint({
+      executionContext,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
       vaultRoot: input.restored.vaultRoot,

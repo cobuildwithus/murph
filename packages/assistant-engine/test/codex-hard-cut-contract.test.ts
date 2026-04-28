@@ -33,6 +33,8 @@ describe('Codex-only assistant hard-cut contracts', () => {
   it('removes obsolete OpenAI-compatible provider and model-harness execution modules', () => {
     expect([
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'automation', 'routing.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'legacy-model-spec.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'provider-config.ts'),
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'providers', 'openai-compatible.ts'),
       path.join('packages', 'assistant-engine', 'src', 'inbox-model-harness.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'model-spec.ts'),
@@ -40,6 +42,26 @@ describe('Codex-only assistant hard-cut contracts', () => {
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'tool-catalog.ts'),
       path.join('packages', 'cli', 'src', 'inbox-model-runtime.ts'),
     ].filter((filePath) => existsSync(resolveRepoPath(filePath)))).toEqual([])
+  })
+
+  it('removes hosted provider request debug traces from active runtime source', async () => {
+    const runtimePaths = [
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'provider-turn-runner.ts'),
+      path.join('packages', 'assistant-runtime', 'src', 'hosted-runtime', 'events.ts'),
+      path.join('packages', 'assistant-runtime', 'src', 'hosted-runtime', 'maintenance.ts'),
+    ]
+    const removedTraceResidue = [
+      'murph.assistant-provider-request-debug.v1',
+      'assistant.provider.request.debug',
+      'Hosted assistant provider request summary captured',
+    ]
+
+    for (const runtimePath of runtimePaths) {
+      const source = await readFile(resolveRepoPath(runtimePath), 'utf8')
+      for (const residue of removedTraceResidue) {
+        expect(source).not.toContain(residue)
+      }
+    }
   })
 
   it('removes inbox model route contracts and OpenAI-compatible model-route residue', async () => {

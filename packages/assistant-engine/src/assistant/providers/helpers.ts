@@ -284,7 +284,10 @@ export function extractCodexAssistantProviderUsage(input: {
     inputTokens,
     outputTokens,
     providerMetadataJson: completionRecord ?? null,
-    providerName: null,
+    providerName:
+      input.providerConfig.target.kind === 'codex-cli'
+        ? input.providerConfig.target.modelProvider
+        : null,
     providerRequestId: readAssistantProviderString(
       completionRecord?.request_id,
       completionRecord?.requestId,

@@ -160,6 +160,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+  executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
@@ -199,6 +200,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
 
   try {
     const metrics = await executePendingHostedSystemMailboxItem({
+      executionContext: input.executionContext ?? null,
       pendingItem: prepared,
       runtime: input.runtime,
       runtimeEnv: input.runtimeEnv,
@@ -378,26 +380,23 @@ export async function restoreHostedSystemMailboxCheckpointRollbackState(input: {
 }
 
 async function executePendingHostedSystemMailboxItem(input: {
+  executionContext: AssistantExecutionContext | null;
   pendingItem: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
-  const executionContext: AssistantExecutionContext = {
-    hosted: {
-      channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-        forwardedEnv: input.runtime.forwardedEnv,
-        platformEnv: input.runtime.platformEnv,
-        userEnv: input.runtime.userEnv,
-      }),
-      memberId: input.pendingItem.wake.userId,
-      userEnvKeys: Object.keys(input.runtime.userEnv),
-    },
-  };
+  const executionContext =
+    input.executionContext
+    ?? buildHostedSystemMailboxExecutionContext({
+      runtime: input.runtime,
+      wake: input.pendingItem.wake,
+    });
 
   if (input.pendingItem.wake.kind === "vault.sync.import") {
     return executePendingHostedVaultSyncImport({
       ...input,
+      executionContext,
       pendingItem: {
         ...input.pendingItem,
         wake: input.pendingItem.wake,
@@ -416,6 +415,7 @@ async function executePendingHostedSystemMailboxItem(input: {
 }
 
 async function executePendingHostedVaultSyncImport(input: {
+  executionContext: AssistantExecutionContext;
   pendingItem: HostedSystemMailboxPendingItem & {
     wake: Extract<HostedExecutionSystemWake, { kind: "vault.sync.import" }>;
   };
@@ -464,17 +464,7 @@ async function executePendingHostedVaultSyncImport(input: {
       : { sourceSchemaVersion: fetched.payload.sourceSchemaVersion }),
   };
   const metrics = await executeHostedMailboxEvent({
-    executionContext: {
-      hosted: {
-        channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
-          forwardedEnv: input.runtime.forwardedEnv,
-          platformEnv: input.runtime.platformEnv,
-          userEnv: input.runtime.userEnv,
-        }),
-        memberId: input.pendingItem.wake.userId,
-        userEnvKeys: Object.keys(input.runtime.userEnv),
-      },
-    },
+    executionContext: input.executionContext,
     forceQueueOnlyAssistantNotification: true,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
@@ -487,6 +477,23 @@ async function executePendingHostedVaultSyncImport(input: {
   }
 
   return metrics;
+}
+
+function buildHostedSystemMailboxExecutionContext(input: {
+  runtime: HostedSystemMailboxRuntime;
+  wake: HostedExecutionSystemWake;
+}): AssistantExecutionContext {
+  return {
+    hosted: {
+      channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+        forwardedEnv: input.runtime.forwardedEnv,
+        platformEnv: input.runtime.platformEnv,
+        userEnv: input.runtime.userEnv,
+      }),
+      memberId: input.wake.userId,
+      userEnvKeys: Object.keys(input.runtime.userEnv),
+    },
+  };
 }
 
 async function removeHostedSystemMailboxPendingItem(input: {

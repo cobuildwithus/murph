@@ -143,11 +143,16 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
   ],
 );
 const HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES = [
+  "AGENTMAIL_",
+  "CF_",
+  "HOSTED_ASSISTANT_",
+  "HOSTED_EMAIL_",
   "HOSTED_EXECUTION_",
   "HOSTED_WAKE_",
   "HOSTED_WEB_CALLBACK_SIGNING_",
   "NPM_CONFIG_",
   "npm_config_",
+  "WRANGLER_",
 ] as const;
 let hostedProcessEnvironmentQueue: Promise<void> = Promise.resolve();
 

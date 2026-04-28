@@ -53,6 +53,12 @@ describe("hosted runner secrets payload decoding", () => {
     })).toThrow(/not allowed/u);
 
     expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
+      CODEX_HOME: "/tmp/member-codex-home",
+    }), {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CODEX_HOME",
+    })).toThrow(/not allowed/u);
+
+    expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
       NODE_EXTRA_CA_CERTS: "/tmp/custom-ca.pem",
     }), {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "NODE_EXTRA_CA_CERTS",

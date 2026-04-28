@@ -428,6 +428,50 @@ describe("importHostedAiUsageRecords", () => {
     }));
   });
 
+  it("persists Codex Vercel AI Gateway metering rows as delegated", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => ({
+          memberId: "member_123",
+          stripeCustomerIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-billing-ref.stripe-customer-id",
+            memberId: "member_123",
+            value: "cus_123",
+          }),
+          stripeSubscriptionIdEncrypted: null,
+        })),
+      },
+    };
+
+    await importHostedAiUsageRecords({
+      aiUsageBillingMode: "stripe_meter",
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [
+        {
+          ...BASE_USAGE_RECORD,
+          baseUrl: null,
+          provider: "codex-cli",
+          providerName: "vercel-ai-gateway",
+          stripeMeterSource: "vercel-ai-gateway",
+        },
+      ],
+    });
+
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        stripeMeterError:
+          "Delegated Stripe token metering is handled upstream by Vercel AI Gateway.",
+        stripeMeterSource: "vercel-ai-gateway",
+        stripeMeterStatus: "delegated",
+      }),
+    }));
+  });
+
   it("fails closed back to Murph metering when delegated rows are missing a trusted Stripe customer id", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = {
