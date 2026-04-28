@@ -253,6 +253,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
       'node scripts/check-workspace-package-cycles.mjs',
     )
+    expect(rootPackageJson.scripts?.['zip:src']).toBe('bash scripts/package-audit-context.sh --zip')
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
   })
 
@@ -538,12 +539,12 @@ Updated: 2026-04-24
     expect(leanReviewConfig).toContain('include_tests=0')
     expect(leanReviewConfig).toContain('include_docs=0')
     expect(leanReviewConfig).toContain('snapshot_attachment_name="murph-review-gpt.repo-snapshot.zip"')
-    expect(leanReviewConfig).toContain('package_script="scripts/package-audit-context.sh"')
+    expect(leanReviewConfig).toContain('package_script="scripts/package-review-gpt-context.sh"')
     expect(leanReviewConfig).toContain('review_gpt_register_dir_preset "privacy" "privacy.md"')
     expect(fullReviewConfig).toContain('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review-gpt.config.sh"')
     expect(fullReviewConfig).toContain('include_tests=1')
     expect(fullReviewConfig).toContain('include_docs=1')
-    expect(fullReviewConfig).toContain('package_script="scripts/package-audit-context-full.sh"')
+    expect(fullReviewConfig).toContain('package_script="scripts/package-review-gpt-context-full.sh"')
     expect(dataReviewConfig).toContain('include_tests=0')
     expect(dataReviewConfig).toContain('include_docs=0')
     expect(dataReviewConfig).toContain('repomix_attachment_format="none"')
