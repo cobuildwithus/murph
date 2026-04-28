@@ -249,6 +249,41 @@ test('assistant CLI foreground logging preserves safe details and stable fallbac
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
+      captureId: 'cap_gateway_auth',
+      details:
+        'Authentication failed. Create an API key and set in AI_GATEWAY_API_KEY environment variable: https://example.invalid/key',
+      safeDetails: 'assistant provider failed',
+      type: 'capture.reply-failed',
+    }),
+    'reply-failed cap_gateway_auth: Authentication failed. Set AI_GATEWAY_API_KEY for the assistant provider.',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_network_safe',
+      details: 'network error while processing message: private inbox text',
+      safeDetails: 'assistant provider failed',
+      type: 'capture.reply-failed',
+    }),
+    'reply-failed cap_network_safe: assistant provider failed',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_auth_token',
+      details: 'Authentication failed for ABC_DEF_GHI',
+      type: 'capture.reply-failed',
+    }),
+    'reply-failed cap_auth_token: Authentication failed. Check assistant provider credentials.',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_auth_lower_token',
+      details: 'Authentication failed. env var lowercase_token_value',
+      type: 'capture.reply-failed',
+    }),
+    'reply-failed cap_auth_lower_token: Authentication failed. Check assistant provider credentials.',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
       captureId: 'cap_failed_unsafe',
       details: 'provider raw error',
       safeDetails: 'assistant provider timed out safely',

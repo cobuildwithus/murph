@@ -139,6 +139,49 @@ test('assistant reply events respect unsafe detail mode and provider progress su
     ),
     'reply-progress cap-01: waiting on provider',
   )
+  assert.equal(
+    formatAssistantRunEventForTerminal(
+      createAssistantEvent({
+        type: 'capture.reply-failed',
+        captureId: 'cap-auth',
+        details:
+          'Authentication failed. Create an API key and set in AI_GATEWAY_API_KEY environment variable: https://example.invalid/key',
+        safeDetails: 'assistant provider failed',
+      }),
+    ),
+    'reply-failed cap-auth: Authentication failed. Set AI_GATEWAY_API_KEY for the assistant provider.',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal(
+      createAssistantEvent({
+        type: 'capture.reply-failed',
+        captureId: 'cap-secret',
+        details: 'Authentication failed for ABC_DEF_GHI',
+      }),
+    ),
+    'reply-failed cap-secret: Authentication failed. Check assistant provider credentials.',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal(
+      createAssistantEvent({
+        type: 'capture.reply-failed',
+        captureId: 'cap-network',
+        details: 'network error while processing message: private inbox text',
+        safeDetails: 'assistant provider failed',
+      }),
+    ),
+    'reply-failed cap-network: assistant provider failed',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal(
+      createAssistantEvent({
+        type: 'capture.reply-failed',
+        captureId: 'cap-lower-token',
+        details: 'Authentication failed. env var lowercase_token_value',
+      }),
+    ),
+    'reply-failed cap-lower-token: Authentication failed. Check assistant provider credentials.',
+  )
 })
 
 test('assistant terminal logging covers routed, failure, skipped, replied, and daemon events', () => {
