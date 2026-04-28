@@ -15,8 +15,8 @@ export type {
 export {
   createHostedLinqChat,
   createHostedLinqWebhookSubscription,
+  sendHostedLinqReadReceipt,
   sendHostedLinqChatMessage,
-  sendHostedLinqTypingPing,
 } from "./linq-client";
 export type { HostedLinqWebhookSubscription } from "./linq-client";
 

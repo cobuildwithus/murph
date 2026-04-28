@@ -217,6 +217,12 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
       return;
     }
 
+    if (request.method === "POST" && request.url && /^\/chats\/[^/]+\/read$/u.test(request.url)) {
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
     if (request.method === "GET" && request.url === "/phone_numbers") {
       writeJsonResponse(response, 200, {
         phone_numbers: [],

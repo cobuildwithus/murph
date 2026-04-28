@@ -6,10 +6,9 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageReceivedEvent,
-  sendHostedLinqTypingPing,
+  sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
-import { getHostedOnboardingEnvironment } from "./runtime";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
@@ -38,6 +37,8 @@ export {
 export type {
   HostedStripeWebhookResponse,
 } from "./webhook-service-types";
+
+const HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS = 750;
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
@@ -109,7 +110,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
       desiredSideEffectCount: plan.desiredSideEffects.length,
       duplicate: Boolean(plan.response.duplicate),
-      ingressTypingRequested: Boolean(plan.ingressTypingChatId),
+      ingressReadReceiptRequested: Boolean(plan.ingressReadReceiptChatId),
       ok: plan.response.ok,
       wakeUserPresent: Boolean(plan.wakeUserId),
     });
@@ -122,7 +123,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await maybeStartHostedLinqIngressTypingDiagnostic({
+    await maybeSendHostedLinqIngressReadReceipt({
       plan,
       signal: input.signal,
     });
@@ -155,26 +156,20 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 }
 
-async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
+async function maybeSendHostedLinqIngressReadReceipt(input: {
   plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
   signal?: AbortSignal;
 }): Promise<void> {
-  const chatId = input.plan.ingressTypingChatId?.trim() ?? "";
+  const chatId = input.plan.ingressReadReceiptChatId?.trim() ?? "";
 
   if (chatId.length === 0) {
     return;
   }
 
-  const environment = getHostedOnboardingEnvironment();
-
-  if (!environment.linqIngressTypingDiagnosticEnabled) {
-    return;
-  }
-
   const responseReason = input.plan.response.reason ?? null;
-  const timeoutMs = environment.linqIngressTypingDiagnosticTimeoutMs;
-  const typingTiming = startHostedOnboardingTiming(
-    "hosted-onboarding.webhook.linq.ingress-typing",
+  const timeoutMs = HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS;
+  const readReceiptTiming = startHostedOnboardingTiming(
+    "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
       chatIdPresent: true,
       responseReason,
@@ -183,22 +178,22 @@ async function maybeStartHostedLinqIngressTypingDiagnostic(input: {
   );
 
   try {
-    const result = await sendHostedLinqTypingPing({
+    const result = await sendHostedLinqReadReceipt({
       chatId,
       signal: input.signal,
       timeoutMs,
     });
 
-    finishHostedOnboardingTiming(typingTiming, result.ok ? "started" : "failed", {
+    finishHostedOnboardingTiming(readReceiptTiming, result.ok ? "sent" : "failed", {
       httpStatus: result.status,
       responseReason,
-      signalAbortedAfterTyping: input.signal?.aborted ?? false,
+      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
     });
   } catch (error) {
-    finishHostedOnboardingTiming(typingTiming, "failed", {
+    finishHostedOnboardingTiming(readReceiptTiming, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
       responseReason,
-      signalAbortedAfterTyping: input.signal?.aborted ?? false,
+      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
     });
   }
 }
