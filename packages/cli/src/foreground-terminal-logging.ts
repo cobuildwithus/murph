@@ -306,6 +306,16 @@ function formatAssistantEventDetails(
     return normalizePreviewText(event.details)
   }
 
+  if (event.type === 'capture.reply-failed') {
+    return (
+      formatSafeAssistantAuthenticationFailureDetail(
+        normalizePreviewText(event.details),
+      ) ??
+      normalizePreviewText(event.safeDetails) ??
+      fallbackAssistantReplyFailureDetails(event)
+    )
+  }
+
   if (event.type === 'capture.failed') {
     return 'assistant processing failed'
   }
@@ -315,6 +325,57 @@ function formatAssistantEventDetails(
   }
 
   return null
+}
+
+function formatSafeAssistantAuthenticationFailureDetail(
+  details: string | null,
+): string | null {
+  if (!details) {
+    return null
+  }
+
+  if (!details.toLowerCase().includes('authentication failed')) {
+    return null
+  }
+
+  const envVar = extractAssistantProviderEnvVar(details)
+
+  return envVar
+    ? `Authentication failed. Set ${envVar} for the assistant provider.`
+    : 'Authentication failed. Check assistant provider credentials.'
+}
+
+function extractAssistantProviderEnvVar(details: string): string | null {
+  const envVar = String.raw`([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)`
+  const patterns = [
+    new RegExp(
+      String.raw`\b(?:env(?:ironment)?\s+variable|env var)\s+${envVar}\b`,
+      'u',
+    ),
+    new RegExp(
+      String.raw`\b(?:in|from|set|export)\s+${envVar}\s+(?:env(?:ironment)?\s+variable|env var)\b`,
+      'u',
+    ),
+    new RegExp(
+      String.raw`\b${envVar}\s+(?:env(?:ironment)?\s+variable|env var)\b`,
+      'u',
+    ),
+  ]
+
+  for (const pattern of patterns) {
+    const match = details.match(pattern)
+    if (match?.[1]) {
+      return match[1]
+    }
+  }
+
+  return null
+}
+
+function fallbackAssistantReplyFailureDetails(
+  event: Pick<AssistantRunEvent, 'errorCode'>,
+): string | null {
+  return event.errorCode ? `assistant reply failed (${event.errorCode})` : null
 }
 
 function formatAssistantReplyProgressDetails(
