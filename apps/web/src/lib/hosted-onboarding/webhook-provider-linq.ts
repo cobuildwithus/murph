@@ -208,7 +208,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         },
         wakeUserId: existingMember.id,
       }),
-      ingressTypingChatId: summary.chatId,
+      ingressReadReceiptChatId: summary.chatId,
     };
   }
 

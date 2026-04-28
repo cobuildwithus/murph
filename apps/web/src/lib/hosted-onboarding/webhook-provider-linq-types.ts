@@ -12,5 +12,5 @@ export type HostedOnboardingLinqWebhookResponse = {
 
 export type HostedOnboardingLinqDirectPlan =
   HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect> & {
-    ingressTypingChatId?: string;
+    ingressReadReceiptChatId?: string;
   };

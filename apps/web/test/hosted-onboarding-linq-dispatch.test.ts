@@ -17,8 +17,6 @@ const mocks = vi.hoisted(() => {
     finishHostedOnboardingTiming: vi.fn(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
-    linqIngressTypingDiagnosticEnabled: false,
-    linqIngressTypingDiagnosticTimeoutMs: 750,
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
       accepted: true,
       alarmScheduled: false,
@@ -29,7 +27,7 @@ const mocks = vi.hoisted(() => {
       nextAlarmAtPresent: false,
     })),
     sendHostedLinqChatMessage: vi.fn(),
-    sendHostedLinqTypingPing: vi.fn(),
+    sendHostedLinqReadReceipt: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
@@ -98,7 +96,7 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
       actual.parseHostedLinqWebhookEvent(input.rawBody),
     ),
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
-    sendHostedLinqTypingPing: mocks.sendHostedLinqTypingPing,
+    sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
   };
 });
 
@@ -122,8 +120,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       linqApiBaseUrl: "https://linq.example.test",
       linqApiToken: "linq-token",
       linqConversationPhoneNumbers: [],
-      linqIngressTypingDiagnosticEnabled: mocks.linqIngressTypingDiagnosticEnabled,
-      linqIngressTypingDiagnosticTimeoutMs: mocks.linqIngressTypingDiagnosticTimeoutMs,
       linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
@@ -276,8 +272,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
-    mocks.linqIngressTypingDiagnosticEnabled = false;
-    mocks.linqIngressTypingDiagnosticTimeoutMs = 750;
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -287,7 +281,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       inFlight: false,
       nextAlarmAtPresent: false,
     });
-    mocks.sendHostedLinqTypingPing.mockResolvedValue({
+    mocks.sendHostedLinqReadReceipt.mockResolvedValue({
       ok: true,
       status: 204,
     });
@@ -369,7 +363,11 @@ https://join.example.test/join/code_first_text`);
       expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
       expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
       expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-      expect(mocks.sendHostedLinqTypingPing).not.toHaveBeenCalled();
+      expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+        chatId: "chat_123",
+        signal: undefined,
+        timeoutMs: 750,
+      });
       expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
         memberId: "member_123",
         occurredAt: "2026-03-26T12:00:00.000Z",
@@ -390,7 +388,7 @@ https://join.example.test/join/code_first_text`);
         expect.objectContaining({
           desiredSideEffectCount: 0,
           duplicate: false,
-          ingressTypingRequested: true,
+          ingressReadReceiptRequested: true,
           ok: true,
           wakeUserPresent: true,
         }),
@@ -540,8 +538,7 @@ https://join.example.test/join/code_first_text`);
     ).toBe(true);
   });
 
-  it("can send an ingress Linq typing diagnostic before a deferred Cloudflare handoff", async () => {
-    mocks.linqIngressTypingDiagnosticEnabled = true;
+  it("sends an ingress Linq read receipt before a deferred Cloudflare handoff", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -572,7 +569,7 @@ https://join.example.test/join/code_first_text`);
       },
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_ingress_typing",
+        eventId: "evt_ingress_read_receipt",
       }),
       signature: null,
       timestamp: null,
@@ -581,7 +578,7 @@ https://join.example.test/join/code_first_text`);
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.sendHostedLinqTypingPing).toHaveBeenCalledWith({
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
       chatId: "chat_123",
       signal: undefined,
       timeoutMs: 750,
@@ -589,7 +586,7 @@ https://join.example.test/join/code_first_text`);
     expect(deferred).toHaveLength(1);
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
-      "hosted-onboarding.webhook.linq.ingress-typing",
+      "hosted-onboarding.webhook.linq.ingress-read-receipt",
       expect.objectContaining({
         chatIdPresent: true,
         responseReason: "wake-appended-active-member",
@@ -598,9 +595,9 @@ https://join.example.test/join/code_first_text`);
     );
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.ingress-typing",
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
       }),
-      "started",
+      "sent",
       expect.objectContaining({
         httpStatus: 204,
         responseReason: "wake-appended-active-member",
@@ -608,9 +605,8 @@ https://join.example.test/join/code_first_text`);
     );
   });
 
-  it("logs a failed ingress Linq typing diagnostic without failing the webhook", async () => {
-    mocks.linqIngressTypingDiagnosticEnabled = true;
-    mocks.sendHostedLinqTypingPing.mockRejectedValueOnce(new Error("typing ping failed"));
+  it("logs a failed ingress Linq read receipt without failing the webhook", async () => {
+    mocks.sendHostedLinqReadReceipt.mockRejectedValueOnce(new Error("read receipt failed"));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -641,7 +637,7 @@ https://join.example.test/join/code_first_text`);
       },
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_ingress_typing_failure",
+        eventId: "evt_ingress_read_receipt_failure",
       }),
       signature: null,
       timestamp: null,
@@ -650,7 +646,7 @@ https://join.example.test/join/code_first_text`);
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.sendHostedLinqTypingPing).toHaveBeenCalledWith({
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
       chatId: "chat_123",
       signal: undefined,
       timeoutMs: 750,
@@ -658,7 +654,7 @@ https://join.example.test/join/code_first_text`);
     expect(deferred).toHaveLength(1);
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.ingress-typing",
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
       }),
       "failed",
       expect.objectContaining({
@@ -747,6 +743,11 @@ https://join.example.test/join/code_first_text`);
     expect(transactionReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+      timeoutMs: 750,
+    });
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
@@ -786,6 +787,7 @@ https://join.example.test/join/code_first_text`);
     expect(hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("rejects invalid message.received timestamps before journaling or side effects", async () => {
@@ -819,6 +821,7 @@ https://join.example.test/join/code_first_text`);
     expect(hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("prefers sent_at when building active-member dispatch metadata", async () => {
@@ -929,6 +932,45 @@ https://join.example.test/join/code_first_text`);
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not send a Linq read receipt when active-member mailbox persistence fails", async () => {
+    mocks.enqueueHostedExecutionOutbox.mockRejectedValueOnce(new Error("mailbox append failed"));
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_mailbox_append_failure",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("mailbox append failed");
+
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
   it("sends the signup link on the first inbound Linq message", async () => {
@@ -1035,6 +1077,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
     );
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("ignores non-iMessage first-contact texts without sending signup links", async () => {
@@ -1086,6 +1129,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it.each(["sms", "RCS"] as const)(

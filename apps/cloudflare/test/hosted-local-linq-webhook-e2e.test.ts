@@ -364,7 +364,6 @@ async function startLinqScenario(
     typeof additionalEnv === "function" ? additionalEnv(requireLinqStub()) : additionalEnv;
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
-      HOSTED_LINQ_INGRESS_TYPING_DIAGNOSTIC: "1",
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,

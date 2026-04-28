@@ -50,7 +50,7 @@ export async function sendHostedLinqChatMessage(input: {
   }
 }
 
-export async function sendHostedLinqTypingPing(input: {
+export async function sendHostedLinqReadReceipt(input: {
   chatId: string;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -64,7 +64,7 @@ export async function sendHostedLinqTypingPing(input: {
     apiBaseUrl,
     apiToken,
     method: "POST",
-    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/typing`,
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/read`,
     signal: input.signal,
     timeoutMs: input.timeoutMs,
   });

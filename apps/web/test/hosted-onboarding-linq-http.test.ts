@@ -11,6 +11,7 @@ import {
   createHostedLinqChat,
   createHostedLinqWebhookSubscription,
   sendHostedLinqChatMessage,
+  sendHostedLinqReadReceipt,
 } from "@/src/lib/hosted-onboarding/linq";
 
 const originalFetch = globalThis.fetch;
@@ -189,6 +190,42 @@ describe("sendHostedLinqChatMessage", () => {
     })).resolves.toBeUndefined();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("sendHostedLinqReadReceipt", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("posts read acknowledgements to the v3 chat read endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqReadReceipt({
+      chatId: "chat_123",
+      timeoutMs: 750,
+    })).resolves.toEqual({
+      ok: true,
+      status: 204,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("chats/chat_123/read", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        method: "POST",
+        signal: expect.any(AbortSignal),
+      }),
+    );
   });
 });
 
