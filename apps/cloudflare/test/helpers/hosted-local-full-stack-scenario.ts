@@ -103,6 +103,7 @@ export async function startHostedLocalFullStackScenario(input: {
   additionalEnv?: NodeJS.ProcessEnv;
   assistantProviderMode?: HostedLocalAssistantProviderMode;
   assistantProviderResponses?: readonly string[];
+  assistantProviderStubModelId?: string;
   localDatabaseUrl?: string;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
@@ -130,6 +131,7 @@ export async function startHostedLocalFullStackScenario(input: {
     if (assistantProviderMode === "stub") {
       assistantProviderServer = await startAssistantProviderStubServer({
         fallbackResponseText: null,
+        modelId: input.assistantProviderStubModelId,
         onRequest: (request) => {
           assistantProviderRequests.push(request);
         },

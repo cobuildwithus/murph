@@ -58,6 +58,24 @@ test('assistant target preset resolution keeps custom endpoints conservative', (
   )
   assert.equal(
     resolveOpenAICompatibleProviderTargetPresetId({
+      apiKeyEnv: 'VERCEL_AI_API_KEY',
+      baseUrl: 'http://127.0.0.1:4111/v1',
+      presetId: 'vercel-ai-gateway',
+      providerName: 'vercel-ai-gateway',
+    }),
+    'vercel-ai-gateway',
+  )
+  assert.equal(
+    resolveOpenAICompatibleProviderTargetPresetId({
+      apiKeyEnv: 'VERCEL_AI_API_KEY',
+      baseUrl: 'http://host.docker.internal:4111/v1',
+      presetId: 'vercel-ai-gateway',
+      providerName: 'vercel-ai-gateway',
+    }),
+    'vercel-ai-gateway',
+  )
+  assert.equal(
+    resolveOpenAICompatibleProviderTargetPresetId({
       baseUrl: 'https://ai-gateway.vercel.sh/v1',
       presetId: 'openai',
       providerName: 'OpenAI',

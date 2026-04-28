@@ -1,5 +1,6 @@
 import type { AssistantModelSpec } from '../model-harness.js'
 import {
+  isAssistantLocalDevelopmentBaseUrl,
   isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '@murphai/operator-config/assistant/shared'
@@ -58,7 +59,10 @@ function resolveAssistantResponsesRequestPolicy(
   if (
     input.target.kind !== 'responses' ||
     input.target.via !== 'vercel-ai-gateway' ||
-    !isAssistantVercelAIGatewayBaseUrl(input.target.baseUrl)
+    (
+      !isAssistantVercelAIGatewayBaseUrl(input.target.baseUrl) &&
+      !isAssistantLocalDevelopmentBaseUrl(input.target.baseUrl)
+    )
   ) {
     return undefined
   }
