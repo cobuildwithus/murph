@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
 slug: protocols/whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
-title: Whole Body Red And Near Infrared Light Exposure
+title: Red Light Therapy
 summary: "High-caution field-testing protocol for a nonthermal whole-body red and near-infrared light-bed self-experiment with explicit dose logging and sleep or recovery readouts; direct evidence remains thin, adjacent, and device-specific."
 status: field-testing
 quality: usable
@@ -23,6 +23,12 @@ categories:
   - sleep
   - recovery
   - wearable-measured
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-red-light-therapy.jpeg
+    mediaType: image/jpeg
+    caption: Red Light Therapy
 relations:
   -
     type: parent_family
@@ -291,21 +297,21 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: Whole-body red and near-infrared light may affect cell energy, blood flow, inflammation, and recovery signals. If overall recovery strain falls, resting pulse might drift lower.
+    description: If sessions reduce soreness, inflammation, or late-day arousal enough to lower overnight recovery demand, resting pulse may drift lower.
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: Theories for red and near-infrared light point to cell energy, blood flow, and inflammation as possible ways to affect sleep. A stable routine might improve sleep continuity, but whole-body evidence is early.
+    description: If sessions reduce discomfort or late-day arousal, sleep may be less fragmented and more time in bed may be spent asleep.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: If red and near-infrared exposure changes recovery strain or stress balance, HRV may move with it. Treat this as exploratory because direct whole-body evidence is limited.
+    description: HRV may rise if the exposure lowers overnight strain through better comfort, less soreness, or easier recovery.
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: If the routine improves sleep depth or overnight recovery, deep-sleep minutes may rise. This should support the broader sleep result rather than lead it.
+    description: Deep-sleep minutes may rise only if the routine reduces early-night arousal or discomfort enough to keep the first sleep cycles steadier.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: Hey Murph, I want to cautiously plan a whole-body red and near-infrared light experiment.
-    intentSummary: Explore Whole-Body Red/NIR PBM
+    displayPrompt: Hey Murph, I want to cautiously plan a Red Light Therapy experiment.
+    intentSummary: Explore Red Light Therapy
   contextReview:
     vaultChecks:
       -
@@ -607,14 +613,14 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you complete or intentionally skip the whole-body red/NIR PBM session today? Either answer is useful — I just want the experiment record to be accurate.
     confirmationPrompt: "Show the limited-evidence posture, protocol key plus pageRevisionId and runSpecRevisionId if available, selected testPlanId, safety-screen outcome, baseline and intervention dates, device model, wavelengths, irradiance/fluence status, session duration, timing, exposure geometry/body coverage, eye protection, nonthermal comfort plan, logging path, stop conditions, and reminder policy before creating the active experiment or any automations."
 whyItWorks:
-  - "Photobiomodulation is a nonthermal visible and near-infrared light modality whose biological effects depend heavily on wavelength, irradiance, fluence, duration, repetition, and exposure geometry rather than on color labels alone. (source_artifact:pmid-40253006; source_artifact:pmid-30550048; source_artifact:fda-pbm-devices-guidance-2023-01-12)"
-  - "Sleep-relevant PBM mechanisms are usually discussed through mitochondrial signaling, adenosine, nitric-oxide and vascular pathways, antioxidant effects, and inflammatory modulation, but most human sleep evidence is transcranial, cervical, special-population, or otherwise indirect; the whole-body human sleep literature remains early and heterogeneous. (source_artifact:doi-10.17241-smr.2024.02593; source_artifact:pmid-36018149)"
-  - "Whole-body or large-area exposure has produced measurable non-sleep signals in narrow contexts, but the signal varies by population and endpoint: acute resting-metabolic effects have been reported in women with obesity, while stronger repeated-session symptom gains come from small supervised fibromyalgia studies rather than generic healthy-adult sleep trials. (source_artifact:pmid-41228430; source_artifact:pmid-36369323; source_artifact:pmid-38356644)"
+  - "Photobiomodulation is a nonthermal visible and near-infrared light modality whose biological effects depend heavily on wavelength, irradiance, fluence, duration, repetition, and exposure geometry rather than on color labels alone."
+  - "Sleep-relevant PBM mechanisms are usually discussed through mitochondrial signaling, adenosine, nitric-oxide and vascular pathways, antioxidant effects, and inflammatory modulation, but most human sleep evidence is transcranial, cervical, special-population, or otherwise indirect; the whole-body human sleep literature remains early and heterogeneous."
+  - "Whole-body or large-area exposure has produced measurable non-sleep signals in narrow contexts, but the signal varies by population and endpoint: acute resting-metabolic effects have been reported in women with obesity, while stronger repeated-session symptom gains come from small supervised fibromyalgia studies rather than generic healthy-adult sleep trials."
 claims:
   -
     claimId: page-scope-is-one-variant-not-all-red-light
     type: evidence_scope
-    text: "This page is for one cautious Murph variant of whole-body red and near-infrared photobiomodulation, not for all red-light therapy, all PBM, or all light-based sleep interventions."
+    text: "This page is for one cautious Murph variant of whole-body red and near-infrared photobiomodulation, not for every red-light therapy use case, all PBM, or all light-based sleep interventions."
     strength: high
     sourceKeys:
       - source_artifact:pmid-40253006
@@ -1136,7 +1142,7 @@ safety:
     - Keep safety language stronger than efficacy language because the direct evidence base is still sparse.
 ---
 
-Whole-body red and near-infrared photobiomodulation is plausible enough for cautious field testing, but the direct evidence for this exact Murph variant is much thinner than the broader PBM internet narrative suggests.
+Red Light Therapy is plausible enough for cautious field testing when implemented as whole-body red and near-infrared photobiomodulation, but the direct evidence for this exact Murph variant is much thinner than the broader PBM internet narrative suggests.
 
 ## What this page is trying to answer
 
@@ -1144,21 +1150,21 @@ This page asks a narrow question: if someone uses a **nonthermal whole-body red/
 
 ## Why this version is cautious
 
-The direct literature is not strong enough to promise a result. The strongest general-wellness controlled record in the landing set is a **partial-body** daytime 850 nm trial with winter-only mood, drowsiness, inflammatory, and resting-heart-rate signals but **no significant sleep or circadian benefit**. The direct whole-body sleep records are mainly registries that help with cadence, endpoints, and exclusions rather than with efficacy. Acute direct whole-body evidence also exists in a narrow women-only metabolic study, but that is not a general sleep study. (source_artifact:pmid-36671752; source_artifact:clinicaltrials-gov-nct05116605-2026-04-23; source_artifact:clinicaltrials-gov-nct05963555-2026-04-23; source_artifact:pmid-41228430)
+The direct literature is not strong enough to promise a result. The strongest general-wellness controlled record in the landing set is a **partial-body** daytime 850 nm trial with winter-only mood, drowsiness, inflammatory, and resting-heart-rate signals but **no significant sleep or circadian benefit**. The direct whole-body sleep records are mainly registries that help with cadence, endpoints, and exclusions rather than with efficacy. Acute direct whole-body evidence also exists in a narrow women-only metabolic study, but that is not a general sleep study.
 
 ## Who should not use this as an ordinary self-experiment
 
-Do not use this ordinary wellness protocol without clinician guidance if you are pregnant or breastfeeding; are under 18; have seizure risk, photophobia, photosensitivity, eye disease, recent eye surgery, active or recent cancer treatment, skin-cancer history, suspicious or changing skin lesions, thyroid disease, an implanted medical device, unstable cardiovascular, metabolic, neurologic, pulmonary, or psychiatric disease, diabetes medication constraints, open wounds, active rash, sunburn, skin infection, herpes outbreak, or recent photodynamic therapy drug exposure. Also do not use this protocol if you cannot reliably detect or report heat, pain, skin symptoms, or visual symptoms. These boundaries come from safety reviews, medication guidance, and supervised or registered protocol exclusions rather than from proven risk rates. (source_artifact:clinicaltrials-gov-nct05116605-2026-04-23; source_artifact:clinicaltrials-gov-nct06678698-2026-04-23; source_artifact:clinicaltrials-gov-nct07047248-2026-04-23; source_artifact:clinicaltrials-gov-nct07271927-2026-04-23; source_artifact:ensaiosclinicos-rbr-8v7rsdp-2026-04-23; source_artifact:ensaiosclinicos-rbr-9vcph8x-2026-04-23; source_artifact:clinicaltrials-gov-nct06866522-2026-04-23; source_artifact:bmla-drugs-and-lasers-ipls-2018-11-30; source_artifact:pmid-34451820; source_artifact:pmid-29466089)
+Do not use this ordinary wellness protocol without clinician guidance if you are pregnant or breastfeeding; are under 18; have seizure risk, photophobia, photosensitivity, eye disease, recent eye surgery, active or recent cancer treatment, skin-cancer history, suspicious or changing skin lesions, thyroid disease, an implanted medical device, unstable cardiovascular, metabolic, neurologic, pulmonary, or psychiatric disease, diabetes medication constraints, open wounds, active rash, sunburn, skin infection, herpes outbreak, or recent photodynamic therapy drug exposure. Also do not use this protocol if you cannot reliably detect or report heat, pain, skin symptoms, or visual symptoms. These boundaries come from safety reviews, medication guidance, and supervised or registered protocol exclusions rather than from proven risk rates.
 
 
 ## What stays separate
 
-This page is not the place to import efficacy claims from athlete recovery beds, fibromyalgia or chronic-pain PBM, cosmetic or photoaging beds, transcranial or intranasal PBM, red-light glasses, bright-light therapy, infrared sauna, or UV tanning. The athlete/recovery bucket is mixed and includes null performance and fatigue-biomarker evidence; fibromyalgia and cosmetic signals are condition- or endpoint-specific. Those literatures help define boundaries, not generic efficacy. (source_artifact:pmid-39883205; source_artifact:pmid-33345040; source_artifact:pmid-36006085; source_artifact:pmid-36369323; source_artifact:pmid-38356644; source_artifact:pmid-24286286; source_artifact:pmid-36927734; source_artifact:pmid-37593770; source_artifact:pmid-37002704; source_artifact:pmid-19602651; source_artifact:iarc-sunbeds-uv-radiation-2009-07-29)
+This page is not the place to import efficacy claims from athlete recovery beds, fibromyalgia or chronic-pain PBM, cosmetic or photoaging beds, transcranial or intranasal PBM, red-light glasses, bright-light therapy, infrared sauna, or UV tanning. The athlete/recovery bucket is mixed and includes null performance and fatigue-biomarker evidence; fibromyalgia and cosmetic signals are condition- or endpoint-specific. Those literatures help define boundaries, not generic efficacy.
 
 ## Stop rules
 
-Stop the session immediately for eye pain, blurred vision, visual disturbance, unusual light sensitivity, new floaters, a persistent afterimage, accidental direct gaze followed by lingering symptoms, burning or hot skin, blistering, persistent redness, rash, swelling, wound or lesion irritation, severe headache, dizziness, nausea, confusion, fainting, seizure symptoms, chest symptoms, palpitations, wheezing, unusual shortness of breath, or marked mood or sleep worsening. Do not finish sessions just to hit an adherence target. Eye, skin, medication, and mood-related adverse-event signals are mostly adjacent rather than direct whole-body evidence, which is exactly why the stop rules should be stricter than the efficacy language. (source_artifact:pmid-39672511; source_artifact:pmid-38180093; source_artifact:pmid-39335685; source_artifact:pmid-28891192; source_artifact:pmid-31483941; source_artifact:pmid-31574513; source_artifact:pmid-37593770)
+Stop the session immediately for eye pain, blurred vision, visual disturbance, unusual light sensitivity, new floaters, a persistent afterimage, accidental direct gaze followed by lingering symptoms, burning or hot skin, blistering, persistent redness, rash, swelling, wound or lesion irritation, severe headache, dizziness, nausea, confusion, fainting, seizure symptoms, chest symptoms, palpitations, wheezing, unusual shortness of breath, or marked mood or sleep worsening. Do not finish sessions just to hit an adherence target. Eye, skin, medication, and mood-related adverse-event signals are mostly adjacent rather than direct whole-body evidence, which is exactly why the stop rules should be stricter than the efficacy language.
 
 ## How to read your result
 
-A positive result would mean your own baseline shifted in a repeatable direction while device, timing, coverage, and other confounders stayed fairly stable. A null or mixed result is still informative here, and worsening sleep duration or sleep-stage estimates should be treated as a real negative signal rather than ignored, because adjacent repeated-use wearable data include both lower sleeping heart rate and shorter sleep durations. (source_artifact:pmid-40253006; source_artifact:pmid-30550048; source_artifact:pmid-36671752; source_artifact:pmid-36006085)
+A positive result would mean your own baseline shifted in a repeatable direction while device, timing, coverage, and other confounders stayed fairly stable. A null or mixed result is still informative here, and worsening sleep duration or sleep-stage estimates should be treated as a real negative signal rather than ignored, because adjacent repeated-use wearable data include both lower sleeping heart rate and shorter sleep durations.

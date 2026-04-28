@@ -7,6 +7,7 @@ title: Hydrolyzed Collagen Peptides
 summary: Use a clearly identified oral hydrolyzed collagen peptide product at a pre-specified daily dose to test one chosen outcome over a target-specific window while keeping safety, product quality, adherence, and confounders visible.
 status: field-testing
 quality: usable
+hidden: true
 aliases:
 - hydrolyzed collagen peptides
 - collagen peptides
@@ -27,6 +28,12 @@ categories:
 - nutrition
 - field-testing
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-04.png
+    mediaType: image/png
+    caption: Hydrolyzed Collagen Peptides
 relations:
 -
   type: parent_family
@@ -426,7 +433,7 @@ lineage:
   rationale: First canonical Murph starter variant for oral hydrolyzed collagen peptides; adjacent collagen variants and clinical/non-oral collagen interventions are kept separate.
 attribution:
   ownerType: murph
-  note: Drafted from the collagen-supplementation research run using the canonical source ledger and section syntheses, with claims limited to cited source keys.
+  note: Drafted from the collagen-supplementation research run using the canonical source ledger and section syntheses, with claims limited to cited evidence.
 protocol:
   doseSignature: Daily oral HCP · fixed user-selected grams/day · 7-day baseline + 6–12+ week target window
   target: One primary outcome selected before start; common options are skin, joint pain/function, tendon/loading, recovery, or tolerability.
@@ -515,13 +522,13 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:chosen-primary-outcome-score
-  description: Oral collagen can raise small collagen pieces in the blood. That makes a skin, joint, tendon, or recovery change possible, but the score should match the target.
+  description: Collagen peptides can supply amino acids and peptide cues for connective-tissue turnover. A skin, joint, tendon, or recovery score should move only if that tissue is remodeling.
 -
   biomarkerKey: biomarker:supplement-adherence
-  description: This protocol only creates a steady dose if the planned grams are taken often enough. Adherence shows whether the product had a fair chance to matter.
+  description: Collagen only has a chance to matter when the planned grams are taken often enough.
 -
   biomarkerKey: biomarker:gi-symptom-score
-  description: Collagen peptides, source proteins, sweeteners, or other active ingredients can bother digestion. A GI score shows whether the supplement adds symptoms.
+  description: Collagen peptides, source proteins, sweeteners, or other active ingredients can bother digestion.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -880,10 +887,10 @@ experimentOnboarding:
     missedLogFollowupCopy: Want to mark whether you took collagen yesterday and note any symptoms or confounders?
     confirmationPrompt: Before creating the private run, confirm the exact product, source species/category, planned labeled daily grams, full ingredient/allergen/lot details, primary target, baseline plan, hard-stop safety screen, biotin/lab context, and confounders. Do not create the run until the user explicitly confirms.
 whyItWorks:
-- 'Collagen-derived peptides can appear in circulation after oral collagen or gelatin hydrolysate intake, which makes oral HCP biologically plausible, but absorption evidence does not by itself prove that a user-facing endpoint will improve. Sources: source_artifact:pmid-16076145; source_artifact:pmid-26934933; source_artifact:pmid-28244315; source_artifact:pmid-39149544.'
-- 'Skin endpoints have the clearest direct HCP cluster, with hydration, elasticity, wrinkle, and appearance outcomes reported across trials and reviews; Murph still treats these as endpoint- and product-specific rather than universal. Sources: source_artifact:pmid-40826844; source_artifact:pmid-40324552; source_artifact:pmid-23949208; source_artifact:pmid-24401291; source_artifact:pmid-26362110.'
-- 'Joint, tendon, and recovery outcomes are more context-sensitive. Tendon and ligament hypotheses depend especially on loading or rehab exposure, while recovery/performance interpretations require repeatable stressors and training context. Sources: source_artifact:pmid-30609761; source_artifact:pmid-35403756; source_artifact:pmid-36776971; source_artifact:pmid-38035363; source_artifact:pmid-38590831.'
-- 'A good Murph run is therefore not “collagen works” versus “collagen does not work.” It is a bounded test of one target, one product, one dose, and one measurement plan, with safety and confounders visible. Sources: source_artifact:pmid-39212129; source_artifact:pmid-33742704; source_artifact:pmid-37717022; source_artifact:pmid-33965702.'
+- 'Collagen-derived peptides can appear in circulation after oral collagen or gelatin hydrolysate intake, which makes oral HCP biologically plausible, but absorption evidence does not by itself prove that a user-facing endpoint will improve.'
+- 'Skin endpoints have the clearest direct HCP cluster, with hydration, elasticity, wrinkle, and appearance outcomes reported across trials and reviews; Murph still treats these as endpoint- and product-specific rather than universal.'
+- 'Joint, tendon, and recovery outcomes are more context-sensitive. Tendon and ligament hypotheses depend especially on loading or rehab exposure, while recovery/performance interpretations require repeatable stressors and training context.'
+- 'A good Murph run is therefore not “collagen works” versus “collagen does not work.” It is a bounded test of one target, one product, one dose, and one measurement plan, with safety and confounders visible.'
 claims:
 -
   claimId: starter-variant-is-oral-hcp
@@ -1422,71 +1429,71 @@ safety:
   - upcoming or active lab testing where the product contains biotin; pause and follow lab/clinician instructions
   - contamination concern, damaged seal, recall, wrong product, label inconsistency, source/allergen uncertainty, or unexpected serious reaction
   notes:
-  - 'Dietary supplements are not FDA-approved before marketing; manufacturer responsibility, label review, and adverse-event reporting are product-specific safety context. Sources: source_artifact:fda-dietary-supplements-2024-02-21; source_artifact:ecfr-21-cfr-part-111-current-2026-04-25.'
-  - 'Short-term tolerability reports do not eliminate allergy, GI, product-quality, or population-specific risks. Sources: source_artifact:pmid-22500661; source_artifact:pmid-30681787; source_artifact:pmid-39839727; source_artifact:pmid-40977985; source_artifact:pmid-23949208; source_artifact:pmid-26840887; source_artifact:pmid-30609761; source_artifact:pmid-40826844.'
-  - 'Fish/marine collagen and gelatin allergy gates are supported by fish-collagen and fish-gelatin case evidence plus FDA food-allergen labeling context. Sources: source_artifact:fda-food-allergies-2026-03-11; source_artifact:pmid-27569115; source_artifact:pmid-31262631; source_artifact:pmid-32389794; source_artifact:pmid-33178560; source_artifact:pmid-19178936.'
-  - 'Mammalian-source and alpha-gal gates are supported by bovine-collagen allergy case evidence and CDC alpha-gal product/management guidance. Sources: source_artifact:pmid-8913129; source_artifact:cdc-alpha-gal-products-2026-01-05; source_artifact:cdc-alpha-gal-managing-2026-01-05.'
-  - 'Clinical wound, burn, pressure-injury, fragility-fracture, frailty, malnutrition, kidney/protein-restriction, pregnancy/lactation, child/adolescent, and supervised nutrition contexts should be routed to clinical guidance before unsupervised experimentation. Sources: source_artifact:doi-10.1016-j.jnim.2017.05.001; source_artifact:pmid-16557055; source_artifact:pmid-30061579; source_artifact:pmid-31859087; source_artifact:pmid-38345088; source_artifact:pmid-32829751; source_artifact:nkf-ckd-protein-diet-undated; source_artifact:fda-medicine-pregnancy-2025-02-03; source_artifact:fda-dietary-supplements-tips-women-2019-05-29.'
-  - 'Recurrent-stone or hyperoxaluria caution is mechanistic/safety-context only; do not convert it into a general disease claim for healthy users. Sources: source_artifact:pmid-17021603; source_artifact:pmid-32829751; source_artifact:nkf-ckd-protein-diet-undated.'
-  - 'Biotin-containing collagen or beauty blends require lab-test caution, especially around thyroid, cardiac/troponin, endocrine, and hormone testing. Sources: source_artifact:fda-biotin-troponin-interference-2022-06-21; source_artifact:hsa-biotin-clinical-lab-tests-2019-09-13; source_artifact:pmid-32874806.'
-  - 'Collagen should be counted as protein exposure but not used as a main/sole protein or meal replacement; collagen is incomplete protein and dose changes are confounders. Sources: source_artifact:pmid-31096622; source_artifact:nkf-ckd-protein-diet-undated.'
-  - 'Marine-source contaminant and lot-level concerns are product-quality gates, not evidence that all marine HCP is unsafe. Sources: source_artifact:pmid-40292256; source_artifact:pmid-32874806; source_artifact:fda-dietary-supplements-2024-02-21.'
+  - 'Dietary supplements are not FDA-approved before marketing; manufacturer responsibility, label review, and adverse-event reporting are product-specific safety context.'
+  - 'Short-term tolerability reports do not eliminate allergy, GI, product-quality, or population-specific risks.'
+  - 'Fish/marine collagen and gelatin allergy gates are supported by fish-collagen and fish-gelatin case evidence plus FDA food-allergen labeling context.'
+  - 'Mammalian-source and alpha-gal gates are supported by bovine-collagen allergy case evidence and CDC alpha-gal product/management guidance.'
+  - 'Clinical wound, burn, pressure-injury, fragility-fracture, frailty, malnutrition, kidney/protein-restriction, pregnancy/lactation, child/adolescent, and supervised nutrition contexts should be routed to clinical guidance before unsupervised experimentation.'
+  - 'Recurrent-stone or hyperoxaluria caution is mechanistic/safety-context only; do not convert it into a general disease claim for healthy users.'
+  - 'Biotin-containing collagen or beauty blends require lab-test caution, especially around thyroid, cardiac/troponin, endocrine, and hormone testing.'
+  - 'Collagen should be counted as protein exposure but not used as a main/sole protein or meal replacement; collagen is incomplete protein and dose changes are confounders.'
+  - 'Marine-source contaminant and lot-level concerns are product-quality gates, not evidence that all marine HCP is unsafe.'
 ---
 
 # Hydrolyzed Collagen Peptides
 
-Hydrolyzed Collagen Peptides is Murph's starter protocol for **oral hydrolyzed collagen peptide** products. The page deliberately keeps adjacent collagen variants separate: native or undenatured type-II collagen, gelatin plus vitamin C loading, bone broth, multi-ingredient beauty blends, clinical wound or fragility-fracture nutrition formulas, and non-oral collagen interventions are not the same protocol. `[source_artifact:pmid-33742704; source_artifact:pmid-30368550; source_artifact:pmid-39212129; source_artifact:pmid-33068290; source_artifact:pmid-27852613; source_artifact:pmid-30061579]`
+Hydrolyzed Collagen Peptides is Murph's starter protocol for **oral hydrolyzed collagen peptide** products. The page deliberately keeps adjacent collagen variants separate: native or undenatured type-II collagen, gelatin plus vitamin C loading, bone broth, multi-ingredient beauty blends, clinical wound or fragility-fracture nutrition formulas, and non-oral collagen interventions are not the same protocol.
 
-The most important setup decision is the target. A collagen-peptide run can be framed around skin appearance or hydration proxies, joint pain/function, tendon or loading-related symptoms, workout recovery, body-composition context with training, long-window bone context, or tolerability/adherence. It should not try to prove every collagen claim at once. `[source_artifact:pmid-40826844; source_artifact:pmid-39212129; source_artifact:pmid-30609761; source_artifact:pmid-29337906; source_artifact:doi-10.5960-dzsm.2024.605]`
+The most important setup decision is the target. A collagen-peptide run can be framed around skin appearance or hydration proxies, joint pain/function, tendon or loading-related symptoms, workout recovery, body-composition context with training, long-window bone context, or tolerability/adherence. It should not try to prove every collagen claim at once.
 
 ## Safety boundary — who this protocol is for
 
-Use this protocol only for a generally healthy adult testing a clearly labeled oral HCP product with known daily grams, source species/category, full ingredients, allergen information, manufacturer, and lot/batch. It is not a treatment protocol for arthritis, osteoporosis, tendon injury, wounds, skin disease, hair loss, pregnancy/lactation, kidney disease, stone disease, or any other clinical condition. Supplements are not intended to treat, diagnose, prevent, or cure disease, and FDA does not approve dietary supplements before marketing. `[source_artifact:fda-dietary-supplements-2024-02-21; source_artifact:fda-dietary-supplements-tips-women-2019-05-29]`
+Use this protocol only for a generally healthy adult testing a clearly labeled oral HCP product with known daily grams, source species/category, full ingredients, allergen information, manufacturer, and lot/batch. It is not a treatment protocol for arthritis, osteoporosis, tendon injury, wounds, skin disease, hair loss, pregnancy/lactation, kidney disease, stone disease, or any other clinical condition. Supplements are not intended to treat, diagnose, prevent, or cure disease, and FDA does not approve dietary supplements before marketing.
 
-Do not start unsupervised if you have reacted to collagen, gelatin, gummies, marshmallows, capsules, bovine/porcine/fish/marine products, or the same product before. Do not start a fish/marine or unclear-source product with fish allergy; do not start a marine or unclear-source product with Crustacean shellfish allergy unless the manufacturer confirms source and cross-contact controls and a clinician/allergist clears the product. Fish and Crustacean shellfish are major food-allergen categories, and fish-collagen/fish-gelatin case reports show that collagen-derived ingredients can matter for susceptible people. `[source_artifact:fda-food-allergies-2026-03-11; source_artifact:pmid-27569115; source_artifact:pmid-31262631; source_artifact:pmid-32389794; source_artifact:pmid-33178560; source_artifact:pmid-19178936]`
+Do not start unsupervised if you have reacted to collagen, gelatin, gummies, marshmallows, capsules, bovine/porcine/fish/marine products, or the same product before. Do not start a fish/marine or unclear-source product with fish allergy; do not start a marine or unclear-source product with Crustacean shellfish allergy unless the manufacturer confirms source and cross-contact controls and a clinician/allergist clears the product. Fish and Crustacean shellfish are major food-allergen categories, and fish-collagen/fish-gelatin case reports show that collagen-derived ingredients can matter for susceptible people.
 
-Do not start bovine/porcine, mammalian-source, mammal-capsule, or unclear-source products if you have alpha-gal syndrome or reactions to mammalian meat, bovine/porcine gelatin, or mammal-derived capsules/excipients unless an allergist or clinician clears the exact product. CDC alpha-gal guidance lists gelatin made from beef or pork and some mammalian-source additives as possible alpha-gal exposures, and bovine-collagen allergy case evidence is adjacent safety context. `[source_artifact:cdc-alpha-gal-products-2026-01-05; source_artifact:cdc-alpha-gal-managing-2026-01-05; source_artifact:pmid-8913129]`
+Do not start bovine/porcine, mammalian-source, mammal-capsule, or unclear-source products if you have alpha-gal syndrome or reactions to mammalian meat, bovine/porcine gelatin, or mammal-derived capsules/excipients unless an allergist or clinician clears the exact product. CDC alpha-gal guidance lists gelatin made from beef or pork and some mammalian-source additives as possible alpha-gal exposures, and bovine-collagen allergy case evidence is adjacent safety context.
 
-Do not start unsupervised with CKD, transplant history, dialysis, protein restriction, recurrent stones, calcium-oxalate stones, hyperoxaluria, reduced or uncertain kidney function, pregnancy, trying to conceive, breastfeeding, child/adolescent use, active medical care, immune/liver/GI malabsorption/cancer/eating-disorder concerns, or a medically supervised diet. These are clinician-guided contexts, not self-experiment defaults. `[source_artifact:pmid-32829751; source_artifact:nkf-ckd-protein-diet-undated; source_artifact:pmid-17021603; source_artifact:fda-medicine-pregnancy-2025-02-03; source_artifact:fda-dietary-supplements-tips-women-2019-05-29]`
+Do not start unsupervised with CKD, transplant history, dialysis, protein restriction, recurrent stones, calcium-oxalate stones, hyperoxaluria, reduced or uncertain kidney function, pregnancy, trying to conceive, breastfeeding, child/adolescent use, active medical care, immune/liver/GI malabsorption/cancer/eating-disorder concerns, or a medically supervised diet. These are clinician-guided contexts, not self-experiment defaults.
 
 ## Product requirements before first dose
 
-The label must state hydrolyzed collagen peptides, collagen hydrolysate, bioactive/specific collagen peptides, low-molecular-weight collagen peptides, or collagen tripeptides. It must also provide grams per serving, animal/fish source or source category, full ingredients, allergen information, serving instructions, manufacturer, lot/batch, and expiration date. For marine collagen, prefer a batch COA or credible third-party contaminant testing that includes metals/metalloids. Do not start if grams, source, ingredients, allergens, lot identity, seal integrity, or recall status are unclear. `[source_artifact:fda-dietary-supplements-2024-02-21; source_artifact:ecfr-21-cfr-part-111-current-2026-04-25; source_artifact:pmid-40292256; source_artifact:pmid-32874806]`
+The label must state hydrolyzed collagen peptides, collagen hydrolysate, bioactive/specific collagen peptides, low-molecular-weight collagen peptides, or collagen tripeptides. It must also provide grams per serving, animal/fish source or source category, full ingredients, allergen information, serving instructions, manufacturer, lot/batch, and expiration date. For marine collagen, prefer a batch COA or credible third-party contaminant testing that includes metals/metalloids. Do not start if grams, source, ingredients, allergens, lot identity, seal integrity, or recall status are unclear.
 
-If the product includes biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, or other active ingredients, treat it as a separate blend protocol or get clinician/pharmacist guidance before starting. Biotin-containing products require lab-test caution, especially around thyroid, cardiac/troponin, endocrine, and hormone tests. `[source_artifact:fda-biotin-troponin-interference-2022-06-21; source_artifact:hsa-biotin-clinical-lab-tests-2019-09-13; source_artifact:pmid-32874806; source_artifact:fda-dietary-supplements-tips-women-2019-05-29]`
+If the product includes biotin, herbs, high-dose vitamins/minerals, glucosamine, chondroitin, MSM, probiotics, stimulants, or other active ingredients, treat it as a separate blend protocol or get clinician/pharmacist guidance before starting. Biotin-containing products require lab-test caution, especially around thyroid, cardiac/troponin, endocrine, and hormone tests.
 
 ## What to do
 
-1. Choose one primary target and one matching metric before starting; do not try to prove every collagen claim at once. `[source_artifact:pmid-40826844; source_artifact:pmid-39212129; source_artifact:pmid-30609761; source_artifact:pmid-29337906; source_artifact:doi-10.5960-dzsm.2024.605]`
-2. Confirm the product meets the HCP identity and product-quality requirements above. `[source_artifact:fda-dietary-supplements-2024-02-21; source_artifact:ecfr-21-cfr-part-111-current-2026-04-25; source_artifact:pmid-32874806]`
-3. Screen hard-stop safety gates before dose planning: allergy/source, alpha-gal/mammalian source, kidney/stone/protein restriction, pregnancy/lactation/child/adolescent, active medical care, active coingredients, and upcoming lab tests. `[source_artifact:fda-food-allergies-2026-03-11; source_artifact:pmid-19178936; source_artifact:pmid-8913129; source_artifact:cdc-alpha-gal-products-2026-01-05; source_artifact:pmid-32829751; source_artifact:fda-medicine-pregnancy-2025-02-03; source_artifact:fda-biotin-troponin-interference-2022-06-21]`
-4. Record the exact product, grams per serving, planned grams per day, source species/category, full ingredients, allergen information, coingredients, lot/batch, expiration date, and third-party testing or recall information if available. `[source_artifact:fda-dietary-supplements-2024-02-21; source_artifact:pmid-40292256; source_artifact:pmid-32874806]`
-5. Collect a 7-day baseline for the chosen target and the major confounders. `[source_artifact:pmid-40826844; source_artifact:pmid-39212129; source_artifact:doi-10.5960-dzsm.2024.605]`
-6. Take only the planned labeled daily grams and log adherence and symptoms. `[source_artifact:pmid-30681787; source_artifact:pmid-18416885; source_artifact:pmid-39060741]`
-7. Recheck the primary outcome weekly and at the endpoint window that matches the target; restart or mark a new experiment if product, dose, source, or active coingredients change. `[source_artifact:pmid-33742704; source_artifact:pmid-39212129; source_artifact:pmid-30609761; source_artifact:pmid-29337906; source_artifact:pmid-32874806]`
+1. Choose one primary target and one matching metric before starting; do not try to prove every collagen claim at once.
+2. Confirm the product meets the HCP identity and product-quality requirements above.
+3. Screen hard-stop safety gates before dose planning: allergy/source, alpha-gal/mammalian source, kidney/stone/protein restriction, pregnancy/lactation/child/adolescent, active medical care, active coingredients, and upcoming lab tests.
+4. Record the exact product, grams per serving, planned grams per day, source species/category, full ingredients, allergen information, coingredients, lot/batch, expiration date, and third-party testing or recall information if available.
+5. Collect a 7-day baseline for the chosen target and the major confounders.
+6. Take only the planned labeled daily grams and log adherence and symptoms.
+7. Recheck the primary outcome weekly and at the endpoint window that matches the target; restart or mark a new experiment if product, dose, source, or active coingredients change.
 
 ## What to measure
 
-Skin targets should use consistent lighting, timing, camera distance, skincare routine, and sun/weather notes, then compare baseline against week 6/8/12 follow-up rather than relying only on memory. `[source_artifact:pmid-33742704; source_artifact:pmid-37432180; source_artifact:pmid-38192916; source_artifact:pmid-40826844; source_artifact:pmid-40324552; source_artifact:doi-10.3390-cosmetics11040137]`
+Skin targets should use consistent lighting, timing, camera distance, skincare routine, and sun/weather notes, then compare baseline against week 6/8/12 follow-up rather than relying only on memory.
 
-Joint and tendon targets should use a repeatable pain/function scale and visible loading context: steps, impact, rehab exercises, training phase, soreness, and rescue medication. Tendon and ligament interpretations are especially dependent on the loading program. `[source_artifact:pmid-30368550; source_artifact:pmid-37717022; source_artifact:pmid-39212129; source_artifact:pmid-30609761; source_artifact:pmid-35403756; source_artifact:pmid-36776971]`
+Joint and tendon targets should use a repeatable pain/function scale and visible loading context: steps, impact, rehab exercises, training phase, soreness, and rescue medication. Tendon and ligament interpretations are especially dependent on the loading program.
 
-Recovery targets should use the same workout or stressor and log 24-, 48-, and 72-hour soreness or recovery checks. Bone outcomes need long-window clinician or lab measurement and should not be treated as a short consumer self-rating. `[source_artifact:doi-10.5960-dzsm.2024.605; source_artifact:pmid-37133292; source_artifact:pmid-38035363; source_artifact:pmid-38590831; source_artifact:pmid-41049371; source_artifact:pmid-29337906]`
+Recovery targets should use the same workout or stressor and log 24-, 48-, and 72-hour soreness or recovery checks. Bone outcomes need long-window clinician or lab measurement and should not be treated as a short consumer self-rating.
 
 Community outcome: a Murph run may track a chosen self-rated outcome score, adherence, GI symptoms, and confounders, but that is a personal tracking outcome rather than proof that HCP treated a disease or repaired tissue.
 
 ## Evidence posture
 
-The research landscape is mixed. Skin outcomes have the clearest direct HCP signal, while joint/OA, tendon/loading, exercise recovery/performance, and bone-density contexts are heterogeneous or population-specific. Mechanistic bioavailability findings explain plausibility but do not prove a given endpoint will improve for a specific user. `[source_artifact:pmid-40826844; source_artifact:pmid-40324552; source_artifact:pmid-16076145; source_artifact:pmid-26934933; source_artifact:pmid-28244315; source_artifact:pmid-39149544]`
+The research landscape is mixed. Skin outcomes have the clearest direct HCP signal, while joint/OA, tendon/loading, exercise recovery/performance, and bone-density contexts are heterogeneous or population-specific. Mechanistic bioavailability findings explain plausibility but do not prove a given endpoint will improve for a specific user.
 
-Dose should be logged as an implementation variable. Trials use different products, peptide profiles, doses, timings, durations, and cointerventions; the Murph protocol therefore records the selected dose rather than presenting one universal recommendation. Follow the stated daily grams, do not stack collagen products or beauty blends, and do not increase dose for faster results. `[source_artifact:pmid-30681787; source_artifact:pmid-18416885; source_artifact:pmid-29337906; source_artifact:pmid-30609761; source_artifact:pmid-26353786; source_artifact:pmid-30061579; source_artifact:pmid-35937777; source_artifact:pmid-39060741]`
+Dose should be logged as an implementation variable. Trials use different products, peptide profiles, doses, timings, durations, and cointerventions; the Murph protocol therefore records the selected dose rather than presenting one universal recommendation. Follow the stated daily grams, do not stack collagen products or beauty blends, and do not increase dose for faster results.
 
-Count collagen as protein exposure, but do not use it as the main protein source or meal replacement; collagen protein is incomplete and protein-context changes can confound interpretation. This is a nutrition-context guardrail, not an HCP efficacy claim. `[source_artifact:pmid-31096622; source_artifact:nkf-ckd-protein-diet-undated]`
+Count collagen as protein exposure, but do not use it as the main protein source or meal replacement; collagen protein is incomplete and protein-context changes can confound interpretation. This is a nutrition-context guardrail, not an HCP efficacy claim.
 
 ## Safety posture
 
-Hydrolyzed collagen peptides are often low burden in short trials, but not risk-free. The practical safety layer is product-specific: GI tolerance, allergy and source species, unclear labels, contaminants, cGMP, recalls, active coingredients, biotin/lab interference, and clinical-population mismatch all matter. `[source_artifact:pmid-22500661; source_artifact:pmid-39839727; source_artifact:pmid-40977985; source_artifact:pmid-40507417; source_artifact:fda-dietary-supplements-2024-02-21; source_artifact:ecfr-21-cfr-part-111-current-2026-04-25; source_artifact:pmid-32874806]`
+Hydrolyzed collagen peptides are often low burden in short trials, but not risk-free. The practical safety layer is product-specific: GI tolerance, allergy and source species, unclear labels, contaminants, cGMP, recalls, active coingredients, biotin/lab interference, and clinical-population mismatch all matter.
 
-Stop and seek urgent/emergency help for hives with systemic symptoms, swelling of lips/tongue/face/throat, throat tightness, wheezing, shortness of breath, dizziness/fainting, or repeated vomiting. Stop and seek urgent medical care for painful or widespread red-purple rash, blistering, peeling, fever with rash, mouth sores, eye pain/redness, genital sores, or facial swelling. `[source_artifact:pmid-36092207; source_artifact:fda-food-allergies-2026-03-11]`
+Stop and seek urgent/emergency help for hives with systemic symptoms, swelling of lips/tongue/face/throat, throat tightness, wheezing, shortness of breath, dizziness/fainting, or repeated vomiting. Stop and seek urgent medical care for painful or widespread red-purple rash, blistering, peeling, fever with rash, mouth sores, eye pain/redness, genital sores, or facial swelling.
 
-Stop or pause and contact a clinician for flank pain, blood in urine, stone symptoms, reduced urination, swelling, persistent vomiting/diarrhea, dehydration, blood in stool, or severe abdominal pain. Pause before lab testing if the product contains biotin and follow lab/clinician instructions. Stop for contamination concern, damaged seal, recall, wrong product, label inconsistency, source/allergen uncertainty, or unexpected serious reaction; save the label, lot/batch, dose log, and photos, and report serious adverse events or product-quality problems where applicable. `[source_artifact:pmid-17021603; source_artifact:pmid-32829751; source_artifact:nkf-ckd-protein-diet-undated; source_artifact:fda-biotin-troponin-interference-2022-06-21; source_artifact:hsa-biotin-clinical-lab-tests-2019-09-13; source_artifact:fda-dietary-supplements-2024-02-21; source_artifact:fda-food-allergies-2026-03-11]`
+Stop or pause and contact a clinician for flank pain, blood in urine, stone symptoms, reduced urination, swelling, persistent vomiting/diarrhea, dehydration, blood in stool, or severe abdominal pain. Pause before lab testing if the product contains biotin and follow lab/clinician instructions. Stop for contamination concern, damaged seal, recall, wrong product, label inconsistency, source/allergen uncertainty, or unexpected serious reaction; save the label, lot/batch, dose log, and photos, and report serious adverse events or product-quality problems where applicable.

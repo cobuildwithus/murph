@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
 slug: protocols/iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-title: IT Band Syndrome Rehab And Return To Run
+title: IT Band Rehab
 summary: Use symptom-guided load reduction, hip and glute strengthening, movement-control work, and a cautious run/walk progression for suspected runner ITBS while routing red flags and escalation care away from self-guided rehab.
 status: field-testing
 quality: usable
@@ -14,11 +14,17 @@ aliases:
   - iliotibial band friction syndrome rehab
   - runner ITBS rehab
 categories:
-  - running
+  - exercise
   - rehabilitation
   - knee-pain
   - physical-therapy
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-it-band-rehab.jpeg
+    mediaType: image/jpeg
+    caption: IT Band Rehab
 relations:
   -
     type: parent_family
@@ -361,8 +367,8 @@ expectedSignalDescriptions:
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
-    displayPrompt: Hey Murph, I want to explore an IT band rehab and return-to-run experiment.
-    intentSummary: Explore ITBS Rehab And Return To Run
+    displayPrompt: Hey Murph, I want to explore an IT Band Rehab experiment.
+    intentSummary: Explore IT Band Rehab
   contextReview:
     vaultChecks:
       -

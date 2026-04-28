@@ -45,7 +45,7 @@ biomarker:
     - menstrual cycle
 ---
 
-Waist Circumference is included here because the No Added Sugar Diet needs a practical primary or secondary signal that can be tracked during a self-experiment.
+Waist Circumference is included here because No Added Sugar needs a practical primary or secondary signal that can be tracked during a self-experiment.
 
 ## Measurement note
 

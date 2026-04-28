@@ -7,6 +7,7 @@ title: Creatine Monohydrate
 summary: Use plain creatine monohydrate consistently to test strength, repeated high-intensity work, body-weight changes, and GI tolerance while keeping safety boundaries stronger than efficacy claims.
 status: field-testing
 quality: usable
+hidden: true
 aliases:
   - creatine monohydrate
   - creatine monohydrate supplementation
@@ -21,6 +22,12 @@ categories:
   - body-composition
   - high-intensity-performance
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-04.png
+    mediaType: image/png
+    caption: Creatine Monohydrate
 relations:
   -
     type: parent_family
@@ -1040,13 +1047,13 @@ expectedSignalDescriptions:
     description: "Large servings or loading can leave more creatine in the gut at once. Symptoms such as nausea, bloating, or diarrhea may change with dose size and splitting."
   -
     biomarkerKey: biomarker:lean-body-mass
-    description: "Creatine can increase muscle water, and with training it may support more lean-mass gain. Short-term lean-mass readings may move before true muscle growth is clear."
+    description: "Creatine can increase muscle water quickly. With training, it may also support more lean mass before true muscle growth is clear."
   -
     biomarkerKey: biomarker:training-volume
-    description: "More quick muscle energy may make repeated sets or sprints easier to complete. That can show up as more planned work finished."
+    description: "More quick muscle energy may make repeated sets or sprints easier to complete, so planned work can go up."
   -
     biomarkerKey: biomarker:perceived-recovery
-    description: "Creatine may make short hard efforts easier to repeat by supporting quick muscle energy. Some users may feel more ready for the next session, but this signal is mixed."
+    description: "Creatine supports quick muscle energy, which can make repeated hard efforts feel easier. Recovery may feel better when sessions create less strain."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -1252,10 +1259,10 @@ experimentOnboarding:
     missedLogFollowupCopy: Want to fill in yesterday's creatine dose, symptoms, and training context?
     confirmationPrompt: Create a creatine monohydrate experiment with the selected dose path, safety boundaries, and logging fields?
 whyItWorks:
-  - 'Creatine supplementation can raise muscle creatine availability; loading raises stores faster, while lower daily dosing can build stores more gradually, and maintenance dosing helps keep stores elevated. Sources: source_artifact:pmid-1327657, source_artifact:pmid-8828669, source_artifact:pmid-12660409, source_artifact:pmid-20609257.'
-  - 'The most plausible user-visible effects are selected strength, repeated high-intensity, and training-volume outcomes, especially in resistance-training contexts; not every strength, power, endurance, or sport endpoint improves. Sources: source_artifact:pmid-39074168, source_artifact:pmid-40944139, source_artifact:pmid-36041731, source_artifact:pmid-29138605.'
-  - 'Taking creatine with carbohydrate or protein/carbohydrate can improve retention or uptake in acute physiology studies, but extracted outcome evidence does not make high-sugar co-ingestion a protocol requirement. Sources: source_artifact:pmid-8944667, source_artifact:pmid-10956365, source_artifact:pmid-20035494, source_artifact:pmid-15903360, source_artifact:pmid-39074168.'
-  - 'Plain monohydrate remains the best-supported protocol boundary; alternative forms and blends should be treated as adjacent variants because superiority over monohydrate is not consistently shown. Sources: source_artifact:pmid-36000773, source_artifact:pmid-35268011, source_artifact:pmid-22971354, source_artifact:pmid-19228401.'
+  - 'Creatine supplementation can raise muscle creatine availability; loading raises stores faster, while lower daily dosing can build stores more gradually, and maintenance dosing helps keep stores elevated.'
+  - 'The most plausible user-visible effects are selected strength, repeated high-intensity, and training-volume outcomes, especially in resistance-training contexts; not every strength, power, endurance, or sport endpoint improves.'
+  - 'Taking creatine with carbohydrate or protein/carbohydrate can improve retention or uptake in acute physiology studies, but extracted outcome evidence does not make high-sugar co-ingestion a protocol requirement.'
+  - 'Plain monohydrate remains the best-supported protocol boundary; alternative forms and blends should be treated as adjacent variants because superiority over monohydrate is not consistently shown.'
 claims:
   -
     claimId: dose-implementation-rapid-loading
@@ -1403,7 +1410,7 @@ claims:
       - source_artifact:pmid-28615996
     caveats:
       - The 2026 3 g/day versus 5 g/day trial is small and endpoint-specific.
-      - The dose-subgroup extraction for source_artifact:pmid-41328071 is low confidence and lacks fully extracted subgroup estimates.
+      - The dose-subgroup extraction for one dose-subgroup source is low confidence and lacks fully extracted subgroup estimates.
       - Use this as an overclaim guardrail, not as evidence to personalize dosing from the extracted corpus.
   -
     claimId: outcomes-biomarkers-strength-primary-endpoints
@@ -2100,10 +2107,10 @@ claims:
       - Scale weight is a confounded signal during creatine use.
       - Lean-mass and body-fat-percentage changes should be interpreted alongside strength, training, diet, and waist or visual context.
 researchLandscape:
-  bottomLine: "Creatine monohydrate has a usable but bounded evidence base for healthy-adult resistance-training and repeated high-intensity contexts; the page should preserve null, mixed, safety, and population-mismatch findings instead of selling a universal supplement claim. Anchor sources: source_artifact:pmid-39074168, source_artifact:pmid-40944139, source_artifact:pmid-36041731, source_artifact:pmid-40198156."
+  bottomLine: "Creatine monohydrate has a usable but bounded evidence base for healthy-adult resistance-training and repeated high-intensity contexts; the page should preserve null, mixed, safety, and population-mismatch findings instead of selling a universal supplement claim."
   confidenceLabel: "moderate"
-  primaryClaim: "The default Murph protocol can reasonably test plain creatine monohydrate at 3–5 g/day, with optional split loading, for strength/high-intensity performance and tolerance endpoints in screened adults. Sources: source_artifact:pmid-8828669, source_artifact:pmid-12660409, source_artifact:pmid-39074168, source_artifact:pmid-40944139."
-  mainCaveat: "Do not generalize this protocol to alternative forms, cognition, endurance, fat loss, pregnancy/lactation, minors, kidney disease, bipolar/mania risk, muscle disorders, or disease-treatment contexts. Sources: source_artifact:pmid-36000773, source_artifact:doi-10.2903-j.efsa.2024.9100, source_artifact:pmid-30547033, source_artifact:pmid-41199218, source_artifact:pmid-41558805."
+  primaryClaim: "The default Murph protocol can reasonably test plain creatine monohydrate at 3–5 g/day, with optional split loading, for strength/high-intensity performance and tolerance endpoints in screened adults."
+  mainCaveat: "Do not generalize this protocol to alternative forms, cognition, endurance, fat loss, pregnancy/lactation, minors, kidney disease, bipolar/mania risk, muscle disorders, or disease-treatment contexts."
   groups:
     -
       id: "dose-implementation"
@@ -3482,10 +3489,10 @@ safety:
     - Mania/hypomania symptoms or meaningful psychiatric destabilization.
     - Unwanted weight gain, edema-like symptoms, or adherence burden makes the experiment unacceptable.
   notes:
-    - 'Studied users generally tolerate recommended creatine doses, but this is not a blanket safety guarantee for unscreened users or high-risk populations. Sources: source_artifact:pmid-40198156, source_artifact:pmid-28615996, source_artifact:pmid-17908288, source_artifact:pmid-41404326.'
-    - 'Creatine can raise serum creatinine or creatinine-based eGFR flags without proving kidney injury; interpret kidney labs with baseline context, urine markers, cystatin C or measured GFR when clinically relevant. Sources: source_artifact:pmid-41199218, source_artifact:pmid-31375416, source_artifact:pmid-18188581, source_artifact:pmid-36986197.'
-    - 'GI symptoms and weight/water changes are practical tracking endpoints, especially with loading or large single servings. Sources: source_artifact:pmid-18373286, source_artifact:pmid-36041731, source_artifact:ods-dietary-supplements-exercise-athletic-performance-2024-04-01.'
-    - 'Recommended-dose creatine is not supported as a dehydration, cramping, or heat-intolerance hazard by the extracted evidence, but ordinary exercise heat and hydration precautions still apply. Sources: source_artifact:pmid-19295968, source_artifact:pmid-18184753, source_artifact:pmid-11445756.'
+    - 'Studied users generally tolerate recommended creatine doses, but this is not a blanket safety guarantee for unscreened users or high-risk populations.'
+    - 'Creatine can raise serum creatinine or creatinine-based eGFR flags without proving kidney injury; interpret kidney labs with baseline context, urine markers, cystatin C or measured GFR when clinically relevant.'
+    - 'GI symptoms and weight/water changes are practical tracking endpoints, especially with loading or large single servings.'
+    - 'Recommended-dose creatine is not supported as a dehydration, cramping, or heat-intolerance hazard by the extracted evidence, but ordinary exercise heat and hydration precautions still apply.'
 researchCoverage:
   protocolKey: protocol_variant:creatine-supplementation/creatine-monohydrate
   familyKey: experiment_family:creatine-supplementation
@@ -3528,23 +3535,23 @@ Creatine monohydrate is the canonical Murph creatine protocol for screened adult
 
 ## How to run it
 
-Use plain creatine monohydrate daily. The default path is **3–5 g/day without loading**. Loading is optional: use **no more than 20 g/day split into four separated 5 g-or-smaller servings for 5–7 days**, then continue with 3–5 g/day. Take it at a repeatable time; with a meal is fine if it helps adherence, but strict post-workout timing and high-sugar co-dosing are not required. Sources: source_artifact:pmid-8828669, source_artifact:pmid-12660409, source_artifact:pmid-20609257, source_artifact:pmid-23919405, source_artifact:pmid-34610729, source_artifact:pmid-36465581, source_artifact:pmid-35010653, source_artifact:pmid-8944667, source_artifact:pmid-10956365, source_artifact:pmid-20035494.
+Use plain creatine monohydrate daily. The default path is **3–5 g/day without loading**. Loading is optional: use **no more than 20 g/day split into four separated 5 g-or-smaller servings for 5–7 days**, then continue with 3–5 g/day. Take it at a repeatable time; with a meal is fine if it helps adherence, but strict post-workout timing and high-sugar co-dosing are not required.
 
 ## What to measure
 
-The strongest practical read is not “did creatine make everything better?” It is whether a repeatable training endpoint, training volume, body-weight context, and tolerance changed while training and diet stayed stable enough to interpret. Good endpoints include repeated strength outputs, reps at a fixed load, total tonnage, repeated sprint/power work, body weight, GI symptoms, adherence, and perceived recovery as context. Sources: source_artifact:pmid-40944139, source_artifact:pmid-41328071, source_artifact:pmid-39074168, source_artifact:pmid-36041731, source_artifact:pmid-18373286.
+The strongest practical read is not “did creatine make everything better?” It is whether a repeatable training endpoint, training volume, body-weight context, and tolerance changed while training and diet stayed stable enough to interpret. Good endpoints include repeated strength outputs, reps at a fixed load, total tonnage, repeated sprint/power work, body weight, GI symptoms, adherence, and perceived recovery as context.
 
 ## What the evidence supports
 
-The research base is most useful for healthy-adult resistance-training and repeated high-intensity contexts. It supports a reasonable experiment around selected strength, training-volume, lean-mass/fat-free-mass, and repeated high-intensity endpoints, while preserving null or mixed findings for some strength tests, peak-power/fatigue/lactate endpoints, swimming/endurance contexts, fat-loss interpretations, and subgroup claims. Sources: source_artifact:pmid-39074168, source_artifact:pmid-40944139, source_artifact:pmid-36041731, source_artifact:pmid-39441446, source_artifact:pmid-36877404, source_artifact:pmid-37892421.
+The research base is most useful for healthy-adult resistance-training and repeated high-intensity contexts. It supports a reasonable experiment around selected strength, training-volume, lean-mass/fat-free-mass, and repeated high-intensity endpoints, while preserving null or mixed findings for some strength tests, peak-power/fatigue/lactate endpoints, swimming/endurance contexts, fat-loss interpretations, and subgroup claims.
 
 ## Safety posture
 
-For studied healthy adults using plain monohydrate in protocolized doses, the safety record is generally reassuring but not risk-free. Split larger doses, track GI symptoms and body-weight changes, and get clinician guidance for kidney disease or abnormal labs, pregnancy/lactation, minors, bipolar/mania risk, muscle disorders, disease-treatment use, nephrotoxic co-exposures, or non-monohydrate products. Sources: source_artifact:pmid-40198156, source_artifact:pmid-41199218, source_artifact:pmid-18373286, source_artifact:pmid-19295968, source_artifact:pmid-24766646, source_artifact:pmid-41558805, source_artifact:pmid-36000773.
+For studied healthy adults using plain monohydrate in protocolized doses, the safety record is generally reassuring but not risk-free. Split larger doses, track GI symptoms and body-weight changes, and get clinician guidance for kidney disease or abnormal labs, pregnancy/lactation, minors, bipolar/mania risk, muscle disorders, disease-treatment use, nephrotoxic co-exposures, or non-monohydrate products.
 
 ## Boundaries
 
-This page should not be used as proof that creatine improves cognition, endurance, fat loss, bone density, Parkinson disease, mental health, pregnancy outcomes, pediatric performance, or every sport outcome. It also should not collapse creatine HCl, ethyl ester, buffered creatine, nitrate, chelates, liquid serums, or multi-ingredient products into monohydrate. Sources: source_artifact:doi-10.2903-j.efsa.2024.9100, source_artifact:govuk-creatine-cognitive-function-2024-08-14, source_artifact:pmid-38582412, source_artifact:pmid-39070254, source_artifact:pmid-36000773, source_artifact:pmid-19228401.
+This page should not be used as proof that creatine improves cognition, endurance, fat loss, bone density, Parkinson disease, mental health, pregnancy outcomes, pediatric performance, or every sport outcome. It also should not collapse creatine HCl, ethyl ester, buffered creatine, nitrate, chelates, liquid serums, or multi-ingredient products into monohydrate.
 
 ## Research-run notes
 

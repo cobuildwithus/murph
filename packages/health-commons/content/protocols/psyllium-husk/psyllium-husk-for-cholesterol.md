@@ -7,6 +7,7 @@ title: "Psyllium Husk For Cholesterol"
 summary: "A lab-measured cholesterol experiment using daily psyllium husk as a diet adjunct, aiming mainly at LDL-C and total-cholesterol change while enforcing hydration, swallowing, allergy, medication-spacing, and lab-follow-up guardrails."
 status: "draft"
 quality: "usable"
+hidden: true
 aliases:
   - "psyllium husk for cholesterol"
   - "psyllium for LDL cholesterol"
@@ -24,6 +25,12 @@ categories:
   - "cardiovascular"
   - "lab-measured"
   - "diet-adjunct"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-03.png
+    mediaType: image/png
+    caption: Psyllium Husk For Cholesterol
 relations:
   -
     type: "parent_family"
@@ -183,22 +190,22 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:ldl-c"
-    description: "Psyllium forms a gel in the gut that can carry bile acids out in stool. The body uses bile acids to handle cholesterol, so LDL-C may fall modestly."
+    description: "Psyllium gel can bind bile acids in the gut and carry them out in stool. The liver may then pull more LDL from blood to replace them."
   -
     biomarkerKey: "biomarker:total-cholesterol"
-    description: "Total cholesterol may fall if LDL-C falls, because LDL-C makes up much of the total value. This is supportive, but less specific than LDL-C."
+    description: "Total cholesterol may fall if LDL-C falls, because LDL-C makes up much of the total value."
   -
     biomarkerKey: "biomarker:non-hdl-c"
-    description: "Non-HDL-C may fall if LDL and related cholesterol-carrying particles fall. It gives a broader view of the same pathway."
+    description: "Non-HDL-C may fall if bile-acid loss helps lower LDL and related cholesterol-carrying particles."
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
-    description: "ApoB may fall if the number of cholesterol-carrying particles linked to heart risk drops with LDL-C. This is a more detailed secondary read, not the main result."
+    description: "When bile-acid loss makes the liver clear more LDL, the number of LDL-related particles can fall. Because each particle carries ApoB, ApoB may fall too."
   -
     biomarkerKey: "biomarker:hdl-c"
-    description: "Psyllium's main expected effect is on LDL-C and total cholesterol, not HDL-C. HDL-C may stay about the same even when LDL-C changes."
+    description: "Psyllium mainly works through LDL-C and total cholesterol. HDL-C may stay about the same even when LDL-C changes."
   -
     biomarkerKey: "biomarker:triglycerides"
-    description: "Triglycerides are not the main psyllium result. They may move with diet, weight, or carbohydrate changes during the run."
+    description: "Psyllium mainly targets LDL-C. Triglycerides tend to change only if diet, weight, or carbs change during the run."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -470,9 +477,9 @@ experimentOnboarding:
     missedLogFollowupCopy: "No psyllium dose was logged for the planned window. Should Murph mark it missed, partial, or taken?"
     confirmationPrompt: "Confirm only after baseline lab status, product dose, full-liquid rule, medication spacing, and stop conditions are clear."
 whyItWorks:
-  - "Psyllium is a viscous, gel-forming soluble fiber; human and mechanistic sources link it to bile-acid/sterol handling and gel effects, but the mechanism is not a single settled pathway [source_artifact:pmid-1431597; source_artifact:pmid-2827455; source_artifact:pmid-12749348; source_artifact:pmid-21736815]."
-  - "Psyllium-specific lipid trials and meta-analyses make LDL-C and total cholesterol the most defensible endpoints for this variant [source_artifact:doi-10.1016-j.jff.2023.105878; source_artifact:pmid-30239559; source_artifact:pmid-10648260; source_artifact:pmid-18985059]."
-  - "The experiment remains interpretable only if product, dose, lab timing, diet, weight, and lipid-medication changes are visible [source_artifact:pmid-10837282; source_artifact:pmid-10201553; source_artifact:pmid-20413122; source_artifact:pmid-8363164; source_artifact:pmid-20727237]."
+  - "Psyllium is a viscous, gel-forming soluble fiber; human and mechanistic sources link it to bile-acid/sterol handling and gel effects, but the mechanism is not a single settled pathway."
+  - "Psyllium-specific lipid trials and meta-analyses make LDL-C and total cholesterol the most defensible endpoints for this variant."
+  - "The experiment remains interpretable only if product, dose, lab timing, diet, weight, and lipid-medication changes are visible."
 claims:
   -
     claimId: "direct-protocol-evidence-scope"
@@ -1019,38 +1026,38 @@ safety:
 ---
 ## What this protocol is
 
-This is a **lab-measured psyllium husk cholesterol experiment**. The intended question is: after a stable period of daily psyllium husk use, do LDL-C and total cholesterol change compared with a baseline lipid panel? The evidence backbone is psyllium-specific lipid trials and syntheses, not generic fiber, constipation-only use, or broad cardiovascular-outcome claims [source_artifact:doi-10.1016-j.jff.2023.105878; source_artifact:pmid-30239559; source_artifact:pmid-10648260; source_artifact:pmid-18985059].
+This is a **lab-measured psyllium husk cholesterol experiment**. The intended question is: after a stable period of daily psyllium husk use, do LDL-C and total cholesterol change compared with a baseline lipid panel? The evidence backbone is psyllium-specific lipid trials and syntheses, not generic fiber, constipation-only use, or broad cardiovascular-outcome claims.
 
 ## Best-fit user
 
-Best fit is an adult with elevated LDL-C or total cholesterol who can keep diet, weight-loss efforts, exercise, lipid medications, and other lipid supplements stable long enough to get a baseline and repeat lipid panel. Pediatric/adolescent, pregnancy or lactation, diabetes/metabolic-syndrome, obesity or weight-loss, medication-combination/statin-adjunct, sex/hormonal-subgroup, and near-normal-lipid contexts should be treated as adjacent, mixed, or supervised contexts rather than silently folded into the default adult self-experiment protocol [source_artifact:pmid-10837282; source_artifact:pmid-10201553; source_artifact:pmid-2724486; source_artifact:pmid-3277558; source_artifact:pmid-9497178; source_artifact:pmid-15453909; source_artifact:doi-10.1111-j.1365-277x.1994.tb00423.x; source_artifact:pmid-20727237; source_artifact:pmid-15911730; source_artifact:pmid-30078477; source_artifact:cps-pediatric-dyslipidemia-2026-04-26; source_artifact:medicines-org-uk-fybogel-plain-smpc-2026-04-26; source_artifact:ncbi-lactmed-psyllium-2021-05-17].
+Best fit is an adult with elevated LDL-C or total cholesterol who can keep diet, weight-loss efforts, exercise, lipid medications, and other lipid supplements stable long enough to get a baseline and repeat lipid panel. Pediatric/adolescent, pregnancy or lactation, diabetes/metabolic-syndrome, obesity or weight-loss, medication-combination/statin-adjunct, sex/hormonal-subgroup, and near-normal-lipid contexts should be treated as adjacent, mixed, or supervised contexts rather than silently folded into the default adult self-experiment protocol.
 
 ## Dose and format
 
-Use active psyllium/ispaghula husk grams, not spoon size or vague serving names. The practical Murph anchor is **7–10.5 g/day active psyllium husk**, usually split across the day. Common evidence-aligned patterns include about **5.1 g twice daily** or **3.4 g three times daily**, but labels vary and product grams may not equal active husk grams or soluble-fiber grams [source_artifact:pmid-10648260; source_artifact:pmid-30239559; source_artifact:pmid-10837282; source_artifact:pmid-10201553; source_artifact:pmid-2203322; source_artifact:pmid-8363164; source_artifact:pmid-9497178].
+Use active psyllium/ispaghula husk grams, not spoon size or vague serving names. The practical Murph anchor is **7–10.5 g/day active psyllium husk**, usually split across the day. Common evidence-aligned patterns include about **5.1 g twice daily** or **3.4 g three times daily**, but labels vary and product grams may not equal active husk grams or soluble-fiber grams.
 
-Powder, granules, cereal/food vehicles, and capsules should remain explicit setup details. Capsules can be a high-burden route because many capsules may be needed to reach grams used in cholesterol studies; swallow capsules one at a time with the full liquid amount. Food/cereal forms are not automatically equivalent to powder or capsules and still require adequate liquid; do not use food mixing as a workaround for swallowing difficulty [source_artifact:dailymed-psyllium-husk-capsule-2026-04-26; source_artifact:federalregister-psyllium-granular-dosage-forms-2007-03-29; source_artifact:pmid-9311953; source_artifact:pmid-8160720; source_artifact:pmid-2173390; source_artifact:ismpcanada-psyllium-choking-2025-06-24].
+Powder, granules, cereal/food vehicles, and capsules should remain explicit setup details. Capsules can be a high-burden route because many capsules may be needed to reach grams used in cholesterol studies; swallow capsules one at a time with the full liquid amount. Food/cereal forms are not automatically equivalent to powder or capsules and still require adequate liquid; do not use food mixing as a workaround for swallowing difficulty.
 
 ## Measurement plan
 
-Use LDL-C as the primary endpoint. Total cholesterol, non-HDL-C, and ApoB are useful secondary endpoints when available. HDL-C and triglycerides should be watched as context because findings are mixed or less consistent for this protocol [source_artifact:pmid-41366295; source_artifact:pmid-10648260; source_artifact:pmid-18985059; source_artifact:pmid-20413122; source_artifact:pmid-9129487; source_artifact:pmid-11566640].
+Use LDL-C as the primary endpoint. Total cholesterol, non-HDL-C, and ApoB are useful secondary endpoints when available. HDL-C and triglycerides should be watched as context because findings are mixed or less consistent for this protocol.
 
-The default test plan is 7 baseline days plus 84 intervention days, with a lipid panel before the first dose and another around 8–12 weeks after stable dosing. The lab result is hard to interpret unless Murph can also see product, dose, adherence, lipid medication changes, diet changes, weight changes, and fasting or non-fasting status [source_artifact:pmid-30239559; source_artifact:pmid-10648260; source_artifact:pmid-18985059; source_artifact:pmid-8363164; source_artifact:pmid-20727237].
+The default test plan is 7 baseline days plus 84 intervention days, with a lipid panel before the first dose and another around 8–12 weeks after stable dosing. The lab result is hard to interpret unless Murph can also see product, dose, adherence, lipid medication changes, diet changes, weight changes, and fasting or non-fasting status.
 
 ## Safety first
 
-Psyllium is not a “just add fiber” experiment. For every dose, use at least 8 oz / 240 mL of water or other liquid, or the stricter direction on the selected product label. Mix powder or granules completely and drink promptly before the mixture thickens. Do not take psyllium dry, incompletely hydrated, mixed into food as a workaround for swallowing difficulty, or right before sleep. If using capsules, swallow capsules one at a time with the full liquid amount rather than taking a handful at once [source_artifact:cornell-law-cfr-201-319-2026-04-26; source_artifact:fda-otc-monograph-m007-laxative-2023-05-02; source_artifact:dailymed-metamucil-psyllium-label-2026-04-26; source_artifact:dailymed-psyllium-husk-capsule-2026-04-26; source_artifact:medicines-org-uk-fybogel-plain-smpc-2026-04-26; source_artifact:ismpcanada-psyllium-choking-2025-06-24].
+Psyllium is not a “just add fiber” experiment. For every dose, use at least 8 oz / 240 mL of water or other liquid, or the stricter direction on the selected product label. Mix powder or granules completely and drink promptly before the mixture thickens. Do not take psyllium dry, incompletely hydrated, mixed into food as a workaround for swallowing difficulty, or right before sleep. If using capsules, swallow capsules one at a time with the full liquid amount rather than taking a handful at once.
 
-Do not use short RCT tolerability summaries as the safety model: direct lipid trials and syntheses often have limited or non-uniform adverse-event capture, so label/regulatory warnings and case reports should control hydration, swallowing, obstruction, allergy, and stop-rule boundaries [source_artifact:pmid-41366295; source_artifact:pmid-10648260; source_artifact:dailymed-metamucil-psyllium-label-2026-04-26; source_artifact:ismpcanada-psyllium-choking-2025-06-24].
+Do not use short RCT tolerability summaries as the safety model: direct lipid trials and syntheses often have limited or non-uniform adverse-event capture, so label/regulatory warnings and case reports should control hydration, swallowing, obstruction, allergy, and stop-rule boundaries.
 
-Do not start unsupervised if you have swallowing difficulty/dysphagia, prior choking with powders or capsules, esophageal narrowing, bowel obstruction or narrowing, fecal impaction, severe constipation, reduced gut motility, prior GI obstruction/bezoar, or known/suspected psyllium/ispaghula/isabgol allergy or occupational sensitization [source_artifact:medicines-org-uk-fybogel-plain-smpc-2026-04-26; source_artifact:ema-plantaginis-ovatae-seminis-tegumentum-2026-04-26; source_artifact:ismpcanada-psyllium-choking-2025-06-24; source_artifact:pmid-12681118; source_artifact:pmid-6711534; source_artifact:pmid-14700444; source_artifact:pmid-18564629; source_artifact:pmid-21253144].
+Do not start unsupervised if you have swallowing difficulty/dysphagia, prior choking with powders or capsules, esophageal narrowing, bowel obstruction or narrowing, fecal impaction, severe constipation, reduced gut motility, prior GI obstruction/bezoar, or known/suspected psyllium/ispaghula/isabgol allergy or occupational sensitization.
 
-Rare but serious case reports cover choking, esophageal obstruction, bezoar, intestinal obstruction, and hypersensitivity. Stop the run for choking, difficulty swallowing, breathing symptoms, allergic symptoms, severe abdominal pain, vomiting, severe constipation, or suspected obstruction [source_artifact:pmid-12681118; source_artifact:pmid-6488929; source_artifact:pmid-35321163; source_artifact:pmid-14700444; source_artifact:pmid-6736485; source_artifact:pmid-7596941].
+Rare but serious case reports cover choking, esophageal obstruction, bezoar, intestinal obstruction, and hypersensitivity. Stop the run for choking, difficulty swallowing, breathing symptoms, allergic symptoms, severe abdominal pain, vomiting, severe constipation, or suspected obstruction.
 
-Medication timing is part of setup. Separate all oral prescriptions, OTC medicines, and supplements from psyllium by at least 2 hours by default, unless a clinician or pharmacist gives product-specific timing. Get clinician/pharmacist guidance before starting if you use thyroid hormone, levodopa, lithium, carbamazepine, coumarins/anticoagulants, cardiac glycosides/digoxin, diabetes medicines, bile-acid sequestrants, mineral or vitamin B12 supplements, or any narrow-therapeutic-index or timing-sensitive drug [source_artifact:dailymed-metamucil-psyllium-label-2026-04-26; source_artifact:dailymed-psyllium-fiber-powder-2026-04-26; source_artifact:dailymed-psyllium-husk-capsule-2026-04-26; source_artifact:medicines-org-uk-fybogel-plain-smpc-2026-04-26; source_artifact:ema-plantaginis-ovatae-seminis-tegumentum-2026-04-26; source_artifact:pmid-22920146; source_artifact:pmid-25112783; source_artifact:pmid-9737361; source_artifact:doi-10.3109-03639049509070866].
+Medication timing is part of setup. Separate all oral prescriptions, OTC medicines, and supplements from psyllium by at least 2 hours by default, unless a clinician or pharmacist gives product-specific timing. Get clinician/pharmacist guidance before starting if you use thyroid hormone, levodopa, lithium, carbamazepine, coumarins/anticoagulants, cardiac glycosides/digoxin, diabetes medicines, bile-acid sequestrants, mineral or vitamin B12 supplements, or any narrow-therapeutic-index or timing-sensitive drug.
 
-Do not delay, stop, or change clinician-directed lipid-lowering or cardiovascular-risk medication to keep the experiment clean. If medication care changes during the run, follow the clinician plan and mark the experiment as confounded or clinician-guided rather than trying to preserve attribution [source_artifact:pmid-30078477; source_artifact:pmid-15911730; source_artifact:pmid-7804477; source_artifact:ema-plantaginis-ovatae-seminis-tegumentum-2026-04-26].
+Do not delay, stop, or change clinician-directed lipid-lowering or cardiovascular-risk medication to keep the experiment clean. If medication care changes during the run, follow the clinician plan and mark the experiment as confounded or clinician-guided rather than trying to preserve attribution.
 
 ## What not to conclude
 
-Do not conclude that psyllium improves the whole lipid profile, lowers cardiovascular events, replaces lipid medication, works equally in normal-lipid users, or that any psyllium-containing product will match the effects of the studied dose. The supported landing claim is narrower: modest LDL-C and total-cholesterol lowering in psyllium-specific lipid trials and syntheses, with HDL-C/triglyceride findings, lower-baseline/null trials, formulation differences, and regulatory health-claim materials preserved as boundaries rather than promoted into individual-response guarantees [source_artifact:pmid-41366295; source_artifact:pmid-10648260; source_artifact:pmid-18985059; source_artifact:pmid-15453909; source_artifact:doi-10.1111-j.1365-277x.1994.tb00423.x; source_artifact:pmid-9311953; source_artifact:ecfr-21-cfr-101-81-2026-04-26; source_artifact:health-canada-psyllium-cholesterol-2011-12-16].
+Do not conclude that psyllium improves the whole lipid profile, lowers cardiovascular events, replaces lipid medication, works equally in normal-lipid users, or that any psyllium-containing product will match the effects of the studied dose. The supported landing claim is narrower: modest LDL-C and total-cholesterol lowering in psyllium-specific lipid trials and syntheses, with HDL-C/triglyceride findings, lower-baseline/null trials, formulation differences, and regulatory health-claim materials preserved as boundaries rather than promoted into individual-response guarantees.

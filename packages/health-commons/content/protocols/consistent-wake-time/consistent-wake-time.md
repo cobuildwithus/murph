@@ -4,7 +4,7 @@ entityType: "protocol_variant"
 key: "protocol_variant:consistent-wake-time/consistent-wake-time"
 slug: "protocols/consistent-wake-time/consistent-wake-time"
 title: "Consistent Wake Time"
-summary: "Choose a realistic daily wake/rise-time window and keep it stable while protecting enough sleep, then test whether wake-time regularity and daytime sleepiness or alertness signals improve."
+summary: "Choose a realistic wake/rise window and keep it stable while protecting enough sleep, then test whether regularity, sleepiness, or alertness signals improve."
 status: "field-testing"
 quality: "usable"
 aliases:
@@ -27,6 +27,12 @@ categories:
   - "behavior-change"
   - "wearable-measured"
   - "murph-canonical"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-consistent-wake-time.jpeg
+    mediaType: image/jpeg
+    caption: Consistent Wake Time
 relations:
   -
     type: "parent_family"
@@ -330,7 +336,7 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:wake-time-variability"
-    description: "This is the behavior the protocol targets. Wake timing should tighten if the chosen window is realistic and followed often enough."
+    description: "The protocol directly targets wake timing. If the chosen window is realistic and followed often enough, wake times should tighten."
   -
     biomarkerKey: "biomarker:total-sleep-time"
     description: "A stable wake time only helps if bedtime and time in bed adjust with it. Total sleep time may stay stable or improve when the anchor reduces drift without creating short sleep."
@@ -339,13 +345,13 @@ expectedSignalDescriptions:
     description: "More regular timing may make mornings feel steadier, but sleepiness should improve only if the plan preserves enough sleep."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
-    description: "A steadier sleep-wake rhythm can support less broken sleep for some people. This is a weaker read because the protocol does not directly treat awakenings."
+    description: "A steadier wake time gives the body clock the same morning anchor each day. That can reduce night-to-night drift and make sleep less broken."
   -
     biomarkerKey: "biomarker:sleep-onset-latency"
     description: "A consistent wake anchor may make sleep pressure and body-clock timing more predictable by evening, so falling asleep may become easier."
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "If regular timing improves sleep continuity and reduces sleep debt, overnight strain may ease. HRV is a weak downstream read."
+    description: "Regular timing can reduce sleep debt and night-to-night drift. If sleep becomes more stable, overnight strain may ease."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -543,9 +549,9 @@ experimentOnboarding:
     missedLogFollowupCopy: "No problem if the log was missed. Do you want to record the wake time and whether sleep felt safe enough today?"
     confirmationPrompt: "Confirm the exact protocol key, 7-day baseline, 28-day intervention, target wake window, sleep-opportunity guardrail, measurement method, stop conditions, and reminder policy before creating the run."
 whyItWorks:
-  - "Wake time is a practical anchor for sleep timing regularity; the direct evidence base uses broader sleep-wake regularization and short regular-timing interventions rather than a pure wake-time-only trial base. Source keys: source_artifact:pmid-8843535, source_artifact:doi-10.1111/j.1479-8425.2011.00524.x, source_artifact:pmid-40543253."
-  - "Protecting sleep opportunity is the mechanism guardrail: a stable wake window is only useful when it does not create chronic short sleep or daytime impairment. Source keys: source_artifact:pmid-8843535, source_artifact:pmid-26039963, source_artifact:pmid-27250809, source_artifact:pmid-37684151."
-  - "Regularity metrics, diaries, and wearables can make the behavior visible over repeated nights, but measurement sources require diary correction and caution against diagnostic interpretations. Source keys: source_artifact:pmid-22294820, source_artifact:pmid-33864369, source_artifact:pmid-29734997, source_artifact:pmid-38149978."
+  - "Wake time is a practical anchor for sleep timing regularity; the direct evidence base uses broader sleep-wake regularization and short regular-timing interventions rather than a pure wake-time-only trial base."
+  - "Protecting sleep opportunity is the mechanism guardrail: a stable wake window is only useful when it does not create chronic short sleep or daytime impairment."
+  - "Regularity metrics, diaries, and wearables can make the behavior visible over repeated nights, but measurement sources require diary correction and caution against diagnostic interpretations."
 claims:
   -
     claimId: "direct-evidence-is-broader-regularization"

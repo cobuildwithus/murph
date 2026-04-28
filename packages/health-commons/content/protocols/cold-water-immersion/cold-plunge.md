@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:cold-water-immersion/cold-plunge
 slug: protocols/cold-water-immersion/cold-plunge
 title: Cold Plunge
-summary: Use a short, controlled, head-out cold-water immersion to test whether later-same-day stress or mood improves enough to matter, while treating first-minute cold shock as the main safety problem.
+summary: Use a controlled, head-out cold-water immersion to test whether stress or mood improves enough to matter, while treating initial cold shock as the main safety problem.
 status: field-testing
 quality: usable
 aliases:
@@ -242,7 +242,7 @@ expectedSignalDescriptions:
     description: "Cold water first gives the body a stress jolt. The mood effect, if it happens, is likely the rebound afterward: less tension and a steadier mood later that day."
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: Repeated cold exposure can train the body to react less sharply to cold. If that stress response gets smaller, resting pulse may drift lower too.
+    description: Repeated cold exposure can blunt the stress response to the plunge. A lower baseline stress response can reduce resting pulse, but only if the body is less taxed between sessions.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
@@ -478,10 +478,10 @@ experimentOnboarding:
     missedLogFollowupCopy: Did you end up doing the planned plunge? Totally fine either way; I just want the experiment record to stay accurate.
     confirmationPrompt: Before I start this, I will show the exact plunge plan, schedule, safety framing, logging expectations, and reminder policy so you can confirm it.
 whyItWorks:
-  - Cold plunge is best understood as a short, controlled cold-stress dose. The body responds first with strong autonomic and respiratory stress, not automatic relaxation. Source keys: source_artifact:pmid-33910456, source_artifact:pmid-10751106, source_artifact:pmid-36150503.
-  - Some of the most useful direct signals appear later rather than instantly: the review backbone and one acute 10 °C study point toward delayed stress or negative-affect improvement rather than a universal immediate mood lift. Source keys: source_artifact:pmid-39879231, source_artifact:pmid-37866096.
-  - A small repeated-exposure study suggests that after a few weeks, resting cardiovascular measures such as heart rate and mean arterial pressure may shift, while leukocyte findings remained mostly null or uncertain. Source keys: source_artifact:pmid-37711459.
-  - Repeated exposure can blunt part of the first-minute cold-shock response after roughly four exposures, which supports conservative acclimation-first onboarding instead of a first-day maximal dose. Source keys: source_artifact:pmid-38211547, source_artifact:pmid-33276648, source_artifact:pmid-31702722.
+  - Cold plunge is best understood as a short, controlled cold-stress dose. The body responds first with strong autonomic and respiratory stress, not automatic relaxation.
+  - Some of the most useful direct signals appear later rather than instantly: the review backbone and one acute 10 °C study point toward delayed stress or negative-affect improvement rather than a universal immediate mood lift.
+  - A small repeated-exposure study suggests that after a few weeks, resting cardiovascular measures such as heart rate and mean arterial pressure may shift, while leukocyte findings remained mostly null or uncertain.
+  - Repeated exposure can blunt part of the first-minute cold-shock response after roughly four exposures, which supports conservative acclimation-first onboarding instead of a first-day maximal dose.
 claims:
   -
     claimId: dose-implementation-001
@@ -920,11 +920,11 @@ Cold Plunge is Murph’s cautious default for deliberate cold-water immersion in
 
 Can a short, repeatable, head-out plunge improve later-same-day stress or mood enough to be worth repeating, without pushing safety, tolerance, or next-morning cardiovascular context in the wrong direction?
 
-The direct healthy-adult evidence is narrow and mixed. The cleanest current claim is not “cold plunge definitely boosts everything,” but something smaller: some users may notice later stress or affect benefits, and a few weeks of repeated use might shift resting cardiovascular measures, while first-minute cold shock remains the main hazard framing. Source keys: `source_artifact:pmid-39879231`, `source_artifact:pmid-37866096`, `source_artifact:doi-10.1002-lim2.53`, `source_artifact:pmid-36829490`, `source_artifact:pmid-37711459`, `source_artifact:pmid-2691172`.
+The direct healthy-adult evidence is narrow and mixed. The cleanest current claim is not “cold plunge definitely boosts everything,” but something smaller: some users may notice later stress or affect benefits, and a few weeks of repeated use might shift resting cardiovascular measures, while first-minute cold shock remains the main hazard framing.
 
 ## Why the Murph default is conservative
 
-The direct literature does not validate one best dose. The closest protocol-like studies used several different short doses rather than one settled standard, and longer or much colder exposures mostly function as boundary-setting physiology or safety context rather than as default home targets. Source keys: `source_artifact:pmid-36829490`, `source_artifact:pmid-33910456`, `source_artifact:pmid-37866096`, `source_artifact:doi-10.1002-lim2.53`, `source_artifact:pmid-37711459`, `source_artifact:pmid-10751106`, `source_artifact:pmid-36150503`, `source_artifact:pmid-25275647`, `source_artifact:pmid-33820701`, `source_artifact:pmid-40408371`.
+The direct literature does not validate one best dose. The closest protocol-like studies used several different short doses rather than one settled standard, and longer or much colder exposures mostly function as boundary-setting physiology or safety context rather than as default home targets.
 
 The 3x/week, 1–5 minute, 10–15 °C plan is a conservative Murph test design, not a validated standard dose from a single trial.
 
@@ -932,7 +932,7 @@ That is why Murph starts with short head-out sessions, a modest target band, and
 
 ## What Murph is not claiming
 
-Murph is not turning post-exercise recovery papers, winter swimming studies, cryotherapy papers, or external newsletters into stand-alone cold-plunge proof. Those sources matter, but mostly as adjacent context, safety framing, or boundary setting. Source keys: `source_artifact:pmid-35157264`, `source_artifact:pmid-36527593`, `source_artifact:pmid-36744038`, `source_artifact:pmid-33146851`, `source_artifact:pmid-35068365`, `source_artifact:pmid-15253480`, `source_artifact:pmid-12078959`, `source_artifact:pmid-10735978`, `source_artifact:pmid-37381680`, `source_artifact:pmid-27631616`, `source_artifact:pmid-38478473`, `source_artifact:hubermanlab-cold-exposure-2022-05-01`.
+Murph is not turning post-exercise recovery papers, winter swimming studies, cryotherapy papers, or external newsletters into stand-alone cold-plunge proof. Those sources matter, but mostly as adjacent context, safety framing, or boundary setting.
 
 ## How to read your result
 

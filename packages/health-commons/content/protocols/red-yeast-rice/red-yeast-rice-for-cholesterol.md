@@ -7,6 +7,7 @@ title: "Red Yeast Rice For Cholesterol"
 summary: "A high-caution, product-specific red yeast rice lipid experiment that tracks LDL-C over 8–12 weeks only after statin-like safety screening, product-quality checks, and clinician review when risk flags are present."
 status: "draft"
 quality: "usable"
+hidden: true
 aliases:
   - "red yeast rice for cholesterol"
   - "red yeast rice for LDL"
@@ -25,6 +26,12 @@ categories:
   - "product-quality"
   - "high-caution"
   - "murph-canonical"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-03.png
+    mediaType: image/png
+    caption: Red Yeast Rice For Cholesterol
 relations:
   -
     type: "parent_family"
@@ -189,19 +196,19 @@ expectedSignalDescriptions:
     description: "Some red yeast rice products can contain monacolin K, a statin-like compound that may lower cholesterol production in the liver. If the product is active and tolerated, LDL-C may fall."
   -
     biomarkerKey: "biomarker:total-cholesterol"
-    description: "Total cholesterol may fall when LDL-C falls, because LDL-C is part of the total value. The signal depends heavily on the exact product and dose."
+    description: "Total cholesterol may fall when LDL-C falls, because LDL-C is part of the total value."
   -
     biomarkerKey: "biomarker:non-hdl-c"
-    description: "Non-HDL-C may fall if LDL and related heart-risk particles drop. The evidence is less direct than for LDL-C."
+    description: "If active red yeast rice lowers LDL-related particles, non-HDL-C may fall too."
   -
     biomarkerKey: "biomarker:triglycerides"
-    description: "Triglycerides improved in some red-yeast-rice studies, but results are mixed and product-specific. Treat this as secondary context."
+    description: "Triglycerides can fall indirectly if the product, diet, or weight change lowers the liver's output of triglyceride-rich particles."
   -
     biomarkerKey: "biomarker:hdl-c"
-    description: "HDL-C is not the main expected response to red yeast rice and may be unchanged. It stays on the panel to show whether the broader lipid pattern shifted."
+    description: "Red yeast rice mainly targets LDL-related cholesterol production. HDL-C may stay unchanged even if LDL-C falls."
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
-    description: "ApoB may fall if cholesterol-carrying particles linked to heart risk drop with LDL-C. The evidence is less consistent than the LDL-C signal."
+    description: "If monacolin K lowers liver cholesterol production, the liver may clear more LDL-related particles. Because each carries ApoB, ApoB may fall with LDL-C."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
@@ -416,9 +423,9 @@ experimentOnboarding:
     missedLogFollowupCopy: "A missed RYR log matters for dose attribution. Please mark taken, missed, or stopped."
     confirmationPrompt: "Before creating this RYR experiment, confirm: baseline lipid panel is planned or complete, product identity and product-quality/local-law checks are documented, safety screen is negative or clinician guidance is in place, and you understand this is not a replacement for prescribed lipid care or cardiovascular-risk management."
 whyItWorks:
-  - "RYR can deliver monacolin K, which is chemically lovastatin-like and can reduce cholesterol synthesis through a statin-like mechanism; this is why the protocol treats RYR as a high-caution active pharmacologic exposure rather than a generic food supplement. Sources: source_artifact:fda-dietary-supplement-ingredient-directory-red-yeast-rice-2025-05-23; source_artifact:nccih-red-yeast-rice-2026-04-26; source_artifact:pmid-22389767."
-  - "The evidence signal is product-specific: direct RYR trials and syntheses show LDL-C and total-cholesterol lowering for some preparations over short windows, while commercial products can differ in monacolin content and contaminants. Sources: source_artifact:pmid-16260426; source_artifact:pmid-24897342; source_artifact:pmid-31941089; source_artifact:pmid-38928859."
-  - "A lipid-panel test is necessary because the expected signal is a lab biomarker change, not a same-day symptom change; LDL-C, non-HDL-C, total cholesterol, HDL-C, triglycerides, and optional ApoB should be interpreted with fasting status, lab method, adherence, and confounders visible. Sources: source_artifact:pmid-39225455; source_artifact:pmid-34802986; source_artifact:nice-ng238-lipid-modification-2025-09-02."
+  - "RYR can deliver monacolin K, which is chemically lovastatin-like and can reduce cholesterol synthesis through a statin-like mechanism; this is why the protocol treats RYR as a high-caution active pharmacologic exposure rather than a generic food supplement."
+  - "The evidence signal is product-specific: direct RYR trials and syntheses show LDL-C and total-cholesterol lowering for some preparations over short windows, while commercial products can differ in monacolin content and contaminants."
+  - "A lipid-panel test is necessary because the expected signal is a lab biomarker change, not a same-day symptom change; LDL-C, non-HDL-C, total cholesterol, HDL-C, triglycerides, and optional ApoB should be interpreted with fasting status, lab method, adherence, and confounders visible."
 claims:
   -
     claimId: "direct-short-term-ldl-total-cholesterol"

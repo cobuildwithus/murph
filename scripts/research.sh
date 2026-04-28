@@ -450,6 +450,8 @@ CONTENT REQUIREMENTS:
    - expected signal and latency
    - claim list with sourceKeys
    - caveats and non-claims
+   - keep `sourceKeys` in structured claim lists only; do not append raw `source_artifact:*` keys or `Source keys:` labels to drafted user-facing Health Commons prose, including protocol, family, biomarker, and bibliography prose
+   - write the protocol frontmatter `summary` as `/experiments` card copy: describe the action/outcome/safety posture without repeating duration, frequency, session count, or dose timing already shown in protocol metadata
 3. Separate causal intervention evidence, observational context, mechanistic plausibility, and safety evidence.
 4. Draft source pages for the highest-priority records using the repo's Health Commons source_artifact style.
 5. Draft a bibliography page and artifact-manifest plan.
@@ -520,6 +522,9 @@ REQUIRED OUTPUTS:
 
 STRICT RULES:
 - No material claim without sourceKeys.
+- Source keys belong in structured metadata or claim lists, not in user-facing Markdown body prose.
+- Remove raw `source_artifact:*`, `sourceKeys`, and `Source keys:` dumps from all user-facing Health Commons copy, including protocol, family, and biomarker prose; use readable study/source references if attribution is needed.
+- Treat the protocol frontmatter `summary` as `/experiments` card copy; do not repeat duration, frequency, session count, or dose timing that is already represented by protocol metadata.
 - Do not imply long-term disease-outcome causality from a short-term self-experiment.
 - Do not include copyrighted PDFs unless they are clearly open access or public domain.
 - Do not invent DOI, PMID, PMCID, journals, sample sizes, or effect sizes.
@@ -549,7 +554,8 @@ AUDIT TASKS:
 3. Identify weak sourceKeys that should be downgraded or removed.
 4. Check that the landing package matches the existing Health Commons page and artifact patterns.
 5. Check that the PDF plan is rights-safe.
-6. Return a revised patch only if something materially changes.
+6. Block raw `source_artifact:*`, `sourceKeys`, or `Source keys:` leaks in user-facing Markdown body prose while preserving structured source-key fields.
+7. Return a revised patch only if something materially changes.
 
 OUTPUT:
 - Blockers
