@@ -190,9 +190,9 @@ export async function finalizeAssistantTurnReceipt(input: {
         ? sanitizeAssistantPortableStateString(
             input.error?.message ?? 'assistant turn failed',
           )
-        : input.status === 'blocked'
-          ? sanitizeAssistantPortableStateString(
-              input.error?.message ?? 'assistant turn blocked before delivery',
+          : input.status === 'blocked'
+            ? sanitizeAssistantPortableStateString(
+              input.error?.message ?? 'assistant turn blocked before commit',
             )
           : null,
     metadata: sanitizeAssistantPortableMetadata(input.metadata),

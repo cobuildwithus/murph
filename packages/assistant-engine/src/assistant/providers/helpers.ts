@@ -190,7 +190,6 @@ function hasAssistantProviderUsableNativeResume(
 export type AssistantProviderHistoryMode =
   | 'none'
   | 'structured-messages'
-  | 'text-bootstrap'
 
 export function resolveAssistantProviderHistoryMode(
   input: AssistantProviderTurnExecutionInput,
@@ -406,18 +405,6 @@ function buildAssistantProviderHistoryMessages(
   switch (resolveAssistantProviderHistoryMode(input)) {
     case 'none':
       return appendActiveTurnMessages([])
-    case 'text-bootstrap': {
-      const transcriptSection =
-        resolveAssistantProviderFlatPromptTranscriptSection(input)
-      return appendActiveTurnMessages(transcriptSection
-        ? [
-            {
-              role: 'user',
-              content: transcriptSection,
-            } satisfies UserModelMessage,
-          ]
-        : [])
-    }
     case 'structured-messages':
       return appendActiveTurnMessages(
         sanitizeAssistantProviderConversationMessages(

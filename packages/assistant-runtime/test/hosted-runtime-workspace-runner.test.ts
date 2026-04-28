@@ -479,6 +479,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxSystemImportedSeq: "0",
         providerRequestOrdinal: 0,
       });
+      assert.deepEqual(checkpointRequests[3]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "2",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "system" },

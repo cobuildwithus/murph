@@ -400,18 +400,20 @@ async function checkpointHostedWorkspacePostAssistantPhase(input: {
   postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
   workspacePort: HostedRuntimeWorkspacePort;
 }): Promise<void> {
+  const mailboxImport =
+    input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
-    input.initialMailboxImport,
+    mailboxImport,
     input.postCheckpoint.redactedStatus ?? {},
   );
   const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
-    importResult: input.initialMailboxImport.importResult,
+    importResult: mailboxImport.importResult,
     nextWakeAt: input.postCheckpoint.nextWakeAt ?? null,
     nextWakeReason: input.postCheckpoint.nextWakeReason ?? null,
-    previousState: input.initialMailboxImport.state,
+    previousState: mailboxImport.state,
     reason: input.postCheckpoint.checkpointReason,
     redactedStatus,
-    state: input.initialMailboxImport.state,
+    state: mailboxImport.state,
   });
   const checkpoint = await input.workspacePort.checkpoint({
     ...checkpointRequest,
@@ -492,18 +494,20 @@ async function checkpointHostedWorkspaceAssistantPhase(input: {
     return;
   }
 
+  const mailboxImport =
+    input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
   const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
-    input.initialMailboxImport,
+    mailboxImport,
     input.assistantPhaseResult.redactedStatus ?? null,
   );
   const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
-    importResult: input.initialMailboxImport.importResult,
+    importResult: mailboxImport.importResult,
     nextWakeAt: input.assistantPhaseResult.nextWakeAt ?? null,
     nextWakeReason: input.assistantPhaseResult.nextWakeAt ? "assistant" : null,
-    previousState: input.initialMailboxImport.state,
+    previousState: mailboxImport.state,
     reason: input.assistantPhaseResult.checkpointReason ?? "maintenance",
     redactedStatus,
-    state: input.initialMailboxImport.state,
+    state: mailboxImport.state,
   });
   const checkpoint = await input.workspacePort.checkpoint({
     ...checkpointRequest,

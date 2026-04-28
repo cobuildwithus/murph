@@ -959,17 +959,12 @@ function createAssistantAutoReplyActiveTurnInputHook(input: {
   let context = input.context
 
   return async (admissionInput) => {
-    let refreshResult: Awaited<ReturnType<AssistantTurnInputPort['refresh']>>
-    try {
-      refreshResult = await input.port.refresh({
-        phase:
-          admissionInput.phase === 'commit_barrier'
-            ? 'commit_barrier'
-            : 'after_provider',
-      })
-    } catch (error) {
-      throw error
-    }
+    const refreshResult = await input.port.refresh({
+      phase:
+        admissionInput.phase === 'commit_barrier'
+          ? 'commit_barrier'
+          : 'after_provider',
+    })
     if (refreshResult.reason === 'source_unavailable') {
       throw new AssistantActiveTurnInputUnavailableError(
         'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
@@ -1102,13 +1097,7 @@ function createAssistantAutoReplyActiveTurnCheckpointHook(
   }
   const checkpointAcceptedInput = port.checkpointAcceptedInput.bind(port)
 
-  return async (checkpointInput) => {
-    try {
-      await checkpointAcceptedInput(checkpointInput)
-    } catch (error) {
-      throw error
-    }
-  }
+  return (checkpointInput) => checkpointAcceptedInput(checkpointInput)
 }
 
 function buildAutoReplyAcceptedTurnInputItems(input: {

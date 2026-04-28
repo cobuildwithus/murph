@@ -594,6 +594,53 @@ export async function recordAssistantAcceptedTurnInputProviderRequest(input: {
   })
 }
 
+export async function updateAssistantAcceptedTurnInputProviderRequest(input: {
+  continuation: AssistantProviderContinuation
+  now?: Date
+  ordinal: number
+  providerAttemptId?: string | null
+  turnId: string
+  vault: string
+}): Promise<AssistantAcceptedTurnInputJournal | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const existing = await readAssistantAcceptedTurnInputJournalAtPaths(
+      paths,
+      input.turnId,
+    )
+    if (!existing) {
+      return null
+    }
+
+    const requestIndex = existing.providerRequests.findIndex(
+      (request) => request.ordinal === input.ordinal,
+    )
+    if (requestIndex < 0) {
+      return null
+    }
+
+    const updatedAt = (input.now ?? new Date()).toISOString()
+    const providerRequests = existing.providerRequests.map((request, index) =>
+      index === requestIndex
+        ? assistantAcceptedTurnInputProviderRequestSchema.parse({
+            ...request,
+            continuation: input.continuation,
+            providerAttemptId: Object.hasOwn(input, 'providerAttemptId')
+              ? input.providerAttemptId ?? null
+              : request.providerAttemptId,
+          })
+        : request,
+    )
+    const updated = assistantAcceptedTurnInputJournalSchema.parse({
+      ...existing,
+      providerRequests,
+      updatedAt,
+    })
+    await writeAssistantAcceptedTurnInputJournalAtPaths(paths, updated)
+    return updated
+  })
+}
+
 export function resolveAssistantAcceptedTurnInputJournalPath(
   paths: AssistantStatePaths,
   turnId: string,

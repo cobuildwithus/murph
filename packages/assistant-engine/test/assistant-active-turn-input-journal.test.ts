@@ -7,6 +7,7 @@ import {
   recordAssistantAcceptedTurnInputProviderRequest,
   resolveAssistantAcceptedTurnInputJournalPath,
   updateAssistantAcceptedTurnInputAdmissionState,
+  updateAssistantAcceptedTurnInputProviderRequest,
   updateAssistantAcceptedTurnInputTranscriptRefs,
 } from '../src/assistant/active-turn-input-journal.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
@@ -299,6 +300,28 @@ describe('assistant accepted active-turn input journal', () => {
       'input_initial',
       'input_late',
     ])
+    const updatedProviderRequest =
+      await updateAssistantAcceptedTurnInputProviderRequest({
+        continuation: {
+          kind: 'explicit-structured-history',
+        },
+        now: new Date('2026-04-22T10:01:30.000Z'),
+        ordinal: 2,
+        providerAttemptId: 'attempt_2b',
+        turnId: 'turn_provider_request',
+        vault: vaultRoot,
+      })
+    expect(updatedProviderRequest?.providerRequests).toEqual([
+      {
+        acceptedInputIds: ['input_initial', 'input_late'],
+        continuation: {
+          kind: 'explicit-structured-history',
+        },
+        ordinal: 2,
+        providerAttemptId: 'attempt_2b',
+        requestedAt: '2026-04-22T10:01:00.000Z',
+      },
+    ])
 
     const committed = await updateAssistantAcceptedTurnInputAdmissionState({
       admissionState: 'commit-started',
@@ -313,7 +336,10 @@ describe('assistant accepted active-turn input journal', () => {
       'turn_provider_request',
     )
     const legacyRaw = JSON.parse(await readFile(journalPath, 'utf8'))
-    legacyRaw.providerRequests[0].continuation.responseId = 'resp_legacy'
+    legacyRaw.providerRequests[0].continuation = {
+      kind: 'provider-state-optimization',
+      responseId: 'resp_legacy',
+    }
     await writeFile(journalPath, `${JSON.stringify(legacyRaw, null, 2)}\n`)
 
     const legacyRead = await readAssistantAcceptedTurnInputJournal(

@@ -36,24 +36,22 @@ type AssistantActiveTurnInputSteerResult =
 
 class AssistantActiveTurnInputController {
   private nextInputOrdinal = 1
-  private completionObserved = false
   private closed = false
   private pending: QueuedAssistantActiveTurnInput[] = []
-  private readonly completion: Promise<AssistantAskResult>
-  private rejectCompletion!: (error: unknown) => void
-  private resolveCompletion!: (result: AssistantAskResult) => void
+  private completion:
+    | {
+        promise: Promise<AssistantAskResult>
+        reject(error: unknown): void
+        resolve(result: AssistantAskResult): void
+      }
+    | null = null
 
   constructor(
     private readonly input: {
       admissionHook?: AssistantActiveTurnInputAdmissionHook | null
       turnId: string
     },
-  ) {
-    this.completion = new Promise<AssistantAskResult>((resolve, reject) => {
-      this.resolveCompletion = resolve
-      this.rejectCompletion = reject
-    })
-  }
+  ) {}
 
   enqueue(input: AssistantMessageInput): AssistantActiveTurnInputSteerResult {
     if (this.closed || typeof input.expectedActiveTurnId !== 'string') {
@@ -66,14 +64,13 @@ class AssistantActiveTurnInputController {
         kind: 'turn-id-mismatch',
       }
     }
-    this.completionObserved = true
     this.pending.push({
       id: `manual-${this.nextInputOrdinal}`,
       input,
     })
     this.nextInputOrdinal += 1
     return {
-      completion: this.completion,
+      completion: this.resolveCompletion().promise,
       kind: 'queued',
     }
   }
@@ -87,7 +84,10 @@ class AssistantActiveTurnInputController {
   ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
     const hookAdmission = await this.input.admissionHook?.(input)
     if (hookAdmission?.kind === 'accepted') {
-      return hookAdmission
+      return mergeAssistantActiveTurnInputAdmissions(
+        hookAdmission,
+        this.admitPending(),
+      )
     }
 
     const queuedAdmission = this.admitPending()
@@ -126,15 +126,34 @@ class AssistantActiveTurnInputController {
   }
 
   complete(result: AssistantAskResult): void {
-    if (this.completionObserved) {
-      this.resolveCompletion(result)
-    }
+    this.completion?.resolve(result)
   }
 
   fail(error: unknown): void {
-    if (this.completionObserved) {
-      this.rejectCompletion(error)
+    this.completion?.reject(error)
+  }
+
+  private resolveCompletion(): {
+    promise: Promise<AssistantAskResult>
+    reject(error: unknown): void
+    resolve(result: AssistantAskResult): void
+  } {
+    if (this.completion) {
+      return this.completion
     }
+
+    let rejectCompletion!: (error: unknown) => void
+    let resolveCompletion!: (result: AssistantAskResult) => void
+    const promise = new Promise<AssistantAskResult>((resolve, reject) => {
+      rejectCompletion = reject
+      resolveCompletion = resolve
+    })
+    this.completion = {
+      promise,
+      reject: rejectCompletion,
+      resolve: resolveCompletion,
+    }
+    return this.completion
   }
 }
 
@@ -261,6 +280,71 @@ function formatAssistantActiveTurnInputControllerKey(input: {
   vault: string
 }): AssistantActiveTurnInputControllerKey {
   return `${input.vault}\u0000${input.kind}\u0000${input.value}`
+}
+
+function mergeAssistantActiveTurnInputAdmissions(
+  first: Extract<AssistantActiveTurnInputAdmissionResult, { kind: 'accepted' }>,
+  second: AssistantActiveTurnInputAdmissionResult | undefined,
+): Extract<AssistantActiveTurnInputAdmissionResult, { kind: 'accepted' }> {
+  if (second?.kind !== 'accepted') {
+    return first
+  }
+
+  return {
+    acceptedInputs: [
+      ...(first.acceptedInputs ?? []),
+      ...(second.acceptedInputs ?? []),
+    ],
+    deliveryReplyToMessageId:
+      second.deliveryReplyToMessageId === undefined
+        ? first.deliveryReplyToMessageId
+        : second.deliveryReplyToMessageId,
+    kind: 'accepted',
+    prompt: joinAssistantActiveTurnInputText([first.prompt, second.prompt]) ?? '',
+    receiptMetadata: mergeAssistantActiveTurnReceiptMetadata([
+      first.receiptMetadata,
+      second.receiptMetadata,
+    ]),
+    transcriptText: joinAssistantActiveTurnInputText([
+      first.transcriptText,
+      second.transcriptText,
+    ]) ?? null,
+    userMessageContent: mergeAssistantActiveTurnUserMessageContent([
+      first.userMessageContent,
+      second.userMessageContent,
+    ]),
+  }
+}
+
+function joinAssistantActiveTurnInputText(
+  values: readonly (string | null | undefined)[],
+): string | undefined {
+  const joined = values
+    .map((value) => normalizeNullableString(value))
+    .filter((value): value is string => value !== null)
+    .join('\n\n')
+  return joined.length > 0 ? joined : undefined
+}
+
+function mergeAssistantActiveTurnReceiptMetadata(
+  values: readonly (Record<string, string> | null | undefined)[],
+): Record<string, string> | undefined {
+  const merged: Record<string, string> = {}
+  for (const value of values) {
+    if (value) {
+      Object.assign(merged, value)
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined
+}
+
+function mergeAssistantActiveTurnUserMessageContent(
+  values: readonly (
+    readonly AssistantUserMessageContentPart[] | null | undefined
+  )[],
+): AssistantUserMessageContentPart[] | undefined {
+  const merged = values.flatMap((value) => value ?? [])
+  return merged.length > 0 ? merged : undefined
 }
 
 function buildQueuedActiveTurnUserMessageContent(
