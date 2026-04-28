@@ -312,10 +312,6 @@ describe("research init scaffold", () => {
     const outDir = path.join(tempRoot, "lane-state");
     const phlebasBrowser = await startFakeCdpServer([]);
     const herculesBrowser = await startFakeCdpServer(["research-run-test"]);
-    const mountainBrowser = await startFakeCdpServer([
-      "https://example.com/c/research-run-test",
-      "https://chatgpt.com/c/research-run-test-suffix",
-    ]);
 
     try {
       expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
@@ -330,7 +326,6 @@ endpoint_for_lane() {
   case "$1" in
     testphlebas) printf '%s\\n' '${phlebasBrowser.endpoint}' ;;
     testhercules) printf '%s\\n' '${herculesBrowser.endpoint}' ;;
-    testmountain) printf '%s\\n' '${mountainBrowser.endpoint}' ;;
     *) exit 65 ;;
   esac
 }
@@ -515,7 +510,7 @@ exit 64
         "Refusing to harvest 01-charter from lane testhercules",
       );
       expect(mismatchResult.stderr).toContain("this seam was sent on testphlebas");
-      expect(mismatchResult.stderr).toContain("--explore-lane");
+      expect(mismatchResult.stderr).toContain("Run without --lane to use the recorded send lane.");
       expect(existsSync(path.join(outDir, "state", "harvest-lane.txt"))).toBe(false);
 
       const harvestResult = runResearchRun(
@@ -548,95 +543,8 @@ exit 64
       expect(readFileSync(path.join(outDir, "responses", "01-charter.md"), "utf8")).toContain(
         "Recovered charter response",
       );
-
-      const invisibleExploratoryResult = runResearchRun(
-        [
-          "--workspace",
-          workspaceArg,
-          "--seam",
-          "01-charter",
-          "--action",
-          "harvest",
-          "--lane",
-          "testmountain",
-          "--explore-lane",
-        ],
-        env,
-      );
-
-      expect(invisibleExploratoryResult.status).toBe(1);
-      expect(invisibleExploratoryResult.stderr).toContain(
-        "Refusing exploratory harvest for 01-charter on testmountain",
-      );
-      expect(invisibleExploratoryResult.stderr).toContain(
-        "ChatGPT conversation research-run-test is not visible",
-      );
-      expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
-        "testphlebas\n",
-      );
-
-      const exploratoryResult = runResearchRun(
-        [
-          "--workspace",
-          workspaceArg,
-          "--seam",
-          "01-charter",
-          "--action",
-          "harvest",
-          "--lane",
-          "testhercules",
-          "--explore-lane",
-        ],
-        env,
-      );
-
-      expect(exploratoryResult.status).toBe(0);
-      expect(exploratoryResult.stderr).toContain("Exploratory harvest override");
-      expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
-        "testhercules\n",
-      );
-      const exploratoryState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
-        browserEndpoint: string;
-        harvest: { browserEndpoint: string; lane: string };
-        lane: string;
-      };
-      expect(exploratoryState.lane).toBe("testphlebas");
-      expect(exploratoryState.browserEndpoint).toBe(phlebasBrowser.endpoint);
-      expect(exploratoryState.harvest.lane).toBe("testhercules");
-      expect(exploratoryState.harvest.browserEndpoint).toBe(herculesBrowser.endpoint);
-
-      const resendResult = runResearchRun(
-        [
-          "--workspace",
-          workspaceArg,
-          "--seam",
-          "01-charter",
-          "--action",
-          "send",
-          "--lane",
-          "testphlebas",
-        ],
-        {
-          ...env,
-          RESEARCH_ALLOW_RESEND_WITH_EXISTING_CHAT_URL: "1",
-        },
-      );
-
-      expect(resendResult.status).toBe(0);
-      const resendState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
-        harvest?: unknown;
-        harvestedAt?: string;
-        send: { status: string };
-      };
-      expect(resendState.send.status).toBe("completed");
-      expect("harvest" in resendState).toBe(false);
-      expect("harvestedAt" in resendState).toBe(false);
     } finally {
-      await Promise.all([
-        phlebasBrowser.close(),
-        herculesBrowser.close(),
-        mountainBrowser.close(),
-      ]);
+      await Promise.all([phlebasBrowser.close(), herculesBrowser.close()]);
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
@@ -670,7 +578,7 @@ exit 64
     }
   });
 
-  it("allows send into a lane with restored ChatGPT conversation tabs", async () => {
+  it("allows send into a lane without scanning unrelated existing ChatGPT tabs", async () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-guard-"));
     const outDir = path.join(tempRoot, "send-guard");
@@ -829,7 +737,7 @@ exit 64
       );
 
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("Refusing to resend 01-charter");
+      expect(result.stderr).toContain("Refusing to send 01-charter");
       expect(result.stderr).toContain("https://chatgpt.com/c/stale-thread");
       expect(existsSync(chatUrlPath)).toBe(true);
       const seamState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
@@ -844,7 +752,7 @@ exit 64
     }
   });
 
-  it("clears stale chat URL scratch files before a fresh resend attempt starts", async () => {
+  it("refuses a send when only the scratch chat URL file already exists", async () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-clear-"));
     const outDir = path.join(tempRoot, "send-clear");
@@ -910,115 +818,16 @@ exit 64
         },
       );
 
-      expect(result.status).toBe(65);
-      expect(existsSync(chatUrlPath)).toBe(false);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Refusing to send 01-charter");
+      expect(result.stderr).toContain("https://chatgpt.com/c/stale-thread");
+      expect(existsSync(chatUrlPath)).toBe(true);
       const seamState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
         chatUrl?: string;
-        send: { status: string };
+        send?: { status: string };
       };
       expect("chatUrl" in seamState).toBe(false);
-      expect(seamState.send.status).toBe("failed");
-    } finally {
-      await browser.close();
-      rmSync(tempRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("refuses concurrent sends on the same browser lane", async () => {
-    mkdirSync(researchOutputRoot, { recursive: true });
-    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-lock-"));
-    const outDir = path.join(tempRoot, "send-lock");
-    const browser = await startFakeCdpServer([]);
-
-    try {
-      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
-
-      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
-      writeTextFileSync(
-        commandPath,
-        `#!/usr/bin/env bash
-printf 'started\\n' > '${path.join(outDir, "state", "send-command-started.txt")}'
-sleep 2
-`,
-      );
-      chmodSync(commandPath, 0o755);
-
-      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
-      writeTextFileSync(
-        profileHelperPath,
-        `#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$1" == "browser-endpoint" ]]; then
-  printf '%s\\n' '${browser.endpoint}'
-  exit 0
-fi
-if [[ "$1" == "research" ]]; then
-  shift 2
-  exec "$@"
-fi
-echo "unexpected profile helper args: $*" >&2
-exit 64
-`,
-      );
-      chmodSync(profileHelperPath, 0o755);
-
-      const workspaceArg = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
-      const env = {
-        ...process.env,
-        MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
-      };
-      const first = spawn(
-        "node",
-        [
-          runScriptPath,
-          "--workspace",
-          workspaceArg,
-          "--seam",
-          "01-charter",
-          "--action",
-          "send",
-          "--lane",
-          "testsendlock",
-        ],
-        {
-          cwd: repoRoot,
-          env,
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-
-      const lockPath = path.join(researchOutputRoot, "_locks", "send-testsendlock.lock.json");
-      for (let attempt = 0; attempt < 50 && !existsSync(lockPath); attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(existsSync(lockPath)).toBe(true);
-
-      const commandStartedPath = path.join(outDir, "state", "send-command-started.txt");
-      for (let attempt = 0; attempt < 50 && !existsSync(commandStartedPath); attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(existsSync(commandStartedPath)).toBe(true);
-
-      const second = runResearchRun(
-        [
-          "--workspace",
-          workspaceArg,
-          "--seam",
-          "01-charter",
-          "--action",
-          "send",
-          "--lane",
-          "testsendlock",
-        ],
-        env,
-      );
-      expect(second.status).toBe(1);
-      expect(second.stderr).toContain("another send is already staging");
-
-      await new Promise<void>((resolve) => {
-        first.on("exit", () => resolve());
-      });
-      expect(existsSync(lockPath)).toBe(false);
+      expect(seamState.send).toBeUndefined();
     } finally {
       await browser.close();
       rmSync(tempRoot, { recursive: true, force: true });
