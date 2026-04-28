@@ -104,7 +104,7 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:serum-25-hydroxyvitamin-d
-    description: Daily D3 gives the body vitamin D it can convert into circulating 25(OH)D over weeks. This is the direct lab signal for the protocol.
+    description: Daily D3 gives the body vitamin D it can convert into the blood marker 25(OH)D over weeks. This is the direct lab signal for the protocol.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

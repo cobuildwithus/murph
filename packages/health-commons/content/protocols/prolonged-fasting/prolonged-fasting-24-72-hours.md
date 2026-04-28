@@ -157,28 +157,28 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:fasting-tolerance-symptom-log
-    description: A 24-72 hour fast is an acute stress on fuel intake, hydration, and the body's stress state. Symptoms show whether the chosen duration was tolerated safely.
+    description: A 24-72 hour fast stresses fuel intake, hydration, and the body's stress state. Symptoms show whether the chosen duration was tolerated safely.
   -
     biomarkerKey: biomarker:refeed-tolerance-symptom-log
-    description: Refeeding tests how the body handles the first meal window after the fast. Symptoms after refeed can matter more than ketones or weight change.
+    description: Refeeding tests how the body handles the first meals after the fast. Symptoms after refeed can matter more than ketones or weight change.
   -
     biomarkerKey: biomarker:continuous-glucose
     description: With no incoming calories, glucose may shift as stored carbohydrate falls and stress hormones rise. The direction can be mixed, so this is context rather than proof of improvement.
   -
     biomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
-    description: As stored carbohydrate and insulin fall, the body may make more of a blood ketone called beta-hydroxybutyrate from fat. Higher ketones confirm fuel switching, not better health by themselves.
+    description: As stored carbohydrate and insulin fall, the body may make more beta-hydroxybutyrate, a blood ketone, from fat. Higher ketones confirm fuel switching, not better health by themselves.
   -
     biomarkerKey: biomarker:body-weight
     description: Body weight often drops during a fast from less gut content, lower glycogen, and water shifts. This is not the same as durable fat loss.
   -
     biomarkerKey: biomarker:morning-blood-pressure
-    description: Fasting can change blood pressure through fluid balance, salt intake, stress hormones, and how well you tolerate standing. Low or unstable readings matter as safety context.
+    description: Fasting can change blood pressure through fluid balance, salt intake, stress hormones, and how well you tolerate standing. Low or unstable readings are safety context.
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: Resting pulse may rise or fall during fasting depending on hydration, stress, sleep, and fuel response. It helps show whether the fast increased strain.
+    description: Resting pulse may rise or fall during fasting depending on hydration, stress, sleep, and fuel response. It helps show whether the fast added strain.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: Fasting can shift stress and recovery balance through hunger, sleep disruption, hydration, and stress. HRV may move, but it is a context signal rather than a success target.
+    description: Fasting can shift stress and recovery through hunger, sleep disruption, hydration, and strain. HRV may move, but it is context rather than a success target.
   -
     biomarkerKey: biomarker:sleep-efficiency
     description: Hunger, caffeine changes, stress, and ketone shifts can change sleep continuity during a fast. Sleep efficiency shows whether the fast disrupted rest.

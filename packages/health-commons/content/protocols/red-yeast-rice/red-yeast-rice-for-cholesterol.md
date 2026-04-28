@@ -186,22 +186,22 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:ldl-c"
-    description: "Some red yeast rice products can contain monacolin K, a lovastatin-like compound that may reduce cholesterol production in the liver. If the product is active and tolerated, LDL-C may fall."
+    description: "Some red yeast rice products can contain monacolin K, a statin-like compound that may lower cholesterol production in the liver. If the product is active and tolerated, LDL-C may fall."
   -
     biomarkerKey: "biomarker:total-cholesterol"
     description: "Total cholesterol may fall when LDL-C falls, because LDL-C is part of the total value. The signal depends heavily on the exact product and dose."
   -
     biomarkerKey: "biomarker:non-hdl-c"
-    description: "Non-HDL-C may fall if cholesterol carried by LDL and related heart-risk particles drops. The extracted evidence is less direct than for LDL-C."
+    description: "Non-HDL-C may fall if LDL and related heart-risk particles drop. The evidence is less direct than for LDL-C."
   -
     biomarkerKey: "biomarker:triglycerides"
-    description: "Triglycerides improved in some red-yeast-rice studies, but the signal is mixed and product-specific. Treat this as secondary context."
+    description: "Triglycerides improved in some red-yeast-rice studies, but results are mixed and product-specific. Treat this as secondary context."
   -
     biomarkerKey: "biomarker:hdl-c"
     description: "HDL-C is not the main expected response to red yeast rice and may be unchanged. It stays on the panel to show whether the broader lipid pattern shifted."
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
-    description: "ApoB may fall if the number of cholesterol-carrying particles linked to heart risk drops along with LDL-C. The evidence is less consistent than the LDL-C signal."
+    description: "ApoB may fall if cholesterol-carrying particles linked to heart risk drop with LDL-C. The evidence is less consistent than the LDL-C signal."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

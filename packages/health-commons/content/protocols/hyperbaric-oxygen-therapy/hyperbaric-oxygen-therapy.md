@@ -588,16 +588,16 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:hbot-session-tolerability"
-    description: "HBOT changes both pressure and oxygen exposure. Ear or sinus pressure, vision changes, confinement distress, glucose or blood-pressure issues, and stopped sessions are direct ways that dose can show up as symptoms."
+    description: "HBOT changes pressure and oxygen exposure. Ear or sinus pressure, vision changes, distress in the chamber, glucose or blood-pressure issues, and stopped sessions show how the dose is landing."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
-    description: "A prescribed HBOT course can add treatment burden, symptoms, and recovery stress. If sessions disturb or relieve that burden, sleep continuity may change."
+    description: "A prescribed HBOT course can add time, symptoms, and recovery stress. If sessions disturb or ease that load, sleep continuity may change."
   -
     biomarkerKey: "biomarker:resting-heart-rate"
-    description: "Pressure exposure, high oxygen dosing, symptoms, and the underlying care context can change overall strain. Resting pulse may shift if the course changes recovery load."
+    description: "Pressure, high oxygen dosing, symptoms, and the care context can change overall strain. Resting pulse may shift if the course changes recovery load."
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "HBOT sessions can affect nervous-system strain through oxygen dose, pressure exposure, symptoms, and recovery burden. HRV may move as context, not as proof that the treatment worked."
+    description: "HBOT sessions can affect nervous-system strain through oxygen dose, pressure, symptoms, and recovery load. HRV may move as context, not as proof that treatment worked."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

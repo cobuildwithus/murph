@@ -159,19 +159,19 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: A gentle breathing or meditation routine may lower pre-sleep arousal and make the transition into sleep feel less effortful.
+    description: A gentle breathing or meditation routine may lower pre-sleep arousal and make falling asleep feel less effortful.
   -
     biomarkerKey: biomarker:pre-sleep-arousal
-    description: This is the closest mechanism signal. Slow breathing or quiet attention may reduce feeling wired, keyed-up, or mentally activated before bed.
+    description: This is the closest sign that the routine is working. Slow breathing or quiet attention may reduce feeling wired, keyed-up, or mentally active before bed.
   -
     biomarkerKey: biomarker:sleep-efficiency
     description: If the practice lowers arousal and shortens the restless start of the night, a larger share of time in bed may be spent asleep.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: Gentle slow breathing can nudge the body toward its recovery side during practice. If that downshift carries into sleep, overnight HRV may rise or stabilize.
+    description: Gentle slow breathing can nudge the body toward a calmer state during practice. If that downshift carries into sleep, overnight HRV may rise or stabilize.
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: A calmer pre-sleep state may reduce overnight stress load. Resting heart rate might drift lower if the routine improves recovery.
+    description: A calmer pre-sleep state may lower overnight stress load. Resting heart rate might drift lower if the routine improves recovery.
 whyItWorks:
   - "Gentle slow breathing near 5-6 breaths per minute can increase cardiorespiratory coupling and vagal/HRV signals, which supports a plausible calming mechanism but not a guarantee of better sleep. Sources include source_artifact:pmid-25234581, source_artifact:pmid-32366866, source_artifact:pmid-11380537, and source_artifact:pmid-23342715."
   - "Mindfulness and meditation interventions can reduce cognitive or emotional arousal in some insomnia-adjacent contexts, but the extracted evidence is mostly guided, structured, clinical, or bundled rather than silent unguided bedtime meditation. Sources include source_artifact:pmid-41027036, source_artifact:pmid-25142566, and source_artifact:pmid-27663102."

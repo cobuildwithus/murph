@@ -330,22 +330,22 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:wake-time-variability"
-    description: "The protocol directly targets wake timing, so this signal should move if the chosen wake window is realistic and followed often enough."
+    description: "This is the behavior the protocol targets. Wake timing should tighten if the chosen window is realistic and followed often enough."
   -
     biomarkerKey: "biomarker:total-sleep-time"
-    description: "A stable wake time only helps if bedtime and sleep opportunity adjust with it. Total sleep time may stay stable or improve when the anchor reduces drift without creating short sleep."
+    description: "A stable wake time only helps if bedtime and time in bed adjust with it. Total sleep time may stay stable or improve when the anchor reduces drift without creating short sleep."
   -
     biomarkerKey: "biomarker:daytime-sleepiness"
     description: "More regular timing may make mornings feel steadier, but sleepiness should improve only if the plan preserves enough sleep."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
-    description: "A steadier sleep-wake rhythm can support more consolidated sleep for some people. The effect is secondary because the protocol does not directly treat awakenings."
+    description: "A steadier sleep-wake rhythm can support less broken sleep for some people. This is a weaker read because the protocol does not directly treat awakenings."
   -
     biomarkerKey: "biomarker:sleep-onset-latency"
-    description: "A consistent wake anchor may make sleep pressure and circadian timing more predictable by evening, so sleep onset might become easier."
+    description: "A consistent wake anchor may make sleep pressure and body-clock timing more predictable by evening, so falling asleep may become easier."
   -
     biomarkerKey: "biomarker:hrv-rmssd"
-    description: "If regular timing improves sleep continuity and reduces sleep debt, overnight recovery strain may ease. HRV is expected to be a weak downstream signal."
+    description: "If regular timing improves sleep continuity and reduces sleep debt, overnight strain may ease. HRV is a weak downstream read."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

@@ -114,16 +114,16 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:estimated-vo2max
-    description: "Regular easy cardio can train the heart, blood vessels, and working muscles to deliver and use oxygen better. Over several weeks, that may lift a wearable cardio-fitness estimate."
+    description: "Regular easy cardio trains the heart, blood vessels, and muscles to deliver and use oxygen better. Over several weeks, that may lift a wearable cardio-fitness estimate."
   -
     biomarkerKey: biomarker:resting-heart-rate
     description: "As aerobic fitness improves, the heart may move more blood with each beat. That can let resting pulse drift lower."
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: "Easy aerobic work may help the nervous system spend more time in recovery mode. If the dose stays manageable, HRV can rise or stay steadier."
+    description: "Easy aerobic work may help the body spend more time in recovery mode. If the dose stays manageable, HRV can rise or stay steadier."
   -
     biomarkerKey: biomarker:morning-blood-pressure
-    description: "Regular aerobic activity can improve blood-vessel function and blood-pressure control. Morning blood pressure may ease down if that adaptation shows up."
+    description: "Regular aerobic activity can help blood vessels relax and control pressure. Morning blood pressure may ease down if that adaptation shows up."
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

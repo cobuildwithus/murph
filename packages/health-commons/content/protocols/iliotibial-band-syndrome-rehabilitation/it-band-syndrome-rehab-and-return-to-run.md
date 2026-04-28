@@ -348,7 +348,7 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:lateral-knee-pain
-    description: "Reducing the running load that provokes symptoms can give the irritated outside-knee area a chance to settle. Hip, glute, and movement-control work may also reduce strain during running."
+    description: "Reducing the running load that triggers symptoms can give the outside-knee area time to settle. Hip, glute, and movement-control work may also reduce running strain."
   -
     biomarkerKey: biomarker:running-tolerance
     description: "A run/walk progression gives the knee small, repeated exposures below the flare threshold. Tolerance may improve as strength and control catch up."

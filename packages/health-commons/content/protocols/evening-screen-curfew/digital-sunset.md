@@ -486,7 +486,7 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: "biomarker:sleep-onset-latency"
-  description: "Stopping personal screens before bed may lower light exposure, message loops, and mental stimulation. If those were keeping the user wired, sleep onset can become easier."
+  description: "Stopping personal screens before bed may lower light exposure, late messages, and mental stimulation. If those were keeping the user wired, sleep onset can become easier."
 -
   biomarkerKey: "biomarker:sleep-efficiency"
   description: "If the curfew reduces in-bed pickups, delayed lights-out, or restless starts to the night, more time in bed may be spent asleep."

@@ -495,16 +495,16 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:added-sugar-intake
-  description: This is the direct exposure the protocol changes. Label checks and food logs may show fewer grams when regular added-sugar sources are removed or replaced.
+  description: This is the part the protocol changes directly. Label checks and food logs can show whether regular added-sugar sources were removed or replaced.
 -
   biomarkerKey: biomarker:body-weight
-  description: Removing added sugar can lower total energy intake for some people, especially when sugary drinks or snacks are not replaced with similar calories. Weight may move if that calorie gap lasts long enough.
+  description: Removing added sugar can lower calories for some people, especially when sweet drinks or snacks are not replaced. Weight may move if that calorie gap lasts.
 -
   biomarkerKey: biomarker:waist-circumference
-  description: If added-sugar reduction lowers sustained energy intake, waist size may change with body fat over time. A 21-day run is a short window, so this is a secondary signal.
+  description: If added-sugar reduction keeps calories lower, waist size may change with body fat over time. A 21-day run is short, so this is a weaker read.
 -
   biomarkerKey: biomarker:morning-blood-pressure
-  description: Lower added sugar may affect blood pressure through lower total energy intake, weight change, or fewer sugar-sweetened drinks. The evidence is mixed, so this is a cautious secondary signal.
+  description: Less added sugar may affect blood pressure by lowering calories, weight, or sugary drinks. Evidence is mixed, so this should stay a cautious read.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

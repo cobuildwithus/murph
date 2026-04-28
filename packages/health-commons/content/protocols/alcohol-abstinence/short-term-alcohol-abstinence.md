@@ -1003,25 +1003,25 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:alcohol-free-days
-  description: This is the direct exposure for the challenge. More alcohol-free days mean less alcohol exposure during the chosen interval.
+  description: This shows whether the challenge happened. More alcohol-free days mean less alcohol exposure during the chosen interval.
 -
   biomarkerKey: biomarker:alcohol-withdrawal-symptoms
-  description: Stopping alcohol can uncover withdrawal symptoms in people with dependence or higher-risk use. This safety signal should take priority over sleep or wearable changes.
+  description: Stopping alcohol can uncover withdrawal symptoms in people who drink heavily or are dependent. This safety signal should come before sleep or wearable changes.
 -
   biomarkerKey: biomarker:alcohol-craving
-  description: Removing alcohol changes cue, reward, and social routines. Craving may rise early or settle as new coping patterns form.
+  description: Removing alcohol changes cues, rewards, and social routines. Craving may rise early or settle as new coping patterns form.
 -
   biomarkerKey: biomarker:resting-heart-rate
-  description: Alcohol can keep the body more activated overnight. Removing it may let resting pulse drift lower, especially when sleep and hydration improve.
+  description: Alcohol can keep the body revved up overnight. Removing it may let resting pulse drift lower, especially if sleep and hydration improve.
 -
   biomarkerKey: biomarker:hrv-rmssd
-  description: Alcohol can make overnight recovery less steady. Abstinence may raise HRV if the body is under less alcohol-related stress.
+  description: Alcohol can make overnight recovery less steady. HRV may rise if the body has less alcohol-related stress.
 -
   biomarkerKey: biomarker:sleep-efficiency
   description: Alcohol can fragment sleep even when it feels sedating at first. Abstinence may improve sleep continuity after the early adjustment period.
 -
   biomarkerKey: biomarker:sleep-onset-latency
-  description: If alcohol was being used as a sleep cue, stopping can change how long it takes to fall asleep. The direction may vary in the first week.
+  description: If alcohol was a sleep cue, stopping can change how long it takes to fall asleep. The direction may vary in the first week.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

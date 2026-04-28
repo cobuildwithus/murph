@@ -183,22 +183,22 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: "biomarker:ldl-c"
-    description: "Psyllium forms a gel in the gut that can carry some cholesterol-related bile acids out in stool. That can modestly lower LDL-C in some adults."
+    description: "Psyllium forms a gel in the gut that can carry bile acids out in stool. The body uses bile acids to handle cholesterol, so LDL-C may fall modestly."
   -
     biomarkerKey: "biomarker:total-cholesterol"
-    description: "Total cholesterol may fall if LDL-C falls, because LDL-C is a major part of the total value. This is supportive, but less specific than LDL-C."
+    description: "Total cholesterol may fall if LDL-C falls, because LDL-C makes up much of the total value. This is supportive, but less specific than LDL-C."
   -
     biomarkerKey: "biomarker:non-hdl-c"
-    description: "Non-HDL-C may fall if cholesterol carried by LDL and related particles falls. It gives a broader lipid-panel view of the same cholesterol-handling pathway."
+    description: "Non-HDL-C may fall if LDL and related cholesterol-carrying particles fall. It gives a broader view of the same pathway."
   -
     biomarkerKey: "biomarker:apolipoprotein-b"
-    description: "ApoB may fall if the number of cholesterol-carrying particles linked to heart risk drops along with LDL-C. This is a higher-resolution secondary signal, not the main endpoint."
+    description: "ApoB may fall if the number of cholesterol-carrying particles linked to heart risk drops with LDL-C. This is a more detailed secondary read, not the main result."
   -
     biomarkerKey: "biomarker:hdl-c"
     description: "Psyllium's main expected effect is on LDL-C and total cholesterol, not HDL-C. HDL-C may stay about the same even when LDL-C changes."
   -
     biomarkerKey: "biomarker:triglycerides"
-    description: "Triglycerides are not the main psyllium endpoint. They may move with diet, weight, or carbohydrate changes during the run."
+    description: "Triglycerides are not the main psyllium result. They may move with diet, weight, or carbohydrate changes during the run."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:
