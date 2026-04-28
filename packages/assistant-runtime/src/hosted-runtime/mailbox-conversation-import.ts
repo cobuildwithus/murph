@@ -17,8 +17,12 @@ import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "./events/conversation.ts";
 import {
-  prepareHostedWakeContext,
+  prepareHostedLocalRuntimeForConversationImport,
+  requireHostedBootstrapForWake,
 } from "./context.ts";
+import {
+  HostedRawEmailMessageMissingError,
+} from "./events/email.ts";
 import {
   recordHostedProviderCleanupBeforeCommit,
   type HostedProviderCleanupCheckpoint,
@@ -54,6 +58,7 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 }
 
 export interface HostedConversationMailboxLocalImportResult {
+  afterCheckpoint?: (() => Promise<void>) | null;
   captureId: string | null;
   deduped: boolean;
   metrics: HostedConversationWakeMetrics;
@@ -186,11 +191,24 @@ export async function importHostedConversationMailboxItem(input: {
     vaultRoot: input.vaultRoot,
     wake: decoded.wake,
   });
-  const imported = await importConversationWake({
-    runtime: input.runtime,
-    vaultRoot: input.vaultRoot,
-    wake: decoded.wake,
-  });
+  let imported: HostedConversationMailboxLocalImportResult;
+  try {
+    imported = await importConversationWake({
+      runtime: input.runtime,
+      vaultRoot: input.vaultRoot,
+      wake: decoded.wake,
+    });
+  } catch (error) {
+    if (error instanceof HostedRawEmailMessageMissingError) {
+      return {
+        reasonCode: "conversation_import.raw_email_missing",
+        retryable: true,
+        status: "blocked",
+      };
+    }
+
+    throw error;
+  }
   const linqProviderMessageId = resolveHostedConversationProviderCleanupMessageId(decoded.wake);
   if (linqProviderMessageId) {
     await (input.recordProviderCleanupBeforeCommit ?? recordHostedProviderCleanupBeforeCommit)({
@@ -204,6 +222,7 @@ export async function importHostedConversationMailboxItem(input: {
 
   if (imported.deduped) {
     return {
+      ...(imported.afterCheckpoint ? { afterCheckpoint: imported.afterCheckpoint } : {}),
       captureId: imported.captureId,
       metrics: imported.metrics,
       reasonCode: "capture.deduped",
@@ -212,6 +231,7 @@ export async function importHostedConversationMailboxItem(input: {
   }
 
   return {
+    ...(imported.afterCheckpoint ? { afterCheckpoint: imported.afterCheckpoint } : {}),
     captureId: imported.captureId,
     metrics: imported.metrics,
     status: "imported",
@@ -262,14 +282,11 @@ async function prepareHostedConversationMailboxWakeContext(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<void> {
-  await prepareHostedWakeContext(
+  void input.runtime;
+  await requireHostedBootstrapForWake(input.vaultRoot, input.wake);
+  await prepareHostedLocalRuntimeForConversationImport(
     input.vaultRoot,
-    input.wake,
-    {
-      ...input.runtime.forwardedEnv,
-      ...input.runtime.userEnv,
-    },
-    input.runtime.resolvedConfig,
+    input.wake.eventId,
   );
 }
 

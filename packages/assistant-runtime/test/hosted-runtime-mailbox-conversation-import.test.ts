@@ -28,6 +28,9 @@ import {
 import {
   createHostedMailboxRoutingPlan,
 } from "../src/hosted-runtime/mailbox-routing.ts";
+import {
+  HostedRawEmailMessageMissingError,
+} from "../src/hosted-runtime/events/email.ts";
 import type {
   HostedMailboxResolvedImportItem,
 } from "../src/hosted-runtime/mailbox-import.ts";
@@ -286,6 +289,38 @@ describe("hosted mailbox conversation import adapter", () => {
       status: "blocked",
     });
     assert.equal(importCalls, 0);
+  });
+
+  test("blocks retryably when raw email bytes are unavailable during local import", async () => {
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "email",
+        identityId: "identity_synthetic",
+        rawMessageKey: "raw_email_missing",
+        selfAddress: "assistant@example.test",
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedRawEmailMessageMissingError({
+          rawMessageKey: "raw_email_missing",
+          userId: TEST_USER_ID,
+        });
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    assert.deepEqual(outcome, {
+      reasonCode: "conversation_import.raw_email_missing",
+      retryable: true,
+      status: "blocked",
+    });
   });
 });
 

@@ -146,6 +146,125 @@ describe("hosted mailbox import checkpoint wrapper", () => {
     }
   });
 
+  test("runs imported item post-checkpoint effects only after durable checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_001",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [item],
+    });
+    const order: string[] = [];
+    const workspacePort: HostedRuntimeWorkspacePort = {
+      async checkpoint(request): Promise<HostedWorkspaceCheckpointResponse> {
+        order.push("checkpoint");
+        return createCheckpointResponse(request);
+      },
+    };
+
+    try {
+      const result = await importHostedMailboxPrefixAndCheckpoint({
+        expectedUserId: TEST_USER_ID,
+        createCheckpointRequest() {
+          return {
+            attemptId: "attempt_synthetic_checkpoint_effect",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            reason: "idle",
+            redactedStatus: {},
+            snapshotRef: null,
+          };
+        },
+        async importItem() {
+          order.push("import");
+          return {
+            afterCheckpoint: async () => {
+              order.push("afterCheckpoint");
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        mailboxPort,
+        now: () => TEST_NOW,
+        requestId: "request_synthetic_checkpoint_effect",
+        vaultRoot,
+        workspacePort,
+      });
+
+      assert.equal(result.stateChanged, true);
+      assert.deepEqual(order, ["import", "checkpoint", "afterCheckpoint"]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("does not roll back a committed checkpoint when a post-checkpoint effect fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
+    const item = createMailboxItem({
+      id: "mailbox_item_conversation_001",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [item],
+    });
+    const workspacePort: HostedRuntimeWorkspacePort = {
+      async checkpoint(request): Promise<HostedWorkspaceCheckpointResponse> {
+        return createCheckpointResponse(request);
+      },
+    };
+
+    try {
+      const result = await importHostedMailboxPrefixAndCheckpoint({
+        expectedUserId: TEST_USER_ID,
+        createCheckpointRequest() {
+          return {
+            attemptId: "attempt_synthetic_checkpoint_effect_failure",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            reason: "idle",
+            redactedStatus: {},
+            snapshotRef: null,
+          };
+        },
+        async importItem() {
+          return {
+            afterCheckpoint: async () => {
+              throw new Error("parser drain failed");
+            },
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        mailboxPort,
+        now: () => TEST_NOW,
+        requestId: "request_synthetic_checkpoint_effect_failure",
+        vaultRoot,
+        workspacePort,
+      });
+
+      assert.equal(result.stateChanged, true);
+      assert.equal(result.state.watermarks.conversation, "1");
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "1",
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("does not write or checkpoint when the fetched prefix leaves state unchanged", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
     const initialState = createEmptyHostedMailboxImportState();

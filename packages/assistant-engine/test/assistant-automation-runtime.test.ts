@@ -953,7 +953,7 @@ describe('assistant automation scanner', () => {
     expect(stateUpdates).toEqual([])
   })
 
-  it('stops the scan loop when automatic document preservation fails', async () => {
+  it('continues reply processing when automatic document preservation fails', async () => {
     const capture = createCaptureSummary({
       attachmentCount: 1,
     })
@@ -982,11 +982,11 @@ describe('assistant automation scanner', () => {
 
     expect(result).toMatchObject({
       replies: {
-        considered: 0,
+        considered: 1,
         failed: 0,
         nextWakeAt: expect.any(String),
         replied: 0,
-        skipped: 0,
+        skipped: 1,
       },
       routing: {
         considered: 0,
@@ -1000,9 +1000,9 @@ describe('assistant automation scanner', () => {
     expect(events).toContainEqual({
       type: 'capture.failed',
       captureId: 'capture-1',
-      details: 'automatic document preservation failed: preserve failed',
+      details: 'nonblocking document preservation failed: preserve failed',
     })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })
 
   it('skips disabled inbox model routing when canonical writes are disabled', async () => {

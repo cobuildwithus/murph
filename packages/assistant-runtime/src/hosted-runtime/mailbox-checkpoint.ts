@@ -91,9 +91,19 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   const previousSystemMailboxState = await readHostedSystemMailboxCheckpointRollbackState({
     vaultRoot: input.vaultRoot,
   });
+  const afterCheckpointEffects: Array<() => Promise<void>> = [];
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     expectedUserId: input.expectedUserId,
-    importItem: input.importItem,
+    importItem: async (item) => {
+      const outcome = await input.importItem(item);
+      if (
+        (outcome.status === "imported" || outcome.status === "skipped")
+        && outcome.afterCheckpoint
+      ) {
+        afterCheckpointEffects.push(outcome.afterCheckpoint);
+      }
+      return outcome;
+    },
     lanes: input.lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
@@ -156,6 +166,15 @@ export async function importHostedMailboxPrefixAndCheckpoint(
       vaultRoot: input.vaultRoot,
     });
     throw error;
+  }
+
+  for (const effect of afterCheckpointEffects) {
+    try {
+      await effect();
+    } catch {
+      // Post-checkpoint effects are enrichment only. They must not roll back an
+      // already durable mailbox checkpoint.
+    }
   }
 
   return {

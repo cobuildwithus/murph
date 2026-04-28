@@ -41,13 +41,6 @@ export type AssistantAutoReplyPreparedInput =
 export function buildAssistantAutoReplyPrompt(
   captures: readonly AssistantAutoReplyPromptCapture[],
 ): AssistantAutoReplyPrompt {
-  if (hasAssistantAutoReplyPendingAttachments(captures)) {
-    return {
-      kind: 'defer',
-      reason: 'waiting for parser completion',
-    }
-  }
-
   const sections = captures
     .map((entry, index) =>
       renderAssistantAutoReplyCaptureSection({
@@ -79,13 +72,6 @@ export async function prepareAssistantAutoReplyInput(
   captures: readonly AssistantAutoReplyPromptCapture[],
   vaultRoot: string,
 ): Promise<AssistantAutoReplyPreparedInput> {
-  if (hasAssistantAutoReplyPendingAttachments(captures)) {
-    return {
-      kind: 'defer',
-      reason: 'waiting for parser completion',
-    }
-  }
-
   const preparedCaptures = await Promise.all(
     captures.map(async (entry) => ({
       ...entry,
@@ -110,9 +96,7 @@ export async function prepareAssistantAutoReplyInput(
     )
     .filter((section): section is string => section !== null)
 
-  const hasTextualContent = preparedCaptures.some((entry) =>
-    captureHasPreparedTextualContent(entry),
-  )
+  const hasTextualContent = textualSections.length > 0
   const nextPrompt = buildAssistantAutoReplyPromptText(captures, textualSections)
 
   const preparedMultimodalInput =
@@ -202,17 +186,6 @@ function readMinimalTelegramMetadata(
   }
 }
 
-function hasAssistantAutoReplyPendingAttachments(
-  captures: readonly AssistantAutoReplyPromptCapture[],
-): boolean {
-  return captures.some(({ capture }) =>
-    capture.attachments.some(
-      (attachment) =>
-        attachment.parseState === 'pending' || attachment.parseState === 'running',
-    ),
-  )
-}
-
 function renderAssistantAutoReplyCaptureSection(input: {
   attachmentSections: readonly string[]
   captureText: string | null
@@ -256,8 +229,6 @@ function renderAttachmentPromptSection(
     attachment.mime ? `mime: ${attachment.mime}` : null,
     typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
     attachment.parseState ? `parseState: ${attachment.parseState}` : null,
-    attachment.storedPath ? `storedPath: ${attachment.storedPath}` : null,
-    attachment.derivedPath ? `derivedPath: ${attachment.derivedPath}` : null,
   ].filter((line): line is string => line !== null)
   const chunks: string[] = []
   const omittedKinds: string[] = []
@@ -286,7 +257,11 @@ ${buildAttachmentTextExcerpt(extractedText)}`)
   }
 
   if (chunks.length === 0) {
-    return null
+    const status = renderAttachmentParserStatus(attachment.parseState ?? null)
+    if (status === null) {
+      return null
+    }
+    chunks.push(status)
   }
 
   if (metadataLines.length > 0) {
@@ -349,22 +324,6 @@ function buildAssistantAutoReplyPromptText(
     : contextLines.join('\n')
 }
 
-function captureHasPreparedTextualContent(
-  entry: AssistantAutoReplyPromptCapture & {
-    attachmentBundles: readonly InboxModelAttachmentBundle[]
-  },
-): boolean {
-  return (
-    Boolean(normalizeNullableString(entry.capture.text)) ||
-    Boolean(entry.telegramMetadata?.replyContext) ||
-    entry.attachmentBundles.some((attachment) =>
-      attachment.fragments.some(
-        (fragment) => fragment.kind !== 'attachment_metadata',
-      ),
-    )
-  )
-}
-
 function renderPreparedAttachmentPromptSection(
   attachment: InboxModelAttachmentBundle,
 ): string | null {
@@ -373,19 +332,51 @@ function renderPreparedAttachmentPromptSection(
   )
   const richEvidenceCandidate =
     hasInboxMultimodalAttachmentEvidenceCandidate(attachment)
-  if (!hasTextFragments && !richEvidenceCandidate) {
+  const status = renderAttachmentParserStatus(attachment.parseState ?? null)
+  if (!hasTextFragments && !richEvidenceCandidate && status === null) {
     return null
   }
 
   const sections = attachment.combinedText.length > 0 ? [attachment.combinedText] : []
-  if (!hasTextFragments) {
+  if (status && !hasTextFragments) {
+    sections.push(status)
+  }
+  if (richEvidenceCandidate && !hasTextFragments) {
     sections.push(
-      'No parsed attachment text is available. Use attached image or PDF evidence if present, but do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+      isPreparedPdfAttachment(attachment)
+        ? 'No parsed attachment text is available. Use attached PDF evidence only if it is present in the model input; do not claim facts from the PDF unless they appear in parsed attachment text or the attached PDF evidence.'
+        : 'No parsed attachment text is available. Use attached image evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
     )
   }
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${sections.join('\n\n')}`
+}
+
+function isPreparedPdfAttachment(attachment: InboxModelAttachmentBundle): boolean {
+  const mime = normalizeNullableString(attachment.mime)?.toLowerCase() ?? ''
+  const fileName = normalizeNullableString(attachment.fileName)?.toLowerCase() ?? ''
+  return (
+    normalizeNullableString(attachment.storedPath) !== null &&
+    attachment.kind === 'document' &&
+    (mime === 'application/pdf' || fileName.endsWith('.pdf'))
+  )
+}
+
+function renderAttachmentParserStatus(parseState: string | null): string | null {
+  if (parseState === 'pending' || parseState === 'running') {
+    return 'Attachment parser status: parser output is not available yet.'
+  }
+
+  if (parseState === 'failed') {
+    return 'Attachment parser status: parser failed; parsed attachment text or transcript is unavailable.'
+  }
+
+  if (parseState === 'unsupported') {
+    return 'Attachment parser status: no parser output is available for this attachment type.'
+  }
+
+  return null
 }
 
 function buildAttachmentTextExcerpt(text: string): string {

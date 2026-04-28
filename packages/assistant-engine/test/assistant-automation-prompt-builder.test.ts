@@ -189,7 +189,7 @@ function createRichUserMessageContent(
 }
 
 describe('buildAssistantAutoReplyPrompt', () => {
-  it('defers when any attachment is still pending parser completion', () => {
+  it('renders parser status instead of deferring pending attachments', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptCapture({
         attachments: [
@@ -201,8 +201,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
     ])
 
     expect(result).toEqual({
-      kind: 'defer',
-      reason: 'waiting for parser completion',
+      kind: 'ready',
+      prompt: expect.stringContaining(
+        'Attachment parser status: parser output is not available yet.',
+      ),
     })
   })
 
@@ -389,7 +391,12 @@ describe('buildAssistantAutoReplyPrompt', () => {
 })
 
 describe('prepareAssistantAutoReplyInput', () => {
-  it('defers before building multimodal input when parser work is still pending', async () => {
+  it('prepares metadata/status input when parser work is still pending', async () => {
+    promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
+      createAttachmentBundle({
+        parseState: 'pending',
+      }),
+    ])
     const result = await prepareAssistantAutoReplyInput(
       [
         createPromptCapture({
@@ -404,13 +411,16 @@ describe('prepareAssistantAutoReplyInput', () => {
     )
 
     expect(result).toEqual({
-      kind: 'defer',
-      reason: 'waiting for parser completion',
+      kind: 'ready',
+      prompt: expect.stringContaining(
+        'Attachment parser status: parser output is not available yet.',
+      ),
+      userMessageContent: null,
     })
-    expect(promptBuilderMocks.buildInboxModelAttachmentBundles).not.toHaveBeenCalled()
+    expect(promptBuilderMocks.buildInboxModelAttachmentBundles).toHaveBeenCalled()
     expect(
       promptBuilderMocks.prepareInboxMultimodalUserMessageContent,
-    ).not.toHaveBeenCalled()
+    ).toHaveBeenCalled()
   })
 
   it('skips when neither text nor rich evidence can be prepared', async () => {
@@ -445,15 +455,36 @@ describe('prepareAssistantAutoReplyInput', () => {
     )
   })
 
-  it('prepares multimodal user message content when only attachment evidence remains', async () => {
+  it('prepares multimodal user message content when only raw image evidence remains', async () => {
     promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
-      createAttachmentBundle(),
+      createAttachmentBundle({
+        kind: 'image',
+        mime: 'image/png',
+        fileName: 'lunch.png',
+        storedPath: 'inbox/attachments/lunch.png',
+        routingImage: {
+          eligible: true,
+          reason: 'supported-format',
+          mediaType: 'image/png',
+          extension: '.png',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'metadata',
+            path: null,
+            text: 'mime: image/png',
+            truncated: false,
+          },
+        ],
+        combinedText: '[metadata]\nmime: image/png',
+      }),
     ])
     promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(
       true,
     )
     const userMessageContent = createRichUserMessageContent(
-      'Attachment PDF 1 (scan.pdf).',
+      'Attachment image 1 (lunch.png).',
     )
     promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
@@ -473,7 +504,7 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed attachment text is available. Use attached image or PDF evidence if present, but do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+        'No parsed attachment text is available. Use attached image evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
       ),
       userMessageContent,
     })
