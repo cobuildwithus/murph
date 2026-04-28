@@ -81,6 +81,7 @@ function expectVitestSpawnCall(): void {
     "run",
     "--config",
     "apps/cloudflare/vitest.e2e.config.ts",
+    "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
     "apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts",

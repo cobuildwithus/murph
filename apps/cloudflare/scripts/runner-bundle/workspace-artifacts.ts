@@ -136,7 +136,7 @@ export function buildHostedRunnerWorkspaceBuildArgs(
   return [
     `--workspace-concurrency=${resolvePositiveIntegerEnv(
       env.MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY,
-      "4",
+      "1",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY",
     )}`,
     ...packageNames.flatMap((packageName) => ["--filter", packageName]),
