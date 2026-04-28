@@ -31,7 +31,7 @@ import type {
   AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
 import {
-  AssistantActiveTurnInputUnavailableError,
+  AssistantActiveTurnInputCheckpointRejectedError,
 } from "@murphai/assistant-engine";
 import type {
   HostedRuntimeEvent,
@@ -42,6 +42,7 @@ import {
 } from "../src/hosted-runtime/turn-input.ts";
 import {
   HostedMailboxImportCheckpointUserMismatchError,
+  HostedMailboxImportCheckpointConflictError,
 } from "../src/hosted-runtime/mailbox-checkpoint.ts";
 import type {
   HostedRuntimeActiveTurnInputCheckpoint,
@@ -276,7 +277,7 @@ describe("createHostedAssistantTurnInputPort", () => {
     });
   });
 
-  it("normalizes hosted active-turn checkpoint failures to engine unavailable errors", async () => {
+  it("normalizes hosted active-turn checkpoint failures to engine checkpoint rejection errors", async () => {
     const basePort: AssistantTurnInputPort = {
       async refresh() {
         return {
@@ -314,7 +315,58 @@ describe("createHostedAssistantTurnInputPort", () => {
         turnId: "turn_123",
         vault: "/tmp/vault-root",
       }),
-    ).rejects.toBeInstanceOf(AssistantActiveTurnInputUnavailableError);
+    ).rejects.toBeInstanceOf(AssistantActiveTurnInputCheckpointRejectedError);
+  });
+
+  it("normalizes hosted active-turn checkpoint conflicts to engine checkpoint rejection errors", async () => {
+    const basePort: AssistantTurnInputPort = {
+      async refresh() {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      },
+      async listNewConversationCaptures(input) {
+        return {
+          captures: [],
+          nextCursor: input.afterCursor,
+        };
+      },
+    };
+    const checkpointActiveTurnInput = vi.fn(async () => {
+      throw new HostedMailboxImportCheckpointConflictError({
+        checkpointed: false,
+        workspace: {
+          createdAt: "2026-04-23T00:00:00.000Z",
+          checkpointedAt: "2026-04-23T00:00:01.000Z",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-04-23T00:00:01.000Z",
+          userId: "member_123",
+          version: "2",
+        },
+      });
+    });
+    const port = createPort({
+      activeTurnInputCheckpoint: checkpointActiveTurnInput,
+      activeTurnInputRefresh: vi.fn(async () => ({
+        progressed: false,
+        reason: "no_new_input" as const,
+      })),
+      basePort,
+    });
+
+    await expect(
+      port?.checkpointAcceptedInput?.({
+        acceptedInputIds: ["request-1"],
+        providerRequestOrdinal: 0,
+        sessionId: "session_123",
+        turnId: "turn_123",
+        vault: "/tmp/vault-root",
+      }),
+    ).rejects.toBeInstanceOf(AssistantActiveTurnInputCheckpointRejectedError);
   });
 
   it("runs the hosted mailbox refresh during active turn input admission before listing captures", async () => {

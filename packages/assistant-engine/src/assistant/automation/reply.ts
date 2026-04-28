@@ -23,6 +23,7 @@ import {
   AssistantActiveTurnInputBudgetExceededError,
   AssistantActiveTurnInputUnavailableError,
   isAssistantActiveTurnInputBudgetExceededError,
+  isAssistantActiveTurnInputCheckpointRejectedError,
   isAssistantActiveTurnInputUnavailableError,
   type AssistantActiveTurnInputCheckpointHook,
   type AssistantActiveTurnInputAdmissionHook,
@@ -353,6 +354,10 @@ export async function processAssistantAutoReplyGroup(input: {
       vault: input.vault,
     })
   } catch (error) {
+    if (isAssistantActiveTurnInputCheckpointRejectedError(error)) {
+      throw error
+    }
+
     if (
       isAssistantActiveTurnInputBudgetExceededError(error) ||
       isAssistantActiveTurnInputUnavailableError(error)

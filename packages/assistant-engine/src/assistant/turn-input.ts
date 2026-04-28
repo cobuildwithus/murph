@@ -126,6 +126,17 @@ export class AssistantActiveTurnInputUnavailableError extends
   }
 }
 
+export class AssistantActiveTurnInputCheckpointRejectedError extends
+  AssistantActiveTurnInputUnavailableError {
+  constructor(message?: string) {
+    super(
+      message ??
+        'Active turn input checkpoint was rejected; retry from the last durable checkpoint.',
+    )
+    this.name = 'AssistantActiveTurnInputCheckpointRejectedError'
+  }
+}
+
 export function isAssistantActiveTurnInputBudgetExceededError(
   value: unknown,
 ): value is AssistantActiveTurnInputBudgetExceededError {
@@ -143,6 +154,16 @@ export function isAssistantActiveTurnInputUnavailableError(
     value instanceof AssistantActiveTurnInputUnavailableError ||
     (value instanceof Error &&
       value.name === 'AssistantActiveTurnInputUnavailableError')
+  )
+}
+
+export function isAssistantActiveTurnInputCheckpointRejectedError(
+  value: unknown,
+): value is AssistantActiveTurnInputCheckpointRejectedError {
+  return (
+    value instanceof AssistantActiveTurnInputCheckpointRejectedError ||
+    (value instanceof Error &&
+      value.name === 'AssistantActiveTurnInputCheckpointRejectedError')
   )
 }
 

@@ -15,6 +15,7 @@ import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-c
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   AssistantActiveTurnInputBudgetExceededError,
+  AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
   type AssistantTurnConversationCaptureQuery,
 } from '../src/assistant/turn-input.ts'
@@ -3603,6 +3604,90 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: true,
     })
+    expect(checkpointAcceptedInput).toHaveBeenCalledTimes(1)
+    expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
+    expect(replyMocks.writeAssistantAutoReplyGroupOutcomeArtifact).not.toHaveBeenCalled()
+  })
+
+  it('aborts when active-turn checkpoint rejection means local admission work cannot be committed', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
+        createShowResult(
+          createCaptureDetail({
+            captureId: input.captureId,
+            occurredAt: '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const checkpointRejected = new AssistantActiveTurnInputCheckpointRejectedError(
+      'Active turn input checkpoint was rejected; retry from durable state.',
+    )
+    const checkpointAcceptedInput = vi.fn(async () => {
+      throw checkpointRejected
+    })
+    const turnInputPort = {
+      checkpointAcceptedInput,
+      async refresh() {
+        return {
+          progressed: false,
+          reason: 'no_new_input' as const,
+        }
+      },
+      async listNewConversationCaptures(input: AssistantTurnConversationCaptureQuery) {
+        return {
+          captures: [],
+          nextCursor: input.afterCursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: {
+        acceptedInputIds: readonly string[]
+        providerRequestOrdinal: number
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<void>
+    }) => {
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      throw new Error('expected active-turn checkpoint rejection to abort')
+    })
+
+    await expect(reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      turnInputPort,
+      vault: '/tmp/assistant-automation-vault',
+    })).rejects.toBe(checkpointRejected)
+
     expect(checkpointAcceptedInput).toHaveBeenCalledTimes(1)
     expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
     expect(replyMocks.writeAssistantAutoReplyGroupOutcomeArtifact).not.toHaveBeenCalled()

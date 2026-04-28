@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  AssistantActiveTurnInputCheckpointRejectedError,
   type AssistantTurnInputRefreshResult,
   type AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
@@ -607,6 +608,66 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         hostedMailboxSystemImportedSeq: "0",
         providerRequestOrdinal: 0,
       });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("aborts without a later workspace checkpoint when active-turn admission checkpoint is rejected", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_abort_initial",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      await assert.rejects(
+        runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_runner_rejected_admission",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "5",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem() {
+            return { status: "imported" };
+          },
+          limitPerLane: 10,
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests }),
+          }),
+          requestId: "request_synthetic_runner_rejected_admission",
+          async runAssistantPhase() {
+            throw new AssistantActiveTurnInputCheckpointRejectedError(
+              "Active turn input checkpoint was rejected; retry from durable state.",
+            );
+          },
+          vaultRoot,
+          workspace: createWorkspaceState({ version: "0" }),
+          now: () => TEST_NOW,
+        }),
+        AssistantActiveTurnInputCheckpointRejectedError,
+      );
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+        ["0"],
+      );
     } finally {
       await rm(vaultRoot, {
         force: true,
