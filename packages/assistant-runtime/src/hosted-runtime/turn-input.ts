@@ -26,6 +26,11 @@ export function createHostedAssistantTurnInputPort(input: {
   if (!refreshMailboxForActiveTurnInput && !checkpointActiveTurnInput) {
     return undefined;
   }
+  if (!refreshMailboxForActiveTurnInput || !checkpointActiveTurnInput) {
+    throw new TypeError(
+      "Hosted active-turn input requires both mailbox refresh and acceptance checkpoint ports.",
+    );
+  }
 
   const basePort = createInboxBackedAssistantTurnInputPort({
     inboxServices: input.inboxServices,
@@ -35,10 +40,6 @@ export function createHostedAssistantTurnInputPort(input: {
 
   return {
     async checkpointAcceptedInput(checkpointInput) {
-      if (!checkpointActiveTurnInput) {
-        return;
-      }
-
       await checkpointActiveTurnInput({
         ...checkpointInput,
         requestId: input.requestId,
@@ -51,12 +52,8 @@ export function createHostedAssistantTurnInputPort(input: {
         refreshInput.phase === "after_provider"
         || refreshInput.phase === "commit_barrier"
       ) {
-        const refreshMailbox = refreshMailboxForActiveTurnInput;
-        if (!refreshMailbox) {
-          return basePort.refresh(refreshInput);
-        }
         try {
-          mailboxRefresh = await refreshMailbox({
+          mailboxRefresh = await refreshMailboxForActiveTurnInput({
             requestId: input.requestId,
           });
         } catch (error) {
