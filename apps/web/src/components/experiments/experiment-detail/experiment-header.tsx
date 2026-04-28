@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Button } from "@/src/components/ui/button";
 import type { ExperimentStatus } from "@/src/types/experiments";
 
@@ -44,21 +43,10 @@ export function ExperimentHeader({
   const protocolDay = day == null ? null : Math.max(1, day - baselineDays);
 
   return (
-    <div className="flex flex-col gap-7">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-[13px]/4">
-        <Link href="/experiments" className="text-muted-foreground/70 hover:text-foreground">
-          Experiments
-        </Link>
-        <span className="text-secondary">→</span>
-        <span className="text-muted-foreground">{title}</span>
-      </div>
-
-      {/* Title row with CTA or ring */}
-      <div className="flex items-start justify-between gap-10">
+    <div className="relative z-10 flex flex-col gap-7">
+      <div className="flex flex-col items-stretch gap-6 md:flex-row md:items-start md:justify-between md:gap-10">
         <div className="flex max-w-[700px] flex-col gap-3.5">
-          {/* Metadata line */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <span className="shrink-0 font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
               {category.toUpperCase()}
             </span>
@@ -129,12 +117,10 @@ export function ExperimentHeader({
             )}
           </div>
 
-          {/* Title */}
-          <h1 className="font-serif text-[38px] font-semibold leading-[110%] tracking-[-0.03em] text-foreground">
+          <h1 className="font-serif text-3xl font-semibold leading-[110%] tracking-[-0.03em] text-foreground sm:text-[38px]">
             {title}
           </h1>
 
-          {/* Description */}
           {sanitizedDescription && (
             <p className="text-[16px] leading-[160%] text-muted-foreground">
               {sanitizedDescription}
@@ -142,17 +128,16 @@ export function ExperimentHeader({
           )}
         </div>
 
-        {/* CTA or completion ring */}
         {status === "upcoming" && (
-          <div className="flex shrink-0 flex-col items-center gap-2">
+          <div className="flex flex-col items-stretch gap-2 md:shrink-0 md:items-center">
             <Button
               size="lg"
-              className="rounded-[10px] bg-primary px-12 py-4 text-base font-semibold text-background hover:bg-primary/90"
+              className="rounded-[10px] bg-primary py-4 text-base font-semibold text-background hover:bg-primary/90 md:px-12"
             >
               Start Experiment →
             </Button>
-            <span className="text-[11px]/3.5 text-muted-foreground/70">
-                      {protocolDays}-day protocol
+            <span className="text-center text-[11px]/3.5 text-muted-foreground/70">
+              {protocolDays}-day protocol
             </span>
           </div>
         )}
