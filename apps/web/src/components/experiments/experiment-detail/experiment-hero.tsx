@@ -2,12 +2,11 @@ import Image from "next/image";
 
 interface ExperimentHeroProps {
   image: string;
-  title: string;
 }
 
-export function ExperimentHero({ image, title }: ExperimentHeroProps) {
+export function ExperimentHero({ image }: ExperimentHeroProps) {
   return (
-    <div className="relative -mx-6 -mt-8 h-[340px] w-[calc(100%+3rem)] overflow-hidden md:-mx-14 md:-mt-10 md:w-[calc(100%+7rem)]">
+    <div className="relative h-[180px] w-full overflow-hidden rounded-2xl border border-border/50 md:h-[220px]">
       <Image src={image} alt="" fill className="object-cover" priority />
     </div>
   );

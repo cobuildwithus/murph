@@ -30,7 +30,7 @@ export function DashboardShell({
           </header>
           <main
             className={cn(
-              "flex-1 overflow-y-auto",
+              "flex-1",
               padded && "px-6 py-8 md:px-14 md:py-10",
             )}
           >
