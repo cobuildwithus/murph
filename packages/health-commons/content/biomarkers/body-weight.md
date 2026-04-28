@@ -22,9 +22,13 @@ relations:
   -
     type: related_protocol
     target: protocol_variant:added-sugar-reduction/no-added-sugar-diet
+  -
+    type: related_protocol
+    target: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
 measurementContexts:
   - creatine_self_experiment
   - added_sugar_reduction
+  - prolonged_fasting_context
   - dietary_behavior_tracking
   - manual_checkin
 unit: kg
@@ -51,6 +55,7 @@ biomarker:
       - diet_change
       - sodium_change
       - glycogen_change
+      - recent_meal_or_refeed_timing
       - menstrual_cycle
       - travel
       - new_training_volume
@@ -65,3 +70,5 @@ Use the same scale, similar time of day, and similar clothing across baseline an
 ## Interpretation
 
 Body weight is context, not a standalone success signal. In creatine experiments, early increases can reflect water or fat-free-mass changes. In added-sugar-reduction experiments, stable or lower averages may be useful context, but the primary outcome remains added-sugar exposure and adherence rather than weight loss.
+
+In prolonged-fasting experiments, short-term weight changes can mostly reflect food mass, glycogen, fluid shifts, and refeed timing, so they should not be treated as durable fat-loss proof.
