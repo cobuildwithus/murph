@@ -73,7 +73,7 @@ function ExperimentDetailClientContent({
   const [isTabsSticky, setIsTabsSticky] = useState(false);
   useEffect(() => {
     const node = sentinelRef.current;
-    if (!node) return;
+    if (!node || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       ([entry]) => setIsTabsSticky(!entry.isIntersecting),
       { rootMargin: "0px 0px 0px 0px", threshold: 0 },

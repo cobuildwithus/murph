@@ -62,6 +62,7 @@ vi.mock("@/src/components/experiments/experiment-detail/safety-section", () => (
 }));
 
 import { ProtocolTab } from "@/src/components/experiments/experiment-detail/protocol-tab";
+import { ResearchTab } from "@/src/components/experiments/experiment-detail/research-tab";
 
 describe("ProtocolTab", () => {
   it("renders the protocol layout without generic step labels or duplicated summary copy", () => {
@@ -77,11 +78,9 @@ describe("ProtocolTab", () => {
     const summaryParagraph = experiment.whyItWorks.split("\n\n")[0]?.trim();
 
     expect(markup).toContain("Run the protocol");
-    expect(markup).toContain("At a glance");
     expect(markup).toContain("Why it works");
-    expect(markup).toContain("Baseline · 7 days");
-    expect(markup).toContain("Protocol · 14 days");
-    expect(markup).toContain('data-progress-percent="33"');
+    expect(markup).toContain("Schedule &amp; dose");
+    expect(markup).toContain("7-day baseline then 14-day protocol");
     expect(markup).not.toContain("days to analysis");
     expect(markup).not.toContain("Total run");
     expect(markup).not.toContain("Protocol window");
@@ -103,6 +102,7 @@ describe("ProtocolTab", () => {
       privateRun: null,
     });
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+    const researchMarkup = renderToStaticMarkup(createElement(ResearchTab, { experiment }));
 
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
@@ -114,10 +114,9 @@ describe("ProtocolTab", () => {
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
     expect(markup).toContain("Sleep Efficiency");
     expect(markup).toContain("Deep Sleep Minutes");
-    expect(markup).toContain("Bottom line");
-    expect(markup).toContain("Best-supported claim");
-    expect(markup).toContain("Confidence · Mixed");
-    expect(markup).not.toContain("Evidence backbone and claim calibration");
+    expect(researchMarkup).toContain("Bottom line");
+    expect(researchMarkup).toContain("Mixed");
+    expect(researchMarkup).not.toContain("Evidence backbone and claim calibration");
     expect(markup).not.toContain("Read these top to bottom");
   });
 
@@ -149,6 +148,7 @@ describe("ProtocolTab", () => {
       privateRun: null,
     });
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+    const researchMarkup = renderToStaticMarkup(createElement(ResearchTab, { experiment }));
 
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
@@ -160,16 +160,16 @@ describe("ProtocolTab", () => {
     expect(markup).not.toContain('data-card="Sleep Efficiency"');
     expect(markup).toContain("Morning Blood Pressure");
     expect(markup).toContain("Sleep Efficiency");
-    expect(markup).toContain("Bottom line");
-    expect(markup).toContain("Best-supported claim");
-    expect(markup).toContain("Confidence · Moderate");
-    expect(markup).toContain("Exact or close 4x4 trials");
-    expect(markup).toContain("Dose, target zone, and implementation");
-    expect(markup).toContain("Broader HIIT and VO2max context");
-    expect(markup).toContain("Clinical lineage and mixed superiority");
-    expect(markup).toContain("Safety boundaries");
-    expect(markup).toContain("Nearby protocols and recovery context");
-    expect(markup).toContain("Read these top to bottom");
+    expect(researchMarkup).toContain("Bottom line");
+    expect(researchMarkup).toContain("best-supported claim");
+    expect(researchMarkup).toContain("Moderate confidence");
+    expect(researchMarkup).toContain("Exact or close 4x4 trials");
+    expect(researchMarkup).toContain("Dose, target zone, and implementation");
+    expect(researchMarkup).toContain("Broader HIIT and VO2max context");
+    expect(researchMarkup).toContain("Clinical lineage and mixed superiority");
+    expect(researchMarkup).toContain("Safety boundaries");
+    expect(researchMarkup).toContain("Nearby protocols and recovery context");
+    expect(researchMarkup).toContain("Read these top to bottom");
   });
 
   it("renders grouped research inside native details cards with source-mix summaries", () => {
@@ -181,9 +181,9 @@ describe("ProtocolTab", () => {
       protocol: protocol!,
       privateRun: null,
     });
-    const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+    const markup = renderToStaticMarkup(createElement(ResearchTab, { experiment }));
 
-    expect(countOccurrences(markup, "<details")).toBe(6);
+    expect(countOccurrences(markup, "group overflow-hidden rounded-xl")).toBe(6);
     expect(countOccurrences(markup, 'open=""')).toBe(2);
     expect(markup).toContain("2 sources · 2 trials");
     expect(markup).toContain("3 sources · 1 physiology study · 1 trial · 1 guidance source");
@@ -239,7 +239,7 @@ describe("ProtocolTab", () => {
       ...baseExperiment,
       researchGroups,
     };
-    const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+    const markup = renderToStaticMarkup(createElement(ResearchTab, { experiment }));
 
     expect(markup).toContain("Short-term signals to watch");
     expect(markup).not.toContain("Synthetic fallback label that should not drive the display mapping");
@@ -257,12 +257,17 @@ describe("ProtocolTab", () => {
       privateRun: null,
     });
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
+    const sleepEfficiencyExpected = experiment.expectedSignals.find(
+      (signal) => signal.label === "Sleep Efficiency",
+    )?.expected;
 
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
     expect(countOccurrences(markup, "data-card=")).toBe(2);
     expect(markup).toContain('data-card="Sleep Efficiency"');
     expect(markup).toContain('data-card="Sleep Onset Latency"');
+    expect(sleepEfficiencyExpected).toBeTruthy();
+    expect(markup).toContain(sleepEfficiencyExpected!);
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
     expect(markup).not.toContain('data-card="HRV / RMSSD"');
     expect(markup).not.toContain('data-card="Resting Heart Rate"');
