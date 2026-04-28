@@ -1,14 +1,18 @@
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantMessageInput } from './service-contracts.js'
-import type { AssistantActiveTurnInputAdmissionResult } from './turn-input.js'
+import type {
+  AssistantActiveTurnInputAdmissionHook,
+  AssistantActiveTurnInputAdmissionInput,
+  AssistantActiveTurnInputAdmissionResult,
+} from './turn-input.js'
 import type { AssistantUserMessageContentPart } from '../model-harness.js'
 import type { AssistantSessionLocator } from './store/types.js'
 import { normalizeNullableString } from './shared.js'
 import { resolveAssistantConversationLookupKey } from './store/paths.js'
 
-type AssistantActiveTurnInputQueueKey = string
+type AssistantActiveTurnInputControllerKey = string
 
-interface AssistantActiveTurnInputQueueKeyInput extends AssistantSessionLocator {
+interface AssistantActiveTurnInputControllerKeyInput extends AssistantSessionLocator {
   conversationKeys?: readonly string[] | null
   vault: string
 }
@@ -30,7 +34,7 @@ type AssistantActiveTurnInputSteerResult =
       kind: 'turn-id-mismatch'
     }
 
-class AssistantActiveTurnInputQueue {
+class AssistantActiveTurnInputController {
   private nextInputOrdinal = 1
   private completionObserved = false
   private closed = false
@@ -39,7 +43,12 @@ class AssistantActiveTurnInputQueue {
   private rejectCompletion!: (error: unknown) => void
   private resolveCompletion!: (result: AssistantAskResult) => void
 
-  constructor(private readonly turnId: string) {
+  constructor(
+    private readonly input: {
+      admissionHook?: AssistantActiveTurnInputAdmissionHook | null
+      turnId: string
+    },
+  ) {
     this.completion = new Promise<AssistantAskResult>((resolve, reject) => {
       this.resolveCompletion = resolve
       this.rejectCompletion = reject
@@ -52,7 +61,7 @@ class AssistantActiveTurnInputQueue {
         kind: 'no-active-turn',
       }
     }
-    if (input.expectedActiveTurnId !== this.turnId) {
+    if (input.expectedActiveTurnId !== this.input.turnId) {
       return {
         kind: 'turn-id-mismatch',
       }
@@ -73,12 +82,26 @@ class AssistantActiveTurnInputQueue {
     this.closed = true
   }
 
-  admit(): AssistantActiveTurnInputAdmissionResult {
+  async admit(
+    input: AssistantActiveTurnInputAdmissionInput,
+  ): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
+    const hookAdmission = await this.input.admissionHook?.(input)
+    if (hookAdmission?.kind === 'accepted') {
+      return hookAdmission
+    }
+
+    const queuedAdmission = this.admitPending()
+    if (queuedAdmission?.kind === 'accepted') {
+      return queuedAdmission
+    }
+
+    return hookAdmission
+  }
+
+  private admitPending(): AssistantActiveTurnInputAdmissionResult | undefined {
     const accepted = this.pending.splice(0)
     if (accepted.length === 0) {
-      return {
-        kind: 'no-new-input',
-      }
+      return undefined
     }
 
     const prompt = accepted
@@ -115,40 +138,46 @@ class AssistantActiveTurnInputQueue {
   }
 }
 
-const activeTurnInputQueues = new Map<
-  AssistantActiveTurnInputQueueKey,
-  AssistantActiveTurnInputQueue
+const activeTurnInputControllers = new Map<
+  AssistantActiveTurnInputControllerKey,
+  AssistantActiveTurnInputController
 >()
 
-export function createAssistantActiveTurnInputQueue(input: {
+export function createAssistantActiveTurnInputController(input: {
+  admissionHook?: AssistantActiveTurnInputAdmissionHook | null
   conversationKeys?: readonly string[] | null
   sessionId: string
   turnId: string
   vault: string
 }): {
-  admit(): AssistantActiveTurnInputAdmissionResult
+  admit(input: AssistantActiveTurnInputAdmissionInput): Promise<
+    AssistantActiveTurnInputAdmissionResult | undefined
+  >
   close(): void
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
 } {
-  const keys = resolveAssistantActiveTurnInputQueueKeys(input)
-  const queue = new AssistantActiveTurnInputQueue(input.turnId)
+  const keys = resolveAssistantActiveTurnInputControllerKeys(input)
+  const controller = new AssistantActiveTurnInputController({
+    admissionHook: input.admissionHook,
+    turnId: input.turnId,
+  })
   for (const key of keys) {
-    activeTurnInputQueues.set(key, queue)
+    activeTurnInputControllers.set(key, controller)
   }
 
   return {
-    admit: () => queue.admit(),
+    admit: (admissionInput) => controller.admit(admissionInput),
     close() {
-      queue.close()
+      controller.close()
       for (const key of keys) {
-        if (activeTurnInputQueues.get(key) === queue) {
-          activeTurnInputQueues.delete(key)
+        if (activeTurnInputControllers.get(key) === controller) {
+          activeTurnInputControllers.delete(key)
         }
       }
     },
-    complete: (result) => queue.complete(result),
-    fail: (error) => queue.fail(error),
+    complete: (result) => controller.complete(result),
+    fail: (error) => controller.fail(error),
   }
 }
 
@@ -164,24 +193,24 @@ export function steerAssistantActiveTurnInputWithStatus(
 ): AssistantActiveTurnInputSteerResult {
   const conversationKey = resolveAssistantConversationLookupKey(input)
   if (conversationKey) {
-    const queue = activeTurnInputQueues.get(formatAssistantActiveTurnInputQueueKey({
+    const controller = activeTurnInputControllers.get(formatAssistantActiveTurnInputControllerKey({
       kind: 'conversation',
       value: conversationKey,
       vault: input.vault,
     }))
-    return queue?.enqueue(input) ?? {
+    return controller?.enqueue(input) ?? {
       kind: 'no-active-turn',
     }
   }
 
   const sessionId = resolveAssistantActiveTurnInputSessionId(input)
   if (sessionId) {
-    const queue = activeTurnInputQueues.get(formatAssistantActiveTurnInputQueueKey({
+    const controller = activeTurnInputControllers.get(formatAssistantActiveTurnInputControllerKey({
       kind: 'session',
       value: sessionId,
       vault: input.vault,
     }))
-    return queue?.enqueue(input) ?? {
+    return controller?.enqueue(input) ?? {
       kind: 'no-active-turn',
     }
   }
@@ -190,13 +219,13 @@ export function steerAssistantActiveTurnInputWithStatus(
   }
 }
 
-function resolveAssistantActiveTurnInputQueueKeys(
-  input: AssistantActiveTurnInputQueueKeyInput,
-): AssistantActiveTurnInputQueueKey[] {
-  const keys: AssistantActiveTurnInputQueueKey[] = []
+function resolveAssistantActiveTurnInputControllerKeys(
+  input: AssistantActiveTurnInputControllerKeyInput,
+): AssistantActiveTurnInputControllerKey[] {
+  const keys: AssistantActiveTurnInputControllerKey[] = []
   const sessionId = resolveAssistantActiveTurnInputSessionId(input)
   if (sessionId) {
-    keys.push(formatAssistantActiveTurnInputQueueKey({
+    keys.push(formatAssistantActiveTurnInputControllerKey({
       kind: 'session',
       value: sessionId,
       vault: input.vault,
@@ -208,7 +237,7 @@ function resolveAssistantActiveTurnInputQueueKeys(
     if (conversationKey === null) {
       continue
     }
-    keys.push(formatAssistantActiveTurnInputQueueKey({
+    keys.push(formatAssistantActiveTurnInputControllerKey({
       kind: 'conversation',
       value: conversationKey,
       vault: input.vault,
@@ -218,7 +247,7 @@ function resolveAssistantActiveTurnInputQueueKeys(
 }
 
 function resolveAssistantActiveTurnInputSessionId(
-  input: Pick<AssistantActiveTurnInputQueueKeyInput, 'conversation' | 'sessionId'>,
+  input: Pick<AssistantActiveTurnInputControllerKeyInput, 'conversation' | 'sessionId'>,
 ): string | null {
   return (
     normalizeNullableString(input.conversation?.sessionId) ??
@@ -226,11 +255,11 @@ function resolveAssistantActiveTurnInputSessionId(
   )
 }
 
-function formatAssistantActiveTurnInputQueueKey(input: {
+function formatAssistantActiveTurnInputControllerKey(input: {
   kind: 'conversation' | 'session'
   value: string
   vault: string
-}): AssistantActiveTurnInputQueueKey {
+}): AssistantActiveTurnInputControllerKey {
   return `${input.vault}\u0000${input.kind}\u0000${input.value}`
 }
 

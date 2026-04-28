@@ -92,9 +92,9 @@ import {
   type AssistantActiveTurnProviderHistory,
 } from './active-turn-history.js'
 import {
-  createAssistantActiveTurnInputQueue,
+  createAssistantActiveTurnInputController,
   steerAssistantActiveTurnInputWithStatus,
-} from './active-turn-input-queue.js'
+} from './active-turn-input-controller.js'
 import { normalizeNullableString } from './shared.js'
 import type {
   AssistantMessageInput,
@@ -277,22 +277,21 @@ export async function sendAssistantMessageLocal(
         session: resolved.session,
         sharedPlan,
       })
-      let activeTurnInputQueue: ReturnType<
-        typeof createAssistantActiveTurnInputQueue
+      let activeTurnInputController: ReturnType<
+        typeof createAssistantActiveTurnInputController
       > | null = null
 
       try {
-        activeTurnInputQueue = isManualAssistantTurnTrigger(input.turnTrigger)
-          ? createAssistantActiveTurnInputQueue({
-              conversationKeys: [
-                resolved.session.binding.conversationKey,
-                resolveAssistantConversationLookupKey(input),
-              ].filter((key): key is string => key !== null),
-              sessionId: resolved.session.sessionId,
-              turnId: receipt.turnId,
-              vault: input.vault,
-            })
-          : null
+        activeTurnInputController = createAssistantActiveTurnInputController({
+          admissionHook: input.activeTurnInput,
+          conversationKeys: [
+            resolved.session.binding.conversationKey,
+            resolveAssistantConversationLookupKey(input),
+          ].filter((key): key is string => key !== null),
+          sessionId: resolved.session.sessionId,
+          turnId: receipt.turnId,
+          vault: input.vault,
+        })
         userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
         let currentUserTurn = userTurn
         const runtimeState = createAssistantRuntimeStateService(input.vault)
@@ -387,7 +386,7 @@ export async function sendAssistantMessageLocal(
           for (const phase of ['request_boundary', 'commit_barrier'] as const) {
             const activeTurnInput =
               await resolveAssistantActiveTurnInputAdmission({
-                activeTurnInputQueue,
+                activeTurnInputController,
                 currentInput,
                 phase,
                 providerRequestOrdinal,
@@ -396,7 +395,7 @@ export async function sendAssistantMessageLocal(
             })
             if (activeTurnInput?.kind !== 'accepted') {
               if (activeTurnInput && phase === 'commit_barrier') {
-                activeTurnInputQueue?.close()
+                activeTurnInputController.close()
                 await currentInput.activeTurnCheckpoint?.({
                   acceptedInputIds: [],
                   providerRequestOrdinal,
@@ -513,7 +512,7 @@ export async function sendAssistantMessageLocal(
           throw new Error('Assistant provider turn did not produce a result.')
         }
 
-        activeTurnInputQueue?.close()
+        activeTurnInputController.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
           admissionState: 'commit-started',
           turnId: currentUserTurn.turnId,
@@ -568,10 +567,10 @@ export async function sendAssistantMessageLocal(
               ? deliveryOutcome.error
               : null,
         })
-        activeTurnInputQueue?.complete(result)
+        activeTurnInputController.complete(result)
         return result
       } catch (error) {
-        activeTurnInputQueue?.fail(error)
+        activeTurnInputController?.fail(error)
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
         const retryAt =
@@ -633,7 +632,7 @@ export async function sendAssistantMessageLocal(
 
         throw error
       } finally {
-        activeTurnInputQueue?.close()
+        activeTurnInputController?.close()
         await stopAssistantChannelTypingIndicator(typingIndicator)
         await runAssistantTurnBestEffort(() =>
           refreshAssistantStatusSnapshotLocal(input.vault),
@@ -691,8 +690,8 @@ async function runAssistantTurnBestEffort(
 }
 
 async function resolveAssistantActiveTurnInputAdmission(input: {
-  activeTurnInputQueue: ReturnType<
-    typeof createAssistantActiveTurnInputQueue
+  activeTurnInputController: ReturnType<
+    typeof createAssistantActiveTurnInputController
   > | null
   currentInput: AssistantMessageInput
   phase: 'request_boundary' | 'commit_barrier'
@@ -700,7 +699,7 @@ async function resolveAssistantActiveTurnInputAdmission(input: {
   providerResult: ExecutedAssistantProviderTurnResult
   userTurn: PersistedUserTurn
 }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-  const hookAdmission = await input.currentInput.activeTurnInput?.({
+  return input.activeTurnInputController?.admit({
     phase: input.phase,
     providerRequestOrdinal: input.providerRequestOrdinal,
     response: input.providerResult.response,
@@ -708,16 +707,6 @@ async function resolveAssistantActiveTurnInputAdmission(input: {
     turnId: input.userTurn.turnId,
     vault: input.currentInput.vault,
   })
-  if (hookAdmission?.kind === 'accepted') {
-    return hookAdmission
-  }
-
-  const queuedAdmission = input.activeTurnInputQueue?.admit()
-  if (queuedAdmission?.kind === 'accepted') {
-    return queuedAdmission
-  }
-
-  return hookAdmission
 }
 
 function resolveInitialAcceptedTurnInputItems(input: {
