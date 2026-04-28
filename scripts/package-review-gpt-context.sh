@@ -49,4 +49,5 @@ append_audit_context_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
   "packages/health-commons/content/**" \
   "packages/health-commons/generated/**"
 
-exec "$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@"
+"$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@" \
+  2> >(sed '/^Warning: excluding path from audit package: /d' >&2)
