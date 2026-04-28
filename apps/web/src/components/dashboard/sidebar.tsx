@@ -52,7 +52,7 @@ const sidebarThemeStyle = {
 
 function BrandMark() {
   return (
-    <Link href="/overview" className="flex items-center px-2 py-1">
+    <Link href="/experiments" className="flex items-center px-2 py-1">
       <Image
         src="/logo-dark.svg"
         alt="Murph"

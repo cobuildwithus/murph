@@ -79,7 +79,7 @@ test("renders the RHR biomarker page with privacy-safe copy and one protocol CTA
     markup,
     /Ranking model deterministic-v0 balances evidence, biomarker relevance, wearable measurability, burden, and safety caution\./,
   );
-  assert.match(markup, /href="\/overview">Murph<\/a>/);
+  assert.match(markup, /href="\/experiments">Murph<\/a>/);
   assert.doesNotMatch(markup, /evidenceWeight \* 3/);
   assert.doesNotMatch(markup, /<main/u);
   assert.equal(viewProtocolCount, biomarker.protocolRankings.length);

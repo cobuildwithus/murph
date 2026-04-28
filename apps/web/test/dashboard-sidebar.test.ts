@@ -91,6 +91,8 @@ test("Sidebar does not render the Overview page as a navigation item", () => {
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
+  assert.match(markup, /href="\/experiments"[^>]*>\s*<img[^>]*alt="Murph"/);
+  assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
 });
 
