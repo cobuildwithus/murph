@@ -93,6 +93,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async importItem(item) {
           events.push(`import:${item.item.laneSeq}`);
           return {
+            afterCheckpointBeforeAssistant: async () => {
+              events.push("mailbox:beforeAssistant");
+            },
             afterCheckpoint: async () => {
               events.push("mailbox:afterCheckpoint");
             },
@@ -128,6 +131,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(events, [
         "import:1",
         "checkpoint:import",
+        "mailbox:beforeAssistant",
         "assistant",
         "mailbox:afterCheckpoint",
       ]);
@@ -213,6 +217,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             async importItem(item) {
               events.push(`import:${item.item.laneSeq}`);
               return {
+                afterCheckpointBeforeAssistant: async () => {
+                  events.push("mailbox:beforeAssistant");
+                },
                 afterCheckpoint: async () => {
                   events.push("mailbox:afterCheckpoint");
                 },
@@ -238,6 +245,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
+        "mailbox:beforeAssistant",
         "assistant",
         "mailbox:afterCheckpoint",
       ]);

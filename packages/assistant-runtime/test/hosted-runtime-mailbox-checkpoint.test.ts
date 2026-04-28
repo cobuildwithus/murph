@@ -181,6 +181,9 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         async importItem() {
           order.push("import");
           return {
+            afterCheckpointBeforeAssistant: async () => {
+              order.push("beforeAssistant");
+            },
             afterCheckpoint: async () => {
               order.push("afterCheckpoint");
             },
@@ -197,9 +200,12 @@ describe("hosted mailbox import checkpoint wrapper", () => {
 
       assert.equal(result.stateChanged, true);
       assert.deepEqual(order, ["import", "checkpoint"]);
+      assert.equal(result.afterCheckpointBeforeAssistantEffects.length, 1);
       assert.equal(result.afterCheckpointEffects.length, 1);
+      await result.afterCheckpointBeforeAssistantEffects[0]?.();
+      assert.deepEqual(order, ["import", "checkpoint", "beforeAssistant"]);
       await result.afterCheckpointEffects[0]?.();
-      assert.deepEqual(order, ["import", "checkpoint", "afterCheckpoint"]);
+      assert.deepEqual(order, ["import", "checkpoint", "beforeAssistant", "afterCheckpoint"]);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -257,6 +263,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
 
       assert.equal(result.stateChanged, true);
       assert.equal(effectRan, false);
+      assert.equal(result.afterCheckpointBeforeAssistantEffects.length, 0);
       assert.equal(result.afterCheckpointEffects.length, 1);
       assert.equal(result.state.watermarks.conversation, "1");
       assert.equal(

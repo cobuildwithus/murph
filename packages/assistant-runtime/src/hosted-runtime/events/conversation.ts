@@ -46,6 +46,7 @@ export async function ingestHostedConversationMessageWake(input: {
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
+  await result.afterCheckpoint?.();
   return result.metrics;
 }
 

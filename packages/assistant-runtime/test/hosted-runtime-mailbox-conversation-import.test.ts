@@ -106,6 +106,7 @@ describe("hosted mailbox conversation import adapter", () => {
       nextWakeAt: null,
       parserProcessed: 0,
     });
+    assert.equal(outcome.afterCheckpointBeforeAssistant, undefined);
     assert.equal(typeof outcome.afterCheckpoint, "function");
     await outcome.afterCheckpoint?.();
     expect(afterCheckpoint).toHaveBeenCalledTimes(1);
@@ -154,8 +155,9 @@ describe("hosted mailbox conversation import adapter", () => {
 
     assert.equal(outcome.status, "imported");
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
-    assert.equal(typeof outcome.afterCheckpoint, "function");
-    await outcome.afterCheckpoint?.();
+    assert.equal(outcome.afterCheckpoint, undefined);
+    assert.equal(typeof outcome.afterCheckpointBeforeAssistant, "function");
+    await outcome.afterCheckpointBeforeAssistant?.();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
         nextWakeAt: null,
@@ -203,7 +205,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    await assert.doesNotReject(async () => outcome.afterCheckpoint?.());
+    await assert.doesNotReject(async () => outcome.afterCheckpointBeforeAssistant?.());
   });
 
   test("reports deterministic local-capture dedupe as a skipped import without hosted cursor terms", async () => {

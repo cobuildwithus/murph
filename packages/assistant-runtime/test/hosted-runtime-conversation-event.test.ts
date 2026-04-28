@@ -287,7 +287,17 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
-    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
+    expect(mocks.markLinqChatRead).toHaveBeenCalledTimes(1);
+    expect(mocks.markLinqChatRead).toHaveBeenCalledWith(
+      {
+        chatId: "chat_123",
+      },
+      expect.objectContaining({
+        env: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      }),
+    );
     expect(pipelineClose).toHaveBeenCalledTimes(3);
     expect(linqMetrics).toEqual({
       nextWakeAt: null,

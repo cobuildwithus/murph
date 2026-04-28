@@ -92,6 +92,7 @@ export type HostedConversationMailboxProviderCleanupRecorder = (input: {
 export type HostedConversationMailboxImportOutcome =
   | {
       afterCheckpoint?: (() => Promise<void>) | null;
+      afterCheckpointBeforeAssistant?: (() => Promise<void>) | null;
       captureId: string | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: null;
@@ -99,6 +100,7 @@ export type HostedConversationMailboxImportOutcome =
     }
   | {
       afterCheckpoint?: (() => Promise<void>) | null;
+      afterCheckpointBeforeAssistant?: (() => Promise<void>) | null;
       captureId: string | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode: "capture.deduped";
@@ -213,8 +215,7 @@ export async function importHostedConversationMailboxItem(input: {
     throw error;
   }
   const linqProviderMessageId = resolveHostedConversationProviderCleanupMessageId(decoded.wake);
-  const afterCheckpoint = composeHostedConversationMailboxAfterCheckpointEffects(
-    imported.afterCheckpoint,
+  const afterCheckpointBeforeAssistant = composeHostedConversationMailboxAfterCheckpointEffects(
     linqProviderMessageId
       ? async () => {
           try {
@@ -245,7 +246,8 @@ export async function importHostedConversationMailboxItem(input: {
 
   if (imported.deduped) {
     return {
-      ...(afterCheckpoint ? { afterCheckpoint } : {}),
+      ...(imported.afterCheckpoint ? { afterCheckpoint: imported.afterCheckpoint } : {}),
+      ...(afterCheckpointBeforeAssistant ? { afterCheckpointBeforeAssistant } : {}),
       captureId: imported.captureId,
       metrics: imported.metrics,
       reasonCode: "capture.deduped",
@@ -254,7 +256,8 @@ export async function importHostedConversationMailboxItem(input: {
   }
 
   return {
-    ...(afterCheckpoint ? { afterCheckpoint } : {}),
+    ...(imported.afterCheckpoint ? { afterCheckpoint: imported.afterCheckpoint } : {}),
+    ...(afterCheckpointBeforeAssistant ? { afterCheckpointBeforeAssistant } : {}),
     captureId: imported.captureId,
     metrics: imported.metrics,
     status: "imported",
@@ -289,10 +292,9 @@ async function importHostedConversationWakeWithLocalInbox(input: {
 }
 
 function composeHostedConversationMailboxAfterCheckpointEffects(
-  first: (() => Promise<void>) | null | undefined,
-  second: (() => Promise<void>) | null | undefined,
+  ...candidates: Array<(() => Promise<void>) | null | undefined>
 ): (() => Promise<void>) | null {
-  const effects = [first, second].filter(
+  const effects = candidates.filter(
     (effect): effect is () => Promise<void> => typeof effect === "function",
   );
   if (effects.length === 0) {
