@@ -505,12 +505,27 @@ test('sendAssistantMessageLocal admits active-turn input and continues inside on
   assert.equal(result.response, 'final after late input')
 })
 
-test('sendAssistantMessageLocal steers explicit same-session input into an active manual turn', async () => {
-  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
+test('sendAssistantMessageLocal steers same-conversation input into an active manual turn', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
       ...createSharedPlan(),
       persistUserPromptOnFailure: false,
     },
+    session,
   })
   const firstProviderTurn = createDeferred<Awaited<
     ReturnType<typeof mocks.executeProviderTurnWithRecovery>
@@ -536,7 +551,9 @@ test('sendAssistantMessageLocal steers explicit same-session input into an activ
 
   const steeredResultPromise = sendAssistantMessageLocal({
     conversation: {
-      sessionId: session.sessionId,
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
     },
     prompt: 'Follow-up while running',
     vault: '/vaults/test',
@@ -573,6 +590,218 @@ test('sendAssistantMessageLocal steers explicit same-session input into an activ
       source: 'manual',
     }),
   ])
+})
+
+test('active-turn queue only steers exact conversations while open', async () => {
+  const {
+    createAssistantActiveTurnInputQueue,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-queue.ts')
+  const queue = createAssistantActiveTurnInputQueue({
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    vault: '/vaults/test',
+  })
+  try {
+    assert.equal(
+      steerAssistantActiveTurnInput({
+        conversation: {
+          channel: 'telegram',
+          identityId: 'identity-1',
+          sessionId: 'session-test',
+          threadId: 'thread-2',
+        },
+        prompt: 'Different thread',
+        sessionId: 'session-test',
+        vault: '/vaults/test',
+      }),
+      null,
+    )
+
+    const steered = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      prompt: 'Same thread',
+      vault: '/vaults/test',
+    })
+    assert.ok(steered)
+    steered.catch(() => undefined)
+    assert.deepEqual(queue.admit(), {
+      acceptedInputs: [
+        {
+          id: 'manual-1',
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: 'Same thread',
+          source: 'manual',
+        },
+      ],
+      deliveryReplyToMessageId: undefined,
+      kind: 'accepted',
+      prompt: 'Same thread',
+      transcriptText: null,
+      userMessageContent: [
+        {
+          text: 'Same thread',
+          type: 'text',
+        },
+      ],
+    })
+
+    const sessionOnlyQueue = createAssistantActiveTurnInputQueue({
+      sessionId: 'session-other',
+      vault: '/vaults/test',
+    })
+    try {
+      const sessionSteered = steerAssistantActiveTurnInput({
+        conversation: {
+          sessionId: ' ',
+        },
+        prompt: 'Session fallback',
+        sessionId: 'session-other',
+        vault: '/vaults/test',
+      })
+      assert.ok(sessionSteered)
+      sessionSteered.catch(() => undefined)
+      assert.deepEqual(sessionOnlyQueue.admit(), {
+        acceptedInputs: [
+          {
+            id: 'manual-1',
+            promptFallbackReason: 'manual-input',
+            promptFallbackText: 'Session fallback',
+            source: 'manual',
+          },
+        ],
+        deliveryReplyToMessageId: undefined,
+        kind: 'accepted',
+        prompt: 'Session fallback',
+        transcriptText: null,
+        userMessageContent: [
+          {
+            text: 'Session fallback',
+            type: 'text',
+          },
+        ],
+      })
+    } finally {
+      sessionOnlyQueue.fail(new Error('session-only queue test complete'))
+      sessionOnlyQueue.close()
+    }
+
+    queue.close()
+    assert.equal(
+      steerAssistantActiveTurnInput({
+        conversation: {
+          channel: 'telegram',
+          identityId: 'identity-1',
+          threadId: 'thread-1',
+        },
+        prompt: 'After commit',
+        vault: '/vaults/test',
+      }),
+      null,
+    )
+  } finally {
+    queue.fail(new Error('active-turn queue test complete'))
+    queue.close()
+  }
+})
+
+test('sendAssistantMessageLocal closes steering before commit checkpoint work starts', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const commitCheckpointStarted = createDeferred<void>()
+  const commitCheckpointRelease = createDeferred<void>()
+  const activeTurnInput = vi.fn(async () => ({
+    kind: 'no-new-input' as const,
+  }))
+  const activeTurnCheckpoint = vi.fn(
+    async (input: AssistantActiveTurnInputCheckpointInput) => {
+      if (
+        input.providerRequestOrdinal === 0 &&
+        input.acceptedInputIds.length === 0
+      ) {
+        commitCheckpointStarted.resolve()
+        await commitCheckpointRelease.promise
+      }
+    },
+  )
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...createSharedPlan(),
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+  mocks.executeProviderTurnWithRecovery
+    .mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        response: 'first response',
+        session,
+      },
+    })
+    .mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        response: 'second response',
+        session,
+      },
+    })
+  mocks.finalizeAssistantTurnArtifacts.mockResolvedValue(session)
+
+  const firstResultPromise = sendAssistantMessageLocal({
+    activeTurnCheckpoint,
+    activeTurnInput,
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await commitCheckpointStarted.promise
+  assert.equal(mocks.finalizeAssistantTurnArtifacts.mock.calls.length, 0)
+  assert.equal(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock.calls.length,
+    0,
+  )
+
+  const secondResult = await sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    prompt: 'Arrived after commit barrier',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(secondResult.response, 'second response')
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 2)
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    'Arrived after commit barrier',
+  )
+
+  commitCheckpointRelease.resolve()
+  const firstResult = await firstResultPromise
+  assert.equal(firstResult.response, 'first response')
+  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.equal(activeTurnCheckpoint.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {

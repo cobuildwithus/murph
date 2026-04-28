@@ -2,9 +2,16 @@ import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-
 import type { AssistantMessageInput } from './service-contracts.js'
 import type { AssistantActiveTurnInputAdmissionResult } from './turn-input.js'
 import type { AssistantUserMessageContentPart } from '../model-harness.js'
+import type { AssistantSessionLocator } from './store/types.js'
 import { normalizeNullableString } from './shared.js'
+import { resolveAssistantConversationLookupKey } from './store/paths.js'
 
 type AssistantActiveTurnInputQueueKey = string
+
+interface AssistantActiveTurnInputQueueKeyInput extends AssistantSessionLocator {
+  conversationKeys?: readonly string[] | null
+  vault: string
+}
 
 interface QueuedAssistantActiveTurnInput {
   id: string
@@ -84,6 +91,7 @@ const activeTurnInputQueues = new Map<
 >()
 
 export function createAssistantActiveTurnInputQueue(input: {
+  conversationKeys?: readonly string[] | null
   sessionId: string
   vault: string
 }): {
@@ -92,15 +100,19 @@ export function createAssistantActiveTurnInputQueue(input: {
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
 } {
-  const key = resolveAssistantActiveTurnInputQueueKey(input)
+  const keys = resolveAssistantActiveTurnInputQueueKeys(input)
   const queue = new AssistantActiveTurnInputQueue()
-  activeTurnInputQueues.set(key, queue)
+  for (const key of keys) {
+    activeTurnInputQueues.set(key, queue)
+  }
 
   return {
     admit: () => queue.admit(),
     close() {
-      if (activeTurnInputQueues.get(key) === queue) {
-        activeTurnInputQueues.delete(key)
+      for (const key of keys) {
+        if (activeTurnInputQueues.get(key) === queue) {
+          activeTurnInputQueues.delete(key)
+        }
       }
     },
     complete: (result) => queue.complete(result),
@@ -111,34 +123,75 @@ export function createAssistantActiveTurnInputQueue(input: {
 export function steerAssistantActiveTurnInput(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> | null {
-  const sessionId = resolveAssistantActiveTurnInputSessionId(input)
-  if (!sessionId) {
-    return null
+  const conversationKey = resolveAssistantConversationLookupKey(input)
+  if (conversationKey) {
+    return (
+      activeTurnInputQueues
+        .get(formatAssistantActiveTurnInputQueueKey({
+          kind: 'conversation',
+          value: conversationKey,
+          vault: input.vault,
+        }))
+        ?.enqueue(input) ?? null
+    )
   }
 
-  const queue = activeTurnInputQueues.get(
-    resolveAssistantActiveTurnInputQueueKey({
-      sessionId,
-      vault: input.vault,
-    }),
-  )
-  return queue?.enqueue(input) ?? null
+  const sessionId = resolveAssistantActiveTurnInputSessionId(input)
+  return sessionId
+    ? (
+        activeTurnInputQueues
+          .get(formatAssistantActiveTurnInputQueueKey({
+            kind: 'session',
+            value: sessionId,
+            vault: input.vault,
+          }))
+          ?.enqueue(input) ?? null
+      )
+    : null
 }
 
-function resolveAssistantActiveTurnInputQueueKey(input: {
-  sessionId: string
-  vault: string
-}): AssistantActiveTurnInputQueueKey {
-  return `${input.vault}\u0000${input.sessionId}`
+function resolveAssistantActiveTurnInputQueueKeys(
+  input: AssistantActiveTurnInputQueueKeyInput,
+): AssistantActiveTurnInputQueueKey[] {
+  const keys: AssistantActiveTurnInputQueueKey[] = []
+  const sessionId = resolveAssistantActiveTurnInputSessionId(input)
+  if (sessionId) {
+    keys.push(formatAssistantActiveTurnInputQueueKey({
+      kind: 'session',
+      value: sessionId,
+      vault: input.vault,
+    }))
+  }
+  const conversationKeys =
+    input.conversationKeys ?? [resolveAssistantConversationLookupKey(input)]
+  for (const conversationKey of conversationKeys) {
+    if (conversationKey === null) {
+      continue
+    }
+    keys.push(formatAssistantActiveTurnInputQueueKey({
+      kind: 'conversation',
+      value: conversationKey,
+      vault: input.vault,
+    }))
+  }
+  return [...new Set(keys)]
 }
 
 function resolveAssistantActiveTurnInputSessionId(
-  input: AssistantMessageInput,
+  input: Pick<AssistantActiveTurnInputQueueKeyInput, 'conversation' | 'sessionId'>,
 ): string | null {
   return (
     normalizeNullableString(input.conversation?.sessionId) ??
     normalizeNullableString(input.sessionId)
   )
+}
+
+function formatAssistantActiveTurnInputQueueKey(input: {
+  kind: 'conversation' | 'session'
+  value: string
+  vault: string
+}): AssistantActiveTurnInputQueueKey {
+  return `${input.vault}\u0000${input.kind}\u0000${input.value}`
 }
 
 function buildQueuedActiveTurnUserMessageContent(
