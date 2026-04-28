@@ -148,19 +148,19 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: Silent meditation may lower rumination and sleep effort before bed. If the mind is less activated, falling asleep can feel easier.
+    description: Silent meditation may lower rumination and sleep effort before bed. If the mind is less busy, falling asleep can feel easier.
   -
     biomarkerKey: biomarker:sleep-efficiency
     description: If meditation reduces the restless start of the night or bedtime rumination, more time in bed may be spent asleep.
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: Deep sleep is a downstream signal here. It might improve only if the practice first improves sleep continuity or reduces early-night disruption.
+    description: Deep sleep is downstream. It might improve only if the practice first improves sleep continuity or reduces early-night disruption.
   -
     biomarkerKey: biomarker:hrv-rmssd
     description: Lower pre-sleep arousal may ease overnight strain. HRV could rise or stabilize if the practice helps recovery rather than adding effort.
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: A calmer pre-bed state may reduce overnight load. Resting heart rate might drift lower if sleep becomes less effortful and more settled.
+    description: A calmer pre-bed state may lower overnight load. Resting heart rate might drift lower if sleep becomes less effortful and more settled.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

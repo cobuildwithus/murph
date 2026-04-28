@@ -635,13 +635,13 @@ expectedSignalDescriptions:
   description: "Repeated back-of-leg holds can increase tolerated reach and range of motion. Fingertips may move closer to the floor over the run."
 -
   biomarkerKey: biomarker:sit-and-reach-distance
-  description: "Hamstring and posterior-chain stretching can make the seated reach position more tolerable. Sit-and-reach distance may improve if that target area is trained."
+  description: "Hamstring and back-of-leg stretching can make the seated reach position more tolerable. Sit-and-reach distance may improve if that target area is trained."
 -
   biomarkerKey: biomarker:ankle-knee-to-wall-distance
   description: "Calf and ankle holds can increase how far the ankle bends forward. Knee-to-wall distance may rise when the ankle target is part of the routine."
 -
   biomarkerKey: biomarker:shoulder-reach-distance
-  description: "Shoulder, chest, or upper-back holds can change the selected reach pattern. The shoulder measure may improve when the same side and reach are trained."
+  description: "Shoulder, chest, or upper-back holds can change the selected reach pattern. The measure may improve when the same side and reach are trained."
 -
   biomarkerKey: biomarker:perceived-stiffness
   description: "Gentle repeated holds can change stretch sensation and reduce the feeling of tightness. This may improve even when measured range changes only a little."
@@ -650,7 +650,7 @@ expectedSignalDescriptions:
   description: "A short home routine lowers setup cost and makes repeated exposure easier. Completed sessions may increase when the routine feels manageable."
 -
   biomarkerKey: biomarker:stretching-session-burden
-  description: "The protocol uses simple self-applied holds, which can keep hassle low. Burden may still rise if too many target areas are included."
+  description: "Simple self-guided holds can keep hassle low. It can still feel like too much if too many target areas are included."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

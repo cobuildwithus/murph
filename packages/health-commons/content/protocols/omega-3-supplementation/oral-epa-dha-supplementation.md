@@ -551,16 +551,16 @@ testPlans:
 expectedSignalDescriptions:
 -
   biomarkerKey: biomarker:omega-3-index
-  description: EPA/DHA supplements can raise red-blood-cell EPA and DHA over weeks when intake is consistent. This is the clearest exposure signal for the protocol.
+  description: EPA/DHA supplements can raise EPA and DHA in red blood cells over weeks when intake is consistent. This is the clearest dose signal for the protocol.
 -
   biomarkerKey: biomarker:fasting-triglycerides
-  description: EPA/DHA can lower fasting triglycerides in some people, especially when baseline triglycerides are elevated. The likely path is altered liver fat handling and fewer triglyceride-rich particles.
+  description: EPA/DHA can lower fasting triglycerides in some people, especially when baseline triglycerides are high. The likely path is liver fat handling and fewer particles carrying triglycerides.
 -
   biomarkerKey: biomarker:ldl-cholesterol
-  description: EPA/DHA can move LDL-C differently by dose, baseline lipids, and EPA/DHA mix. DHA-heavy or higher-dose contexts may raise LDL-C in some evidence, so this is a watch signal.
+  description: EPA/DHA can move LDL-C differently by dose, baseline lipids, and EPA/DHA mix. Some DHA-heavy or higher-dose contexts may raise LDL-C, so a rise would matter.
 -
   biomarkerKey: biomarker:non-hdl-cholesterol
-  description: Non-HDL-C may change if triglyceride-rich particles or LDL-C shift during the run. It helps show whether the lipid panel moved broadly or only in triglycerides.
+  description: Non-HDL-C may change if LDL-C or particles carrying triglycerides shift during the run. It shows whether the lipid panel moved broadly or only in triglycerides.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

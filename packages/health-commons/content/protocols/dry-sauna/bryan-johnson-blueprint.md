@@ -182,10 +182,10 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: Daily high-heat sauna after workouts raises heat load and heart rate during the session. With heat adaptation, resting strain may fall; if the dose is too much, resting pulse can rise instead.
+    description: Daily high-heat sauna after workouts raises heat load and heart rate during the session. With heat adaptation, resting strain may fall. If the dose is too much, resting pulse can rise.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: Heat plus workout residue can push the body toward stress or recovery. HRV may steady or rise if recovery catches up, or fall if daily heat is too much.
+    description: Heat and post-workout strain can push the body toward stress or recovery. HRV may rise if recovery catches up, or fall if daily heat is too much.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

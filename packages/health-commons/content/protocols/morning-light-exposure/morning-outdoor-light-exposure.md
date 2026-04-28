@@ -310,13 +310,13 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-quality
-    description: Morning outdoor light may strengthen the day-night timing signal. For some users, that can make the next night feel more settled or restorative.
+    description: Morning outdoor light may strengthen the body's day-night timing cue. For some users, the next night may feel more settled or restorative.
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: Bright morning light can help anchor circadian timing earlier in the day. If evening timing becomes better aligned, sleep onset may become easier.
+    description: Bright morning light can help anchor the body clock earlier in the day. If evening timing lines up better, falling asleep may become easier.
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: A stronger light-dark rhythm may support more consolidated sleep for some people, though this is a secondary signal rather than the main expected change.
+    description: A stronger light-dark rhythm may support less broken sleep for some people, though this is a weaker read than the main expected change.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

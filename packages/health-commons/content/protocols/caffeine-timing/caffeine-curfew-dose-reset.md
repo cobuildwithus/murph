@@ -117,16 +117,16 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:sleep-onset-latency
-    description: Caffeine blocks part of the brain's sleep-pressure signal. Moving it earlier may make falling asleep easier if late caffeine was keeping the body alert.
+    description: Caffeine blocks part of the brain's sleep-pressure signal. Moving it earlier may make it easier to fall asleep if late caffeine kept the body alert.
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: If earlier caffeine makes sleep onset easier or reduces night waking, a larger share of time in bed may be spent asleep.
+    description: If earlier caffeine makes sleep onset easier or reduces waking, more time in bed may be spent asleep.
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: Late caffeine can lighten or fragment sleep in some people. Moving it earlier might leave more room for stable early-night deep sleep, though this is a noisy downstream signal.
+    description: Late caffeine can lighten or break up sleep. Moving it earlier may leave more room for stable early-night deep sleep, though this is a less reliable signal.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: Less late stimulation and steadier sleep may lower overnight strain. HRV could rise or stabilize if the curfew helps recovery more than it adds withdrawal stress.
+    description: Less late stimulation and steadier sleep may lower overnight strain. HRV may rise or stabilize if the curfew helps recovery more than it adds withdrawal stress.
 safety:
   cautionLevel: moderate
   avoidOrGetClinicianGuidance:

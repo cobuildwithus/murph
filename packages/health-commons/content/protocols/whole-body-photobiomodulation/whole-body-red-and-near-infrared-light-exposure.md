@@ -291,16 +291,16 @@ testPlans:
 expectedSignalDescriptions:
   -
     biomarkerKey: biomarker:resting-heart-rate
-    description: Whole-body red and near-infrared light may affect how cells make energy, blood flow, inflammation, and recovery signals. If overall recovery strain falls, resting pulse might drift lower.
+    description: Whole-body red and near-infrared light may affect cell energy, blood flow, inflammation, and recovery signals. If overall recovery strain falls, resting pulse might drift lower.
   -
     biomarkerKey: biomarker:sleep-efficiency
-    description: Theories for red and near-infrared light point to cell energy, blood flow, and inflammation pathways that could affect sleep regulation. A stable routine might improve sleep continuity, but whole-body evidence is early.
+    description: Theories for red and near-infrared light point to cell energy, blood flow, and inflammation as possible ways to affect sleep. A stable routine might improve sleep continuity, but whole-body evidence is early.
   -
     biomarkerKey: biomarker:hrv-rmssd
-    description: If red/NIR exposure changes recovery strain or stress balance, HRV may move with it. Treat this as exploratory because direct whole-body evidence is limited.
+    description: If red and near-infrared exposure changes recovery strain or stress balance, HRV may move with it. Treat this as exploratory because direct whole-body evidence is limited.
   -
     biomarkerKey: biomarker:deep-sleep-minutes
-    description: If the routine improves sleep depth or overnight recovery, deep-sleep minutes may rise. This should support the broader sleep story rather than lead it.
+    description: If the routine improves sleep depth or overnight recovery, deep-sleep minutes may rise. This should support the broader sleep result rather than lead it.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
