@@ -984,7 +984,7 @@ describe('assistant automation scanner', () => {
       replies: {
         considered: 1,
         failed: 0,
-        nextWakeAt: expect.any(String),
+        nextWakeAt: null,
         replied: 0,
         skipped: 1,
       },
@@ -998,9 +998,12 @@ describe('assistant automation scanner', () => {
       },
     })
     expect(events).toContainEqual({
-      type: 'capture.failed',
+      type: 'capture.reply-progress',
       captureId: 'capture-1',
-      details: 'nonblocking document preservation failed: preserve failed',
+      details: 'nonblocking document preservation failed',
+      providerKind: 'status',
+      providerState: 'completed',
+      safeDetails: 'document_preservation_failed_nonblocking',
     })
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })

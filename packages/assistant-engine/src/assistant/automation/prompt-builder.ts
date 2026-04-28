@@ -343,24 +343,12 @@ function renderPreparedAttachmentPromptSection(
   }
   if (richEvidenceCandidate && !hasTextFragments) {
     sections.push(
-      isPreparedPdfAttachment(attachment)
-        ? 'No parsed attachment text is available. Use attached PDF evidence only if it is present in the model input; do not claim facts from the PDF unless they appear in parsed attachment text or the attached PDF evidence.'
-        : 'No parsed attachment text is available. Use attached image evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+      'No parsed attachment text is available. Use attached image evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
     )
   }
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${sections.join('\n\n')}`
-}
-
-function isPreparedPdfAttachment(attachment: InboxModelAttachmentBundle): boolean {
-  const mime = normalizeNullableString(attachment.mime)?.toLowerCase() ?? ''
-  const fileName = normalizeNullableString(attachment.fileName)?.toLowerCase() ?? ''
-  return (
-    normalizeNullableString(attachment.storedPath) !== null &&
-    attachment.kind === 'document' &&
-    (mime === 'application/pdf' || fileName.endsWith('.pdf'))
-  )
 }
 
 function renderAttachmentParserStatus(parseState: string | null): string | null {

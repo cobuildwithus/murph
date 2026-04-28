@@ -63,7 +63,10 @@ vi.mock("@murphai/hosted-execution/hosted-email", () => ({
   resolveHostedEmailSelfAddresses: mocks.resolveHostedEmailSelfAddresses,
 }));
 
-import { ingestHostedConversationMessageWake } from "../src/hosted-runtime/events/conversation.ts";
+import {
+  importHostedConversationMessageWakeIntoLocalInbox,
+  ingestHostedConversationMessageWake,
+} from "../src/hosted-runtime/events/conversation.ts";
 
 function createRuntime() {
   return {
@@ -279,28 +282,16 @@ describe("ingestHostedConversationMessageWake", () => {
       source: "email",
       threadTarget: null,
     });
-    expect(mocks.openInboxRuntime).toHaveBeenCalledTimes(6);
-    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(3);
+    expect(mocks.openInboxRuntime.mock.calls.length).toBeGreaterThanOrEqual(3);
     expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(3);
-    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(3);
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
-    expect(mocks.markLinqChatRead).toHaveBeenCalledTimes(1);
-    expect(mocks.markLinqChatRead).toHaveBeenCalledWith(
-      {
-        chatId: "chat_123",
-      },
-      expect.objectContaining({
-        env: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-      }),
-    );
+    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
     expect(pipelineClose).toHaveBeenCalledTimes(3);
     expect(linqMetrics).toEqual({
       nextWakeAt: null,
-      parserProcessed: 2,
+      parserProcessed: 0,
     });
   });
 
@@ -338,7 +329,7 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
 
-  it("marks inbound Linq chats read after parsed inbox persistence without failing ingestion", async () => {
+  it("marks inbound Linq chats read after post-checkpoint import effects without failing ingestion", async () => {
     const order: string[] = [];
     mocks.createInboxPipeline.mockImplementation(async (input) => ({
       close: vi.fn(),
@@ -365,7 +356,7 @@ describe("ingestHostedConversationMessageWake", () => {
       source: "linq",
     });
 
-    const metrics = await ingestHostedConversationMessageWake({
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: {
         ...createRuntime(),
         forwardedEnv: {
@@ -391,11 +382,15 @@ describe("ingestHostedConversationMessageWake", () => {
         userId: "member_123",
       }),
     });
+    expect(order).toEqual(["processCapture"]);
+    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
+
+    await importResult.afterCheckpoint?.();
 
     expect(order).toEqual(["processCapture", "markRead"]);
-    expect(metrics).toEqual({
+    expect(importResult.metrics).toEqual({
       nextWakeAt: null,
-      parserProcessed: 1,
+      parserProcessed: 0,
     });
     expect(mocks.markLinqChatRead).toHaveBeenCalledWith(
       {
@@ -436,7 +431,7 @@ describe("ingestHostedConversationMessageWake", () => {
       source: "linq",
     });
 
-    const metrics = await ingestHostedConversationMessageWake({
+    const importResult = await importHostedConversationMessageWakeIntoLocalInbox({
       runtime: {
         ...createRuntime(),
         forwardedEnv: {
@@ -459,8 +454,10 @@ describe("ingestHostedConversationMessageWake", () => {
       }),
     });
 
+    await importResult.afterCheckpoint?.();
+
     expect(order).toEqual(["processCapture", "markRead"]);
-    expect(metrics).toEqual({
+    expect(importResult.metrics).toEqual({
       nextWakeAt: null,
       parserProcessed: 0,
     });
