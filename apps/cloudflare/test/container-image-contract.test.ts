@@ -448,6 +448,20 @@ describe("hosted runner container image contract", () => {
       "docker build --platform linux/amd64 -f ../../Dockerfile.cloudflare-hosted-runner-smoke -t murph-cloudflare-runner .",
     );
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
+    expect(packageJson.scripts?.["test:e2e:local"]).toBe(
+      "pnpm test:e2e:hosted-local && pnpm test:e2e:workers:local",
+    );
+    expect(packageJson.scripts?.["test:e2e:full-stack:local"]).toBe(
+      "pnpm test:e2e:hosted-local",
+    );
+    expect(packageJson.scripts?.["test:e2e:smoke:local"]).toBe(
+      "pnpm test:e2e:workers:local",
+    );
+    expect(packageJson.scripts?.["test:e2e:workers:local"]).toBe("pnpm test:workers");
+    expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain(
+      "pnpm runner:bundle:hosted-local &&",
+    );
+    expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain(
       "pnpm runner:bundle:hosted-local &&",
     );
