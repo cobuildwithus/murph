@@ -9,6 +9,7 @@ import { ExpectedSignalCard } from "@/src/components/experiments/experiment-deta
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import { Badge } from "@/src/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
@@ -63,6 +64,7 @@ export function ComponentsContent() {
             <Button variant="ghost">Ghost</Button>
             <Button variant="destructive">Destructive</Button>
             <Button variant="link">Link</Button>
+            <AuthButton variant="outline">Auth Button</AuthButton>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Button size="xs">Extra Small</Button>
