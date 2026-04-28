@@ -15,13 +15,19 @@ import {
 import {
   VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
 } from "@murphai/operator-config/assistant/target-runtime";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+} from "./launch-spec.ts";
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
+const HOSTED_CODEX_STUB_BIN_DIR_NAME = "bin";
 const DEFAULT_HOSTED_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "medium";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
+const DEFAULT_HOSTED_CODEX_PATH =
+  "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -104,6 +110,10 @@ export async function prepareHostedCodexRuntimeEnvironment(
     },
   );
   await chmod(codexConfigPath, 0o600);
+  await maybeInstallHostedLocalCodexAppServerStub({
+    codexHome,
+    runtimeEnv,
+  });
 
   return {
     codexConfigPath,
@@ -122,6 +132,342 @@ function stripHostedCodexRejectedSeedEnv(
   }
 
   return nextEnv;
+}
+
+async function maybeInstallHostedLocalCodexAppServerStub(input: {
+  codexHome: string;
+  runtimeEnv: Record<string, string>;
+}): Promise<void> {
+  const assistantProviderBaseUrl = readHostedLocalCodexAppServerStubBaseUrl(input.runtimeEnv);
+
+  if (!assistantProviderBaseUrl) {
+    return;
+  }
+
+  const binDir = path.join(input.codexHome, HOSTED_CODEX_STUB_BIN_DIR_NAME);
+  const codexPath = path.join(binDir, "codex");
+  await mkdir(binDir, {
+    mode: 0o700,
+    recursive: true,
+  });
+  await chmod(binDir, 0o700);
+  await writeFile(
+    codexPath,
+    buildHostedLocalCodexAppServerStubSource(assistantProviderBaseUrl),
+    {
+      encoding: "utf8",
+      mode: 0o700,
+    },
+  );
+  await chmod(codexPath, 0o700);
+
+  input.runtimeEnv.PATH = prependHostedCodexPathSegment(
+    binDir,
+    input.runtimeEnv.PATH ?? process.env.PATH ?? DEFAULT_HOSTED_CODEX_PATH,
+  );
+}
+
+function readHostedLocalCodexAppServerStubBaseUrl(
+  runtimeEnv: Readonly<Record<string, string>>,
+): string | null {
+  const rawBaseUrl = normalizeHostedCodexEnvString(
+    runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV],
+  );
+
+  if (!rawBaseUrl) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(rawBaseUrl);
+  } catch {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must be an absolute URL.`,
+    );
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must use http or https.`,
+    );
+  }
+
+  if (!isHostedLocalCodexStubHostname(url.hostname)) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} must point at a local test host.`,
+    );
+  }
+
+  return url.toString();
+}
+
+function isHostedLocalCodexStubHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "127.0.0.1"
+    || normalized === "localhost"
+    || normalized === "::1"
+    || normalized === "host.docker.internal";
+}
+
+function prependHostedCodexPathSegment(segment: string, currentPath: string): string {
+  return [segment, currentPath]
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .join(path.delimiter);
+}
+
+export function buildHostedLocalCodexAppServerStubSource(
+  assistantProviderBaseUrl: string,
+): string {
+  return `#!/usr/bin/env node
+const readline = require("node:readline");
+
+const assistantProviderBaseUrl = ${JSON.stringify(assistantProviderBaseUrl)};
+const turnDelayMs = 25;
+let threadCounter = 0;
+let turnCounter = 0;
+let activeTurn = null;
+
+function writeRpc(payload) {
+  process.stdout.write(JSON.stringify(payload) + "\\n");
+}
+
+function writeRpcError(id, message) {
+  writeRpc({
+    id,
+    error: {
+      code: -32000,
+      message,
+    },
+  });
+}
+
+function readTextInput(params) {
+  const input = params && Array.isArray(params.input) ? params.input : [];
+  return input
+    .flatMap((item) => item && item.type === "text" && typeof item.text === "string" ? [item.text] : [])
+    .join("\\n\\n");
+}
+
+function extractResponseText(payload) {
+  const outputs = payload && Array.isArray(payload.output) ? payload.output : [];
+  for (const output of outputs) {
+    const content = output && Array.isArray(output.content) ? output.content : [];
+    for (const part of content) {
+      if (part && typeof part.text === "string" && part.text.trim()) {
+        return part.text;
+      }
+    }
+  }
+
+  throw new Error("assistant provider stub response did not contain output text");
+}
+
+async function fetchAssistantResponse(prompt) {
+  const response = await fetch(new URL("responses", assistantProviderBaseUrl.replace(/\\/+$/u, "") + "/"), {
+    body: JSON.stringify({
+      input: prompt,
+      model: "hosted-local-codex-shim",
+    }),
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+  });
+  const rawBody = await response.text();
+
+  if (!response.ok) {
+    throw new Error("assistant provider stub failed with HTTP " + response.status + ": " + rawBody);
+  }
+
+  return extractResponseText(JSON.parse(rawBody));
+}
+
+async function completeTurn(turn) {
+  if (turn.completed) {
+    return;
+  }
+  turn.completed = true;
+
+  try {
+    const prompt = turn.prompts.filter(Boolean).join("\\n\\n");
+    const text = await fetchAssistantResponse(prompt);
+    writeRpc({
+      type: "item.completed",
+      item: {
+        id: "msg_" + turn.turnId,
+        type: "assistant.message",
+        text,
+      },
+    });
+    writeRpc({
+      method: "turn/completed",
+      params: {
+        turn: {
+          id: turn.turnId,
+          status: "completed",
+        },
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writeRpc({
+      type: "error",
+      message,
+    });
+    writeRpc({
+      method: "turn/completed",
+      params: {
+        turn: {
+          error: {
+            message,
+          },
+          id: turn.turnId,
+          status: "failed",
+        },
+      },
+    });
+  }
+}
+
+function scheduleTurnCompletion(turn) {
+  setTimeout(() => {
+    void completeTurn(turn);
+  }, turnDelayMs);
+}
+
+async function handleRpc(message) {
+  const id = typeof message.id === "number" ? message.id : null;
+  const method = typeof message.method === "string" ? message.method : null;
+  const params = message.params && typeof message.params === "object" ? message.params : {};
+
+  if (method === "initialize" && id !== null) {
+    writeRpc({
+      id,
+      result: {},
+    });
+    return;
+  }
+
+  if (method === "initialized") {
+    return;
+  }
+
+  if ((method === "thread/start" || method === "thread/resume") && id !== null) {
+    const requestedThreadId = typeof params.threadId === "string" && params.threadId.trim()
+      ? params.threadId.trim()
+      : null;
+    const threadId = requestedThreadId ?? "thread_hosted_local_" + (++threadCounter);
+    writeRpc({
+      id,
+      result: {
+        thread: {
+          id: threadId,
+        },
+      },
+    });
+    return;
+  }
+
+  if (method === "turn/start" && id !== null) {
+    const threadId = typeof params.threadId === "string" && params.threadId.trim()
+      ? params.threadId.trim()
+      : "thread_hosted_local_" + (threadCounter || 1);
+    const turnId = "turn_hosted_local_" + (++turnCounter);
+    const turn = {
+      completed: false,
+      prompts: [readTextInput(params)],
+      threadId,
+      turnId,
+    };
+    activeTurn = turn;
+    writeRpc({
+      id,
+      result: {
+        turn: {
+          id: turnId,
+        },
+      },
+    });
+    writeRpc({
+      method: "turn/started",
+      params: {
+        turn: {
+          id: turnId,
+        },
+      },
+    });
+    scheduleTurnCompletion(turn);
+    return;
+  }
+
+  if (method === "turn/steer" && id !== null) {
+    if (!activeTurn || activeTurn.completed) {
+      writeRpcError(id, "hosted local Codex shim does not have an active turn");
+      return;
+    }
+    activeTurn.prompts.push(readTextInput(params));
+    writeRpc({
+      id,
+      result: {
+        ok: true,
+      },
+    });
+    return;
+  }
+
+  if (method === "turn/interrupt" && id !== null) {
+    if (activeTurn) {
+      activeTurn.completed = true;
+    }
+    writeRpc({
+      id,
+      result: {
+        ok: true,
+      },
+    });
+    writeRpc({
+      method: "turn/completed",
+      params: {
+        turn: {
+          id: activeTurn ? activeTurn.turnId : "turn_hosted_local_unknown",
+          status: "interrupted",
+        },
+      },
+    });
+    return;
+  }
+
+  if (id !== null) {
+    writeRpcError(id, "unsupported hosted local Codex shim method: " + (method ?? "unknown"));
+  }
+}
+
+const rl = readline.createInterface({
+  input: process.stdin,
+});
+let queue = Promise.resolve();
+
+rl.on("line", (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return;
+  }
+  queue = queue.then(async () => {
+    await handleRpc(JSON.parse(trimmed));
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    writeRpc({
+      type: "error",
+      message,
+    });
+  });
+});
+`;
 }
 
 export function buildHostedCodexConfigToml(input: {

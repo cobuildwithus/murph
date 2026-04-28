@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
+import {
+  HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 const hostedWebSmokeDefaultEncryptionKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
@@ -235,18 +238,26 @@ export function writeJsonResponse(
 export function resolveHostedAssistantLocalDevEnv(
   source: NodeJS.ProcessEnv,
   assistantProviderMode: HostedLocalAssistantProviderMode,
-  _assistantProviderStubBaseUrl: string | null,
+  assistantProviderStubBaseUrl: string | null,
   scenarioLabel: string,
 ): NodeJS.ProcessEnv {
   const hostedExecutionRunnerTimeoutMs =
     source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || hostedLocalE2eRunnerTimeoutMs;
 
   if (assistantProviderMode === "stub") {
+    const normalizedAssistantProviderStubBaseUrl = assistantProviderStubBaseUrl?.trim();
+    if (!normalizedAssistantProviderStubBaseUrl) {
+      throw new Error(`${scenarioLabel} requires an assistant provider stub base URL in stub mode.`);
+    }
+
     return {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
+      [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+        normalizedAssistantProviderStubBaseUrl,
+      NODE_ENV: "test",
       VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
     };
   }
