@@ -105,7 +105,7 @@ function BiomarkerBreadcrumb({ biomarker }: BiomarkerPageClientProps) {
   return (
     <nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
       <Link
-        href="/overview"
+        href="/experiments"
         className="text-muted-foreground transition-colors hover:text-foreground"
       >
         Murph

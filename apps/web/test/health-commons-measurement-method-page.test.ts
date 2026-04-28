@@ -125,6 +125,7 @@ describe("MeasurementMethodPage", () => {
     expect(markup).toContain("Measurement method page");
     expect(markup).toContain("Home Image Analysis");
     expect(markup).toContain("Repeatable at-home image analysis");
+    expect(markup).toContain('href="/experiments"');
     expect(markup).toContain("Texture score");
     expect(markup).toContain("Local-only storage is recommended");
     expect(markup).toContain("Skin Texture / Roughness Score");

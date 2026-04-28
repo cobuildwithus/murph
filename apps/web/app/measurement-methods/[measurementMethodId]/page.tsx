@@ -67,7 +67,7 @@ function MeasurementMethodBody({ method }: { method: MeasurementMethodPageModel 
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-8 md:px-12 lg:px-16 lg:py-12">
         <nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
           <Link
-            href="/overview"
+            href="/experiments"
             className="text-muted-foreground transition-colors hover:text-foreground"
           >
             Murph
