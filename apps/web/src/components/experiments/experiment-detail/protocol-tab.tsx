@@ -92,6 +92,16 @@ const SIGNAL_ESTIMATE_FALLBACK: SignalEstimate = {
   evidence: "Indicative",
 };
 
+function getSignalEstimate(signal: ExperimentSignal): SignalEstimate {
+  const estimate = SIGNAL_ESTIMATES[signal.label];
+  if (estimate) return estimate;
+  return {
+    ...SIGNAL_ESTIMATE_FALLBACK,
+    range: signal.expected,
+    point: signal.expected,
+  };
+}
+
 interface TrajectoryChartProps {
   direction: "up" | "down" | "neutral";
   baseline: string;
@@ -266,13 +276,13 @@ export function ProtocolTab({ experiment, onJumpToResearch }: ProtocolTabProps) 
           <SectionLabel>What could change</SectionLabel>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {focusSignals.map((signal, idx) => {
-              const est =
-                SIGNAL_ESTIMATES[signal.label] ?? SIGNAL_ESTIMATE_FALLBACK;
+              const est = getSignalEstimate(signal);
               const isPrimary = idx === 0;
               const isNeutral = signal.direction === "neutral";
               return (
                 <div
                   key={signal.label}
+                  data-card={signal.label}
                   className={`flex flex-col rounded-xl border ${
                     isPrimary
                       ? "xl:col-span-2 gap-5 pt-7 px-7 pb-5 border-primary/25 bg-primary/[0.04]"
@@ -482,7 +492,7 @@ export function ProtocolTab({ experiment, onJumpToResearch }: ProtocolTabProps) 
             </span>
             <span>
               Anything unclear during the protocol? Ask Murph in the chat,
-              it knows the plan, your baseline, and the signals you're
+              it knows the plan, your baseline, and the signals you are
               tracking.
             </span>
           </p>
