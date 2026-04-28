@@ -12,6 +12,36 @@ const defaultHostedRunnerEnvProfiles = [
   "parsers",
   "web",
 ] as const;
+export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
+  "ANTHROPIC_API_KEY",
+  "CEREBRAS_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "FIREWORKS_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GROQ_API_KEY",
+  "HF_TOKEN",
+  "HUGGINGFACEHUB_API_TOKEN",
+  "HUGGINGFACE_API_KEY",
+  "HUGGING_FACE_HUB_TOKEN",
+  "LITELLM_PROXY_API_KEY",
+  "MISTRAL_API_KEY",
+  "NVIDIA_API_KEY",
+  "NGC_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "PERPLEXITY_API_KEY",
+  "TOGETHER_API_KEY",
+  "VENICE_API_KEY",
+  "XAI_API_KEY",
+  "HOSTED_ASSISTANT_API_KEY_ENV",
+  "HOSTED_ASSISTANT_BASE_URL",
+  "HOSTED_ASSISTANT_CODEX_COMMAND",
+  "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
+  "HOSTED_ASSISTANT_OSS",
+  "HOSTED_ASSISTANT_PROFILE",
+  "HOSTED_ASSISTANT_PROVIDER_NAME",
+  "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
+] as const;
 
 export type HostedLocalAssistantProviderMode = "stub" | "live";
 
@@ -251,6 +281,7 @@ export function resolveHostedAssistantLocalDevEnv(
     }
 
     return {
+      ...buildHostedAssistantStubEnvClearances(),
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
@@ -277,6 +308,14 @@ export function resolveHostedAssistantLocalDevEnv(
   return {
     HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
   };
+}
+
+function buildHostedAssistantStubEnvClearances(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS) {
+    env[key] = undefined;
+  }
+  return env;
 }
 
 export function resolveHostedLocalSmokeWebEnv(

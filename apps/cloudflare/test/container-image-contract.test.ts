@@ -327,7 +327,7 @@ describe("hosted runner container image contract", () => {
     }
   });
 
-  it("pins whisper.cpp provisioning in the base image and keeps the final image app-only", async () => {
+  it("pins native and Codex CLI provisioning in the base image and keeps the final image app-only", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -343,6 +343,7 @@ describe("hosted runner container image contract", () => {
 
     expect(baseDockerfile).toContain("ARG WHISPER_CPP_VERSION=v1.8.1");
     expect(baseDockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.125.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim AS whisper-builder");
     expect(baseDockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim\n\nARG NODE_VERSION");
@@ -371,22 +372,33 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain("worker-secrets.json");
     expect(baseDockerfile).not.toContain("runner-bundle-builder");
     expect(baseDockerfile).not.toContain("pnpm install --frozen-lockfile");
+    expect(baseDockerfile).toContain(
+      'npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}"',
+    );
+    expect(baseDockerfile).toContain("npm cache clean --force");
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(baseDockerfile).toContain("WHISPER_COMMAND=/usr/local/bin/whisper-cli");
     expect(baseDockerfile).toContain(
       "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
     );
     expect(baseDockerfile).toContain("RUN ldconfig");
+    expect(baseDockerfile).toContain("codex --version");
+    expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
     expect(baseDockerfile).toContain("tini");
     expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
+    expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
+    expect(finalDockerfile).toContain(
+      'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
+    );
     expect(finalDockerfile).toContain(
       "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
     );
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     expect(finalDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).not.toContain("apt-get install");
+    expect(finalDockerfile).not.toContain("@openai/codex");
     expect(finalDockerfile).not.toContain("whisper.cpp");
     expect(finalDockerfile).not.toContain("huggingface.co");
     expect(finalDockerfile).not.toContain("worker-secrets.json");
@@ -398,6 +410,7 @@ describe("hosted runner container image contract", () => {
     expect(smokeDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     expect(smokeDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(smokeDockerfile).not.toContain("apt-get install");
+    expect(smokeDockerfile).not.toContain("@openai/codex");
     expect(smokeDockerfile).not.toContain("worker-secrets.json");
   });
 

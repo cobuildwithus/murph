@@ -1,6 +1,7 @@
 ARG NODE_VERSION=24.14.1
 ARG WHISPER_CPP_VERSION=v1.8.1
 ARG WHISPER_MODEL_FILE=ggml-base.en.bin
+ARG CODEX_CLI_VERSION=0.125.0
 
 FROM node:${NODE_VERSION}-bookworm-slim AS whisper-builder
 
@@ -42,6 +43,7 @@ FROM node:${NODE_VERSION}-bookworm-slim
 
 ARG NODE_VERSION
 ARG WHISPER_MODEL_FILE
+ARG CODEX_CLI_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/runner \
@@ -69,6 +71,11 @@ RUN apt-get update \
   && chown -R runner:runner /home/runner \
   && rm -rf /var/lib/apt/lists/*
 
+# The hosted assistant harness is Codex app-server itself; repo-local helpers
+# only coordinate the mailbox/runtime around this pinned CLI.
+RUN npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}" \
+  && npm cache clean --force
+
 WORKDIR /app
 
 COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli
@@ -79,5 +86,8 @@ COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_F
 RUN ldconfig
 
 USER runner
+
+RUN codex --version \
+  && codex app-server --help >/dev/null
 
 EXPOSE 8080

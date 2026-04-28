@@ -2,6 +2,10 @@ ARG HOSTED_RUNNER_BASE_IMAGE=murph-cloudflare-runner-base:node24.14.1-whisper1.8
 
 FROM ${HOSTED_RUNNER_BASE_IMAGE}
 
+ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local
+
+LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"
+
 COPY --chown=runner:runner .deploy/runner-bundle/ /app/
 
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]

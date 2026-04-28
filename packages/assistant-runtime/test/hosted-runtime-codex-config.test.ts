@@ -200,6 +200,7 @@ test("hosted Codex runtime config rejects the local E2E app-server stub for non-
           HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
           [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
             "https://provider.example.test/v1",
+          NODE_ENV: "test",
           VERCEL_AI_API_KEY: "secret-vercel-key",
         },
       }),
@@ -207,6 +208,27 @@ test("hosted Codex runtime config rejects the local E2E app-server stub for non-
       error instanceof HostedAssistantConfigurationError
       && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
       && error.message.includes("local test host"),
+  );
+});
+
+test("hosted Codex runtime config rejects the local E2E app-server stub outside test mode", async () => {
+  const operatorHomeRoot = await createTemporaryDirectory();
+
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+          [HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV]:
+            "http://127.0.0.1:4123/v1",
+          VERCEL_AI_API_KEY: "secret-vercel-key",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes("NODE_ENV=test"),
   );
 });
 

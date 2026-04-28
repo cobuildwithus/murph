@@ -4,6 +4,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 import {
+  HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS,
   mergeRequiredEnvProfile,
   resolveHostedAssistantLocalDevEnv,
 } from "./helpers/hosted-local-e2e-support.js";
@@ -22,7 +23,9 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
   it("seeds Codex Vercel AI Gateway config in local stub mode", () => {
     const env = resolveHostedAssistantLocalDevEnv(
       {
+        HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
         HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "12345",
+        OPENAI_API_KEY: "live-openai-key",
       },
       "stub",
       "http://127.0.0.1:1234/v1",
@@ -42,6 +45,23 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     expect(env.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it("clears direct provider keys from local stub mode", () => {
+    const source = Object.fromEntries(
+      HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS.map((key) => [key, `${key}-value`]),
+    );
+    const env = resolveHostedAssistantLocalDevEnv(
+      source,
+      "stub",
+      "http://127.0.0.1:1234/v1",
+      "Hosted local test",
+    );
+
+    for (const key of HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS) {
+      expect(env[key]).toBeUndefined();
+    }
+    expect(env.VERCEL_AI_API_KEY).toBe("stub-local-vercel-ai-gateway-key");
   });
 
   it("fails closed in live mode without explicit hosted assistant provider and model", () => {

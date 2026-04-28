@@ -178,6 +178,13 @@ function readHostedLocalCodexAppServerStubBaseUrl(
     return null;
   }
 
+  if (normalizeHostedCodexEnvString(runtimeEnv.NODE_ENV) !== "test") {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_RUNTIME_CODEX_APP_SERVER_STUB_BASE_URL_ENV} is only available when NODE_ENV=test.`,
+    );
+  }
+
   let url: URL;
   try {
     url = new URL(rawBaseUrl);

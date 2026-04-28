@@ -1,10 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   cloudflareDir,
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
+  HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
   WRANGLER_VAR_ALLOWLIST,
 } from "./constants.ts";
@@ -298,6 +299,8 @@ export function buildWranglerLocalDevConfig(
   const cloudflareAppDir = options.cloudflareAppDir ?? cloudflareDir;
   const workspaceRoot = options.workspaceRoot ?? repoRoot;
   const configDir = options.configDir ?? path.join(cloudflareAppDir, ".wrangler");
+  const hostedRunnerLocalBuildId =
+    buildHostedRunnerLocalBuildId(source[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]);
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: resolveWranglerEnvValue("HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS", source) ?? "3",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: resolveWranglerEnvValue("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID", source) ?? "v1",
@@ -334,6 +337,9 @@ export function buildWranglerLocalDevConfig(
           path.join(workspaceRoot, "Dockerfile.cloudflare-hosted-runner"),
         ),
         image_build_context: toWranglerConfigRelativePath(configDir, cloudflareAppDir),
+        image_vars: {
+          HOSTED_RUNNER_LOCAL_BUILD_ID: hostedRunnerLocalBuildId,
+        },
         instance_type: "standard-1",
         max_instances: 50,
       },
@@ -387,6 +393,19 @@ export function buildWranglerLocalDevConfig(
     },
     vars,
   };
+}
+
+export function buildHostedRunnerLocalBuildId(value: string | undefined): string {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return "local";
+  }
+
+  if (/^sha256-[a-f0-9]{24}$/u.test(normalized)) {
+    return normalized;
+  }
+
+  return `sha256-${createHash("sha256").update(normalized).digest("hex").slice(0, 24)}`;
 }
 
 function toWranglerConfigRelativePath(configDir: string, targetPath: string): string {

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,10 +9,12 @@ import { resolveHostedLocalDevConfig } from "./config.ts";
 import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
+  HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
   repoRoot,
   webDir,
 } from "./constants.ts";
 import {
+  buildHostedRunnerLocalBuildId,
   buildHostedLocalDevOverrides,
   buildWranglerEnvFileText,
   buildWranglerLocalDevConfig,
@@ -82,6 +85,9 @@ export async function startHostedLocalDevStack(input: {
   const config = resolveHostedLocalDevConfig(initialEnv);
   const tempDirOverride = initialEnv.MURPH_DEV_TEMP_DIR?.trim() || null;
   const providedVercelOidcToken = initialEnv.VERCEL_OIDC_TOKEN?.trim() || null;
+  const hostedRunnerLocalBuildId = buildHostedRunnerLocalBuildId(
+    initialEnv[HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]?.trim() || randomUUID(),
+  );
   const tsxTsconfigPath = path.join(repoRoot, "tsconfig.base.json");
 
   if (!config.skipVercelPull && !providedVercelOidcToken) {
@@ -166,6 +172,7 @@ export async function startHostedLocalDevStack(input: {
     workerRuntimeEnv = {
       ...runtimeEnv,
       ...cloudflareDevVars,
+      [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: hostedRunnerLocalBuildId,
     };
     const workerEnvText = `${buildWranglerEnvFileText(workerRuntimeEnv)}\n`;
     await writeFile(workerEnvPath, workerEnvText, "utf8");
