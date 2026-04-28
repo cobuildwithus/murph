@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@cobuild/review-gpt@0.5.84':
-    hash: 8430657e1968edb2803da315126e54709e08c1d560edff96774eb210797b016a
-    path: patches/@cobuild__review-gpt@0.5.84.patch
-
 importers:
 
   .:
@@ -17,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.84
-        version: 0.5.84(patch_hash=8430657e1968edb2803da315126e54709e08c1d560edff96774eb210797b016a)(@cfworker/json-schema@4.1.1)
+        specifier: ^0.5.85
+        version: 0.5.85(@cfworker/json-schema@4.1.1)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -980,8 +975,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.84':
-    resolution: {integrity: sha512-nAJjsf6AR8laXrryF5CG9oTlKj+nlTBRRrFjCP+7A3DVlgLlqKzzx1u2kXQc/6weoVhRr1tMX1OXo7AlgiKq9A==}
+  '@cobuild/review-gpt@0.5.85':
+    resolution: {integrity: sha512-/cLIo5PLYLDWmFGMd0GlDvnj+vByT1hJLKCf3OF1ezRW61s2FHNGJCjRe0QfnevpV1NCmp+DZwMosf8GVSQ7jQ==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.45.0':
@@ -8526,7 +8521,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.84(patch_hash=8430657e1968edb2803da315126e54709e08c1d560edff96774eb210797b016a)(@cfworker/json-schema@4.1.1)':
+  '@cobuild/review-gpt@0.5.85(@cfworker/json-schema@4.1.1)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.25
