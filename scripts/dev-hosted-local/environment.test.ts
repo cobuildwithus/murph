@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertLocalWorkerOidcEnvironment,
+  buildHostedRunnerLocalBuildId,
   buildHostedLocalDevOverrides,
   buildWranglerEnvFileText,
   buildWranglerLocalDevConfig,
@@ -311,6 +312,7 @@ describe("buildWranglerVarArgs", () => {
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+        MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         IGNORED_SECRET: "secret",
       }),
@@ -321,6 +323,8 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID:callback:v1",
       "--var",
       "ALLOW_LOCAL_INTERNAL_PROXY:true",
+      "--var",
+      "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL:http://127.0.0.1:4111/v1",
       "--var",
       "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:http://127.0.0.1:8787",
       "--var",
@@ -363,11 +367,18 @@ describe("buildWranglerEnvFileText", () => {
 describe("buildWranglerLocalDevConfig", () => {
   it("keeps repo-relative defaults for the checked-in local dev location", () => {
     const config = buildWranglerLocalDevConfig({});
-    const container = (config.containers as { image: string; image_build_context: string }[])[0];
+    const container = (config.containers as {
+      image: string;
+      image_build_context: string;
+      image_vars: Record<string, string>;
+    }[])[0];
 
     expect(config.main).toBe("../src/index.ts");
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
+    expect(container.image_vars).toEqual({
+      HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+    });
   });
 
   it("re-roots generated paths to the temp config directory", () => {
@@ -379,10 +390,37 @@ describe("buildWranglerLocalDevConfig", () => {
         workspaceRoot: "/workspace",
       },
     );
-    const container = (config.containers as { image: string; image_build_context: string }[])[0];
+    const container = (config.containers as {
+      image: string;
+      image_build_context: string;
+      image_vars: Record<string, string>;
+    }[])[0];
 
     expect(config.main).toBe("../../workspace/apps/cloudflare/src/index.ts");
     expect(container.image).toBe("../../workspace/Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("../../workspace/apps/cloudflare");
+  });
+
+  it("passes the local runner build id as a Docker build arg", () => {
+    const config = buildWranglerLocalDevConfig({
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "stack-test-build-id",
+    });
+    const container = (config.containers as {
+      image_vars: Record<string, string>;
+    }[])[0];
+
+    expect(container.image_vars).toEqual({
+      HOSTED_RUNNER_LOCAL_BUILD_ID: buildHostedRunnerLocalBuildId("stack-test-build-id"),
+    });
+  });
+
+  it("hashes caller-supplied local runner build ids before they reach image metadata", () => {
+    expect(buildHostedRunnerLocalBuildId("stack-test-build-id")).toMatch(
+      /^sha256-[a-f0-9]{24}$/u,
+    );
+    expect(buildHostedRunnerLocalBuildId("")).toBe("local");
+    expect(buildHostedRunnerLocalBuildId("sha256-0123456789abcdef01234567")).toBe(
+      "sha256-0123456789abcdef01234567",
+    );
   });
 });

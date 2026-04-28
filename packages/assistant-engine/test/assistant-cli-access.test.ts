@@ -68,7 +68,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       LINQ_API_TOKEN: "linq-secret",
       NODE_ENV: "production",
       NODE_OPTIONS: "--require /tmp/injected.js",
-      PATH: "/usr/bin",
+      PATH: `${path.join("/tmp/murph-home", ".codex-hosted", "bin")}${path.delimiter}/usr/bin`,
       TELEGRAM_BOT_TOKEN: "telegram-secret",
       VAULT: "/tmp/murph-vault",
       VERCEL_AI_API_KEY: "vercel-secret",
@@ -83,7 +83,8 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
     expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
     expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
-    expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".local", "bin"));
+    expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".codex-hosted", "bin"));
+    expect(pathEntries[1]).toBe(path.join("/tmp/murph-home", ".local", "bin"));
     expect(pathEntries).toContain("/usr/bin");
     expect(env.AGENTMAIL_API_KEY).toBeUndefined();
     expect(env.AMBIENT_SECRET).toBeUndefined();

@@ -116,6 +116,21 @@ vi.mock("./config.ts", () => ({
 }));
 
 vi.mock("./environment.ts", () => ({
+  buildHostedRunnerLocalBuildId: vi.fn((value: string | undefined) => {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return "local";
+    }
+    if (/^sha256-[a-f0-9]{24}$/u.test(normalized)) {
+      return normalized;
+    }
+
+    let hex = "";
+    for (const character of normalized) {
+      hex += character.charCodeAt(0).toString(16).padStart(2, "0");
+    }
+    return `sha256-${hex.padEnd(24, "0").slice(0, 24)}`;
+  }),
   buildHostedLocalDevOverrides: vi.fn(() => ({
     HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
   })),
@@ -293,6 +308,70 @@ describe("hosted local dev stack", () => {
       ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"],
       expect.any(Object),
     );
+  });
+
+  it("passes a stable local runner build id into the generated Wrangler config", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 121 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 122 }));
+    vi.stubEnv("MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID", "stack-test-build-id");
+
+    const environmentModule = await import("./environment.ts");
+    const expectedBuildId = environmentModule.buildHostedRunnerLocalBuildId(
+      "stack-test-build-id",
+    );
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(environmentModule.buildWranglerLocalDevConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: expectedBuildId,
+      }),
+      expect.any(Object),
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "cloudflare",
+      "pnpm",
+      expect.any(Array),
+      expect.objectContaining({
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: expectedBuildId,
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("generates a unique non-default local runner build id for each stack", async () => {
+    const environmentModule = await import("./environment.ts");
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+    const env = {
+      ...process.env,
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: undefined,
+    };
+
+    const firstStack = await startHostedLocalDevStack({ env });
+    await firstStack.ready;
+    await firstStack.stop();
+    const firstCall = vi.mocked(environmentModule.buildWranglerLocalDevConfig)
+      .mock.calls.at(-1);
+    const firstBuildId = firstCall?.[0].MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID;
+
+    const secondStack = await startHostedLocalDevStack({ env });
+    await secondStack.ready;
+    await secondStack.stop();
+    const secondCall = vi.mocked(environmentModule.buildWranglerLocalDevConfig)
+      .mock.calls.at(-1);
+    const secondBuildId = secondCall?.[0].MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID;
+
+    expect(firstBuildId).toMatch(/^sha256-[a-f0-9]{24}$/u);
+    expect(secondBuildId).toMatch(/^sha256-[a-f0-9]{24}$/u);
+    expect(firstBuildId).not.toBe("local");
+    expect(secondBuildId).not.toBe("local");
+    expect(secondBuildId).not.toBe(firstBuildId);
   });
 
   it("can force-reset the local Postgres target before db push when explicitly requested", async () => {

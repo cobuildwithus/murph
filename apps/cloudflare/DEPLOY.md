@@ -260,7 +260,8 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is tagged `murph-cloudflare-runner-base:node24.14.1-whisper1.8.1-base-en`.
-It contains Node, `ffmpeg`, `whisper.cpp`, and the default Whisper model, but no app bundle or worker secrets.
+It contains Node, pinned `@openai/codex`, `ffmpeg`, `whisper.cpp`, and the default Whisper model, but no app bundle or worker secrets.
+The base image build runs `codex app-server --help` under the runner user, and the Docker smoke repeats that check inside the final image before deploy.
 
 When you need to backstop lifecycle rules locally or in CI:
 

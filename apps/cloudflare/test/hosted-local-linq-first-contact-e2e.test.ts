@@ -380,6 +380,8 @@ describe("hosted local Linq first-contact e2e", () => {
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeFirstReply =
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    const assistantProviderResponseCountBefore =
+      countAssistantProviderResponsesApiRequests();
     const assistantQuestionText =
       "What should I call you? And what health-wise have you been working on lately?";
     const assistantSecondReplyText =
@@ -459,11 +461,21 @@ describe("hosted local Linq first-contact e2e", () => {
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
     expect(requireScenario().runtimeEnv.OPENAI_API_KEY).toBeUndefined();
-    expect(requireScenario().assistantProviderRequests.filter((request) =>
-      request.url === "/v1/responses"
-    )).toEqual([]);
+    const assistantProviderResponseRequests = requireScenario().assistantProviderRequests
+      .filter((request) => request.url === "/v1/responses")
+      .slice(assistantProviderResponseCountBefore);
+    expect(assistantProviderResponseRequests).toHaveLength(2);
+    expect(assistantProviderResponseRequests.every((request) =>
+      request.method === "POST"
+    )).toBe(true);
   }, 300_000);
 });
+
+function countAssistantProviderResponsesApiRequests(): number {
+  return requireScenario().assistantProviderRequests.filter((request) =>
+    request.url === "/v1/responses"
+  ).length;
+}
 
 function buildActivationWake(userId: string) {
   return buildHostedExecutionMemberActivatedWake({

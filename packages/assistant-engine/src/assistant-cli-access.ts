@@ -64,12 +64,20 @@ export function buildAssistantCliGuidanceText(
 export function prepareAssistantDirectCliEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const baseEnv = isHostedRuntimeProcessEnv(env)
+  const hostedRuntimeProcess = isHostedRuntimeProcessEnv(env)
+  const baseEnv = hostedRuntimeProcess
     ? projectHostedCodexDirectCliEnv(env)
     : env
   const homeDirectory = resolveOperatorHomeDirectory(baseEnv)
   const userBinDirectory = path.join(homeDirectory, ...DEFAULT_USER_BIN_SEGMENTS)
-  return withPrependedPath(baseEnv, [userBinDirectory, ...resolveAssistantCliBinPathEntries()])
+  const hostedCodexBinEntries = hostedRuntimeProcess
+    ? resolveHostedCodexBinPathEntries(baseEnv)
+    : []
+  return withPrependedPath(baseEnv, [
+    ...hostedCodexBinEntries,
+    userBinDirectory,
+    ...resolveAssistantCliBinPathEntries(),
+  ])
 }
 
 function isHostedRuntimeProcessEnv(env: NodeJS.ProcessEnv): boolean {
@@ -89,6 +97,11 @@ function projectHostedCodexDirectCliEnv(
   }
 
   return projected
+}
+
+function resolveHostedCodexBinPathEntries(env: NodeJS.ProcessEnv): string[] {
+  const codexHome = env.CODEX_HOME?.trim()
+  return codexHome ? [path.join(codexHome, 'bin')] : []
 }
 
 function resolveAssistantCliBinPathEntries(): string[] {
