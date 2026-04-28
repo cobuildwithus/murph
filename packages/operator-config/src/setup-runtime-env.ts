@@ -8,6 +8,10 @@ import {
   normalizeSetupWearables,
 } from './setup-cli-contracts.js'
 
+type HiddenPromptReadline = ReturnType<typeof createInterface> & {
+  _writeToOutput?: (stringToWrite: string) => void
+}
+
 const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
 const EMAIL_API_KEY_KEYS = ['AGENTMAIL_API_KEY'] as const
 const GARMIN_CLIENT_ID_KEYS = ['GARMIN_CLIENT_ID'] as const
@@ -24,7 +28,7 @@ const STRAVA_CLIENT_SECRET_KEYS = ['STRAVA_CLIENT_SECRET'] as const
 const STRAVA_CLIENT_KEY_GROUPS = [STRAVA_CLIENT_ID_KEYS, STRAVA_CLIENT_SECRET_KEYS] as const
 
 export const SETUP_RUNTIME_ENV_NOTICE =
-  'Murph can use keys from your current shell for this setup run. Anything you enter here is only used for this run and is not written to a file.'
+  'Murph can use keys from your current shell for this setup run. Values you enter here are saved to local `.env.local` so future Murph commands can read them.'
 
 export interface SetupWizardRuntimeStatus {
   badge: string
@@ -348,6 +352,21 @@ async function readSetupRuntimePromptAnswer(question: string): Promise<string> {
       input: process.stdin,
       output: process.stderr,
     })
+    const promptReadline: HiddenPromptReadline = readline
+    const originalWriteToOutput = promptReadline._writeToOutput?.bind(readline)
+    let hideAnswer = false
+    promptReadline._writeToOutput = (stringToWrite) => {
+      if (hideAnswer) {
+        return
+      }
+
+      if (originalWriteToOutput) {
+        originalWriteToOutput(stringToWrite)
+        return
+      }
+
+      process.stderr.write(stringToWrite)
+    }
 
     const cancel = () => {
       readline.close()
@@ -358,10 +377,12 @@ async function readSetupRuntimePromptAnswer(question: string): Promise<string> {
 
     readline.once('SIGINT', cancel)
     readline.question(question, (answer) => {
+      process.stderr.write('\n')
       readline.removeListener('SIGINT', cancel)
       readline.close()
       resolve(answer)
     })
+    hideAnswer = true
   })
 }
 

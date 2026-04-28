@@ -3401,7 +3401,7 @@
                   ]
                 },
                 "model": {
-                  "description": "Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.",
+                  "description": "Model id to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.",
                   "type": "string",
                   "minLength": 1
                 },

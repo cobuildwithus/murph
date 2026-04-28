@@ -1607,12 +1607,12 @@ test('createSetupAssistantResolver requires a non-empty OpenAI-compatible model 
   assert.deepEqual(promptMocks.prompts, [
     'Ollama endpoint URL [http://127.0.0.1:11434/v1]: ',
     'API key env var name (leave blank if this local endpoint does not need one): ',
-    'Default model to use: ',
-    'Default model to use: ',
+    'Model id to use: ',
+    'Model id to use: ',
   ])
 })
 
-test('createSetupAssistantResolver applies named provider preset defaults before discovery', async () => {
+test('createSetupAssistantResolver skips discovery for gateway presets with explicit models', async () => {
   const discoverModels = vi
     .fn()
     .mockResolvedValue(createDiscoveryResult(['openai/gpt-4.1-mini']))
@@ -1631,20 +1631,55 @@ test('createSetupAssistantResolver applies named provider preset defaults before
     preset: 'openai-compatible',
     options: {
       assistantProviderPreset: 'openrouter',
+      assistantModel: 'openai/gpt-4.1-mini',
     } as any,
   })
 
-  assert.equal(discoverModels.mock.calls.length, 1)
-  assert.deepEqual(discoverModels.mock.calls[0]?.[0], {
-    apiKeyEnv: 'OPENROUTER_API_KEY',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    providerName: 'openrouter',
-  })
+  assert.equal(discoverModels.mock.calls.length, 0)
   assert.equal(resolved.baseUrl, 'https://openrouter.ai/api/v1')
   assert.equal(resolved.apiKeyEnv, 'OPENROUTER_API_KEY')
   assert.equal(resolved.providerName, 'openrouter')
   assert.equal(resolved.model, 'openai/gpt-4.1-mini')
   assert.match(resolved.detail, /OpenRouter/u)
+})
+
+test('createSetupAssistantResolver asks for a direct model id for gateway presets instead of listing catalogs', async () => {
+  const discoverModels = vi
+    .fn()
+    .mockResolvedValue(createDiscoveryResult(['alibaba/qwen3-coder']))
+  promptMocks.answers.push('', 'openai/gpt-5.4')
+  const input = new PassThrough()
+  const output = new PassThrough()
+  const outputChunks: string[] = []
+  output.on('data', (chunk: Buffer | string) => {
+    outputChunks.push(chunk.toString())
+  })
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    discoverModels,
+    input,
+    output,
+  })
+
+  const resolved = await resolver.resolve({
+    allowPrompt: true,
+    commandName: 'setup',
+    preset: 'openai-compatible',
+    options: {
+      assistantProviderPreset: 'vercel-ai-gateway',
+    } as any,
+  })
+
+  assert.equal(discoverModels.mock.calls.length, 0)
+  assert.equal(resolved.provider, 'openai-compatible')
+  assert.equal(resolved.model, 'openai/gpt-5.4')
+  assert.doesNotMatch(outputChunks.join(''), /Available models/u)
+  assert.deepEqual(promptMocks.prompts, [
+    'Vercel AI Gateway endpoint URL [https://ai-gateway.vercel.sh/v1]: ',
+    'Model id to use: ',
+  ])
 })
 
 test('createSetupAssistantResolver defaults Codex reasoning effort when it is not specified', async () => {

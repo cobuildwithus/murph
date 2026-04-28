@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { PassThrough } from 'node:stream'
 import { Cli } from 'incur'
 import { initializeVault } from '@murphai/core'
 import { afterEach, test, vi } from 'vitest'
@@ -999,6 +1000,101 @@ test('model --show summarizes a saved OpenAI-compatible backend without an endpo
   )
 })
 
+test('model --show redacts malformed saved API key metadata that looks like a raw key', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-redact-'))
+  cleanupPaths.push(homeRoot)
+
+  const inlineApiKey = 'AIza_TEST_INLINE_KEY_METADATA'
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: inlineApiKey,
+        endpoint: 'https://ai-gateway.vercel.sh/v1',
+        headers: null,
+        model: 'openai/gpt-5.5',
+        presetId: 'vercel-ai-gateway',
+        providerName: 'vercel-ai-gateway',
+        reasoningEffort: null,
+        webSearch: null,
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson<{
+    backend: {
+      apiKeyEnv: string | null
+    } | null
+    notes: string[]
+  }>(cli, ['model', '--show'])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(result.envelope.data?.backend?.apiKeyEnv, '<redacted-inline-api-key>')
+  assert.doesNotMatch(JSON.stringify(result.envelope.data), new RegExp(inlineApiKey, 'u'))
+  assert.deepEqual(result.envelope.data?.notes, [
+    'Saved OpenAI-compatible API key metadata looks like a raw key. Re-run `murph model` to save it as a local environment value.',
+  ])
+})
+
+test('model --show suppresses export notes when the saved API key is already present', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-env-present-'))
+  cleanupPaths.push(homeRoot)
+
+  const previousEnvValue = process.env.OLLAMA_API_KEY
+  restoreEnvironmentVariable('OLLAMA_API_KEY', 'already-present')
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      backend: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        endpoint: 'http://127.0.0.1:11434/v1',
+        headers: null,
+        model: 'gpt-oss:20b',
+        presetId: 'ollama',
+        providerName: 'ollama',
+        reasoningEffort: null,
+        webSearch: null,
+      },
+      account: null,
+    },
+    homeRoot,
+  )
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  try {
+    const result = await runRegisteredCliJson<{
+      notes: string[]
+    }>(cli, ['model', '--show'])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(result.envelope.ok, true)
+    assert.deepEqual(result.envelope.data?.notes, [])
+  } finally {
+    restoreEnvironmentVariable('OLLAMA_API_KEY', previousEnvValue)
+  }
+})
+
 test('model --show includes a note for an explicit saved Codex home', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-codex-home-'))
   cleanupPaths.push(homeRoot)
@@ -1113,6 +1209,96 @@ test('interactive bare model uses the assistant Ink wizard selection before reso
     result.envelope.data?.summary,
     'gpt-oss:20b via http://127.0.0.1:11434/v1',
   )
+})
+
+test('interactive bare model saves a missing OpenAI-compatible API key locally', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-model-local-env-'))
+  const homeRoot = path.join(root, 'home')
+  const workspace = path.join(root, 'workspace')
+  cleanupPaths.push(root)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(workspace, { recursive: true })
+
+  const previousEnvValue = process.env.VERCEL_AI_API_KEY
+  const previousCwd = process.cwd()
+  restoreEnvironmentVariable('VERCEL_AI_API_KEY', undefined)
+
+  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
+    assistantPreset: 'openai-compatible' as const,
+    assistantBaseUrl: 'https://ai-gateway.vercel.sh/v1',
+    assistantApiKeyEnv: 'VERCEL_AI_API_KEY',
+    assistantProviderName: 'vercel-ai-gateway',
+    assistantOss: false,
+  }))
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'openai-compatible',
+      model: 'openai/gpt-5.5',
+      baseUrl: options.assistantBaseUrl ?? null,
+      apiKeyEnv: options.assistantApiKeyEnv ?? null,
+      providerName: options.assistantProviderName ?? null,
+      codexCommand: null,
+      profile: null,
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      account: null,
+      detail: 'resolved Vercel AI Gateway selection',
+    }),
+  )
+  const input = new PassThrough()
+  input.end('test-vercel-key\n')
+  const output = new PassThrough()
+  const outputChunks: string[] = []
+  output.on('data', (chunk: Buffer | string) => {
+    outputChunks.push(chunk.toString())
+  })
+
+  try {
+    process.chdir(workspace)
+    const cli = Cli.create('vault-cli')
+    registerModelCommands(cli, {
+      assistantSetup: {
+        resolve: resolveAssistant,
+      },
+      assistantWizard,
+      input,
+      output,
+      resolveHomeDirectory: () => homeRoot,
+      terminal: {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+    })
+
+    const result = await runRegisteredCliJson<{
+      backend: {
+        apiKeyEnv: string | null
+      } | null
+      notes: string[]
+    }>(cli, ['model'])
+
+    assert.equal(result.exitCode, null)
+    assert.equal(result.envelope.ok, true)
+    assert.equal(result.envelope.data?.backend?.apiKeyEnv, 'VERCEL_AI_API_KEY')
+    assert.deepEqual(result.envelope.data?.notes, [])
+    assert.match(
+      outputChunks.join(''),
+      /API key for VERCEL_AI_API_KEY \(saved to \.env\.local, leave blank to skip\): /u,
+    )
+    assert.match(
+      await readFile(path.join(workspace, '.env.local'), 'utf8'),
+      /VERCEL_AI_API_KEY="test-vercel-key"/u,
+    )
+    assert.equal(process.env.VERCEL_AI_API_KEY, 'test-vercel-key')
+  } finally {
+    process.chdir(previousCwd)
+    restoreEnvironmentVariable('VERCEL_AI_API_KEY', previousEnvValue)
+  }
 })
 
 test('interactive bare model clears stale saved model and provider metadata when the wizard changes endpoint details', async () => {

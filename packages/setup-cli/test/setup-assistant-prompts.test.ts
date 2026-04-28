@@ -64,7 +64,7 @@ function createSetupOptions(
 }
 
 test('setup assistant prompt flow uses discovered models and numeric model selection', async () => {
-  promptState.answers = ['', '', '2']
+  promptState.answers = ['', '2']
   const { output, readOutput } = createCapturedOutputStream()
 
   const resolver = createSetupAssistantResolver({
@@ -87,7 +87,7 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
     allowPrompt: true,
     commandName: 'murph setup',
     options: createSetupOptions({
-      assistantProviderPreset: 'openrouter',
+      assistantProviderPreset: 'venice',
     }),
     preset: 'openai-compatible',
   })
@@ -97,10 +97,10 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
     enabled: true,
     provider: 'openai-compatible',
     model: 'model-beta',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    apiKeyEnv: 'OPENROUTER_API_KEY',
-    presetId: 'openrouter',
-    providerName: 'openrouter',
+    baseUrl: 'https://api.venice.ai/api/v1',
+    apiKeyEnv: 'VENICE_API_KEY',
+    presetId: 'venice',
+    providerName: 'venice',
     codexCommand: null,
     profile: null,
     reasoningEffort: null,
@@ -108,23 +108,23 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
     approvalPolicy: null,
     oss: false,
     account: null,
-    detail: 'Use model-beta from OpenRouter. Murph will read the key from OPENROUTER_API_KEY.',
+    detail: 'Use model-beta from Venice. Murph will read the key from VENICE_API_KEY.',
   })
   assert.deepEqual(promptState.discoveredCalls, [
     {
-      apiKeyEnv: 'OPENROUTER_API_KEY',
-      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKeyEnv: 'VENICE_API_KEY',
+      baseUrl: 'https://api.venice.ai/api/v1',
       provider: 'openai-compatible',
-      providerName: 'openrouter',
+      providerName: 'venice',
     },
   ])
   assert.match(readOutput(), /Discovered models/u)
   assert.match(readOutput(), /Available models:/u)
 })
 
-test('setup assistant prompt flow recomputes inferred preset identity from the final endpoint', async () => {
-  promptState.answers = ['https://ai-gateway.vercel.sh/v1', 'VERCEL_AI_API_KEY', '1']
-  const { output } = createCapturedOutputStream()
+test('setup assistant prompt flow asks for a direct model id for inferred gateway endpoints', async () => {
+  promptState.answers = ['https://ai-gateway.vercel.sh/v1', 'VERCEL_AI_API_KEY', 'model-alpha']
+  const { output, readOutput } = createCapturedOutputStream()
 
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -169,13 +169,8 @@ test('setup assistant prompt flow recomputes inferred preset identity from the f
       'Use model-alpha from Vercel AI Gateway. Murph will read the key from VERCEL_AI_API_KEY.',
   })
   assert.deepEqual(promptState.discoveredCalls, [
-    {
-      apiKeyEnv: 'VERCEL_AI_API_KEY',
-      baseUrl: 'https://ai-gateway.vercel.sh/v1',
-      provider: 'openai-compatible',
-      providerName: 'vercel-ai-gateway',
-    },
   ])
+  assert.doesNotMatch(readOutput(), /Available models/u)
 })
 
 test('setup assistant prompt flow retries required model entry and rejects unsupported reasoning effort', async () => {

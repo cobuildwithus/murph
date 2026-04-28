@@ -959,7 +959,7 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
     allowPrompt: false,
     commandName: 'murph setup',
     options: createSetupOptions({
-      assistantProviderPreset: 'openrouter',
+      assistantProviderPreset: 'venice',
     }),
     preset: 'openai-compatible',
   })
@@ -968,10 +968,10 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
     enabled: true,
     provider: 'openai-compatible',
     model: 'openai/gpt-4.1',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    apiKeyEnv: 'OPENROUTER_API_KEY',
-    presetId: 'openrouter',
-    providerName: 'openrouter',
+    baseUrl: 'https://api.venice.ai/api/v1',
+    apiKeyEnv: 'VENICE_API_KEY',
+    presetId: 'venice',
+    providerName: 'venice',
     codexCommand: null,
     profile: null,
     reasoningEffort: null,
@@ -986,7 +986,7 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
       quota: null,
     },
     detail:
-      'Use openai/gpt-4.1 from OpenRouter. Murph will read the key from OPENROUTER_API_KEY. Detected API key account from local Codex credentials.',
+      'Use openai/gpt-4.1 from Venice. Murph will read the key from VENICE_API_KEY. Detected API key account from local Codex credentials.',
   })
 })
 
