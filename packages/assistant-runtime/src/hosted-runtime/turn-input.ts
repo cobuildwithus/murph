@@ -1,4 +1,5 @@
 import {
+  AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
   createInboxBackedAssistantTurnInputPort,
   type AssistantTurnInputRefreshResult,
@@ -104,8 +105,8 @@ function normalizeHostedActiveTurnInputUnavailableError(
     error instanceof HostedMailboxImportCheckpointConflictError ||
     error instanceof HostedMailboxImportCheckpointUserMismatchError
   ) {
-    return new AssistantActiveTurnInputUnavailableError(
-      "Active turn checkpoint was rejected before outbox commit; will retry later.",
+    return new AssistantActiveTurnInputCheckpointRejectedError(
+      "Active turn input checkpoint was rejected; aborting this workspace phase so it can retry from durable state.",
     );
   }
 

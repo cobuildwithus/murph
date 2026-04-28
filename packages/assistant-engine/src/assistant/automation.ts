@@ -22,6 +22,7 @@ export {
 export {
   createInboxBackedAssistantTurnInputPort,
   createNoopAssistantTurnInputPort,
+  AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
   type AssistantActiveTurnInputCheckpointHook,
   type AssistantActiveTurnInputCheckpointInput,
