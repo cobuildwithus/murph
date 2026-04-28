@@ -19,6 +19,7 @@ import {
   createLinqChat,
   createLinqWebhookSubscription,
   deleteLinqMessage,
+  markLinqChatRead,
   probeLinqApi,
   sendLinqChatMessage,
   startLinqChatTypingIndicator,
@@ -337,6 +338,74 @@ test('linq runtime preserves path-prefixed base urls when building requests', as
   assert.deepEqual(seenUrls, [
     'http://host.docker.internal:8902/__murph/local-internal-proxy/users/member_123/results.worker/chats/chat%3A123/messages',
   ])
+})
+
+test('markLinqChatRead posts a no-body read acknowledgement with Linq metadata', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const seenRequests: Array<{
+    body?: string
+    headers?: Record<string, string>
+    method: string
+    url: string
+  }> = []
+
+  await markLinqChatRead(
+    {
+      chatId: ' chat:123 ',
+    },
+    {
+      env,
+      fetchImplementation: async (url: string, init) => {
+        seenRequests.push({
+          body: init.body,
+          headers: init.headers,
+          method: init.method,
+          url,
+        })
+        return new Response(null, { status: 204 })
+      },
+    },
+  )
+
+  assert.deepEqual(seenRequests, [
+    {
+      body: undefined,
+      headers: {
+        authorization: `Bearer ${env.LINQ_API_TOKEN}`,
+      },
+      method: 'POST',
+      url: 'https://linq.example.test/custom/chats/chat%3A123/read',
+    },
+  ])
+
+  await assert.rejects(
+    () =>
+      markLinqChatRead(
+        {
+          chatId: 'chat-123',
+        },
+        {
+          env,
+          fetchImplementation: async () =>
+            createJsonResponse({ detail: 'read unavailable' }, {
+              status: 503,
+            }),
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'mark_read' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'POST' &&
+      error.context?.path === '/chats/chat-123/read' &&
+      error.context?.retryable === false &&
+      error.context?.status === 503,
+  )
 })
 
 test('linq runtime surfaces non-retryable transport, http, and configuration failures', async () => {

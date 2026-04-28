@@ -30,6 +30,7 @@ type LinqOperation =
   | 'create_webhook_subscription'
   | 'delete_message'
   | 'list_phone_numbers'
+  | 'mark_read'
   | 'send_message'
   | 'typing_start'
   | 'typing_stop'
@@ -249,6 +250,31 @@ export async function stopLinqChatTypingIndicator(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'DELETE',
     path: `/chats/${encodeURIComponent(chatId)}/typing`,
+    signal: dependencies.signal,
+  })
+}
+
+export async function markLinqChatRead(
+  input: {
+    chatId: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<void> {
+  const chatId = normalizeRequiredString(input.chatId, 'chat id')
+
+  await requestLinqNoContent({
+    details: {
+      operation: 'mark_read',
+      provider: 'linq',
+    },
+    env: dependencies.env ?? process.env,
+    fetchImplementation: dependencies.fetchImplementation,
+    method: 'POST',
+    path: `/chats/${encodeURIComponent(chatId)}/read`,
     signal: dependencies.signal,
   })
 }

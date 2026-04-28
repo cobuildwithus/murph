@@ -19,6 +19,7 @@ import {
 } from "@murphai/inboxd";
 import { createConfiguredParserRegistry } from "@murphai/parsers";
 
+import { markHostedConversationReadBestEffort } from "../channel-activity.ts";
 import { readHostedRawEmailMessage } from "./email.ts";
 import {
   createHostedLinqAttachmentDownloadDriver,
@@ -71,6 +72,10 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       vaultRoot: input.vaultRoot,
     });
     const persistedCapture = await pipeline.processCapture(capture);
+    await markHostedConversationReadBestEffort({
+      runtimeEnv: input.runtime.platformEnv,
+      wake: input.wake,
+    });
 
     return {
       capture: persistedCapture,
