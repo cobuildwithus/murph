@@ -124,7 +124,7 @@ function createPort(input: {
 }
 
 describe("createHostedAssistantTurnInputPort", () => {
-  it("returns undefined when the hosted platform has no mailbox refresh port", () => {
+  it("returns undefined when the hosted platform has no active-turn input ports", () => {
     const inboxServices = {} as InboxServicesInput;
 
     expect(
@@ -153,7 +153,78 @@ describe("createHostedAssistantTurnInputPort", () => {
     expect(mocks.createInboxBackedAssistantTurnInputPort).not.toHaveBeenCalled();
   });
 
-  it("forwards accepted active-turn input checkpoints with the hosted request id", async () => {
+  it("fails closed when hosted mailbox refresh lacks acceptance checkpointing", () => {
+    vi.clearAllMocks();
+
+    const inboxServices = {} as InboxServicesInput;
+    const activeTurnInputRefresh = vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(
+      async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      }),
+    );
+
+    expect(() =>
+      createHostedAssistantTurnInputPort({
+        inboxServices,
+        requestId: "req_refresh_only",
+        runtime: {
+          forwardedEnv: {},
+          platform: {
+            artifactStore: {
+              get: vi.fn(async () => null),
+              put: vi.fn(async () => undefined),
+            },
+            effectsPort: {
+              readRawEmailMessage: vi.fn(async () => null),
+              sendEmail: vi.fn(async () => undefined),
+            },
+            refreshMailboxForActiveTurnInput: activeTurnInputRefresh,
+          },
+          platformEnv: {},
+        },
+        vaultRoot: "/tmp/vault-root",
+        wake: TIMER_WAKE,
+      }),
+    ).toThrow(/requires both mailbox refresh and acceptance checkpoint ports/u);
+
+    expect(mocks.createInboxBackedAssistantTurnInputPort).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when hosted acceptance checkpointing lacks mailbox refresh", () => {
+    vi.clearAllMocks();
+
+    const inboxServices = {} as InboxServicesInput;
+    const checkpointActiveTurnInput = vi.fn(async () => undefined);
+
+    expect(() =>
+      createHostedAssistantTurnInputPort({
+        inboxServices,
+        requestId: "req_checkpoint_only",
+        runtime: {
+          forwardedEnv: {},
+          platform: {
+            artifactStore: {
+              get: vi.fn(async () => null),
+              put: vi.fn(async () => undefined),
+            },
+            checkpointActiveTurnInput,
+            effectsPort: {
+              readRawEmailMessage: vi.fn(async () => null),
+              sendEmail: vi.fn(async () => undefined),
+            },
+          },
+          platformEnv: {},
+        },
+        vaultRoot: "/tmp/vault-root",
+        wake: TIMER_WAKE,
+      }),
+    ).toThrow(/requires both mailbox refresh and acceptance checkpoint ports/u);
+
+    expect(mocks.createInboxBackedAssistantTurnInputPort).not.toHaveBeenCalled();
+  });
+
+  it("forwards accepted active-turn input checkpoints with the hosted request id when both hooks are available", async () => {
     const basePort: AssistantTurnInputPort = {
       async refresh() {
         return {
@@ -169,8 +240,15 @@ describe("createHostedAssistantTurnInputPort", () => {
       },
     };
     const checkpointActiveTurnInput = vi.fn(async () => undefined);
+    const activeTurnInputRefresh = vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(
+      async () => ({
+        progressed: false,
+        reason: "no_new_input",
+      }),
+    );
     const port = createPort({
       activeTurnInputCheckpoint: checkpointActiveTurnInput,
+      activeTurnInputRefresh,
       basePort,
     });
 
@@ -231,6 +309,7 @@ describe("createHostedAssistantTurnInputPort", () => {
       },
     );
     const port = createPort({
+      activeTurnInputCheckpoint: vi.fn(async () => undefined),
       basePort,
       activeTurnInputRefresh,
     });
@@ -291,6 +370,7 @@ describe("createHostedAssistantTurnInputPort", () => {
       }),
     );
     const port = createPort({
+      activeTurnInputCheckpoint: vi.fn(async () => undefined),
       basePort,
       activeTurnInputRefresh,
     });
@@ -325,6 +405,7 @@ describe("createHostedAssistantTurnInputPort", () => {
       async () => activeTurnInputResult,
     );
     const port = createPort({
+      activeTurnInputCheckpoint: vi.fn(async () => undefined),
       basePort,
       activeTurnInputRefresh,
     });
@@ -353,7 +434,11 @@ describe("createHostedAssistantTurnInputPort", () => {
       .fn<HostedRuntimeActiveTurnInputMailboxRefresh>()
       .mockRejectedValueOnce(hostedError);
 
-    const port = createPort({ basePort, activeTurnInputRefresh });
+    const port = createPort({
+      activeTurnInputCheckpoint: vi.fn(async () => undefined),
+      basePort,
+      activeTurnInputRefresh,
+    });
     expect(port).toBeDefined();
 
     await expect(port?.refresh({ phase: "after_provider" })).rejects.toThrow(
