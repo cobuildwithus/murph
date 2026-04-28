@@ -422,9 +422,13 @@ export function emitHostedAssistantProviderTraceLog(input: {
 }): HostedExecutionRedactedLogEntry | null {
   const requestDebug = readHostedProviderRequestDebugTrace(input.event);
   if (requestDebug) {
+    const requestSummary = buildHostedProviderRequestSummary(requestDebug);
     const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
       ...(input.details ?? {}),
-      assistantProviderRequest: buildHostedProviderRequestSummary(requestDebug),
+      ...prefixHostedProviderTraceDetails(
+        requestSummary,
+        "assistantProviderRequest",
+      ),
     });
 
     emitHostedExecutionStructuredLog({
@@ -450,9 +454,13 @@ export function emitHostedAssistantProviderTraceLog(input: {
     return null;
   }
 
+  const responsesSummary = buildHostedResponsesRequestSummary(responsesDebug);
   const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
     ...(input.details ?? {}),
-    assistantResponsesRequest: buildHostedResponsesRequestSummary(responsesDebug),
+    ...prefixHostedProviderTraceDetails(
+      responsesSummary,
+      "assistantResponsesRequest",
+    ),
   });
 
   emitHostedExecutionStructuredLog({
@@ -471,6 +479,63 @@ export function emitHostedAssistantProviderTraceLog(input: {
     phase: "wake.running",
     redacted: redactedDetails,
   };
+}
+
+function prefixHostedProviderTraceDetails(
+  details: HostedExecutionStructuredLogDetails,
+  prefix: string,
+): HostedExecutionStructuredLogDetails {
+  return Object.fromEntries(
+    Object.entries(details)
+      .filter(([key, value]) =>
+        isHostedProviderTraceDetailKeySafeForRuntimeLog(key)
+        && isHostedProviderTraceDetailValueSafeForRuntimeLog(value)
+      )
+      .map(([key, value]) => [
+        `${prefix}${key.slice(0, 1).toUpperCase()}${key.slice(1)}`,
+        value,
+      ]),
+  );
+}
+
+function isHostedProviderTraceDetailKeySafeForRuntimeLog(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return ![
+    "address",
+    "authorization",
+    "body",
+    "cookie",
+    "email",
+    "header",
+    "message",
+    "path",
+    "payload",
+    "phone",
+    "prompt",
+    "raw",
+    "secret",
+    "text",
+    "token",
+  ].some((part) => normalized.includes(part));
+}
+
+function isHostedProviderTraceDetailValueSafeForRuntimeLog(
+  value: unknown,
+): value is null | boolean | number | string | Array<null | boolean | number | string> {
+  if (Array.isArray(value)) {
+    return value.every(isHostedProviderTraceDetailScalarSafeForRuntimeLog);
+  }
+
+  return isHostedProviderTraceDetailScalarSafeForRuntimeLog(value);
+}
+
+function isHostedProviderTraceDetailScalarSafeForRuntimeLog(
+  value: unknown,
+): value is null | boolean | number | string {
+  return value === null
+    || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value))
+    || typeof value === "string";
 }
 
 function readHostedProviderRequestDebugTrace(

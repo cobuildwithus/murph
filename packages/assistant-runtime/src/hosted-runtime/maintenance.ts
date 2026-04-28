@@ -254,7 +254,7 @@ export async function runHostedAssistantAutomation(
     redactedLogEntries.push(emitHostedRuntimeRedactedLog({
       component: "runtime",
       details: {
-        automationEventCounts: Object.fromEntries(automationEventCounts),
+        ...buildHostedAssistantAutomationEventCountLogDetails(automationEventCounts),
         autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
         autoReplyCursorSummary: afterState.autoReply.map((entry) =>
           `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
@@ -320,6 +320,20 @@ export async function runHostedAssistantAutomation(
     });
     throw error;
   }
+}
+
+function buildHostedAssistantAutomationEventCountLogDetails(
+  counts: ReadonlyMap<string, number>,
+): Record<string, number | string> {
+  const details: Record<string, number | string> = {};
+  let index = 0;
+  for (const [eventType, count] of [...counts.entries()].slice(0, 8)) {
+    details[`automationEventType${index}`] = eventType;
+    details[`automationEventCount${index}`] = count;
+    index += 1;
+  }
+  details.automationEventTypeCount = counts.size;
+  return details;
 }
 
 function emitHostedRuntimeRedactedLog(

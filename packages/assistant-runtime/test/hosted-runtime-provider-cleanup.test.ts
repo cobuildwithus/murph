@@ -153,6 +153,49 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
   }
 });
 
+test("hosted provider cleanup persists a future retry checkpoint after failed deletion", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    mocks.deleteHostedLinqMessages.mockRejectedValueOnce(new Error("delete unavailable"));
+    await recordHostedProviderCleanupBeforeCommit({
+      linqMessageIds: ["linq_inbound_1"],
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      vaultRoot,
+    });
+
+    const result = await drainHostedProviderCleanupAfterCommit({
+      assistantDeliveryOutcomes: [],
+      env: {},
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      vaultRoot,
+      wake,
+    });
+
+    assert.deepEqual(result, {
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 0,
+      failedLinqMessageCount: 1,
+      nextWakeAt: "2026-04-08T00:05:00.000Z",
+    });
+    assert.deepEqual(
+      await readHostedProviderCleanupCheckpoint(vaultRoot),
+      {
+        nextWakeAt: "2026-04-08T00:05:00.000Z",
+      },
+    );
+  } finally {
+    vi.useRealTimers();
+    await cleanup();
+  }
+});
+
 async function readHostedProviderCleanupFile(vaultRoot: string): Promise<{
   linqMessageIds: unknown;
   checkpoint: unknown;

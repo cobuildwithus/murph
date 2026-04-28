@@ -318,9 +318,9 @@ describe("runHostedAssistantAutomation", () => {
         expect.objectContaining({
           message: "Hosted assistant automation pass finished.",
           redacted: expect.objectContaining({
-            automationEventCounts: {
-              "capture.replied": 1,
-            },
+            automationEventCount0: 1,
+            automationEventType0: "capture.replied",
+            automationEventTypeCount: 1,
             progressed: true,
             requestId: "req_123",
           }),
@@ -764,15 +764,8 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
           component: "runtime.provider",
           message: "Hosted assistant provider request summary captured.",
           redacted: expect.objectContaining({
-            assistantProviderRequest: expect.objectContaining({
-              previousResponseIdPresent: true,
-              promptCacheDynamicContextStartsAfterStaticCore: 4096,
-              promptCacheStableRouteCapabilityPromptHash: "hash-stable-route",
-              promptCacheStaticPromptHash: "hash-static",
-              promptCacheToolSchemaHash: "hash-tools",
-              promptProfile: "conversation",
-              schema: "murph.assistant-provider-request-debug.v1",
-            }),
+            assistantProviderRequestPreviousResponseIdPresent: true,
+            assistantProviderRequestSchema: "murph.assistant-provider-request-debug.v1",
             requestId: "req_123",
           }),
         }),

@@ -91,12 +91,14 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
       messageIds,
     });
   } catch (error) {
+    const nextWakeAt = new Date(Date.now() + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
     await writeHostedProviderCleanupState(input.vaultRoot, {
       schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-      checkpoint: existing?.checkpoint ?? normalizeHostedProviderCleanupCheckpoint(input.checkpoint),
+      checkpoint: {
+        nextWakeAt,
+      },
       linqMessageIds: messageIds,
     });
-    const nextWakeAt = new Date(Date.now() + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
     emitHostedExecutionStructuredLog({
       component: "runtime",
       details: {
