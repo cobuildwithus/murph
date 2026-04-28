@@ -105,7 +105,7 @@ async function assertAccessibleCodexHomeDirectory(
   } catch {
     throw new VaultCliError(
       'ASSISTANT_CODEX_HOME_INVALID',
-      `Configured Codex home does not exist: ${resolvedHome}`,
+      'Configured Codex home does not exist. Check --codexHome or CODEX_HOME.',
     )
   }
 
@@ -119,14 +119,14 @@ async function assertAccessibleCodexHomeDirectory(
   } catch {
     throw new VaultCliError(
       'ASSISTANT_CODEX_HOME_INVALID',
-      `Configured Codex home is not accessible: ${resolvedHome}`,
+      'Configured Codex home is not accessible. Check --codexHome permissions.',
     )
   }
 
   if (!resolvedStats.isDirectory()) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_HOME_INVALID',
-      `Configured Codex home is not a directory: ${resolvedHome}`,
+      'Configured Codex home is not a directory. Check --codexHome.',
     )
   }
 }

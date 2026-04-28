@@ -368,7 +368,7 @@ test('executeCodexAppServerTurn rejects unreadable image paths before spawn', as
       assert.equal((error as { code?: string }).code, 'ASSISTANT_CODEX_IMAGE_INVALID')
       assert.equal(
         (error as { message?: string }).message,
-        `Codex app-server image input path is not readable: ${imagePath}`,
+        'Codex app-server image input path is not readable.',
       )
       return true
     },

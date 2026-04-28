@@ -56,7 +56,6 @@ export interface AssistantLocalAutomationRunInput {
   deliveryDispatchMode?: RunAssistantAutomationInput['deliveryDispatchMode']
   drainOutbox?: boolean
   maxPerScan?: number
-  modelSpec?: RunAssistantAutomationInput['modelSpec']
   once?: boolean
   requestId?: string | null
   sessionMaxAgeMs?: number | null
@@ -351,7 +350,6 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
           drainOutbox: input?.drainOutbox,
           inboxServices,
           maxPerScan: input?.maxPerScan,
-          modelSpec: input?.modelSpec,
           once: input?.once ?? true,
           requestId: input?.requestId ?? null,
           sessionMaxAgeMs: input?.sessionMaxAgeMs ?? null,

@@ -1,10 +1,10 @@
 {
   "id": "assistant-chat",
-  "command": "vault-cli assistant chat [prompt] --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli|openai-compatible] [--codexCommand <path>] [--model <model>] [--baseUrl <url>] [--apiKeyEnv <name>] [--providerName <name>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--request-id <id>]",
+  "command": "vault-cli assistant chat [prompt] --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--provider codex-cli] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--oss] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents the assistant chat surface, including the preferred Ink terminal UI and readline fallback semantics, without treating provider transcripts as part of smoke execution."
+  "purpose": "Documents the Codex App Server assistant chat surface, including the preferred Ink terminal UI and readline fallback semantics, without treating provider transcripts as part of smoke execution."
 }

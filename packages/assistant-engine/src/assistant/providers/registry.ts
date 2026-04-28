@@ -203,8 +203,11 @@ export async function executeAssistantProviderTurn(
   const providerConfig = normalizeAssistantProviderConfig(input)
 
   return await executeAssistantProviderTurnWithDefinition({
+    activeTurnId: input.activeTurnId,
     abortSignal: input.abortSignal,
+    activeTurnSteering: input.activeTurnSteering,
     activeTurnMessages: input.activeTurnMessages,
+    activeTurnSessionId: input.activeTurnSessionId,
     continuityContext: input.continuityContext,
     conversationMessages: input.conversationMessages,
     env: input.env,
@@ -229,8 +232,11 @@ export async function executeAssistantProviderTurnAttempt(
   const providerConfig = normalizeAssistantProviderConfig(input)
 
   return await executeAssistantProviderTurnAttemptWithDefinition({
+    activeTurnId: input.activeTurnId,
     abortSignal: input.abortSignal,
+    activeTurnSteering: input.activeTurnSteering,
     activeTurnMessages: input.activeTurnMessages,
+    activeTurnSessionId: input.activeTurnSessionId,
     continuityContext: input.continuityContext,
     conversationMessages: input.conversationMessages,
     env: input.env,

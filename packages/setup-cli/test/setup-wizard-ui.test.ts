@@ -97,15 +97,15 @@ test('setup wizard panel and selection rows build structured Ink elements withou
 test('setup wizard answered, detail, and hint rows render the expected labels and values', () => {
   const answered = createSetupWizardAnsweredBlock(
     {
-      detail: 'OpenAI-compatible endpoint',
+      detail: 'Codex App Server backend',
       label: 'Assistant',
-      value: 'OpenRouter',
+      value: 'Codex',
     },
     'answered',
   )
   assert.equal(
     collectElementText(answered),
-    '◇ Assistant  OpenRouter  OpenAI-compatible endpoint',
+    '◇ Assistant  Codex  Codex App Server backend',
   )
 
   const bullet = createSetupWizardBulletRow(
@@ -173,10 +173,10 @@ test('setup wizard UI omits optional rows cleanly and keeps selected inactive ro
       line: {
         active: false,
         badges: [],
-        description: 'Use the saved OpenAI-compatible endpoint.',
-        key: 'endpoint',
+        description: 'Use the saved Codex App Server backend.',
+        key: 'backend',
         selected: true,
-        title: 'Saved endpoint',
+        title: 'Saved backend',
       },
       marker: 'radio',
     },
@@ -184,7 +184,7 @@ test('setup wizard UI omits optional rows cleanly and keeps selected inactive ro
   )
   assert.equal(
     collectElementText(selectedRow),
-    '  ● Saved endpoint  Use the saved OpenAI-compatible endpoint.',
+    '  ● Saved backend  Use the saved Codex App Server backend.',
   )
 
   const answered = createSetupWizardAnsweredBlock(

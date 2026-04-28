@@ -336,6 +336,7 @@ export async function sendAssistantMessageLocal(
           let providerRequestAcceptedInputIds: readonly string[] = []
           const providerOutcome = await executeProviderTurnWithRecovery({
             activeTurnHistory,
+            activeTurnSteering: activeTurnInputController,
             input: currentInput,
             onProviderRequestPlanned: async (event) => {
               providerRequestJournal =
@@ -514,10 +515,25 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
               vault: currentInput.vault,
             })
-            currentInput = buildActiveTurnContinuationInput({
+            const nextInput = buildActiveTurnContinuationInput({
               acceptedInput: activeTurnInput,
               input: previousInput,
             })
+            if (activeTurnInput.providerAlreadySteered === true) {
+              currentInput = nextInput
+              providerRequestJournal =
+                await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                  acceptedInputIds: acceptedInputJournal.inputIds,
+                  continuation: providerResult.providerContinuation,
+                  ordinal: providerRequestOrdinal,
+                  providerAttemptId: null,
+                  turnId: currentUserTurn.turnId,
+                }) ?? providerRequestJournal
+              providerRequestAcceptedInputIds =
+                providerRequestJournal?.inputIds ?? acceptedInputJournal.inputIds
+              continue
+            }
+            currentInput = nextInput
             activeTurnHistory = appendAssistantActiveTurnProviderExchange({
               acceptedInputIds: providerRequestAcceptedInputIds,
               assistantResponse: providerResult.response,

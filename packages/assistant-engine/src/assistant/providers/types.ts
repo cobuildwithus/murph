@@ -18,6 +18,7 @@ import type {
 } from '../content-types.js'
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantProviderContinuation } from '../active-turn-input-journal.js'
+import type { AssistantActiveTurnLiveProviderSteering } from '../turn-input.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -70,10 +71,13 @@ export interface AssistantProviderExecutionCapabilities
 }
 
 export interface AssistantProviderTurnInput {
+  activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
+  activeTurnId?: string | null
   activeTurnMessages?: ReadonlyArray<{
     content: string | AssistantUserMessageContentPart[]
     role: 'assistant' | 'user'
   }>
+  activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
   codexCommand?: string | null
@@ -107,10 +111,13 @@ export interface AssistantProviderTurnInput {
 }
 
 export interface AssistantProviderTurnExecutionInput {
+  activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
+  activeTurnId?: string | null
   activeTurnMessages?: ReadonlyArray<{
     content: string | AssistantUserMessageContentPart[]
     role: 'assistant' | 'user'
   }>
+  activeTurnSessionId?: string | null
   abortSignal?: AbortSignal
   continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{

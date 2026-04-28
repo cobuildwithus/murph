@@ -43,6 +43,9 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
+import type {
+  AssistantActiveTurnLiveProviderSteering,
+} from './turn-input.js'
 import type { AssistantProviderContinuation } from './active-turn-input-journal.js'
 import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
 import {
@@ -105,6 +108,7 @@ export type AssistantProviderTurnRecoveryOutcome =
 
 export async function executeProviderTurnWithRecovery(input: {
   activeTurnHistory?: AssistantActiveTurnProviderHistory | null
+  activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   onProviderRequestPlanned?: (event: {
     providerAttemptId: string | null
@@ -251,6 +255,9 @@ async function executeAssistantProviderAttempt(input: {
     })
     const attemptResult = await executeAssistantProviderTurnAttempt({
       abortSignal: executionPlan.input.abortSignal,
+      activeTurnId: executionPlan.turnId,
+      activeTurnSteering: executionPlan.activeTurnSteering,
+      activeTurnSessionId: attemptPlan.session.sessionId,
       provider: attemptPlan.route.provider,
       workingDirectory: attemptPlan.routePlan.workingDirectory,
       env: attemptEnv,

@@ -946,6 +946,240 @@ test('sendAssistantMessageLocal steers same-conversation input into an active ma
   ])
 })
 
+test('sendAssistantMessageLocal live-steers same-conversation input without a second provider request', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+
+  mocks.executeProviderTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      providerSessionId: 'thread-live',
+      providerTurnId: 'turn-live-provider',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'final after live-steered input',
+        session,
+      },
+    }
+  })
+
+  const firstResultPromise = sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Follow-up while running',
+    vault: '/vaults/test',
+  })
+
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Follow-up while running'])
+  })
+  providerRelease.resolve()
+
+  const [firstResult, steeredResult] = await Promise.all([
+    firstResultPromise,
+    steeredResultPromise,
+  ])
+
+  assert.equal(firstResult.response, 'final after live-steered input')
+  assert.equal(firstResult.prompt, 'Follow-up while running')
+  assert.equal(steeredResult.response, 'final after live-steered input')
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls.length, 1)
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 1)
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0])
+      .some((input) =>
+        input.ordinal === 0 &&
+        input.turnId === 'turn-1' &&
+        input.acceptedInputIds?.join(',') === 'initial,manual-1'
+      ),
+  ).toBe(true)
+})
+
+test('sendAssistantMessageLocal replays only unsteered input from a mixed live-steer batch', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+
+  mocks.executeProviderTurnWithRecovery
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: null,
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+      })
+      const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+        interrupt: async () => undefined,
+        providerSessionId: 'thread-live',
+        providerTurnId: 'turn-live-provider',
+        sessionId: session.sessionId,
+        steer: async (input) => {
+          liveSteeredPrompts.push(input.prompt)
+          if (input.prompt === 'Second follow-up') {
+            throw new Error('steer failed after first input')
+          }
+        },
+        turnId: 'turn-1',
+      })
+      providerStarted.resolve()
+      await providerRelease.promise
+      releaseLiveTurn?.()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          providerContinuation: {
+            kind: 'explicit-structured-history',
+          },
+          response: 'draft after mixed live input',
+          session,
+        },
+      }
+    })
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: null,
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          providerContinuation: {
+            kind: 'explicit-structured-history',
+          },
+          response: 'final after unsteered replay',
+          session,
+        },
+      }
+    })
+
+  const firstResultPromise = sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const firstQueuedResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'First follow-up',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['First follow-up'])
+  })
+
+  const secondQueuedResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Second follow-up',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['First follow-up', 'Second follow-up'])
+  })
+  providerRelease.resolve()
+
+  const [firstResult, firstQueuedResult, secondQueuedResult] = await Promise.all([
+    firstResultPromise,
+    firstQueuedResultPromise,
+    secondQueuedResultPromise,
+  ])
+
+  assert.equal(firstResult.response, 'final after unsteered replay')
+  assert.equal(firstQueuedResult.response, 'final after unsteered replay')
+  assert.equal(secondQueuedResult.response, 'final after unsteered replay')
+  assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
+  assert.equal(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt,
+    'Second follow-up',
+  )
+  assert.equal(
+    mocks.executeProviderTurnWithRecovery.mock.calls[1]?.[0]?.input.prompt.includes('First follow-up'),
+    false,
+  )
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0])
+      .some((input) =>
+        input.ordinal === 0 &&
+        input.turnId === 'turn-1' &&
+        input.acceptedInputIds?.join(',') === 'initial,manual-1'
+      ),
+  ).toBe(true)
+})
+
 test('sendAssistantMessageLocal registers manual steering before prompt persistence completes', async () => {
   const session = createAssistantSession({
     binding: {
@@ -2434,9 +2668,11 @@ async function loadLocalServiceModule(input?: {
           ),
           updateProviderRequest: vi.fn(
             async (_input: {
+              acceptedInputIds?: readonly string[] | null
               continuation: { kind: string }
               ordinal: number
               providerAttemptId?: string | null
+              turnId?: string
             }) => ({
               admissionState: 'current-turn-open' as const,
               inputIds: [...acceptedInputIds],

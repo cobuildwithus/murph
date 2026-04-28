@@ -43,7 +43,6 @@ export async function runAssistantAutomation(
         deliveryDispatchMode: input.deliveryDispatchMode,
         drainOutbox: input.drainOutbox,
         maxPerScan: input.maxPerScan,
-        modelSpec: input.modelSpec,
         once: input.once,
         requestId: input.requestId ?? null,
         sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,

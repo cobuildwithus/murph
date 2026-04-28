@@ -3,8 +3,6 @@ import { access, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from '
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { test as baseTest } from 'vitest'
-import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
-import { writeAssistantChatResultArtifacts } from '@murphai/assistant-engine/assistant/automation/artifacts'
 import { materializeInboxModelBundle } from '../src/inbox-model-harness.ts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { VaultServices } from '@murphai/vault-usecases'
@@ -112,64 +110,6 @@ function createStubInboxServices(showResult: Awaited<ReturnType<InboxServices['s
   }
 }
 
-function createStubAssistantResult(vault: string): AssistantAskResult {
-  return {
-    vault,
-    status: 'completed',
-    prompt: 'Reply to the capture.',
-    response: 'Acknowledged.',
-    session: {
-      schema: 'murph.assistant-session.v1',
-      sessionId: 'asst_session_1',
-      target: {
-        adapter: 'codex-cli',
-        approvalPolicy: null,
-        codexCommand: null,
-        model: 'gpt-5.4',
-        oss: false,
-        profile: null,
-        reasoningEffort: null,
-        sandbox: null,
-      },
-      resumeState: null,
-      provider: 'codex-cli',
-      providerOptions: {
-        provider: 'codex-cli',
-        continuityFingerprint: 'fingerprint-inbox-model-harness',
-        model: 'gpt-5.4',
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
-        baseUrl: undefined,
-        apiKeyEnv: undefined,
-        executionDriver: 'codex-app-server',
-        providerName: undefined,
-        resumeKind: 'codex-thread',
-      },
-      alias: null,
-      binding: {
-        conversationKey: null,
-        channel: null,
-        identityId: null,
-        actorId: null,
-        threadId: null,
-        threadIsDirect: null,
-        delivery: null,
-      },
-      createdAt: '2026-03-13T10:00:00.000Z',
-      updatedAt: '2026-03-13T10:00:00.000Z',
-      lastTurnAt: '2026-03-13T10:00:00.000Z',
-      turnCount: 1,
-    },
-    delivery: null,
-    deliveryDeferred: false,
-    deliveryIntentId: null,
-    deliveryError: null,
-  }
-}
-
 async function pathExists(targetPath: string): Promise<boolean> {
   try {
     await access(targetPath)
@@ -179,7 +119,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-test('materializeInboxModelBundle emits a text-only routing bundle without runtime tools', async () => {
+test('materializeInboxModelBundle emits a text-only capture audit bundle', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-'))
   const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_1', 'attachment-1')
   await mkdir(derivedDirectory, { recursive: true })
@@ -276,17 +216,14 @@ test('materializeInboxModelBundle emits a text-only routing bundle without runti
     assert.equal(result.bundle.preparedInputMode, 'text-only')
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
     assert.equal(result.bundle.attachments[0]?.routingImage.reason, 'not-image')
-    assert.deepEqual(result.bundle.tools, [])
     assert.match(result.bundle.routingText, /Please file this lab summary/u)
     assert.match(result.bundle.routingText, /Extracted plain text from the attachment/u)
     assert.match(result.bundle.routingText, /Lab values and follow-up notes/u)
-    assert.doesNotMatch(result.bundle.routingText, /Tool reminders:/u)
 
     const persistedBundle = JSON.parse(
       await readFile(path.join(vaultRoot, result.bundlePath), 'utf8'),
     ) as {
       schema: string
-      tools: Array<{ name: string }>
     }
 
     assert.equal(persistedBundle.schema, 'murph.inbox-model-bundle.v1')
@@ -298,7 +235,6 @@ test('materializeInboxModelBundle emits a text-only routing bundle without runti
       (await stat(path.join(vaultRoot, result.bundlePath))).mode & 0o777,
       0o600,
     )
-    assert.deepEqual(persistedBundle.tools, [])
 
     const repeatedResult = await materializeInboxModelBundle({
       inboxServices,
@@ -451,36 +387,6 @@ test('materializeInboxModelBundle marks supported meal photos as multimodal-read
   }
 })
 
-test('writeAssistantChatResultArtifacts rejects malicious capture ids before writing chat artifacts outside the vault', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-chat-malicious-vault-'))
-  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-chat-malicious-outside-'))
-  const maliciousCaptureId = path.posix.join('..', '..', '..', path.basename(outsideRoot))
-
-  try {
-    await assert.rejects(
-      () =>
-        writeAssistantChatResultArtifacts({
-          captureIds: [maliciousCaptureId],
-          respondedAt: '2026-03-13T10:05:00.000Z',
-          result: createStubAssistantResult(vaultRoot),
-          vault: vaultRoot,
-        }),
-      (error) => {
-        assert.equal((error as { code?: string }).code, 'ASSISTANT_PATH_OUTSIDE_VAULT')
-        return true
-      },
-    )
-
-    assert.equal(
-      await pathExists(path.join(outsideRoot, 'assistant', 'chat-result.json')),
-      false,
-    )
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-    await rm(outsideRoot, { recursive: true, force: true })
-  }
-})
-
 test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text-only path', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-heic-bundle-'))
 
@@ -611,7 +517,7 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
   await mkdir(derivedDirectory, { recursive: true })
   await writeFile(
     path.join(outsideRoot, 'secret.txt'),
-    'outside-vault text should never enter the routing bundle',
+    'outside-vault text should never enter the capture bundle',
     'utf8',
   )
   await symlink(path.join(outsideRoot, 'secret.txt'), linkedPlainText)
@@ -689,7 +595,7 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
     assert.ok(result.bundle)
     assert.doesNotMatch(
       result.bundle.routingText,
-      /outside-vault text should never enter the routing bundle/u,
+      /outside-vault text should never enter the capture bundle/u,
     )
     assert.equal(
       result.bundle.attachments[0]?.fragments.some(
@@ -809,7 +715,7 @@ test('materializeInboxModelBundle ignores manifest entries that point at in-vaul
   await mkdir(path.join(vaultRoot, 'bank'), { recursive: true })
   await writeFile(
     path.join(vaultRoot, 'bank', 'secret.md'),
-    'bank secret text should never enter the routing bundle\n',
+    'bank secret text should never enter the capture bundle\n',
     'utf8',
   )
   await writeFile(
@@ -918,7 +824,7 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
   await mkdir(otherDerivedDirectory, { recursive: true })
   await writeFile(
     path.join(otherDerivedDirectory, 'plain.txt'),
-    'other capture text should never enter this routing bundle\n',
+    'other capture text should never enter this capture bundle\n',
     'utf8',
   )
   await writeFile(

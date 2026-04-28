@@ -85,6 +85,7 @@ export type AssistantActiveTurnInputAdmissionResult =
       receiptMetadata?: Record<string, string> | null
       transcriptText?: string | null
       userMessageContent?: AssistantUserMessageContentPart[] | null
+      providerAlreadySteered?: boolean
       kind: 'accepted'
     }
 
@@ -104,6 +105,24 @@ export interface AssistantActiveTurnInputCheckpointInput {
 export type AssistantActiveTurnInputCheckpointHook = (
   input: AssistantActiveTurnInputCheckpointInput,
 ) => Promise<void>
+
+export interface AssistantActiveTurnLiveProviderSteerInput {
+  prompt: string
+  userMessageContent?: readonly AssistantUserMessageContentPart[] | null
+}
+
+export interface AssistantActiveTurnLiveProviderTurn {
+  interrupt(): Promise<void>
+  providerSessionId: string
+  providerTurnId: string
+  sessionId: string
+  steer(input: AssistantActiveTurnLiveProviderSteerInput): Promise<void>
+  turnId: string
+}
+
+export interface AssistantActiveTurnLiveProviderSteering {
+  registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void
+}
 
 export class AssistantActiveTurnInputBudgetExceededError extends Error {
   constructor(message?: string) {

@@ -5,57 +5,6 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import { routingImageEligibilityReasonValues } from './inbox-routing-vision.js'
 
-export const assistantCapabilityHostKindValues = [
-  'cli-backed',
-  'native-local',
-] as const
-
-export const assistantToolBackendKindValues = [
-  'cli-wrapper',
-  'local-service',
-  'configured-web-read',
-  'hosted-api',
-  'native-file',
-] as const
-
-export const assistantToolSpecSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().min(1),
-  inputExample: z.record(z.string(), z.unknown()).nullable(),
-  mutationSemantics: z.enum([
-    'read-only',
-    'mixed',
-    'assistant-runtime-write',
-    'canonical-write',
-    'outward-side-effect',
-  ]),
-  riskClass: z.enum(['low', 'medium', 'high']),
-  backendKind: z.enum(assistantToolBackendKindValues),
-  preferredHostKind: z.enum(assistantCapabilityHostKindValues),
-  selectedHostKind: z.enum(assistantCapabilityHostKindValues),
-  provenance: z.object({
-    origin: z.enum([
-      'descriptor-generated',
-      'hand-authored-helper',
-      'vault-service-backed',
-      'cli-backed',
-      'configured-web-read',
-      'hosted-api-backed',
-      'native-local-only',
-    ]),
-    localOnly: z.boolean(),
-    generatedFrom: z.string().min(1).nullable(),
-    policyWrappers: z.array(z.enum([
-      'command-blocking',
-      'default-vault-injection',
-      'format-default',
-      'stdin-input-materialization',
-      'argv-redaction',
-      'output-redaction',
-    ])),
-  }),
-})
-
 export const inboxModelInputModeValues = ['text-only', 'multimodal'] as const
 
 export const inboxModelInputModeSchema = z.enum(inboxModelInputModeValues)
@@ -114,7 +63,6 @@ export const inboxModelBundleSchema = z.object({
   envelopePath: pathSchema,
   captureText: z.string().nullable(),
   attachments: z.array(inboxModelAttachmentBundleSchema),
-  tools: z.array(assistantToolSpecSchema),
   preparedInputMode: inboxModelInputModeSchema,
   routingText: z.string().min(1),
 })
@@ -126,12 +74,6 @@ export const inboxModelBundleResultSchema = z.object({
   bundle: inboxModelBundleSchema.nullable(),
 })
 
-export type AssistantToolSpec = z.infer<typeof assistantToolSpecSchema>
-export type AssistantToolMutationSemantics = AssistantToolSpec['mutationSemantics']
-export type AssistantToolRiskClass = AssistantToolSpec['riskClass']
-export type AssistantToolBackendKind = AssistantToolSpec['backendKind']
-export type AssistantToolHostKind = AssistantToolSpec['preferredHostKind']
-export type AssistantToolProvenance = AssistantToolSpec['provenance']
 export type InboxModelAttachmentBundle = z.infer<
   typeof inboxModelAttachmentBundleSchema
 >

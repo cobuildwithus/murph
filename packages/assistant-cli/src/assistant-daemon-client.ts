@@ -469,7 +469,6 @@ export async function maybeRunAssistantAutomationViaDaemon(
       drainOutbox: input.drainOutbox,
       executionContext: input.executionContext,
       maxPerScan: input.maxPerScan,
-      modelSpec: input.modelSpec,
       once: input.once,
       requestId: input.requestId ?? null,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,

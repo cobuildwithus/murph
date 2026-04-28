@@ -158,86 +158,6 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-session-id");
   });
 
-  it("keeps Responses function-call output diagnostics shape-only in hosted logs", () => {
-    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "evt_responses_shape",
-      memberId: "member_123",
-      notification: {
-        instructions: "Reply to the current message.",
-        route: {
-          actorId: "+15550002222",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "thread_123",
-          threadIsDirect: true,
-        },
-      },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-    });
-
-    const entry = emitHostedAssistantProviderTraceLog({
-      event: {
-        rawEvent: {
-          schema: "murph.assistant-responses-request-debug.v1",
-          type: "assistant.responses.request.debug",
-          functionCallCount: 1,
-          functionCallNames: ["vault_cli_run"],
-          functionCallOutputCount: 1,
-          functionCallOutputHashes: [
-            "a".repeat(64),
-          ],
-          functionCallOutputKinds: ["string"],
-          functionCallOutputLongestLength: 128,
-          functionCallOutputNonStringCount: 0,
-          functionCallOutputOrphanCount: 0,
-          functionCallOutputStringJsonObjectCount: 1,
-          functionCallOutputStringLengths: [128],
-          gatewayZeroDataRetention: true,
-          inputEntryCount: 3,
-          inputEntryKinds: [
-            "message:user",
-            "function_call:vault_cli_run",
-            "function_call_output:string",
-          ],
-          model: "gpt-5.5",
-          requestBodyHash: "b".repeat(64),
-          requestBodyLength: 4096,
-        },
-      },
-      wake,
-    });
-
-    expect(entry?.redacted).toEqual(
-      expect.objectContaining({
-        assistantResponsesRequestFunctionCallCount: 1,
-        assistantResponsesRequestFunctionCallNames: ["vault_cli_run"],
-        assistantResponsesRequestFunctionCallOutputCount: 1,
-        assistantResponsesRequestFunctionCallOutputHashes: ["a".repeat(64)],
-        assistantResponsesRequestFunctionCallOutputKinds: ["string"],
-        assistantResponsesRequestFunctionCallOutputLongestLength: 128,
-        assistantResponsesRequestFunctionCallOutputOrphanCount: 0,
-        assistantResponsesRequestFunctionCallOutputStringJsonObjectCount: 1,
-        assistantResponsesRequestFunctionCallOutputStringLengths: [128],
-        assistantResponsesRequestGatewayZeroDataRetention: true,
-        assistantResponsesRequestInputEntryCount: 3,
-        assistantResponsesRequestInputEntryKinds: [
-          "message:user",
-          "function_call:vault_cli_run",
-          "function_call_output:string",
-        ],
-        assistantResponsesRequestModel: "gpt-5.5",
-      }),
-    );
-    expect(entry?.redacted).not.toEqual(expect.objectContaining({
-      assistantResponsesRequestRequestBodyHash: expect.anything(),
-      assistantResponsesRequestRequestBodyLength: expect.anything(),
-    }));
-  });
-
   it("sends generic assistant notifications and returns noop wake metrics", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
@@ -252,34 +172,6 @@ describe("executeHostedMailboxEvent", () => {
     mocks.prepareHostedWakeContext.mockResolvedValue(bootstrapResult);
     const debugSystemPrompt = "System prompt headed to Azure with notification rules. ".repeat(16);
     const debugUserPrompt = "Send exactly the signup welcome.";
-    const debugRequestBody = JSON.stringify({
-      model: "gpt-5.5",
-      input: [
-        {
-          content: [
-            {
-              text: debugUserPrompt,
-              type: "input_text",
-            },
-          ],
-          role: "user",
-        },
-      ],
-      instructions: debugSystemPrompt,
-      providerOptions: {
-        gateway: {
-          tags: "[redacted]",
-          user: "[redacted]",
-          zeroDataRetention: true,
-        },
-      },
-      tools: [
-        {
-          name: "vault.show",
-          type: "function",
-        },
-      ],
-    });
     mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
       input.onTraceEvent?.({
         providerSessionId: null,
@@ -344,41 +236,6 @@ describe("executeHostedMailboxEvent", () => {
           userPromptHash: "hash-user-prompt",
           userPromptLength: debugUserPrompt.length,
           zeroDataRetention: true,
-        },
-        updates: [],
-      });
-      input.onTraceEvent?.({
-        providerSessionId: null,
-        rawEvent: {
-          schema: "murph.assistant-responses-request-debug.v1",
-          type: "assistant.responses.request.debug",
-          contextManagementPresent: true,
-          gatewayOnlyProviderCount: 0,
-          gatewayTagsCount: 1,
-          gatewayUserPresent: true,
-          gatewayZeroDataRetention: true,
-          inputMessageCount: 1,
-          inputRoles: ["user"],
-          inputTextFieldCount: 1,
-          inputTextHash: "hash-input",
-          inputTextLength: debugUserPrompt.length,
-          instructionsHash: "hash-instructions",
-          instructionsLength: debugSystemPrompt.length,
-          method: "POST",
-          model: "gpt-5.5",
-          payloadTopLevelKeys: ["input", "instructions", "model", "providerOptions", "tools"],
-          previousResponseIdPresent: false,
-          providerOptionsHash: "hash-provider-options",
-          requestBodyHash: "hash-request-body",
-          requestBodyLength: debugRequestBody.length,
-          requestUrlOrigin: "https://ai-gateway.vercel.sh",
-          requestUrlPath: "/v1/responses",
-          responseFormatHash: "hash-response-format",
-          textConfigHash: "hash-text-config",
-          toolChoice: "auto",
-          toolCount: 1,
-          toolNames: ["vault.show"],
-          toolsHash: "hash-tools",
         },
         updates: [],
       });
@@ -514,19 +371,6 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       4,
       expect.objectContaining({
-        component: "runtime.provider.http",
-        details: expect.objectContaining({
-          assistantResponsesRequestGatewayZeroDataRetention: true,
-          assistantResponsesRequestModel: "gpt-5.5",
-        }),
-        message: "Hosted assistant final Responses request summary captured.",
-        phase: "wake.running",
-        wake,
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
-      5,
-      expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
           notificationRouteChannel: "linq",
@@ -545,15 +389,6 @@ describe("executeHostedMailboxEvent", () => {
     expect(result.redactedLogEntries?.[2]?.redacted).not.toEqual(expect.objectContaining({
       assistantProviderRequestSystemPromptHash: expect.anything(),
       assistantProviderRequestUserPromptHash: expect.anything(),
-    }));
-    expect(result.redactedLogEntries?.[3]?.redacted).toEqual(
-      expect.objectContaining({
-        assistantResponsesRequestModel: "gpt-5.5",
-      }),
-    );
-    expect(result.redactedLogEntries?.[3]?.redacted).not.toEqual(expect.objectContaining({
-      assistantResponsesRequestRequestBodyHash: expect.anything(),
-      assistantResponsesRequestRequestBodyLength: expect.anything(),
     }));
     expect(result).toEqual({
       bootstrapResult,
@@ -610,16 +445,6 @@ describe("executeHostedMailboxEvent", () => {
             assistantProviderRequestProviderExecutionDriver: "codex-app-server",
             assistantProviderRequestProviderModel: "gpt-5.5",
             assistantProviderRequestProviderName: "vercel-ai-gateway",
-          }),
-        },
-        {
-          component: "runtime.provider.http",
-          eventId: "evt_notification",
-          level: "info",
-          message: "Hosted assistant final Responses request summary captured.",
-          phase: "wake.running",
-          redacted: expect.objectContaining({
-            assistantResponsesRequestModel: "gpt-5.5",
           }),
         },
         {

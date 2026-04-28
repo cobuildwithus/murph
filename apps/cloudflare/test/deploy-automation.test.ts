@@ -58,6 +58,44 @@ async function importRenderWorkerSecretsWithMockedAccess(
   return await import("../scripts/render-worker-secrets.ts");
 }
 
+const LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES = [
+  "ANTHROPIC_API_KEY",
+  "CEREBRAS_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "FIREWORKS_API_KEY",
+  "GOOGLE_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GROQ_API_KEY",
+  "HF_TOKEN",
+  "HUGGINGFACEHUB_API_TOKEN",
+  "HUGGINGFACE_API_KEY",
+  "HUGGING_FACE_HUB_TOKEN",
+  "LITELLM_PROXY_API_KEY",
+  "LM_STUDIO_API_KEY",
+  "MISTRAL_API_KEY",
+  "NVIDIA_API_KEY",
+  "NGC_API_KEY",
+  "OLLAMA_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "PERPLEXITY_API_KEY",
+  "TOGETHER_API_KEY",
+  "VENICE_API_KEY",
+  "VLLM_API_KEY",
+  "XAI_API_KEY",
+] as const;
+
+const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
+  "HOSTED_ASSISTANT_API_KEY_ENV",
+  "HOSTED_ASSISTANT_BASE_URL",
+  "HOSTED_ASSISTANT_CODEX_COMMAND",
+  "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
+  "HOSTED_ASSISTANT_OSS",
+  "HOSTED_ASSISTANT_PROFILE",
+  "HOSTED_ASSISTANT_PROVIDER_NAME",
+  "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
+] as const;
+
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
     const environment = readHostedDeployAutomationEnvironment({
@@ -385,6 +423,21 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_OPTIONAL_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("secrets");
     }
+    expect(
+      [...workflowEnvBindings.keys()].filter((name) => name.startsWith("HOSTED_ASSISTANT_")).sort(),
+    ).toEqual(
+      HOSTED_WORKER_OPTIONAL_VAR_NAMES
+        .filter((name) => name.startsWith("HOSTED_ASSISTANT_"))
+        .sort(),
+    );
+    for (const name of LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES) {
+      expect(workflowEnvBindings.get(name)).toBeUndefined();
+      expect(workflow).not.toContain(`${name}:`);
+    }
+    for (const name of REMOVED_HOSTED_ASSISTANT_VAR_NAMES) {
+      expect(workflowEnvBindings.get(name)).toBeUndefined();
+      expect(workflow).not.toContain(`${name}:`);
+    }
     expect([
       ...workflow.matchAll(/pnpm --dir apps\/cloudflare verify:parallel/gmu),
     ]).toHaveLength(2);
@@ -469,12 +522,17 @@ describe("hosted deploy automation helpers", () => {
   });
 
   it("renders required and optional worker secrets from CI secrets", () => {
+    const legacyHostedAssistantProviderSecrets = Object.fromEntries(
+      LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES.map((name) => [
+        name,
+        `${name.toLowerCase()}-legacy`,
+      ]),
+    );
+
     expect(buildHostedWorkerSecretsPayload({
       AGENTMAIL_API_KEY: "agentmail-secret",
       BRAVE_API_KEY: "brave-key",
-      CEREBRAS_API_KEY: "cerebras-key",
-      DEEPSEEK_API_KEY: "deepseek-key",
-      FIREWORKS_API_KEY: "fireworks-key",
+      ...legacyHostedAssistantProviderSecrets,
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
@@ -489,28 +547,14 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-wake-key\"}",
-      HF_TOKEN: "hf-token",
-      HUGGINGFACEHUB_API_TOKEN: "huggingfacehub-token",
-      HUGGINGFACE_API_KEY: "huggingface-api-key",
-      HUGGING_FACE_HUB_TOKEN: "hugging-face-hub-token",
-      LITELLM_PROXY_API_KEY: "litellm-proxy-key",
-      LM_STUDIO_API_KEY: "lm-studio-key",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
-      NVIDIA_API_KEY: "nvidia-key",
-      NGC_API_KEY: "ngc-key",
-      OLLAMA_API_KEY: "ollama-key",
-      PERPLEXITY_API_KEY: "perplexity-key",
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
-      VLLM_API_KEY: "vllm-key",
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
-      CEREBRAS_API_KEY: "cerebras-key",
-      DEEPSEEK_API_KEY: "deepseek-key",
-      FIREWORKS_API_KEY: "fireworks-key",
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
@@ -525,39 +569,56 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
       HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{\"v0\":\"old-wake-key\"}",
-      HF_TOKEN: "hf-token",
-      HUGGINGFACEHUB_API_TOKEN: "huggingfacehub-token",
-      HUGGINGFACE_API_KEY: "huggingface-api-key",
-      HUGGING_FACE_HUB_TOKEN: "hugging-face-hub-token",
-      LITELLM_PROXY_API_KEY: "litellm-proxy-key",
-      LM_STUDIO_API_KEY: "lm-studio-key",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
-      NVIDIA_API_KEY: "nvidia-key",
-      NGC_API_KEY: "ngc-key",
-      OLLAMA_API_KEY: "ollama-key",
-      PERPLEXITY_API_KEY: "perplexity-key",
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
-      VLLM_API_KEY: "vllm-key",
     });
   });
 
   it("keeps only known hosted assistant provider env names in deploy automation", () => {
-    expect(buildHostedWorkerSecretsPayload({
+    const providerSecretsPayload = buildHostedWorkerSecretsPayload({
+      HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
-      VERCEL_AI_API_KEY: "sk-user",
-    })).toMatchObject({
-      VERCEL_AI_API_KEY: "sk-user",
+      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     });
+    expect(providerSecretsPayload).toMatchObject({
+      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+    });
+    expect(providerSecretsPayload.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
+    expect(providerSecretsPayload.HOSTED_ASSISTANT_MODEL).toBeUndefined();
+    expect(providerSecretsPayload.HOSTED_ASSISTANT_PROVIDER).toBeUndefined();
+    expect(providerSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
+    expect(providerSecretsPayload.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBeUndefined();
+
+    const platformSecretsPayload = buildHostedWorkerSecretsPayload({
+      HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
+      HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
+      HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
+      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+    });
+    expect(platformSecretsPayload).toMatchObject({
+      VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
+    });
+    expect(platformSecretsPayload.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
+    expect(platformSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
+    expect(platformSecretsPayload.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBeUndefined();
 
     expect(buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
@@ -569,7 +630,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
-      OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
+      OPENAI_ENTERPRISE_API_KEY: "enterprise-openai-key",
     }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
 
     expect(readHostedDeployAutomationEnvironment({

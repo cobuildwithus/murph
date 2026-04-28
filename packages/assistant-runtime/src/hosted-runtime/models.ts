@@ -58,7 +58,7 @@ export interface HostedBootstrapResult {
     | "saved"
     | "unready";
   assistantConfigured: boolean;
-  assistantProvider: "codex-cli" | "openai-compatible" | null;
+  assistantProvider: "codex-cli" | null;
   assistantSeeded: boolean;
   emailAutoReplyEnabled: boolean;
   linqAutoReplyEnabled: boolean;

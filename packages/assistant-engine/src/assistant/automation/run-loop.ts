@@ -1,7 +1,6 @@
 import { assistantRunResultSchema, type AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices, InboxRunEvent } from '@murphai/inbox-services'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
-import type { AssistantModelSpec } from '../legacy-model-spec.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
@@ -66,7 +65,6 @@ export interface RunAssistantAutomationInput {
   executionContext?: AssistantExecutionContext | null
   inboxServices?: InboxServices
   maxPerScan?: number
-  modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onInboxEvent?: (event: InboxRunEvent) => void
@@ -340,7 +338,6 @@ export async function runAssistantAutomationPass(
     executionContext,
     inboxServices,
     maxPerScan: input.maxPerScan,
-    modelSpec: input.modelSpec,
     onEvent: input.onEvent,
     onTraceEvent: input.onTraceEvent,
     requestId: input.requestId,

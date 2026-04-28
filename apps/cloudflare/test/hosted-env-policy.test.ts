@@ -84,6 +84,24 @@ describe("buildHostedRunnerContainerEnv", () => {
       source,
     )).toBe(false);
   });
+
+  it("does not allow runner secrets to override process environment keys", () => {
+    const source = {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
+        "HTTPS_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NPM_CONFIG_USERCONFIG",
+        "SSL_CERT_FILE",
+        "TMPDIR",
+      ].join(","),
+    };
+
+    expect(isHostedRunnerSecretKeyAllowed("HTTPS_PROXY", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("NODE_EXTRA_CA_CERTS", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("NPM_CONFIG_USERCONFIG", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("SSL_CERT_FILE", source)).toBe(false);
+    expect(isHostedRunnerSecretKeyAllowed("TMPDIR", source)).toBe(false);
+  });
 });
 
 describe("hosted runner log categories", () => {
@@ -113,14 +131,16 @@ describe("hosted runner log categories", () => {
 });
 
 describe("buildHostedWorkerSecretsPayload", () => {
-  it("keeps assistant provider secrets in sync with the shared allowlist", () => {
+  it("keeps only the Codex Vercel AI Gateway provider secret in the worker payload", () => {
     const payload = buildHostedWorkerSecretsPayload({
       ...requiredWorkerSecrets,
       OLLAMA_API_KEY: "ollama-secret",
+      OPENAI_API_KEY: "openai-secret",
       VERCEL_AI_API_KEY: "vercel-secret",
     });
 
-    expect(payload.OLLAMA_API_KEY).toBe("ollama-secret");
+    expect(payload.OLLAMA_API_KEY).toBeUndefined();
+    expect(payload.OPENAI_API_KEY).toBeUndefined();
     expect(payload.VERCEL_AI_API_KEY).toBe("vercel-secret");
   });
 

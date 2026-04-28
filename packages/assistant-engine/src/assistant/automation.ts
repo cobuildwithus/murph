@@ -17,9 +17,6 @@ export {
   scanAssistantAutoReplyOnce,
 } from './automation/reply.js'
 export {
-  scanAssistantInboxOnce,
-} from './automation/routing.js'
-export {
   createInboxBackedAssistantTurnInputPort,
   createNoopAssistantTurnInputPort,
   AssistantActiveTurnInputCheckpointRejectedError,

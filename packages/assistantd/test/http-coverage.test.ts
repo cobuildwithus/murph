@@ -379,6 +379,16 @@ test('assistantd http protocol validates optional object and finite-number field
   assert.throws(
     () =>
       parseAssistantAutomationRunRequestBody({
+        modelSpec: {
+          model: 'gpt-5.4',
+        },
+      }),
+    /automation run requests no longer support modelSpec/u,
+  )
+
+  assert.throws(
+    () =>
+      parseAssistantAutomationRunRequestBody({
         maxPerScan: '7',
       }),
     /request field maxPerScan must be a finite number/u,
@@ -462,6 +472,18 @@ test('assistantd http protocol validates optional nullable-string and boolean fi
         },
         sessionId: 'session_http_test',
       }),
-    /session-options provider must be one of codex-cli, openai-compatible/u,
+    /session-options provider must be one of codex-cli/u,
+  )
+
+  assert.throws(
+    () =>
+      parseAssistantSessionOptionsRequestBody({
+        providerOptions: {
+          provider: 'openai-compatible',
+          model: 'gpt-5.4',
+        },
+        sessionId: 'session_http_test',
+      }),
+    /session-options provider must be one of codex-cli/u,
   )
 })

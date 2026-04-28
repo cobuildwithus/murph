@@ -24,11 +24,6 @@
       "import": "./dist/assistant-backend.js",
       "default": "./dist/assistant-backend.js"
     },
-    "./assistant/openai-compatible-provider-presets": {
-      "types": "./dist/assistant/openai-compatible-provider-presets.d.ts",
-      "import": "./dist/assistant/openai-compatible-provider-presets.js",
-      "default": "./dist/assistant/openai-compatible-provider-presets.js"
-    },
     "./assistant/provider-config": {
       "types": "./dist/assistant/provider-config.d.ts",
       "import": "./dist/assistant/provider-config.js",

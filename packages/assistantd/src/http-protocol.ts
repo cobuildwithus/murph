@@ -41,7 +41,7 @@ const assistantConversationDirectnessValues = new Set([
 const assistantOperatorAuthorityValues = new Set([
   'direct-operator',
 ])
-const assistantChatProviderValues = ['codex-cli', 'openai-compatible'] as const
+const assistantChatProviderValues = ['codex-cli'] as const
 const assistantChatProviderValueSet = new Set(assistantChatProviderValues)
 const assistantCanonicalConversationFields = new Set([
   'alias',
@@ -338,7 +338,12 @@ function parseAssistantAutomationRunRequestBody(payload: unknown): AssistantAuto
       400,
     )
   }
-  assertOptionalObjectField(record, 'modelSpec', 'automation/run-once')
+  if ('modelSpec' in record) {
+    throw new AssistantHttpRequestError(
+      'Assistant automation run requests no longer support modelSpec.',
+      400,
+    )
+  }
   return {
     ...record,
     deliveryDispatchMode: deliveryDispatchMode ?? undefined,

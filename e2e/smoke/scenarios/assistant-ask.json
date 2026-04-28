@@ -1,10 +1,10 @@
 {
   "id": "assistant-ask",
-  "command": "vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--provider codex-cli|openai-compatible] [--codexCommand <path>] [--model <model>] [--baseUrl <url>] [--apiKeyEnv <name>] [--providerName <name>] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy untrusted|on-request|never] [--profile <name>] [--oss] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]",
+  "command": "vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--provider codex-cli] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--oss] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents one-shot local assistant turns backed by an external provider session, including optional outbound delivery, while keeping assistant runtime residue under vault/.runtime/operations/assistant/."
+  "purpose": "Documents one-shot local assistant turns backed by Codex App Server, including optional outbound delivery, while keeping assistant runtime residue under vault/.runtime/operations/assistant/."
 }

@@ -404,6 +404,11 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        HTTPS_PROXY: "http://forwarded-proxy.example.test:8080",
+        NODE_EXTRA_CA_CERTS: "/tmp/forwarded-ca.pem",
+        NPM_CONFIG_USERCONFIG: "/tmp/forwarded-npmrc",
+        SSL_CERT_FILE: "/tmp/forwarded-cert.pem",
+        TMPDIR: "/tmp/forwarded-tmp",
         VERCEL_AI_API_KEY: "vercel-secret",
       },
       userEnv: {
@@ -418,6 +423,11 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
         HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+        HTTPS_PROXY: "http://user-proxy.example.test:8080",
+        NODE_EXTRA_CA_CERTS: "/tmp/user-ca.pem",
+        NPM_CONFIG_USERCONFIG: "/tmp/user-npmrc",
+        SSL_CERT_FILE: "/tmp/user-cert.pem",
+        TMPDIR: "/tmp/user-tmp",
         VERCEL_AI_API_KEY: "user-vercel-secret",
       },
     },
@@ -594,6 +604,89 @@ test("withHostedProcessEnvironment restores overwritten and newly introduced env
       delete process.env.CUSTOM_HOSTED_ENV;
     } else {
       process.env.CUSTOM_HOSTED_ENV = originalCustom;
+    }
+  }
+});
+
+test("withHostedProcessEnvironment replaces ambient env with the hosted runtime projection", async () => {
+  const originalValues = new Map(
+    [
+      "AMBIENT_CHANNEL_SECRET",
+      "CUSTOM_HOSTED_ENV",
+      "HOSTED_ASSISTANT_BASE_URL",
+      "HOSTED_ASSISTANT_PROVIDER_NAME",
+      "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
+      "HOSTED_EXECUTION_CONTROL_TOKEN",
+      "MURPH_HOSTED_RUNTIME_PROCESS",
+      "MUTATED_DURING_HOSTED_ENV",
+      "PATH",
+      "HOME",
+      "VAULT",
+      "VERCEL_AI_API_KEY",
+    ].map((key) => [key, process.env[key]]),
+  );
+
+  process.env.AMBIENT_CHANNEL_SECRET = "ambient-secret";
+  process.env.HOSTED_ASSISTANT_BASE_URL = "https://legacy-provider.example.test/v1";
+  process.env.HOSTED_ASSISTANT_PROVIDER_NAME = "legacy-provider";
+  process.env.HOSTED_ASSISTANT_ZERO_DATA_RETENTION = "true";
+  process.env.HOSTED_EXECUTION_CONTROL_TOKEN = "control-secret";
+  process.env.PATH = "/usr/bin";
+  process.env.HOME = "/tmp/original-home";
+  process.env.VAULT = "/tmp/original-vault";
+  process.env.VERCEL_AI_API_KEY = "ambient-vercel-secret";
+  delete process.env.CUSTOM_HOSTED_ENV;
+  delete process.env.MURPH_HOSTED_RUNTIME_PROCESS;
+  delete process.env.MUTATED_DURING_HOSTED_ENV;
+
+  try {
+    await withHostedProcessEnvironment(
+      {
+        envOverrides: {
+          CUSTOM_HOSTED_ENV: "runtime-value",
+          VERCEL_AI_API_KEY: "runtime-vercel-secret",
+        },
+        operatorHomeRoot: "/tmp/hosted-home",
+        vaultRoot: "/tmp/hosted-vault",
+      },
+      async () => {
+        assert.equal(process.env.AMBIENT_CHANNEL_SECRET, undefined);
+        assert.equal(process.env.HOSTED_ASSISTANT_BASE_URL, undefined);
+        assert.equal(process.env.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
+        assert.equal(process.env.HOSTED_ASSISTANT_ZERO_DATA_RETENTION, undefined);
+        assert.equal(process.env.HOSTED_EXECUTION_CONTROL_TOKEN, undefined);
+        assert.equal(process.env.CUSTOM_HOSTED_ENV, "runtime-value");
+        assert.equal(process.env.HOME, "/tmp/hosted-home");
+        assert.equal(process.env.PATH, "/usr/bin");
+        assert.equal(process.env.MURPH_HOSTED_RUNTIME_PROCESS, "1");
+        assert.equal(process.env.VAULT, "/tmp/hosted-vault");
+        assert.equal(process.env.VERCEL_AI_API_KEY, "runtime-vercel-secret");
+        process.env.MUTATED_DURING_HOSTED_ENV = "must-restore-away";
+      },
+    );
+
+    assert.equal(process.env.AMBIENT_CHANNEL_SECRET, "ambient-secret");
+    assert.equal(
+      process.env.HOSTED_ASSISTANT_BASE_URL,
+      "https://legacy-provider.example.test/v1",
+    );
+    assert.equal(process.env.HOSTED_ASSISTANT_PROVIDER_NAME, "legacy-provider");
+    assert.equal(process.env.HOSTED_ASSISTANT_ZERO_DATA_RETENTION, "true");
+    assert.equal(process.env.HOSTED_EXECUTION_CONTROL_TOKEN, "control-secret");
+    assert.equal(process.env.CUSTOM_HOSTED_ENV, undefined);
+    assert.equal(process.env.HOME, "/tmp/original-home");
+    assert.equal(process.env.PATH, "/usr/bin");
+    assert.equal(process.env.MURPH_HOSTED_RUNTIME_PROCESS, undefined);
+    assert.equal(process.env.MUTATED_DURING_HOSTED_ENV, undefined);
+    assert.equal(process.env.VAULT, "/tmp/original-vault");
+    assert.equal(process.env.VERCEL_AI_API_KEY, "ambient-vercel-secret");
+  } finally {
+    for (const [key, value] of originalValues) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
   }
 });

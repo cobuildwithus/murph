@@ -10,7 +10,6 @@ import {
   inboxShowResultSchema,
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
@@ -23,17 +22,6 @@ import {
 function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value))
 }
-
-const routingMocks = vi.hoisted(() => ({
-  assistantResultArtifactExists: vi.fn(),
-  routeInboxCaptureWithModel: vi.fn(),
-  shouldBypassParserWaitForRouting: vi.fn(),
-}))
-
-const scannerRoutingMocks = vi.hoisted(() => ({
-  applyRoutingOutcome: vi.fn(),
-  routeAssistantInboxCapture: vi.fn(),
-}))
 
 const scannerReplyMocks = vi.hoisted(() => ({
   applyAssistantAutoReplyProcessResult: vi.fn(),
@@ -91,29 +79,15 @@ const replyMocks = vi.hoisted(() => ({
   writeAssistantChatResultArtifacts: vi.fn(),
 }))
 
-vi.mock('../src/inbox-model-harness.ts', () => ({
-  routeInboxCaptureWithModel: routingMocks.routeInboxCaptureWithModel,
-}))
-
-vi.mock('../src/inbox-routing-vision.ts', () => ({
-  shouldBypassParserWaitForRouting: routingMocks.shouldBypassParserWaitForRouting,
-}))
-
 vi.mock('../src/assistant/automation/artifacts.ts', () => ({
   assistantAutoReplyGroupOutcomeArtifactExists:
     replyMocks.assistantAutoReplyGroupOutcomeArtifactExists,
   assistantChatReplyArtifactExists: replyMocks.assistantChatReplyArtifactExists,
-  assistantResultArtifactExists: routingMocks.assistantResultArtifactExists,
   writeAssistantAutoReplyGroupOutcomeArtifact:
     replyMocks.writeAssistantAutoReplyGroupOutcomeArtifact,
   writeAssistantChatDeferredArtifacts: replyMocks.writeAssistantChatDeferredArtifacts,
   writeAssistantChatErrorArtifacts: replyMocks.writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts: replyMocks.writeAssistantChatResultArtifacts,
-}))
-
-vi.mock('../src/assistant/automation/routing.ts', () => ({
-  applyRoutingOutcome: scannerRoutingMocks.applyRoutingOutcome,
-  routeAssistantInboxCapture: scannerRoutingMocks.routeAssistantInboxCapture,
 }))
 
 vi.mock('../src/assistant/automation/reply.ts', () => ({
@@ -488,56 +462,6 @@ function createInboxServices(
   }
 }
 
-function applyRoutingOutcomeForTest(input: {
-  captureId: string
-  onEvent?: (event: Record<string, unknown>) => void
-  outcome: {
-    details?: string
-    status: 'failed' | 'noop' | 'routed' | 'skipped'
-    tools?: string[]
-  }
-  summary: {
-    failed: number
-    noAction: number
-    routed: number
-    skipped: number
-  }
-}) {
-  switch (input.outcome.status) {
-    case 'failed':
-      input.summary.failed += 1
-      input.onEvent?.({
-        type: 'capture.failed',
-        captureId: input.captureId,
-        details: input.outcome.details,
-      })
-      return
-    case 'noop':
-      input.summary.noAction += 1
-      input.onEvent?.({
-        type: 'capture.noop',
-        captureId: input.captureId,
-        details: input.outcome.details,
-      })
-      return
-    case 'routed':
-      input.summary.routed += 1
-      input.onEvent?.({
-        type: 'capture.routed',
-        captureId: input.captureId,
-        tools: input.outcome.tools,
-      })
-      return
-    case 'skipped':
-      input.summary.skipped += 1
-      input.onEvent?.({
-        type: 'capture.skipped',
-        captureId: input.captureId,
-        details: input.outcome.details,
-      })
-  }
-}
-
 function createAutoReplyContextForTest(
   items: ReadonlyArray<{
     summary: { captureId: string; occurredAt: string }
@@ -597,23 +521,6 @@ function createReplyGroupItem(
 
 beforeEach(() => {
   vi.useRealTimers()
-
-  routingMocks.assistantResultArtifactExists.mockReset().mockResolvedValue(false)
-  routingMocks.routeInboxCaptureWithModel.mockReset().mockResolvedValue({
-    plan: {
-      actions: [],
-    },
-  })
-  routingMocks.shouldBypassParserWaitForRouting.mockReset().mockReturnValue(false)
-
-  scannerRoutingMocks.applyRoutingOutcome
-    .mockReset()
-    .mockImplementation(applyRoutingOutcomeForTest)
-  scannerRoutingMocks.routeAssistantInboxCapture.mockReset().mockResolvedValue({
-    advanceCursor: true,
-    status: 'routed',
-    tools: ['write'],
-  })
 
   scannerReplyMocks.applyAssistantAutoReplyProcessResult
     .mockReset()
@@ -931,496 +838,6 @@ describe('assistant automation shared helpers', () => {
   })
 })
 
-describe('assistant inbox routing', () => {
-  it('skips captures with existing assistant result artifacts', async () => {
-    routingMocks.assistantResultArtifactExists.mockResolvedValue(true)
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const outcome = await routing.routeAssistantInboxCapture({
-      capture: createCaptureSummary(),
-      inboxServices: createInboxServices(),
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(outcome).toEqual({
-      advanceCursor: true,
-      details: 'assistant result already exists',
-      status: 'skipped',
-    })
-  })
-
-  it('waits for non-bypassed parser work before routing', async () => {
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult({
-          ...createCaptureDetail(),
-          attachmentCount: 1,
-          attachments: [
-            {
-              attachmentId: 'attachment-1',
-              ordinal: 1,
-              externalId: null,
-              kind: 'document',
-              mime: 'application/pdf',
-              originalPath: null,
-              storedPath: 'inbox/attachments/attachment-1.pdf',
-              fileName: 'attachment-1.pdf',
-              byteSize: 128,
-              sha256: null,
-              extractedText: null,
-              transcriptText: null,
-              derivedPath: null,
-              parseState: 'pending',
-            },
-          ],
-        }),
-      ),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const outcome = await routing.routeAssistantInboxCapture({
-      capture: createCaptureSummary({
-        attachmentCount: 1,
-      }),
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(outcome).toEqual({
-      advanceCursor: false,
-      details: 'waiting for parser completion',
-      nextWakeAt: expect.any(String),
-      status: 'skipped',
-    })
-    expect(routingMocks.routeInboxCaptureWithModel).not.toHaveBeenCalled()
-  })
-
-  it('reports noop decisions when the routing model makes no canonical writes', async () => {
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult(createCaptureDetail()),
-      ),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const outcome = await routing.routeAssistantInboxCapture({
-      capture: createCaptureSummary(),
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(outcome).toEqual({
-      advanceCursor: true,
-      details: 'model chose no canonical writes',
-      status: 'noop',
-    })
-  })
-
-  it('reports routed tools from successful model routing', async () => {
-    routingMocks.routeInboxCaptureWithModel.mockResolvedValue({
-      plan: {
-        actions: [
-          {
-            tool: 'promoteMeal',
-          },
-          {
-            tool: 'promoteJournal',
-          },
-        ],
-      },
-    })
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult(createCaptureDetail()),
-      ),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const outcome = await routing.routeAssistantInboxCapture({
-      capture: createCaptureSummary(),
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(outcome).toEqual({
-      advanceCursor: true,
-      status: 'routed',
-      tools: ['promoteMeal', 'promoteJournal'],
-    })
-  })
-
-  it('previews model routing when canonical writes are disabled', async () => {
-    routingMocks.routeInboxCaptureWithModel.mockResolvedValue({
-      plan: {
-        actions: [
-          {
-            tool: 'promoteMeal',
-          },
-        ],
-      },
-    })
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult(createCaptureDetail()),
-      ),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const outcome = await routing.routeAssistantInboxCapture({
-      applyCanonicalWrites: false,
-      capture: createCaptureSummary(),
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(outcome).toEqual({
-      advanceCursor: true,
-      status: 'routed',
-      tools: ['promoteMeal'],
-    })
-    expect(routingMocks.routeInboxCaptureWithModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        apply: false,
-        vaultServices: undefined,
-      }),
-    )
-  })
-
-  it('maps routing errors to failed outcomes', async () => {
-    routingMocks.routeInboxCaptureWithModel.mockRejectedValue(new Error('routing failed'))
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult(createCaptureDetail()),
-      ),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const outcome = await routing.routeAssistantInboxCapture({
-      capture: createCaptureSummary(),
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(outcome).toEqual({
-      advanceCursor: true,
-      details: 'routing failed',
-      status: 'failed',
-    })
-  })
-
-  it('keeps the inbox cursor retryable for invalid model configuration errors', async () => {
-    routingMocks.routeInboxCaptureWithModel.mockRejectedValue(
-      new VaultCliError(
-        'assistant_model_config_invalid',
-        'Assistant model configuration is invalid: Codex app-server model provider is not available.',
-      ),
-    )
-    const inboxServices = createInboxServices({
-      show: vi.fn().mockResolvedValue(
-        createShowResult(createCaptureDetail()),
-      ),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const outcome = await routing.routeAssistantInboxCapture({
-      capture: createCaptureSummary(),
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(outcome).toEqual({
-      advanceCursor: false,
-      details: 'Assistant model configuration is invalid: Codex app-server model provider is not available.',
-      nextWakeAt: expect.any(String),
-      status: 'failed',
-    })
-  })
-
-  it('scans captures in sorted order and applies outcome events', async () => {
-    routingMocks.routeInboxCaptureWithModel.mockResolvedValue({
-      plan: {
-        actions: [
-          {
-            tool: 'promoteMeal',
-          },
-        ],
-      },
-    })
-    const later = createCaptureSummary({
-      captureId: 'capture-2',
-      occurredAt: '2026-04-08T00:02:00.000Z',
-    })
-    const earlier = createCaptureSummary({
-      captureId: 'capture-1',
-      occurredAt: '2026-04-08T00:01:00.000Z',
-    })
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([later, earlier])),
-      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-
-    const events: Array<Record<string, unknown>> = []
-    const cursorUpdates: Array<AssistantAutomationCursor | null> = []
-    const signalController = new AbortController()
-    const result = await routing.scanAssistantInboxOnce({
-      afterCursor: null,
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      onCursorProgress: async (cursor) => {
-        cursorUpdates.push(cursor)
-      },
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-        if (event.type === 'capture.routed') {
-          signalController.abort()
-        }
-      },
-      signal: signalController.signal,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 2,
-      failed: 0,
-      nextWakeAt: null,
-      noAction: 0,
-      routed: 1,
-      skipped: 0,
-    })
-    expect(events[0]).toEqual({
-      type: 'scan.started',
-      details: '2 capture(s)',
-    })
-    expect(events[1]).toMatchObject({
-      type: 'capture.routed',
-      captureId: 'capture-1',
-      tools: ['promoteMeal'],
-    })
-    expect(cursorUpdates).toEqual([
-      {
-        captureId: 'capture-1',
-        createdAt: '2026-04-08T00:00:01.000Z',
-        occurredAt: '2026-04-08T00:01:00.000Z',
-      },
-    ])
-  })
-
-  it('keeps preview routing scans from advancing the canonical cursor', async () => {
-    routingMocks.routeInboxCaptureWithModel.mockResolvedValue({
-      plan: {
-        actions: [
-          {
-            tool: 'promoteMeal',
-          },
-        ],
-      },
-    })
-    const capture = createCaptureSummary({
-      captureId: 'capture-preview',
-      occurredAt: '2026-04-08T00:01:00.000Z',
-    })
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([capture])),
-      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-    const cursorUpdates: Array<AssistantAutomationCursor | null> = []
-
-    const result = await routing.scanAssistantInboxOnce({
-      applyCanonicalWrites: false,
-      afterCursor: null,
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      onCursorProgress: async (cursor) => {
-        cursorUpdates.push(cursor)
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 1,
-      failed: 0,
-      routed: 1,
-    })
-    expect(cursorUpdates).toEqual([])
-    expect(routingMocks.routeInboxCaptureWithModel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        apply: false,
-      }),
-    )
-  })
-
-  it('does not advance the scan cursor past retryable model configuration failures', async () => {
-    routingMocks.routeInboxCaptureWithModel.mockRejectedValue(
-      new VaultCliError(
-        'assistant_model_config_invalid',
-        'Assistant model configuration is invalid: Codex app-server model provider is not available.',
-      ),
-    )
-    const later = createCaptureSummary({
-      captureId: 'capture-2',
-      occurredAt: '2026-04-08T00:02:00.000Z',
-    })
-    const earlier = createCaptureSummary({
-      captureId: 'capture-1',
-      occurredAt: '2026-04-08T00:01:00.000Z',
-    })
-    const inboxServices = createInboxServices({
-      list: vi.fn().mockResolvedValue(createListResult([later, earlier])),
-      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
-    })
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-    const cursorUpdates: Array<AssistantAutomationCursor | null> = []
-
-    const result = await routing.scanAssistantInboxOnce({
-      afterCursor: null,
-      inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
-      onCursorProgress: async (cursor) => {
-        cursorUpdates.push(cursor)
-      },
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(result).toMatchObject({
-      considered: 2,
-      failed: 1,
-      nextWakeAt: expect.any(String),
-      noAction: 0,
-      routed: 0,
-      skipped: 0,
-    })
-    expect(cursorUpdates).toEqual([null])
-    expect(routingMocks.routeInboxCaptureWithModel).toHaveBeenCalledTimes(1)
-  })
-
-  it('applies each routing outcome status to the scan summary', async () => {
-    const routing = await vi.importActual<typeof import('../src/assistant/automation/routing.ts')>(
-      '../src/assistant/automation/routing.ts',
-    )
-    const summary = {
-      considered: 0,
-      failed: 0,
-      nextWakeAt: null,
-      noAction: 0,
-      routed: 0,
-      skipped: 0,
-    }
-    const events: Array<Record<string, unknown>> = []
-
-    routing.applyRoutingOutcome({
-      captureId: 'capture-failed',
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
-      outcome: {
-        advanceCursor: true,
-        details: 'failed detail',
-        status: 'failed',
-      },
-      summary,
-    })
-    routing.applyRoutingOutcome({
-      captureId: 'capture-noop',
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
-      outcome: {
-        advanceCursor: true,
-        details: 'noop detail',
-        status: 'noop',
-      },
-      summary,
-    })
-    routing.applyRoutingOutcome({
-      captureId: 'capture-skipped',
-      onEvent: (event) => {
-        events.push(toSnapshotRecord(event))
-      },
-      outcome: {
-        advanceCursor: false,
-        details: 'skip detail',
-        status: 'skipped',
-      },
-      summary,
-    })
-
-    expect(summary).toEqual({
-      considered: 0,
-      failed: 1,
-      nextWakeAt: null,
-      noAction: 1,
-      routed: 0,
-      skipped: 1,
-    })
-    expect(events).toEqual([
-      {
-        type: 'capture.failed',
-        captureId: 'capture-failed',
-        details: 'failed detail',
-      },
-      {
-        type: 'capture.noop',
-        captureId: 'capture-noop',
-        details: 'noop detail',
-      },
-      {
-        type: 'capture.skipped',
-        captureId: 'capture-skipped',
-        details: 'skip detail',
-      },
-    ])
-  })
-})
-
 describe('assistant automation scanner', () => {
   it('returns immediately when routing and auto-reply are both disabled', async () => {
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
@@ -1588,7 +1005,7 @@ describe('assistant automation scanner', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
   })
 
-  it('skips automatic document preservation and forwards preview mode when canonical writes are disabled', async () => {
+  it('skips disabled inbox model routing when canonical writes are disabled', async () => {
     const preserveDocumentAttachments = vi
       .fn()
       .mockRejectedValue(new Error('should not preserve'))
@@ -1607,9 +1024,6 @@ describe('assistant automation scanner', () => {
     const result = await scanner.scanAssistantAutomationOnce({
       applyCanonicalWrites: false,
       inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
         autoReplyPrimed: true,
@@ -1625,23 +1039,15 @@ describe('assistant automation scanner', () => {
     })
 
     expect(result.routing).toMatchObject({
-      considered: 1,
+      considered: 0,
       failed: 0,
     })
     expect(preserveDocumentAttachments).not.toHaveBeenCalled()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
-    expect(scannerRoutingMocks.routeAssistantInboxCapture).toHaveBeenCalledWith(
-      expect.objectContaining({
-        applyCanonicalWrites: false,
-        capture: expect.objectContaining({
-          captureId: capture.captureId,
-        }),
-      }),
-    )
     expect(stateUpdates).toEqual([])
   })
 
-  it('keeps the routing cursor blocked after a non-advancing routing decision', async () => {
+  it('does not route inbox captures through the legacy model path', async () => {
     const first = createCaptureSummary({
       captureId: 'capture-1',
       occurredAt: '2026-04-08T00:01:00.000Z',
@@ -1650,17 +1056,6 @@ describe('assistant automation scanner', () => {
       captureId: 'capture-2',
       occurredAt: '2026-04-08T00:02:00.000Z',
     })
-    scannerRoutingMocks.routeAssistantInboxCapture
-      .mockResolvedValueOnce({
-        advanceCursor: false,
-        details: 'waiting',
-        status: 'skipped',
-      })
-      .mockResolvedValueOnce({
-        advanceCursor: true,
-        status: 'routed',
-        tools: ['promoteMeal'],
-      })
     const inboxServices = createInboxServices({
       list: vi.fn().mockResolvedValue(createListResult([first, second])),
     })
@@ -1671,9 +1066,6 @@ describe('assistant automation scanner', () => {
     const stateUpdates: AssistantAutomationState[] = []
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
@@ -1686,33 +1078,25 @@ describe('assistant automation scanner', () => {
     })
 
     expect(result.routing).toEqual({
-      considered: 2,
+      considered: 0,
       failed: 0,
       nextWakeAt: null,
       noAction: 0,
-      routed: 1,
-      skipped: 1,
+      routed: 0,
+      skipped: 0,
     })
+    expect(inboxServices.list).not.toHaveBeenCalled()
     expect(stateUpdates).toEqual([])
   })
 
-  it('constrains merged candidates to the reply boundary when the reply page is full', async () => {
+  it('scans only auto-reply candidates when the reply page is full', async () => {
     const shared = createCaptureSummary({
       captureId: 'capture-reply',
       occurredAt: '2026-04-08T00:01:00.000Z',
     })
-    const laterRoutingOnly = createCaptureSummary({
-      captureId: 'capture-routing-only',
-      occurredAt: '2026-04-08T00:02:00.000Z',
-    })
-    const list = vi
-      .fn()
-      .mockResolvedValueOnce(createListResult([shared], {
-        limit: 1,
-      }))
-      .mockResolvedValueOnce(createListResult([shared, laterRoutingOnly], {
-        limit: 1,
-      }))
+    const list = vi.fn().mockResolvedValueOnce(createListResult([shared], {
+      limit: 1,
+    }))
     const inboxServices = createInboxServices({
       list,
       preserveDocumentAttachments: vi
@@ -1733,9 +1117,6 @@ describe('assistant automation scanner', () => {
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
       maxPerScan: 1,
-      modelSpec: {
-        model: 'gpt-5.4',
-      },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
         autoReplyPrimed: true,
@@ -1750,14 +1131,7 @@ describe('assistant automation scanner', () => {
       replied: 1,
       skipped: 0,
     })
-    expect(scannerRoutingMocks.routeAssistantInboxCapture).toHaveBeenCalledTimes(1)
-    expect(scannerRoutingMocks.routeAssistantInboxCapture).toHaveBeenCalledWith(
-      expect.objectContaining({
-        capture: expect.objectContaining({
-          captureId: 'capture-reply',
-        }),
-      }),
-    )
+    expect(list).toHaveBeenCalledTimes(1)
   })
 })
 

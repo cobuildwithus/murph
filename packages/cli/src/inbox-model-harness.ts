@@ -95,7 +95,6 @@ async function prepareInboxModelSession(
       envelopePath: shown.capture.envelopePath,
       captureText: shown.capture.text ?? null,
       attachments,
-      tools: [],
       preparedInputMode,
       routingText,
     }),

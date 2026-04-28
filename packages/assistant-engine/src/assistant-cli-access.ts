@@ -3,6 +3,38 @@ import { fileURLToPath } from 'node:url'
 import { resolveOperatorHomeDirectory } from '@murphai/operator-config/operator-config'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
+export const HOSTED_RUNTIME_PROCESS_ENV_MARKER =
+  'MURPH_HOSTED_RUNTIME_PROCESS'
+const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
+  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
+  'ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT',
+  'ASSISTANT_MEMORY_BOUND_SESSION_ID',
+  'ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT',
+  'ASSISTANT_MEMORY_BOUND_TURN_ID',
+  'ASSISTANT_MEMORY_BOUND_VAULT',
+  'CODEX_HOME',
+  'HOME',
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_CTYPE',
+  'NO_COLOR',
+  'NODE_ENV',
+  'NODE_EXTRA_CA_CERTS',
+  'PATH',
+  'PATHEXT',
+  'SSL_CERT_DIR',
+  'SSL_CERT_FILE',
+  'SystemDrive',
+  'SystemRoot',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'TZ',
+  'VAULT',
+  'VERCEL_AI_API_KEY',
+  'VERCEL_ENV',
+] as const
 
 export interface AssistantCliAccessContext {
   env: NodeJS.ProcessEnv
@@ -32,9 +64,31 @@ export function buildAssistantCliGuidanceText(
 export function prepareAssistantDirectCliEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const homeDirectory = resolveOperatorHomeDirectory(env)
+  const baseEnv = isHostedRuntimeProcessEnv(env)
+    ? projectHostedCodexDirectCliEnv(env)
+    : env
+  const homeDirectory = resolveOperatorHomeDirectory(baseEnv)
   const userBinDirectory = path.join(homeDirectory, ...DEFAULT_USER_BIN_SEGMENTS)
-  return withPrependedPath(env, [userBinDirectory, ...resolveAssistantCliBinPathEntries()])
+  return withPrependedPath(baseEnv, [userBinDirectory, ...resolveAssistantCliBinPathEntries()])
+}
+
+function isHostedRuntimeProcessEnv(env: NodeJS.ProcessEnv): boolean {
+  return env[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1'
+}
+
+function projectHostedCodexDirectCliEnv(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const projected: NodeJS.ProcessEnv = {}
+
+  for (const key of HOSTED_CODEX_DIRECT_CLI_ENV_NAMES) {
+    const value = env[key]
+    if (typeof value === 'string') {
+      projected[key] = value
+    }
+  }
+
+  return projected
 }
 
 function resolveAssistantCliBinPathEntries(): string[] {

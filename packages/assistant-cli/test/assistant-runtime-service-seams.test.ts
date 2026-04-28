@@ -61,7 +61,6 @@ const automationEngineMocks = vi.hoisted(() => ({
   runAssistantAutomationLocal: vi.fn(),
   scanAssistantAutomationOnce: vi.fn(),
   scanAssistantAutoReplyOnce: vi.fn(),
-  scanAssistantInboxOnce: vi.fn(),
 }))
 
 const runtimeModuleMocks = vi.hoisted(() => ({
@@ -107,7 +106,6 @@ vi.mock('@murphai/assistant-engine/assistant-automation', () => ({
   runAssistantAutomation: automationEngineMocks.runAssistantAutomationLocal,
   scanAssistantAutomationOnce: automationEngineMocks.scanAssistantAutomationOnce,
   scanAssistantAutoReplyOnce: automationEngineMocks.scanAssistantAutoReplyOnce,
-  scanAssistantInboxOnce: automationEngineMocks.scanAssistantInboxOnce,
 }))
 
 vi.mock('../src/assistant-runtime.js', () => runtimeModuleMocks)
@@ -129,6 +127,7 @@ import {
   listAssistantOutboxIntents,
   readAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
+import * as assistantRuntimeRootFacade from '../src/assistant-runtime.ts'
 import * as assistantRuntimeFacade from '../src/assistant/runtime.ts'
 import {
   openAssistantConversation,
@@ -568,7 +567,6 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
       deliveryDispatchMode: undefined,
       drainOutbox: undefined,
       maxPerScan: undefined,
-      modelSpec: undefined,
       once: true,
       requestId: null,
       sessionMaxAgeMs: null,
@@ -640,8 +638,16 @@ test('assistant facade modules re-export the package runtime and daemon-aware se
     automationEngineMocks.scanAssistantAutoReplyOnce,
   )
   assert.equal(
-    assistantAutomationFacade.scanAssistantInboxOnce,
-    automationEngineMocks.scanAssistantInboxOnce,
+    Reflect.has(assistantAutomationFacade, 'scanAssistantInboxOnce'),
+    false,
+  )
+  assert.equal(
+    Reflect.has(assistantRuntimeFacade, 'scanAssistantInboxOnce'),
+    false,
+  )
+  assert.equal(
+    Reflect.has(assistantRuntimeRootFacade, 'scanAssistantInboxOnce'),
+    false,
   )
   assert.equal(
     assistantDaemonFacade.maybeGetAssistantStatusViaDaemon,
