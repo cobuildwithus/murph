@@ -2,7 +2,6 @@ import * as React from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
 import {
   type SetupAssistantPreset,
-  type SetupAssistantProviderPreset,
   type SetupChannel,
   type SetupWearable,
 } from '@murphai/operator-config/setup-cli-contracts'
@@ -32,7 +31,6 @@ import {
   buildSetupWizardPublicUrlReview,
   describeSetupWizardPublicUrlStrategyChoice,
   formatSetupPublicUrlStrategy,
-  normalizeSetupWizardText,
 } from './setup-wizard-public-url.js'
 import {
   buildSetupWizardScheduledUpdateBadges,
@@ -79,11 +77,8 @@ import {
 } from './setup-wizard-ui.js'
 
 type SetupWizardAppResult = {
-  assistantApiKeyEnv?: string | null
-  assistantBaseUrl?: string | null
   assistantOss?: boolean | null
   assistantPreset?: SetupAssistantPreset
-  assistantProviderName?: string | null
   channels: SetupChannel[]
   scheduledUpdates: string[]
   wearables: SetupWearable[]
@@ -94,12 +89,8 @@ export interface SetupWizardAppProps {
   commandName: string
   defaultScheduledUpdateIds: ReadonlySet<string>
   deviceSyncLocalBaseUrl?: string | null
-  initialAssistantApiKeyEnv?: string | null
-  initialAssistantBaseUrl?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset: SetupAssistantPreset
-  initialAssistantProviderName?: string | null
-  initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
   initialChannels: SetupChannel[]
   initialScheduledUpdates: string[]
   initialWearables: SetupWearable[]
@@ -128,12 +119,8 @@ export function SetupWizardApp(
   const createElement = React.createElement
   const { exit } = useApp()
   const initialAssistantProvider = inferSetupWizardAssistantProvider({
-    apiKeyEnv: input.initialAssistantApiKeyEnv,
-    baseUrl: input.initialAssistantBaseUrl,
     oss: input.initialAssistantOss,
     preset: input.initialAssistantPreset,
-    providerName: input.initialAssistantProviderName,
-    providerPreset: input.initialAssistantProviderPreset,
   })
   const initialAssistantMethod = inferSetupWizardAssistantMethod({
     oss: input.initialAssistantOss,
@@ -169,10 +156,6 @@ export function SetupWizardApp(
   >(input.initialWearables)
   const assistantProviderOptions = listSetupWizardAssistantProviderOptions()
   const assistantSelection = resolveSetupWizardAssistantSelection({
-    initialApiKeyEnv: input.initialAssistantApiKeyEnv,
-    initialBaseUrl: input.initialAssistantBaseUrl,
-    initialProvider: initialAssistantProvider,
-    initialProviderName: input.initialAssistantProviderName,
     method: selectedAssistantMethod,
     provider: selectedAssistantProvider,
   })
@@ -504,11 +487,8 @@ export function SetupWizardApp(
 
       if (key.return || value === ' ') {
         input.onComplete({
-          assistantApiKeyEnv: latestAssistantRef.current.apiKeyEnv,
-          assistantBaseUrl: latestAssistantRef.current.baseUrl,
           assistantOss: latestAssistantRef.current.oss,
           assistantPreset: latestAssistantRef.current.preset,
-          assistantProviderName: latestAssistantRef.current.providerName,
           channels: sortSetupWizardChannels(latestChannelsRef.current),
           scheduledUpdates: sortSetupWizardScheduledUpdates(
             latestScheduledUpdatesRef.current,
@@ -562,10 +542,6 @@ export function SetupWizardApp(
         ? [`${formatSetupWearable(wearable)} (${formatMissingEnv(status.missingEnv)})`]
         : []
     }),
-    ...(assistantSelection.apiKeyEnv &&
-    normalizeSetupWizardText(process.env[assistantSelection.apiKeyEnv]) === null
-      ? [`Assistant (${assistantSelection.apiKeyEnv})`]
-      : []),
   ]
   const hintRow = createSetupWizardHintRow(
     resolveSetupWizardHints({

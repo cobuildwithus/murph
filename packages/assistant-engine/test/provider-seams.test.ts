@@ -63,10 +63,6 @@ describe('assistant provider seam helpers', () => {
       providerOptions: {
         codexHome: '/tmp/local-codex-home',
         continuityFingerprint: 'fingerprint-shared',
-        headers: {
-          'X-Trace': '1',
-          Authorization: 'Bearer token',
-        },
       },
       routeId: 'route-secondary',
     })
@@ -335,7 +331,6 @@ describe('assistant provider seam helpers', () => {
           providerOptions: {
             codexHome: '/tmp/codex-home-b',
             continuityFingerprint: 'fingerprint-rotated',
-            headers: null,
           },
           routeId: 'route-rotated',
         }),
@@ -351,7 +346,6 @@ describe('assistant provider seam helpers', () => {
         route: createRoute({
           providerOptions: {
             continuityFingerprint: 'fingerprint-shared',
-            headers: null,
           },
           routeId: 'route-headers-rotated',
         }),
@@ -403,7 +397,7 @@ function createRoute(input?: {
     codexCommand: null,
     cooldownMs: 60_000,
     label: 'primary',
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),
     routeId: input?.routeId ?? 'route-primary',
   }
@@ -413,20 +407,17 @@ function createProviderOptions(
   overrides?: Partial<AssistantProviderSessionOptions>,
 ): AssistantProviderSessionOptions {
   return {
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     continuityFingerprint: 'fingerprint-default',
-    executionDriver: 'openai-compatible',
-    model: 'gpt-4.1',
-    reasoningEffort: 'high',
-    sandbox: null,
-    approvalPolicy: null,
+    executionDriver: 'codex-app-server',
+    model: 'gpt-5.5',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     profile: null,
     oss: false,
-    baseUrl: 'https://api.example.test/v1',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    providerName: 'murph-openai',
-    resumeKind: null,
-    headers: null,
+    modelProvider: null,
+    resumeKind: 'codex-thread',
     ...overrides,
   }
 }
@@ -447,17 +438,16 @@ function createAssistantSession(input?: {
     schema: 'murph.assistant-session.v1',
     sessionId: 'session_provider_seam_test',
     target: {
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      endpoint: 'https://api.example.test/v1',
-      headers: {
-        Authorization: 'Bearer token',
-      },
-      model: 'gpt-4.1',
-      presetId: null,
-      providerName: 'murph-openai',
-      reasoningEffort: 'high',
-      webSearch: null,
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: null,
+      codexHome: null,
+      model: 'gpt-5.5',
+      modelProvider: null,
+      oss: false,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
     },
     resumeState,
     alias: null,
@@ -474,12 +464,8 @@ function createAssistantSession(input?: {
     updatedAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     turnCount: 0,
-    provider: 'openai-compatible',
-    providerOptions: createProviderOptions({
-      headers: {
-        Authorization: 'Bearer token',
-      },
-    }),
+    provider: 'codex-cli',
+    providerOptions: createProviderOptions(),
   }
 }
 

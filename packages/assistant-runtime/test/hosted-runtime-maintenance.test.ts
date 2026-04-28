@@ -118,7 +118,7 @@ beforeEach(() => {
     assistantConfigPresent: true,
     assistantConfigStatus: "saved",
     assistantConfigured: true,
-    assistantProvider: "openai-compatible",
+    assistantProvider: "codex-cli",
   });
   mocks.readAssistantAutomationState.mockResolvedValue({
     autoReply: [],
@@ -698,9 +698,9 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
           promptCacheStaticPromptHash: "hash-static",
           promptCacheToolSchemaHash: "hash-tools",
           promptProfile: "conversation",
-          provider: "openai-compatible",
-          providerExecutionDriver: "responses",
-          providerModel: "openai/gpt-5.4",
+          provider: "codex-cli",
+          providerExecutionDriver: "codex-app-server",
+          providerModel: "gpt-5.5",
           providerName: "vercel-ai-gateway",
           routeId: "route-hosted",
           sessionContextPresent: false,
@@ -971,7 +971,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       assistantConfigPresent: true,
       assistantConfigStatus: "hosted-env",
       assistantConfigured: false,
-      assistantProvider: "openai-compatible",
+      assistantProvider: "codex-cli",
     });
 
     await runHostedAssistantRuntimeTimerLane({
@@ -997,7 +997,7 @@ describe("runHostedAssistantRuntimeTimerLane", () => {
       expect.objectContaining({
         level: "warn",
         message:
-          "Hosted assistant automation skipped because the active hosted assistant profile (openai-compatible) is not ready.",
+          "Hosted assistant automation skipped because the active hosted assistant profile (codex-cli) is not ready.",
       }),
     );
   });

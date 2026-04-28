@@ -18,7 +18,7 @@ import type {
   AssistantProviderProgressEvent,
   AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
-import type { AssistantUserMessageContentPart } from '../model-harness.js'
+import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantCliAccessContext } from '../assistant-cli-access.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
 import type {
@@ -39,7 +39,6 @@ import type {
 } from './active-turn-input-journal.js'
 import type {
   ResolvedAssistantFailoverRoute,
-  readAssistantFailoverState,
 } from './failover.js'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
@@ -60,6 +59,7 @@ export interface AssistantSessionResolutionFields {
   identityId?: string | null
   maxSessionAgeMs?: number | null
   model?: string | null
+  modelProvider?: string | null
   oss?: boolean
   participantId?: string | null
   presetId?: string | null
@@ -160,10 +160,6 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   workingDirectory: string
 }
 
-export type AssistantProviderFailoverState = Awaited<
-  ReturnType<typeof readAssistantFailoverState>
->
-
 export interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
@@ -175,8 +171,6 @@ export interface AssistantProviderTurnExecutionPlan {
 
 export interface AssistantProviderAttemptPlan {
   attemptCount: number
-  primaryRouteCooldownFailover: boolean
-  remainingRoutes: readonly ResolvedAssistantFailoverRoute[]
   route: ResolvedAssistantFailoverRoute
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
@@ -186,19 +180,11 @@ export type AssistantProviderAttemptOutcome =
   | {
       kind: 'failed_terminal'
       error: unknown
-      failoverState: AssistantProviderFailoverState
       providerContinuation: AssistantProviderContinuation
       session: AssistantSession
     }
   | {
-      kind: 'retry_next_route'
-      error: unknown
-      failoverState: AssistantProviderFailoverState
-      session: AssistantSession
-    }
-  | {
       kind: 'succeeded'
-      failoverState: AssistantProviderFailoverState
       result: ExecutedAssistantProviderTurnResult
     }
 

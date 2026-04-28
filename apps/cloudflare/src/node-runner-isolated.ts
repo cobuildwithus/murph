@@ -23,6 +23,10 @@ import {
   parseHostedExecutionRunnerChildResult,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.ts";
+import {
+  redactHostedRuntimeDiagnosticDetails,
+  redactHostedRuntimeDiagnosticText,
+} from "./hosted-runtime-redaction.ts";
 
 export interface HostedExecutionIsolatedRunnerInput {
   internalWorkerProxyToken?: string | null;
@@ -188,7 +192,12 @@ function createHostedRuntimeChildFailure(
   code: number | null,
 ): Error {
   const message = error?.message
-    ?? `Hosted assistant runtime child exited with code ${code ?? "unknown"}.`;
+    ? redactHostedRuntimeDiagnosticText(error.message)
+    : `Hosted assistant runtime child exited with code ${code ?? "unknown"}.`;
+  const stack = error?.stack
+    ? redactHostedRuntimeDiagnosticText(error.stack)
+    : null;
+  const details = redactHostedRuntimeDiagnosticDetails(error?.details);
 
   if (error?.name === "HostedAssistantConfigurationError") {
     const classified = new HostedAssistantConfigurationError(
@@ -197,9 +206,9 @@ function createHostedRuntimeChildFailure(
         : "HOSTED_ASSISTANT_CONFIG_INVALID",
       message,
     ) as HostedAssistantConfigurationError & { details?: Record<string, unknown> | null };
-    classified.stack = error.stack ?? classified.stack;
-    if (error?.details) {
-      classified.details = error.details;
+    classified.stack = stack ?? classified.stack;
+    if (details) {
+      classified.details = details;
     }
     return classified;
   }
@@ -208,11 +217,11 @@ function createHostedRuntimeChildFailure(
   if (error?.name) {
     untyped.name = error.name;
   }
-  if (error?.stack) {
-    untyped.stack = error.stack;
+  if (stack) {
+    untyped.stack = stack;
   }
-  if (error?.details) {
-    untyped.details = error.details;
+  if (details) {
+    untyped.details = details;
   }
   return untyped;
 }
@@ -268,5 +277,9 @@ function writeHostedRuntimeChildOutputLine(input: {
     return;
   }
 
-  input.sink.write(`${input.line}\n`);
+  input.sink.write(`${redactHostedRuntimeChildOutputLine(input.line)}\n`);
+}
+
+function redactHostedRuntimeChildOutputLine(line: string): string {
+  return redactHostedRuntimeDiagnosticText(line);
 }

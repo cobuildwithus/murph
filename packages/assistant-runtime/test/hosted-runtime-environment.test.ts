@@ -49,7 +49,7 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
 
 test("hosted runtime config copies user and forwarded env maps", () => {
   const platform = createHostedRuntimePlatformStub();
-  const forwardedEnv = { OPENAI_API_KEY: "secret" };
+  const forwardedEnv = { VERCEL_AI_API_KEY: "secret" };
   const platformEnv = { TELEGRAM_BOT_TOKEN: "telegram-token" };
   const resolvedConfig = createHostedRuntimeResolvedConfig();
   const userEnv = { ANTHROPIC_API_KEY: "anthropic-secret" };
@@ -93,7 +93,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       NODE_OPTIONS: "--require /tmp/injected.js",
-      OPENAI_API_KEY: "worker-openai-secret",
+      VERCEL_AI_API_KEY: "worker-vercel-secret",
       TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       TELEGRAM_BOT_TOKEN: "evil-telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
@@ -107,7 +107,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
     },
     userEnv: {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-      OPENAI_API_KEY: "user-openai-secret",
+      VERCEL_AI_API_KEY: "user-vercel-secret",
       TELEGRAM_BOT_TOKEN: "user-telegram-token",
     },
   });
@@ -117,7 +117,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
     forwardedEnv: {
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       LINQ_API_TOKEN: "linq-token",
-      OPENAI_API_KEY: "worker-openai-secret",
+      VERCEL_AI_API_KEY: "worker-vercel-secret",
     },
     platformEnv: {
       HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
@@ -151,7 +151,7 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
       ],
     },
     userEnv: {
-      OPENAI_API_KEY: "user-openai-secret",
+      VERCEL_AI_API_KEY: "user-vercel-secret",
     },
   });
 });
@@ -159,13 +159,13 @@ test("hosted runtime launch spec owns semantic env split and runtime config", ()
 test("hosted runtime launch spec derives platform env from forwarded env only when no explicit platform env is supplied", () => {
   const spec = buildHostedRuntimeLaunchSpec({
     forwardedEnv: {
-      OPENAI_API_KEY: "worker-openai-secret",
+      VERCEL_AI_API_KEY: "worker-vercel-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     },
   });
 
   assert.deepEqual(spec.runtime.forwardedEnv, {
-    OPENAI_API_KEY: "worker-openai-secret",
+    VERCEL_AI_API_KEY: "worker-vercel-secret",
   });
   assert.deepEqual(spec.runtime.platformEnv, {
     TELEGRAM_BOT_TOKEN: "telegram-token",
@@ -214,13 +214,13 @@ test("hosted runtime child env projection is a transport projection of forwarded
       forwardedEnv: {
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
-        OPENAI_API_KEY: "worker-openai-secret",
+        VERCEL_AI_API_KEY: "worker-vercel-secret",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
     }),
     {
       HOSTED_WEB_BASE_URL: "https://web.example.test",
-      OPENAI_API_KEY: "worker-openai-secret",
+      VERCEL_AI_API_KEY: "worker-vercel-secret",
     },
   );
 });
@@ -279,7 +279,7 @@ test("hosted platform-backed env merges non-secret forwarded env with platform-o
   assert.deepEqual(
     buildHostedPlatformBackedRuntimeEnv({
       forwardedEnv: {
-        OPENAI_API_KEY: "openai-secret",
+        VERCEL_AI_API_KEY: "vercel-secret",
       },
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.test",
@@ -288,7 +288,7 @@ test("hosted platform-backed env merges non-secret forwarded env with platform-o
       },
     }),
     {
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
       TELEGRAM_API_BASE_URL: "https://api.telegram.test",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.test",
@@ -300,7 +300,7 @@ test("hosted platform-backed env keeps platform Telegram values when forwarded e
   assert.deepEqual(
     buildHostedPlatformBackedRuntimeEnv({
       forwardedEnv: {
-        OPENAI_API_KEY: "openai-secret",
+        VERCEL_AI_API_KEY: "vercel-secret",
         TELEGRAM_API_BASE_URL: "https://evil.telegram.test",
         TELEGRAM_BOT_TOKEN: "evil-telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.test",
@@ -312,7 +312,7 @@ test("hosted platform-backed env keeps platform Telegram values when forwarded e
       },
     }),
     {
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
       TELEGRAM_API_BASE_URL: "https://api.telegram.test",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.test",
@@ -331,7 +331,7 @@ test("hosted runtime config strips ingress-only secrets from forwarded env", () 
       },
       userEnv: {
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
-        OPENAI_API_KEY: "openai-secret",
+        VERCEL_AI_API_KEY: "vercel-secret",
       },
     },
     platform,
@@ -341,7 +341,7 @@ test("hosted runtime config strips ingress-only secrets from forwarded env", () 
     LINQ_API_TOKEN: "linq-token",
   });
   assert.deepEqual(normalized.userEnv, {
-    OPENAI_API_KEY: "openai-secret",
+    VERCEL_AI_API_KEY: "vercel-secret",
   });
 });
 
@@ -351,7 +351,7 @@ test("hosted runtime config strips platform-only Telegram vars from forwarded an
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
-        OPENAI_API_KEY: "openai-secret",
+        VERCEL_AI_API_KEY: "vercel-secret",
         TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       },
       platformEnv: {
@@ -360,7 +360,7 @@ test("hosted runtime config strips platform-only Telegram vars from forwarded an
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
       userEnv: {
-        OPENAI_API_KEY: "user-openai-secret",
+        VERCEL_AI_API_KEY: "user-vercel-secret",
         TELEGRAM_API_BASE_URL: "https://user.telegram.example",
         TELEGRAM_BOT_TOKEN: "user-telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://user-files.telegram.example",
@@ -370,7 +370,7 @@ test("hosted runtime config strips platform-only Telegram vars from forwarded an
   );
 
   assert.deepEqual(normalized.forwardedEnv, {
-    OPENAI_API_KEY: "openai-secret",
+    VERCEL_AI_API_KEY: "vercel-secret",
   });
   assert.deepEqual(normalized.platformEnv, {
     TELEGRAM_API_BASE_URL: "https://api.telegram.example",
@@ -378,7 +378,7 @@ test("hosted runtime config strips platform-only Telegram vars from forwarded an
     TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
   });
   assert.deepEqual(normalized.userEnv, {
-    OPENAI_API_KEY: "user-openai-secret",
+    VERCEL_AI_API_KEY: "user-vercel-secret",
   });
 });
 
@@ -389,6 +389,10 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
     {
       forwardedEnv: {
         LD_PRELOAD: "/tmp/injected.so",
+        CODEX_HOME: "/tmp/forwarded-codex-home",
+        HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+        HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
+        HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
         NODE_OPTIONS: "--require /tmp/injected.js",
         PATH: "/tmp/custom-bin",
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
@@ -400,17 +404,21 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        OPENAI_API_KEY: "openai-secret",
+        VERCEL_AI_API_KEY: "vercel-secret",
       },
       userEnv: {
         LD_PRELOAD: "/tmp/user-injected.so",
+        CODEX_HOME: "/tmp/user-codex-home",
+        HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
+        HOSTED_ASSISTANT_BASE_URL: "https://user-legacy-provider.example.test/v1",
+        HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
         NODE_OPTIONS: "--require /tmp/user-injected.js",
         PATH: "/tmp/user-bin",
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{}",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
         HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        OPENAI_API_KEY: "user-openai-secret",
+        VERCEL_AI_API_KEY: "user-vercel-secret",
       },
     },
     platform,
@@ -418,10 +426,10 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
 
   assert.deepEqual(normalized.forwardedEnv, {
     HOSTED_WEB_BASE_URL: "https://web.example.test",
-    OPENAI_API_KEY: "openai-secret",
+    VERCEL_AI_API_KEY: "vercel-secret",
   });
   assert.deepEqual(normalized.userEnv, {
-    OPENAI_API_KEY: "user-openai-secret",
+    VERCEL_AI_API_KEY: "user-vercel-secret",
   });
 });
 
@@ -429,17 +437,17 @@ test("hosted platform-backed env strips non-platform entries from platform env",
   assert.deepEqual(
     buildHostedPlatformBackedRuntimeEnv({
       forwardedEnv: {
-        OPENAI_API_KEY: "openai-secret",
+        VERCEL_AI_API_KEY: "vercel-secret",
       },
       platformEnv: {
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
-        OPENAI_API_KEY: "platform-openai-secret",
+        VERCEL_AI_API_KEY: "platform-vercel-secret",
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
     }),
     {
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     },
   );

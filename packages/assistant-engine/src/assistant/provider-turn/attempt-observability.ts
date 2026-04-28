@@ -6,46 +6,6 @@ import {
   appendAssistantTurnReceiptEvent,
 } from '../turns.js'
 
-export async function recordProviderCooldownFailoverApplied(input: {
-  primaryRoute: ResolvedAssistantFailoverRoute
-  route: ResolvedAssistantFailoverRoute
-  sessionId: string
-  turnId: string
-  vault: string
-}): Promise<void> {
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'provider.failover.applied',
-    detail: `${input.primaryRoute.label} -> ${input.route.label}`,
-    metadata: {
-      from: input.primaryRoute.label,
-      to: input.route.label,
-      fromRouteId: input.primaryRoute.routeId,
-      toRouteId: input.route.routeId,
-      reason: 'cooldown',
-    },
-  })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.failover.applied',
-    level: 'warn',
-    message: `Primary assistant provider route ${input.primaryRoute.label} is cooling down; using ${input.route.label}.`,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      from: input.primaryRoute.label,
-      to: input.route.label,
-      fromRouteId: input.primaryRoute.routeId,
-      toRouteId: input.route.routeId,
-    },
-    counterDeltas: {
-      providerFailovers: 1,
-    },
-  })
-}
-
 export async function recordProviderAttemptStarted(input: {
   attemptCount: number
   at: string
@@ -176,47 +136,6 @@ export async function recordProviderAttemptFailed(input: {
     },
     counterDeltas: {
       providerFailures: 1,
-    },
-  })
-}
-
-export async function recordProviderFailoverApplied(input: {
-  errorCode: string | null
-  fromRoute: ResolvedAssistantFailoverRoute
-  sessionId: string
-  toRoute: ResolvedAssistantFailoverRoute
-  turnId: string
-  vault: string
-}): Promise<void> {
-  await appendAssistantTurnReceiptEvent({
-    vault: input.vault,
-    turnId: input.turnId,
-    kind: 'provider.failover.applied',
-    detail: `${input.fromRoute.label} -> ${input.toRoute.label}`,
-    metadata: {
-      from: input.fromRoute.label,
-      to: input.toRoute.label,
-      fromRouteId: input.fromRoute.routeId,
-      toRouteId: input.toRoute.routeId,
-    },
-  })
-  await recordAssistantDiagnosticEvent({
-    vault: input.vault,
-    component: 'provider',
-    kind: 'provider.failover.applied',
-    level: 'warn',
-    message: `Failing over assistant provider from ${input.fromRoute.label} to ${input.toRoute.label}.`,
-    code: input.errorCode,
-    sessionId: input.sessionId,
-    turnId: input.turnId,
-    data: {
-      from: input.fromRoute.label,
-      to: input.toRoute.label,
-      fromRouteId: input.fromRoute.routeId,
-      toRouteId: input.toRoute.routeId,
-    },
-    counterDeltas: {
-      providerFailovers: 1,
     },
   })
 }

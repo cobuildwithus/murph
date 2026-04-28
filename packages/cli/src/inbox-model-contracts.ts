@@ -56,20 +56,6 @@ export const assistantToolSpecSchema = z.object({
   }),
 })
 
-export const assistantToolCallSchema = z.object({
-  tool: z.string().min(1),
-  input: z.record(z.string(), z.unknown()),
-})
-
-export const assistantToolExecutionResultSchema = z.object({
-  tool: z.string().min(1),
-  input: z.record(z.string(), z.unknown()),
-  status: z.enum(['previewed', 'succeeded', 'failed', 'skipped']),
-  result: z.record(z.string(), z.unknown()).nullable(),
-  errorCode: z.string().min(1).nullable(),
-  errorMessage: z.string().min(1).nullable(),
-})
-
 export const inboxModelInputModeValues = ['text-only', 'multimodal'] as const
 
 export const inboxModelInputModeSchema = z.enum(inboxModelInputModeValues)
@@ -133,38 +119,11 @@ export const inboxModelBundleSchema = z.object({
   routingText: z.string().min(1),
 })
 
-export const assistantExecutionPlanSchema = z.object({
-  schema: z.literal('murph.assistant-plan.v1'),
-  summary: z.string().min(1),
-  rationale: z.string().min(1),
-  actions: z.array(assistantToolCallSchema).max(4),
-})
-
 export const inboxModelBundleResultSchema = z.object({
   vault: pathSchema,
   captureId: z.string().min(1),
   bundlePath: pathSchema,
   bundle: inboxModelBundleSchema.nullable(),
-})
-
-export const inboxModelRouteResultSchema = z.object({
-  vault: pathSchema,
-  captureId: z.string().min(1),
-  apply: z.boolean(),
-  bundlePath: pathSchema,
-  planPath: pathSchema,
-  resultPath: pathSchema.nullable(),
-  preparedInputMode: inboxModelInputModeSchema,
-  inputMode: inboxModelInputModeSchema,
-  fallbackError: z.string().min(1).nullable(),
-  model: z.object({
-    model: z.string().min(1),
-    providerMode: z.literal('openai-compatible'),
-    baseUrl: z.string().min(1).nullable(),
-    providerName: z.string().min(1).nullable(),
-  }),
-  plan: assistantExecutionPlanSchema,
-  results: z.array(assistantToolExecutionResultSchema),
 })
 
 export type AssistantToolSpec = z.infer<typeof assistantToolSpecSchema>
@@ -173,15 +132,9 @@ export type AssistantToolRiskClass = AssistantToolSpec['riskClass']
 export type AssistantToolBackendKind = AssistantToolSpec['backendKind']
 export type AssistantToolHostKind = AssistantToolSpec['preferredHostKind']
 export type AssistantToolProvenance = AssistantToolSpec['provenance']
-export type AssistantToolCall = z.infer<typeof assistantToolCallSchema>
-export type AssistantToolExecutionResult = z.infer<
-  typeof assistantToolExecutionResultSchema
->
 export type InboxModelAttachmentBundle = z.infer<
   typeof inboxModelAttachmentBundleSchema
 >
 export type InboxModelBundle = z.infer<typeof inboxModelBundleSchema>
 export type InboxModelBundleResult = z.infer<typeof inboxModelBundleResultSchema>
 export type InboxModelInputMode = z.infer<typeof inboxModelInputModeSchema>
-export type InboxModelRouteResult = z.infer<typeof inboxModelRouteResultSchema>
-export type AssistantExecutionPlan = z.infer<typeof assistantExecutionPlanSchema>

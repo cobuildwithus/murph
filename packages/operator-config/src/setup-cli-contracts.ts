@@ -19,11 +19,6 @@ import {
   pathSchema,
   requestIdSchema,
 } from './vault-cli-contracts.js'
-import {
-  apiKeyEnvNameSchema,
-  httpBaseUrlSchema,
-} from './command-helpers.js'
-
 export const whisperModelValues = [
   'tiny',
   'tiny.en',
@@ -52,7 +47,6 @@ export function normalizeSetupWearables(
 
 export const setupAssistantPresetValues = [
   'codex',
-  'openai-compatible',
   'skip',
 ] as const
 export const setupAssistantPresetSchema = z.enum(setupAssistantPresetValues)
@@ -142,6 +136,7 @@ export const setupConfiguredAssistantSchema = z.object({
   enabled: z.boolean(),
   provider: z.enum(assistantChatProviderValues).nullable(),
   model: z.string().min(1).nullable(),
+  modelProvider: z.string().min(1).nullable().optional(),
   baseUrl: z.string().min(1).nullable(),
   apiKeyEnv: z.string().min(1).nullable(),
   presetId: setupAssistantProviderPresetSchema.nullable().optional(),
@@ -203,26 +198,17 @@ export const setupCommandOptionsSchema = z.object({
     .describe('whisper.cpp model to download for local transcription.'),
   assistantPreset: setupAssistantPresetSchema
     .optional()
-    .describe('Optional onboarding assistant preset: Codex, OpenAI-compatible endpoint, or skip.'),
-  assistantProviderPreset: setupAssistantProviderPresetSchema
+    .describe('Optional onboarding assistant preset: Codex or skip.'),
+  assistantModelProvider: z
+    .string()
+    .min(1)
     .optional()
-    .describe('Optional named OpenAI-compatible provider preset to save during setup, such as openai, vercel-ai-gateway, openrouter, venice, groq, ollama, or custom. Named presets also enable provider-specific runtime behavior such as native resume, web search, and zero-data-retention when supported.'),
+    .describe('Optional Codex model provider id to save during setup, such as vercel-ai-gateway.'),
   assistantModel: z
     .string()
     .min(1)
     .optional()
     .describe('Optional default assistant model to save during setup.'),
-  assistantBaseUrl: httpBaseUrlSchema
-    .optional()
-    .describe('Optional OpenAI-compatible base URL to save during setup, such as http://127.0.0.1:11434/v1 for Ollama.'),
-  assistantApiKeyEnv: apiKeyEnvNameSchema
-    .optional()
-    .describe('Optional environment variable name that should hold the OpenAI-compatible API key.'),
-  assistantProviderName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional label for the saved OpenAI-compatible assistant provider.'),
   assistantCodexCommand: z
     .string()
     .min(1)
@@ -243,10 +229,6 @@ export const setupCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Optional assistant reasoning effort default to save during setup.'),
-  assistantZeroDataRetention: z
-    .boolean()
-    .optional()
-    .describe('Optional OpenAI-compatible flag to request Vercel AI Gateway zero data retention on each assistant turn.'),
   assistantOss: z
     .boolean()
     .optional()

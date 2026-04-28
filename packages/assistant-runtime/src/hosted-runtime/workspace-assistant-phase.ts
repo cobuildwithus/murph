@@ -22,7 +22,7 @@ import {
 } from "./callbacks.ts";
 import {
   createHostedAssistantChannelTypingDependencies,
-} from "./channel-typing.ts";
+} from "./channel-activity.ts";
 import {
   hydrateHostedExecutionDefaultTarget,
 } from "./context.ts";
@@ -87,8 +87,8 @@ export async function runHostedWorkspaceAssistantPhase(
       channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
         forwardedEnv: input.runtime.forwardedEnv,
         platformEnv: input.runtime.platformEnv,
-        runtimeEnv: input.runtimeEnv,
         signal: typingAbortController.signal,
+        userEnv: input.runtime.userEnv,
       }),
       deviceConnectProviders: resolveHostedWorkspaceDeviceConnectProviders(input.runtime),
       memberId: input.request.userId,

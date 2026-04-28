@@ -1016,18 +1016,17 @@ async function createVaultRoot(prefix: string): Promise<string> {
 
 function createTarget(
   overrides: Partial<{
-    apiKeyEnv: string
-    baseUrl: string
     model: string
-    providerName: string
+    modelProvider: string | null
   }> = {},
 ): AssistantModelTarget {
   const target = createAssistantModelTarget({
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://gateway.example.com/v1',
-    model: 'gpt-5-mini',
-    provider: 'openai-compatible',
-    providerName: 'Example Gateway',
+    approvalPolicy: 'never',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    provider: 'codex-cli',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
     ...overrides,
   })
 

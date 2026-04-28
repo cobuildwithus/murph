@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
-import type { AssistantUserMessageContentPart } from '../../model-harness.js'
+import type { AssistantUserMessageContentPart } from '../content-types.js'
 import {
   buildInboxModelAttachmentBundles,
   hasInboxMultimodalAttachmentEvidenceCandidate,

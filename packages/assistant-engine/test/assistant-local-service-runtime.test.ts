@@ -16,6 +16,11 @@ import { readAssistantTranscriptEntries } from '../src/assistant/store/persisten
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
+type CodexAssistantTarget = Extract<
+  AssistantSession['target'],
+  { adapter: 'codex-cli' }
+>
+
 type Deferred<T> = {
   promise: Promise<T>
   reject(error: unknown): void
@@ -23,6 +28,13 @@ type Deferred<T> = {
 }
 
 const tempRoots: string[] = []
+const CODEX_MODEL_PROVIDER_CONFIG = {
+  id: 'vercel-ai-gateway',
+  name: 'Vercel AI Gateway',
+  baseUrl: 'https://ai-gateway.vercel.sh/v1',
+  envKey: 'VERCEL_AI_API_KEY',
+  wireApi: 'responses' as const,
+}
 
 afterEach(async () => {
   vi.resetModules()
@@ -179,17 +191,9 @@ test('sendAssistantMessageLocal keeps automation cron turns on Murph history onl
 })
 
 test('sendAssistantMessageLocal prefers the hosted execution default target when resolving the session', async () => {
-  const hostedDefaultTarget: AssistantSession['target'] = {
-    adapter: 'openai-compatible',
-    apiKeyEnv: 'HOSTED_OPENAI_API_KEY',
-    endpoint: 'https://gateway.example.com/v1',
-    headers: null,
-    model: 'gpt-4.1-mini',
-    presetId: null,
-    providerName: 'Hosted Gateway',
-    reasoningEffort: null,
-    webSearch: null,
-  }
+  const hostedDefaultTarget = createCodexTarget({
+    model: 'gpt-5.5-mini',
+  })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 
   await sendAssistantMessageLocal({
@@ -216,10 +220,7 @@ test('sendAssistantMessageLocal prefers the hosted execution default target when
           userEnvKeys: [],
         },
       },
-      fallbackTarget: {
-        adapter: 'openai-compatible',
-        model: 'gpt-5.4',
-      },
+      fallbackTarget: createCodexTarget(),
     },
   )
   const firstResolvedMessageSessionCall = (
@@ -2035,8 +2036,8 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
   const result = await updateAssistantSessionOptionsLocal({
     providerOptions: {
       model: 'gpt-5.4-mini',
-      provider: 'openai-compatible',
-      providerName: 'Updated Provider',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
       reasoningEffort: 'low',
     },
     sessionId: 'session-updated',
@@ -2050,8 +2051,8 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
     mocks.saveAssistantSession.mock.calls[0]?.[1]?.providerOptions?.model,
     'gpt-5.4-mini',
   )
-  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.provider, 'openai-compatible')
-  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.adapter, 'openai-compatible')
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.provider, 'codex-cli')
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.adapter, 'codex-cli')
   assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.resumeState, null)
 })
 
@@ -2061,22 +2062,17 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
     providerOptions: {
       provider: 'codex-cli',
       approvalPolicy: 'never',
-      apiKeyEnv: undefined,
-      baseUrl: undefined,
       codexHome: '/tmp/codex-home',
       continuityFingerprint: 'fingerprint-codex',
       executionDriver: 'codex-app-server',
-      headers: undefined,
       model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      modelProviderConfig: CODEX_MODEL_PROVIDER_CONFIG,
       oss: false,
-      presetId: undefined,
       profile: 'prod',
-      providerName: undefined,
       reasoningEffort: 'high',
-      resumeKind: null,
+      resumeKind: 'codex-thread',
       sandbox: 'workspace-write',
-      webSearch: undefined,
-      zeroDataRetention: undefined,
     },
     sessionId: 'session-codex-updated',
     target: {
@@ -2085,6 +2081,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
       codexCommand: '/opt/murph/bin/custom-codex',
       codexHome: '/tmp/codex-home',
       model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: 'prod',
       reasoningEffort: 'high',
@@ -2099,22 +2096,17 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
       providerOptions: {
         provider: 'codex-cli',
         approvalPolicy: 'never',
-        apiKeyEnv: undefined,
-        baseUrl: undefined,
         codexHome: '/tmp/codex-home',
         continuityFingerprint: 'fingerprint-codex',
         executionDriver: 'codex-app-server',
-        headers: undefined,
         model: 'gpt-5.4',
+        modelProvider: 'vercel-ai-gateway',
+        modelProviderConfig: CODEX_MODEL_PROVIDER_CONFIG,
         oss: false,
-        presetId: undefined,
         profile: 'prod',
-        providerName: undefined,
         reasoningEffort: 'high',
-        resumeKind: null,
+        resumeKind: 'codex-thread',
         sandbox: 'workspace-write',
-        webSearch: undefined,
-        zeroDataRetention: undefined,
       },
       sessionId: 'session-codex-updated',
       target: {
@@ -2123,6 +2115,7 @@ test('updateAssistantSessionOptionsLocal preserves codex target-only fields', as
         codexCommand: '/opt/murph/bin/custom-codex',
         codexHome: '/tmp/codex-home',
         model: 'gpt-5.4',
+        modelProvider: 'vercel-ai-gateway',
         oss: false,
         profile: 'prod',
         reasoningEffort: 'high',
@@ -2475,7 +2468,7 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantTurnRoutes: vi.fn(() =>
       input?.routes ?? [
         {
-          provider: 'openai-compatible',
+          provider: 'codex-cli',
           providerOptions: {
             model: 'gpt-5.4',
           },
@@ -2492,120 +2485,80 @@ async function loadLocalServiceModule(input?: {
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
     assistantBackendTargetToProviderConfigInput: (target: {
-      adapter: 'codex-cli' | 'openai-compatible'
-      apiKeyEnv?: string | null
+      adapter: 'codex-cli'
       approvalPolicy?: string | null
       codexCommand?: string | null
       codexHome?: string | null
-      endpoint?: string | null
-      headers?: Record<string, string> | null
       model?: string | null
+      modelProvider?: string | null
       oss?: boolean
-      presetId?: string | null
       profile?: string | null
-      providerName?: string | null
       reasoningEffort?: string | null
       sandbox?: string | null
-      webSearch?: string | null
-      zeroDataRetention?: boolean
-    }) =>
-      target.adapter === 'openai-compatible'
-        ? {
-            provider: 'openai-compatible',
-            apiKeyEnv: target.apiKeyEnv ?? null,
-            baseUrl: target.endpoint ?? null,
-            headers: target.headers ?? null,
-            model: target.model ?? null,
-            presetId: target.presetId ?? null,
-            providerName: target.providerName ?? null,
-            reasoningEffort: target.reasoningEffort ?? null,
-            webSearch: target.webSearch ?? null,
-            zeroDataRetention: target.zeroDataRetention === true ? true : null,
-          }
-        : {
-            provider: 'codex-cli',
-            approvalPolicy: target.approvalPolicy ?? null,
-            codexCommand: target.codexCommand ?? null,
-            codexHome: target.codexHome ?? null,
-            model: target.model ?? null,
-            oss: target.oss === true,
-            profile: target.profile ?? null,
-            reasoningEffort: target.reasoningEffort ?? null,
-            sandbox: target.sandbox ?? null,
-          },
+    }) => ({
+      provider: 'codex-cli',
+      approvalPolicy: target.approvalPolicy ?? null,
+      codexCommand: target.codexCommand ?? null,
+      codexHome: target.codexHome ?? null,
+      model: target.model ?? null,
+      modelProvider: target.modelProvider ?? null,
+      oss: target.oss === true,
+      profile: target.profile ?? null,
+      reasoningEffort: target.reasoningEffort ?? null,
+      sandbox: target.sandbox ?? null,
+    }),
     createAssistantModelTarget: (input: {
-      apiKeyEnv?: string | null
-      approvalPolicy?: string | null
+      approvalPolicy?: CodexAssistantTarget['approvalPolicy']
       codexCommand?: string | null
       codexHome?: string | null
       model?: string | null
+      modelProvider?: string | null
       oss?: boolean
       policy?: {
-        approvalPolicy?: string | null
-        reasoningEffort?: string | null
-        sandbox?: string | null
+        approvalPolicy?: CodexAssistantTarget['approvalPolicy']
+        reasoningEffort?: CodexAssistantTarget['reasoningEffort']
+        sandbox?: CodexAssistantTarget['sandbox']
         webSearch?: string | null
       } | null
       profile?: string | null
-      provider?: 'codex-cli' | 'openai-compatible' | null
-      providerName?: string | null
-      reasoningEffort?: string | null
-      sandbox?: string | null
+      provider?: 'codex-cli' | null
+      reasoningEffort?: CodexAssistantTarget['reasoningEffort']
+      sandbox?: CodexAssistantTarget['sandbox']
       target?: {
-        kind: 'codex-cli' | 'openai-compatible' | 'responses'
-        apiKeyEnv?: string | null
-        baseUrl?: string | null
+        kind: 'codex-cli' | 'responses'
         codexCommand?: string | null
         codexHome?: string | null
-        headers?: Record<string, string> | null
         model?: string | null
+        modelProvider?: string | null
         oss?: boolean
-        presetId?: string | null
         profile?: string | null
-        providerName?: string | null
       } | null
     }) => {
       const provider =
         input.target?.kind === 'codex-cli'
           ? 'codex-cli'
           : input.target
-            ? 'openai-compatible'
+            ? null
             : input.provider
 
-      if (provider === 'openai-compatible') {
-        return {
-          adapter: 'openai-compatible',
-          apiKeyEnv: input.target?.apiKeyEnv ?? input.apiKeyEnv ?? null,
-          endpoint: input.target?.baseUrl ?? null,
-          headers: input.target?.headers ?? null,
+      if (provider === 'codex-cli') {
+        return createCodexTarget({
+          approvalPolicy: input.policy?.approvalPolicy ?? input.approvalPolicy ?? null,
+          codexCommand: input.target?.codexCommand ?? input.codexCommand ?? null,
+          codexHome: input.target?.codexHome ?? input.codexHome ?? null,
           model: input.target?.model ?? input.model ?? null,
-          presetId: input.target?.presetId ?? null,
-          providerName: input.target?.providerName ?? input.providerName ?? null,
-          reasoningEffort: null,
-          webSearch: input.policy?.webSearch ?? null,
-        }
+          modelProvider: input.target?.modelProvider ?? input.modelProvider ?? null,
+          oss: input.target?.oss ?? input.oss === true,
+          profile: input.target?.profile ?? input.profile ?? null,
+          reasoningEffort:
+            input.policy?.reasoningEffort ?? input.reasoningEffort ?? null,
+          sandbox: input.policy?.sandbox ?? input.sandbox ?? null,
+        })
       }
 
-      return provider === 'codex-cli'
-        ? {
-            adapter: 'codex-cli',
-            approvalPolicy:
-              input.policy?.approvalPolicy ?? input.approvalPolicy ?? null,
-            codexCommand: input.target?.codexCommand ?? input.codexCommand ?? null,
-            codexHome: input.target?.codexHome ?? input.codexHome ?? null,
-            model: input.target?.model ?? input.model ?? null,
-            oss: input.target?.oss ?? input.oss === true,
-            profile: input.target?.profile ?? input.profile ?? null,
-            reasoningEffort:
-              input.policy?.reasoningEffort ?? input.reasoningEffort ?? null,
-            sandbox: input.policy?.sandbox ?? input.sandbox ?? null,
-          }
-        : null
+      return null
     },
-    createDefaultLocalAssistantModelTarget: () => ({
-      adapter: 'openai-compatible',
-      model: 'gpt-5.4',
-    }),
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   if (!useRealAcceptedInputPersistence) {
     vi.doMock('../src/assistant/store.js', () => ({
@@ -2751,20 +2704,21 @@ function createAssistantSession(input?: {
       },
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
-    provider: input?.provider ?? 'openai-compatible',
+    provider: input?.provider ?? 'codex-cli',
     providerOptions: {
-      provider: input?.provider ?? 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      continuityFingerprint: 'fingerprint-openai',
-      executionDriver: 'openai-compatible',
-      model: 'gpt-5.4',
+      provider: input?.provider ?? 'codex-cli',
+      approvalPolicy: 'never',
+      codexHome: null,
+      continuityFingerprint: 'fingerprint-codex',
+      executionDriver: 'codex-app-server',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      modelProviderConfig: CODEX_MODEL_PROVIDER_CONFIG,
       oss: false,
       profile: null,
-      providerName: 'OpenAI',
-      reasoningEffort: null,
-      resumeKind: null,
-      sandbox: null,
-      approvalPolicy: null,
+      reasoningEffort: 'medium',
+      resumeKind: 'codex-thread',
+      sandbox: 'danger-full-access',
       ...input?.providerOptions,
     },
     resumeState: input?.resumeState ?? null,
@@ -2772,19 +2726,27 @@ function createAssistantSession(input?: {
     sessionId: input?.sessionId ?? 'session-test',
     target:
       input?.target ??
-      {
-        adapter: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        endpoint: null,
-        headers: null,
-        model: 'gpt-5.4',
-        presetId: null,
-        providerName: 'OpenAI',
-        reasoningEffort: null,
-        webSearch: null,
-      },
+      createCodexTarget(),
     turnCount: 0,
     updatedAt: '2026-04-08T00:00:00.000Z',
+  }
+}
+
+function createCodexTarget(
+  overrides: Partial<CodexAssistantTarget> = {},
+): CodexAssistantTarget {
+  return {
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    oss: false,
+    profile: null,
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
+    ...overrides,
   }
 }
 

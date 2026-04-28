@@ -1,16 +1,5 @@
 import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
-import {
-  discoverAssistantProviderModels,
-  resolveAssistantTargetCapabilities,
-  type AssistantModelDiscoveryResult,
-} from '@murphai/assistant-engine/assistant-provider-catalog'
-import {
-  getOpenAICompatibleProviderPreset,
-  resolveOpenAICompatibleProviderPreset,
-  resolveOpenAICompatibleProviderPresetFromId,
-  type OpenAICompatibleProviderPreset,
-} from '@murphai/operator-config/assistant/openai-compatible-provider-presets'
 import { normalizeNullableString } from '@murphai/operator-config/assistant/shared'
 import {
   createSetupAssistantAccountResolver,
@@ -27,15 +16,34 @@ import {
   type SetupCommandOptions,
   type SetupConfiguredAssistant,
 } from '@murphai/operator-config/setup-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.5'
 export const DEFAULT_SETUP_CODEX_OSS_MODEL = 'gpt-oss:20b'
 export const DEFAULT_SETUP_CODEX_REASONING_EFFORT = 'medium'
-export const DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL =
-  'http://127.0.0.1:11434/v1'
 const DEFAULT_SETUP_SANDBOX = 'danger-full-access' as const
 const DEFAULT_SETUP_APPROVAL_POLICY = 'never' as const
+
+type LegacyOpenAICompatibleSetupOptions = {
+  assistantApiKeyEnv?: unknown
+  assistantBaseUrl?: unknown
+  assistantProviderName?: unknown
+  assistantProviderPreset?: unknown
+  assistantZeroDataRetention?: unknown
+}
+
+type SetupAssistantOptionSubset = Pick<
+  SetupCommandOptions,
+  | 'assistantCodexCommand'
+  | 'assistantCodexHome'
+  | 'assistantModel'
+  | 'assistantModelProvider'
+  | 'assistantOss'
+  | 'assistantPreset'
+  | 'assistantProfile'
+  | 'assistantReasoningEffort'
+> & LegacyOpenAICompatibleSetupOptions
 
 export interface ResolveSetupAssistantInput {
   allowPrompt: boolean
@@ -50,11 +58,6 @@ export interface SetupAssistantResolver {
 
 interface SetupAssistantResolverDependencies {
   assistantAccount?: SetupAssistantAccountResolver
-  discoverModels?: (input: {
-    apiKeyEnv?: string | null
-    baseUrl: string
-    providerName?: string | null
-  }) => Promise<AssistantModelDiscoveryResult>
   input?: NodeJS.ReadableStream
   output?: NodeJS.WritableStream
   resolveCodexHome?: (input: {
@@ -71,76 +74,38 @@ export function getDefaultSetupAssistantPreset(): SetupAssistantPreset {
 }
 
 export function hasExplicitSetupAssistantOptions(
-  options: Pick<
-    SetupCommandOptions,
-    | 'assistantPreset'
-    | 'assistantProviderPreset'
-    | 'assistantModel'
-    | 'assistantBaseUrl'
-    | 'assistantApiKeyEnv'
-    | 'assistantProviderName'
-    | 'assistantCodexCommand'
-    | 'assistantCodexHome'
-    | 'assistantProfile'
-    | 'assistantReasoningEffort'
-    | 'assistantZeroDataRetention'
-    | 'assistantOss'
-  >,
+  options: Partial<SetupAssistantOptionSubset>,
 ): boolean {
   return Boolean(
     options.assistantPreset ||
-      options.assistantProviderPreset ||
       options.assistantModel ||
-      options.assistantBaseUrl ||
-      options.assistantApiKeyEnv ||
-      options.assistantProviderName ||
-      options.assistantZeroDataRetention !== undefined ||
+      options.assistantModelProvider ||
       options.assistantCodexCommand ||
       options.assistantCodexHome ||
       options.assistantProfile ||
       options.assistantReasoningEffort ||
-      options.assistantOss,
+      options.assistantOss !== undefined ||
+      hasLegacyOpenAICompatibleSetupOptions(options),
   )
 }
 
 export function inferSetupAssistantPresetFromOptions(
-  options: Pick<
-    SetupCommandOptions,
-    | 'assistantPreset'
-    | 'assistantProviderPreset'
-    | 'assistantModel'
-    | 'assistantBaseUrl'
-    | 'assistantApiKeyEnv'
-    | 'assistantProviderName'
-    | 'assistantCodexCommand'
-    | 'assistantCodexHome'
-    | 'assistantProfile'
-    | 'assistantReasoningEffort'
-    | 'assistantZeroDataRetention'
-    | 'assistantOss'
-  >,
+  options: Partial<SetupAssistantOptionSubset>,
 ): SetupAssistantPreset | null {
+  assertNoLegacyOpenAICompatibleSetupOptions(options)
+
   if (options.assistantPreset) {
     return options.assistantPreset
   }
 
   if (
-    options.assistantProviderPreset ||
-    options.assistantBaseUrl ||
-    options.assistantApiKeyEnv ||
-    options.assistantProviderName ||
-    options.assistantZeroDataRetention !== undefined
-  ) {
-    return 'openai-compatible'
-  }
-
-  if (
     options.assistantModel ||
+    options.assistantModelProvider ||
     options.assistantCodexCommand ||
     options.assistantCodexHome ||
     options.assistantProfile ||
     options.assistantReasoningEffort ||
-    options.assistantOss
+    options.assistantOss !== undefined
   ) {
     return 'codex'
   }
@@ -148,45 +113,9 @@ export function inferSetupAssistantPresetFromOptions(
   return null
 }
 
-export function resolveSetupAssistantProviderPreset(
-  options: Pick<
-    SetupCommandOptions,
-    | 'assistantProviderPreset'
-    | 'assistantBaseUrl'
-    | 'assistantApiKeyEnv'
-    | 'assistantProviderName'
-  >,
-): OpenAICompatibleProviderPreset | null {
-  const explicitPreset = resolveOpenAICompatibleProviderPresetFromId(
-    normalizeNullableString(options.assistantProviderPreset),
-  )
-  if (explicitPreset) {
-    return explicitPreset
-  }
-
-  return resolveOpenAICompatibleProviderPreset({
-    apiKeyEnv: normalizeNullableString(options.assistantApiKeyEnv),
-    baseUrl: normalizeNullableString(options.assistantBaseUrl),
-    providerName: normalizeNullableString(options.assistantProviderName),
-  })
-}
-
 export function createSetupAssistantResolver(
   dependencies: SetupAssistantResolverDependencies = {},
 ): SetupAssistantResolver {
-  const discoverModels =
-    dependencies.discoverModels ??
-    (async (input: {
-      apiKeyEnv?: string | null
-      baseUrl: string
-      providerName?: string | null
-    }) =>
-      await discoverAssistantProviderModels({
-        provider: 'openai-compatible',
-        baseUrl: input.baseUrl,
-        apiKeyEnv: input.apiKeyEnv,
-        providerName: input.providerName,
-      }))
   const assistantAccount =
     dependencies.assistantAccount ?? createSetupAssistantAccountResolver()
   const input = dependencies.input ?? defaultInput
@@ -196,6 +125,8 @@ export function createSetupAssistantResolver(
 
   return {
     async resolve(resolutionInput) {
+      assertNoLegacyOpenAICompatibleSetupOptions(resolutionInput.options)
+
       let resolvedAssistant: SetupConfiguredAssistant
       switch (resolutionInput.preset) {
         case 'skip':
@@ -204,11 +135,13 @@ export function createSetupAssistantResolver(
             enabled: false,
             provider: null,
             model: null,
+            modelProvider: null,
             baseUrl: null,
             apiKeyEnv: null,
             presetId: null,
             providerName: null,
             codexCommand: null,
+            codexHome: null,
             profile: null,
             reasoningEffort: null,
             sandbox: null,
@@ -248,12 +181,16 @@ export function createSetupAssistantResolver(
               ? 'Local model id to use with Codex'
               : 'Model id to use with Codex',
           })
+          const modelProvider =
+            normalizeNullableString(resolutionInput.options.assistantModelProvider) ??
+            null
 
           resolvedAssistant = {
             preset: 'codex',
             enabled: true,
             provider: 'codex-cli',
             model,
+            modelProvider,
             baseUrl: null,
             apiKeyEnv: null,
             presetId: null,
@@ -277,135 +214,8 @@ export function createSetupAssistantResolver(
             detail: buildCodexAssistantDetail({
               codexHome: selectedCodexHome.codexHome,
               model,
+              modelProvider,
               oss: useLocalModel,
-            }),
-          }
-          break
-        }
-
-        case 'openai-compatible': {
-          const explicitReasoningEffort = normalizeNullableString(
-            resolutionInput.options.assistantReasoningEffort,
-          )
-          const explicitZeroDataRetention =
-            resolutionInput.options.assistantZeroDataRetention
-
-          const explicitProviderPreset = resolveOpenAICompatibleProviderPresetFromId(
-            normalizeNullableString(resolutionInput.options.assistantProviderPreset),
-          )
-          const initialProviderPreset =
-            explicitProviderPreset ??
-            resolveSetupAssistantProviderPreset(resolutionInput.options) ??
-            resolveOpenAICompatibleProviderPreset({
-              baseUrl: DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
-            }) ??
-            getOpenAICompatibleProviderPreset('custom')
-          const baseUrl = await resolvePromptedValue({
-            allowPrompt: resolutionInput.allowPrompt,
-            defaultValue:
-              normalizeNullableString(resolutionInput.options.assistantBaseUrl) ??
-              initialProviderPreset.baseUrl ??
-              DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
-            input,
-            output,
-            prompt: buildSetupAssistantBaseUrlPrompt(initialProviderPreset),
-          })
-
-          const apiKeyEnv = await resolveSetupAssistantApiKeyEnv({
-            allowPrompt: resolutionInput.allowPrompt,
-            defaultValue:
-              normalizeNullableString(
-                resolutionInput.options.assistantApiKeyEnv,
-              ) ??
-              initialProviderPreset.apiKeyEnv ??
-              null,
-            input,
-            output,
-            providerPreset: initialProviderPreset,
-          })
-          const explicitProviderName = normalizeNullableString(
-            resolutionInput.options.assistantProviderName,
-          )
-          const resolvedProviderPreset =
-            explicitProviderPreset ??
-            resolveOpenAICompatibleProviderPreset({
-              apiKeyEnv,
-              baseUrl,
-              providerName: explicitProviderName,
-            }) ??
-            getOpenAICompatibleProviderPreset('custom')
-          const providerName =
-            explicitProviderName ??
-            resolvedProviderPreset.providerName
-          const explicitModel = normalizeNullableString(
-            resolutionInput.options.assistantModel,
-          )
-          const discovery =
-            explicitModel === null && resolvedProviderPreset.kind !== 'gateway'
-              ? await discoverModels({
-                  baseUrl,
-                  apiKeyEnv,
-                  providerName,
-                })
-              : null
-
-          const model = await resolveOpenAICompatibleModel({
-            allowPrompt: resolutionInput.allowPrompt,
-            discovery,
-            explicitModel,
-            input,
-            output,
-          })
-          const targetCapabilities = resolveAssistantTargetCapabilities({
-            provider: 'openai-compatible',
-            apiKeyEnv,
-            baseUrl,
-            model,
-            presetId: resolvedProviderPreset.id,
-            providerName,
-          })
-          if (
-            explicitReasoningEffort &&
-            !targetCapabilities.supportsReasoningEffort
-          ) {
-            throw new Error(
-              'The resolved OpenAI-compatible target does not support assistantReasoningEffort.',
-            )
-          }
-          if (
-            explicitZeroDataRetention === true &&
-            !targetCapabilities.supportsZeroDataRetention
-          ) {
-            throw new Error(
-              'The resolved OpenAI-compatible target does not support assistantZeroDataRetention.',
-            )
-          }
-
-          resolvedAssistant = {
-            preset: 'openai-compatible',
-            enabled: true,
-            provider: 'openai-compatible',
-            model,
-            baseUrl,
-            apiKeyEnv,
-            presetId: resolvedProviderPreset.id,
-            providerName,
-            codexCommand: null,
-            profile: null,
-            reasoningEffort: explicitReasoningEffort,
-            sandbox: null,
-            approvalPolicy: null,
-            oss: false,
-            ...(explicitZeroDataRetention !== undefined
-              ? { zeroDataRetention: explicitZeroDataRetention }
-              : {}),
-            account: null,
-            detail: buildOpenAICompatibleAssistantDetail({
-              apiKeyEnv,
-              baseUrl,
-              model,
-              providerTitle: resolvedProviderPreset.title,
-              zeroDataRetention: explicitZeroDataRetention,
             }),
           }
           break
@@ -427,122 +237,6 @@ export function createSetupAssistantResolver(
             ),
           }
     },
-  }
-}
-
-async function resolveOpenAICompatibleModel(input: {
-  allowPrompt: boolean
-  discovery: AssistantModelDiscoveryResult | null
-  explicitModel: string | null
-  input: NodeJS.ReadableStream
-  output: NodeJS.WritableStream
-}): Promise<string> {
-  const discoveredModels = input.discovery?.models.map((model) => model.id) ?? []
-
-  if (input.explicitModel) {
-    return input.explicitModel
-  }
-
-  if (!input.allowPrompt) {
-    const discoveredModel = discoveredModels[0] ?? null
-    if (discoveredModel) {
-      return discoveredModel
-    }
-
-    throw new Error(
-      input.discovery?.message
-        ? `OpenAI-compatible setup requires an explicit model when discovery does not return any models. ${input.discovery.message}`
-        : 'OpenAI-compatible setup requires an explicit model when discovery does not return any models.',
-    )
-  }
-
-  if (input.discovery?.message) {
-    input.output.write(`\n${input.discovery.message}\n`)
-  }
-
-  if (discoveredModels.length > 0) {
-    input.output.write('\nAvailable models:\n')
-    for (const [index, model] of discoveredModels.entries()) {
-      input.output.write(`  ${index + 1}. ${model}\n`)
-    }
-
-    const choice = await resolveOptionalPromptedValue({
-      allowPrompt: true,
-      defaultValue: '1',
-      input: input.input,
-      output: input.output,
-      prompt: 'Pick a model number or type a model id',
-    })
-
-    if (choice) {
-      const numericIndex = Number.parseInt(choice, 10)
-      if (
-        Number.isFinite(numericIndex) &&
-        numericIndex >= 1 &&
-        numericIndex <= discoveredModels.length
-      ) {
-        return discoveredModels[numericIndex - 1] ?? discoveredModels[0] ?? ''
-      }
-
-      return choice
-    }
-  }
-
-  return await resolveRequiredPromptedValue({
-    allowPrompt: true,
-    input: input.input,
-    output: input.output,
-    prompt: 'Model id to use',
-  })
-}
-
-async function resolveSetupAssistantApiKeyEnv(input: {
-  allowPrompt: boolean
-  defaultValue: string | null
-  input: NodeJS.ReadableStream
-  output: NodeJS.WritableStream
-  providerPreset: OpenAICompatibleProviderPreset
-}): Promise<string | null> {
-  if (
-    input.providerPreset.id !== 'custom' &&
-    input.providerPreset.kind !== 'local' &&
-    input.defaultValue
-  ) {
-    return input.defaultValue
-  }
-
-  return await resolveOptionalPromptedValue({
-    allowPrompt: input.allowPrompt,
-    defaultValue: input.defaultValue,
-    input: input.input,
-    output: input.output,
-    prompt: buildSetupAssistantApiKeyEnvPrompt(input.providerPreset),
-  })
-}
-
-async function resolveRequiredPromptedValue(input: {
-  allowPrompt: boolean
-  input: NodeJS.ReadableStream
-  output: NodeJS.WritableStream
-  prompt: string
-}): Promise<string> {
-  if (!input.allowPrompt) {
-    return ''
-  }
-
-  while (true) {
-    const response = await promptWithDefault({
-      defaultValue: null,
-      input: input.input,
-      output: input.output,
-      prompt: input.prompt,
-    })
-
-    if (response) {
-      return response
-    }
-
-    input.output.write('A model id is required.\n')
   }
 }
 
@@ -568,25 +262,6 @@ async function resolvePromptedValue(input: {
   return response ?? explicitDefault ?? ''
 }
 
-async function resolveOptionalPromptedValue(input: {
-  allowPrompt: boolean
-  defaultValue: string | null
-  input: NodeJS.ReadableStream
-  output: NodeJS.WritableStream
-  prompt: string
-}): Promise<string | null> {
-  if (!input.allowPrompt) {
-    return input.defaultValue
-  }
-
-  return await promptWithDefault({
-    defaultValue: input.defaultValue,
-    input: input.input,
-    output: input.output,
-    prompt: input.prompt,
-  })
-}
-
 async function promptWithDefault(input: {
   defaultValue: string | null
   input: NodeJS.ReadableStream
@@ -608,38 +283,22 @@ async function promptWithDefault(input: {
   }
 }
 
-function buildOpenAICompatibleAssistantDetail(input: {
-  apiKeyEnv: string | null
-  baseUrl: string
-  model: string
-  providerTitle?: string | null
-  zeroDataRetention?: boolean
-}): string {
-  const providerLabel =
-    normalizeNullableString(input.providerTitle) ?? input.baseUrl
-  const retentionNote = input.zeroDataRetention
-    ? ' Zero data retention is enabled.'
-    : ''
-
-  if (input.apiKeyEnv) {
-    return `Use ${input.model} from ${providerLabel}. Murph will read the key from ${input.apiKeyEnv}.${retentionNote}`
-  }
-
-  return `Use ${input.model} from ${providerLabel}.${retentionNote}`
-}
-
 function buildCodexAssistantDetail(input: {
   codexHome?: string | null
   model: string
+  modelProvider?: string | null
   oss: boolean
 }): string {
   const detail = input.oss
     ? `Use Codex with the local model ${input.model}.`
     : `Use Codex with ${input.model}.`
+  const providerDetail = input.modelProvider
+    ? ` Use Codex model provider ${input.modelProvider}.`
+    : ''
 
   return input.codexHome
-    ? `${detail} Use the explicit Codex home at ${input.codexHome}.`
-    : detail
+    ? `${detail}${providerDetail} An explicit Codex home is configured; path redacted in CLI output.`
+    : `${detail}${providerDetail}`
 }
 
 function appendDetectedAssistantAccountDetail(
@@ -654,26 +313,32 @@ function appendDetectedAssistantAccountDetail(
   return `${detail} Detected ${label} from local Codex credentials.`
 }
 
-function buildSetupAssistantBaseUrlPrompt(
-  providerPreset: OpenAICompatibleProviderPreset,
-): string {
-  if (providerPreset.id === 'custom') {
-    return 'Model endpoint URL'
-  }
+function hasLegacyOpenAICompatibleSetupOptions(
+  options: unknown,
+): boolean {
+  const candidate =
+    typeof options === 'object' && options !== null
+      ? (options as Partial<LegacyOpenAICompatibleSetupOptions>)
+      : {}
 
-  return `${providerPreset.title} endpoint URL`
+  return (
+    candidate.assistantProviderPreset !== undefined ||
+    candidate.assistantBaseUrl !== undefined ||
+    candidate.assistantApiKeyEnv !== undefined ||
+    candidate.assistantProviderName !== undefined ||
+    candidate.assistantZeroDataRetention !== undefined
+  )
 }
 
-function buildSetupAssistantApiKeyEnvPrompt(
-  providerPreset: OpenAICompatibleProviderPreset,
-): string {
-  if (providerPreset.kind === 'local') {
-    return 'API key env var name (leave blank if this local endpoint does not need one)'
+function assertNoLegacyOpenAICompatibleSetupOptions(
+  options: unknown,
+): void {
+  if (!hasLegacyOpenAICompatibleSetupOptions(options)) {
+    return
   }
 
-  if (providerPreset.id === 'custom') {
-    return 'API key env var name (leave blank if this endpoint does not need one)'
-  }
-
-  return `${providerPreset.title} API key env var name (leave blank if this endpoint does not need one)`
+  throw new VaultCliError(
+    'invalid_option',
+    'OpenAI-compatible assistant setup options have been removed. Use Codex setup options such as --assistantModel, --assistantModelProvider, --assistantCodexCommand, --assistantProfile, --assistantReasoningEffort, or --assistantOss.',
+  )
 }

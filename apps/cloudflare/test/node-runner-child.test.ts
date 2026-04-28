@@ -26,6 +26,8 @@ import {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("runHostedExecutionChild", () => {
@@ -105,6 +107,10 @@ describe("runHostedExecutionChild", () => {
   });
 
   it("routes workspace-invocation child payloads through the workspace runtime with proxy-only authority", async () => {
+    vi.stubEnv("MURPH_E2E_DEBUG_HOSTED_RUNNER", "1");
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     const stdout = { write: vi.fn() };
     const setExitCode = vi.fn();
     const runWorkspaceInProcess = vi.fn(async (
@@ -134,6 +140,8 @@ describe("runHostedExecutionChild", () => {
           runtime: {
             forwardedEnv: {
               HOSTED_ASSISTANT_MODEL: "gpt-test",
+              HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+              LINQ_API_TOKEN: "linq-token",
             },
           },
         },
@@ -172,6 +180,80 @@ describe("runHostedExecutionChild", () => {
         status: "idle",
       },
     });
+
+    const debugOutput = consoleErrorSpy.mock.calls
+      .map((call) => String(call[0]))
+      .join("\n");
+    expect(debugOutput).toContain('"hostedAssistantModelConfigured":true');
+    expect(debugOutput).toContain('"hostedAssistantProviderConfigured":true');
+    expect(debugOutput).toContain('"linqApiConfigured":true');
+    expect(debugOutput).not.toContain("gpt-test");
+    expect(debugOutput).not.toContain("vercel-ai-gateway");
+    expect(debugOutput).not.toContain("linq-token");
+  });
+
+  it("redacts runtime failure diagnostics before writing the child result payload", async () => {
+    const stdout = { write: vi.fn() };
+    const setExitCode = vi.fn();
+    const runtimeError = new Error(
+      'failed for person@example.test +15555550123 with VERCEL_AI_API_KEY=secret-value base_url = "https://gateway.example.test/v1" /tmp/hosted-runner/private-file',
+    ) as Error & { details?: Record<string, unknown> };
+    runtimeError.details = {
+      assistantProviderErrorMessage:
+        "Bearer provider-token at /tmp/hosted-runner/provider-detail",
+    };
+    runtimeError.stack =
+      "Error: failed\n    at run (/tmp/hosted-runner/private-file.ts:7:3)";
+    const runWorkspaceInProcess = vi.fn(async () => {
+      throw runtimeError;
+    });
+
+    await runHostedExecutionChild({
+      readStandardInput: async () => JSON.stringify({
+        internalWorkerProxyToken: "bridge-token",
+        localInternalProxyBaseUrl: null,
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_workspace_child_error",
+            leaseGeneration: "7",
+            reason: "nudge",
+            userId: "u_workspace",
+            workspaceVersion: "4",
+          },
+          runtime: {
+            forwardedEnv: {},
+          },
+        },
+      }),
+      runWorkspaceInProcess,
+      setExitCode,
+      stdout,
+    });
+
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    const payload = readChildResult(stdout.write.mock.calls[0]?.[0]);
+
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.message).toContain("VERCEL_AI_API_KEY=<redacted>");
+    expect(payload.error?.message).toContain("base_url=<redacted>");
+    expect(payload.error?.message).toContain("<redacted-path>");
+    expect(payload.error?.message).toContain("<redacted-email>");
+    expect(payload.error?.message).toContain("<redacted-phone>");
+    expect(payload.error?.stack).toContain("<redacted-path>");
+    expect(payload.error?.message).not.toContain("person@example.test");
+    expect(payload.error?.message).not.toContain("+15555550123");
+    expect(payload.error?.message).not.toContain("secret-value");
+    expect(payload.error?.message).not.toContain("gateway.example.test");
+    expect(payload.error?.message).not.toContain("/tmp/hosted-runner/private-file");
+    expect(payload.error?.stack).not.toContain("/tmp/hosted-runner/private-file");
+    expect(payload.error?.details?.assistantProviderErrorMessage).toBe(
+      "Bearer [redacted] at <redacted-path>",
+    );
+    expect(JSON.stringify(payload.error?.details)).not.toContain("provider-token");
+    expect(JSON.stringify(payload.error?.details)).not.toContain(
+      "/tmp/hosted-runner/provider-detail",
+    );
   });
 });
 

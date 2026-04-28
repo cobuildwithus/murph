@@ -7,6 +7,9 @@ import {
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
 import {
+  prepareHostedCodexRuntimeEnvironment,
+} from "./hosted-runtime/codex-config.ts";
+import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import {
@@ -219,10 +222,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
     input.request.budget?.maxMailboxItems,
   );
-  const runtimeEnv = {
+  const baseRuntimeEnv = {
     ...runtime.forwardedEnv,
     ...runtime.userEnv,
   };
+  const hostedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
+    operatorHomeRoot: restored.operatorHomeRoot,
+    runtimeEnv: baseRuntimeEnv,
+  });
+  const runtimeEnv = hostedCodexRuntime.runtimeEnv;
 
   const result = await withHostedProcessEnvironment(
     {

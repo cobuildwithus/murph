@@ -110,37 +110,28 @@ describe('assistant state ids', () => {
 })
 
 describe('assistant session secret sidecars', () => {
-  it('extracts secret headers into a sidecar and leaves persisted headers inline', () => {
-    const session = createOpenAiSession()
+  it('does not extract sidecars for Codex session persistence', () => {
+    const session = createCodexSession()
 
     const result = extractAssistantSessionSecretsForPersistence(session)
 
-    expect(result.migratedHeaderNames).toEqual(['Authorization', 'Cookie'])
+    expect(result.migratedHeaderNames).toEqual([])
     expect(result.persisted.target).toEqual({
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      endpoint: 'https://api.example.com/v1',
-      headers: {
-        'X-Trace': 'trace-123',
-      },
-      model: 'gpt-5.4',
-      presetId: null,
-      providerName: 'murph-openai',
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: null,
+      codexHome: null,
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+      profile: null,
       reasoningEffort: 'medium',
-      webSearch: null,
+      sandbox: 'danger-full-access',
     })
-    expect(result.secrets).toEqual({
-      schema: 'murph.assistant-session-secrets.v1',
-      sessionId: session.sessionId,
-      updatedAt: session.updatedAt,
-      providerHeaders: {
-        Authorization: 'Bearer secret-token',
-        Cookie: 'session-cookie',
-      },
-    })
+    expect(result.secrets).toBeNull()
   })
 
-  it('returns no sidecar data for non-openai targets and leaves merge unchanged without secrets', () => {
+  it('leaves Codex sessions unchanged without secrets', () => {
     const session = createCodexSession()
 
     const result = extractAssistantSessionSecretsForPersistence(session)
@@ -151,143 +142,62 @@ describe('assistant session secret sidecars', () => {
     expect(mergeAssistantSessionSecrets(session, null)).toBe(session)
   })
 
-  it('leaves non-openai sessions unchanged even if a legacy secret sidecar is present', () => {
+  it('leaves Codex sessions unchanged even if a legacy secret sidecar is present', () => {
     const session = createCodexSession()
-    const secrets = extractAssistantSessionSecretsForPersistence(createOpenAiSession()).secrets
+    const secrets = createSessionSecrets({
+      sessionId: session.sessionId,
+      updatedAt: session.updatedAt,
+    })
 
     const merged = mergeAssistantSessionSecrets(session, secrets)
 
     expect(merged).toBe(session)
   })
 
-  it('merges sidecar headers back into persisted sessions and provider options', () => {
-    const extracted = extractAssistantSessionSecretsForPersistence(createOpenAiSession())
-    const hydratedSession = parseAssistantSessionRecord(extracted.persisted)
-
-    const merged = mergeAssistantSessionSecrets(hydratedSession, extracted.secrets)
-
-    expect(merged.target).toMatchObject({
-      adapter: 'openai-compatible',
-      headers: {
-        Authorization: 'Bearer secret-token',
-        Cookie: 'session-cookie',
-        'X-Trace': 'trace-123',
-      },
-    })
-    expect(merged.providerOptions.headers).toEqual({
-      Authorization: 'Bearer secret-token',
-      Cookie: 'session-cookie',
-      'X-Trace': 'trace-123',
-    })
+  it('fails closed before legacy OpenAI-compatible sessions can be secret-merged', () => {
+    expect(() =>
+      parseAssistantSessionRecord(createLegacyOpenAiSessionRecord()),
+    ).toThrowError(/OpenAI-compatible assistant runtimes are no longer supported/u)
   })
 
-  it('rejects sidecars whose embedded session identity does not match the session', () => {
-    const extracted = extractAssistantSessionSecretsForPersistence(createOpenAiSession())
-    const hydratedSession = parseAssistantSessionRecord(extracted.persisted)
-    if (!extracted.secrets) {
-      throw new Error('Expected openai-compatible session secrets.')
-    }
+  it('does not apply mismatched legacy sidecars to Codex sessions', () => {
+    const session = createCodexSession()
     const mismatchedSecrets = assistantSessionSecretsSchema.parse({
-      ...extracted.secrets,
+      ...createSessionSecrets({
+        sessionId: session.sessionId,
+        updatedAt: session.updatedAt,
+      }),
       sessionId: 'session-beta',
     })
 
     expect(() =>
-      mergeAssistantSessionSecrets(hydratedSession, mismatchedSecrets),
-    ).toThrowError(
-      expect.objectContaining({
-        code: 'ASSISTANT_SESSION_SECRETS_MISMATCH',
-      }),
-    )
-  })
-
-  it('rebuilds provider binding headers from the target owner when resuming an openai session', () => {
-    const session = parseAssistantSessionRecord({
-      schema: 'murph.assistant-session.v1',
-      sessionId: 'sess_headers_roundtrip',
-      target: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: null,
-        endpoint: 'https://api.example.com/v1',
-        headers: {
-          'X-Trace-Id': 'trace-123',
-        },
-        model: 'gpt-test',
-        presetId: null,
-        providerName: null,
-        reasoningEffort: null,
-        webSearch: null,
-      },
-      resumeState: {
-        providerSessionId: 'provider-session-123',
-        resumeRouteId: 'resume-route-123',
-      },
-      alias: null,
-      binding: {
-        conversationKey: null,
-        channel: null,
-        identityId: null,
-        actorId: null,
-        threadId: null,
-        threadIsDirect: null,
-        delivery: null,
-      },
-      createdAt: '2026-04-13T00:00:00.000Z',
-      updatedAt: '2026-04-13T00:00:00.000Z',
-      lastTurnAt: null,
-      turnCount: 0,
-    })
-    const secrets = assistantSessionSecretsSchema.parse({
-      schema: 'murph.assistant-session-secrets.v1',
-      sessionId: session.sessionId,
-      updatedAt: session.updatedAt,
-      providerHeaders: {
-        'X-Upstream-Auth': 'Bearer firstsecret123',
-      },
-    })
-
-    const merged = mergeAssistantSessionSecrets(session, secrets)
-
-    expect(merged.target.adapter).toBe('openai-compatible')
-    if (merged.target.adapter !== 'openai-compatible') {
-      throw new Error('Expected an openai-compatible session target.')
-    }
-    expect(merged.target.headers).toEqual({
-      'X-Trace-Id': 'trace-123',
-      'X-Upstream-Auth': 'Bearer firstsecret123',
-    })
-    expect(merged.providerOptions.headers).toEqual({
-      'X-Trace-Id': 'trace-123',
-      'X-Upstream-Auth': 'Bearer firstsecret123',
-    })
-    expect(merged.resumeState).toEqual({
-      providerSessionId: 'provider-session-123',
-      resumeRouteId: 'resume-route-123',
-    })
+      mergeAssistantSessionSecrets(session, mismatchedSecrets),
+    ).not.toThrow()
+    expect(mergeAssistantSessionSecrets(session, mismatchedSecrets)).toBe(session)
   })
 
   it('writes, reads, and removes secret sidecars in the session secrets directory', async () => {
     const paths = await createAssistantPaths('assistant-state-secrets-')
-    const session = createOpenAiSession()
-    const extracted = extractAssistantSessionSecretsForPersistence(session)
-    if (!extracted.secrets) {
-      throw new Error('Expected openai-compatible session secrets.')
-    }
+    const session = createCodexSession()
+    const secrets = createSessionSecrets({
+      sessionId: session.sessionId,
+      updatedAt: session.updatedAt,
+    })
     const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
 
     await persistAssistantSessionSecrets({
       paths,
-      secrets: extracted.secrets,
+      secrets,
       sessionId: session.sessionId,
     })
 
-    expect(JSON.parse(await readFile(secretsPath, 'utf8'))).toEqual(extracted.secrets)
+    expect(JSON.parse(await readFile(secretsPath, 'utf8'))).toEqual(secrets)
     await expect(
       readAssistantSessionSecrets({
         paths,
         sessionId: session.sessionId,
       }),
-    ).resolves.toEqual(extracted.secrets)
+    ).resolves.toEqual(secrets)
 
     await persistAssistantSessionSecrets({
       paths,
@@ -308,8 +218,11 @@ describe('assistant session secret sidecars', () => {
 
   it('quarantines valid sidecars stored under the wrong session filename', async () => {
     const paths = await createAssistantPaths('assistant-state-secrets-mismatched-')
-    const session = createOpenAiSession()
-    const extracted = extractAssistantSessionSecretsForPersistence(session)
+    const session = createCodexSession()
+    const secrets = createSessionSecrets({
+      sessionId: session.sessionId,
+      updatedAt: session.updatedAt,
+    })
     const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
 
     await mkdir(path.dirname(secretsPath), {
@@ -318,7 +231,7 @@ describe('assistant session secret sidecars', () => {
     await writeFile(
       secretsPath,
       JSON.stringify({
-        ...extracted.secrets,
+        ...secrets,
         sessionId: 'session-beta',
       }),
       'utf8',
@@ -351,8 +264,11 @@ describe('assistant session secret sidecars', () => {
 
   it('quarantines stale sidecars whose updatedAt no longer matches the session', async () => {
     const paths = await createAssistantPaths('assistant-state-secrets-stale-')
-    const session = createOpenAiSession()
-    const extracted = extractAssistantSessionSecretsForPersistence(session)
+    const session = createCodexSession()
+    const secrets = createSessionSecrets({
+      sessionId: session.sessionId,
+      updatedAt: session.updatedAt,
+    })
     const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
     const staleUpdatedAt = '2026-04-07T23:59:59.000Z'
 
@@ -362,7 +278,7 @@ describe('assistant session secret sidecars', () => {
     await writeFile(
       secretsPath,
       JSON.stringify({
-        ...extracted.secrets,
+        ...secrets,
         updatedAt: staleUpdatedAt,
       }),
       'utf8',
@@ -533,8 +449,22 @@ async function createAssistantPaths(prefix: string) {
   return resolveAssistantStatePaths(context.vaultRoot)
 }
 
-function createOpenAiSession(): AssistantSession {
-  return parseAssistantSessionRecord({
+function createSessionSecrets(input: {
+  sessionId: string
+  updatedAt: string
+}) {
+  return assistantSessionSecretsSchema.parse({
+    schema: 'murph.assistant-session-secrets.v1',
+    sessionId: input.sessionId,
+    updatedAt: input.updatedAt,
+    providerHeaders: {
+      Authorization: 'Bearer stale-secret-token',
+    },
+  })
+}
+
+function createLegacyOpenAiSessionRecord() {
+  return {
     schema: 'murph.assistant-session.v1',
     sessionId: 'session-alpha',
     target: {
@@ -565,7 +495,7 @@ function createOpenAiSession(): AssistantSession {
     updatedAt: '2026-04-08T00:05:00.000Z',
     lastTurnAt: null,
     turnCount: 2,
-  })
+  }
 }
 
 function createCodexSession(): AssistantSession {
@@ -576,11 +506,13 @@ function createCodexSession(): AssistantSession {
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexCommand: null,
-      model: 'gpt-5.4',
+      codexHome: null,
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',
-      sandbox: 'workspace-write',
+      sandbox: 'danger-full-access',
     },
     resumeState: null,
     alias: 'codex',

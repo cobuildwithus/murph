@@ -56,6 +56,24 @@ const DEFAULT_MEMBER_CHANNELS = {
   linq: true,
   telegram: true,
 } as const;
+const HOSTED_ASSISTANT_SEED_ENV = {
+  HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
+  HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+  HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+  HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+  HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
+} as const;
+const HOSTED_CODEX_VERCEL_GATEWAY_TARGET = {
+  adapter: "codex-cli",
+  approvalPolicy: "never",
+  codexCommand: null,
+  model: "gpt-5.5",
+  modelProvider: "vercel-ai-gateway",
+  oss: false,
+  profile: null,
+  reasoningEffort: "medium",
+  sandbox: "danger-full-access",
+} as const;
 
 function buildLegacyWake(input: {
   event: Record<string, unknown> & { kind: string; userId?: string };
@@ -131,29 +149,27 @@ async function writeAutomationState(
 }
 
 function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
-  const previousEnv = {
-    HOSTED_ASSISTANT_MODEL: process.env.HOSTED_ASSISTANT_MODEL,
-    HOSTED_ASSISTANT_PROVIDER: process.env.HOSTED_ASSISTANT_PROVIDER,
-  };
-  process.env.HOSTED_ASSISTANT_MODEL = "gpt-4.1-mini";
-  process.env.HOSTED_ASSISTANT_PROVIDER = "openai";
+  const previousEnv: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(HOSTED_ASSISTANT_SEED_ENV)) {
+    previousEnv[key] = process.env[key];
+    process.env[key] = value;
+  }
   return previousEnv;
 }
 
 function buildHostedAssistantSeedRuntimeEnv(): Record<string, string> {
-  return {
-    HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-    HOSTED_ASSISTANT_PROVIDER: "openai",
-  };
+  return { ...HOSTED_ASSISTANT_SEED_ENV };
 }
 
-function restoreEnvVar(key: "HOSTED_ASSISTANT_MODEL" | "HOSTED_ASSISTANT_PROVIDER", value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
+function restoreHostedAssistantSeedEnv(previousEnv: Record<string, string | undefined>): void {
+  for (const key of Object.keys(HOSTED_ASSISTANT_SEED_ENV)) {
+    const value = previousEnv[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
   }
-
-  process.env[key] = value;
 }
 
 async function withOperatorHomeRoot<T>(
@@ -399,7 +415,7 @@ test("hosted member activation enables managed Linq auto-reply when first contac
         assistantConfigPresent: true,
         assistantConfigStatus: "hosted-env",
         assistantConfigured: true,
-        assistantProvider: "openai-compatible",
+        assistantProvider: "codex-cli",
         assistantSeeded: true,
         emailAutoReplyEnabled: true,
         linqAutoReplyEnabled: true,
@@ -422,8 +438,7 @@ test("hosted member activation enables managed Linq auto-reply when first contac
       },
     ]);
   } finally {
-    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
-    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });
@@ -506,21 +521,10 @@ test("hosted assistant bootstrap exposes an execution default target for later m
 
       const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
 
-      assert.deepEqual(defaultTarget, {
-        adapter: "openai-compatible",
-        apiKeyEnv: "OPENAI_API_KEY",
-        endpoint: "https://api.openai.com/v1",
-        headers: null,
-        model: "gpt-4.1-mini",
-        presetId: "openai",
-        providerName: "openai",
-        reasoningEffort: null,
-        webSearch: null,
-      });
+      assert.deepEqual(defaultTarget, HOSTED_CODEX_VERCEL_GATEWAY_TARGET);
     });
   } finally {
-    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
-    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });
@@ -583,8 +587,7 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
       },
     ]);
   } finally {
-    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
-    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });
@@ -648,8 +651,7 @@ test("hosted Linq inbound wake self-heals managed Linq auto-reply when the hoste
       },
     ]);
   } finally {
-    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
-    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });
@@ -715,8 +717,7 @@ test("hosted Linq inbound wake self-heal preserves existing managed channels", a
       },
     ]);
   } finally {
-    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
-    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    restoreHostedAssistantSeedEnv(previousHostedAssistantEnv);
     await cleanup();
   }
 });

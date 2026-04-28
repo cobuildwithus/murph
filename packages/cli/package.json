@@ -59,8 +59,6 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.53",
-    "@ai-sdk/openai-compatible": "^2.0.41",
     "@mozilla/readability": "0.6.0",
     "@murphai/assistant-cli": "workspace:*",
     "@murphai/assistant-engine": "workspace:*",
@@ -81,7 +79,6 @@
     "@murphai/runtime-state": "workspace:*",
     "@murphai/setup-cli": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "ai": "^6.0.168",
     "grammy": "1.41.1",
     "ink": "^6.8.0",
     "incur": "0.4.4",

@@ -51,8 +51,8 @@ describe('assistant shared helpers', () => {
     expect(isAssistantOpenAIBaseUrl('https://example.com/v1')).toBe(false)
     expect(isAssistantOpenAIBaseUrl('not-a-url')).toBe(false)
 
-    expect(normalizeAssistantProviderOptionKey(' OpenAI-compatible endpoint ')).toBe(
-      'openAICompatibleEndpoint',
+    expect(normalizeAssistantProviderOptionKey(' Codex app server endpoint ')).toBe(
+      'codexAppServerEndpoint',
     )
     expect(normalizeAssistantProviderOptionKey('---')).toBe('murphAssistant')
     expect(normalizeAssistantProviderOptionKey(null)).toBe('murphAssistant')

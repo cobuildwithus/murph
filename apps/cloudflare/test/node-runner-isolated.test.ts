@@ -91,8 +91,9 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     spawnMock.mockImplementation((_command, _args, options) => {
       expect(options?.env).toMatchObject({
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
-        OPENAI_API_KEY: "openai-key",
+        VERCEL_AI_API_KEY: "vercel-key",
       });
+      expect(options?.env?.CODEX_HOME).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK).toBeUndefined();
       expect(options?.env?.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK).toBeUndefined();
@@ -139,6 +140,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
         ...createWorkspaceJob("evt_child_env"),
         runtime: {
           forwardedEnv: {
+            CODEX_HOME: "/tmp/forwarded-codex-home",
             HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "platform-key",
             HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
             HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: "http://127.0.0.1:8787",
@@ -148,7 +150,7 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
             HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
             HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
             HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"secret"}',
-            OPENAI_API_KEY: "openai-key",
+            VERCEL_AI_API_KEY: "vercel-key",
           },
           userEnv: {},
         },
@@ -200,6 +202,136 @@ describe("runHostedWorkspaceInvocationIsolatedDetailed", () => {
     })).rejects.toThrow("Hosted workspace invocation result");
 
     expect(processKillSpy).toHaveBeenCalledWith(-4246, "SIGKILL");
+  });
+
+  it("redacts isolated child stderr before forwarding it to runner logs", async () => {
+    const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const stderrWriteSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const module = await import("../src/node-runner-isolated.ts");
+
+    spawnMock.mockImplementation(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        kill: ReturnType<typeof vi.fn>;
+        pid: number;
+        stderr: PassThrough;
+        stdin: PassThrough;
+        stdout: PassThrough;
+      };
+      child.kill = vi.fn();
+      child.pid = 4248;
+      child.stderr = new PassThrough();
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+
+      queueMicrotask(() => {
+        child.stderr.write("Bearer secret-token\n");
+        child.stderr.write(
+          "VERCEL_AI_API_KEY=secret-value person@example.test +15555550123 /tmp/hosted-runner/path",
+        );
+        child.stderr.end();
+        child.stdout.end(module.formatHostedExecutionChildResult({
+          ok: true,
+          result: createRunnerResult(),
+        }));
+        child.emit("close", 0);
+      });
+
+      return child;
+    });
+
+    await module.runHostedWorkspaceInvocationIsolatedDetailed({
+      internalWorkerProxyToken: "proxy-token",
+      job: createWorkspaceJob("evt_child_stderr_redaction"),
+    });
+
+    const forwarded = stderrWriteSpy.mock.calls.map((call) => String(call[0])).join("");
+    expect(forwarded).toContain("Bearer <redacted>");
+    expect(forwarded).toContain("VERCEL_AI_API_KEY=<redacted>");
+    expect(forwarded).toContain("<redacted-email>");
+    expect(forwarded).toContain("<redacted-phone>");
+    expect(forwarded).toContain("<redacted-path>");
+    expect(forwarded).not.toContain("secret-token");
+    expect(forwarded).not.toContain("secret-value");
+    expect(forwarded).not.toContain("person@example.test");
+    expect(forwarded).not.toContain("+15555550123");
+    expect(forwarded).not.toContain("/tmp/hosted-runner/path");
+    expect(processKillSpy).toHaveBeenCalledWith(-4248, "SIGKILL");
+  });
+
+  it("redacts child failure payload diagnostics before rethrowing them", async () => {
+    const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const module = await import("../src/node-runner-isolated.ts");
+
+    spawnMock.mockImplementation(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        kill: ReturnType<typeof vi.fn>;
+        pid: number;
+        stderr: PassThrough;
+        stdin: PassThrough;
+        stdout: PassThrough;
+      };
+      child.kill = vi.fn();
+      child.pid = 4249;
+      child.stderr = new PassThrough();
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+
+      queueMicrotask(() => {
+        child.stdout.end(module.formatHostedExecutionChildResult({
+          ok: false,
+          error: {
+            details: {
+              errorDetail:
+                "Bearer detail-token /tmp/hosted-runner/detail-path",
+            },
+            message:
+              "VERCEL_AI_API_KEY=secret-value model_provider = vercel-ai-gateway /tmp/hosted-runner/private-file",
+            name: "Error",
+            stack:
+              "Error: failed\n    at run (/tmp/hosted-runner/private-file.ts:7:3)",
+          },
+        }));
+        child.emit("close", 1);
+      });
+
+      return child;
+    });
+
+    let thrown: (Error & { details?: Record<string, unknown> | null }) | null = null;
+    try {
+      await module.runHostedWorkspaceInvocationIsolatedDetailed({
+        internalWorkerProxyToken: "proxy-token",
+        job: createWorkspaceJob("evt_child_failure_redaction"),
+      });
+      throw new Error("Expected isolated child failure to throw.");
+    } catch (error) {
+      thrown = error as Error & { details?: Record<string, unknown> | null };
+    }
+
+    if (!thrown) {
+      throw new Error("Expected isolated child failure to throw.");
+    }
+
+    expect(thrown.message).toContain("VERCEL_AI_API_KEY=<redacted>");
+    expect(thrown.message).toContain("model_provider=<redacted>");
+    expect(thrown.message).toContain("<redacted-path>");
+    expect(thrown.stack).toContain("<redacted-path>");
+    expect(thrown.details?.errorDetail).toBe(
+      "Bearer <redacted> <redacted-path>",
+    );
+    expect(thrown.message).not.toContain("secret-value");
+    expect(thrown.message).not.toContain("vercel-ai-gateway");
+    expect(thrown.message).not.toContain("/tmp/hosted-runner/private-file");
+    expect(thrown.stack ?? "").not.toContain("/tmp/hosted-runner/private-file");
+    expect(JSON.stringify(thrown.details)).not.toContain("detail-token");
+    expect(JSON.stringify(thrown.details)).not.toContain("/tmp/hosted-runner/detail-path");
+    expect(processKillSpy).toHaveBeenCalledWith(-4249, "SIGKILL");
   });
 
 });

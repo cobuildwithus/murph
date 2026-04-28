@@ -56,9 +56,14 @@ async function main(): Promise<void> {
     const result = parseHostedRunnerSmokeResult(JSON.parse(output));
 
     console.log(`Hosted runner smoke passed.`);
-    console.log(`childCwd=${result.childCwd}`);
-    console.log(`murphBin=${result.murphBin}`);
-    console.log(`vaultCliBin=${result.vaultCliBin}`);
+    console.log(`childCwdIsIsolated=${result.childCwdIsIsolated}`);
+    console.log(`murphCommandDiscovered=${result.murphCommandDiscovered}`);
+    console.log(`vaultCliCommandDiscovered=${result.vaultCliCommandDiscovered}`);
+    console.log(`codexCommandDiscovered=${result.codexCommandDiscovered}`);
+    console.log(`codexVersion=${result.codexVersion}`);
+    console.log(`codexAppServerHelpBytes=${result.codexAppServerHelpBytes}`);
+    console.log(`operatorHomeRebound=${result.operatorHomeRebound}`);
+    console.log(`vaultRootRebound=${result.vaultRootRebound}`);
     console.log(`reportedVaultId=${result.reportedVaultId}`);
     console.log(`vaultShowBytes=${result.vaultShowBytes}`);
     console.log(`healthCommonsCatalogHash=${result.healthCommonsCatalogHash}`);

@@ -48,8 +48,16 @@ import {
 import { saveAssistantSelfDeliveryTarget } from '@murphai/operator-config/operator-config'
 
 const cleanupPaths: string[] = []
+let previousHome: string | undefined
 
 afterEach(async () => {
+  if (previousHome === undefined) {
+    delete process.env.HOME
+  } else {
+    process.env.HOME = previousHome
+  }
+  previousHome = undefined
+
   await Promise.all(
     cleanupPaths.splice(0).map(async (target) => {
       await rm(target, {
@@ -61,8 +69,12 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-beforeEach(() => {
+beforeEach(async () => {
   cronServiceMocks.sendAssistantMessage.mockReset()
+  previousHome = process.env.HOME
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-home-'))
+  cleanupPaths.push(homeRoot)
+  process.env.HOME = homeRoot
 })
 
 const testCronDeliveryTarget = {

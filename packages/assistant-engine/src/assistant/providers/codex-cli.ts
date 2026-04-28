@@ -27,7 +27,7 @@ import {
 import type {
   AssistantModelImagePart,
   AssistantUserMessageContentPart,
-} from '../../model-harness.js'
+} from '../content-types.js'
 import type { CodexAppServerImageInput } from '../../assistant-codex.js'
 import { fileURLToPath } from 'node:url'
 
@@ -44,7 +44,6 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       'image',
     ]),
     supportsZeroDataRetention: false,
-    supportsToolRuntime: false,
   },
   async discoverModels() {
     return {
@@ -74,6 +73,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       }),
       env: prepareAssistantDirectCliEnv(input.env),
       model: providerConfig.target.model ?? undefined,
+      modelProvider: providerConfig.target.modelProvider ?? undefined,
       onProgress: input.onEvent ?? undefined,
       onTraceEvent: input.onTraceEvent,
       oss: providerConfig.target.oss,

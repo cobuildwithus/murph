@@ -218,22 +218,15 @@ function resolveAssistantSessionRequestedProviderOptions(
 }
 
 const ASSISTANT_SESSION_PROVIDER_OVERRIDE_FIELDS = [
-  'apiKeyEnv',
   'approvalPolicy',
-  'baseUrl',
   'codexHome',
-  'gatewayOnlyProviders',
-  'headers',
   'model',
+  'modelProvider',
   'oss',
-  'presetId',
   'profile',
   'provider',
-  'providerName',
   'reasoningEffort',
   'sandbox',
-  'webSearch',
-  'zeroDataRetention',
 ] as const satisfies readonly (keyof ResolveAssistantSessionInput)[]
 
 function hasAssistantSessionProviderOverrideInput(

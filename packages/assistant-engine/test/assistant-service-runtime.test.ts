@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AssistantDeliveryError,
   AssistantBindingDelivery,
-  AssistantProviderFailoverRoute,
   AssistantProviderSessionOptions,
   AssistantSession,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -288,7 +287,7 @@ describe("assistant service wrapper seam", () => {
     await expect(
       assistantService.updateAssistantSessionOptions({
         providerOptions: {
-          provider: "openai-compatible",
+          provider: "codex-cli",
           model: "gpt-5-mini",
         },
         sessionId: "session-1",
@@ -303,7 +302,7 @@ describe("assistant service wrapper seam", () => {
       seamMocks.local.updateAssistantSessionOptionsLocal
     ).toHaveBeenCalledWith({
       providerOptions: {
-        provider: "openai-compatible",
+        provider: "codex-cli",
         model: "gpt-5-mini",
       },
       sessionId: "session-1",
@@ -329,28 +328,10 @@ describe("assistant service turn routes", () => {
         },
       }),
     };
-    const failoverRoutes: AssistantProviderFailoverRoute[] = [
-      {
-        apiKeyEnv: null,
-        approvalPolicy: "never",
-        cooldownMs: 60_000,
-        codexCommand: null,
-        codexHome: null,
-        headers: null,
-        provider: "codex-cli",
-        model: "gpt-5-codex",
-        name: "backup",
-        oss: false,
-        profile: null,
-        reasoningEffort: "medium",
-        sandbox: "danger-full-access",
-      },
-    ];
     const input = {
-      failoverRoutes,
       model: "gpt-5-mini",
       prompt: "Summarize today.",
-      provider: "openai-compatible" as const,
+      provider: "codex-cli" as const,
       vault: "/vault",
     };
     const routes = [createRoute({ routeId: "route-primary" })];
@@ -362,11 +343,10 @@ describe("assistant service turn routes", () => {
 
     expect(result).toBe(routes);
     expect(seamMocks.resolveAssistantExecutionPlan).toHaveBeenCalledWith({
-      backups: input.failoverRoutes,
       defaults,
       override: expect.objectContaining({
         model: "gpt-5-mini",
-        provider: "openai-compatible",
+        provider: "codex-cli",
       }),
       resumeState: resolved.session.resumeState,
       sessionTarget: resolved.session.target,
@@ -451,11 +431,9 @@ describe("assistant service turn routes", () => {
       provider: "codex-cli",
       providerOptions: createProviderOptions({
         approvalPolicy: "never",
-        baseUrl: null,
-        headers: null,
         model: "gpt-5-codex",
+        modelProvider: "vercel-ai-gateway",
         profile: "ops",
-        providerName: null,
         sandbox: "danger-full-access",
       }),
       routeId: "route-backup",
@@ -488,32 +466,28 @@ describe("assistant service turn routes", () => {
       )
     ).toEqual({
       providerOverride: {
-        apiKeyEnv: backup.providerOptions.apiKeyEnv,
         approvalPolicy: backup.providerOptions.approvalPolicy ?? null,
-        baseUrl: backup.providerOptions.baseUrl ?? null,
         codexCommand: undefined,
         codexHome: backup.providerOptions.codexHome ?? null,
-        headers: backup.providerOptions.headers ?? null,
         model: backup.providerOptions.model ?? null,
+        modelProvider: backup.providerOptions.modelProvider ?? null,
         oss: false,
-        presetId: backup.providerOptions.presetId ?? null,
         profile: backup.providerOptions.profile ?? null,
         provider: "codex-cli",
-        providerName: backup.providerOptions.providerName ?? null,
         reasoningEffort: backup.providerOptions.reasoningEffort ?? null,
         sandbox: backup.providerOptions.sandbox ?? null,
-        webSearch: null,
-        zeroDataRetention: backup.providerOptions.zeroDataRetention ?? null,
       },
       route: backup,
     });
 
     const nullableBackup = createRoute({
-      providerOptions: createProviderOptions({
+      providerOptions: {
+        approvalPolicy: null,
         model: null,
+        modelProvider: null,
         reasoningEffort: null,
         sandbox: null,
-      }),
+      },
       routeId: "route-nullable",
     });
 
@@ -524,22 +498,16 @@ describe("assistant service turn routes", () => {
       )
     ).toEqual({
       providerOverride: {
-        apiKeyEnv: "OPENAI_API_KEY",
         approvalPolicy: null,
-        baseUrl: "https://api.example.test/v1",
         codexCommand: undefined,
         codexHome: null,
-        headers: null,
         model: null,
+        modelProvider: null,
         oss: false,
-        presetId: nullableBackup.providerOptions.presetId ?? null,
         profile: null,
-        provider: "openai-compatible",
-        providerName: "murph-openai",
-        reasoningEffort: null,
+        provider: "codex-cli",
+        reasoningEffort: "medium",
         sandbox: null,
-        webSearch: null,
-        zeroDataRetention: null,
       },
       route: nullableBackup,
     });
@@ -586,7 +554,7 @@ describe("assistant pending usage seam", () => {
       executionContext: {
         hosted: {
           memberId: " member-42 ",
-          userEnvKeys: [" OPENAI_API_KEY ", "", "CUSTOM_KEY"],
+          userEnvKeys: [" CODEX_API_KEY ", "", "CUSTOM_KEY"],
         },
       },
       providerResult: createProviderResult({
@@ -624,8 +592,8 @@ describe("assistant pending usage seam", () => {
     ).toHaveBeenCalledWith({
       apiKeyEnv: "RUNTIME_KEY",
       headers: null,
-      provider: "openai-compatible",
-      userEnvKeys: [" OPENAI_API_KEY ", "", "CUSTOM_KEY"],
+      provider: "codex-cli",
+      userEnvKeys: [" CODEX_API_KEY ", "", "CUSTOM_KEY"],
     });
     expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenCalledWith({
       vault: "/vault",
@@ -642,7 +610,7 @@ describe("assistant pending usage seam", () => {
         memberId: "member-42",
         occurredAt: "2026-04-08T10:00:00.000Z",
         outputTokens: 13,
-        provider: "openai-compatible",
+        provider: "codex-cli",
         providerName: "Runtime Provider",
         providerRequestOrdinal: 0,
         reasoningTokens: 17,
@@ -662,7 +630,7 @@ describe("assistant pending usage seam", () => {
     });
   });
 
-  it("passes credential-like provider headers into fallback hosted usage attribution", async () => {
+  it("uses Codex provider options without legacy credential headers for fallback hosted usage attribution", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T10:02:00.000Z"));
 
@@ -674,12 +642,7 @@ describe("assistant pending usage seam", () => {
         },
       },
       providerResult: createProviderResult({
-        providerOptions: createProviderOptions({
-          apiKeyEnv: null,
-          headers: {
-            "X-Api-Key": "member-header-secret",
-          },
-        }),
+        providerOptions: createProviderOptions(),
       }),
       turnId: "turn-usage-header-fallback",
       vault: "/vault",
@@ -689,10 +652,8 @@ describe("assistant pending usage seam", () => {
       seamMocks.resolveAssistantUsageCredentialSource
     ).toHaveBeenCalledWith({
       apiKeyEnv: null,
-      headers: {
-        "X-Api-Key": "member-header-secret",
-      },
-      provider: "openai-compatible",
+      headers: null,
+      provider: "codex-cli",
       userEnvKeys: [],
     });
     expect(seamMocks.writePendingAssistantUsageRecord).toHaveBeenCalledWith({
@@ -718,10 +679,7 @@ describe("assistant pending usage seam", () => {
       },
       providerResult: createProviderResult({
         providerOptions: createProviderOptions({
-          apiKeyEnv: "FALLBACK_KEY",
-          baseUrl: "https://fallback.example.test/v1",
-          model: "gpt-4.1-fallback",
-          providerName: "Fallback Provider",
+          model: "gpt-5.5-fallback",
         }),
         usage: {
           apiKeyEnv: null,
@@ -748,12 +706,12 @@ describe("assistant pending usage seam", () => {
       {
         vault: "/vault",
         record: expect.objectContaining({
-          apiKeyEnv: "FALLBACK_KEY",
-          baseUrl: "https://fallback.example.test/v1",
+          apiKeyEnv: null,
+          baseUrl: null,
           memberId: "member-43",
           occurredAt: "2026-04-08T10:05:00.000Z",
-          providerName: "Fallback Provider",
-          requestedModel: "gpt-4.1-fallback",
+          providerName: null,
+          requestedModel: "gpt-5.5-fallback",
         }),
       }
     );
@@ -1247,7 +1205,7 @@ describe("assistant execution context normalization", () => {
       normalizeAssistantExecutionContext({
         hosted: {
           memberId: "   ",
-          userEnvKeys: ["OPENAI_API_KEY"],
+          userEnvKeys: ["CODEX_API_KEY"],
         },
       })
     ).toEqual({
@@ -1258,8 +1216,9 @@ describe("assistant execution context normalization", () => {
   it("normalizes hosted context and preserves callable helpers only", () => {
     const issueDeviceConnectLink = vi.fn();
     const defaultTarget = createAssistantModelTarget({
-      model: "gpt-5.4",
-      provider: "openai-compatible",
+      model: "gpt-5.5",
+      modelProvider: "vercel-ai-gateway",
+      provider: "codex-cli",
     });
 
     expect(
@@ -1274,7 +1233,7 @@ describe("assistant execution context normalization", () => {
           issueDeviceConnectLink,
           memberId: " member-1 ",
           stripeCustomerId: " cus_123 ",
-          userEnvKeys: [" OPENAI_API_KEY ", "", " CUSTOM_KEY ", "   "],
+          userEnvKeys: [" CODEX_API_KEY ", "", " CUSTOM_KEY ", "   "],
         },
       })
     ).toEqual({
@@ -1286,7 +1245,7 @@ describe("assistant execution context normalization", () => {
         issueDeviceConnectLink,
         memberId: "member-1",
         stripeCustomerId: "cus_123",
-        userEnvKeys: ["OPENAI_API_KEY", "CUSTOM_KEY"],
+        userEnvKeys: ["CODEX_API_KEY", "CUSTOM_KEY"],
       },
     });
   });
@@ -1309,8 +1268,9 @@ describe("assistant execution context normalization", () => {
 
   it("falls back to the provided target when no hosted default target exists", () => {
     const fallbackTarget = createAssistantModelTarget({
-      model: "gpt-5.4-mini",
-      provider: "openai-compatible",
+      model: "gpt-5.5-mini",
+      modelProvider: "vercel-ai-gateway",
+      provider: "codex-cli",
     });
     if (!fallbackTarget) {
       throw new Error("expected fallback target");
@@ -1331,11 +1291,9 @@ describe("assistant execution context normalization", () => {
 
   it("overlays the hosted default target onto operator defaults without dropping other defaults", () => {
     const hostedDefaultTarget = createAssistantModelTarget({
-      apiKeyEnv: "HOSTED_OPENAI_API_KEY",
-      baseUrl: "https://gateway.example.com/v1",
-      model: "gpt-5.4-mini",
-      provider: "openai-compatible",
-      providerName: "Hosted Gateway",
+      model: "gpt-5.5-mini",
+      modelProvider: "vercel-ai-gateway",
+      provider: "codex-cli",
     });
     if (!hostedDefaultTarget) {
       throw new Error("expected hosted default target");
@@ -1349,7 +1307,8 @@ describe("assistant execution context normalization", () => {
             approvalPolicy: "never",
             codexCommand: null,
             codexHome: null,
-            model: "gpt-5.4",
+            model: "gpt-5.5",
+            modelProvider: "vercel-ai-gateway",
             oss: false,
             profile: null,
             reasoningEffort: "medium",
@@ -1357,22 +1316,18 @@ describe("assistant execution context normalization", () => {
           },
           failoverRoutes: [
             {
-              apiKeyEnv: "BACKUP_API_KEY",
-              baseUrl: "https://backup.example.com/v1",
-              codexCommand: null,
-              cooldownMs: null,
-              headers: null,
-              model: "gpt-4.1-mini",
-              name: null,
-              provider: "openai-compatible",
-              providerName: "Backup Gateway",
-              reasoningEffort: null,
               approvalPolicy: null,
+              codexCommand: null,
+              codexHome: null,
+              cooldownMs: null,
+              model: "gpt-5.5-backup",
+              modelProvider: "vercel-ai-gateway",
+              name: null,
               oss: false,
-              presetId: null,
               profile: null,
+              provider: "codex-cli",
+              reasoningEffort: null,
               sandbox: null,
-              webSearch: null,
             },
           ],
           identityId: "identity-123",
@@ -1390,22 +1345,18 @@ describe("assistant execution context normalization", () => {
       backend: hostedDefaultTarget,
       failoverRoutes: [
         {
-          apiKeyEnv: "BACKUP_API_KEY",
-          baseUrl: "https://backup.example.com/v1",
-          codexCommand: null,
-          cooldownMs: null,
-          headers: null,
-          model: "gpt-4.1-mini",
-          name: null,
-          provider: "openai-compatible",
-          providerName: "Backup Gateway",
-          reasoningEffort: null,
           approvalPolicy: null,
+          codexCommand: null,
+          codexHome: null,
+          cooldownMs: null,
+          model: "gpt-5.5-backup",
+          modelProvider: "vercel-ai-gateway",
+          name: null,
           oss: false,
-          presetId: null,
           profile: null,
+          provider: "codex-cli",
+          reasoningEffort: null,
           sandbox: null,
-          webSearch: null,
         },
       ],
       identityId: "identity-123",
@@ -1484,7 +1435,7 @@ describe("assistant turn finalizer seam", () => {
     expect(runtimeState.sessions.save).toHaveBeenCalledWith(
       expect.objectContaining({
         lastTurnAt: "2026-04-08T14:00:00.000Z",
-        provider: "openai-compatible",
+        provider: "codex-cli",
         providerOptions: expect.objectContaining({
           model: "gpt-5-mini",
         }),
@@ -1759,35 +1710,14 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.resumeState?.resumeRouteId).toBe("route-new");
   });
 
-  it("falls back to the existing session target when the merged provider config cannot build a new target", async () => {
+  it("keeps the Codex session target when no provider override is supplied", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T16:00:00.000Z"));
     runtimeState.sessions.save.mockImplementation(
       async (session: AssistantSession) => session
     );
 
-    const target = {
-      adapter: "openai-compatible" as const,
-      apiKeyEnv: null,
-      endpoint: null,
-      headers: null,
-      model: null,
-      presetId: null,
-      providerName: null,
-      reasoningEffort: null,
-      webSearch: null,
-    };
-    const session = createAssistantSession({
-      providerOptions: createProviderOptions({
-        apiKeyEnv: null,
-        baseUrl: null,
-        headers: null,
-        model: null,
-        providerName: null,
-        reasoningEffort: null,
-      }),
-      target,
-    });
+    const session = createAssistantSession();
 
     const saved = await persistAssistantTurnAndSession({
       input: {
@@ -1806,8 +1736,8 @@ describe("assistant turn finalizer seam", () => {
       turnId: "turn-finalizer-fallback",
     });
 
-    expect(saved.target).toEqual(target);
-    expect(saved.provider).toBe("openai-compatible");
+    expect(saved.target).toEqual(session.target);
+    expect(saved.provider).toBe("codex-cli");
   });
 });
 
@@ -1846,14 +1776,12 @@ function createProviderOptions(
   overrides: Partial<AssistantProviderSessionOptions> = {}
 ): AssistantProviderSessionOptions {
   return serializeAssistantProviderSessionOptions({
-    provider: "openai-compatible",
-    apiKeyEnv: "OPENAI_API_KEY",
-    baseUrl: "https://api.example.test/v1",
-    headers: null,
-    model: "gpt-4.1",
-    providerName: "murph-openai",
-    reasoningEffort: "high",
-    zeroDataRetention: null,
+    approvalPolicy: "never",
+    provider: "codex-cli",
+    model: "gpt-5.5",
+    modelProvider: "vercel-ai-gateway",
+    reasoningEffort: "medium",
+    sandbox: "danger-full-access",
     ...overrides,
   });
 }
@@ -1867,7 +1795,7 @@ function createRoute(input?: {
     codexCommand: null,
     cooldownMs: 60_000,
     label: "Primary",
-    provider: input?.provider ?? "openai-compatible",
+    provider: input?.provider ?? "codex-cli",
     providerOptions: createProviderOptions(input?.providerOptions),
     routeId: input?.routeId ?? "route-primary",
   };
@@ -1885,26 +1813,15 @@ function createAssistantSession(input?: {
   const target =
     input?.target ??
     createAssistantModelTarget({
-      provider:
-        providerOptions.baseUrl ||
-        providerOptions.apiKeyEnv ||
-        providerOptions.providerName ||
-        providerOptions.headers ||
-        providerOptions.zeroDataRetention === true
-          ? "openai-compatible"
-          : "codex-cli",
+      provider: "codex-cli",
       approvalPolicy: providerOptions.approvalPolicy,
-      apiKeyEnv: providerOptions.apiKeyEnv ?? null,
-      baseUrl: providerOptions.baseUrl ?? null,
       codexHome: providerOptions.codexHome ?? null,
-      headers: providerOptions.headers ?? null,
       model: providerOptions.model,
+      modelProvider: providerOptions.modelProvider ?? null,
       oss: providerOptions.oss,
       profile: providerOptions.profile,
-      providerName: providerOptions.providerName ?? null,
       reasoningEffort: providerOptions.reasoningEffort ?? null,
       sandbox: providerOptions.sandbox,
-      zeroDataRetention: providerOptions.zeroDataRetention ?? null,
     });
 
   if (!target) {
@@ -1924,7 +1841,7 @@ function createAssistantSession(input?: {
     },
     createdAt: "2026-04-08T00:00:00.000Z",
     lastTurnAt: null,
-    provider: target.adapter,
+    provider: "codex-cli",
     providerOptions,
     resumeState: input?.resumeState ?? null,
     schema: "murph.assistant-session.v1",
@@ -2027,7 +1944,7 @@ function createProviderResult(input?: {
   };
   return {
     attemptCount: input?.attemptCount ?? 1,
-    provider: "openai-compatible" as const,
+    provider: "codex-cli",
     providerContinuation: {
       kind: "explicit-structured-history",
     },

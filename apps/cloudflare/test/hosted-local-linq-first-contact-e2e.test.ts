@@ -36,7 +36,7 @@ const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 const fastReplyUserId = `member_local_linq_fast_reply_${Date.now()}`;
 const postAssistantReplyUserId = `member_local_linq_post_assistant_reply_${Date.now()}`;
 const linqWebhookSecret = "linq-local-webhook-secret";
-const productionLikeAssistantModel = "openai/gpt-5.5";
+const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -384,7 +384,6 @@ describe("hosted local Linq first-contact e2e", () => {
       "What should I call you? And what health-wise have you been working on lately?";
     const assistantSecondReplyText =
       "Got it. I will remember that and we can work from those goals.";
-
     requireScenario().queueAssistantResponses([
       assistantQuestionText,
       assistantSecondReplyText,
@@ -451,37 +450,18 @@ describe("hosted local Linq first-contact e2e", () => {
       assistantSecondReplyText,
     );
 
-    const providerRequests = requireScenario().assistantProviderRequests
-      .map((request) => ({
-        body: parseJsonObjectForTest(request.body),
-        method: request.method,
-        url: request.url,
-      }))
-      .filter((request) => request.url === "/v1/responses");
-    expect(providerRequests.length).toBeGreaterThanOrEqual(3);
-    expect(providerRequests.every((request) => request.method === "POST")).toBe(true);
-    expect(providerRequests.every((request) =>
-      request.body?.model === productionLikeAssistantModel
-    )).toBe(true);
-    expect(providerRequests.every((request) =>
-      request.body?.previous_response_id === undefined
-    )).toBe(true);
-    expect(providerRequests.every((request) =>
-      request.body?.store === true
-    )).toBe(true);
-    expect(providerRequests.every((request) =>
-      readProviderGatewayOnlyProviders(request.body).length === 0
-    )).toBe(true);
-
-    const finalConversationRequest = providerRequests.at(-1)?.body;
-    expect(finalConversationRequest).toMatchObject({
-      model: productionLikeAssistantModel,
-      tool_choice: "auto",
+    expect(requireScenario().runtimeEnv).toMatchObject({
+      HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
     });
-    expect(finalConversationRequest?.input).toEqual(expect.any(Array));
-    expect(readResponsesInputRoles(finalConversationRequest?.input)).toEqual(
-      expect.arrayContaining(["assistant", "system", "user"]),
-    );
+    expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
+    expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
+    expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
+    expect(requireScenario().runtimeEnv.OPENAI_API_KEY).toBeUndefined();
+    expect(requireScenario().assistantProviderRequests.filter((request) =>
+      request.url === "/v1/responses"
+    )).toEqual([]);
   }, 300_000);
 });
 
@@ -609,11 +589,8 @@ async function startLinqScenario(
   linqStub = await startHostedLocalLinqStub();
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
-      HOSTED_ASSISTANT_API_KEY_ENV: "VERCEL_AI_API_KEY",
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
-      HOSTED_ASSISTANT_PROVIDER_NAME: "vercel-ai-gateway",
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "false",
       LINQ_API_BASE_URL: requireLinqStub().baseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
@@ -632,46 +609,4 @@ async function startLinqScenario(
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function parseJsonObjectForTest(value: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function readProviderGatewayOnlyProviders(
-  requestBody: Record<string, unknown> | null | undefined,
-): string[] {
-  const providerOptions = requestBody?.providerOptions;
-  if (!providerOptions || typeof providerOptions !== "object") {
-    return [];
-  }
-
-  const gateway = (providerOptions as Record<string, unknown>).gateway;
-  if (!gateway || typeof gateway !== "object") {
-    return [];
-  }
-
-  const only = (gateway as Record<string, unknown>).only;
-  return Array.isArray(only)
-    ? only.filter((entry): entry is string => typeof entry === "string")
-    : [];
-}
-
-function readResponsesInputRoles(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value
-      .map((entry) =>
-        entry && typeof entry === "object"
-          ? (entry as Record<string, unknown>).role
-          : null
-      )
-      .filter((role): role is string => typeof role === "string")
-    : [];
 }

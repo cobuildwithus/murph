@@ -15,8 +15,7 @@ import type {
 } from '../provider-progress.js'
 import type {
   AssistantUserMessageContentPart,
-  AssistantToolCatalog,
-} from '../../model-harness.js'
+} from '../content-types.js'
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
 import type { AssistantProviderContinuation } from '../active-turn-input-journal.js'
 
@@ -60,7 +59,7 @@ export interface AssistantProviderCapabilities {
   supportsZeroDataRetention: boolean
 }
 
-export type AssistantMurphCommandSurface = 'bound-tools' | 'direct-cli'
+export type AssistantMurphCommandSurface = 'direct-cli'
 
 export type AssistantMurphCommandAccessMode = AssistantMurphCommandSurface | 'none'
 
@@ -68,15 +67,6 @@ export interface AssistantProviderExecutionCapabilities
   extends AssistantProviderCapabilities {
   murphCommandSurface: AssistantMurphCommandSurface
   requestFormat: 'flat-prompt' | 'messages'
-  supportsToolRuntime: boolean
-}
-
-export interface AssistantProviderToolRuntime {
-  allowSensitiveHealthContext?: boolean
-  requestId?: string | null
-  sessionId?: string | null
-  toolCatalog?: AssistantToolCatalog | null
-  vault: string
 }
 
 export interface AssistantProviderTurnInput {
@@ -86,8 +76,6 @@ export interface AssistantProviderTurnInput {
   }>
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
   codexCommand?: string | null
   codexHome?: string | null
   continuityContext?: string | null
@@ -96,20 +84,15 @@ export interface AssistantProviderTurnInput {
     role: 'assistant' | 'user'
   }>
   env?: NodeJS.ProcessEnv
-  gatewayOnlyProviders?: readonly string[] | null
-  headers?: Record<string, string> | null
   model?: string | null
+  modelProvider?: string | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean | null
   profile?: string | null
   prompt?: string | null
   provider?: AssistantChatProvider | null
-  providerName?: string | null
-  presetId?: string | null
   reasoningEffort?: string | null
-  webSearch?: string | null
-  zeroDataRetention?: boolean | null
   resumeProviderSessionId?: string | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {
@@ -117,7 +100,6 @@ export interface AssistantProviderTurnInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
-  toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
@@ -146,7 +128,6 @@ export interface AssistantProviderTurnExecutionInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
-  toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null

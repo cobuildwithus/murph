@@ -2292,22 +2292,23 @@ test('createSetupServices dry-run on macOS plans toolchain and assistant default
   assert.ok(preset)
 
   const assistant: SetupConfiguredAssistant = {
-    preset: 'openai-compatible',
+    preset: 'codex',
     enabled: true,
-    provider: 'openai-compatible',
-    model: 'gpt-5',
-    baseUrl: 'https://api.example.test/v1',
-    apiKeyEnv: 'OPENAI_COMPATIBLE_API_KEY',
-    providerName: 'Example',
-    codexCommand: null,
-    codexHome: undefined,
+    provider: 'codex-cli',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    baseUrl: null,
+    apiKeyEnv: null,
+    providerName: null,
+    codexCommand: 'codex',
+    codexHome: null,
     profile: null,
     reasoningEffort: 'medium',
-    sandbox: 'workspace-write',
+    sandbox: 'danger-full-access',
     approvalPolicy: 'never',
     oss: false,
     account: null,
-    detail: 'Configured Example gpt-5.',
+    detail: 'Configured Codex gpt-5.5.',
   }
 
   try {
@@ -2365,10 +2366,7 @@ test('createSetupServices dry-run on macOS plans toolchain and assistant default
       'planned',
     )
     assert.equal(result.scheduledUpdates.length, 1)
-    assert.match(
-      result.notes.join('\n'),
-      /Export OPENAI_COMPATIBLE_API_KEY before using the saved OpenAI-compatible assistant backend\./,
-    )
+    assert.doesNotMatch(result.notes.join('\n'), /assistant backend/u)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -2388,21 +2386,22 @@ test('createSetupServices on linux records apt provisioning failures and saves a
 
   const assistant: SetupConfiguredAssistant = {
     account: null,
-    apiKeyEnv: 'OPENROUTER_API_KEY',
-    approvalPolicy: null,
-    baseUrl: 'https://openrouter.ai/api/v1',
-    codexCommand: null,
-    codexHome: undefined,
-    detail: 'Configured OpenRouter.',
+    apiKeyEnv: null,
+    approvalPolicy: 'never',
+    baseUrl: null,
+    codexCommand: 'codex',
+    codexHome: null,
+    detail: 'Configured Codex.',
     enabled: true,
-    model: 'openrouter/auto',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
     oss: false,
-    preset: 'openai-compatible',
+    preset: 'codex',
     profile: null,
-    provider: 'openai-compatible',
-    providerName: 'openrouter',
+    provider: 'codex-cli',
+    providerName: null,
     reasoningEffort: 'high',
-    sandbox: null,
+    sandbox: 'danger-full-access',
   }
 
   try {
@@ -2594,6 +2593,10 @@ test('createSetupServices refuses to write setup keys through a symlinked local 
 
     const vaultCore = createIntegratedVaultServices().core
     const services = createSetupServices({
+      downloadFile: async (_url, destinationPath) => {
+        await mkdir(path.dirname(destinationPath), { recursive: true })
+        await writeFile(destinationPath, 'whisper model', 'utf8')
+      },
       env: () => ({
         PATH: '',
         SHELL: '/bin/zsh',

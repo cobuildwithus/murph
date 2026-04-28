@@ -99,33 +99,30 @@ const TEST_SESSION: AssistantSession = {
   schema: 'murph.assistant-session.v1',
   sessionId: 'session-runtime-ui',
   target: {
-    adapter: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    endpoint: 'http://127.0.0.1:11434/v1',
-    headers: null,
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
     model: null,
-    presetId: null,
-    providerName: 'local',
+    modelProvider: null,
+    oss: false,
+    profile: null,
     reasoningEffort: null,
-    webSearch: null,
+    sandbox: 'danger-full-access',
   },
   resumeState: null,
-  provider: 'openai-compatible',
+  provider: 'codex-cli',
   providerOptions: {
     continuityFingerprint: 'fingerprint-ui-runtime',
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     model: null,
     reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     profile: null,
     oss: false,
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    executionDriver: 'openai-compatible',
-    providerName: 'local',
+    executionDriver: 'codex-app-server',
     resumeKind: null,
-    headers: null,
   },
   alias: 'chat:runtime',
   binding: {
@@ -173,14 +170,6 @@ beforeEach(() => {
     status: 'ready',
   })
 })
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve
-  })
-  return { promise, resolve }
-}
 
 test('runtime helpers surface provider progress, interrupted turns, and transcript persistence deterministically', async () => {
   const setEntriesCalls: InkChatEntry[][] = []
@@ -446,7 +435,7 @@ test('turn error presentation distinguishes connection loss, missing sessions, a
   )
 })
 
-test('model selection helpers resolve the initial choice, persist updates, and trigger catalog discovery when supported', async () => {
+test('model selection helpers resolve the initial choice, persist updates, and use the Codex catalog', async () => {
   const updatedSession = {
     ...TEST_SESSION,
     providerOptions: {
@@ -513,10 +502,10 @@ test('model selection helpers resolve the initial choice, persist updates, and t
     models: [],
     modelOptions: [],
   })
-  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length, 1)
+  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length, 0)
 })
 
-test('model catalog hook resets discovery when unsupported or missing a base URL, and initial selection falls back through defaults', async () => {
+test('model catalog hook uses Codex catalog inputs, and initial selection falls back through defaults', async () => {
   runtimeMocks.resolveAssistantModelCatalog.mockReturnValue({
     capabilities: {
       supportsModelDiscovery: false,
@@ -533,7 +522,7 @@ test('model catalog hook resets discovery when unsupported or missing a base URL
         ...TEST_SESSION,
         providerOptions: {
           ...TEST_SESSION.providerOptions,
-          baseUrl: '   ',
+          modelProvider: null,
         },
       },
     })
@@ -606,52 +595,30 @@ test('model catalog hook resets discovery when unsupported or missing a base URL
   )
 })
 
-test('model catalog hook keeps equivalent discovery results, clears stale discovery when support disappears, and ignores cancelled async updates', async () => {
-  const discoveriesSeen: unknown[] = []
-  const discoveryA = {
-    message: ' ready ',
-    models: [
-      {
-        id: 'gpt-5.4',
-      },
-    ],
-    status: 'ready',
-  }
-  const discoveryB = {
-    message: 'ready',
-    models: [
-      {
-        id: 'gpt-5.4',
-      },
-    ],
-    status: 'ready',
-  }
-  const pendingDiscovery = createDeferred<typeof discoveryA>()
-
+test('model catalog hook updates when Codex model state changes', async () => {
+  const catalogInputs: unknown[] = []
   runtimeMocks.resolveAssistantModelCatalog.mockImplementation((input) => {
-    discoveriesSeen.push(input.discovery)
+    catalogInputs.push(input)
     return {
       capabilities: {
-        supportsModelDiscovery: input.discovery === discoveryA ? false : true,
+        supportsModelDiscovery: false,
       },
       models: [],
       modelOptions: [],
     }
   })
-  runtimeMocks.discoverAssistantProviderModels
-    .mockResolvedValueOnce(discoveryA)
-    .mockResolvedValueOnce(discoveryB)
-    .mockImplementationOnce(() => pendingDiscovery.promise)
 
   const stdin = createInkTestInput()
   const stdout = createInkTestOutput()
   const stderr = createInkTestOutput()
+  let activeModel: string | null = 'gpt-5.4'
+  let activeReasoningEffort: string | null = 'medium'
   let session = TEST_SESSION
 
   function Probe(): React.ReactElement {
     useAssistantModelCatalogState({
-      activeModel: 'gpt-5.4',
-      activeReasoningEffort: 'medium',
+      activeModel,
+      activeReasoningEffort,
       session,
     })
 
@@ -665,51 +632,35 @@ test('model catalog hook keeps equivalent discovery results, clears stale discov
     stderr,
   })
 
-  await flushAsyncWork(10)
-
-  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length >= 1, true)
-  assert.equal(discoveriesSeen.some((value) => value === discoveryA), true)
-
+  await flushAsyncWork(2)
+  activeModel = 'gpt-5.5'
+  activeReasoningEffort = 'high'
   session = {
     ...TEST_SESSION,
     providerOptions: {
       ...TEST_SESSION.providerOptions,
-      headers: {
-        authorization: 'Bearer changed',
-      },
+      oss: true,
     },
   }
   instance.rerender(React.createElement(Probe))
-  await flushAsyncWork(10)
-
-  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length >= 2, true)
-  assert.equal(discoveriesSeen.filter((value) => value === discoveryA).length >= 1, true)
-
-  session = {
-    ...session,
-    providerOptions: {
-      ...session.providerOptions,
-      headers: {
-        authorization: 'Bearer cancelled',
-      },
-    },
-  }
-  instance.rerender(React.createElement(Probe))
-  await flushAsyncWork(4)
+  await flushAsyncWork(2)
   instance.unmount()
-  pendingDiscovery.resolve({
-    message: 'late result',
-    models: [
-      {
-        id: 'late-model',
-      },
-    ],
-    status: 'ready',
-  })
-  await flushAsyncWork(8)
 
-  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length >= 3, true)
-  assert.equal(discoveriesSeen.some((value) => value === null), true)
+  assert.deepEqual(catalogInputs, [
+    {
+      currentModel: 'gpt-5.4',
+      currentReasoningEffort: 'medium',
+      oss: false,
+      provider: 'codex-cli',
+    },
+    {
+      currentModel: 'gpt-5.5',
+      currentReasoningEffort: 'high',
+      oss: true,
+      provider: 'codex-cli',
+    },
+  ])
+  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length, 0)
 
   stdin.destroy()
   stdout.destroy()

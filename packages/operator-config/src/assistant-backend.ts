@@ -6,13 +6,14 @@ import {
   type AssistantModelTarget,
 } from './assistant-cli-contracts.js'
 import {
-  normalizeAssistantHeaders,
-  normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigLike,
   type AssistantProviderConfigInput,
 } from './assistant/provider-config.js'
+import {
+  createUnsupportedAssistantRuntimeTargetError,
+} from './assistant/target-runtime.js'
 import { normalizeNullableString } from './assistant/shared.js'
 
 export const assistantBackendTargetSchema = assistantModelTargetSchema
@@ -26,6 +27,7 @@ export function createDefaultLocalAssistantModelTarget(): AssistantModelTarget {
     codexCommand: null,
     codexHome: null,
     model: null,
+    modelProvider: null,
     oss: false,
     profile: null,
     reasoningEffort: 'medium',
@@ -64,21 +66,7 @@ export function assistantModelTargetToProviderConfigInput(
 ): AssistantProviderConfigInput {
   switch (target.adapter) {
     case 'openai-compatible':
-      return {
-        provider: 'openai-compatible',
-        apiKeyEnv: normalizeNullableString(target.apiKeyEnv),
-        baseUrl: normalizeNullableString(target.endpoint),
-        ...(target.gatewayOnlyProviders
-          ? { gatewayOnlyProviders: target.gatewayOnlyProviders }
-          : {}),
-        headers: normalizeAssistantHeaders(target.headers),
-        model: normalizeNullableString(target.model),
-        presetId: target.presetId ?? null,
-        providerName: normalizeNullableString(target.providerName),
-        reasoningEffort: normalizeNullableString(target.reasoningEffort),
-        webSearch: target.webSearch ?? null,
-        zeroDataRetention: target.zeroDataRetention === true ? true : null,
-      }
+      throw createUnsupportedAssistantRuntimeTargetError()
     case 'codex-cli':
     default:
       return {
@@ -91,6 +79,7 @@ export function assistantModelTargetToProviderConfigInput(
         codexCommand: normalizeNullableString(target.codexCommand),
         codexHome: normalizeNullableString(target.codexHome),
         model: normalizeNullableString(target.model),
+        modelProvider: normalizeNullableString(target.modelProvider),
         oss: target.oss === true,
         profile: normalizeNullableString(target.profile),
         reasoningEffort:
@@ -124,14 +113,15 @@ export function sanitizeAssistantModelTargetForPersistence(
 ): AssistantModelTarget | null {
   const normalized = normalizeAssistantModelTarget(target)
 
-  if (!normalized || normalized.adapter !== 'openai-compatible') {
+  if (!normalized) {
     return normalized
   }
 
-  return assistantModelTargetSchema.parse({
-    ...normalized,
-    headers: normalizeAssistantPersistedHeaders(normalized.headers),
-  })
+  if (normalized.adapter !== 'codex-cli') {
+    throw createUnsupportedAssistantRuntimeTargetError()
+  }
+
+  return normalized
 }
 
 export const sanitizeAssistantBackendTargetForPersistence =
@@ -143,24 +133,7 @@ function convertAssistantProviderConfigToModelTarget(
   switch (config.target.kind) {
     case 'responses':
     case 'openai-compatible':
-      return {
-        adapter: 'openai-compatible',
-        apiKeyEnv: config.target.apiKeyEnv,
-        endpoint: config.target.baseUrl,
-        ...(config.target.gatewayOnlyProviders
-          ? { gatewayOnlyProviders: [...config.target.gatewayOnlyProviders] }
-          : {}),
-        headers: config.target.headers,
-        model: config.target.model,
-        presetId: config.target.presetId,
-        providerName: config.target.providerName,
-        reasoningEffort: normalizeNullableEnumValue(
-          config.policy.reasoningEffort,
-          assistantReasoningEffortValues,
-        ),
-        webSearch: config.policy.webSearch,
-        ...(config.policy.zeroDataRetention ? { zeroDataRetention: true } : {}),
-      }
+      throw createUnsupportedAssistantRuntimeTargetError()
     case 'codex-cli':
     default:
       return {
@@ -169,6 +142,7 @@ function convertAssistantProviderConfigToModelTarget(
         codexCommand: config.target.codexCommand,
         ...(config.target.codexHome ? { codexHome: config.target.codexHome } : {}),
         model: config.target.model,
+        modelProvider: config.target.modelProvider,
         oss: config.target.oss,
         profile: config.target.profile,
         reasoningEffort: normalizeNullableEnumValue(
@@ -192,24 +166,12 @@ function coerceAssistantModelTargetToProviderConfigInput(
 function hasAssistantModelTargetValues(target: AssistantModelTarget): boolean {
   switch (target.adapter) {
     case 'openai-compatible':
-      return Boolean(
-        target.model ??
-          target.endpoint ??
-          target.apiKeyEnv ??
-          target.presetId ??
-          target.providerName ??
-          (target.gatewayOnlyProviders && target.gatewayOnlyProviders.length > 0
-            ? 'gateway-only-providers'
-            : null) ??
-          (target.headers && Object.keys(target.headers).length > 0 ? 'headers' : null) ??
-          target.reasoningEffort ??
-          target.webSearch ??
-          (target.zeroDataRetention ? 'zero-data-retention' : null),
-      )
+      throw createUnsupportedAssistantRuntimeTargetError()
     case 'codex-cli':
     default:
       return Boolean(
-        target.model ??
+          target.model ??
+          target.modelProvider ??
           target.reasoningEffort ??
           target.profile ??
           target.codexHome ??

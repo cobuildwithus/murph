@@ -6,14 +6,14 @@ declare module 'incur' {
       'allergy save': { args: { title: string }; options: { vault: string; requestId?: string; id?: string; slug?: string; substance: string; status?: "active" | "inactive" | "resolved"; criticality?: "low" | "high" | "unable_to_assess"; reaction?: string; recordedOn?: string; relatedConditionId?: string[]; note?: string } }
       'allergy scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'allergy show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'assistant ask': { args: { prompt: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean; deliverResponse?: boolean; deliveryTarget?: string } }
-      'assistant chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean } }
+      'assistant ask': { args: { prompt: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli"; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean; deliverResponse?: boolean; deliveryTarget?: string } }
+      'assistant chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli"; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean } }
       'assistant deliver': { args: { message: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
       'assistant doctor': { args: {}; options: { vault: string; requestId?: string; repair: boolean } }
       'assistant onboarding complete': { args: {}; options: { vault: string; requestId?: string; reason: "user_answered" | "user_declined" | "concrete_request" | "manual" } }
       'assistant onboarding reopen': { args: {}; options: { vault: string; requestId?: string } }
       'assistant onboarding status': { args: {}; options: { vault: string; requestId?: string } }
-      'assistant run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
+      'assistant run': { args: {}; options: { vault: string; requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'assistant self-target clear': { args: { channel?: string }; options: { requestId?: string } }
       'assistant self-target list': { args: {}; options: { requestId?: string } }
       'assistant self-target set': { args: { channel: string }; options: { requestId?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
@@ -40,7 +40,7 @@ declare module 'incur' {
       'capture list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; tag?: string[]; limit: number; label?: string; bodySite?: string; collection?: string } }
       'capture manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'capture show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean } }
+      'chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; provider?: "codex-cli"; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; oss?: boolean } }
       'commons get': { args: { key: string }; options: { type?: string } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
@@ -146,7 +146,6 @@ declare module 'incur' {
       'inbox init': { args: {}; options: { vault: string; requestId?: string; rebuild?: boolean } }
       'inbox list': { args: {}; options: { vault: string; requestId?: string; source?: string; limit: number } }
       'inbox model bundle': { args: { captureId: string }; options: { vault: string; requestId?: string; sensitive?: boolean } }
-      'inbox model route': { args: { captureId: string }; options: { vault: string; requestId?: string; model: string; baseUrl: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; apply?: boolean } }
       'inbox parse': { args: {}; options: { vault: string; requestId?: string; captureId?: string; limit?: number } }
       'inbox promote document': { args: { captureId: string }; options: { vault: string; requestId?: string } }
       'inbox promote experiment-note': { args: { captureId: string }; options: { vault: string; requestId?: string } }
@@ -203,7 +202,7 @@ declare module 'incur' {
       'memory show': { args: { memoryId?: string }; options: { vault: string } }
       'memory update': { args: { memoryId: string; text: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { vault: string; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
-      'model': { args: {}; options: { show?: boolean; preset?: "codex" | "openai-compatible"; providerPreset?: "openai" | "vercel-ai-gateway" | "openrouter" | "venice" | "deepseek" | "groq" | "together" | "fireworks" | "cerebras" | "xai" | "huggingface" | "nvidia" | "ollama" | "lm-studio" | "vllm" | "litellm" | "custom"; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; zeroDataRetention?: boolean; codexCommand?: string; profile?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
+      'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
       'protocol import-json': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'protocol list': { args: {}; options: { vault: string; requestId?: string; status?: string; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { vault: string; requestId?: string } }
@@ -231,7 +230,7 @@ declare module 'incur' {
       'regimen stop': { args: { regimenId: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
       'research': { args: { prompt: string }; options: { vault: string; requestId?: string; title?: string; chat?: string; browserPath?: string; timeout?: string; waitTimeout?: string } }
       'route estimate': { args: { origin: string; destination: string }; options: { waypoint?: string[]; profile?: "walking" | "cycling" | "driving" | "driving-traffic"; elevation?: boolean; geometry?: boolean; country?: string[]; language?: string; elevationSampleSpacingMeters?: number; maxElevationSamples?: number } }
-      'run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
+      'run': { args: {}; options: { vault: string; requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'samples add': { args: {}; options: { vault: string; requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string; endAt?: string; durationMinutes?: number } }
       'samples batch list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; limit: number } }
       'samples batch show': { args: { id: string }; options: { vault: string; requestId?: string } }

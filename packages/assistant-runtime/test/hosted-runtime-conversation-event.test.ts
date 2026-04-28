@@ -64,6 +64,7 @@ import { ingestHostedConversationMessageWake } from "../src/hosted-runtime/event
 function createRuntime() {
   return {
     forwardedEnv: {},
+    userEnv: {},
     platform: {
       artifactStore: {
         async get() {
@@ -113,7 +114,8 @@ describe("ingestHostedConversationMessageWake", () => {
     const runtime = {
       ...createRuntime(),
       forwardedEnv: {
-        OPENAI_API_KEY: "sk-runtime",
+        LINQ_API_TOKEN: "linq-token",
+        VERCEL_AI_API_KEY: "sk-runtime",
       },
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
@@ -245,7 +247,6 @@ describe("ingestHostedConversationMessageWake", () => {
     });
     expect(mocks.createHostedTelegramAttachmentDownloadDriver).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedTelegramAttachmentDownloadDriver).toHaveBeenCalledWith({
-      OPENAI_API_KEY: "sk-runtime",
       TELEGRAM_API_BASE_URL: "https://api.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
@@ -286,7 +287,9 @@ describe("ingestHostedConversationMessageWake", () => {
         chatId: "chat_123",
       },
       expect.objectContaining({
-        env: runtime.platformEnv,
+        env: {
+          LINQ_API_TOKEN: "linq-token",
+        },
       }),
     );
     expect(pipelineClose).toHaveBeenCalledTimes(3);
@@ -358,8 +361,12 @@ describe("ingestHostedConversationMessageWake", () => {
     const metrics = await ingestHostedConversationMessageWake({
       runtime: {
         ...createRuntime(),
-        platformEnv: {
+        forwardedEnv: {
+          LINQ_API_BASE_URL: "https://api.linq.example",
           LINQ_API_TOKEN: "linq-token",
+        },
+        platformEnv: {
+          TELEGRAM_BOT_TOKEN: "telegram-token",
         },
       },
       vaultRoot: "/tmp/assistant-runtime-conversation",
@@ -389,6 +396,7 @@ describe("ingestHostedConversationMessageWake", () => {
       },
       expect.objectContaining({
         env: {
+          LINQ_API_BASE_URL: "https://api.linq.example",
           LINQ_API_TOKEN: "linq-token",
         },
       }),

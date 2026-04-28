@@ -1,7 +1,7 @@
 import { assistantRunResultSchema, type AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices, InboxRunEvent } from '@murphai/inbox-services'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
-import type { AssistantModelSpec } from '../../model-harness.js'
+import type { AssistantModelSpec } from '../legacy-model-spec.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {

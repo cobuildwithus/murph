@@ -3,17 +3,10 @@ import { PassThrough } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
 import type { SetupCommandOptions } from '@murphai/operator-config/setup-cli-contracts'
 import { createSetupAssistantResolver } from '../src/setup-assistant.ts'
-import { createCapturedOutputStream } from './helpers.ts'
 
 const promptState = vi.hoisted(() => ({
   answers: [] as string[],
   prompts: [] as string[],
-  discoveredCalls: [] as Array<{
-    apiKeyEnv?: string | null
-    baseUrl: string
-    providerName?: string | null
-  }>,
-  supportsReasoningEffort: true,
 }))
 
 vi.mock('node:readline/promises', () => ({
@@ -28,28 +21,9 @@ vi.mock('node:readline/promises', () => ({
   },
 }))
 
-vi.mock('@murphai/assistant-engine/assistant-provider-catalog', () => ({
-  discoverAssistantProviderModels: vi.fn(async (input: {
-    apiKeyEnv?: string | null
-    baseUrl: string
-    providerName?: string | null
-  }) => {
-    promptState.discoveredCalls.push(input)
-    return {
-      message: 'Discovered models',
-      models: [{ id: 'model-alpha' }, { id: 'model-beta' }],
-    }
-  }),
-  resolveAssistantTargetCapabilities: vi.fn(() => ({
-    supportsReasoningEffort: promptState.supportsReasoningEffort,
-  })),
-}))
-
 afterEach(() => {
   promptState.answers = []
   promptState.prompts = []
-  promptState.discoveredCalls = []
-  promptState.supportsReasoningEffort = true
 })
 
 function createSetupOptions(
@@ -63,9 +37,8 @@ function createSetupOptions(
   }
 }
 
-test('setup assistant prompt flow uses discovered models and numeric model selection', async () => {
-  promptState.answers = ['', '2']
-  const { output, readOutput } = createCapturedOutputStream()
+test('setup assistant prompt flow asks directly for the Codex model id', async () => {
+  promptState.answers = ['gpt-5.5-medium']
 
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -74,7 +47,7 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
       },
     },
     input: new PassThrough(),
-    output,
+    output: new PassThrough(),
     async resolveCodexHome() {
       return {
         codexHome: null,
@@ -87,44 +60,39 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
     allowPrompt: true,
     commandName: 'murph setup',
     options: createSetupOptions({
-      assistantProviderPreset: 'venice',
+      assistantModelProvider: 'vercel-ai-gateway',
     }),
-    preset: 'openai-compatible',
+    preset: 'codex',
   })
 
+  assert.deepEqual(promptState.prompts, [
+    'Model id to use with Codex [gpt-5.5]: ',
+  ])
   assert.deepEqual(assistant, {
-    preset: 'openai-compatible',
+    preset: 'codex',
     enabled: true,
-    provider: 'openai-compatible',
-    model: 'model-beta',
-    baseUrl: 'https://api.venice.ai/api/v1',
-    apiKeyEnv: 'VENICE_API_KEY',
-    presetId: 'venice',
-    providerName: 'venice',
+    provider: 'codex-cli',
+    model: 'gpt-5.5-medium',
+    modelProvider: 'vercel-ai-gateway',
+    baseUrl: null,
+    apiKeyEnv: null,
+    presetId: null,
+    providerName: null,
     codexCommand: null,
+    codexHome: null,
     profile: null,
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     oss: false,
     account: null,
-    detail: 'Use model-beta from Venice. Murph will read the key from VENICE_API_KEY.',
+    detail:
+      'Use Codex with gpt-5.5-medium. Use Codex model provider vercel-ai-gateway.',
   })
-  assert.deepEqual(promptState.discoveredCalls, [
-    {
-      apiKeyEnv: 'VENICE_API_KEY',
-      baseUrl: 'https://api.venice.ai/api/v1',
-      provider: 'openai-compatible',
-      providerName: 'venice',
-    },
-  ])
-  assert.match(readOutput(), /Discovered models/u)
-  assert.match(readOutput(), /Available models:/u)
 })
 
-test('setup assistant prompt flow asks for a direct model id for inferred gateway endpoints', async () => {
-  promptState.answers = ['https://ai-gateway.vercel.sh/v1', 'VERCEL_AI_API_KEY', 'model-alpha']
-  const { output, readOutput } = createCapturedOutputStream()
+test('setup assistant prompt flow defaults local OSS Codex models when blank', async () => {
+  promptState.answers = ['']
 
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -133,10 +101,10 @@ test('setup assistant prompt flow asks for a direct model id for inferred gatewa
       },
     },
     input: new PassThrough(),
-    output,
+    output: new PassThrough(),
     async resolveCodexHome() {
       return {
-        codexHome: null,
+        codexHome: '/tmp/codex-home',
         discoveredHomes: [],
       }
     },
@@ -145,71 +113,16 @@ test('setup assistant prompt flow asks for a direct model id for inferred gatewa
   const assistant = await resolver.resolve({
     allowPrompt: true,
     commandName: 'murph setup',
-    options: createSetupOptions(),
-    preset: 'openai-compatible',
+    options: createSetupOptions({
+      assistantOss: true,
+    }),
+    preset: 'codex',
   })
 
-  assert.deepEqual(assistant, {
-    preset: 'openai-compatible',
-    enabled: true,
-    provider: 'openai-compatible',
-    model: 'model-alpha',
-    baseUrl: 'https://ai-gateway.vercel.sh/v1',
-    apiKeyEnv: 'VERCEL_AI_API_KEY',
-    presetId: 'vercel-ai-gateway',
-    providerName: 'vercel-ai-gateway',
-    codexCommand: null,
-    profile: null,
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
-    oss: false,
-    account: null,
-    detail:
-      'Use model-alpha from Vercel AI Gateway. Murph will read the key from VERCEL_AI_API_KEY.',
-  })
-  assert.deepEqual(promptState.discoveredCalls, [
+  assert.deepEqual(promptState.prompts, [
+    'Local model id to use with Codex [gpt-oss:20b]: ',
   ])
-  assert.doesNotMatch(readOutput(), /Available models/u)
-})
-
-test('setup assistant prompt flow retries required model entry and rejects unsupported reasoning effort', async () => {
-  promptState.answers = ['https://example.test/v1', '', '', 'custom-model']
-  promptState.supportsReasoningEffort = false
-  const { output, readOutput } = createCapturedOutputStream()
-
-  const resolver = createSetupAssistantResolver({
-    assistantAccount: {
-      async resolve() {
-        return null
-      },
-    },
-    discoverModels: async () => ({
-      message: 'No models available',
-      models: [],
-      status: 'ok',
-    }),
-    input: new PassThrough(),
-    output,
-    async resolveCodexHome() {
-      return {
-        codexHome: null,
-        discoveredHomes: [],
-      }
-    },
-  })
-
-  await assert.rejects(
-    resolver.resolve({
-      allowPrompt: true,
-      commandName: 'murph setup',
-      options: createSetupOptions({
-        assistantProviderPreset: 'custom',
-        assistantReasoningEffort: 'high',
-      }),
-      preset: 'openai-compatible',
-    }),
-    /does not support assistantReasoningEffort/u,
-  )
-  assert.match(readOutput(), /A model id is required\./u)
+  assert.equal(assistant.model, 'gpt-oss:20b')
+  assert.equal(assistant.oss, true)
+  assert.match(assistant.detail, /path redacted/u)
 })

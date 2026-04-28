@@ -47,33 +47,30 @@ const TEST_SESSION: AssistantSession = {
   schema: 'murph.assistant-session.v1',
   sessionId: 'session-state-ui',
   target: {
-    adapter: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    endpoint: 'http://127.0.0.1:11434/v1',
-    headers: null,
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
     model: null,
-    presetId: null,
-    providerName: 'local',
+    modelProvider: null,
+    oss: false,
+    profile: null,
     reasoningEffort: null,
-    webSearch: null,
+    sandbox: 'danger-full-access',
   },
   resumeState: null,
-  provider: 'openai-compatible',
+  provider: 'codex-cli',
   providerOptions: {
     continuityFingerprint: 'fingerprint-ui-state-view-model',
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     model: null,
     reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     profile: null,
     oss: false,
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    executionDriver: 'openai-compatible',
-    providerName: 'local',
+    executionDriver: 'codex-app-server',
     resumeKind: null,
-    headers: null,
   },
   alias: 'chat:state',
   binding: {
@@ -554,19 +551,17 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
   assert.equal(
     formatChatMetadata(
       {
-        baseUrl: TEST_SESSION.providerOptions.baseUrl,
         model: 'gpt-5.4',
         provider: TEST_SESSION.provider,
         reasoningEffort: 'high',
       },
       'vault-a',
     ),
-    'gpt-5.4 · vault-a',
+    'gpt-5.4 high · vault-a',
   )
   assert.deepEqual(
     resolveChatMetadataBadges(
       {
-        baseUrl: TEST_SESSION.providerOptions.baseUrl,
         model: 'gpt-5.4',
         provider: TEST_SESSION.provider,
         reasoningEffort: 'high',
@@ -580,6 +575,11 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
         value: 'gpt-5.4',
       },
       {
+        key: 'reasoning',
+        label: 'reasoning',
+        value: 'high',
+      },
+      {
         key: 'vault',
         label: 'vault',
         value: 'vault-a',
@@ -589,7 +589,6 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
   assert.equal(
     formatChatMetadata(
       {
-        baseUrl: null,
         model: null,
         provider: 'codex-cli',
         reasoningEffort: ' high ',
@@ -601,7 +600,6 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
   assert.deepEqual(
     resolveChatMetadataBadges(
       {
-        baseUrl: null,
         model: null,
         provider: 'codex-cli',
         reasoningEffort: ' high ',

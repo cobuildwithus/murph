@@ -25,9 +25,11 @@ import {
   setupAssistantProviderPresetValues,
 } from './assistant/openai-compatible-provider-presets.js'
 import {
+  assistantCodexModelProviderWireApiValues,
   assistantExecutionDriverValues,
   assistantResumeKindValues,
   assistantWebSearchModeValues,
+  createUnsupportedAssistantRuntimeTargetError,
   resolveAssistantRuntimeTarget,
 } from './assistant/target-runtime.js'
 
@@ -49,7 +51,7 @@ export const assistantReasoningEffortValues = [
   'xhigh',
 ] as const
 
-export const assistantChatProviderValues = ['codex-cli', 'openai-compatible'] as const
+export const assistantChatProviderValues = ['codex-cli'] as const
 export const assistantChannelNameValues = ['telegram', 'linq', 'email'] as const
 export const assistantChannelNameSchema = z.enum(assistantChannelNameValues)
 export const assistantChannelDeliveryTargetKindValues = gatewayDeliveryTargetKindValues
@@ -202,6 +204,16 @@ export const assistantGatewayOnlyProvidersValueSchema = z
   .array(z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9._-]*$/u))
   .nullable()
 
+export const assistantCodexModelProviderConfigSchema = z
+  .object({
+    id: z.string().trim().regex(/^[a-z0-9][a-z0-9._-]*$/u),
+    name: z.string().min(1),
+    baseUrl: z.string().url(),
+    envKey: z.string().min(1),
+    wireApi: z.enum(assistantCodexModelProviderWireApiValues),
+  })
+  .strict()
+
 export const assistantCodexModelTargetSchema = z
   .object({
     adapter: z.literal('codex-cli'),
@@ -209,6 +221,7 @@ export const assistantCodexModelTargetSchema = z
     codexCommand: z.string().min(1).nullable().default(null),
     codexHome: z.string().min(1).nullable().optional(),
     model: z.string().min(1).nullable().default(null),
+    modelProvider: z.string().min(1).nullable().optional(),
     oss: z.boolean().default(false),
     profile: z.string().min(1).nullable().default(null),
     reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
@@ -267,6 +280,8 @@ export const assistantProviderSessionOptionsSchema = z.object({
   profile: z.string().min(1).nullable(),
   oss: z.boolean(),
   codexHome: z.string().min(1).nullable().optional(),
+  modelProvider: z.string().min(1).nullable().optional(),
+  modelProviderConfig: assistantCodexModelProviderConfigSchema.nullable().optional(),
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
   executionDriver: z.enum(assistantExecutionDriverValues),
@@ -295,19 +310,12 @@ export const assistantProviderFailoverRouteSchema = z
     codexCommand: z.string().min(1).nullable().default(null),
     codexHome: z.string().min(1).nullable().optional(),
     model: z.string().min(1).nullable().default(null),
+    modelProvider: z.string().min(1).nullable().optional(),
     reasoningEffort: z.string().min(1).nullable().default(null),
     sandbox: z.enum(assistantSandboxValues).nullable().default(null),
     approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().default(null),
     profile: z.string().min(1).nullable().default(null),
     oss: z.boolean().default(false),
-    baseUrl: z.string().min(1).nullable().optional(),
-    apiKeyEnv: z.string().min(1).nullable().optional(),
-    providerName: z.string().min(1).nullable().optional(),
-    presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
-    gatewayOnlyProviders: assistantGatewayOnlyProvidersValueSchema.optional(),
-    headers: assistantHeadersSchema.nullable().optional(),
-    webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
-    zeroDataRetention: z.boolean().optional(),
     cooldownMs: z.number().int().positive().nullable().default(null),
   })
   .strict()
@@ -386,75 +394,41 @@ function normalizeAssistantSessionRecord(
 function buildAssistantRuntimeSession(
   value: AssistantPersistedSessionRecord,
 ): AssistantSession {
+  if (value.target.adapter !== 'codex-cli') {
+    throw createUnsupportedAssistantRuntimeTargetError()
+  }
+
   const provider = value.target.adapter
-  const resolvedRuntimeTarget = resolveAssistantRuntimeTarget(
-    value.target.adapter === 'openai-compatible'
-      ? {
-          provider: 'openai-compatible',
-          apiKeyEnv: value.target.apiKeyEnv,
-          baseUrl: value.target.endpoint,
-          headers: value.target.headers,
-          gatewayOnlyProviders: value.target.gatewayOnlyProviders,
-          model: value.target.model,
-          presetId: value.target.presetId,
-          providerName: value.target.providerName,
-          reasoningEffort: value.target.reasoningEffort,
-          webSearch: value.target.webSearch,
-          zeroDataRetention: value.target.zeroDataRetention === true,
-        }
-      : {
-          provider: 'codex-cli',
-          approvalPolicy: value.target.approvalPolicy,
-          codexHome: value.target.codexHome,
-          model: value.target.model,
-          oss: value.target.oss,
-          profile: value.target.profile,
-          reasoningEffort: value.target.reasoningEffort,
-          sandbox: value.target.sandbox,
-        },
-  )
-  const providerOptions =
-    value.target.adapter === 'openai-compatible'
-      ? assistantProviderSessionOptionsSchema.parse({
-          continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
-          executionDriver: resolvedRuntimeTarget.executionDriver,
-          provider,
-          model: value.target.model,
-          presetId: resolvedRuntimeTarget.presetId,
-          reasoningEffort: value.target.reasoningEffort,
-          resumeKind: resolvedRuntimeTarget.resumeKind,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          ...(value.target.endpoint ? { baseUrl: value.target.endpoint } : {}),
-          ...(value.target.apiKeyEnv ? { apiKeyEnv: value.target.apiKeyEnv } : {}),
-          ...(value.target.providerName
-            ? { providerName: value.target.providerName }
-            : {}),
-          ...(value.target.gatewayOnlyProviders
-            ? { gatewayOnlyProviders: value.target.gatewayOnlyProviders }
-            : {}),
-          ...(value.target.headers ? { headers: value.target.headers } : {}),
-          ...(value.target.webSearch ? { webSearch: value.target.webSearch } : {}),
-          ...(resolvedRuntimeTarget.supportsZeroDataRetention &&
-          value.target.zeroDataRetention
-            ? { zeroDataRetention: true }
-            : {}),
-        })
-      : assistantProviderSessionOptionsSchema.parse({
-          continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
-          executionDriver: resolvedRuntimeTarget.executionDriver,
-          provider,
-          model: value.target.model,
-          reasoningEffort: value.target.reasoningEffort,
-          resumeKind: resolvedRuntimeTarget.resumeKind,
-          sandbox: value.target.sandbox,
-          approvalPolicy: value.target.approvalPolicy,
-          profile: value.target.profile,
-          oss: value.target.oss,
-          ...(value.target.codexHome ? { codexHome: value.target.codexHome } : {}),
-        })
+  const resolvedRuntimeTarget = resolveAssistantRuntimeTarget({
+    provider,
+    approvalPolicy: value.target.approvalPolicy,
+    codexHome: value.target.codexHome,
+    model: value.target.model,
+    modelProvider: value.target.modelProvider,
+    oss: value.target.oss,
+    profile: value.target.profile,
+    reasoningEffort: value.target.reasoningEffort,
+    sandbox: value.target.sandbox,
+  })
+  const providerOptions = assistantProviderSessionOptionsSchema.parse({
+    continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,
+    executionDriver: resolvedRuntimeTarget.executionDriver,
+    provider,
+    model: value.target.model,
+    reasoningEffort: value.target.reasoningEffort,
+    resumeKind: resolvedRuntimeTarget.resumeKind,
+    sandbox: value.target.sandbox,
+    approvalPolicy: value.target.approvalPolicy,
+    profile: value.target.profile,
+    oss: value.target.oss,
+    ...(value.target.codexHome ? { codexHome: value.target.codexHome } : {}),
+    ...(resolvedRuntimeTarget.modelProvider
+      ? { modelProvider: resolvedRuntimeTarget.modelProvider }
+      : {}),
+    ...(resolvedRuntimeTarget.modelProviderConfig
+      ? { modelProviderConfig: resolvedRuntimeTarget.modelProviderConfig }
+      : {}),
+  })
   return {
     ...value,
     provider,
@@ -1197,6 +1171,9 @@ export type AssistantDeliverySource = z.infer<
 >
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
+>
+export type AssistantCodexModelProviderConfig = z.infer<
+  typeof assistantCodexModelProviderConfigSchema
 >
 export type AssistantModelTarget = z.infer<typeof assistantModelTargetSchema>
 export type AssistantSessionResumeState = z.infer<

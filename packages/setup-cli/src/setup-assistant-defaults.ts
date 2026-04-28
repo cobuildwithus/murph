@@ -26,6 +26,7 @@ export function assistantSelectionToOperatorDefaults(
       provider: assistant.provider,
       providerConfig: {
         model: assistant.model,
+        modelProvider: assistant.modelProvider ?? null,
         ...(assistant.codexCommand !== null
           ? {
               codexCommand: assistant.codexCommand,
@@ -41,13 +42,6 @@ export function assistantSelectionToOperatorDefaults(
         approvalPolicy: assistant.approvalPolicy,
         profile: assistant.profile,
         oss: assistant.oss === true,
-        baseUrl: assistant.baseUrl,
-        apiKeyEnv: assistant.apiKeyEnv,
-        presetId: assistant.presetId ?? null,
-        providerName: assistant.providerName,
-        ...(assistant.zeroDataRetention !== undefined
-          ? { zeroDataRetention: assistant.zeroDataRetention }
-          : {}),
       },
     }),
     account: assistant.account ?? null,
@@ -69,15 +63,6 @@ export function assistantOperatorDefaultsMatch(
 export function formatAssistantDefaultsSummary(
   assistant: SetupConfiguredAssistant,
 ): string {
-  if (assistant.provider === 'openai-compatible') {
-    return appendAssistantAccountSummary(
-      assistant.baseUrl
-        ? `${assistant.model ?? 'the configured model'} via ${assistant.baseUrl}`
-        : `${assistant.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`,
-      assistant.account ?? null,
-    )
-  }
-
   if (assistant.oss) {
     return appendAssistantAccountSummary(
       `${assistant.model ?? 'the configured local model'} via Codex OSS app-server`,
@@ -102,9 +87,7 @@ export function formatSavedAssistantDefaultsSummary(
   switch (backend.adapter) {
     case 'openai-compatible':
       return appendAssistantAccountSummary(
-        backend.endpoint
-          ? `${backend.model ?? 'the configured model'} via ${backend.endpoint}`
-          : `${backend.model ?? 'the configured model'} via the saved OpenAI-compatible endpoint`,
+        'saved OpenAI-compatible assistant backend is no longer supported; run `murph model --preset codex` to save a Codex backend',
         defaults?.account ?? null,
       )
     case 'codex-cli':
@@ -127,27 +110,10 @@ export function buildSetupAssistantOptionsFromDefaults(
   }
 
   switch (backend.adapter) {
-    case 'openai-compatible': {
-      const savedDefaults = resolveAssistantProviderDefaults(
-        defaults ?? null,
-        'openai-compatible',
-      )
-
+    case 'openai-compatible':
       return {
-        assistantPreset: 'openai-compatible',
-        assistantProviderPreset: savedDefaults?.presetId ?? undefined,
-        assistantModel: savedDefaults?.model ?? undefined,
-        assistantBaseUrl: savedDefaults?.baseUrl ?? undefined,
-        assistantApiKeyEnv: savedDefaults?.apiKeyEnv ?? undefined,
-        assistantProviderName: savedDefaults?.providerName ?? undefined,
-        assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
-        ...(savedDefaults?.zeroDataRetention === true
-          ? {
-              assistantZeroDataRetention: true,
-            }
-          : {}),
+        assistantPreset: 'codex',
       }
-    }
 
     case 'codex-cli':
     default: {
@@ -159,6 +125,7 @@ export function buildSetupAssistantOptionsFromDefaults(
       return {
         assistantPreset: 'codex',
         assistantModel: savedDefaults?.model ?? undefined,
+        assistantModelProvider: savedDefaults?.modelProvider ?? undefined,
         assistantCodexCommand: savedDefaults?.codexCommand ?? undefined,
         assistantCodexHome: savedDefaults?.codexHome ?? undefined,
         assistantProfile: savedDefaults?.profile ?? undefined,

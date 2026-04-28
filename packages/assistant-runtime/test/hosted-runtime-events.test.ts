@@ -203,7 +203,7 @@ describe("executeHostedMailboxEvent", () => {
             "function_call:vault_cli_run",
             "function_call_output:string",
           ],
-          model: "openai/gpt-5.5",
+          model: "gpt-5.5",
           requestBodyHash: "b".repeat(64),
           requestBodyLength: 4096,
         },
@@ -229,7 +229,7 @@ describe("executeHostedMailboxEvent", () => {
           "function_call:vault_cli_run",
           "function_call_output:string",
         ],
-        assistantResponsesRequestModel: "openai/gpt-5.5",
+        assistantResponsesRequestModel: "gpt-5.5",
       }),
     );
     expect(entry?.redacted).not.toEqual(expect.objectContaining({
@@ -242,7 +242,7 @@ describe("executeHostedMailboxEvent", () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
       assistantConfigured: true,
-      assistantProvider: "openai-compatible" as const,
+      assistantProvider: "codex-cli" as const,
       assistantSeeded: false,
       emailAutoReplyEnabled: true,
       linqAutoReplyEnabled: true,
@@ -253,7 +253,7 @@ describe("executeHostedMailboxEvent", () => {
     const debugSystemPrompt = "System prompt headed to Azure with notification rules. ".repeat(16);
     const debugUserPrompt = "Send exactly the signup welcome.";
     const debugRequestBody = JSON.stringify({
-      model: "openai/gpt-5.4",
+      model: "gpt-5.5",
       input: [
         {
           content: [
@@ -321,7 +321,7 @@ describe("executeHostedMailboxEvent", () => {
           conversationMessageRoles: [],
           deliveryDispatchMode: "queue-only",
           gatewayOnlyProviderCount: 1,
-          gatewayOnlyProviders: ["azure"],
+          gatewayOnlyProviders: ["vercel-ai-gateway"],
           nativeResumePolicy: "disabled",
           previousResponseIdPresent: false,
           promptCacheDynamicContextStartsAfterStaticCore: 2048,
@@ -329,9 +329,9 @@ describe("executeHostedMailboxEvent", () => {
           promptCacheStaticPromptHash: "hash-static",
           promptCacheToolSchemaHash: "hash-tools",
           promptProfile: "notification-decision",
-          provider: "openai-compatible",
-          providerExecutionDriver: "responses",
-          providerModel: "openai/gpt-5.4",
+          provider: "codex-cli",
+          providerExecutionDriver: "codex-app-server",
+          providerModel: "gpt-5.5",
           providerName: "vercel-ai-gateway",
           routeId: "route-notification",
           sessionContextPresent: false,
@@ -365,7 +365,7 @@ describe("executeHostedMailboxEvent", () => {
           instructionsHash: "hash-instructions",
           instructionsLength: debugSystemPrompt.length,
           method: "POST",
-          model: "openai/gpt-5.4",
+          model: "gpt-5.5",
           payloadTopLevelKeys: ["input", "instructions", "model", "providerOptions", "tools"],
           previousResponseIdPresent: false,
           providerOptionsHash: "hash-provider-options",
@@ -420,7 +420,7 @@ describe("executeHostedMailboxEvent", () => {
       executionContext,
       runtime,
       runtimeEnv: {
-        OPENAI_API_KEY: "secret",
+        VERCEL_AI_API_KEY: "secret",
       },
       vaultRoot: "/tmp/assistant-runtime-events",
     });
@@ -429,7 +429,7 @@ describe("executeHostedMailboxEvent", () => {
       "/tmp/assistant-runtime-events",
       wake,
       {
-        OPENAI_API_KEY: "secret",
+        VERCEL_AI_API_KEY: "secret",
       },
       runtime.resolvedConfig,
     );
@@ -499,9 +499,9 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         component: "runtime.provider",
         details: expect.objectContaining({
-          assistantProviderRequestGatewayOnlyProviders: ["azure"],
-          assistantProviderRequestProviderExecutionDriver: "responses",
-          assistantProviderRequestProviderModel: "openai/gpt-5.4",
+          assistantProviderRequestGatewayOnlyProviders: ["vercel-ai-gateway"],
+          assistantProviderRequestProviderExecutionDriver: "codex-app-server",
+          assistantProviderRequestProviderModel: "gpt-5.5",
           assistantProviderRequestProviderName: "vercel-ai-gateway",
           assistantProviderRequestPreviousResponseIdPresent: false,
           assistantProviderRequestSchema: "murph.assistant-provider-request-debug.v1",
@@ -517,7 +517,7 @@ describe("executeHostedMailboxEvent", () => {
         component: "runtime.provider.http",
         details: expect.objectContaining({
           assistantResponsesRequestGatewayZeroDataRetention: true,
-          assistantResponsesRequestModel: "openai/gpt-5.4",
+          assistantResponsesRequestModel: "gpt-5.5",
         }),
         message: "Hosted assistant final Responses request summary captured.",
         phase: "wake.running",
@@ -539,7 +539,7 @@ describe("executeHostedMailboxEvent", () => {
     );
     expect(result.redactedLogEntries?.[2]?.redacted).toEqual(
       expect.objectContaining({
-        assistantProviderRequestProviderModel: "openai/gpt-5.4",
+        assistantProviderRequestProviderModel: "gpt-5.5",
       }),
     );
     expect(result.redactedLogEntries?.[2]?.redacted).not.toEqual(expect.objectContaining({
@@ -548,7 +548,7 @@ describe("executeHostedMailboxEvent", () => {
     }));
     expect(result.redactedLogEntries?.[3]?.redacted).toEqual(
       expect.objectContaining({
-        assistantResponsesRequestModel: "openai/gpt-5.4",
+        assistantResponsesRequestModel: "gpt-5.5",
       }),
     );
     expect(result.redactedLogEntries?.[3]?.redacted).not.toEqual(expect.objectContaining({
@@ -606,8 +606,10 @@ describe("executeHostedMailboxEvent", () => {
           message: "Hosted assistant provider request summary captured.",
           phase: "wake.running",
           redacted: expect.objectContaining({
-            assistantProviderRequestGatewayOnlyProviders: ["azure"],
-            assistantProviderRequestProviderModel: "openai/gpt-5.4",
+            assistantProviderRequestGatewayOnlyProviders: ["vercel-ai-gateway"],
+            assistantProviderRequestProviderExecutionDriver: "codex-app-server",
+            assistantProviderRequestProviderModel: "gpt-5.5",
+            assistantProviderRequestProviderName: "vercel-ai-gateway",
           }),
         },
         {
@@ -617,7 +619,7 @@ describe("executeHostedMailboxEvent", () => {
           message: "Hosted assistant final Responses request summary captured.",
           phase: "wake.running",
           redacted: expect.objectContaining({
-            assistantResponsesRequestModel: "openai/gpt-5.4",
+            assistantResponsesRequestModel: "gpt-5.5",
           }),
         },
         {
@@ -651,15 +653,15 @@ describe("executeHostedMailboxEvent", () => {
     const hydratedExecutionContext = {
       hosted: {
         defaultTarget: {
-          adapter: "openai-compatible" as const,
-          apiKeyEnv: "OPENAI_API_KEY",
-          endpoint: "https://gateway.example.test/v1",
-          headers: null,
-          model: "gpt-4.1-mini",
-          presetId: null,
-          providerName: "Hosted Gateway",
-          reasoningEffort: null,
-          webSearch: null,
+          adapter: "codex-cli" as const,
+          approvalPolicy: "never" as const,
+          codexCommand: null,
+          model: "gpt-5.5",
+          modelProvider: "vercel-ai-gateway",
+          oss: false,
+          profile: null,
+          reasoningEffort: "medium" as const,
+          sandbox: "danger-full-access" as const,
         },
         memberId: "member_123",
         userEnvKeys: [],
@@ -753,9 +755,9 @@ describe("executeHostedMailboxEvent", () => {
       Object.assign(new Error("Provider rejected configured credentials."), {
         code: "invalid_api_key",
         details: {
-          assistantNotificationProvider: "openai-compatible",
-          assistantNotificationProviderBaseUrlOrigin: "https://gateway.example.test",
-          assistantNotificationProviderModel: "openai/gpt-5.4",
+          assistantNotificationProvider: "codex-cli",
+          assistantNotificationProviderBaseUrlOrigin: "https://ai-gateway.vercel.sh",
+          assistantNotificationProviderModel: "gpt-5.5",
           assistantNotificationStage: "provider",
         },
         statusCode: 401,
@@ -790,10 +792,10 @@ describe("executeHostedMailboxEvent", () => {
           assistantNotificationErrorMessage: "Hosted execution authorization failed.",
           assistantNotificationErrorName: "Error",
           assistantNotificationErrorStatus: 401,
-          assistantNotificationProvider: "openai-compatible",
+          assistantNotificationProvider: "codex-cli",
           assistantNotificationProviderBaseUrlConfigured: true,
           assistantNotificationProviderErrorCode: "invalid_api_key",
-          assistantNotificationProviderModel: "openai/gpt-5.4",
+          assistantNotificationProviderModel: "gpt-5.5",
           assistantNotificationStage: "provider",
           errorCode: "authorization_error",
           notificationRouteThreadIsDirect: null,

@@ -1309,7 +1309,7 @@ describe('assistant product small seams', () => {
     })
     await localService.updateAssistantSessionOptionsLocal({
       providerOptions: {
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
         model: 'gpt-4.1-mini',
       },
       sessionId: session.sessionId,
@@ -1349,14 +1349,12 @@ function createProviderOptions(
   overrides: Partial<AssistantProviderSessionOptions> = {},
 ): AssistantProviderSessionOptions {
   return serializeAssistantProviderSessionOptions({
-    provider: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://api.example.test/v1',
-    headers: null,
-    model: 'gpt-4.1',
-    providerName: 'murph-openai',
-    reasoningEffort: 'high',
-    zeroDataRetention: null,
+    approvalPolicy: 'never',
+    provider: 'codex-cli',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
     ...overrides,
   })
 }
@@ -1373,26 +1371,15 @@ function createAssistantSession(input?: {
     input?.target ??
     (() => {
       const resolvedTarget = createAssistantModelTarget({
-        provider:
-          providerOptions.baseUrl ||
-          providerOptions.apiKeyEnv ||
-          providerOptions.providerName ||
-          providerOptions.headers ||
-          providerOptions.zeroDataRetention === true
-            ? 'openai-compatible'
-            : 'codex-cli',
+        provider: 'codex-cli',
         approvalPolicy: providerOptions.approvalPolicy,
-        apiKeyEnv: providerOptions.apiKeyEnv ?? null,
-        baseUrl: providerOptions.baseUrl ?? null,
         codexHome: providerOptions.codexHome ?? null,
-        headers: providerOptions.headers ?? null,
         model: providerOptions.model,
+        modelProvider: providerOptions.modelProvider ?? null,
         oss: providerOptions.oss,
         profile: providerOptions.profile,
-        providerName: providerOptions.providerName ?? null,
         reasoningEffort: providerOptions.reasoningEffort ?? null,
         sandbox: providerOptions.sandbox,
-        zeroDataRetention: providerOptions.zeroDataRetention ?? null,
       })
       if (!resolvedTarget) {
         throw new Error('Expected assistant session target.')
@@ -1413,7 +1400,7 @@ function createAssistantSession(input?: {
     },
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
-    provider: target.adapter,
+    provider: 'codex-cli',
     providerOptions,
     resumeState: null,
     schema: 'murph.assistant-session.v1',

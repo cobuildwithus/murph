@@ -89,7 +89,7 @@ export async function startAssistantProviderStubServer(input: {
   onRequest?: (request: HostedLocalAssistantProviderStubRequest) => void;
   responseState?: HostedLocalAssistantProviderStubState;
 } = {}): Promise<ReturnType<typeof createServer>> {
-  const modelId = input.modelId ?? "stub-openrouter-model";
+  const modelId = input.modelId ?? "gpt-5.5";
 
   const server = createServer(async (request, response) => {
     const body = await readRequestBody(request);
@@ -235,28 +235,19 @@ export function writeJsonResponse(
 export function resolveHostedAssistantLocalDevEnv(
   source: NodeJS.ProcessEnv,
   assistantProviderMode: HostedLocalAssistantProviderMode,
-  assistantProviderStubBaseUrl: string | null,
+  _assistantProviderStubBaseUrl: string | null,
   scenarioLabel: string,
 ): NodeJS.ProcessEnv {
   const hostedExecutionRunnerTimeoutMs =
     source.HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?.trim() || hostedLocalE2eRunnerTimeoutMs;
 
   if (assistantProviderMode === "stub") {
-    if (!assistantProviderStubBaseUrl) {
-      throw new Error(
-        `${scenarioLabel} requires a stub assistant provider base URL in stub mode.`,
-      );
-    }
-
     return {
-      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
-      HOSTED_ASSISTANT_BASE_URL: assistantProviderStubBaseUrl,
-      HOSTED_ASSISTANT_MODEL: "stub-openrouter-model",
-      HOSTED_ASSISTANT_PROVIDER: "openrouter",
-      HOSTED_ASSISTANT_PROVIDER_NAME: "local-openrouter-stub",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
       HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: hostedExecutionRunnerTimeoutMs,
-      OPENAI_API_KEY: "stub-local-openrouter-key",
+      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
     };
   }
 

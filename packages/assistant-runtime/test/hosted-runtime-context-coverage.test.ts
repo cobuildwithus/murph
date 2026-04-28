@@ -191,7 +191,7 @@ describe("hosted runtime context coverage", () => {
       await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
       mocks.ensureHostedAssistantOperatorDefaults.mockResolvedValue({
         configured: true,
-        provider: "openai-compatible",
+        provider: "codex-cli",
         seeded: false,
         source: "saved",
       });
@@ -345,7 +345,7 @@ describe("hosted runtime context coverage", () => {
     });
     mocks.resolveHostedAssistantOperatorDefaultsState.mockReturnValueOnce({
       configured: false,
-      provider: "openai-compatible",
+      provider: "codex-cli",
     });
     await expect(readHostedAssistantRuntimeState()).resolves.toEqual({
       assistantActiveProfileId: null,
@@ -355,7 +355,7 @@ describe("hosted runtime context coverage", () => {
       assistantConfigPresent: true,
       assistantConfigStatus: "unready",
       assistantConfigured: false,
-      assistantProvider: "openai-compatible",
+      assistantProvider: "codex-cli",
     });
 
     mocks.readOperatorConfig.mockResolvedValueOnce({
@@ -365,7 +365,7 @@ describe("hosted runtime context coverage", () => {
     });
     mocks.resolveHostedAssistantOperatorDefaultsState.mockReturnValueOnce({
       configured: true,
-      provider: "openai-compatible",
+      provider: "codex-cli",
     });
     await expect(readHostedAssistantRuntimeState()).resolves.toEqual({
       assistantActiveProfileId: null,
@@ -375,7 +375,7 @@ describe("hosted runtime context coverage", () => {
       assistantConfigPresent: true,
       assistantConfigStatus: "saved",
       assistantConfigured: true,
-      assistantProvider: "openai-compatible",
+      assistantProvider: "codex-cli",
     });
   });
 

@@ -1,7 +1,7 @@
-# `vault-cli inbox model bundle|route`
+# `vault-cli inbox model bundle`
 
 Current smoke expectation:
 
 - `bundle` emits a normalized text-only inbox routing bundle plus a persisted `bundlePath`
-- `route` emits an audited plan/result artifact set and reports the chosen provider mode
-- `route --apply` delegates writes back through the existing CLI service layer instead of mutating files directly
+- the removed `route` command stays unavailable instead of exposing OpenAI-compatible backend options
+- bundle artifacts remain rebuildable audit material under `derived/inbox/**`, not canonical vault truth

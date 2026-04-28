@@ -9,18 +9,15 @@ export * from './assistant-outbox.js'
 export * from './assistant-service.js'
 export * from './assistant-status.js'
 export * from './inbox-evidence-projection.js'
-export {
-  createDefaultAssistantCapabilityRegistry,
-  createDefaultAssistantToolCatalog,
-  createInboxRoutingAssistantCapabilityRegistry,
-  createInboxRoutingAssistantToolCatalog,
-  createNotificationTurnAssistantToolCatalog,
-  createProviderTurnAssistantCapabilityRegistry,
-  createProviderTurnAssistantCapabilityRuntime,
-  createProviderTurnAssistantToolCatalog,
-  readAssistantCliLlmsManifest,
-} from './assistant-cli-tools.js'
 export * from './assistant/channel-adapters.js'
+export type {
+  AssistantModelContentPart,
+  AssistantModelFilePart,
+  AssistantModelImagePart,
+  AssistantModelMessage,
+  AssistantModelTextPart,
+  AssistantUserMessageContentPart,
+} from './assistant/content-types.js'
 export * from './assistant/conversation-policy.js'
 export * from './assistant/conversation-ref.js'
 export * from './assistant/hosted-context-diagnostics.js'

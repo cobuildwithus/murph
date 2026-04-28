@@ -1,19 +1,7 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
-import {
-  listNamedOpenAICompatibleProviderPresets,
-  resolveOpenAICompatibleProviderPreset,
-  resolveOpenAICompatibleProviderPresetFromId,
-  type OpenAICompatibleProviderPreset,
-} from '@murphai/operator-config/assistant/openai-compatible-provider-presets'
-import {
-  DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
-  getDefaultSetupAssistantPreset as getDefaultAssistantPreset,
-} from './setup-assistant.js'
-import type {
-  SetupAssistantPreset,
-  SetupAssistantProviderPreset,
-} from '@murphai/operator-config/setup-cli-contracts'
+import { getDefaultSetupAssistantPreset as getDefaultAssistantPreset } from './setup-assistant.js'
+import type { SetupAssistantPreset } from '@murphai/operator-config/setup-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createSetupWizardCompletionController,
@@ -33,30 +21,23 @@ import {
 } from './setup-wizard-ui.js'
 
 export type SetupAssistantWizardResult = {
-  assistantApiKeyEnv?: string | null
-  assistantBaseUrl?: string | null
   assistantOss?: boolean | null
   assistantPreset?: Exclude<SetupAssistantPreset, 'skip'>
-  assistantProviderName?: string | null
 }
 
 export interface SetupAssistantWizardInput {
-  initialAssistantApiKeyEnv?: string | null
-  initialAssistantBaseUrl?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
-  initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
-  initialAssistantProviderName?: string | null
 }
 
-export type SetupWizardAssistantProvider = SetupAssistantProviderPreset | 'skip'
+export type SetupWizardAssistantProvider =
+  | 'codex-cloud'
+  | 'codex-local'
+  | 'skip'
 
 export type SetupWizardAssistantMethod =
-  | 'openai-codex'
-  | 'openai-api-key'
-  | 'compatible-provider'
-  | 'compatible-endpoint'
-  | 'compatible-codex-local'
+  | 'codex-cloud'
+  | 'codex-local'
   | 'skip'
 
 interface SetupWizardAssistantProviderOption {
@@ -74,29 +55,24 @@ interface SetupWizardAssistantMethodOption {
 }
 
 export interface SetupWizardResolvedAssistantSelection {
-  apiKeyEnv: string | null
-  baseUrl: string | null
   detail: string
   methodLabel: string | null
   oss: boolean | null
   preset: SetupAssistantPreset
   providerLabel: string
-  providerName: string | null
   summary: string
 }
 
-const DEFAULT_SETUP_OPENAI_API_BASE_URL = 'https://api.openai.com/v1'
-
 const setupWizardAssistantProviderOptions: readonly SetupWizardAssistantProviderOption[] = [
-  ...listNamedOpenAICompatibleProviderPresets().map((preset) => ({
-    provider: preset.id,
-    title: preset.title,
-    description: buildSetupWizardAssistantProviderDescription(preset),
-  })),
   {
-    provider: 'custom',
-    title: 'Custom endpoint',
-    description: 'Use any other OpenAI-style endpoint, or keep the Codex local-model path.',
+    provider: 'codex-cloud',
+    title: 'ChatGPT / Codex sign-in',
+    description: 'Use the saved Codex sign-in path.',
+  },
+  {
+    provider: 'codex-local',
+    title: 'Codex local model',
+    description: 'Use Codex with a local OSS model.',
   },
   {
     provider: 'skip',
@@ -104,41 +80,6 @@ const setupWizardAssistantProviderOptions: readonly SetupWizardAssistantProvider
     description: 'Leave the current assistant settings alone.',
   },
 ]
-
-const setupWizardOpenAIAssistantMethodOptions: readonly SetupWizardAssistantMethodOption[] =
-  [
-    {
-      method: 'openai-codex',
-      title: 'ChatGPT / Codex sign-in',
-      description: 'Best if you already use the Codex sign-in flow.',
-      detail:
-        'Murph will use your saved Codex / ChatGPT login and ask which model id to use next.',
-      badges: [{ label: 'recommended', tone: 'success' }],
-    },
-    {
-      method: 'openai-api-key',
-      title: 'OpenAI API key',
-      description: 'Use OPENAI_API_KEY and choose a model.',
-      detail: 'Good if you want direct API billing instead of the Codex sign-in path.',
-    },
-  ]
-
-const setupWizardCompatibleAssistantMethodOptions: readonly SetupWizardAssistantMethodOption[] =
-  [
-    {
-      method: 'compatible-endpoint',
-      title: 'Compatible endpoint',
-      description: 'Use any OpenAI-style endpoint and enter the details during setup.',
-      detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
-      badges: [{ label: 'manual', tone: 'accent' }],
-    },
-    {
-      method: 'compatible-codex-local',
-      title: 'Codex local model',
-      description: 'Keep the Codex flow, but point it at a local OSS model.',
-      detail: 'Good if you want the Codex tooling path with a local model by default.',
-    },
-  ]
 
 export function getDefaultSetupWizardAssistantPreset(): SetupAssistantPreset {
   return getDefaultAssistantPreset()
@@ -176,44 +117,28 @@ export function findSetupWizardAssistantMethodIndex(
   provider: SetupWizardAssistantProvider,
   method: SetupWizardAssistantMethod,
 ): number {
-  const options = listSetupWizardAssistantMethodOptions(provider)
-  const index = options.findIndex((option) => option.method === method)
-  return index >= 0 ? index : 0
+  const resolvedMethod = resolveSetupWizardAssistantMethodForProvider({
+    currentMethod: method,
+    provider,
+  })
+  return resolvedMethod === 'codex-local' ? 1 : 0
 }
 
 export function normalizeSetupAssistantWizardProvider(
   provider: SetupWizardAssistantProvider,
 ): SetupWizardAssistantProvider {
-  return provider === 'skip' ? 'openai' : provider
+  return provider === 'skip' ? 'codex-cloud' : provider
 }
 
 export function inferSetupWizardAssistantProvider(input: {
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
   oss?: boolean | null
   preset: SetupAssistantPreset
-  providerName?: string | null
-  providerPreset?: SetupAssistantProviderPreset | null
 }): SetupWizardAssistantProvider {
-  switch (input.preset) {
-    case 'codex':
-      if (input.oss === true) {
-        return resolveSetupWizardCompatibleProviderPreset(input)?.id ?? 'custom'
-      }
-      return 'openai'
-    case 'skip':
-      return 'skip'
-    case 'openai-compatible':
-      if (input.providerPreset) {
-        return input.providerPreset
-      }
-
-      if (isOpenAIAssistantSelection(input)) {
-        return 'openai'
-      }
-
-      return resolveSetupWizardCompatibleProviderPreset(input)?.id ?? 'custom'
+  if (input.preset === 'skip') {
+    return 'skip'
   }
+
+  return input.oss === true ? 'codex-local' : 'codex-cloud'
 }
 
 export function inferSetupWizardAssistantMethod(input: {
@@ -221,207 +146,76 @@ export function inferSetupWizardAssistantMethod(input: {
   preset: SetupAssistantPreset
   provider: SetupWizardAssistantProvider
 }): SetupWizardAssistantMethod {
-  switch (input.preset) {
-    case 'codex':
-      return input.oss === true ? 'compatible-codex-local' : 'openai-codex'
-    case 'skip':
-      return 'skip'
-    case 'openai-compatible':
-      if (input.provider === 'openai') {
-        return 'openai-api-key'
-      }
-
-      return doesSetupWizardAssistantProviderRequireMethod(input.provider)
-        ? 'compatible-endpoint'
-        : 'compatible-provider'
+  if (input.preset === 'skip' || input.provider === 'skip') {
+    return 'skip'
   }
+
+  return input.oss === true || input.provider === 'codex-local'
+    ? 'codex-local'
+    : 'codex-cloud'
 }
 
 export function doesSetupWizardAssistantProviderRequireMethod(
-  provider: SetupWizardAssistantProvider,
+  _provider: SetupWizardAssistantProvider,
 ): boolean {
-  return provider === 'openai' || provider === 'custom'
+  return false
 }
 
 export function resolveSetupWizardAssistantMethodForProvider(input: {
   currentMethod: SetupWizardAssistantMethod
   provider: SetupWizardAssistantProvider
 }): SetupWizardAssistantMethod {
-  if (input.provider === 'skip') {
-    return 'skip'
+  switch (input.provider) {
+    case 'codex-local':
+      return 'codex-local'
+    case 'skip':
+      return 'skip'
+    case 'codex-cloud':
+    default:
+      return 'codex-cloud'
   }
-
-  if (input.provider === 'openai') {
-    return input.currentMethod === 'openai-api-key'
-      ? 'openai-api-key'
-      : 'openai-codex'
-  }
-
-  if (input.provider === 'custom') {
-    return input.currentMethod === 'compatible-codex-local'
-      ? 'compatible-codex-local'
-      : 'compatible-endpoint'
-  }
-
-  return 'compatible-provider'
 }
 
 export function listSetupWizardAssistantMethodOptions(
-  provider: SetupWizardAssistantProvider,
+  _provider: SetupWizardAssistantProvider,
 ): readonly SetupWizardAssistantMethodOption[] {
-  switch (provider) {
-    case 'openai':
-      return setupWizardOpenAIAssistantMethodOptions
-    case 'custom':
-      return setupWizardCompatibleAssistantMethodOptions
-    case 'skip':
-      return []
-    default:
-      return []
-  }
+  return []
 }
 
 export function resolveSetupWizardAssistantSelection(input: {
-  initialApiKeyEnv?: string | null
-  initialBaseUrl?: string | null
-  initialProvider?: SetupWizardAssistantProvider
-  initialProviderName?: string | null
   method: SetupWizardAssistantMethod
   provider: SetupWizardAssistantProvider
 }): SetupWizardResolvedAssistantSelection {
-  const preservedSelection =
-    input.initialProvider === input.provider
-      ? {
-          apiKeyEnv: normalizeSetupWizardText(input.initialApiKeyEnv),
-          baseUrl: normalizeSetupWizardText(input.initialBaseUrl),
-          providerName: normalizeSetupWizardText(input.initialProviderName),
-        }
-      : {
-          apiKeyEnv: null,
-          baseUrl: null,
-          providerName: null,
-        }
-
-  if (input.provider === 'skip') {
+  if (input.provider === 'skip' || input.method === 'skip') {
     return {
-      apiKeyEnv: null,
-      baseUrl: null,
       detail: 'Murph will leave your current assistant settings alone for now.',
       methodLabel: null,
       oss: null,
       preset: 'skip',
       providerLabel: 'Skip for now',
-      providerName: null,
       summary: 'Skip for now',
     }
   }
 
-  if (input.provider === 'openai') {
-    if (input.method === 'openai-api-key') {
-      const apiKeyEnv = preservedSelection.apiKeyEnv ?? 'OPENAI_API_KEY'
-      return {
-        apiKeyEnv,
-        baseUrl: preservedSelection.baseUrl ?? DEFAULT_SETUP_OPENAI_API_BASE_URL,
-        detail: `Murph will use ${apiKeyEnv} and ask which model to save next.`,
-        methodLabel: 'OpenAI API key',
-        oss: false,
-        preset: 'openai-compatible',
-        providerLabel: 'OpenAI',
-        providerName: preservedSelection.providerName ?? 'openai',
-        summary: 'OpenAI · API key',
-      }
-    }
-
+  if (input.provider === 'codex-local' || input.method === 'codex-local') {
     return {
-      apiKeyEnv: null,
-      baseUrl: null,
-      detail:
-        'Murph will use your saved Codex / ChatGPT sign-in and ask which model id to use next.',
-      methodLabel: 'ChatGPT / Codex sign-in',
-      oss: false,
+      detail: 'Murph will ask which local model id to save next.',
+      methodLabel: null,
+      oss: true,
       preset: 'codex',
-      providerLabel: 'OpenAI',
-      providerName: null,
-      summary: 'OpenAI · ChatGPT / Codex sign-in',
+      providerLabel: 'Codex local model',
+      summary: 'Codex local model',
     }
   }
 
-  if (input.provider === 'custom') {
-    if (input.method === 'compatible-codex-local') {
-      return {
-        apiKeyEnv: null,
-        baseUrl: null,
-        detail: 'Murph will keep the Codex flow and ask which local model to save next.',
-        methodLabel: 'Codex local model',
-        oss: true,
-        preset: 'codex',
-        providerLabel: 'Custom endpoint',
-        providerName: null,
-        summary: 'Custom endpoint · Codex local model',
-      }
-    }
-
-    return {
-      apiKeyEnv: preservedSelection.apiKeyEnv,
-      baseUrl:
-        preservedSelection.baseUrl ?? DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
-      detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
-      methodLabel: 'Compatible endpoint',
-      oss: false,
-      preset: 'openai-compatible',
-      providerLabel: 'Custom endpoint',
-      providerName: preservedSelection.providerName,
-      summary: 'Custom endpoint · Compatible endpoint',
-    }
-  }
-
-  const preset =
-    resolveOpenAICompatibleProviderPresetFromId(input.provider) ??
-    resolveOpenAICompatibleProviderPresetFromId('custom')
-  const apiKeyEnv = normalizeSetupWizardAssistantApiKeyEnv({
-    preservedApiKeyEnv: preservedSelection.apiKeyEnv,
-    preset,
-  })
   return {
-    apiKeyEnv,
-    baseUrl:
-      preservedSelection.baseUrl ??
-      preset?.baseUrl ??
-      DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
-    detail: buildSetupWizardNamedProviderSelectionDetail({
-      apiKeyEnv,
-      preset,
-    }),
+    detail: 'Murph will use your saved Codex / ChatGPT sign-in.',
     methodLabel: null,
     oss: false,
-    preset: 'openai-compatible',
-    providerLabel: preset?.title ?? 'OpenAI-compatible provider',
-    providerName: preservedSelection.providerName ?? preset?.providerName ?? null,
-    summary: preset?.title ?? 'OpenAI-compatible provider',
+    preset: 'codex',
+    providerLabel: 'ChatGPT / Codex sign-in',
+    summary: 'ChatGPT / Codex sign-in',
   }
-}
-
-function normalizeSetupWizardAssistantApiKeyEnv(input: {
-  preservedApiKeyEnv: string | null
-  preset: OpenAICompatibleProviderPreset | null | undefined
-}): string | null {
-  if (!input.preset) {
-    return input.preservedApiKeyEnv
-  }
-
-  if (looksLikeInlineApiKey(input.preservedApiKeyEnv)) {
-    return input.preset.apiKeyEnv
-  }
-
-  return input.preservedApiKeyEnv ?? input.preset.apiKeyEnv ?? null
-}
-
-function looksLikeInlineApiKey(value: string | null): boolean {
-  if (!value) {
-    return false
-  }
-
-  return /^(?:AIza|vck_|sk-|sk_|pk_|hf_|nvapi-|xai-|gsk_|csk_|fn_|tgp_)/iu.test(value)
 }
 
 export function buildSetupWizardAssistantProviderBadges(input: {
@@ -430,21 +224,12 @@ export function buildSetupWizardAssistantProviderBadges(input: {
 }): SetupWizardInlineBadge[] {
   const badges: SetupWizardInlineBadge[] = []
 
-  if (input.provider === 'skip') {
-    badges.push({ label: 'no change', tone: 'muted' })
-  } else if (input.provider === 'custom') {
-    badges.push({ label: 'manual', tone: 'accent' })
+  if (input.provider === 'codex-cloud') {
+    badges.push({ label: 'recommended', tone: 'success' })
+  } else if (input.provider === 'codex-local') {
+    badges.push({ label: 'local', tone: 'accent' })
   } else {
-    const preset = resolveOpenAICompatibleProviderPresetFromId(input.provider)
-    if (preset?.id === 'openai') {
-      badges.push({ label: 'recommended', tone: 'success' })
-    } else if (preset?.kind === 'local') {
-      badges.push({ label: 'local', tone: 'accent' })
-    } else if (preset?.kind === 'gateway') {
-      badges.push({ label: 'gateway', tone: 'accent' })
-    } else {
-      badges.push({ label: 'hosted', tone: 'muted' })
-    }
+    badges.push({ label: 'no change', tone: 'muted' })
   }
 
   if (input.currentProvider === input.provider) {
@@ -489,12 +274,8 @@ export async function runSetupAssistantWizard(
     const { exit } = useApp()
     const initialAssistantProvider = normalizeSetupAssistantWizardProvider(
       inferSetupWizardAssistantProvider({
-        apiKeyEnv: input.initialAssistantApiKeyEnv,
-        baseUrl: input.initialAssistantBaseUrl,
         oss: input.initialAssistantOss,
         preset: initialAssistantPreset,
-        providerName: input.initialAssistantProviderName,
-        providerPreset: input.initialAssistantProviderPreset,
       }),
     )
     const initialAssistantMethod = inferSetupWizardAssistantMethod({
@@ -503,17 +284,11 @@ export async function runSetupAssistantWizard(
       provider: initialAssistantProvider,
     })
     const assistantProviderOptions = listSetupAssistantWizardProviderOptions()
-    const [step, setStep] = React.useState<
-      'assistant-provider' | 'assistant-method' | 'confirm'
-    >('assistant-provider')
+    const [step, setStep] = React.useState<'assistant-provider' | 'confirm'>(
+      'assistant-provider',
+    )
     const [assistantProviderIndex, setAssistantProviderIndex] = React.useState(
       findSetupAssistantWizardProviderIndex(initialAssistantProvider),
-    )
-    const [assistantMethodIndex, setAssistantMethodIndex] = React.useState(
-      findSetupWizardAssistantMethodIndex(
-        initialAssistantProvider,
-        initialAssistantMethod,
-      ),
     )
     const [selectedAssistantProvider, setSelectedAssistantProvider] =
       React.useState<SetupWizardAssistantProvider>(initialAssistantProvider)
@@ -521,123 +296,46 @@ export async function runSetupAssistantWizard(
       SetupWizardAssistantMethod
     >(initialAssistantMethod)
     const assistantSelection = resolveSetupWizardAssistantSelection({
-      initialApiKeyEnv: input.initialAssistantApiKeyEnv,
-      initialBaseUrl: input.initialAssistantBaseUrl,
-      initialProvider: initialAssistantProvider,
-      initialProviderName: input.initialAssistantProviderName,
       method: selectedAssistantMethod,
       provider: selectedAssistantProvider,
     })
     const latestAssistantRef = React.useRef<SetupWizardResolvedAssistantSelection>(
       assistantSelection,
     )
-    const includeAssistantMethodStep = doesSetupWizardAssistantProviderRequireMethod(
-      selectedAssistantProvider,
-    )
 
     React.useEffect(() => {
       latestAssistantRef.current = assistantSelection
     }, [assistantSelection])
 
-    React.useEffect(() => {
-      setAssistantMethodIndex(
-        findSetupWizardAssistantMethodIndex(
-          selectedAssistantProvider,
-          selectedAssistantMethod,
-        ),
-      )
-    }, [selectedAssistantMethod, selectedAssistantProvider])
-
-    type SetupAssistantWizardSelectionConfig = {
-      lines: SetupWizardSelectionLine[]
-      marker: 'radio'
-      nextStep: 'assistant-method' | 'confirm'
-      previousStep: 'assistant-provider' | 'assistant-method'
-      setIndex: React.Dispatch<React.SetStateAction<number>>
-      step: 'assistant-provider' | 'assistant-method'
-      stepIntro?: string
-      toggleCurrent: () => void
-    }
-
-    const assistantMethodOptions = listSetupWizardAssistantMethodOptions(
-      selectedAssistantProvider,
+    const selectionLines: SetupWizardSelectionLine[] = assistantProviderOptions.map(
+      (option, index) => ({
+        active: index === assistantProviderIndex,
+        badges: buildSetupWizardAssistantProviderBadges({
+          currentProvider: initialAssistantProvider,
+          provider: option.provider,
+        }),
+        description: option.description,
+        key: option.provider,
+        selected: option.provider === selectedAssistantProvider,
+        title: option.title,
+      }),
     )
-    const selectionSteps: Record<
-      'assistant-provider' | 'assistant-method',
-      SetupAssistantWizardSelectionConfig
-    > = {
-      'assistant-provider': {
-        lines: assistantProviderOptions.map((option, index) => ({
-          active: index === assistantProviderIndex,
-          badges: buildSetupWizardAssistantProviderBadges({
-            currentProvider: initialAssistantProvider,
-            provider: option.provider,
-          }),
-          description: option.description,
-          key: option.provider,
-          selected: option.provider === selectedAssistantProvider,
-          title: option.title,
-        })),
-        marker: 'radio',
-        nextStep: includeAssistantMethodStep ? 'assistant-method' : 'confirm',
-        previousStep: 'assistant-provider',
-        setIndex: setAssistantProviderIndex,
-        step: 'assistant-provider',
-        stepIntro: formatSetupAssistantWizardStepIntro(
-          'assistant-provider',
-          selectedAssistantProvider,
-        ),
-        toggleCurrent: () => {
-          const activeProvider =
-            assistantProviderOptions[assistantProviderIndex]?.provider
-          if (!activeProvider) {
-            return
-          }
 
-          const nextMethod = resolveSetupWizardAssistantMethodForProvider({
-            currentMethod: selectedAssistantMethod,
-            provider: activeProvider,
-          })
-          setSelectedAssistantProvider(activeProvider)
-          setSelectedAssistantMethod(nextMethod)
-          setAssistantMethodIndex(
-            findSetupWizardAssistantMethodIndex(activeProvider, nextMethod),
-          )
-        },
-      },
-      'assistant-method': {
-        lines: assistantMethodOptions.map((option, index) => ({
-          active: index === assistantMethodIndex,
-          badges: buildSetupWizardAssistantMethodBadges({
-            currentMethod: initialAssistantMethod,
-            method: option.method,
-            optionBadges: option.badges,
-          }),
-          description: option.description,
-          detail: option.detail,
-          key: option.method,
-          selected: option.method === selectedAssistantMethod,
-          title: option.title,
-        })),
-        marker: 'radio',
-        nextStep: 'confirm',
-        previousStep: 'assistant-provider',
-        setIndex: setAssistantMethodIndex,
-        step: 'assistant-method',
-        stepIntro: formatSetupAssistantWizardStepIntro(
-          'assistant-method',
-          selectedAssistantProvider,
-        ),
-        toggleCurrent: () => {
-          const activeMethod = assistantMethodOptions[assistantMethodIndex]?.method
-          if (activeMethod) {
-            setSelectedAssistantMethod(activeMethod)
-          }
-        },
-      },
+    const toggleCurrent = () => {
+      const activeProvider =
+        assistantProviderOptions[assistantProviderIndex]?.provider
+      if (!activeProvider) {
+        return
+      }
+
+      setSelectedAssistantProvider(activeProvider)
+      setSelectedAssistantMethod(
+        resolveSetupWizardAssistantMethodForProvider({
+          currentMethod: selectedAssistantMethod,
+          provider: activeProvider,
+        }),
+      )
     }
-
-    const selectionStep = step === 'confirm' ? null : selectionSteps[step]
 
     useInput((value, key) => {
       if ((key.ctrl && value === 'c') || value.toLowerCase() === 'q') {
@@ -648,73 +346,55 @@ export async function runSetupAssistantWizard(
         return
       }
 
-      if (selectionStep) {
+      if (step === 'assistant-provider') {
         if (key.upArrow) {
-          selectionStep.setIndex((current) =>
-            wrapSetupWizardIndex(current, selectionStep.lines.length, -1),
+          setAssistantProviderIndex((current) =>
+            wrapSetupWizardIndex(current, selectionLines.length, -1),
           )
           return
         }
 
         if (key.downArrow) {
-          selectionStep.setIndex((current) =>
-            wrapSetupWizardIndex(current, selectionStep.lines.length, 1),
+          setAssistantProviderIndex((current) =>
+            wrapSetupWizardIndex(current, selectionLines.length, 1),
           )
           return
         }
 
         if (value === ' ') {
-          selectionStep.toggleCurrent()
+          toggleCurrent()
           return
         }
 
         if (key.escape) {
-          if (selectionStep.step === 'assistant-provider') {
-            completion.fail(
-              new VaultCliError(
-                'setup_cancelled',
-                'Murph model selection was cancelled.',
-              ),
-            )
-            exit()
-            return
-          }
-
-          setStep(selectionStep.previousStep)
+          completion.fail(
+            new VaultCliError(
+              'setup_cancelled',
+              'Murph model selection was cancelled.',
+            ),
+          )
+          exit()
           return
         }
 
         if (key.return) {
-          if (selectionStep.step === 'assistant-provider') {
-            const activeProvider =
-              assistantProviderOptions[assistantProviderIndex]?.provider ??
-              selectedAssistantProvider
-            selectionStep.toggleCurrent()
-            setStep(
-              doesSetupWizardAssistantProviderRequireMethod(activeProvider)
-                ? 'assistant-method'
-                : 'confirm',
-            )
-            return
-          }
-
-          selectionStep.toggleCurrent()
-          setStep(selectionStep.nextStep)
+          toggleCurrent()
+          setStep('confirm')
         }
         return
       }
 
       if (key.escape || key.leftArrow) {
-        setStep(includeAssistantMethodStep ? 'assistant-method' : 'assistant-provider')
+        setStep('assistant-provider')
         return
       }
 
       if (key.return || value === ' ') {
-        if (latestAssistantRef.current.preset === 'skip') {
+        if (latestAssistantRef.current.preset !== 'codex') {
           completion.fail(
             new VaultCliError(
               'invalid_option',
-              'Assistant-only model selection must resolve to a saved backend.',
+              'Assistant-only model selection must resolve to a saved Codex backend.',
             ),
           )
           exit()
@@ -722,11 +402,8 @@ export async function runSetupAssistantWizard(
         }
 
         completion.submit({
-          assistantApiKeyEnv: latestAssistantRef.current.apiKeyEnv,
-          assistantBaseUrl: latestAssistantRef.current.baseUrl,
           assistantOss: latestAssistantRef.current.oss,
           assistantPreset: latestAssistantRef.current.preset,
-          assistantProviderName: latestAssistantRef.current.providerName,
         })
         exit()
       }
@@ -734,85 +411,63 @@ export async function runSetupAssistantWizard(
 
     const completedBlocks: React.ReactElement[] = []
 
-    if (step !== 'assistant-provider') {
+    if (step === 'confirm') {
       completedBlocks.push(
         createSetupWizardAnsweredBlock(
           {
-            label: formatSetupAssistantWizardPromptTitle(
-              'assistant-provider',
-              selectedAssistantProvider,
-            ),
+            label: formatSetupAssistantWizardPromptTitle('assistant-provider'),
             value: assistantSelection.providerLabel,
+            detail: assistantSelection.detail,
           },
           'completed-assistant-provider',
         ),
       )
     }
 
-    if (step === 'confirm' && includeAssistantMethodStep) {
-      completedBlocks.push(
-        createSetupWizardAnsweredBlock(
-          {
-            label: formatSetupAssistantWizardPromptTitle(
-              'assistant-method',
-              selectedAssistantProvider,
-            ),
-            value: assistantSelection.methodLabel ?? 'Skip',
-            detail: assistantSelection.detail,
-          },
-          'completed-assistant-method',
-        ),
-      )
-    }
-
-    const activePanel = selectionStep
-      ? createSetupWizardPanel({
-          title: formatSetupAssistantWizardPromptTitle(
-            selectionStep.step,
-            selectedAssistantProvider,
-          ),
-          tone: 'accent',
-          children: [
-            selectionStep.stepIntro
-              ? createElement(
-                  Text,
-                  { color: resolveSetupWizardToneColor('muted') },
-                  selectionStep.stepIntro,
-                )
-              : null,
-            selectionStep.stepIntro ? createElement(Text, null, '') : null,
-            ...selectionStep.lines.map((line) =>
-              createSetupWizardSelectionRow(
-                {
-                  line,
-                  marker: selectionStep.marker,
-                },
-                line.key,
+    const activePanel =
+      step === 'assistant-provider'
+        ? createSetupWizardPanel({
+            title: formatSetupAssistantWizardPromptTitle('assistant-provider'),
+            tone: 'accent',
+            children: [
+              createElement(
+                Text,
+                { color: resolveSetupWizardToneColor('muted') },
+                formatSetupAssistantWizardStepIntro(),
               ),
-            ),
-          ],
-        })
-      : createSetupWizardPanel({
-          title: 'Review',
-          tone: 'accent',
-          children: [
-            createSetupWizardKeyValueRow(
-              {
-                label: 'Assistant',
-                value: assistantSelection.summary,
-              },
-              'confirm-assistant',
-            ),
-            createSetupWizardBulletRow(
-              {
-                body: 'Murph will ask for any remaining model or endpoint details next, then save this backend as your default.',
-                label: 'Next',
-                tone: 'accent',
-              },
-              'confirm-next',
-            ),
-          ],
-        })
+              createElement(Text, null, ''),
+              ...selectionLines.map((line) =>
+                createSetupWizardSelectionRow(
+                  {
+                    line,
+                    marker: 'radio',
+                  },
+                  line.key,
+                ),
+              ),
+            ],
+          })
+        : createSetupWizardPanel({
+            title: 'Review',
+            tone: 'accent',
+            children: [
+              createSetupWizardKeyValueRow(
+                {
+                  label: 'Assistant',
+                  value: assistantSelection.summary,
+                },
+                'confirm-assistant',
+              ),
+              createSetupWizardBulletRow(
+                {
+                  body: 'Murph will ask for any remaining Codex model details next, then save this backend as your default.',
+                  label: 'Next',
+                  tone: 'accent',
+                },
+                'confirm-next',
+              ),
+            ],
+          })
 
     return createElement(
       Box,
@@ -829,7 +484,7 @@ export async function runSetupAssistantWizard(
       createElement(
         Text,
         { color: resolveSetupWizardToneColor('muted') },
-        'Choose the default assistant path first. Murph will ask for any remaining details next.',
+        'Choose the default Codex assistant path first. Murph will ask for model details next.',
       ),
       createElement(Text, null, ''),
       ...completedBlocks,
@@ -838,7 +493,6 @@ export async function runSetupAssistantWizard(
       createSetupWizardHintRow(
         resolveSetupAssistantWizardHints({
           step,
-          selectionStep,
         }),
       ),
     )
@@ -870,23 +524,14 @@ export async function runSetupAssistantWizard(
 }
 
 function resolveSetupAssistantWizardHints(input: {
-  step: 'assistant-provider' | 'assistant-method' | 'confirm'
-  selectionStep:
-    | {
-        step: 'assistant-provider' | 'assistant-method'
-      }
-    | null
+  step: 'assistant-provider' | 'confirm'
 }): SetupWizardHint[] {
-  if (input.selectionStep) {
+  if (input.step === 'assistant-provider') {
     return [
       { label: '↑/↓ move', tone: 'muted' },
       { label: 'Space choose', tone: 'accent' },
       { label: 'Enter next', tone: 'success' },
-      {
-        label:
-          input.selectionStep.step === 'assistant-provider' ? 'Esc cancel' : 'Esc back',
-        tone: 'muted',
-      },
+      { label: 'Esc cancel', tone: 'muted' },
       { label: 'q quit', tone: 'muted' },
     ]
   }
@@ -899,125 +544,11 @@ function resolveSetupAssistantWizardHints(input: {
 }
 
 function formatSetupAssistantWizardPromptTitle(
-  step: 'assistant-provider' | 'assistant-method' | 'confirm',
-  provider: SetupWizardAssistantProvider,
+  _step: 'assistant-provider' | 'confirm',
 ): string {
-  switch (step) {
-    case 'assistant-provider':
-      return 'How should Murph answer?'
-    case 'assistant-method':
-      return provider === 'openai'
-        ? 'How should Murph connect to OpenAI?'
-        : 'How should Murph connect to your endpoint?'
-    case 'confirm':
-      return 'Review'
-  }
+  return 'How should Murph answer?'
 }
 
-function formatSetupAssistantWizardStepIntro(
-  step: 'assistant-provider' | 'assistant-method',
-  provider: SetupWizardAssistantProvider,
-): string | undefined {
-  switch (step) {
-    case 'assistant-provider':
-      return 'Choose the provider or endpoint style Murph should use by default.'
-    case 'assistant-method':
-      return provider === 'openai'
-        ? 'Pick the OpenAI path that fits you best.'
-        : 'Choose a manual endpoint or keep the Codex local-model flow.'
-  }
-}
-
-function resolveSetupWizardCompatibleProviderPreset(input: {
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  providerName?: string | null
-}): OpenAICompatibleProviderPreset | null {
-  const normalizedBaseUrl = normalizeSetupWizardText(input.baseUrl)
-  if (normalizedBaseUrl !== null) {
-    const preset = resolveOpenAICompatibleProviderPreset({
-      baseUrl: normalizedBaseUrl,
-    })
-    return preset?.id === 'openai' ? null : preset
-  }
-
-  const normalizedProviderName = normalizeSetupWizardText(input.providerName)
-  if (normalizedProviderName !== null) {
-    const preset = resolveOpenAICompatibleProviderPreset({
-      providerName: normalizedProviderName,
-    })
-    return preset?.id === 'openai' ? null : preset
-  }
-
-  const preset = resolveOpenAICompatibleProviderPreset({
-    apiKeyEnv: input.apiKeyEnv,
-  })
-
-  return preset?.id === 'openai' ? null : preset
-}
-
-function buildSetupWizardAssistantProviderDescription(
-  preset: OpenAICompatibleProviderPreset,
-): string {
-  if (preset.id === 'openai') {
-    return 'Use OpenAI. You can choose ChatGPT / Codex sign-in or an API key next.'
-  }
-
-  if (preset.kind === 'local') {
-    return `Use ${preset.title} through its local OpenAI-compatible server.`
-  }
-
-  if (preset.kind === 'gateway') {
-    return `Use ${preset.title} as an OpenAI-compatible gateway.`
-  }
-
-  return `Use ${preset.title} and choose a model during setup.`
-}
-
-function buildSetupWizardNamedProviderSelectionDetail(input: {
-  apiKeyEnv: string | null
-  preset: OpenAICompatibleProviderPreset | null
-}): string {
-  const providerTitle = input.preset?.title ?? 'this provider'
-
-  if (input.apiKeyEnv) {
-    return `Murph will use ${providerTitle} and read the key from ${input.apiKeyEnv}. It will ask which model to save next.`
-  }
-
-  return `Murph will use ${providerTitle} and ask which model to save next.`
-}
-
-function isOpenAIAssistantSelection(input: {
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  providerName?: string | null
-}): boolean {
-  const normalizedProviderName = normalizeSetupWizardText(input.providerName)
-  if (normalizedProviderName !== null) {
-    return (
-      resolveOpenAICompatibleProviderPreset({
-        providerName: normalizedProviderName,
-      })?.id === 'openai'
-    )
-  }
-
-  const normalizedBaseUrl = normalizeSetupWizardText(input.baseUrl)
-  if (normalizedBaseUrl !== null) {
-    return (
-      resolveOpenAICompatibleProviderPreset({
-        baseUrl: normalizedBaseUrl,
-      })?.id === 'openai'
-    )
-  }
-
-  return (
-    resolveOpenAICompatibleProviderPreset({
-      apiKeyEnv: input.apiKeyEnv,
-    })?.id === 'openai'
-  )
-}
-
-function normalizeSetupWizardText(value: string | null | undefined): string | null {
-  const trimmed = value?.trim()
-  return trimmed ? trimmed : null
+function formatSetupAssistantWizardStepIntro(): string {
+  return 'Choose the Codex path Murph should use by default.'
 }

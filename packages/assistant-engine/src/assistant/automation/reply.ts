@@ -1,7 +1,7 @@
 import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
-import type { AssistantUserMessageContentPart } from '../../model-harness.js'
+import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type { AssistantAcceptedTurnInputItemInput } from '../active-turn-input-journal.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {

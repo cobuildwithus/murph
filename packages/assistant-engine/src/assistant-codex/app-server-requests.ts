@@ -5,7 +5,10 @@ import type {
   AssistantApprovalPolicy,
   AssistantSandbox,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type { CodexAppServerTurnInput } from '../assistant-codex.js'
+import type {
+  CodexAppServerSteerInput,
+  CodexAppServerTurnInput,
+} from '../assistant-codex.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
@@ -24,6 +27,13 @@ export type CodexAppServerInputItem =
       type: 'localImage'
       path: string
     }
+
+export type CodexAppServerSteerRequestInput = Omit<
+  CodexAppServerSteerInput,
+  'images'
+> & {
+  imagePaths?: readonly string[] | null
+}
 
 export function buildCodexThreadStartParams(
   input: CodexAppServerTurnInput & {
@@ -61,6 +71,7 @@ export function buildCodexThreadContextParams(input: {
     approvalPolicy: mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
     cwd: input.input.workingDirectory,
     model: normalizeNullableString(input.input.model),
+    modelProvider: normalizeNullableString(input.input.modelProvider),
     sandbox: mapCodexAppServerSandboxMode(input.input.sandbox),
     serviceName: input.includeServiceName ? CODEX_RPC_CLIENT_NAME : undefined,
   })
@@ -81,6 +92,41 @@ export function buildCodexTurnStartParams(input: {
     }),
     threadId: input.providerSessionId,
   })
+}
+
+export function buildCodexTurnSteerParams(
+  input: CodexAppServerSteerRequestInput,
+): Record<string, unknown> {
+  return stripUndefinedRpcParams({
+    expectedTurnId: assertCodexRpcIdentifier({
+      field: 'turnId',
+      value: input.turnId,
+    }),
+    input: buildCodexAppServerInputItems({
+      imagePaths: input.imagePaths ?? [],
+      prompt: input.prompt,
+    }),
+    threadId: assertCodexRpcIdentifier({
+      field: 'threadId',
+      value: input.threadId,
+    }),
+  })
+}
+
+export function buildCodexTurnInterruptParams(input: {
+  threadId: string
+  turnId: string
+}): Record<string, unknown> {
+  return {
+    threadId: assertCodexRpcIdentifier({
+      field: 'threadId',
+      value: input.threadId,
+    }),
+    turnId: assertCodexRpcIdentifier({
+      field: 'turnId',
+      value: input.turnId,
+    }),
+  }
 }
 
 export function buildCodexAppServerInputItems(input: {
@@ -141,6 +187,25 @@ export function resolveSupportedCodexAppServerApprovalPolicy(
     `Codex app-server approval policy "${approvalPolicy}" is not supported in noninteractive assistant turns. Use approvalPolicy=never.`,
     {
       approvalPolicy,
+      retryable: false,
+    },
+  )
+}
+
+function assertCodexRpcIdentifier(input: {
+  field: 'threadId' | 'turnId'
+  value: string
+}): string {
+  const normalized = normalizeNullableString(input.value)
+  if (normalized) {
+    return normalized
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+    `Codex app-server ${input.field} is required for live turn requests.`,
+    {
+      field: input.field,
       retryable: false,
     },
   )

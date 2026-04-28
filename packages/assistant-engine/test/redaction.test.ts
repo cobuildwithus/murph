@@ -108,28 +108,23 @@ describe('assistant redaction helpers', () => {
     })
   })
 
-  it('redacts provider and session headers only on supported target shapes', () => {
+  it('leaves Codex provider and session display data free of legacy headers', () => {
     const providerOptions = redactAssistantProviderOptionsForDisplay({
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       approvalPolicy: 'never',
       continuityFingerprint: 'fingerprint-provider',
-      executionDriver: 'openai-compatible',
-      headers: {
-        Authorization: 'Bearer provider-secret',
-        'X-Trace': 'trace-123',
-      },
+      executionDriver: 'codex-app-server',
       model: 'gpt-5.4',
+      modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
-      providerName: 'murph-openai',
       reasoningEffort: 'medium',
-      resumeKind: null,
+      resumeKind: 'codex-thread',
       sandbox: 'workspace-write',
+      codexHome: '/tmp/codex-home',
     })
-    expect(providerOptions.headers).toEqual({
-      Authorization: '[REDACTED]',
-      'X-Trace': 'trace-123',
-    })
+    expect(providerOptions.codexHome).toBe('[path]')
+    expect(providerOptions.headers).toBeNull()
 
     const session = redactAssistantSessionForDisplay({
       schema: 'murph.assistant-session.v1',
@@ -145,79 +140,53 @@ describe('assistant redaction helpers', () => {
       },
       createdAt: '2026-04-08T00:00:00.000Z',
       lastTurnAt: null,
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerOptions: {
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
         approvalPolicy: 'never',
         continuityFingerprint: 'fingerprint-session',
-        executionDriver: 'openai-compatible',
-        headers: {
-          Authorization: 'Bearer session-secret',
-          'X-Trace': 'trace-789',
-        },
+        executionDriver: 'codex-app-server',
         model: 'gpt-5.4',
+        modelProvider: 'vercel-ai-gateway',
         oss: false,
         profile: null,
-        providerName: 'murph-openai',
         reasoningEffort: 'medium',
-        resumeKind: null,
+        resumeKind: 'codex-thread',
         sandbox: 'workspace-write',
+        codexHome: '/tmp/codex-home',
       },
       resumeState: null,
       sessionId: 'session-alpha',
       target: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        endpoint: 'https://api.example.com/v1',
-        headers: {
-          Authorization: 'Bearer target-secret',
-          'X-Trace': 'trace-321',
-        },
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: '/tmp/codex-cli',
+        codexHome: '/tmp/codex-home',
         model: 'gpt-5.4',
-        presetId: null,
-        providerName: 'murph-openai',
+        modelProvider: 'vercel-ai-gateway',
+        oss: false,
+        profile: null,
         reasoningEffort: 'medium',
-        webSearch: null,
+        sandbox: 'workspace-write',
       },
       turnCount: 0,
       updatedAt: '2026-04-08T00:00:00.000Z',
     })
-    expect(session.target).toMatchObject({
-      adapter: 'openai-compatible',
-      headers: {
-        Authorization: '[REDACTED]',
-        'X-Trace': 'trace-321',
-      },
+    expect(session.target).toEqual({
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: '[path]',
+      codexHome: '[path]',
+      model: 'gpt-5.4',
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+      profile: null,
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
     })
-    expect(session.providerOptions.headers).toEqual({
-      Authorization: '[REDACTED]',
-      'X-Trace': 'trace-789',
-    })
+    expect(session.providerOptions.codexHome).toBe('[path]')
+    expect(session.providerOptions.headers).toBeNull()
     expect(session.resumeState).toBeNull()
-
-    const codexSession = redactAssistantSessionForDisplay({
-      ...session,
-      target: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        model: 'gpt-5.4',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'workspace-write',
-      },
-    })
-      expect(codexSession.target).toEqual({
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        model: 'gpt-5.4',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'workspace-write',
-      })
 
     expect(
       redactAssistantSessionsForDisplay([session]).map((entry) => entry.sessionId),

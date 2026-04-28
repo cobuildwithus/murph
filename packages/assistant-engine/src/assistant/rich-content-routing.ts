@@ -1,4 +1,4 @@
-import type { AssistantUserMessageContentPart } from '../model-harness.js'
+import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { ResolvedAssistantFailoverRoute } from './failover.js'
 import { resolveAssistantProviderTargetCapabilities } from './provider-registry.js'
 import type { AssistantUserMessageContentType } from './providers/types.js'

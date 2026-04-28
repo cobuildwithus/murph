@@ -2,7 +2,6 @@ import * as React from 'react'
 import { render } from 'ink'
 import {
   type SetupAssistantPreset,
-  type SetupAssistantProviderPreset,
   type SetupChannel,
   type SetupWearable,
 } from '@murphai/operator-config/setup-cli-contracts'
@@ -59,11 +58,8 @@ export {
 } from './setup-wizard-options.js'
 
 export interface SetupWizardResult {
-  assistantApiKeyEnv?: string | null
-  assistantBaseUrl?: string | null
   assistantOss?: boolean | null
   assistantPreset?: SetupAssistantPreset
-  assistantProviderName?: string | null
   channels: SetupChannel[]
   scheduledUpdates: string[]
   wearables: SetupWearable[]
@@ -73,12 +69,8 @@ export interface SetupWizardInput {
   channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
   commandName?: string
   deviceSyncLocalBaseUrl?: string | null
-  initialAssistantApiKeyEnv?: string | null
-  initialAssistantBaseUrl?: string | null
   initialAssistantOss?: boolean | null
   initialAssistantPreset?: SetupAssistantPreset
-  initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
-  initialAssistantProviderName?: string | null
   initialChannels?: readonly SetupChannel[]
   initialScheduledUpdates?: readonly string[]
   initialWearables?: readonly SetupWearable[]
@@ -129,12 +121,8 @@ export async function runSetupWizard(
         commandName,
         defaultScheduledUpdateIds,
         deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
-        initialAssistantApiKeyEnv: input.initialAssistantApiKeyEnv,
-        initialAssistantBaseUrl: input.initialAssistantBaseUrl,
         initialAssistantOss: input.initialAssistantOss,
         initialAssistantPreset,
-        initialAssistantProviderName: input.initialAssistantProviderName,
-        initialAssistantProviderPreset: input.initialAssistantProviderPreset,
         initialChannels,
         initialScheduledUpdates,
         initialWearables,

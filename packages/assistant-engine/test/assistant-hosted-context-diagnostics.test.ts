@@ -153,14 +153,12 @@ describe('hosted assistant context diagnostics', () => {
     ])
 
     const providerOptions = serializeAssistantProviderSessionOptions({
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'https://api.example.test/v1',
-      headers: null,
-      model: 'gpt-4.1',
-      provider: 'openai-compatible',
-      providerName: 'murph-openai',
-      reasoningEffort: 'high',
-      zeroDataRetention: null,
+      approvalPolicy: 'never',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
     })
     const target = createAssistantModelTarget(providerOptions)
     if (!target) {
@@ -182,7 +180,7 @@ describe('hosted assistant context diagnostics', () => {
         },
         createdAt: '2026-04-25T09:00:00.000Z',
         lastTurnAt: null,
-        provider: target.adapter,
+        provider: 'codex-cli',
         providerOptions,
         resumeState: null,
         schema: 'murph.assistant-session.v1',

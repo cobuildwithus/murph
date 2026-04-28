@@ -28,7 +28,6 @@ import {
   getDefaultSetupAssistantPreset,
   hasExplicitSetupAssistantOptions,
   inferSetupAssistantPresetFromOptions,
-  resolveSetupAssistantProviderPreset,
 } from '../src/setup-assistant.js'
 
 function encodeBase64Url(value: string): string {
@@ -54,46 +53,24 @@ function createSetupOptions(
   }
 }
 
-function createDiscoveredModel(id: string) {
-  return {
-    id,
-    label: id,
-    description: `${id} description`,
-    source: 'discovered' as const,
-    capabilities: {
-      images: false,
-      pdf: false,
-      reasoning: true,
-      streaming: true,
-      tools: true,
-    },
-  }
-}
-
-test('setup assistant option normalization infers presets from explicit assistant inputs', () => {
+test('setup assistant option normalization infers Codex presets and rejects legacy provider inputs', () => {
   assert.equal(getDefaultSetupAssistantPreset(), 'codex')
   assert.equal(hasExplicitSetupAssistantOptions({}), false)
   assert.equal(
     hasExplicitSetupAssistantOptions({
-      assistantModel: 'gpt-5.4',
+      assistantModel: 'gpt-5.5',
+    }),
+    true,
+  )
+  assert.equal(
+    hasExplicitSetupAssistantOptions({
+      assistantModelProvider: 'vercel-ai-gateway',
     }),
     true,
   )
   assert.equal(
     inferSetupAssistantPresetFromOptions({
-      assistantBaseUrl: 'https://openrouter.ai/api/v1',
-    }),
-    'openai-compatible',
-  )
-  assert.equal(
-    inferSetupAssistantPresetFromOptions({
-      assistantZeroDataRetention: true,
-    }),
-    'openai-compatible',
-  )
-  assert.equal(
-    inferSetupAssistantPresetFromOptions({
-      assistantModel: 'gpt-5.4',
+      assistantModel: 'gpt-5.5',
     }),
     'codex',
   )
@@ -104,16 +81,24 @@ test('setup assistant option normalization infers presets from explicit assistan
     'skip',
   )
   assert.equal(inferSetupAssistantPresetFromOptions({}), null)
+  assert.throws(
+    () =>
+      inferSetupAssistantPresetFromOptions({
+        assistantBaseUrl: 'https://example.test/v1',
+      }),
+    /OpenAI-compatible assistant setup options have been removed/u,
+  )
 })
 
-test('setup assistant defaults round-trip between saved operator defaults and setup options', () => {
+test('setup assistant defaults round-trip Codex defaults and quarantine legacy saved backends', () => {
   const codexDefaults: AssistantOperatorDefaults = {
     backend: {
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexCommand: 'codex',
       codexHome: '/tmp/codex-home',
-      model: 'gpt-5.4',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
       oss: true,
       profile: 'primary',
       reasoningEffort: 'medium',
@@ -130,7 +115,7 @@ test('setup assistant defaults round-trip between saved operator defaults and se
     },
     selfDeliveryTargets: null,
   }
-  const openAiDefaults: AssistantOperatorDefaults = {
+  const legacyDefaults: AssistantOperatorDefaults = {
     backend: {
       adapter: 'openai-compatible',
       apiKeyEnv: 'OPENROUTER_API_KEY',
@@ -156,49 +141,46 @@ test('setup assistant defaults round-trip between saved operator defaults and se
 
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(codexDefaults), {
     assistantPreset: 'codex',
-    assistantModel: 'gpt-5.4',
+    assistantModel: 'gpt-5.5',
+    assistantModelProvider: 'vercel-ai-gateway',
     assistantCodexCommand: 'codex',
     assistantCodexHome: '/tmp/codex-home',
     assistantProfile: 'primary',
     assistantReasoningEffort: 'medium',
     assistantOss: true,
   })
-  assert.deepEqual(buildSetupAssistantOptionsFromDefaults(openAiDefaults), {
-    assistantPreset: 'openai-compatible',
-    assistantProviderPreset: 'openrouter',
-    assistantModel: 'openrouter/auto',
-    assistantBaseUrl: 'https://openrouter.ai/api/v1',
-    assistantApiKeyEnv: 'OPENROUTER_API_KEY',
-    assistantProviderName: 'openrouter',
-    assistantReasoningEffort: 'high',
-  })
-  assert.equal(
-    formatSavedAssistantDefaultsSummary(codexDefaults),
-    'gpt-5.4 via Codex OSS app-server (Team account)',
+  assert.throws(
+    () => buildSetupAssistantOptionsFromDefaults(legacyDefaults),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
   assert.equal(
-    formatSavedAssistantDefaultsSummary(openAiDefaults),
-    'openrouter/auto via https://openrouter.ai/api/v1 (API key account)',
+    formatSavedAssistantDefaultsSummary(codexDefaults),
+    'gpt-5.5 via Codex OSS app-server (Team account)',
+  )
+  assert.throws(
+    () => formatSavedAssistantDefaultsSummary(legacyDefaults),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
   assert.equal(formatSavedAssistantDefaultsSummary(null), null)
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(null), {})
 })
 
-test('setup assistant summary helpers label accounts consistently for selected and saved defaults', () => {
+test('setup assistant summary helpers label Codex accounts consistently', () => {
   const assistant: SetupConfiguredAssistant = {
-    preset: 'openai-compatible',
+    preset: 'codex',
     enabled: true,
-    provider: 'openai-compatible',
-    model: 'gpt-4.1-mini',
+    provider: 'codex-cli',
+    model: 'gpt-5.5',
+    modelProvider: null,
     baseUrl: null,
-    apiKeyEnv: 'OPENROUTER_API_KEY',
-    providerName: 'openrouter',
+    apiKeyEnv: null,
+    providerName: null,
     codexCommand: null,
     codexHome: undefined,
     profile: null,
     reasoningEffort: 'high',
-    sandbox: null,
-    approvalPolicy: null,
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     oss: false,
     account: {
       source: 'codex-auth-json',
@@ -207,12 +189,12 @@ test('setup assistant summary helpers label accounts consistently for selected a
       planName: 'Plus',
       quota: null,
     },
-    detail: 'OpenRouter',
+    detail: 'Codex',
   }
 
   assert.equal(
     formatAssistantDefaultsSummary(assistant),
-    'gpt-4.1-mini via the saved OpenAI-compatible endpoint (Plus account)',
+    'gpt-5.5 via Codex app-server (Plus account)',
   )
   assert.equal(
     formatSetupAssistantAccountLabel(assistant.account),
@@ -231,10 +213,7 @@ test('setup assistant summary helpers label accounts consistently for selected a
   assert.equal(
     formatAssistantDefaultsSummary({
       ...assistant,
-      provider: 'codex-cli',
-      baseUrl: null,
       model: null,
-      oss: false,
       account: {
         source: 'codex-auth-json',
         kind: 'unknown',
@@ -245,85 +224,9 @@ test('setup assistant summary helpers label accounts consistently for selected a
     }),
     'the configured model via Codex app-server',
   )
-  assert.equal(
-    formatSavedAssistantDefaultsSummary({
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: 'codex',
-        codexHome: null,
-        model: null,
-        oss: false,
-        profile: null,
-        reasoningEffort: null,
-        sandbox: 'danger-full-access',
-      },
-      identityId: null,
-      failoverRoutes: null,
-      account: {
-        source: 'codex-auth-json',
-        kind: 'unknown',
-        planCode: null,
-        planName: '   ',
-        quota: null,
-      },
-      selfDeliveryTargets: null,
-    }),
-    'the configured model via Codex app-server',
-  )
 })
 
-test('setup assistant saved defaults summaries cover OpenAI-compatible endpoint and fallback branches', () => {
-  assert.equal(
-    formatSavedAssistantDefaultsSummary({
-      backend: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        endpoint: 'https://example.test/v1',
-        headers: null,
-        model: null,
-        presetId: null,
-        providerName: 'Example',
-        reasoningEffort: null,
-        webSearch: null,
-      },
-      identityId: null,
-      failoverRoutes: null,
-      account: {
-        source: 'codex-auth-json',
-        kind: 'api-key',
-        planCode: null,
-        planName: null,
-        quota: null,
-      },
-      selfDeliveryTargets: null,
-    }),
-    'the configured model via https://example.test/v1 (API key account)',
-  )
-
-  assert.equal(
-    formatSavedAssistantDefaultsSummary({
-      backend: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: null,
-        endpoint: null,
-        headers: null,
-        model: null,
-        presetId: null,
-        providerName: null,
-        reasoningEffort: null,
-        webSearch: null,
-      },
-      identityId: null,
-      failoverRoutes: null,
-      account: null,
-      selfDeliveryTargets: null,
-    }),
-    null,
-  )
-})
-
-test('setup assistant codex auth detection reads plan metadata and api key accounts', () => {
+test('setup assistant codex auth detection reads plan metadata and API key accounts', () => {
   const account = detectCodexAccountFromAuthJson(
     JSON.stringify({
       tokens: {
@@ -362,13 +265,13 @@ test('setup assistant account helpers cover auth path resolution, JWT parsing, a
       {
         CODEX_HOME: '/tmp/codex-home',
       } as NodeJS.ProcessEnv,
-      '/Users/example',
+      '/tmp/home',
     ),
     '/tmp/codex-home/auth.json',
   )
   assert.equal(
-    resolveCodexAuthFilePath({} as NodeJS.ProcessEnv, '/Users/example'),
-    '/Users/example/.codex/auth.json',
+    resolveCodexAuthFilePath({} as NodeJS.ProcessEnv, '/tmp/home'),
+    '/tmp/home/.codex/auth.json',
   )
   assert.equal(parseJwtPayload('not-a-jwt'), null)
   assert.equal(parseJwtPayload('a.b.c'), null)
@@ -409,26 +312,10 @@ test('setup assistant account helpers cover auth path resolution, JWT parsing, a
       quota: null,
     },
   )
-  assert.deepEqual(
-    mergeSetupAssistantAccounts(null, {
-      source: 'codex-auth-json',
-      kind: 'account',
-      planCode: 'team',
-      planName: 'Team',
-      quota: null,
-    }),
-    {
-      source: 'codex-auth-json',
-      kind: 'account',
-      planCode: 'team',
-      planName: 'Team',
-      quota: null,
-    },
-  )
   assert.equal(
     await loadCodexAuthAccountSnapshot({
       env: {} as NodeJS.ProcessEnv,
-      getHomeDirectory: () => '/Users/example',
+      getHomeDirectory: () => '/tmp/home',
       readTextFile: async () => {
         throw new Error('missing')
       },
@@ -437,14 +324,14 @@ test('setup assistant account helpers cover auth path resolution, JWT parsing, a
   )
 })
 
-test('setup assistant account resolver merges codex auth and RPC snapshots', async () => {
+test('setup assistant account resolver merges Codex auth and RPC snapshots', async () => {
   let observedPath = ''
   let observedEnv: NodeJS.ProcessEnv | null = null
   const resolver = createSetupAssistantAccountResolver({
     env: () => ({
       OPENAI_API_KEY: 'sk-env',
     }),
-    getHomeDirectory: () => '/Users/example',
+    getHomeDirectory: () => '/tmp/home',
     readTextFile: async (filePath) => {
       observedPath = filePath
       return JSON.stringify({
@@ -463,36 +350,13 @@ test('setup assistant account resolver merges codex auth and RPC snapshots', asy
     },
   })
 
-  assert.equal(
-    await resolver.resolve({
-      assistant: {
-        preset: 'openai-compatible',
-        enabled: true,
-        provider: 'openai-compatible',
-        model: 'gpt-4.1',
-        baseUrl: 'https://api.openai.com/v1',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        providerName: 'openai',
-        codexCommand: null,
-        codexHome: undefined,
-        profile: null,
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        oss: false,
-        account: null,
-        detail: 'OpenAI',
-      },
-    }),
-    null,
-  )
-
   const resolved = await resolver.resolve({
     assistant: {
       preset: 'codex',
       enabled: true,
       provider: 'codex-cli',
-      model: 'gpt-5.4',
+      model: 'gpt-5.5',
+      modelProvider: null,
       baseUrl: null,
       apiKeyEnv: null,
       providerName: null,
@@ -522,21 +386,22 @@ test('setup assistant account resolver merges codex auth and RPC snapshots', asy
   })
 })
 
-test('setup assistant selection normalizes chosen assistant values into operator defaults patches', () => {
+test('setup assistant selection normalizes Codex values into operator defaults patches', () => {
   const assistant: SetupConfiguredAssistant = {
-    preset: 'openai-compatible',
+    preset: 'codex',
     enabled: true,
-    provider: 'openai-compatible',
-    model: 'gpt-4o-mini',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    apiKeyEnv: 'OPENROUTER_API_KEY',
-    providerName: 'openrouter',
-    codexCommand: null,
-    codexHome: undefined,
-    profile: null,
+    provider: 'codex-cli',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    baseUrl: null,
+    apiKeyEnv: null,
+    providerName: null,
+    codexCommand: 'codex',
+    codexHome: '/tmp/codex-home',
+    profile: 'team',
     reasoningEffort: 'high',
-    sandbox: null,
-    approvalPolicy: null,
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     oss: false,
     account: {
       source: 'codex-auth-json',
@@ -545,21 +410,22 @@ test('setup assistant selection normalizes chosen assistant values into operator
       planName: null,
       quota: null,
     },
-    detail: 'OpenRouter',
+    detail: 'Codex',
   }
 
   const patch = assistantSelectionToOperatorDefaults(assistant, null)
   assert.deepEqual(patch, {
     backend: {
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENROUTER_API_KEY',
-      endpoint: 'https://openrouter.ai/api/v1',
-      headers: null,
-      model: 'gpt-4o-mini',
-      presetId: 'openrouter',
-      providerName: 'openrouter',
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome: '/tmp/codex-home',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+      profile: 'team',
       reasoningEffort: 'high',
-      webSearch: null,
+      sandbox: 'danger-full-access',
     },
     account: {
       source: 'codex-auth-json',
@@ -591,6 +457,7 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
       enabled: false,
       provider: null,
       model: null,
+      modelProvider: null,
       baseUrl: null,
       apiKeyEnv: null,
       providerName: null,
@@ -610,7 +477,8 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
         approvalPolicy: 'never',
         codexCommand: 'codex',
         codexHome: null,
-        model: 'gpt-5.4',
+        model: 'gpt-5.5',
+        modelProvider: null,
         oss: false,
         profile: null,
         reasoningEffort: 'medium',
@@ -627,234 +495,11 @@ test('setup assistant defaults helpers clear backend state and summarize empty s
     backend: null,
     account: null,
   })
-  assert.equal(
-    assistantOperatorDefaultsMatch(
-      {
-        backend: {
-          adapter: 'codex-cli',
-          approvalPolicy: 'never',
-          codexCommand: 'codex',
-          codexHome: null,
-          model: 'gpt-5.4',
-          oss: false,
-          profile: null,
-          reasoningEffort: 'medium',
-          sandbox: 'workspace-write',
-        },
-        identityId: null,
-        failoverRoutes: null,
-        account: null,
-        selfDeliveryTargets: null,
-      },
-      patch,
-    ),
-    false,
-  )
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(null), {})
   assert.equal(formatSavedAssistantDefaultsSummary(null), null)
 })
 
-test('setup assistant defaults helpers preserve codex null home and surface mismatched backends', () => {
-  const assistant: SetupConfiguredAssistant = {
-    preset: 'codex',
-    enabled: true,
-    provider: 'codex-cli',
-    model: 'gpt-5.4',
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
-    codexCommand: null,
-    codexHome: null,
-    profile: null,
-    reasoningEffort: 'medium',
-    sandbox: 'danger-full-access',
-    approvalPolicy: 'never',
-    oss: false,
-    account: null,
-    detail: 'Codex',
-  }
-
-  assert.deepEqual(assistantSelectionToOperatorDefaults(assistant, null), {
-    backend: {
-      adapter: 'codex-cli',
-      approvalPolicy: 'never',
-      codexCommand: null,
-      model: 'gpt-5.4',
-      oss: false,
-      profile: null,
-      reasoningEffort: 'medium',
-      sandbox: 'danger-full-access',
-    },
-    account: null,
-  })
-  assert.equal(
-    assistantOperatorDefaultsMatch(null, {
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        codexHome: null,
-        model: 'gpt-5.4',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'danger-full-access',
-      },
-      account: null,
-    }),
-    false,
-  )
-})
-
-test('setup assistant defaults helpers retain explicit codex command and surface null saved backend fields', () => {
-  const codexAssistant: SetupConfiguredAssistant = {
-    preset: 'codex',
-    enabled: true,
-    provider: 'codex-cli',
-    model: null,
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
-    codexCommand: 'codex-beta',
-    codexHome: '/tmp/codex-home',
-    profile: null,
-    reasoningEffort: null,
-    sandbox: 'danger-full-access',
-    approvalPolicy: 'never',
-    oss: true,
-    account: {
-      source: 'codex-auth-json',
-      kind: 'api-key',
-      planCode: null,
-      planName: null,
-      quota: null,
-    },
-    detail: 'Codex',
-  }
-
-  assert.deepEqual(assistantSelectionToOperatorDefaults(codexAssistant, null), {
-    backend: {
-      adapter: 'codex-cli',
-      approvalPolicy: 'never',
-      codexCommand: 'codex-beta',
-      codexHome: '/tmp/codex-home',
-      model: null,
-      oss: true,
-      profile: null,
-      reasoningEffort: 'medium',
-      sandbox: 'danger-full-access',
-    },
-    account: {
-      source: 'codex-auth-json',
-      kind: 'api-key',
-      planCode: null,
-      planName: null,
-      quota: null,
-    },
-  })
-  assert.equal(
-    formatAssistantDefaultsSummary({
-      ...codexAssistant,
-      account: {
-        source: 'codex-auth-json',
-        kind: 'unknown',
-        planCode: null,
-        planName: null,
-        quota: null,
-      },
-    }),
-    'the configured local model via Codex OSS app-server',
-  )
-  assert.equal(
-    formatSavedAssistantDefaultsSummary({
-      backend: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: null,
-        endpoint: null,
-        headers: null,
-        model: 'gpt-4.1-mini',
-        presetId: null,
-        providerName: null,
-        reasoningEffort: null,
-        webSearch: null,
-      },
-      identityId: null,
-      failoverRoutes: null,
-      account: null,
-      selfDeliveryTargets: null,
-    }),
-    'gpt-4.1-mini via the saved OpenAI-compatible endpoint',
-  )
-  assert.deepEqual(
-    buildSetupAssistantOptionsFromDefaults({
-      backend: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: null,
-        endpoint: null,
-        headers: null,
-        model: 'gpt-4.1-mini',
-        presetId: null,
-        providerName: null,
-        reasoningEffort: null,
-        webSearch: null,
-      },
-      identityId: null,
-      failoverRoutes: null,
-      account: null,
-      selfDeliveryTargets: null,
-    }),
-    {
-      assistantPreset: 'openai-compatible',
-      assistantProviderPreset: undefined,
-      assistantModel: 'gpt-4.1-mini',
-      assistantBaseUrl: undefined,
-      assistantApiKeyEnv: undefined,
-      assistantProviderName: undefined,
-      assistantReasoningEffort: undefined,
-    },
-  )
-})
-
-test('setup assistant provider preset resolution prefers explicit preset ids and inferred endpoints', () => {
-  assert.equal(
-    resolveSetupAssistantProviderPreset({
-      assistantProviderPreset: 'openrouter',
-      assistantBaseUrl: 'https://api.openai.com/v1',
-      assistantApiKeyEnv: 'OPENAI_API_KEY',
-      assistantProviderName: 'openai',
-    })?.id,
-    'openrouter',
-  )
-  assert.equal(
-    resolveSetupAssistantProviderPreset({
-      assistantProviderPreset: undefined,
-      assistantBaseUrl: 'http://127.0.0.1:11434/v1',
-      assistantApiKeyEnv: undefined,
-      assistantProviderName: undefined,
-    })?.id,
-    'ollama',
-  )
-  assert.equal(
-    resolveSetupAssistantProviderPreset({
-      assistantProviderPreset: undefined,
-      assistantBaseUrl: undefined,
-      assistantApiKeyEnv: undefined,
-      assistantProviderName: undefined,
-    }),
-    null,
-  )
-  assert.equal(
-    resolveSetupAssistantProviderPreset({
-      assistantProviderPreset: undefined,
-      assistantBaseUrl: 'https://ai-gateway.vercel.sh/v1',
-      assistantApiKeyEnv: undefined,
-      assistantProviderName: undefined,
-    })?.id,
-    'vercel-ai-gateway',
-  )
-})
-
-test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-compatible models', async () => {
+test('setup assistant resolver handles skip, Codex cloud, and Codex OSS', async () => {
   const capturedAssistants: SetupConfiguredAssistant[] = []
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -868,24 +513,8 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
               planName: 'Team',
               quota: null,
             }
-          : {
-              source: 'codex-auth-json',
-              kind: 'api-key',
-              planCode: null,
-              planName: null,
-              quota: null,
-            }
+          : null
       },
-    },
-    async discoverModels() {
-      return {
-        models: [
-          createDiscoveredModel('openai/gpt-4.1'),
-          createDiscoveredModel('openai/gpt-4.1-mini'),
-        ],
-        message: 'Discovered models',
-        status: 'ok',
-      }
     },
     async resolveCodexHome() {
       return {
@@ -913,15 +542,18 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
     preset: 'codex',
   })
   assert.equal(defaultCodex.model, DEFAULT_SETUP_CODEX_MODEL)
+  assert.equal(defaultCodex.modelProvider, null)
   assert.equal(
     defaultCodex.detail,
-    'Use Codex with gpt-5.5. Use the explicit Codex home at /tmp/codex-home. Detected Team account from local Codex credentials.',
+    'Use Codex with gpt-5.5. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
   )
 
   const codex = await resolver.resolve({
     allowPrompt: false,
     commandName: 'murph setup',
     options: createSetupOptions({
+      assistantModel: 'gpt-5.5',
+      assistantModelProvider: 'vercel-ai-gateway',
       assistantOss: true,
       assistantCodexCommand: 'codex-beta',
       assistantProfile: 'team',
@@ -932,7 +564,8 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
     preset: 'codex',
     enabled: true,
     provider: 'codex-cli',
-    model: 'gpt-oss:20b',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
     baseUrl: null,
     apiKeyEnv: null,
     presetId: null,
@@ -952,112 +585,11 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
       quota: null,
     },
     detail:
-      'Use Codex with the local model gpt-oss:20b. Use the explicit Codex home at /tmp/codex-home. Detected Team account from local Codex credentials.',
-  })
-
-  const compatible = await resolver.resolve({
-    allowPrompt: false,
-    commandName: 'murph setup',
-    options: createSetupOptions({
-      assistantProviderPreset: 'venice',
-    }),
-    preset: 'openai-compatible',
-  })
-  assert.deepEqual(compatible, {
-    preset: 'openai-compatible',
-    enabled: true,
-    provider: 'openai-compatible',
-    model: 'openai/gpt-4.1',
-    baseUrl: 'https://api.venice.ai/api/v1',
-    apiKeyEnv: 'VENICE_API_KEY',
-    presetId: 'venice',
-    providerName: 'venice',
-    codexCommand: null,
-    profile: null,
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
-    oss: false,
-    account: {
-      source: 'codex-auth-json',
-      kind: 'api-key',
-      planCode: null,
-      planName: null,
-      quota: null,
-    },
-    detail:
-      'Use openai/gpt-4.1 from Venice. Murph will read the key from VENICE_API_KEY. Detected API key account from local Codex credentials.',
+      'Use Codex with the local model gpt-5.5. Use Codex model provider vercel-ai-gateway. An explicit Codex home is configured; path redacted in CLI output. Detected Team account from local Codex credentials.',
   })
 })
 
-test('setup assistant resolver requires an explicit model when discovery returns no models without prompting', async () => {
-  const resolver = createSetupAssistantResolver({
-    assistantAccount: {
-      async resolve() {
-        return null
-      },
-    },
-    async discoverModels() {
-      return {
-        models: [],
-        message: 'No models were returned.',
-        status: 'ok',
-      }
-    },
-    async resolveCodexHome() {
-      return {
-        codexHome: null,
-        discoveredHomes: [],
-      }
-    },
-  })
-
-  await assert.rejects(
-    resolver.resolve({
-      allowPrompt: false,
-      commandName: 'murph setup',
-      options: createSetupOptions({
-        assistantBaseUrl: 'https://example.test/v1',
-      }),
-      preset: 'openai-compatible',
-    }),
-    /explicit model.*No models were returned/u,
-  )
-})
-
-test('setup assistant summaries and account helpers cover OSS and fallback branches', () => {
-  assert.equal(
-    formatAssistantDefaultsSummary({
-      preset: 'codex',
-      enabled: true,
-      provider: 'codex-cli',
-      model: null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
-      codexCommand: null,
-      codexHome: null,
-      profile: null,
-      reasoningEffort: null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: true,
-      account: {
-        source: 'codex-auth-json',
-        kind: 'api-key',
-        planCode: null,
-        planName: null,
-        quota: null,
-      },
-      detail: 'Codex OSS',
-    }),
-    'the configured local model via Codex OSS app-server (API key account)',
-  )
-
-  assert.equal(detectCodexAccountFromAuthJson('not-json'), null)
-  assert.equal(detectCodexAccountFromAuthJson('[]'), null)
-  assert.equal(detectCodexAccountFromAuthJson('{}'), null)
-
+test('setup assistant plan name helpers cover known and custom plans', () => {
   for (const [planCode, label] of [
     ['guest', 'Guest'],
     ['free', 'Free'],
@@ -1073,39 +605,4 @@ test('setup assistant summaries and account helpers cover OSS and fallback branc
     assert.equal(formatCodexPlanName(planCode), label)
   }
   assert.equal(formatCodexPlanName(null), null)
-
-  assert.equal(formatSetupAssistantAccountLabel(null), null)
-  assert.equal(
-    formatSetupAssistantAccountLabel({
-      source: 'codex-rpc',
-      kind: 'account',
-      planCode: null,
-      planName: null,
-      quota: null,
-    }),
-    'signed-in account',
-  )
-  assert.equal(
-    mergeSetupAssistantAccounts(null, {
-      source: 'codex-auth-json',
-      kind: 'api-key',
-      planCode: null,
-      planName: null,
-      quota: null,
-    })?.source,
-    'codex-auth-json',
-  )
-  assert.equal(
-    mergeSetupAssistantAccounts(
-      {
-        source: 'codex-rpc',
-        kind: 'unknown',
-        planCode: null,
-        planName: null,
-        quota: null,
-      },
-      null,
-    )?.source,
-    'codex-rpc',
-  )
 })

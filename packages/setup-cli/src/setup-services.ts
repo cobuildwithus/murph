@@ -336,10 +336,7 @@ export function createSetupServices(
       assistant:
         assistant === null
           ? null
-          : {
-              ...assistant,
-              detail: redactHomePathInText(assistant.detail, homeDirectory),
-            },
+          : redactSetupAssistantForOutput(assistant, homeDirectory),
       scheduledUpdates: scheduledUpdates.map((scheduledUpdate) =>
         redactHomePathsInValue(scheduledUpdate, homeDirectory),
       ) as SetupScheduledUpdate[],
@@ -382,6 +379,18 @@ export function createSetupServices(
   return {
     setupHost,
     setupMacos,
+  }
+}
+
+function redactSetupAssistantForOutput(
+  assistant: SetupConfiguredAssistant,
+  homeDirectory: string,
+): SetupConfiguredAssistant {
+  return {
+    ...assistant,
+    codexCommand: assistant.codexCommand ? '[path]' : assistant.codexCommand,
+    codexHome: assistant.codexHome ? '[path]' : assistant.codexHome,
+    detail: redactHomePathInText(assistant.detail, homeDirectory),
   }
 }
 

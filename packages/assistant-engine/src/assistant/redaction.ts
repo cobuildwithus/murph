@@ -15,6 +15,7 @@ import {
 import type { AssistantHeaderPersistenceSplit } from '@murphai/operator-config/assistant/redaction'
 
 const REDACTED_SECRET_TEXT = '[REDACTED]' as const
+const REDACTED_LOCAL_PATH_TEXT = '[path]' as const
 const PORTABLE_STATE_STRING_MAX_LENGTH = 240
 const PORTABLE_STATE_METADATA_VALUE_MAX_LENGTH = 160
 
@@ -236,10 +237,16 @@ export function redactAssistantHeadersForDisplay(
 export function redactAssistantProviderOptionsForDisplay(
   providerOptions: AssistantProviderSessionOptions,
 ): AssistantProviderSessionOptions {
-  return {
+  const redacted = {
     ...providerOptions,
     headers: redactAssistantHeadersForDisplay(providerOptions.headers),
   }
+
+  if (redacted.codexHome) {
+    redacted.codexHome = REDACTED_LOCAL_PATH_TEXT
+  }
+
+  return redacted
 }
 
 export function redactAssistantSessionForDisplay(
@@ -247,14 +254,27 @@ export function redactAssistantSessionForDisplay(
 ): AssistantSession {
   return {
     ...session,
-    target:
-      session.target.adapter === 'openai-compatible'
-        ? {
-            ...session.target,
-            headers: redactAssistantHeadersForDisplay(session.target.headers),
-          }
-        : session.target,
+    target: redactAssistantSessionTargetForDisplay(session.target),
     providerOptions: redactAssistantProviderOptionsForDisplay(session.providerOptions),
+  }
+}
+
+function redactAssistantSessionTargetForDisplay(
+  target: AssistantSession['target'],
+): AssistantSession['target'] {
+  if (target.adapter === 'openai-compatible') {
+    return {
+      ...target,
+      headers: redactAssistantHeadersForDisplay(target.headers),
+    }
+  }
+
+  return {
+    ...target,
+    codexCommand: target.codexCommand
+      ? REDACTED_LOCAL_PATH_TEXT
+      : target.codexCommand,
+    ...(target.codexHome ? { codexHome: REDACTED_LOCAL_PATH_TEXT } : {}),
   }
 }
 

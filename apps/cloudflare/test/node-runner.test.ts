@@ -88,7 +88,7 @@ describe("createHostedWorkspaceInvocationRunner", () => {
       request,
       runtime: {
         forwardedEnv: {
-          OPENAI_API_KEY: "job-openai-key",
+          VERCEL_AI_API_KEY: "job-vercel-key",
         },
       },
     }, {
@@ -104,7 +104,7 @@ describe("createHostedWorkspaceInvocationRunner", () => {
           request,
           runtime: {
             forwardedEnv: {
-              OPENAI_API_KEY: "job-openai-key",
+              VERCEL_AI_API_KEY: "job-vercel-key",
             },
           },
         },
@@ -135,7 +135,7 @@ describe("buildHostedExecutionJobRuntime", () => {
       forwardedEnv: {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
         HOSTED_ASSISTANT_MODEL: "gpt-test",
-        OPENAI_API_KEY: "job-openai-key",
+        VERCEL_AI_API_KEY: "job-vercel-key",
       },
       userEnv: {
         CUSTOM_API_KEY: "secret-value",
@@ -144,7 +144,7 @@ describe("buildHostedExecutionJobRuntime", () => {
 
     expect(runtime.forwardedEnv).toMatchObject({
       HOSTED_ASSISTANT_MODEL: "gpt-test",
-      OPENAI_API_KEY: "job-openai-key",
+      VERCEL_AI_API_KEY: "job-vercel-key",
     });
     expect(runtime.userEnv).toEqual({
       CUSTOM_API_KEY: "secret-value",

@@ -567,7 +567,6 @@ export function useAssistantChatController(
   const bindingSummary = formatSessionBinding(session)
   const metadataBadges = resolveChatMetadataBadges(
     {
-      baseUrl: session.providerOptions.baseUrl,
       provider: session.provider,
       model: activeModel ?? session.providerOptions.model ?? input.codexDisplay.model,
       reasoningEffort: activeReasoningEffort,

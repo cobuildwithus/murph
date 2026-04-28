@@ -71,9 +71,15 @@ export function resolveAssistantExecutionPlan(input: {
       'Assistant execution requires an explicit target or a boundary default.',
     )
   }
+  if (primaryTarget.adapter !== 'codex-cli') {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      'Assistant execution only supports Codex app-server targets.',
+    )
+  }
 
   const routes = buildAssistantFailoverRoutes({
-    backups: input.backups ?? input.defaults?.failoverRoutes ?? null,
+    backups: null,
     codexCommand:
       primaryTarget.adapter === 'codex-cli'
         ? primaryTarget.codexCommand ?? null

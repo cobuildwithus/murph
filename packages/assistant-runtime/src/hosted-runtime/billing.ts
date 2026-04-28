@@ -6,8 +6,8 @@ import {
   readHostedAiUsageBillingMode,
 } from "@murphai/hosted-execution";
 import {
-  isAssistantVercelAIGatewayBaseUrl,
-} from "@murphai/operator-config/assistant/shared";
+  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+} from "@murphai/operator-config/assistant/target-runtime";
 
 import type {
   HostedRuntimePlatform,
@@ -38,7 +38,6 @@ export async function resolveHostedVercelAiGatewayStripeCustomerId(input: {
       component: "runtime",
       details: {
         provider: normalizeHostedRuntimeString(input.forwardedEnv.HOSTED_ASSISTANT_PROVIDER),
-        providerName: normalizeHostedRuntimeString(input.forwardedEnv.HOSTED_ASSISTANT_PROVIDER_NAME),
         stripeRestrictedAccessKeyConfigured: Boolean(
           normalizeHostedRuntimeString(
             input.forwardedEnv[HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY_ENV],
@@ -88,20 +87,21 @@ function isHostedAssistantUsingPlatformCredential(
   forwardedEnv: Readonly<Record<string, string>>,
   userEnv: Readonly<Record<string, string>>,
 ): boolean {
-  const apiKeyEnv = normalizeHostedRuntimeString(forwardedEnv.HOSTED_ASSISTANT_API_KEY_ENV);
-
-  return !apiKeyEnv || normalizeHostedRuntimeString(userEnv[apiKeyEnv]) === null;
+  return normalizeHostedRuntimeString(
+    userEnv[VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey],
+  ) === null
+    && Boolean(
+      normalizeHostedRuntimeString(
+        forwardedEnv[VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey],
+      ),
+    );
 }
 
 function isHostedAssistantUsingVercelAiGateway(
   forwardedEnv: Readonly<Record<string, string>>,
 ): boolean {
-  const baseUrl = normalizeHostedRuntimeString(forwardedEnv.HOSTED_ASSISTANT_BASE_URL);
-  return baseUrl !== null && isTrustedHostedVercelAiGatewayBaseUrl(baseUrl);
-}
-
-function isTrustedHostedVercelAiGatewayBaseUrl(value: string): boolean {
-  return isAssistantVercelAIGatewayBaseUrl(value);
+  return normalizeHostedRuntimeString(forwardedEnv.HOSTED_ASSISTANT_PROVIDER)
+    === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.id;
 }
 
 function normalizeHostedRuntimeString(value: string | null | undefined): string | null {

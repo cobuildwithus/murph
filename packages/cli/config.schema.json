@@ -229,11 +229,10 @@
                           "minLength": 1
                         },
                         "provider": {
-                          "description": "Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.",
+                          "description": "Codex provider adapter for the local assistant surface.",
                           "type": "string",
                           "enum": [
-                            "codex-cli",
-                            "openai-compatible"
+                            "codex-cli"
                           ]
                         },
                         "codexCommand": {
@@ -241,30 +240,30 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "codexHome": {
+                          "description": "Optional Codex home directory used by local assistant chat.",
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "model": {
-                          "description": "Optional provider model override for local chat turns.",
+                          "description": "Optional Codex model override for local chat turns.",
                           "type": "string",
                           "minLength": 1
                         },
-                        "baseUrl": {
-                          "description": "Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.",
+                        "modelProvider": {
+                          "description": "Optional Codex model provider id for local chat turns.",
                           "type": "string",
                           "minLength": 1
                         },
-                        "apiKeyEnv": {
-                          "description": "Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.",
+                        "reasoningEffort": {
+                          "description": "Optional Codex reasoning effort for local assistant chat turns.",
                           "type": "string",
-                          "minLength": 1
-                        },
-                        "providerName": {
-                          "description": "Optional stable provider label for OpenAI-compatible local assistant chat sessions.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "headersJson": {
-                          "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
-                          "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
                         },
                         "sandbox": {
                           "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
@@ -352,11 +351,10 @@
                           "minLength": 1
                         },
                         "provider": {
-                          "description": "Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.",
+                          "description": "Codex provider adapter for the local assistant surface.",
                           "type": "string",
                           "enum": [
-                            "codex-cli",
-                            "openai-compatible"
+                            "codex-cli"
                           ]
                         },
                         "codexCommand": {
@@ -364,30 +362,30 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "codexHome": {
+                          "description": "Optional Codex home directory used by local assistant chat.",
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "model": {
-                          "description": "Optional provider model override for local chat turns.",
+                          "description": "Optional Codex model override for local chat turns.",
                           "type": "string",
                           "minLength": 1
                         },
-                        "baseUrl": {
-                          "description": "Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.",
+                        "modelProvider": {
+                          "description": "Optional Codex model provider id for local chat turns.",
                           "type": "string",
                           "minLength": 1
                         },
-                        "apiKeyEnv": {
-                          "description": "Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.",
+                        "reasoningEffort": {
+                          "description": "Optional Codex reasoning effort for local assistant chat turns.",
                           "type": "string",
-                          "minLength": 1
-                        },
-                        "providerName": {
-                          "description": "Optional stable provider label for OpenAI-compatible local assistant chat sessions.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "headersJson": {
-                          "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
-                          "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
                         },
                         "sandbox": {
                           "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
@@ -492,36 +490,6 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
-                        },
-                        "model": {
-                          "description": "Optional model id for canonical inbox triage routing, such as gpt-oss:20b or an AI Gateway model string. Omit it when you only want channel auto-reply.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "baseUrl": {
-                          "description": "Optional OpenAI-compatible base URL for the inbox routing model.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "apiKey": {
-                          "description": "Optional explicit API key for the OpenAI-compatible routing endpoint.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "apiKeyEnv": {
-                          "description": "Optional environment variable name that stores the routing API key.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "providerName": {
-                          "description": "Optional stable provider label for the routing endpoint.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "headersJson": {
-                          "description": "Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.",
-                          "type": "string",
-                          "minLength": 1
                         },
                         "maxPerScan": {
                           "default": 50,
@@ -941,11 +909,10 @@
                   "minLength": 1
                 },
                 "provider": {
-                  "description": "Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.",
+                  "description": "Codex provider adapter for the local assistant surface.",
                   "type": "string",
                   "enum": [
-                    "codex-cli",
-                    "openai-compatible"
+                    "codex-cli"
                   ]
                 },
                 "codexCommand": {
@@ -953,30 +920,30 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "codexHome": {
+                  "description": "Optional Codex home directory used by local assistant chat.",
+                  "type": "string",
+                  "minLength": 1
+                },
                 "model": {
-                  "description": "Optional provider model override for local chat turns.",
+                  "description": "Optional Codex model override for local chat turns.",
                   "type": "string",
                   "minLength": 1
                 },
-                "baseUrl": {
-                  "description": "Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.",
+                "modelProvider": {
+                  "description": "Optional Codex model provider id for local chat turns.",
                   "type": "string",
                   "minLength": 1
                 },
-                "apiKeyEnv": {
-                  "description": "Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.",
+                "reasoningEffort": {
+                  "description": "Optional Codex reasoning effort for local assistant chat turns.",
                   "type": "string",
-                  "minLength": 1
-                },
-                "providerName": {
-                  "description": "Optional stable provider label for OpenAI-compatible local assistant chat sessions.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "headersJson": {
-                  "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
-                  "type": "string",
-                  "minLength": 1
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "xhigh"
+                  ]
                 },
                 "sandbox": {
                   "description": "Codex sandbox mode for local assistant chat. Codex runs as a privileged local adapter by default, so leaving this unset keeps its normal unsandboxed behavior.",
@@ -1023,36 +990,6 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 128
-                },
-                "model": {
-                  "description": "Optional model id for canonical inbox triage routing, such as gpt-oss:20b or an AI Gateway model string. Omit it when you only want channel auto-reply.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "baseUrl": {
-                  "description": "Optional OpenAI-compatible base URL for the inbox routing model.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "apiKey": {
-                  "description": "Optional explicit API key for the OpenAI-compatible routing endpoint.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "apiKeyEnv": {
-                  "description": "Optional environment variable name that stores the routing API key.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "providerName": {
-                  "description": "Optional stable provider label for the routing endpoint.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "headersJson": {
-                  "description": "Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.",
-                  "type": "string",
-                  "minLength": 1
                 },
                 "maxPerScan": {
                   "default": 50,
@@ -3370,59 +3307,19 @@
                   "type": "boolean"
                 },
                 "preset": {
-                  "description": "Assistant backend preset to save. Required for non-interactive updates when Murph cannot infer or reuse the backend, and required when switching between Codex and an OpenAI-compatible endpoint.",
+                  "description": "Assistant backend preset to save. The CLI setup surface only accepts Codex for new model configuration.",
                   "type": "string",
-                  "enum": [
-                    "codex",
-                    "openai-compatible"
-                  ]
-                },
-                "providerPreset": {
-                  "description": "Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`. Named presets carry provider-specific runtime behavior in addition to endpoint defaults.",
-                  "type": "string",
-                  "enum": [
-                    "openai",
-                    "vercel-ai-gateway",
-                    "openrouter",
-                    "venice",
-                    "deepseek",
-                    "groq",
-                    "together",
-                    "fireworks",
-                    "cerebras",
-                    "xai",
-                    "huggingface",
-                    "nvidia",
-                    "ollama",
-                    "lm-studio",
-                    "vllm",
-                    "litellm",
-                    "custom"
-                  ]
+                  "const": "codex"
                 },
                 "model": {
                   "description": "Model id to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.",
                   "type": "string",
                   "minLength": 1
                 },
-                "baseUrl": {
-                  "description": "OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1. Only applies with `--preset openai-compatible`.",
+                "modelProvider": {
+                  "description": "Optional Codex model provider id to save. Only applies with `--preset codex`.",
                   "type": "string",
                   "minLength": 1
-                },
-                "apiKeyEnv": {
-                  "description": "Environment variable name that should hold the OpenAI-compatible API key. Only applies with `--preset openai-compatible`.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "providerName": {
-                  "description": "Stable label for the saved OpenAI-compatible provider. Only applies with `--preset openai-compatible`.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "zeroDataRetention": {
-                  "description": "Request zero data retention on Vercel AI Gateway assistant turns. Only applies with `--preset openai-compatible`.",
-                  "type": "boolean"
                 },
                 "codexCommand": {
                   "description": "Optional Codex CLI executable path. Only applies with `--preset codex`. Defaults to `codex`.",
@@ -3431,6 +3328,11 @@
                 },
                 "profile": {
                   "description": "Optional Codex profile name to save. Only applies with `--preset codex`.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "codexHome": {
+                  "description": "Optional Codex home directory to save. Only applies with `--preset codex`.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -12554,63 +12456,6 @@
                                 },
                                 "sensitive": {
                                   "description": "Return the full sensitive routing bundle in CLI output. The artifact file is always written privately.",
-                                  "type": "boolean"
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "route": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "model": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Model id to use, such as anthropic/claude-sonnet-4.5 or a local model id."
-                                },
-                                "baseUrl": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "OpenAI-compatible base URL for local or custom model endpoints."
-                                },
-                                "apiKey": {
-                                  "description": "Optional explicit API key for OpenAI-compatible model endpoints.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "apiKeyEnv": {
-                                  "description": "Optional environment variable name that stores the API key.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "providerName": {
-                                  "description": "Optional stable provider label for OpenAI-compatible endpoints.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "headersJson": {
-                                  "description": "Optional JSON object of extra HTTP headers for OpenAI-compatible endpoints.",
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "apply": {
-                                  "description": "Execute the planned tool calls instead of previewing them.",
                                   "type": "boolean"
                                 }
                               }

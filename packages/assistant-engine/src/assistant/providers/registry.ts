@@ -1,4 +1,5 @@
 import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeAssistantProviderConfig,
   resolveAssistantChatProviderFromConfig,
@@ -14,7 +15,6 @@ import {
 } from '../provider-progress.js'
 import { codexCliProviderDefinition } from './codex-cli.js'
 import { createCatalogModel } from './catalog.js'
-import { openAiCompatibleProviderDefinition } from './openai-compatible.js'
 import { supportsAnyAssistantRichUserMessageContent } from './types.js'
 import type {
   AssistantCatalogModel,
@@ -33,12 +33,11 @@ import type {
   AssistantUserMessageContentType,
 } from './types.js'
 
-const ASSISTANT_PROVIDER_DEFINITIONS: Readonly<Record<
+const ASSISTANT_PROVIDER_DEFINITIONS: Readonly<Partial<Record<
   AssistantChatProvider,
   AssistantProviderDefinition
->> = Object.freeze({
+>>> = Object.freeze({
   'codex-cli': codexCliProviderDefinition,
-  'openai-compatible': openAiCompatibleProviderDefinition,
 })
 
 export function listAssistantProviderDefinitions(): readonly AssistantProviderDefinition[] {
@@ -52,7 +51,15 @@ export function listAssistantProviders(): readonly AssistantChatProvider[] {
 export function getAssistantProviderDefinition(
   provider: AssistantChatProvider,
 ): AssistantProviderDefinition {
-  return ASSISTANT_PROVIDER_DEFINITIONS[provider]
+  const definition = ASSISTANT_PROVIDER_DEFINITIONS[provider]
+  if (!definition) {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      `Assistant provider "${provider}" is not available in this runtime.`,
+    )
+  }
+
+  return definition
 }
 
 function resolveAssistantProviderDefinition(
@@ -209,7 +216,6 @@ export async function executeAssistantProviderTurn(
     sessionContext: input.sessionContext,
     showThinkingTraces: input.showThinkingTraces,
     systemPrompt: input.systemPrompt,
-    toolRuntime: input.toolRuntime,
     userPrompt: input.userPrompt,
     userMessageContent: input.userMessageContent,
     usageAttribution: input.usageAttribution,
@@ -236,7 +242,6 @@ export async function executeAssistantProviderTurnAttempt(
     sessionContext: input.sessionContext,
     showThinkingTraces: input.showThinkingTraces,
     systemPrompt: input.systemPrompt,
-    toolRuntime: input.toolRuntime,
     userPrompt: input.userPrompt,
     userMessageContent: input.userMessageContent,
     usageAttribution: input.usageAttribution,

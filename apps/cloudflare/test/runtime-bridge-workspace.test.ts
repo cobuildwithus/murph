@@ -289,7 +289,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       },
       runtime: {
         forwardedEnv: {
-          OPENAI_API_KEY: "openai-secret",
+          VERCEL_AI_API_KEY: "vercel-secret",
         },
       },
       vaultRoot,

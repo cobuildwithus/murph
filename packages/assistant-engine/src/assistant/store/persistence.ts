@@ -125,27 +125,7 @@ export async function readAssistantSession(input: {
     })
   }
 
-  let secrets: Awaited<ReturnType<typeof readAssistantSessionSecrets>> = null
-  try {
-    if (persistedSession.target.adapter === 'openai-compatible') {
-      secrets = await readAssistantSessionSecrets({
-        paths: input.paths,
-        sessionId: input.sessionId,
-        updatedAt: persistedSession.updatedAt,
-      })
-    }
-  } catch (error) {
-    if (input.treatCorruptedAsMissing) {
-      return null
-    }
-    throw createAssistantSessionCorruptedError({
-      error,
-      sessionId: input.sessionId,
-      sessionPath: resolveAssistantSessionSecretsPath(input.paths, input.sessionId),
-    })
-  }
-
-  return mergeAssistantSessionSecrets(persistedSession, secrets)
+  return mergeAssistantSessionSecrets(persistedSession, null)
 }
 
 export async function writeAssistantSession(

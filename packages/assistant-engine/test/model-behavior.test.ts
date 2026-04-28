@@ -13,11 +13,11 @@ import {
 } from '../src/assistant/system-prompt.js'
 
 describe('resolveAssistantModelBehaviorProfile', () => {
-  it('uses the GPT-5 agentic profile for GPT-5 OpenAI-compatible targets', () => {
+  it('uses the GPT-5 agentic profile for explicit GPT-5 Codex targets', () => {
     expect(
       resolveAssistantModelBehaviorProfile({
         model: 'gpt-5.4',
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
       }),
     ).toBe('gpt5-agentic')
   })
@@ -26,7 +26,7 @@ describe('resolveAssistantModelBehaviorProfile', () => {
     expect(
       resolveAssistantModelBehaviorProfile({
         model: 'openai/gpt-5.4',
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
       }),
     ).toBe('gpt5-agentic')
   })
@@ -54,8 +54,8 @@ describe('assistant GPT-5 execution prompt overlay', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       allowSensitiveHealthContext: true,
-      assistantCommandAccessMode: 'bound-tools',
-      assistantHealthCommonsAccessMode: 'bound-tools',
+      assistantCommandAccessMode: 'direct-cli',
+      assistantHealthCommonsAccessMode: 'direct-cli',
       assistantHostedDeviceConnectAvailable: true,
       assistantHostedDeviceConnectProviders: [
         { label: 'Oura', provider: 'oura' },
@@ -96,12 +96,12 @@ describe('assistant GPT-5 execution prompt overlay', () => {
 })
 
 describe('assistant system prompt cache stability', () => {
-  it('keeps the common OpenAI route prefix stable across dynamic turn context', () => {
+  it('keeps the common Codex route prefix stable across dynamic turn context', () => {
     const cacheInput = {
-      toolSchemaHash: 'assistant-tool-schema-common-openai-test',
+      toolSchemaHash: 'assistant-tool-schema-common-codex-test',
     }
     const promptA = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonOpenAiPromptInput({
+      createCommonCodexPromptInput({
         activeExperimentContext: 'Active experiment context for user A.',
         allowSensitiveHealthContext: true,
         channel: 'telegram',
@@ -112,7 +112,7 @@ describe('assistant system prompt cache stability', () => {
       cacheInput,
     )
     const promptB = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonOpenAiPromptInput({
+      createCommonCodexPromptInput({
         activeExperimentContext: 'Active experiment context for user B.',
         allowSensitiveHealthContext: false,
         channel: 'sms',
@@ -156,10 +156,10 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
     expect(promptA.cacheMetadata).toMatchInlineSnapshot(`
       {
-        "dynamicContextStartsAfterStaticCore": 21796,
-        "stableRouteCapabilityPromptHash": "9303cfdd09d4d9187785693cd208b1fb508193bdbef918cafeba5cea238b1147",
-        "staticPromptHash": "ee411cd5984a0ea4bd72a58d31446957eb38b809346373bcf9632d381e5802fc",
-        "toolSchemaHash": "assistant-tool-schema-common-openai-test",
+        "dynamicContextStartsAfterStaticCore": 21227,
+        "stableRouteCapabilityPromptHash": "4bcbed20931d47337cd92cf4ea12d4ba117ad1934d3807fd2b6675340a738ccc",
+        "staticPromptHash": "55545923910bc38b4b2e85e50ee706716f5e413fe457844572d70dfcab7da444",
+        "toolSchemaHash": "assistant-tool-schema-common-codex-test",
       }
     `)
     expect(promptB.cacheMetadata.staticPromptHash).toBe(
@@ -243,8 +243,8 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       allowSensitiveHealthContext: true,
-      assistantCommandAccessMode: 'bound-tools',
-      assistantHealthCommonsAccessMode: 'bound-tools',
+      assistantCommandAccessMode: 'direct-cli',
+      assistantHealthCommonsAccessMode: 'direct-cli',
       assistantHostedDeviceConnectAvailable: true,
       assistantHostedDeviceConnectProviders: [],
       assistantKnowledgeToolsAvailable: true,
@@ -322,14 +322,14 @@ describe('assistant conversation onboarding guidance', () => {
   })
 })
 
-function createCommonOpenAiPromptInput(
+function createCommonCodexPromptInput(
   overrides: Partial<AssistantSystemPromptInput> = {},
 ): AssistantSystemPromptInput {
   return {
-    assistantCliContract: 'Stable CLI contract for common OpenAI route.',
+    assistantCliContract: 'Stable CLI contract for common Codex route.',
     allowSensitiveHealthContext: true,
-    assistantCommandAccessMode: 'bound-tools',
-    assistantHealthCommonsAccessMode: 'bound-tools',
+    assistantCommandAccessMode: 'direct-cli',
+    assistantHealthCommonsAccessMode: 'direct-cli',
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },
@@ -356,7 +356,7 @@ function createCommonNotificationPromptInput(
 ): AssistantNotificationDecisionSystemPromptInput {
   return {
     allowSensitiveHealthContext: true,
-    assistantHealthCommonsAccessMode: 'bound-tools',
+    assistantHealthCommonsAccessMode: 'direct-cli',
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },

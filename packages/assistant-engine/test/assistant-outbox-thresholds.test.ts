@@ -504,7 +504,7 @@ describe('assistant outbox thresholds', () => {
     await turns.createAssistantTurnReceipt({
       deliveryRequested: true,
       prompt: 'prompt',
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: 'model',
       sessionId: seeded.sessionId,
       startedAt: '2026-04-08T12:00:00.000Z',

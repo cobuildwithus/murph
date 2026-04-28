@@ -22,6 +22,10 @@ import {
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "./runner-job-transport.js";
+import {
+  redactHostedRuntimeDiagnosticDetails,
+  redactHostedRuntimeDiagnosticText,
+} from "./hosted-runtime-redaction.js";
 
 interface HostedExecutionChildDependencies {
   emitLog?: typeof emitHostedExecutionStructuredLog;
@@ -77,11 +81,13 @@ export async function runHostedExecutionChild(
     emitHostedRunnerChildDebug({
       stage: "before-run",
       payload: {
-        hostedAssistantBaseUrl: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_BASE_URL ?? null,
-        hostedAssistantModel: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_MODEL ?? null,
-        hostedAssistantProvider: input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_PROVIDER ?? null,
+        hostedAssistantModelConfigured:
+          typeof input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_MODEL === "string",
+        hostedAssistantProviderConfigured:
+          typeof input.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_PROVIDER === "string",
         hasLocalInternalProxyBaseUrl: Boolean(input.localInternalProxyBaseUrl),
-        linqApiBaseUrl: input.job.runtime?.forwardedEnv?.LINQ_API_BASE_URL ?? null,
+        linqApiConfigured:
+          typeof input.job.runtime?.forwardedEnv?.LINQ_API_TOKEN === "string",
       },
     });
     const result = await runWorkspaceChildJob({
@@ -101,26 +107,15 @@ export async function runHostedExecutionChild(
     emitHostedRunnerChildDebug({
       stage: "run-error",
       payload: {
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: readHostedRuntimeChildErrorMessage(error),
         errorName: error instanceof Error ? error.name : null,
       },
     });
+    const serializedError = createHostedExecutionChildRuntimeError(error);
     stdout.write(
       `${formatHostedExecutionRunnerChildResult({
         ok: false,
-        error: {
-          code:
-            error
-            && typeof error === "object"
-            && "code" in error
-            && typeof error.code === "string"
-              ? error.code
-              : null,
-          details: extractHostedAssistantNotificationRedactedDetails(error),
-          message: error instanceof Error ? error.message : String(error),
-          name: error instanceof Error ? error.name : null,
-          stack: error instanceof Error ? error.stack ?? null : null,
-        },
+        error: serializedError,
       })}\n`,
     );
     setExitCode(1);
@@ -206,6 +201,38 @@ function createHostedExecutionChildBootstrapError(error: unknown): {
     name: readHostedExecutionSafeErrorName(error),
     stack: null,
   };
+}
+
+function createHostedExecutionChildRuntimeError(error: unknown): {
+  code: string | null;
+  details: Record<string, unknown> | null;
+  message: string;
+  name: string | null;
+  stack: string | null;
+} {
+  return {
+    code:
+      error
+      && typeof error === "object"
+      && "code" in error
+      && typeof error.code === "string"
+        ? error.code
+        : null,
+    details: redactHostedRuntimeDiagnosticDetails(
+      extractHostedAssistantNotificationRedactedDetails(error),
+    ),
+    message: readHostedRuntimeChildErrorMessage(error),
+    name: error instanceof Error ? error.name : null,
+    stack: error instanceof Error && error.stack
+      ? redactHostedRuntimeDiagnosticText(error.stack)
+      : null,
+  };
+}
+
+function readHostedRuntimeChildErrorMessage(error: unknown): string {
+  return redactHostedRuntimeDiagnosticText(
+    error instanceof Error ? error.message : String(error),
+  );
 }
 
 function readNullableString(value: unknown, label: string): string | null {

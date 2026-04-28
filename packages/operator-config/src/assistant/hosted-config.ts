@@ -12,9 +12,8 @@ import {
   type AssistantProviderConfigInput,
 } from './provider-config.js'
 import {
-  resolveOpenAICompatibleProviderPreset,
-  resolveOpenAICompatibleProviderPresetFromId,
-} from './openai-compatible-provider-presets.js'
+  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+} from './target-runtime.js'
 
 export const HOSTED_ASSISTANT_CONFIG_SCHEMA = 'murph.hosted-assistant-config.v1'
 export const hostedAssistantProfileManagedByValues = [
@@ -28,8 +27,8 @@ export const hostedAssistantProfileSchema = z
     label: z.string().min(1),
     managedBy: z.enum(hostedAssistantProfileManagedByValues).default('member'),
     target: assistantModelTargetSchema.refine(
-      (target) => target.adapter === 'openai-compatible',
-      'Hosted assistant profiles must use the OpenAI-compatible adapter.',
+      (target) => target.adapter === 'codex-cli',
+      'Hosted assistant profiles must use the Codex App Server adapter.',
     ),
   })
   .strict()
@@ -87,9 +86,9 @@ export function createHostedAssistantProfile(input: {
     createAssistantModelTarget(input.providerConfig),
   )
 
-  if (!target || target.adapter !== 'openai-compatible') {
+  if (!target || target.adapter !== 'codex-cli') {
     throw new TypeError(
-      'Hosted assistant profiles require an explicit OpenAI-compatible target.',
+      'Hosted assistant profiles require an explicit Codex App Server target.',
     )
   }
 
@@ -98,11 +97,8 @@ export function createHostedAssistantProfile(input: {
     label:
       normalizeHostedAssistantString(input.label) ??
       resolveHostedAssistantProfileLabel({
-        apiKeyEnv: target.apiKeyEnv,
-        baseUrl: target.endpoint,
-        presetId: target.presetId,
+        modelProvider: target.modelProvider,
         provider: target.adapter,
-        providerName: target.providerName,
       }),
     managedBy: input.managedBy ?? 'member',
     target,
@@ -229,39 +225,15 @@ export function hostedAssistantProfilesEqual(
 }
 
 export function resolveHostedAssistantProfileLabel(input: {
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
-  presetId?: string | null
+  modelProvider?: string | null
   provider?: AssistantChatProvider | null
-  providerName?: string | null
 }): string {
-  const preset =
-    resolveOpenAICompatibleProviderPresetFromId(input.presetId) ??
-    resolveOpenAICompatibleProviderPreset({
-      apiKeyEnv: input.apiKeyEnv,
-      baseUrl: input.baseUrl,
-      providerName: input.providerName,
-    })
-  if (preset && preset.id !== 'custom') {
-    return preset.title
+  if (input.modelProvider === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID) {
+    return 'Vercel AI Gateway'
   }
 
-  const providerName = normalizeHostedAssistantString(input.providerName)
-  if (providerName) {
-    return providerName
-  }
-
-  const baseUrl = normalizeHostedAssistantString(input.baseUrl)
-  if (baseUrl) {
-    try {
-      return new URL(baseUrl).host
-    } catch {
-      return baseUrl
-    }
-  }
-
-  return input.provider === 'openai-compatible'
-    ? 'OpenAI-compatible endpoint'
+  return input.provider === 'codex-cli'
+    ? 'Codex App Server'
     : 'Hosted assistant profile'
 }
 

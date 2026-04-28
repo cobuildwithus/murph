@@ -181,27 +181,6 @@ export async function discoverAssistantProviderModels(input: {
   return await discoverAssistantProviderModelsWithRegistry(input)
 }
 
-export async function defaultDiscoverOpenAICompatibleModels(
-  baseUrl: string | null | undefined,
-  options?: {
-    apiKeyEnv?: string | null
-    env?: NodeJS.ProcessEnv
-    headers?: Record<string, string> | null
-    providerName?: string | null
-  },
-): Promise<string[]> {
-  const result = await discoverAssistantProviderModelsWithRegistry({
-    provider: 'openai-compatible',
-    baseUrl,
-    apiKeyEnv: options?.apiKeyEnv,
-    env: options?.env,
-    headers: options?.headers,
-    providerName: options?.providerName,
-  })
-
-  return result.models.map((model) => model.id)
-}
-
 export function resolveAssistantCatalogReasoningOptions(
   model: AssistantCatalogModel | null | undefined,
 ): readonly AssistantReasoningOption[] {
@@ -297,9 +276,6 @@ function buildAssistantCatalogModels(input: {
 
 function buildCurrentModelDescription(profile: AssistantProviderProfile): string {
   switch (profile.target.kind) {
-    case 'responses':
-    case 'openai-compatible':
-      return `Current model from ${profile.providerLabel}.`
     case 'codex-cli':
       return profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
     default:
@@ -316,20 +292,7 @@ function normalizeAssistantModelDiscoveryResult(input: {
     return null
   }
 
-  if (input.profile.target.kind === 'codex-cli') {
-    return input.discovery
-  }
-
-  return {
-    ...input.discovery,
-    models: input.discovery.models.map((model) => ({
-      ...model,
-      capabilities: resolveAssistantCatalogModelCapabilities(
-        input.profile,
-        input.capabilities,
-      ),
-    })),
-  }
+  return input.discovery
 }
 
 function resolveAssistantCatalogModelCapabilities(
@@ -338,20 +301,10 @@ function resolveAssistantCatalogModelCapabilities(
 ): AssistantCatalogModel['capabilities'] {
   const supportedContentTypes = new Set(capabilities.supportedUserMessageContentTypes)
 
-  if (profile.target.kind === 'codex-cli') {
-    return {
-      images: supportedContentTypes.has('image'),
-      pdf: supportedContentTypes.has('file'),
-      reasoning: true,
-      streaming: true,
-      tools: true,
-    }
-  }
-
   return {
     images: supportedContentTypes.has('image'),
     pdf: supportedContentTypes.has('file'),
-    reasoning: capabilities.supportsReasoningEffort,
+    reasoning: true,
     streaming: true,
     tools: true,
   }

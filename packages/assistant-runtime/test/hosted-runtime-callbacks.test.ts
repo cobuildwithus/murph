@@ -595,7 +595,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
-        OPENAI_API_KEY: "sk-runtime",
+        VERCEL_AI_API_KEY: "sk-runtime",
       },
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",

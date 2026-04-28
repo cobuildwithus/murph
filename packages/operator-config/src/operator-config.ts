@@ -2,6 +2,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import {
   assistantProviderFailoverRouteSchema,
+  type AssistantChatProvider,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
 import {
@@ -130,7 +131,7 @@ export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
 export type AssistantProviderDefaultsEntry = AssistantProviderDefaultsConfig
-type AssistantChatProviderValue = 'codex-cli' | 'openai-compatible'
+type AssistantChatProviderValue = AssistantChatProvider
 
 const assistantSelfDeliveryTargetDependencies = {
   normalizeString: normalizeOperatorConfigString,
@@ -163,7 +164,7 @@ export async function saveDefaultVaultConfig(
   vault: string,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig> {
-  const existing = await readOperatorConfig(homeDirectory)
+  const existing = await readOperatorConfigForPatch(homeDirectory)
   const config = buildOperatorConfig(
     {
       defaultVault: normalizeVaultForConfig(vault, homeDirectory),
@@ -184,7 +185,7 @@ export async function saveAssistantOperatorDefaultsPatch(
   patch: Partial<AssistantOperatorDefaults>,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig> {
-  const existing = await readOperatorConfig(homeDirectory)
+  const existing = await readOperatorConfigForPatch(homeDirectory)
   const config = buildOperatorConfig(
     {
       assistant: mergeAssistantOperatorDefaults(existing?.assistant ?? null, patch),
@@ -199,6 +200,55 @@ export async function saveAssistantOperatorDefaultsPatch(
   )
 
   return config
+}
+
+async function readOperatorConfigForPatch(
+  homeDirectory: string,
+): Promise<OperatorConfig | null> {
+  try {
+    return await readOperatorConfig(homeDirectory)
+  } catch (error) {
+    if (!hasErrorCode(error, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')) {
+      throw error
+    }
+  }
+
+  const raw = await readOperatorConfigFile(resolveOperatorConfigPath(homeDirectory))
+  if (raw === null) {
+    return null
+  }
+
+  try {
+    const parsed = operatorConfigSchema.parse(JSON.parse(raw))
+    return normalizeParsedOperatorConfig({
+      ...parsed,
+      assistant: stripUnsupportedAssistantBackend(parsed.assistant),
+    })
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+function stripUnsupportedAssistantBackend(value: unknown): unknown {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? {
+        ...value,
+        backend: null,
+      }
+    : null
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === code
+  )
 }
 
 export async function saveHostedAssistantConfig(
@@ -310,7 +360,7 @@ export async function resolveDefaultVault(
     return expandConfiguredVaultPath(envVault, homeDirectory)
   }
 
-  const config = await readOperatorConfig(homeDirectory)
+  const config = await readOperatorConfigForPatch(homeDirectory)
   if (config?.defaultVault) {
     const configuredDefaultVault = expandConfiguredVaultPath(
       config.defaultVault,
@@ -332,7 +382,7 @@ export async function resolveDefaultVault(
 export async function resolveConfiguredDefaultVault(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<string | null> {
-  const config = await readOperatorConfig(homeDirectory)
+  const config = await readOperatorConfigForPatch(homeDirectory)
   if (!config?.defaultVault) {
     return null
   }

@@ -1,8 +1,4 @@
 import {
-  isHostedAssistantApiKeyEnvName,
-  readHostedAssistantApiKeyEnvName,
-} from "@murphai/assistant-runtime/hosted-assistant-env";
-import {
   HOSTED_WORKER_OPTIONAL_VAR_NAMES,
 } from "./worker-optional-vars.ts";
 
@@ -253,17 +249,7 @@ function resolveHostedWorkerVar(
   source: EnvSource,
   key: typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES[number],
 ): string | null {
-  const value = key === "HOSTED_ASSISTANT_API_KEY_ENV"
-    ? readHostedAssistantApiKeyEnvName(source)
-    : normalizeOptionalString(source[key]);
-
-  if (
-    key === "HOSTED_ASSISTANT_API_KEY_ENV"
-    && value
-    && !isHostedAssistantApiKeyEnvName(value)
-  ) {
-    return null;
-  }
+  const value = normalizeOptionalString(source[key]);
 
   if (value) {
     return value;

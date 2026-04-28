@@ -144,21 +144,14 @@ function resolveDirectThreadDeliveryPatch(input: {
 
 export function normalizeProviderOptions(input: {
   approvalPolicy?: AssistantApprovalPolicy | null
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
   codexHome?: string | null
-  gatewayOnlyProviders?: readonly string[] | null
-  headers?: Record<string, string> | null
   model?: string | null
+  modelProvider?: string | null
   oss?: boolean
-  presetId?: string | null
   profile?: string | null
   provider?: AssistantChatProvider | null
-  providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
-  webSearch?: string | null
-  zeroDataRetention?: boolean | null
 }): AssistantProviderSessionOptions {
   return serializeAssistantProviderSessionOptions(input)
 }

@@ -75,6 +75,7 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/importers": "workspace:*",
@@ -82,6 +83,7 @@
     "zod": "^4.1.8"
   },
   "bundleDependencies": [
+    "@murphai/core",
     "@murphai/device-syncd",
     "@murphai/importers",
     "@murphai/runtime-state"

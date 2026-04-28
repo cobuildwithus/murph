@@ -7,6 +7,9 @@ import {
   createHostedAssistantConfig,
   createHostedAssistantProfile,
 } from '../src/assistant/hosted-config.ts'
+import {
+  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+} from '../src/assistant/target-runtime.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -42,18 +45,25 @@ async function loadHostedAssistantModule(options?: {
   }
 }
 
-test('hosted assistant config parsing and readiness helpers normalize expected shapes', async () => {
+function assertCodexGatewayProfile(profile: HostedAssistantConfig['profiles'][number] | undefined) {
+  assert.ok(profile)
+  assert.equal(profile.target.adapter, 'codex-cli')
+  if (profile.target.adapter !== 'codex-cli') {
+    throw new Error('expected hosted profile to use Codex')
+  }
+
+  assert.equal(profile.target.model, 'gpt-5.5')
+  assert.equal(profile.target.modelProvider, 'vercel-ai-gateway')
+}
+
+test('hosted assistant config parsing and readiness helpers normalize Codex hosted profiles', async () => {
   const hostedConfigModule = await loadHostedAssistantModule()
   const {
-    HOSTED_ASSISTANT_API_KEY_ENV,
-    HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
-    HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
     compileHostedAssistantProfileProviderConfig,
     isHostedAssistantProfileReady,
     parseHostedAssistantConfig,
     parseHostedAssistantConfigJson,
     prepareHostedAssistantConfigForWrite,
-    readHostedAssistantApiKeyEnvName,
     resolveActiveHostedAssistantProfile,
     resolveHostedAssistantOperatorDefaultsState,
     resolveHostedAssistantProfile,
@@ -66,18 +76,19 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     id: 'platform-default',
     managedBy: 'platform',
     providerConfig: {
-      provider: 'openai-compatible',
-      apiKeyEnv: ' OPENAI_API_KEY ',
-      baseUrl: ' https://api.openai.com/v1 ',
-      model: ' gpt-5 ',
+      provider: 'codex-cli',
+      model: ' gpt-5.5 ',
+      modelProvider: ' vercel-ai-gateway ',
+      reasoningEffort: ' medium ',
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
     },
   })
   const incompleteProfile = createHostedAssistantProfile({
     id: 'member-incomplete',
     providerConfig: {
-      provider: 'openai-compatible',
-      baseUrl: ' https://gateway.example.test/v1 ',
-      providerName: 'Gateway',
+      provider: 'codex-cli',
+      modelProvider: 'vercel-ai-gateway',
     },
   })
   const config = createHostedAssistantConfig({
@@ -90,284 +101,82 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
   assert.deepEqual(parseHostedAssistantConfigJson(JSON.stringify(config)), config)
   assert.equal(tryParseHostedAssistantConfig('bad-json-shape'), null)
   assert.deepEqual(prepareHostedAssistantConfigForWrite(config), config)
-  assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: ' OPENAI_API_KEY ' }), 'OPENAI_API_KEY')
-  const preparedGatewayConfig = prepareHostedAssistantConfigForWrite(
-    createHostedAssistantConfig({
-      activeProfileId: 'gateway',
-      profiles: [
-        createHostedAssistantProfile({
-          id: 'gateway',
-          providerConfig: {
-            provider: 'openai-compatible',
-            apiKeyEnv: 'VERCEL_AI_API_KEY',
-            baseUrl: 'https://ai-gateway.vercel.sh/v1',
-            model: 'openai/gpt-5.4',
-            presetId: 'vercel-ai-gateway',
-            gatewayOnlyProviders: ['openai'],
-            zeroDataRetention: true,
-          },
-        }),
-      ],
-    }),
-  )
-  assert.equal(preparedGatewayConfig?.profiles[0]?.target.zeroDataRetention, true)
-  assert.deepEqual(
-    preparedGatewayConfig?.profiles[0]?.target.gatewayOnlyProviders,
-    ['openai'],
-  )
-  assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: '   ' }), null)
-  assert.equal(
-    HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
-    'HOSTED_ASSISTANT_ZERO_DATA_RETENTION',
-  )
-  assert.equal(
-    HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV,
-    'HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS',
-  )
   assert.deepEqual(resolveHostedAssistantProfile(config, ' platform-default '), readyProfile)
   assert.equal(resolveHostedAssistantProfile(config, 'missing'), null)
-  assert.equal(resolveHostedAssistantProfile(config, '   '), null)
   assert.deepEqual(resolveActiveHostedAssistantProfile(config), readyProfile)
   assert.deepEqual(resolveReadyHostedAssistantProfile(config), readyProfile)
   assert.equal(resolveReadyHostedAssistantProfile(null), null)
   assert.equal(isHostedAssistantProfileReady(incompleteProfile), false)
   assert.equal(isHostedAssistantProfileReady(null), false)
   assert.deepEqual(compileHostedAssistantProfileProviderConfig(readyProfile), {
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://api.openai.com/v1',
-    headers: null,
-    model: 'gpt-5',
-    presetId: 'openai',
-    provider: 'openai-compatible',
-    providerName: null,
-    reasoningEffort: null,
-    webSearch: null,
-    zeroDataRetention: null,
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    oss: false,
+    profile: null,
+    provider: 'codex-cli',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
   })
   assert.deepEqual(resolveHostedAssistantProviderConfig(config), {
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://api.openai.com/v1',
-    headers: null,
-    model: 'gpt-5',
-    presetId: 'openai',
-    provider: 'openai-compatible',
-    providerName: null,
-    reasoningEffort: null,
-    webSearch: null,
-    zeroDataRetention: null,
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    oss: false,
+    profile: null,
+    provider: 'codex-cli',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(config), {
     configured: true,
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(null), {
     configured: false,
     provider: null,
   })
-  assert.deepEqual(
-    resolveHostedAssistantOperatorDefaultsState(
-      createHostedAssistantConfig({
-        activeProfileId: incompleteProfile.id,
-        profiles: [incompleteProfile],
-        updatedAt: '2026-04-08T10:00:00.000Z',
-      }),
-    ),
-    {
-      configured: false,
-      provider: 'openai-compatible',
-    },
-  )
   assert.throws(() => parseHostedAssistantConfig(null), /required/u)
 })
 
-test('hosted assistant bootstrap reads process env and accepts valid boolean and enum values', async () => {
+test('hosted assistant bootstrap maps Vercel AI Gateway env to Codex model provider config', async () => {
   const hostedConfigModule = await loadHostedAssistantModule({
     readOperatorConfigResult: null,
   })
 
-  vi.stubEnv('HOSTED_ASSISTANT_PROVIDER', 'openai')
-  vi.stubEnv('HOSTED_ASSISTANT_MODEL', 'gpt-5')
-  vi.stubEnv('HOSTED_ASSISTANT_REASONING_EFFORT', 'high')
+  vi.stubEnv('HOSTED_ASSISTANT_PROVIDER', 'vercel-ai-gateway')
+  vi.stubEnv('HOSTED_ASSISTANT_MODEL', 'gpt-5.5')
+  vi.stubEnv('HOSTED_ASSISTANT_REASONING_EFFORT', 'medium')
+  vi.stubEnv('HOSTED_ASSISTANT_APPROVAL_POLICY', 'never')
+  vi.stubEnv('HOSTED_ASSISTANT_SANDBOX', 'danger-full-access')
 
   const seeded = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
     allowMissing: false,
+    homeDirectory: '/tmp/operator-home',
   })
 
   assert.deepEqual(seeded, {
     configured: true,
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     seeded: true,
     source: 'hosted-env',
   })
-
-  await assert.rejects(
-    () =>
-      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_REASONING_EFFORT: 'high',
-          HOSTED_ASSISTANT_OSS: 'enabled',
-        },
-      }),
-    (error) =>
-      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_OSS cannot be used/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_OSS: 'disabled',
-        },
-      }),
-    (error) =>
-      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_OSS cannot be used/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_APPROVAL_POLICY: 'never',
-        },
-      }),
-    (error) =>
-      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_APPROVAL_POLICY cannot be used/u.test(error.message),
-  )
-
-  const gatewaySeed = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
-      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
-      HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: ' openai,openai ',
-    },
-  })
-
-  assert.deepEqual(gatewaySeed, {
-    configured: true,
-    provider: 'openai-compatible',
-    seeded: true,
-    source: 'hosted-env',
-  })
+  assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 1)
   assert.equal(
-    hostedConfigModule.saveHostedAssistantConfig.mock.calls[1]?.[0]?.profiles?.[0]?.target
-      ?.zeroDataRetention,
-    true,
-  )
-  assert.deepEqual(
-    hostedConfigModule.saveHostedAssistantConfig.mock.calls[1]?.[0]?.profiles?.[0]?.target
-      ?.gatewayOnlyProviders,
-    ['openai'],
+    hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[1],
+    '/tmp/operator-home',
   )
 
-  const gatewaySeedWithoutZdr = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
-      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'false',
-    },
-  })
-
-  assert.deepEqual(gatewaySeedWithoutZdr, {
-    configured: true,
-    provider: 'openai-compatible',
-    seeded: true,
-    source: 'hosted-env',
-  })
+  const savedProfile = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
+    ?.profiles?.[0]
+  assertCodexGatewayProfile(savedProfile)
   assert.equal(
-    hostedConfigModule.saveHostedAssistantConfig.mock.calls[2]?.[0]?.profiles?.[0]?.target
-      ?.zeroDataRetention,
-    undefined,
-  )
-
-  await assert.rejects(
-    () =>
-      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'true',
-        },
-      }),
-    (error) =>
-      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with a hosted target that enforces zero data retention/u.test(
-        error.message,
-      ),
-  )
-
-  await assert.rejects(
-    () =>
-      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: 'openai',
-        },
-      }),
-    (error) =>
-      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS can be used only with Vercel AI Gateway/u.test(
-        error.message,
-      ),
-  )
-
-  await assert.rejects(
-    () =>
-      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_BASE_URL: 'https://gateway.internal.test/v1',
-          HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
-          HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
-        },
-      }),
-    (error) =>
-      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS can be used only with Vercel AI Gateway/u.test(
-        error.message,
-      ),
-  )
-
-  await assert.rejects(
-    () =>
-      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_BASE_URL: 'https://gateway.internal.test/v1',
-          HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
-          HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
-          HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'true',
-        },
-      }),
-    (error) =>
-      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with a hosted target that enforces zero data retention/u.test(
-        error.message,
-      ),
+    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG.envKey,
+    'VERCEL_AI_API_KEY',
   )
 })
 
@@ -436,35 +245,16 @@ test('hosted assistant bootstrap returns missing or invalid states and throws re
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
       /present but invalid/u.test(error.message),
   )
-
-  assert.deepEqual(
-    await invalidModule.ensureHostedAssistantOperatorDefaults({
-      allowMissing: true,
-      env: {
-        HOSTED_ASSISTANT_MODEL: 'openai-gpt-54',
-        HOSTED_ASSISTANT_PROVIDER: 'venice',
-        HOSTED_ASSISTANT_REASONING_EFFORT: 'medium',
-      },
-    }),
-    {
-      configured: true,
-      provider: 'openai-compatible',
-      seeded: true,
-      source: 'hosted-env',
-    },
-  )
 })
 
-test('hosted assistant bootstrap seeds or updates platform profiles from hosted env', async () => {
+test('hosted assistant bootstrap updates platform Codex profiles from hosted env', async () => {
   const existingPlatformProfile = createHostedAssistantProfile({
     id: 'platform-default',
     managedBy: 'platform',
     providerConfig: {
-      provider: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'https://api.openai.com/v1',
-      model: 'gpt-4.1',
-      providerName: 'openai',
+      provider: 'codex-cli',
+      model: 'gpt-5.4',
+      modelProvider: 'vercel-ai-gateway',
     },
   })
   const existingConfig = createHostedAssistantConfig({
@@ -472,29 +262,6 @@ test('hosted assistant bootstrap seeds or updates platform profiles from hosted 
     profiles: [existingPlatformProfile],
     updatedAt: '2026-04-08T10:00:00.000Z',
   })
-
-  const seededModule = await loadHostedAssistantModule({
-    readOperatorConfigResult: null,
-  })
-  const seeded = await seededModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'openai',
-      HOSTED_ASSISTANT_MODEL: 'gpt-5',
-    },
-    homeDirectory: '/tmp/operator-home',
-  })
-  assert.deepEqual(seeded, {
-    configured: true,
-    provider: 'openai-compatible',
-    seeded: true,
-    source: 'hosted-env',
-  })
-  assert.equal(seededModule.saveHostedAssistantConfig.mock.calls.length, 1)
-  assert.equal(
-    seededModule.saveHostedAssistantConfig.mock.calls[0]?.[1],
-    '/tmp/operator-home',
-  )
 
   const updatedModule = await loadHostedAssistantModule({
     readOperatorConfigResult: {
@@ -505,344 +272,93 @@ test('hosted assistant bootstrap seeds or updates platform profiles from hosted 
   const updated = await updatedModule.ensureHostedAssistantOperatorDefaults({
     allowMissing: false,
     env: {
-      HOSTED_ASSISTANT_PROVIDER: 'openrouter',
-      HOSTED_ASSISTANT_MODEL: 'openrouter/auto',
+      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
     },
   })
   assert.deepEqual(updated, {
     configured: true,
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     seeded: true,
     source: 'hosted-env',
   })
   assert.equal(updatedModule.saveHostedAssistantConfig.mock.calls.length, 1)
+  assertCodexGatewayProfile(updatedModule.saveHostedAssistantConfig.mock.calls[0]?.[0]?.profiles?.[0])
 
   const unchangedModule = await loadHostedAssistantModule({
     readOperatorConfigResult: {
-      hostedAssistant: existingConfig,
+      hostedAssistant: createHostedAssistantConfig({
+        activeProfileId: existingPlatformProfile.id,
+        profiles: [
+          createHostedAssistantProfile({
+            id: 'platform-default',
+            managedBy: 'platform',
+            providerConfig: {
+              approvalPolicy: 'never',
+              provider: 'codex-cli',
+              model: 'gpt-5.5',
+              modelProvider: 'vercel-ai-gateway',
+              reasoningEffort: 'medium',
+              sandbox: 'danger-full-access',
+            },
+          }),
+        ],
+        updatedAt: '2026-04-08T10:00:00.000Z',
+      }),
       hostedAssistantInvalid: false,
     },
   })
   const unchanged = await unchangedModule.ensureHostedAssistantOperatorDefaults({
     allowMissing: false,
     env: {
-      HOSTED_ASSISTANT_PROVIDER: 'openai',
-      HOSTED_ASSISTANT_MODEL: 'gpt-4.1',
+      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
     },
   })
   assert.deepEqual(unchanged, {
     configured: true,
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     seeded: false,
     source: 'saved',
   })
   assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 0)
 })
 
-test('hosted assistant bootstrap promotes hosted env over saved member profiles', async () => {
-  const memberProfile = createHostedAssistantProfile({
-    id: 'member-profile',
-    providerConfig: {
-      provider: 'openai-compatible',
-      baseUrl: 'https://gateway.example.test/v1',
-      model: 'gpt-4.1',
-      providerName: 'Gateway',
-    },
-  })
-  const memberConfig = createHostedAssistantConfig({
-    activeProfileId: memberProfile.id,
-    profiles: [memberProfile],
-    updatedAt: '2026-04-08T10:00:00.000Z',
-  })
-  const hostedConfigModule = await loadHostedAssistantModule({
-    readOperatorConfigResult: {
-      hostedAssistant: memberConfig,
-      hostedAssistantInvalid: false,
-    },
-  })
-
-  const promoted = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: true,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
-      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.5',
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'false',
-    },
-  })
-
-  assert.deepEqual(promoted, {
-    configured: true,
-    provider: 'openai-compatible',
-    seeded: true,
-    source: 'hosted-env',
-  })
-  assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 1)
-  const savedConfig = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
-  assert.equal(savedConfig?.activeProfileId, 'platform-default')
-  assert.equal(savedConfig?.profiles.length, 2)
-  assert.equal(savedConfig?.profiles[0]?.id, memberProfile.id)
-  assert.equal(savedConfig?.profiles[1]?.id, 'platform-default')
-  assert.equal(savedConfig?.profiles[1]?.managedBy, 'platform')
-  assert.equal(savedConfig?.profiles[1]?.target.model, 'openai/gpt-5.5')
-  assert.equal(savedConfig?.profiles[1]?.target.zeroDataRetention, undefined)
-})
-
-test('hosted assistant bootstrap normalizes container-rewritten local bridge base urls before persisting platform profiles', async () => {
-  const hostedConfigModule = await loadHostedAssistantModule({
-    readOperatorConfigResult: null,
-  })
-
-  const seeded = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'openai',
-      HOSTED_ASSISTANT_MODEL: 'gpt-5',
-      HOSTED_ASSISTANT_BASE_URL: 'http://host.docker.internal:4111/v1',
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: 'http://host.docker.internal:8787',
-    },
-  })
-
-  assert.deepEqual(seeded, {
-    configured: true,
-    provider: 'openai-compatible',
-    seeded: true,
-    source: 'hosted-env',
-  })
-  assert.equal(
-    hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]?.profiles?.[0]?.target
-      ?.endpoint,
-    'http://127.0.0.1:4111/v1',
-  )
-
-  const customBridgeHostModule = await loadHostedAssistantModule({
-    readOperatorConfigResult: null,
-  })
-
-  await customBridgeHostModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'openai',
-      HOSTED_ASSISTANT_MODEL: 'gpt-5',
-      HOSTED_ASSISTANT_BASE_URL: 'http://172.17.0.1:4111/v1',
-      HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL: 'http://172.17.0.1:8787',
-    },
-  })
-
-  assert.equal(
-    customBridgeHostModule.saveHostedAssistantConfig.mock.calls[0]?.[0]?.profiles?.[0]?.target
-      ?.endpoint,
-    'http://127.0.0.1:4111/v1',
-  )
-})
-
-test('hosted assistant bootstrap validates env combinations and unsupported provider settings', async () => {
-  const existingIncompletePlatformProfile = createHostedAssistantProfile({
-    id: 'platform-default',
-    managedBy: 'platform',
-    providerConfig: {
-      provider: 'openai-compatible',
-      baseUrl: 'https://gateway.example.test/v1',
-      providerName: 'Gateway',
-    },
-  })
-  const existingIncompleteConfig = createHostedAssistantConfig({
-    activeProfileId: existingIncompletePlatformProfile.id,
-    profiles: [existingIncompletePlatformProfile],
-    updatedAt: '2026-04-08T10:00:00.000Z',
-  })
-
+test('hosted assistant bootstrap rejects removed OpenAI-compatible hosted provider aliases', async () => {
   const moduleWithProfile = await loadHostedAssistantModule({
-    readOperatorConfigResult: {
-      hostedAssistant: existingIncompleteConfig,
-      hostedAssistantInvalid: false,
-    },
+    readOperatorConfigResult: null,
   })
 
-  const adopted = await moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    env: {
-      HOSTED_ASSISTANT_PROVIDER: 'OpenRouter',
-      HOSTED_ASSISTANT_MODEL: 'openrouter/auto',
-    },
-  })
-  assert.deepEqual(adopted, {
-    configured: true,
-    provider: 'openai-compatible',
-    seeded: true,
-    source: 'hosted-env',
-  })
+  for (const provider of ['openai', 'openrouter', 'custom', 'codex-cli', 'not-a-provider']) {
+    await assert.rejects(
+      () =>
+        moduleWithProfile.ensureHostedAssistantOperatorDefaults({
+          allowMissing: false,
+          env: {
+            HOSTED_ASSISTANT_PROVIDER: provider,
+            HOSTED_ASSISTANT_MODEL: 'gpt-5',
+          },
+        }),
+      (error) =>
+        error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
+        error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
+        /vercel-ai-gateway/u.test(error.message),
+    )
+  }
 
   await assert.rejects(
     () =>
       moduleWithProfile.ensureHostedAssistantOperatorDefaults({
         allowMissing: false,
         env: {
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
+          HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+          HOSTED_ASSISTANT_MODEL: 'gpt-5.5',
+          HOSTED_ASSISTANT_BASE_URL: 'https://gateway.internal.test/v1',
         },
       }),
     (error) =>
       error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_PROVIDER is required/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-        },
-      }),
-    (error) =>
-      error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_MODEL must be configured/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'custom',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-        },
-      }),
-    (error) =>
-      error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_BASE_URL must be configured/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_CODEX_COMMAND: 'codex',
-        },
-      }),
-    (error) =>
-      error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_CODEX_COMMAND cannot be used/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_OSS: 'sometimes',
-        },
-      }),
-    (error) =>
-      error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /boolean value/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'openai',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-          HOSTED_ASSISTANT_REASONING_EFFORT: 'extreme',
-        },
-      }),
-    (error) =>
-      error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /must be one of/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'codex-cli',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-        },
-      }),
-    (error) =>
-      error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /not supported for hosted assistant execution/u.test(error.message),
-  )
-
-  await assert.rejects(
-    () =>
-      moduleWithProfile.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {
-          HOSTED_ASSISTANT_PROVIDER: 'not-a-provider',
-          HOSTED_ASSISTANT_MODEL: 'gpt-5',
-        },
-      }),
-    (error) =>
-      error instanceof moduleWithProfile.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /supported OpenAI-compatible provider alias/u.test(error.message),
-  )
-
-  const memberProfile = createHostedAssistantProfile({
-    id: 'member-profile',
-    providerConfig: {
-      provider: 'openai-compatible',
-      baseUrl: 'https://gateway.example.test/v1',
-      model: 'gpt-4.1',
-      providerName: 'Gateway',
-    },
-  })
-  const memberConfig = createHostedAssistantConfig({
-    activeProfileId: memberProfile.id,
-    profiles: [memberProfile],
-    updatedAt: '2026-04-08T10:00:00.000Z',
-  })
-  const memberModule = await loadHostedAssistantModule({
-    readOperatorConfigResult: {
-      hostedAssistant: memberConfig,
-      hostedAssistantInvalid: false,
-    },
-  })
-
-  assert.deepEqual(
-    await memberModule.ensureHostedAssistantOperatorDefaults({
-      allowMissing: true,
-      env: {},
-    }),
-    {
-      configured: true,
-      provider: 'openai-compatible',
-      seeded: false,
-      source: 'saved',
-    },
-  )
-
-  const invalidReadyModule = await loadHostedAssistantModule({
-    readOperatorConfigResult: {
-      hostedAssistant: existingIncompleteConfig,
-      hostedAssistantInvalid: false,
-    },
-  })
-
-  await assert.rejects(
-    () =>
-      invalidReadyModule.ensureHostedAssistantOperatorDefaults({
-        allowMissing: false,
-        env: {},
-      }),
-    (error) =>
-      error instanceof invalidReadyModule.HostedAssistantConfigurationError &&
-      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /does not define a ready active profile/u.test(error.message),
+      /HOSTED_ASSISTANT_BASE_URL cannot be used/u.test(error.message),
   )
 })

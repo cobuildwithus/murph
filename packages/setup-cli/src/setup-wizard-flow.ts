@@ -107,17 +107,13 @@ export function buildSetupWizardScheduledUpdateBadges(input: {
 
 export function formatSetupWizardPromptTitle(
   step: Exclude<SetupWizardStep, 'intro' | 'confirm'>,
-  provider: SetupWizardAssistantProvider,
+  _provider: SetupWizardAssistantProvider,
 ): string {
   switch (step) {
     case 'assistant-provider':
       return 'How should Murph answer?'
     case 'assistant-method':
-      if (provider === 'openai') {
-        return 'How should Murph connect to OpenAI?'
-      }
-
-      return 'How should Murph connect to your endpoint?'
+      return 'How should Murph use Codex?'
     case 'scheduled-updates':
       return 'Auto updates'
     case 'channels':
@@ -131,15 +127,13 @@ export function formatSetupWizardPromptTitle(
 
 export function formatSetupWizardStepIntro(
   step: SetupWizardSelectionStep,
-  provider: SetupWizardAssistantProvider,
+  _provider: SetupWizardAssistantProvider,
 ): string {
   switch (step) {
     case 'assistant-provider':
-      return 'Choose the provider or endpoint style Murph should use by default.'
+      return 'Choose the Codex path Murph should use by default.'
     case 'assistant-method':
-      return provider === 'openai'
-        ? 'Pick the OpenAI path that fits you best.'
-        : 'Choose a manual endpoint or keep the Codex local-model flow.'
+      return 'Choose the Codex model path Murph should use by default.'
     case 'scheduled-updates':
       return 'These are optional check-ins Murph can send later.'
     case 'channels':

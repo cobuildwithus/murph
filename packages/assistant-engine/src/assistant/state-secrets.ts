@@ -5,14 +5,9 @@ import path from 'node:path'
 import {
   assistantPersistedSessionSchema,
   assistantSessionSecretsSchema,
-  parseAssistantSessionRecord,
   type AssistantSession,
   type AssistantSessionSecrets,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  mergeAssistantHeaders,
-  splitAssistantHeadersForPersistence,
-} from '@murphai/operator-config/assistant/redaction'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { quarantineAssistantStateFile } from './quarantine.js'
 import { serializeAssistantSessionForPersistence } from './provider-state.js'
@@ -39,38 +34,14 @@ export function extractAssistantSessionSecretsForPersistence(
 ): AssistantSecretPersistenceResult<z.infer<typeof assistantPersistedSessionSchema>> & {
   secrets: AssistantSessionSecrets | null
 } {
-  const providerHeaders = splitAssistantHeadersForPersistence(
-    session.target.adapter === 'openai-compatible' ? session.target.headers : null,
-  )
-
   const persisted = assistantPersistedSessionSchema.parse({
     ...serializeAssistantSessionForPersistence(session),
-    target:
-      session.target.adapter === 'openai-compatible'
-        ? {
-            ...session.target,
-            headers: providerHeaders.persistedHeaders,
-          }
-        : session.target,
   })
 
-  const migratedHeaderNames = [...Object.keys(providerHeaders.secretHeaders ?? {})].sort(
-    (left, right) => left.localeCompare(right),
-  )
-
-  const secrets = providerHeaders.secretHeaders
-    ? assistantSessionSecretsSchema.parse({
-          schema: 'murph.assistant-session-secrets.v1',
-          sessionId: session.sessionId,
-          updatedAt: session.updatedAt,
-          providerHeaders: providerHeaders.secretHeaders,
-        })
-    : null
-
   return {
-    migratedHeaderNames,
+    migratedHeaderNames: [],
     persisted,
-    secrets,
+    secrets: null,
   }
 }
 
@@ -78,22 +49,8 @@ export function mergeAssistantSessionSecrets(
   session: AssistantSession,
   secrets: AssistantSessionSecrets | null,
 ): AssistantSession {
-  if (!secrets || session.target.adapter !== 'openai-compatible') {
-    return session
-  }
-  assertAssistantSessionSecretsIdentity({
-    expectedSessionId: session.sessionId,
-    expectedUpdatedAt: session.updatedAt,
-    secrets,
-  })
-
-  return parseAssistantSessionRecord({
-    ...serializeAssistantSessionForPersistence(session),
-    target: {
-      ...session.target,
-      headers: mergeAssistantHeaders(session.target.headers, secrets.providerHeaders),
-    },
-  })
+  void secrets
+  return session
 }
 
 export async function readAssistantSessionSecrets(input: {

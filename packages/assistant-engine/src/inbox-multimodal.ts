@@ -21,7 +21,7 @@ import {
 } from './inbox-evidence-projection.js'
 import {
   type AssistantUserMessageContentPart,
-} from './model-harness.js'
+} from './assistant/content-types.js'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 

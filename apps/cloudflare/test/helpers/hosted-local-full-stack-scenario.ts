@@ -78,6 +78,7 @@ export interface HostedLocalFullStackScenario {
     userId: string,
   ): Promise<HostedMailboxAppendForTestResponse>;
   harness: HostedLocalDevHarness;
+  runtimeEnv: NodeJS.ProcessEnv;
   stop(): Promise<void>;
   waitForHostedCompletion(
     userId: string,
@@ -219,6 +220,7 @@ export async function startHostedLocalFullStackScenario(input: {
           `stderr tail: ${scenarioHarness.stderrTail()}`,
         ].join("\n");
       },
+      runtimeEnv,
       queueAssistantResponses: (responseTexts) => {
         for (const responseText of responseTexts) {
           const trimmed = responseText.trim();

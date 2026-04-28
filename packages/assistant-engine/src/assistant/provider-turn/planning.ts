@@ -9,11 +9,6 @@ import {
   toLocalDayKey,
 } from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
-import {
-  createNotificationTurnAssistantToolCatalog,
-  createProviderTurnAssistantToolCatalog,
-} from '../../assistant-cli-tools.js'
 import {
   resolveAssistantProviderTargetExecutionCapabilities,
 } from '../../assistant-provider.js'
@@ -24,8 +19,6 @@ import {
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
 import {
-  isAssistantFailoverRouteCoolingDown,
-  type readAssistantFailoverState,
   type ResolvedAssistantFailoverRoute,
 } from '../failover.js'
 import {
@@ -38,15 +31,9 @@ import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
 } from '../provider-binding.js'
-import {
-  resolveOpenAiCompatibleProviderVisibleToolAliases,
-} from '../providers/openai-compatible.js'
 import type {
   AssistantMurphCommandAccessMode,
 } from '../providers/types.js'
-import {
-  hashAssistantToolCatalogForPromptCache,
-} from '../../model-harness.js'
 import {
   prioritizeAssistantRoutesForRichUserMessageContent,
 } from '../rich-content-routing.js'
@@ -97,7 +84,6 @@ export interface AssistantRouteTurnPlan {
   }
   promptCacheMetadata: AssistantPromptCacheMetadata | null
   systemPrompt: string | null
-  supportsToolRuntime: boolean
   workingDirectory: string
 }
 
@@ -160,7 +146,6 @@ export interface AssistantProviderTurnExecutionPlan {
   profile: AssistantProviderTurnResolvedExecutionProfile
   primaryRoute: ResolvedAssistantFailoverRoute | null
   promptTimeContext: AssistantPromptTimeContext
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   routes: readonly ResolvedAssistantFailoverRoute[]
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -168,16 +153,10 @@ export interface AssistantProviderTurnExecutionPlan {
 
 export interface AssistantProviderAttemptPlan {
   attemptCount: number
-  primaryRouteCooldownFailover: boolean
-  remainingRoutes: readonly ResolvedAssistantFailoverRoute[]
   route: ResolvedAssistantFailoverRoute
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
 }
-
-export type AssistantProviderFailoverState = Awaited<
-  ReturnType<typeof readAssistantFailoverState>
->
 
 const ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 100
 
@@ -261,25 +240,6 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
     profile: input.profile,
     turnTrigger: input.input.turnTrigger,
   })
-  const toolCatalog = (
-    profile.toolProfile === 'notification-turn'
-      ? createNotificationTurnAssistantToolCatalog
-      : createProviderTurnAssistantToolCatalog
-  )({
-    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-    cliEnv: {
-      ...input.plan.cliAccess.env,
-      ...memoryTurnEnv,
-    },
-    executionContext,
-    operatorAuthority: input.plan.operatorAuthority,
-    requestId: input.turnId,
-    sessionBinding: input.resolvedSession.binding,
-    sessionId: input.resolvedSession.sessionId,
-    vault: input.input.vault,
-    vaultServices: createIntegratedVaultServices(),
-    workingDirectory: input.plan.requestedWorkingDirectory,
-  })
   const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
 
   return {
@@ -290,7 +250,6 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
     profile,
     primaryRoute: input.routes[0] ?? null,
     promptTimeContext,
-    toolCatalog,
     routes: input.routes,
     sharedPlan: input.plan,
     turnId: input.turnId,
@@ -301,34 +260,24 @@ export async function resolveAssistantProviderAttemptPlan(input: {
   attemptCount: number
   attemptedRouteIds: ReadonlySet<string>
   executionPlan: AssistantProviderTurnExecutionPlan
-  failoverState: AssistantProviderFailoverState
   session: AssistantSession
 }): Promise<AssistantProviderAttemptPlan | null> {
-  const remainingRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
-    routes: input.executionPlan.routes.filter(
-      (route) => !input.attemptedRouteIds.has(route.routeId),
-    ),
+  const primaryRoute = input.executionPlan.primaryRoute
+  if (!primaryRoute || input.attemptedRouteIds.has(primaryRoute.routeId)) {
+    return null
+  }
+
+  const selectableRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
+    routes: [primaryRoute],
     userMessageContent: input.executionPlan.input.userMessageContent,
   })
-  const prioritizedRoutes =
-    input.executionPlan.activeTurnHistory?.nonReplayableProviderWork === true
-      ? remainingRoutes
-      : prioritizeAssistantFailoverRoutes(
-          remainingRoutes,
-          input.failoverState,
-        )
-  const route = prioritizedRoutes[0] ?? null
+  const route = selectableRoutes[0] ?? null
   if (!route) {
     return null
   }
 
   return {
     attemptCount: input.attemptCount,
-    primaryRouteCooldownFailover:
-      input.attemptCount === 1 &&
-      input.executionPlan.primaryRoute !== null &&
-      route.routeId !== input.executionPlan.primaryRoute.routeId,
-    remainingRoutes: prioritizedRoutes.slice(1),
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
       executionContext: input.executionPlan.executionContext,
@@ -339,7 +288,6 @@ export async function resolveAssistantProviderAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
-      toolCatalog: input.executionPlan.toolCatalog,
     }),
     session: input.session,
   }
@@ -348,7 +296,6 @@ export async function resolveAssistantProviderAttemptPlan(input: {
 export async function resolveAssistantRouteTurnPlan(input: {
   activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   input: AssistantMessageInput
   profile: AssistantProviderTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
@@ -400,12 +347,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const shouldInjectOnboardingGuidance =
     continuityPlan.onboardingGuidanceInjected
   const providerCapabilities = routeProviderCapabilities
-  const supportsToolRuntime = providerCapabilities.supportsToolRuntime
-  const assistantToolNameAliases = resolveAssistantProviderToolNameAliases({
-    route: input.route,
-    supportsToolRuntime,
-    toolCatalog: input.toolCatalog,
-  })
+  const assistantToolNameAliases = null
   const transcriptReplayLimit = shouldPrepareBootstrapContext && !activeTurnHistoryPresent
     ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
     : null
@@ -426,8 +368,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
     providerCapabilities,
-    supportsToolRuntime,
-    toolCatalog: input.toolCatalog,
   })
   const assistantCommandAccessMode =
     promptCapabilityAvailability.assistantCommandAccessMode
@@ -450,9 +390,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )
-  const toolSchemaHash = supportsToolRuntime
-    ? hashAssistantToolCatalogForPromptCache(input.toolCatalog)
-    : null
+  const toolSchemaHash = null
   const systemPromptResult =
     input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
@@ -530,30 +468,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     promptCacheMetadata: systemPromptResult.cacheMetadata,
     workingDirectory,
     systemPrompt,
-    supportsToolRuntime,
   }
-}
-
-function resolveAssistantProviderToolNameAliases(input: {
-  route: ResolvedAssistantFailoverRoute
-  supportsToolRuntime: boolean
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
-}): Record<string, string> | null {
-  if (input.route.provider !== 'openai-compatible' || !input.supportsToolRuntime) {
-    return null
-  }
-
-  const aliases = resolveOpenAiCompatibleProviderVisibleToolAliases(
-    input.toolCatalog.listTools().map((tool) => tool.name),
-  )
-  const visibleAliases = Object.fromEntries(
-    Object.entries(aliases).filter(
-      ([canonicalName, providerVisibleName]) =>
-        providerVisibleName !== canonicalName,
-    ),
-  )
-
-  return Object.keys(visibleAliases).length > 0 ? visibleAliases : null
 }
 
 export async function resolveAssistantPromptTimeContext(
@@ -601,118 +516,38 @@ export async function resolveAssistantActiveExperimentContextBlock(
 export function resolveAssistantPromptCapabilityAvailability(input: {
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-  supportsToolRuntime: boolean
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantPromptCapabilityAvailability {
-  const assistantHostedDeviceConnectAvailable = hasRouteToolRuntimeAccess({
-    supportsToolRuntime: input.supportsToolRuntime,
-    toolCatalog: input.toolCatalog,
-    toolNames: ['murph.device.connect'],
-  })
+  const assistantHostedDeviceConnectAvailable = false
 
   return {
     assistantCommandAccessMode: resolveAssistantCommandAccessMode({
       providerCapabilities: input.providerCapabilities,
-      supportsToolRuntime: input.supportsToolRuntime,
-      toolCatalog: input.toolCatalog,
     }),
     assistantHealthCommonsAccessMode: resolveAssistantHealthCommonsAccessMode({
       providerCapabilities: input.providerCapabilities,
-      supportsToolRuntime: input.supportsToolRuntime,
-      toolCatalog: input.toolCatalog,
     }),
     assistantHostedDeviceConnectAvailable,
     assistantHostedDeviceConnectProviders: assistantHostedDeviceConnectAvailable
       ? input.executionContext?.hosted?.deviceConnectProviders ?? []
       : [],
-    assistantKnowledgeToolsAvailable: hasRouteToolRuntimeAccess({
-      supportsToolRuntime: input.supportsToolRuntime,
-      toolCatalog: input.toolCatalog,
-      toolNames: [
-        'assistant.knowledge.list',
-        'assistant.knowledge.search',
-        'assistant.knowledge.get',
-        'assistant.knowledge.lint',
-        'assistant.knowledge.upsert',
-        'assistant.knowledge.rebuildIndex',
-      ],
-    }),
+    assistantKnowledgeToolsAvailable: false,
   }
 }
 
 function resolveAssistantHealthCommonsAccessMode(input: {
   providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-  supportsToolRuntime: boolean
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantHealthCommonsAccessMode {
-  if (
-    hasRouteToolRuntimeAccess({
-      supportsToolRuntime: input.supportsToolRuntime,
-      toolCatalog: input.toolCatalog,
-      toolNames: [
-        'healthCommons.search',
-        'healthCommons.get',
-        'healthCommons.listProtocols',
-        'healthCommons.listSources',
-      ],
-    })
-  ) {
-    return 'bound-tools'
-  }
-
   return input.providerCapabilities.murphCommandSurface === 'direct-cli'
     ? 'direct-cli'
     : 'none'
 }
 
-function hasRouteToolRuntimeAccess(input: {
-  supportsToolRuntime: boolean
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
-  toolNames: readonly string[]
-}): boolean {
-  return (
-    input.supportsToolRuntime &&
-    input.toolNames.every((toolName) => input.toolCatalog.hasTool(toolName))
-  )
-}
-
 function resolveAssistantCommandAccessMode(input: {
   providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
-  supportsToolRuntime: boolean
-  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantMurphCommandAccessMode {
-  switch (input.providerCapabilities.murphCommandSurface) {
-    case 'bound-tools':
-      return hasRouteToolRuntimeAccess({
-        supportsToolRuntime: input.supportsToolRuntime,
-        toolCatalog: input.toolCatalog,
-        toolNames: ['vault.cli.run'],
-      })
-        ? 'bound-tools'
-        : 'none'
-    case 'direct-cli':
-      return 'direct-cli'
-    default:
-      return 'none'
-  }
-}
-
-export function prioritizeAssistantFailoverRoutes(
-  routes: readonly ResolvedAssistantFailoverRoute[],
-  state: AssistantProviderFailoverState,
-): ResolvedAssistantFailoverRoute[] {
-  const ready: ResolvedAssistantFailoverRoute[] = []
-  const cooling: ResolvedAssistantFailoverRoute[] = []
-
-  for (const route of routes) {
-    if (isAssistantFailoverRouteCoolingDown({ route, state })) {
-      cooling.push(route)
-    } else {
-      ready.push(route)
-    }
-  }
-
-  return ready.length > 0 ? [...ready, ...cooling] : [...routes]
+  return input.providerCapabilities.murphCommandSurface === 'direct-cli'
+    ? 'direct-cli'
+    : 'none'
 }
 
 function removeTrailingCurrentUserPrompt(
@@ -767,18 +602,8 @@ function resolveAssistantEffectiveProviderResumeSessionId(input: {
   resumeProviderSessionId: string | null
   route: ResolvedAssistantFailoverRoute
 }): string | null {
-  const resumeProviderSessionId = normalizeNullableString(
-    input.resumeProviderSessionId,
-  )
-  if (
-    resumeProviderSessionId &&
-    input.route.providerOptions.executionDriver === 'responses' &&
-    !resumeProviderSessionId.startsWith('resp_')
-  ) {
-    return null
-  }
-
-  return resumeProviderSessionId
+  void input.route
+  return normalizeNullableString(input.resumeProviderSessionId)
 }
 
 export async function loadAssistantConversationMessages(input: {

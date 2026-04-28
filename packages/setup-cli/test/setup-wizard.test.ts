@@ -188,11 +188,8 @@ test.sequential('setup wizard preserves an explicit empty channel selection on d
     await writeInput('\r')
 
     assert.deepEqual(await wizardResultPromise, {
-      assistantApiKeyEnv: null,
-      assistantBaseUrl: null,
       assistantOss: null,
       assistantPreset: 'skip',
-      assistantProviderName: null,
       channels: [],
       scheduledUpdates: [
         'environment-health-watch',
@@ -340,31 +337,19 @@ test('setup wizard runtime-status helpers preserve defaulting, detail copy, and 
   ])
 })
 
-test.sequential('setup wizard uses endpoint-specific method copy and confirm review for named endpoints', async () => {
+test.sequential('setup wizard carries Codex local selection into confirm review', async () => {
   await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
     const wizardResultPromise = runSetupWizard({
-      initialAssistantPreset: 'openai-compatible',
-      initialAssistantProviderPreset: 'custom',
+      initialAssistantOss: true,
+      initialAssistantPreset: 'codex',
       platform: 'linux',
-      vault: './wizard-endpoint-provider',
+      vault: './wizard-codex-local',
     })
 
     const introOutput = await waitForRenderedText(flush, readOutput, /Before you start/u)
     assert.match(introOutput, /Before you start/u)
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
-    await writeInput('\r')
-
-    const methodOutput = await waitForRenderedText(
-      flush,
-      readOutput,
-      /How should Murph connect to your endpoint\?/u,
-    )
-    assert.match(
-      methodOutput,
-      /Choose a manual endpoint or keep the Codex local-model flow\./u,
-    )
-
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
@@ -375,16 +360,13 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
 
     const confirmOutput = await waitForRenderedText(flush, readOutput, /Review/u)
     assert.match(confirmOutput, /Review your setup/u)
-    assert.match(confirmOutput, /Assistant: Custom endpoint · Compatible endpoint/u)
+    assert.match(confirmOutput, /Assistant: Codex local model/u)
 
     await writeInput('\r')
 
     assert.deepEqual(await wizardResultPromise, {
-      assistantApiKeyEnv: null,
-      assistantBaseUrl: 'http://127.0.0.1:11434/v1',
-      assistantOss: false,
-      assistantPreset: 'openai-compatible',
-      assistantProviderName: null,
+      assistantOss: true,
+      assistantPreset: 'codex',
       channels: [],
       scheduledUpdates: [
         'environment-health-watch',
@@ -805,11 +787,8 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
 
     await assert.doesNotReject(wizardResultPromise)
     assert.deepEqual(await wizardResultPromise, {
-      assistantApiKeyEnv: null,
-      assistantBaseUrl: null,
       assistantOss: null,
       assistantPreset: 'skip',
-      assistantProviderName: null,
       channels: [],
       scheduledUpdates: [],
       wearables: ['whoop'],
@@ -817,77 +796,50 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
   })
 }, WIZARD_TEST_TIMEOUT_MS)
 
-test.sequential('setup wizard keeps assistant API-key defaults and review guidance when no public-link step is needed', async () => {
-  const previousOpenAiApiKey = process.env.OPENAI_API_KEY
-  delete process.env.OPENAI_API_KEY
-
-  try {
-    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
-      const wizardResultPromise = runSetupWizard({
-        initialAssistantApiKeyEnv: '  OPENAI_API_KEY  ',
-        initialAssistantBaseUrl: ' https://api.openai.com/v1 ',
-        initialAssistantPreset: 'openai-compatible',
-        initialAssistantProviderName: ' OpenAI ',
-        platform: 'linux',
-        vault: './wizard-openai',
-      })
-
-      await flush()
-      await writeInput('\r')
-      await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
-      await writeInput('\r')
-      await waitForRenderedText(flush, readOutput, /How should Murph connect to OpenAI\?/u)
-      await writeInput('\r')
-      await waitForRenderedText(flush, readOutput, /Auto updates/u)
-      await writeInput('\r')
-      await waitForRenderedText(flush, readOutput, /Chat channels/u)
-      await writeInput('\r')
-      await waitForRenderedText(flush, readOutput, /Health data/u)
-      await writeInput('\r')
-      const confirmOutput = await waitForRenderedText(
-        flush,
-        readOutput,
-        /Needs keys first/u,
-      )
-      assert.match(confirmOutput, /How should Murph connect to OpenAI\?/u)
-      assert.match(confirmOutput, /Needs keys first: Assistant \(OPENAI_API_KEY\)/u)
-      assert.match(
-        confirmOutput,
-        /Murph will ask for any missing keys for this setup run/u,
-      )
-      assert.match(confirmOutput, /keep your update picks ready for/u)
-      assert.match(
-        confirmOutput,
-        /later, and open anything that can connect right away\./u,
-      )
-
-      await writeInput('\u001B[D')
-      await waitForRenderedText(flush, readOutput, /Health data/u)
-      await writeInput('\r')
-      await waitForRenderedText(flush, readOutput, /Review your setup/u)
-      await writeInput('\r')
-
-      assert.deepEqual(await wizardResultPromise, {
-        assistantApiKeyEnv: 'OPENAI_API_KEY',
-        assistantBaseUrl: 'https://api.openai.com/v1',
-        assistantOss: false,
-        assistantPreset: 'openai-compatible',
-        assistantProviderName: 'OpenAI',
-        channels: [],
-        scheduledUpdates: [
-          'environment-health-watch',
-          'weekly-health-snapshot',
-        ],
-        wearables: [],
-      })
+test.sequential('setup wizard keeps Codex cloud review guidance when no public-link step is needed', async () => {
+  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+    const wizardResultPromise = runSetupWizard({
+      initialAssistantOss: false,
+      initialAssistantPreset: 'codex',
+      platform: 'linux',
+      vault: './wizard-codex',
     })
-  } finally {
-    if (previousOpenAiApiKey === undefined) {
-      delete process.env.OPENAI_API_KEY
-    } else {
-      process.env.OPENAI_API_KEY = previousOpenAiApiKey
-    }
-  }
+
+    await flush()
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Health data/u)
+    await writeInput('\r')
+    const confirmOutput = await waitForRenderedText(
+      flush,
+      readOutput,
+      /Review your setup/u,
+    )
+    assert.match(confirmOutput, /Assistant: ChatGPT \/ Codex sign-in/u)
+    assert.match(confirmOutput, /Needs keys first: None/u)
+
+    await writeInput('\u001B[D')
+    await waitForRenderedText(flush, readOutput, /Health data/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
+    await writeInput('\r')
+
+    assert.deepEqual(await wizardResultPromise, {
+      assistantOss: false,
+      assistantPreset: 'codex',
+      channels: [],
+      scheduledUpdates: [
+        'environment-health-watch',
+        'weekly-health-snapshot',
+      ],
+      wearables: [],
+    })
+  })
 }, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard surfaces cancellation when the operator quits from the intro screen', async () => {
@@ -973,11 +925,8 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
     await writeInput(' ')
 
     assert.deepEqual(await wizardResultPromise, {
-      assistantApiKeyEnv: null,
-      assistantBaseUrl: null,
       assistantOss: null,
       assistantPreset: 'skip',
-      assistantProviderName: null,
       channels: ['telegram'],
       scheduledUpdates: [],
       wearables: ['whoop'],

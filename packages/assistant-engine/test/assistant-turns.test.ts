@@ -47,7 +47,7 @@ describe('assistant turns', () => {
         source: 'test',
       },
       prompt,
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel,
       sessionId: 'session-alpha',
       startedAt: '2026-04-08T00:00:00.000Z',
@@ -63,7 +63,7 @@ describe('assistant turns', () => {
       deliveryRequested: true,
       lastError: null,
       promptPreview: buildExpectedRedactedPreview(prompt),
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: normalizePreview(providerModel, 240),
       responsePreview: null,
       schema: 'murph.assistant-turn-receipt.v1',
@@ -197,7 +197,7 @@ describe('assistant turns', () => {
     const created = await createAssistantTurnReceipt({
       deliveryRequested: false,
       prompt: '  hello world  ',
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: null,
       sessionId: 'session-defaults',
       startedAt: '2026-04-08T01:00:00.000Z',
@@ -241,7 +241,7 @@ describe('assistant turns', () => {
     await createAssistantTurnReceipt({
       deliveryRequested: true,
       prompt: 'first prompt',
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: 'model-a',
       sessionId: 'session-a',
       startedAt: '2026-04-08T02:00:00.000Z',
@@ -251,7 +251,7 @@ describe('assistant turns', () => {
     await createAssistantTurnReceipt({
       deliveryRequested: true,
       prompt: 'second prompt',
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: 'model-b',
       sessionId: 'session-b',
       startedAt: '2026-04-08T02:00:01.000Z',
@@ -261,7 +261,7 @@ describe('assistant turns', () => {
     await createAssistantTurnReceipt({
       deliveryRequested: true,
       prompt: 'third prompt',
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: 'model-c',
       sessionId: 'session-a',
       startedAt: '2026-04-08T02:00:02.000Z',
@@ -314,7 +314,7 @@ describe('assistant turns', () => {
     const created = await createAssistantTurnReceipt({
       deliveryRequested: true,
       prompt: 'prompt',
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: 'model',
       sessionId: 'session-corrupt',
       startedAt: '2026-04-08T03:00:00.000Z',

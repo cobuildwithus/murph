@@ -7,7 +7,10 @@ import {
 } from "../src/hosted-runner-smoke-contract.js";
 
 const validHostedRunnerSmokeResult = {
-  childCwd: "/tmp/hosted-runner-smoke-launch-123",
+  childCwdIsIsolated: true,
+  codexAppServerHelpBytes: 2048,
+  codexCommandDiscovered: true,
+  codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
   healthCommonsCliProtocolListBytes: 768,
   healthCommonsCliSearchBytes: 512,
@@ -18,15 +21,15 @@ const validHostedRunnerSmokeResult = {
   healthCommonsRuntimeSearchHitKeys: [
     "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
   ],
-  murphBin: "/app/node_modules/.bin/murph",
+  murphCommandDiscovered: true,
   normalizedTranscriptMatchesExpectedSnippet: true,
   normalizedTranscriptProviderId: "whisper.cpp",
   normalizedTranscriptSha256: "normalized-hash",
-  operatorHomeRoot: "/tmp/hosted-runner-smoke/home",
+  operatorHomeRebound: true,
   reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
   schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
-  vaultCliBin: "/app/node_modules/.bin/vault-cli",
-  vaultRoot: "/tmp/hosted-runner-smoke/vault",
+  vaultCliCommandDiscovered: true,
+  vaultRootRebound: true,
   vaultShowBytes: 128,
   wavTranscriptMatchesExpectedSnippet: true,
   wavTranscriptProviderId: "whisper.cpp",
@@ -61,8 +64,13 @@ describe("parseHostedRunnerSmokeInput", () => {
 describe("parseHostedRunnerSmokeResult", () => {
   it("accepts the in-image smoke result shape", () => {
     expect(parseHostedRunnerSmokeResult(validHostedRunnerSmokeResult)).toMatchObject({
-      murphBin: "/app/node_modules/.bin/murph",
+      childCwdIsIsolated: true,
+      codexAppServerHelpBytes: 2048,
+      codexCommandDiscovered: true,
+      codexVersion: "codex-cli 0.125.0",
+      murphCommandDiscovered: true,
       normalizedTranscriptSha256: "normalized-hash",
+      operatorHomeRebound: true,
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
       healthCommonsCatalogHash: "sha256:catalog",
       healthCommonsCliSearchBytes: 512,
@@ -71,6 +79,8 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsRuntimeSearchHitKeys: [
         "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
       ],
+      vaultCliCommandDiscovered: true,
+      vaultRootRebound: true,
       vaultShowBytes: 128,
       wavTranscriptProviderId: "whisper.cpp",
     });
@@ -89,6 +99,29 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsRuntimeSearchHitKeys: [],
     })).toThrow(
       "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys must be a non-empty array.",
+    );
+  });
+
+  it("rejects missing or empty Codex preflight proof fields", () => {
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexCommandDiscovered: "true",
+    })).toThrow(
+      "Hosted runner smoke result.codexCommandDiscovered must be a boolean.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexVersion: "",
+    })).toThrow(
+      "Hosted runner smoke result.codexVersion must be a non-empty string.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      codexAppServerHelpBytes: Number.NaN,
+    })).toThrow(
+      "Hosted runner smoke result.codexAppServerHelpBytes must be a finite number.",
     );
   });
 

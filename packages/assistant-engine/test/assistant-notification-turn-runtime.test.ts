@@ -17,6 +17,19 @@ import type {
   ExecutedAssistantProviderTurnResult,
 } from '../src/assistant/service-contracts.ts'
 
+type CodexAssistantTarget = Extract<
+  AssistantSession['target'],
+  { adapter: 'codex-cli' }
+>
+
+const CODEX_MODEL_PROVIDER_CONFIG = {
+  id: 'vercel-ai-gateway',
+  name: 'Vercel AI Gateway',
+  baseUrl: 'https://ai-gateway.vercel.sh/v1',
+  envKey: 'VERCEL_AI_API_KEY',
+  wireApi: 'responses' as const,
+}
+
 afterEach(() => {
   vi.resetModules()
   vi.unstubAllEnvs()
@@ -171,10 +184,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
-    createDefaultLocalAssistantModelTarget: () => ({
-      adapter: 'openai-compatible',
-      model: 'gpt-5.4',
-    }),
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
@@ -227,6 +237,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))
 
+  const hostedDefaultTarget = createCodexTarget({
+    model: 'gpt-5.5-mini',
+  })
   const { sendAssistantNotificationLocal } = await import(
     '../src/assistant/notification-turn.ts'
   )
@@ -235,17 +248,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     deliveryDedupeToken: 'cron-slot-token',
     executionContext: {
       hosted: {
-        defaultTarget: {
-          adapter: 'openai-compatible',
-          apiKeyEnv: 'HOSTED_OPENAI_API_KEY',
-          endpoint: 'https://gateway.example.com/v1',
-          headers: null,
-          model: 'gpt-4.1-mini',
-          presetId: null,
-          providerName: 'Hosted Gateway',
-          reasoningEffort: null,
-          webSearch: null,
-        },
+        defaultTarget: hostedDefaultTarget,
         channelTypingDependencies: {
           startTelegramTyping,
         },
@@ -297,32 +300,12 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       | undefined
   assert.deepEqual(
     firstResolvedNotificationSessionInput?.boundaryDefaultTarget,
-    {
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'HOSTED_OPENAI_API_KEY',
-      endpoint: 'https://gateway.example.com/v1',
-      headers: null,
-      model: 'gpt-4.1-mini',
-      presetId: null,
-      providerName: 'Hosted Gateway',
-      reasoningEffort: null,
-      webSearch: null,
-    },
+    hostedDefaultTarget,
   )
   assert.deepEqual(
     firstResolvedNotificationSessionInput?.defaults,
     {
-      backend: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: 'HOSTED_OPENAI_API_KEY',
-        endpoint: 'https://gateway.example.com/v1',
-        headers: null,
-        model: 'gpt-4.1-mini',
-        presetId: null,
-        providerName: 'Hosted Gateway',
-        reasoningEffort: null,
-        webSearch: null,
-      },
+      backend: hostedDefaultTarget,
       timezone: 'Australia/Sydney',
     },
   )
@@ -439,10 +422,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
-    createDefaultLocalAssistantModelTarget: () => ({
-      adapter: 'openai-compatible',
-      model: 'gpt-5.4',
-    }),
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
@@ -578,10 +558,7 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
-    createDefaultLocalAssistantModelTarget: () => ({
-      adapter: 'openai-compatible',
-      model: 'gpt-5.4',
-    }),
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
@@ -652,15 +629,13 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      baseUrl: 'https://api.primary.example.test/v1',
-      model: 'gpt-4.1-primary',
+      model: 'gpt-5.5-primary',
     },
     routeId: 'route-primary',
   })
   const backupRoute = createRoute({
     providerOptions: {
-      baseUrl: 'https://api.backup.example.test/v1',
-      model: 'gpt-4.1-backup',
+      model: 'gpt-5.5-backup',
     },
     routeId: 'route-backup',
   })
@@ -730,10 +705,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
-    createDefaultLocalAssistantModelTarget: () => ({
-      adapter: 'openai-compatible',
-      model: 'gpt-5.4',
-    }),
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
@@ -791,8 +763,8 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   ).rejects.toThrow('delivery exploded')
   expect(mocks.createAssistantRuntimeStateService.mock.results[0]?.value.turns.createReceipt)
     .toHaveBeenCalledWith(expect.objectContaining({
-      provider: 'openai-compatible',
-      providerModel: 'gpt-4.1-backup',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.5-backup',
     }))
   expect((deliveryError as Error & {
     details?: Record<string, unknown>
@@ -801,10 +773,10 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     assistantNotificationDeliveryKind: null,
     assistantNotificationLinqBaseUrlOrigin: 'https://linq.example.test',
     assistantNotificationLinqBaseUrlPath: '/api/partner/v3',
-    assistantNotificationProvider: 'openai-compatible',
-    assistantNotificationProviderBaseUrlOrigin: 'https://api.backup.example.test',
-    assistantNotificationProviderBaseUrlPath: '/v1',
-    assistantNotificationProviderModel: 'gpt-4.1-backup',
+    assistantNotificationProvider: 'codex-cli',
+    assistantNotificationProviderBaseUrlOrigin: null,
+    assistantNotificationProviderBaseUrlPath: null,
+    assistantNotificationProviderModel: 'gpt-5.5-backup',
     assistantNotificationRouteId: 'route-backup',
     assistantNotificationStage: 'delivery',
   })
@@ -817,15 +789,13 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   const primaryRoute = createRoute({
     routeId: 'route-primary',
     providerOptions: {
-      baseUrl: 'https://gateway-primary.example.test/v1',
-      model: 'gpt-4.1-primary',
+      model: 'gpt-5.5-primary',
     },
   })
   const route = createRoute({
     routeId: 'route-provider-failure',
     providerOptions: {
-      baseUrl: 'https://gateway.example.test/v1',
-      model: 'gpt-4.1-mini',
+      model: 'gpt-5.5-mini',
     },
   })
   const mocks = {
@@ -862,10 +832,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
-    createDefaultLocalAssistantModelTarget: () => ({
-      adapter: 'openai-compatible',
-      model: 'gpt-5.4',
-    }),
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/execution-context.js', () => ({
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
@@ -913,10 +880,10 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   expect((providerError as Error & {
     details?: Record<string, unknown>
   }).details).toMatchObject({
-    assistantNotificationProvider: 'openai-compatible',
-    assistantNotificationProviderBaseUrlOrigin: 'https://gateway.example.test',
-    assistantNotificationProviderBaseUrlPath: '/v1',
-    assistantNotificationProviderModel: 'gpt-4.1-mini',
+    assistantNotificationProvider: 'codex-cli',
+    assistantNotificationProviderBaseUrlOrigin: null,
+    assistantNotificationProviderBaseUrlPath: null,
+    assistantNotificationProviderModel: 'gpt-5.5-mini',
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
   })
@@ -998,10 +965,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
-    createDefaultLocalAssistantModelTarget: () => ({
-      adapter: 'openai-compatible',
-      model: 'gpt-5.4',
-    }),
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
@@ -1112,14 +1076,12 @@ function createProviderOptions(
   overrides: Partial<AssistantProviderSessionOptions> = {},
 ): AssistantProviderSessionOptions {
   return serializeAssistantProviderSessionOptions({
-    provider: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://api.example.test/v1',
-    headers: null,
-    model: 'gpt-4.1',
-    providerName: 'murph-openai',
-    reasoningEffort: 'high',
-    zeroDataRetention: null,
+    approvalPolicy: 'never',
+    provider: 'codex-cli',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
     ...overrides,
   })
 }
@@ -1133,7 +1095,7 @@ function createRoute(input?: {
     codexCommand: null,
     cooldownMs: 60_000,
     label: 'Primary',
-    provider: input?.provider ?? 'openai-compatible',
+    provider: input?.provider ?? 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),
     routeId: input?.routeId ?? 'route-primary',
   }
@@ -1168,26 +1130,15 @@ function createAssistantSession(input?: {
   const target =
     input?.target ??
     createAssistantModelTarget({
-      provider:
-        providerOptions.baseUrl ||
-        providerOptions.apiKeyEnv ||
-        providerOptions.providerName ||
-        providerOptions.headers ||
-        providerOptions.zeroDataRetention === true
-          ? 'openai-compatible'
-          : 'codex-cli',
+      provider: 'codex-cli',
       approvalPolicy: providerOptions.approvalPolicy,
-      apiKeyEnv: providerOptions.apiKeyEnv ?? null,
-      baseUrl: providerOptions.baseUrl ?? null,
       codexHome: providerOptions.codexHome ?? null,
-      headers: providerOptions.headers ?? null,
       model: providerOptions.model,
+      modelProvider: providerOptions.modelProvider ?? null,
       oss: providerOptions.oss,
       profile: providerOptions.profile,
-      providerName: providerOptions.providerName ?? null,
       reasoningEffort: providerOptions.reasoningEffort ?? null,
       sandbox: providerOptions.sandbox,
-      zeroDataRetention: providerOptions.zeroDataRetention ?? null,
     })
 
   if (!target) {
@@ -1209,7 +1160,7 @@ function createAssistantSession(input?: {
       },
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
-    provider: target.adapter,
+    provider: 'codex-cli',
     providerOptions,
     resumeState: input?.resumeState ?? null,
     schema: 'murph.assistant-session.v1',
@@ -1217,6 +1168,24 @@ function createAssistantSession(input?: {
     target,
     turnCount: input?.turnCount ?? 0,
     updatedAt: '2026-04-08T00:00:00.000Z',
+  }
+}
+
+function createCodexTarget(
+  overrides: Partial<CodexAssistantTarget> = {},
+): CodexAssistantTarget {
+  return {
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    oss: false,
+    profile: null,
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
+    ...overrides,
   }
 }
 
@@ -1280,7 +1249,7 @@ function createProviderResult(input?: {
 
   return {
     attemptCount: 1,
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     providerContinuation: {
       kind: 'explicit-structured-history',
     },

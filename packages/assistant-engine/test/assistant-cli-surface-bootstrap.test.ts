@@ -18,7 +18,7 @@ afterEach(async () => {
   vi.resetModules()
   vi.restoreAllMocks()
   vi.clearAllMocks()
-  vi.doUnmock('../src/assistant-cli-tools.js')
+  vi.doUnmock('../src/assistant/cli-surface-manifest.js')
   await Promise.all(
     cleanupPaths.splice(0).map((target) =>
       rm(target, {
@@ -93,6 +93,14 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
         name: 'search docs',
       },
       {
+        description: 'Recursive assistant route',
+        name: 'assistant run',
+      },
+      {
+        description: 'Outbound delivery route',
+        name: 'assistant deliver',
+      },
+      {
         description: '   ',
         name: '   ',
       },
@@ -101,6 +109,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
 
   assert.ok(contract)
   assert.match(contract, /^Murph CLI Contract:/u)
+  assert.match(contract, /Use `vault-cli` directly from the local process/u)
   assert.match(contract, /Family Index:/u)
   assert.match(contract, /- search \(1\): docs/u)
   assert.match(contract, /- root \(1\): search/u)
@@ -113,6 +122,40 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders family, a
   assert.doesNotMatch(contract, /requestId/u)
   assert.doesNotMatch(contract, /--vault/u)
   assert.doesNotMatch(contract, /Duplicate name/u)
+  assert.doesNotMatch(contract, /assistant run/u)
+  assert.doesNotMatch(contract, /assistant deliver/u)
+})
+
+test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {
+  const {
+    buildAssistantCliProcessEnv,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  const env = buildAssistantCliProcessEnv({
+    ambientEnv: {
+      BRAVE_API_KEY: 'secret-api-key',
+      HOME: '/tmp/murph-home',
+      LINQ_API_TOKEN: 'secret-token',
+      MAPBOX_ACCESS_TOKEN: 'secret-map-token',
+      PATH: '/usr/bin',
+      TELEGRAM_BOT_TOKEN: 'secret-bot-token',
+    },
+    cliEnv: {
+      DEVICE_SYNC_SECRET: 'secret-device',
+      LINQ_WEBHOOK_SECRET: 'secret-webhook',
+      PATH: '',
+    },
+  })
+
+  assert.equal(env.HOME, '/tmp/murph-home')
+  assert.ok((env.PATH ?? '').length > 0)
+  assert.equal(env.NO_COLOR, '1')
+  assert.equal(env.BRAVE_API_KEY, undefined)
+  assert.equal(env.DEVICE_SYNC_SECRET, undefined)
+  assert.equal(env.LINQ_API_TOKEN, undefined)
+  assert.equal(env.LINQ_WEBHOOK_SECRET, undefined)
+  assert.equal(env.MAPBOX_ACCESS_TOKEN, undefined)
+  assert.equal(env.TELEGRAM_BOT_TOKEN, undefined)
 })
 
 test('buildAssistantCliSurfaceContract renders explicit string option signatures when the schema provides them', async () => {
@@ -220,8 +263,9 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
   )
 
   const readAssistantCliLlmsManifest = vi.fn()
-  vi.doMock('../src/assistant-cli-tools.js', () => ({
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
   }))
   const {
     resolveAssistantCliSurfaceBootstrapContext,
@@ -279,8 +323,9 @@ test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only 
       },
     ],
   })
-  vi.doMock('../src/assistant-cli-tools.js', () => ({
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
   }))
   const {
     resolveAssistantCliSurfaceBootstrapContext,
@@ -299,7 +344,6 @@ test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only 
         cliEnv: undefined,
         detail: 'full',
         executionContext: undefined,
-        vault: vaultRoot,
         workingDirectory: undefined,
       },
     ],
@@ -333,8 +377,9 @@ test('resolveAssistantCliSurfaceBootstrapContext falls back from full to compact
       ],
     })
 
-  vi.doMock('../src/assistant-cli-tools.js', () => ({
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
   }))
   const {
     resolveAssistantCliSurfaceBootstrapContext,
@@ -378,8 +423,9 @@ test('resolveAssistantCliSurfaceBootstrapContext clears the cached promise after
         },
       ],
     })
-  vi.doMock('../src/assistant-cli-tools.js', () => ({
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: () => ({}),
   }))
   const {
     resolveAssistantCliSurfaceBootstrapContext,
@@ -432,8 +478,11 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
       },
     ],
   }))
-  vi.doMock('../src/assistant-cli-tools.js', () => ({
+  vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
     readAssistantCliLlmsManifest,
+    buildAssistantCliProcessEnv: ({ cliEnv }: { cliEnv?: NodeJS.ProcessEnv }) => ({
+      ...(cliEnv ?? {}),
+    }),
   }))
   const {
     resolveAssistantCliSurfaceBootstrapContext,

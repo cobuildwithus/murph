@@ -23,7 +23,6 @@ import {
 } from '@murphai/assistant-engine/assistant/runtime-budgets'
 import { readAssistantCronRuns } from '@murphai/assistant-engine/assistant/cron/store'
 import { readAssistantOutboxIntent } from '@murphai/assistant-engine/assistant-outbox'
-import { summarizeAssistantQuarantines } from '@murphai/assistant-engine/assistant/quarantine'
 import { withAssistantRuntimeWriteLock } from '@murphai/assistant-engine/assistant/runtime-write-lock'
 import { readAssistantSession } from '@murphai/assistant-engine/assistant/store/persistence'
 import { readAssistantTurnReceipt } from '@murphai/assistant-engine/assistant/turns'
@@ -31,7 +30,6 @@ import {
   assistantSessionSchema,
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { redactAssistantSessionForDisplay } from '@murphai/assistant-engine/assistant/redaction'
 
 const cleanupPaths: string[] = []
 
@@ -1444,170 +1442,28 @@ test('assistant status includes runtime-budget quarantine details on the same re
   )
 })
 
-test('assistant session secrets persist in private sidecars with private permissions and redacted display output', async () => {
-  const { vaultRoot } = await createAssistantStateVault('murph-assistant-session-secrets-')
-
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    alias: 'assistant:secret-session',
-    channel: 'telegram',
-    participantId: 'contact:secret-user',
-  })
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const target = createAssistantBackendTarget({
-    provider: 'openai-compatible',
-    model: 'gpt-4.1-mini',
-    reasoningEffort: null,
-    baseUrl: 'https://api.example.test/v1',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    providerName: 'example',
-    headers: {
-      Authorization: 'Bearer session-secret-token',
-      'X-Visible': 'public-header',
-    },
-  })
-  assert.ok(target)
-  const updatedSession = await saveAssistantSession(vaultRoot, {
-    ...resolved.session,
-    target,
-    resumeState: {
-      providerSessionId: 'provider-session-1',
-      resumeRouteId: null,
-    },
-    provider: 'openai-compatible',
-    providerOptions: {
-      ...resolved.session.providerOptions,
-      model: 'gpt-4.1-mini',
-      baseUrl: 'https://api.example.test/v1',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      providerName: 'example',
-      headers: {
-        Authorization: 'Bearer session-secret-token',
-        'X-Visible': 'public-header',
-      },
-    },
-    updatedAt: '2026-03-29T12:00:00.000Z',
-  })
-
-  const sessionPath = path.join(
-    statePaths.sessionsDirectory,
-    `${updatedSession.sessionId}.json`,
-  )
-  const sessionSecretsPath = path.join(
-    statePaths.sessionSecretsDirectory,
-    `${updatedSession.sessionId}.json`,
-  )
-
-  const persistedRaw = await readFile(sessionPath, 'utf8')
-  const persisted = JSON.parse(persistedRaw) as {
-    target?: {
-      headers?: Record<string, string> | null
-    } | null
-    resumeState?: {
-      providerSessionId?: string | null
-    } | null
-  }
-  const secretSidecar = JSON.parse(
-    await readFile(sessionSecretsPath, 'utf8'),
-  ) as {
-    providerBindingHeaders?: Record<string, string> | null
-    providerHeaders?: Record<string, string> | null
-  }
-
-  assert.deepEqual(persisted.target?.headers, {
-    'X-Visible': 'public-header',
-  })
-  assert.equal(persisted.resumeState?.providerSessionId, 'provider-session-1')
-  assert.equal(/session-secret-token|binding-secret-token/u.test(persistedRaw), false)
-  assert.deepEqual(secretSidecar.providerHeaders, {
-    Authorization: 'Bearer session-secret-token',
-  })
-  assert.equal(secretSidecar.providerBindingHeaders ?? null, null)
-
-  const reloaded = await readAssistantSession({
-    paths: statePaths,
-    sessionId: updatedSession.sessionId,
-  })
-  assert.equal(
-    reloaded?.providerOptions.headers?.Authorization,
-    'Bearer session-secret-token',
-  )
-
-  const redacted = redactAssistantSessionForDisplay(reloaded!)
-  assert.equal(redacted.providerOptions.headers?.Authorization, '[REDACTED]')
-  assert.equal(redacted.providerOptions.headers?.['X-Visible'], 'public-header')
-
-  assert.equal((await stat(statePaths.assistantStateRoot)).mode & 0o777, 0o700)
-  assert.equal((await stat(statePaths.sessionsDirectory)).mode & 0o777, 0o700)
-  assert.equal((await stat(statePaths.sessionSecretsDirectory)).mode & 0o777, 0o700)
-  assert.equal((await stat(sessionPath)).mode & 0o777, 0o600)
-  assert.equal((await stat(sessionSecretsPath)).mode & 0o777, 0o600)
-})
-
-test('malformed session secret sidecars are quarantined instead of being treated as cleanly missing', async () => {
-  const { vaultRoot } = await createAssistantStateVault('murph-assistant-sidecar-corruption-')
-
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    alias: 'assistant:corrupted-sidecar',
-    channel: 'telegram',
-    participantId: 'contact:corrupted-sidecar',
-  })
-  const target = createAssistantBackendTarget({
-    provider: 'openai-compatible',
-    model: 'gpt-4.1-mini',
-    reasoningEffort: null,
-    baseUrl: 'https://api.example.test/v1',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    providerName: 'example',
-    headers: {
-      Authorization: 'Bearer session-secret-token',
-    },
-  })
-  assert.ok(target)
-  const updatedSession = await saveAssistantSession(vaultRoot, {
-    ...resolved.session,
-    target,
-    provider: 'openai-compatible',
-    providerOptions: {
-      ...resolved.session.providerOptions,
-      model: 'gpt-4.1-mini',
-      baseUrl: 'https://api.example.test/v1',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      providerName: 'example',
-      headers: {
-        Authorization: 'Bearer session-secret-token',
-      },
-    },
-    updatedAt: '2026-03-29T12:10:00.000Z',
-  })
-  const sessionSecretsPath = path.join(
-    statePaths.sessionSecretsDirectory,
-    `${updatedSession.sessionId}.json`,
-  )
-  await writeFile(sessionSecretsPath, '{"schema":"murph.assistant-session-secrets.v1"', 'utf8')
-
-  await assert.rejects(
+test('legacy OpenAI-compatible assistant targets fail closed before session secret sidecars are written', async () => {
+  assert.throws(
     () =>
-      readAssistantSession({
-        paths: statePaths,
-        sessionId: updatedSession.sessionId,
+      createAssistantBackendTarget({
+        provider: 'openai-compatible',
+        model: 'gpt-4.1-mini',
+        reasoningEffort: null,
+        baseUrl: 'https://api.example.test/v1',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        providerName: 'example',
+        headers: {
+          Authorization: 'Bearer session-secret-token',
+          'X-Visible': 'public-header',
+        },
       }),
     (error) => {
-      assert.equal((error as { code?: unknown }).code, 'ASSISTANT_SESSION_CORRUPTED')
+      assert.equal((error as { code?: unknown }).code, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')
       assert.match(
-        String((error as { context?: { reason?: unknown } }).context?.reason),
-        /secret sidecar is corrupted and was quarantined/u,
+        String((error as { message?: unknown }).message),
+        /Reconfigure the assistant for Codex App Server/u,
       )
       return true
     },
   )
-  await assert.rejects(() => stat(sessionSecretsPath))
-
-  const quarantine = await summarizeAssistantQuarantines({
-    paths: statePaths,
-  })
-  assert.equal(quarantine.total >= 1, true)
-  assert.equal(quarantine.byKind.session >= 1, true)
 })

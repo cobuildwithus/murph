@@ -21,23 +21,16 @@ import { resolveAssistantExecutionPlan } from './execution-plan.js'
 
 export type AssistantTurnRouteOverride = Pick<
   AssistantMessageInput,
-  | 'apiKeyEnv'
   | 'approvalPolicy'
-  | 'baseUrl'
   | 'codexCommand'
   | 'codexHome'
-  | 'gatewayOnlyProviders'
-  | 'headers'
   | 'model'
+  | 'modelProvider'
   | 'oss'
-  | 'presetId'
   | 'profile'
   | 'provider'
-  | 'providerName'
   | 'reasoningEffort'
   | 'sandbox'
-  | 'webSearch'
-  | 'zeroDataRetention'
 >
 
 export function resolveAssistantTurnRoutes(
@@ -46,7 +39,6 @@ export function resolveAssistantTurnRoutes(
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
   return resolveAssistantExecutionPlan({
-    backups: input.failoverRoutes,
     defaults,
     override: compactAssistantProviderConfigInput(input),
     resumeState: resolved.session.resumeState,
@@ -77,7 +69,6 @@ export async function resolveAssistantTurnRoutesForMessage(
     }
 
     return resolveAssistantExecutionPlan({
-      backups: input.failoverRoutes,
       boundaryDefaultTarget,
       defaults,
       override: compactAssistantProviderConfigInput(input),
@@ -110,28 +101,16 @@ export function selectAssistantTurnRouteOverride(
 
   return {
     providerOverride: {
-      apiKeyEnv: selectedRoute.providerOptions.apiKeyEnv ?? null,
       approvalPolicy: selectedRoute.providerOptions.approvalPolicy ?? null,
-      baseUrl: selectedRoute.providerOptions.baseUrl ?? null,
       codexCommand: selectedRoute.codexCommand ?? undefined,
       codexHome: selectedRoute.providerOptions.codexHome ?? null,
-      ...(selectedRoute.providerOptions.gatewayOnlyProviders
-        ? {
-            gatewayOnlyProviders:
-              selectedRoute.providerOptions.gatewayOnlyProviders,
-          }
-        : {}),
-      headers: selectedRoute.providerOptions.headers ?? null,
       model: selectedRoute.providerOptions.model ?? null,
+      modelProvider: selectedRoute.providerOptions.modelProvider ?? null,
       oss: selectedRoute.providerOptions.oss,
-      presetId: selectedRoute.providerOptions.presetId ?? null,
       profile: selectedRoute.providerOptions.profile ?? null,
       provider: selectedRoute.provider,
-      providerName: selectedRoute.providerOptions.providerName ?? null,
       reasoningEffort: selectedRoute.providerOptions.reasoningEffort ?? null,
       sandbox: selectedRoute.providerOptions.sandbox ?? null,
-      webSearch: selectedRoute.providerOptions.webSearch ?? null,
-      zeroDataRetention: selectedRoute.providerOptions.zeroDataRetention ?? null,
     },
     route: selectedRoute,
   }

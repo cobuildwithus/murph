@@ -49,7 +49,7 @@ interface HostedAssistantAutomationReadiness {
   configPresent: boolean;
   configStatus: "hosted-env" | "invalid" | "missing" | "saved" | "unready";
   configured: boolean;
-  provider: "openai-compatible" | null;
+  provider: "codex-cli" | "openai-compatible" | null;
   shouldRun: boolean;
 }
 

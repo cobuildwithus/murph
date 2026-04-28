@@ -9,4 +9,4 @@ Current smoke expectation:
 - `status`, `doctor`, and `session list|show` inspect local assistant runtime state without treating provider transcripts as canonical vault data
 - canonical `memory show|search|upsert|forget` uses `bank/memory.md`
 - canonical `automation scaffold|list|show|upsert` uses `bank/automations/*.md`
-- `run` watches inbox captures, processes due canonical automations plus internal runtime-only scheduling, skips already-routed or parser-pending work, and reuses the existing inbox model-routing harness for canonical writes
+- `run` watches inbox captures, processes due canonical automations plus internal runtime-only scheduling, skips already-routed or parser-pending work, and lets the Codex app-server runner call the normal `vault-cli` / `murph` surface for canonical writes

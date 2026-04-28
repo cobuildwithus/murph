@@ -117,22 +117,17 @@ test('redactAssistantDisplayPath leaves sibling prefixes alone and falls back to
 
 test('normalizeProviderOptions and createAssistantSessionId keep assistant identifiers normalized', () => {
   const normalized = normalizeProviderOptions({
-    model: 'gpt-5.4',
-    headers: {
-      Authorization: 'Bearer token',
-    },
-  })
-  assert.deepEqual(normalized.headers, {
-    Authorization: 'Bearer token',
+    model: 'gpt-5.5',
+    reasoningEffort: 'medium',
   })
   assert.equal(normalized.approvalPolicy, null)
-  assert.equal(normalized.continuityFingerprint?.includes('"model":"gpt-5.4"'), true)
-  assert.equal(normalized.executionDriver, 'openai-compatible')
-  assert.equal(normalized.model, 'gpt-5.4')
+  assert.equal(normalized.continuityFingerprint?.includes('"model":"gpt-5.5"'), true)
+  assert.equal(normalized.executionDriver, 'codex-app-server')
+  assert.equal(normalized.model, 'gpt-5.5')
   assert.equal(normalized.oss, false)
   assert.equal(normalized.profile, null)
-  assert.equal(normalized.reasoningEffort, null)
-  assert.equal(normalized.resumeKind, null)
+  assert.equal(normalized.reasoningEffort, 'medium')
+  assert.equal(normalized.resumeKind, 'codex-thread')
   assert.equal(normalized.sandbox, null)
 
   const sessionId = createAssistantSessionId()
