@@ -2,13 +2,13 @@
 
 import { useMemo } from "react";
 
-import { ProtocolTab } from "@/src/components/experiments/experiment-detail/protocol-tab";
+import { ResearchTab } from "@/src/components/experiments/experiment-detail/research-tab";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
 
-export function ExperimentDetailClient({
+export function ResearchTabClient({
   protocol,
 }: {
   protocol: ExperimentProtocol;
@@ -26,10 +26,5 @@ export function ExperimentDetailClient({
     [privateRun, protocol],
   );
 
-  return (
-    <ProtocolTab
-      experiment={experiment}
-      researchHref={`/experiments/${protocol.id}/research`}
-    />
-  );
+  return <ResearchTab experiment={experiment} />;
 }

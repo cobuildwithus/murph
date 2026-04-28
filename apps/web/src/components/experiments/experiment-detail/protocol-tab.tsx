@@ -21,7 +21,7 @@ import { splitBulletLead } from "./format";
 
 interface ProtocolTabProps {
   experiment: Experiment;
-  onJumpToResearch?: () => void;
+  researchHref?: string;
 }
 
 interface SignalEstimate {
@@ -233,7 +233,7 @@ function TrajectoryChart({
   );
 }
 
-export function ProtocolTab({ experiment, onJumpToResearch }: ProtocolTabProps) {
+export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
   const {
     expectedSignals,
     measurementPaths,
@@ -520,15 +520,14 @@ export function ProtocolTab({ experiment, onJumpToResearch }: ProtocolTabProps) 
             <MechanismCausalChain experimentId={experiment.id} />
           </div>
 
-          {onJumpToResearch && (
-            <button
-              type="button"
-              onClick={onJumpToResearch}
+          {researchHref && (
+            <Link
+              href={researchHref}
               className="inline-flex w-fit items-center gap-2 rounded-lg bg-foreground px-4 py-2.5 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
             >
               Read the research
               <ArrowRight className="size-4" strokeWidth={1.75} />
-            </button>
+            </Link>
           )}
         </section>
       )}
