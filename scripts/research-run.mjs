@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -108,6 +109,10 @@ function toPosixRelative(targetPath) {
   return relativePath.split(path.sep).join(path.posix.sep);
 }
 
+function shellSingleQuote(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+}
+
 function assertInside(parentDir, childPath, message) {
   const relativePath = path.relative(parentDir, childPath);
   if (
@@ -201,6 +206,26 @@ function readJsonFile(filePath) {
   return parsed;
 }
 
+function listFilesRecursive(rootDir) {
+  if (!existsSync(rootDir)) {
+    return [];
+  }
+
+  const entries = readdirSync(rootDir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const entryPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listFilesRecursive(entryPath));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
 function readStateString(state, key) {
   const value = state[key];
   return typeof value === "string" ? value : "";
@@ -270,6 +295,139 @@ function normalizeChatConversationUrl(chatUrl) {
   return `https://chatgpt.com/c/${conversationId}`;
 }
 
+function chatUrlMentionedInFile(filePath, chatUrl) {
+  const content = readFileSync(filePath, "utf8");
+  if (normalizeChatConversationUrl(content.trim()) === chatUrl) {
+    return true;
+  }
+
+  const matches = content.match(/https?:\/\/chatgpt\.com\/c\/[A-Za-z0-9-]+/gu) ?? [];
+  return matches.some((match) => normalizeChatConversationUrl(match) === chatUrl);
+}
+
+function isCurrentSeamStatePath(filePath, workspaceDir, seam) {
+  return filePath === statePathFor(workspaceDir, seam) || filePath === chatUrlPathFor(workspaceDir, seam);
+}
+
+function isChatUrlOwnerPath(filePath) {
+  const normalizedPath = filePath.split(path.sep).join(path.posix.sep);
+  return (
+    /\/state\/seams\/[^/]+\.json$/u.test(normalizedPath) ||
+    /\/state\/chat-urls\/[^/]+\.txt$/u.test(normalizedPath) ||
+    /\/state\/abandoned\/[^/]+\/seam-state\.json$/u.test(normalizedPath) ||
+    /\/state\/abandoned\/[^/]+\/chat-url\.txt$/u.test(normalizedPath)
+  );
+}
+
+function findResearchChatUrlOwners(chatUrl, { includeAbandoned, seam, workspaceDir }) {
+  const owners = [];
+  const workspaceEntries = existsSync(researchRoot)
+    ? readdirSync(researchRoot, { withFileTypes: true })
+    : [];
+  const stateRoots = workspaceEntries
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => listFilesRecursive(path.join(researchRoot, entry.name, "state")))
+    .filter((filePath) => filePath.endsWith(".json") || filePath.endsWith(".txt"))
+    .filter((filePath) => isChatUrlOwnerPath(filePath))
+    .filter((filePath) => includeAbandoned || !filePath.includes(`${path.sep}abandoned${path.sep}`));
+
+  for (const filePath of stateRoots) {
+    if (isCurrentSeamStatePath(filePath, workspaceDir, seam)) {
+      continue;
+    }
+    try {
+      if (chatUrlMentionedInFile(filePath, chatUrl)) {
+        owners.push(toPosixRelative(filePath));
+      }
+    } catch {
+      // Ignore malformed historical state while scanning for URL ownership.
+    }
+  }
+
+  return owners;
+}
+
+function assertChatUrlHasNoOtherOwners({ chatUrl, includeAbandoned, seam, workspaceDir }) {
+  const owners = findResearchChatUrlOwners(chatUrl, {
+    includeAbandoned,
+    seam,
+    workspaceDir,
+  });
+  if (owners.length === 0) {
+    return;
+  }
+
+  const ownerLines = owners.slice(0, 5).map((owner) => `- ${owner}`);
+  const remaining = owners.length > ownerLines.length
+    ? [`- ...and ${owners.length - ownerLines.length} more`]
+    : [];
+  throw new Error(
+    [
+      `Refusing to use ${chatUrl} for ${seam} because it is already recorded by another research seam.`,
+      ...ownerLines,
+      ...remaining,
+      "Quarantine the stale owner or re-send this seam into a fresh conversation before harvesting.",
+    ].join("\n"),
+  );
+}
+
+function readBrowserTargets(browserEndpoint) {
+  const endpoint = browserEndpoint.replace(/\/+$/u, "");
+  const result = spawnSync("curl", ["--silent", "--show-error", "--fail", "--max-time", "2", `${endpoint}/json/list`], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: process.env,
+  });
+
+  if (result.error) {
+    throw new Error(`Unable to inspect browser targets at ${browserEndpoint}: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const details = result.stderr.trim() || result.stdout.trim();
+    throw new Error(`Unable to inspect browser targets at ${browserEndpoint}: ${details || `curl exited ${result.status}`}`);
+  }
+
+  const parsed = JSON.parse(result.stdout);
+  if (!Array.isArray(parsed)) {
+    throw new Error(`Browser target list at ${browserEndpoint} was not an array.`);
+  }
+  return parsed
+    .filter((target) => target && typeof target === "object")
+    .map((target) => ({
+      id: typeof target.id === "string" ? target.id : "",
+      type: typeof target.type === "string" ? target.type : "",
+      url: typeof target.url === "string" ? target.url : "",
+    }));
+}
+
+function findBrowserTargetForUrl(browserEndpoint, targetUrl) {
+  return readBrowserTargets(browserEndpoint).find(
+    (target) => target.type === "page" && target.url === targetUrl,
+  );
+}
+
+function findBrowserTargetForChatUrl(browserEndpoint, chatUrl) {
+  return readBrowserTargets(browserEndpoint).find(
+    (target) => target.type === "page" && normalizeChatConversationUrl(target.url) === chatUrl,
+  );
+}
+
+function assertChatUrlVisibleInLane({ action, browserEndpoint, chatUrl, lane, seam }) {
+  const target = findBrowserTargetForChatUrl(browserEndpoint, chatUrl);
+  if (target) {
+    return;
+  }
+
+  throw new Error(
+    [
+      `Refusing to ${action} ${seam}: saved ChatGPT conversation is not visible in lane ${lane} (${browserEndpoint}).`,
+      `Conversation: ${chatUrl}`,
+      "This usually means the saved URL is stale, the tab was lost, or another seam recorded the wrong conversation.",
+      "Quarantine the saved state and re-send the seam instead of forcing a wake on this lane.",
+    ].join("\n"),
+  );
+}
+
 function validateSendChatUrl(workspaceDir, seam) {
   const rawChatUrl = readChatUrl(workspaceDir, seam);
   if (!rawChatUrl) {
@@ -278,6 +436,20 @@ function validateSendChatUrl(workspaceDir, seam) {
   const chatUrl = normalizeChatConversationUrl(rawChatUrl);
   if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9-]+$/u.test(chatUrl)) {
     throw new Error(`Refusing to record malformed ChatGPT URL for ${seam}: ${rawChatUrl}`);
+  }
+  return chatUrl;
+}
+
+function validateHarvestChatUrl({ existingState, seam, workspaceDir }) {
+  const rawChatUrl = readStateString(existingState, "chatUrl") || readChatUrl(workspaceDir, seam);
+  if (!rawChatUrl) {
+    throw new Error(
+      `Refusing to harvest ${seam} because it has no recorded ChatGPT conversation URL.`,
+    );
+  }
+  const chatUrl = normalizeChatConversationUrl(rawChatUrl);
+  if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9-]+$/u.test(chatUrl)) {
+    throw new Error(`Refusing to harvest ${seam} with malformed ChatGPT URL: ${rawChatUrl}`);
   }
   return chatUrl;
 }
@@ -326,6 +498,96 @@ function resolveBrowserEndpoint(profileHelper, lane) {
     return endpoint;
   }
   return `http://${endpoint}`;
+}
+
+function sendTargetUrlFor({ lane, seam, workspaceDir }) {
+  const workspaceSlug = path.basename(workspaceDir)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 64) || "research";
+  const token = [
+    workspaceSlug,
+    seam,
+    lane,
+    Date.now().toString(36),
+    process.pid.toString(36),
+  ]
+    .join("-")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/gu, "-");
+  return `https://chatgpt.com/?murph_new_research_chat=${encodeURIComponent(token)}`;
+}
+
+function writeSendReviewGptConfig(workspaceDir, seam) {
+  const configDir = path.join(workspaceDir, "state", "runtime-configs");
+  mkdirSync(configDir, { recursive: true });
+  const configPath = path.join(configDir, `${seam}.send.review-gpt.config.sh`);
+  writeFileSync(
+    configPath,
+    [
+      "#!/usr/bin/env bash",
+      "",
+      "script_dir=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"",
+      "workspace_dir=\"$(cd \"${script_dir}/../..\" && pwd)\"",
+      "",
+      "base_config=\"${workspace_dir}/config/review-gpt-work-profile.sh\"",
+      "if [[ ! -f \"${base_config}\" ]]; then",
+      "  base_config=\"${workspace_dir}/config/review-gpt-research.config.sh\"",
+      "fi",
+      "",
+      "# shellcheck source=/dev/null",
+      ". \"${base_config}\"",
+      "",
+      "chatgpt_url=\"${RESEARCH_SEND_CHATGPT_URL:-${chatgpt_url:-https://chatgpt.com/}}\"",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return configPath;
+}
+
+function openFreshSendTarget({ browserEndpoint, chatgptUrl, seam }) {
+  const endpoint = browserEndpoint.replace(/\/+$/u, "");
+  const openUrl = `${endpoint}/json/new?${chatgptUrl}`;
+  let result = spawnSync("curl", ["--silent", "--show-error", "--fail", "--request", "PUT", "--max-time", "5", openUrl], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: process.env,
+  });
+
+  if (result.status !== 0) {
+    result = spawnSync("curl", ["--silent", "--show-error", "--fail", "--max-time", "5", openUrl], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: process.env,
+    });
+  }
+
+  if (result.error) {
+    throw new Error(`Unable to open a fresh ChatGPT send tab for ${seam}: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const details = result.stderr.trim() || result.stdout.trim();
+    throw new Error(
+      `Unable to open a fresh ChatGPT send tab for ${seam}: ${details || `curl exited ${result.status}`}`,
+    );
+  }
+
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (findBrowserTargetForUrl(browserEndpoint, chatgptUrl)) {
+      return;
+    }
+  }
+
+  throw new Error(
+    [
+      `Opened a fresh ChatGPT send tab for ${seam}, but the lane did not expose the expected URL.`,
+      `Expected: ${chatgptUrl}`,
+      "Refusing to send because review:gpt could fall back to an existing conversation tab.",
+    ].join("\n"),
+  );
 }
 
 function writeRunState({
@@ -401,10 +663,10 @@ function writeRunState({
   writeJsonFile(statePath, nextState);
 }
 
-function runLaneCommand(profileHelper, lane, commandPath) {
+function runLaneCommand(profileHelper, lane, commandPath, env = process.env) {
   const result = spawnSync("bash", [profileHelper, "research", lane, commandPath], {
     cwd: repoRoot,
-    env: process.env,
+    env,
     stdio: "inherit",
   });
 
@@ -496,11 +758,49 @@ function main(argv) {
       seam,
       workspaceDir,
     });
+  } else {
+    const chatUrl = validateHarvestChatUrl({
+      existingState,
+      seam,
+      workspaceDir,
+    });
+    assertChatUrlHasNoOtherOwners({
+      chatUrl,
+      includeAbandoned: true,
+      seam,
+      workspaceDir,
+    });
+    assertChatUrlVisibleInLane({
+      action,
+      browserEndpoint,
+      chatUrl,
+      lane,
+      seam,
+    });
   }
 
   console.log(
     `Running research ${action} for ${seam} via lane ${lane} (${browserEndpoint}).`,
   );
+
+  let commandEnv = process.env;
+  if (action === "send") {
+    const sendChatgptUrl = sendTargetUrlFor({ lane, seam, workspaceDir });
+    const sendReviewGptConfig = writeSendReviewGptConfig(workspaceDir, seam);
+    openFreshSendTarget({
+      browserEndpoint,
+      chatgptUrl: sendChatgptUrl,
+      seam,
+    });
+    commandEnv = {
+      ...process.env,
+      RESEARCH_REVIEW_GPT_CONFIG: sendReviewGptConfig,
+      RESEARCH_SEND_CHATGPT_URL: sendChatgptUrl,
+    };
+    console.log(`Prepared fresh ChatGPT send tab: ${sendChatgptUrl}`);
+    console.log(`Review:gpt send config: ${toPosixRelative(sendReviewGptConfig)}`);
+  }
+
   writeRunState({
     action,
     browserEndpoint,
@@ -512,11 +812,26 @@ function main(argv) {
     workspaceDir,
   });
 
-  let exitCode = runLaneCommand(profileHelper, lane, commandPath);
+  let exitCode = runLaneCommand(profileHelper, lane, commandPath, commandEnv);
 
   if (action === "send" && exitCode === 0) {
     try {
-      validateSendChatUrl(workspaceDir, seam);
+      const chatUrl = validateSendChatUrl(workspaceDir, seam);
+      if (chatUrl) {
+        assertChatUrlHasNoOtherOwners({
+          chatUrl,
+          includeAbandoned: true,
+          seam,
+          workspaceDir,
+        });
+        assertChatUrlVisibleInLane({
+          action: "record",
+          browserEndpoint,
+          chatUrl,
+          lane,
+          seam,
+        });
+      }
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       exitCode = 69;

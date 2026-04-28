@@ -114,6 +114,7 @@ Important current behavior:
 - Harvests stick to the saved `state/seams/<label>.json` lane and `state/chat-urls/<label>.txt` URL. If a requested harvest lane differs from the recorded send lane, rerun without `--lane` so the runner uses the recorded lane.
 - Do not bulk-open or bulk-harvest recorded-lane conversations in a different browser profile just because that profile is idle. If the recorded lane cannot load a saved conversation, record the mismatch/blocker and repair that seam intentionally instead of moving it through an ad hoc cross-lane retry path.
 - A harvest can be wrong even when it is using the recorded send lane. If a long wake loop starts producing repeated stale `stop-visible` snapshots followed by `Timed out waiting for ChatGPT thread content`, and live CDP targets no longer include the saved conversation URL, stop that watcher and record a lost-target/stale-profile mismatch. Do not keep forcing reloads on a tab that has drifted to the ChatGPT home page or another conversation.
+- `pnpm research:run` now fails closed when a sent URL is already recorded by another seam or when a saved harvest URL is not visible in the recorded lane's live CDP targets. Treat that as a state-repair signal: quarantine the stale/cross-owned seam state and re-send the affected seam into a fresh conversation, instead of adding retry environment variables or forcing a cross-lane wake.
 
 ## End-To-End Workflow
 
