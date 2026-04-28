@@ -416,6 +416,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             await turnInputPort.refresh({
               phase: "after_provider",
             });
+            const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
+            if (typeof checkpointActiveTurnInput !== "function") {
+              throw new Error("Expected hosted active-turn checkpoint to be installed.");
+            }
+            await checkpointActiveTurnInput({
+              acceptedInputIds: ["request-1"],
+              providerRequestOrdinal: 0,
+              requestId: "request_synthetic_runner_active_turn_input",
+              sessionId: "session_synthetic",
+              turnId: "turn_synthetic",
+              vault: vaultRoot,
+            });
             const lateCaptures = await turnInputPort.listNewConversationCaptures({
               afterCursor: {
                 captureId: "capture_synthetic_initial",
@@ -450,12 +462,23 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
         "active_turn_input",
+        "active_turn_acceptance",
         "maintenance",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["0", "1", "2"],
+        ["0", "1", "2", "3"],
       );
+      assert.deepEqual(checkpointRequests[2]?.redactedStatus, {
+        acceptedInputCount: 1,
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "2",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+        providerRequestOrdinal: 0,
+      });
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
         [
           { importedSeq: "0", lane: "system" },
