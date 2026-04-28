@@ -388,6 +388,18 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).not.toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
+    const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
+      "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
+    );
+    const finalLocalBuildIdArgIndex = finalDockerfile.indexOf(
+      "ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local",
+    );
+    const finalLocalBuildIdLabelIndex = finalDockerfile.indexOf(
+      'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
+    );
+    expect(finalRunnerBundleCopyIndex).toBeGreaterThan(-1);
+    expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
+    expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
