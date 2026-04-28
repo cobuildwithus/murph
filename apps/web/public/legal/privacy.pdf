@@ -6,14 +6,14 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
 endobj
 3 0 obj
-<< /Length 5247 >>
+<< /Length 5268 >>
 stream
 BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Privacy Policy) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 9, 2026 Last Updated: April 9, 2026) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (Murph \("Murph," "we," "us," or "our"\) provides software and services designed to help people) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (understand their bodies and lives better through tools such as health journaling, meal tracking, wearable) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (and device sync, messaging-based interactions, hosted onboarding, sharing features, and related local or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (hosted experiences.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (local or hosted experiences.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 628.00 Tm (This Privacy Policy explains how we collect, use, disclose, and otherwise process information when you:) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 610.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 610.00 Tm (use Murph's websites, applications, hosted services, local or self-hosted deployments, and related) Tj ET
@@ -39,9 +39,9 @@ BT /F1 10 Tf 1 0 0 1 72.00 376.00 Tm (more of your data may remain within system
 BT /F1 10 Tf 1 0 0 1 72.00 362.00 Tm (configuration choices, and selected providers may determine much of the privacy and security) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 348.00 Tm (posture.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 332.00 Tm (2.) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 332.00 Tm (Hosted Murph services. If you use Murph's hosted onboarding, billing, messaging, sharing, wearable) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 318.00 Tm (sync, email sync, device sync, or execution features, Murph and its service providers may process) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 304.00 Tm (information needed to provide and support those features.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 332.00 Tm (Hosted Murph services. If you use Murph's hosted onboarding, billing, messaging, invite, import,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 318.00 Tm (export, wearable sync, email sync, device sync, or execution features, Murph and its service) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 304.00 Tm (providers may process information needed to provide and support those features.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (This Privacy Policy applies to Murph-controlled processing. If you self-host Murph or connect Murph to) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (providers of your choosing, your use of those providers and systems may also be subject to separate) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 260.00 Tm (privacy policies, terms, security settings, and retention practices that Murph does not control.) Tj ET
@@ -193,7 +193,7 @@ BT /F1 10 Tf 1 0 0 1 72.00 83.00 Tm (Murph.) Tj ET
 endstream
 endobj
 6 0 obj
-<< /Length 4529 >>
+<< /Length 4528 >>
 stream
 BT /F2 14 Tf 1 0 0 1 54.00 728.00 Tm (5. How we use information) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 704.00 Tm (We may use information for the following purposes.) Tj ET
@@ -210,7 +210,7 @@ BT /F1 10 Tf 1 0 0 1 72.00 593.00 Tm (operate wearable and provider connections;
 BT /F1 10 Tf 1 0 0 1 54.00 577.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 577.00 Tm (process prompts, messages, attachments, and requested outputs;) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 561.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 561.00 Tm (deliver hosted onboarding, invite, sharing, and import flows;) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 561.00 Tm (deliver hosted onboarding, invite, import, and export flows;) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 545.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 545.00 Tm (enable billing, entitlement, and subscription management; and) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 529.00 Tm (-) Tj ET
@@ -680,32 +680,32 @@ xref
 0000000009 00000 n 
 0000000079 00000 n 
 0000000154 00000 n 
-0000005453 00000 n 
-0000010806 00000 n 
-0000015959 00000 n 
-0000020540 00000 n 
-0000025432 00000 n 
-0000030319 00000 n 
-0000035334 00000 n 
-0000040489 00000 n 
-0000045902 00000 n 
-0000050647 00000 n 
-0000053413 00000 n 
-0000053551 00000 n 
-0000053689 00000 n 
-0000053827 00000 n 
-0000053965 00000 n 
-0000054103 00000 n 
-0000054241 00000 n 
-0000054379 00000 n 
-0000054518 00000 n 
-0000054657 00000 n 
-0000054796 00000 n 
-0000054935 00000 n 
-0000055065 00000 n 
-0000055206 00000 n 
+0000005474 00000 n 
+0000010827 00000 n 
+0000015980 00000 n 
+0000020560 00000 n 
+0000025452 00000 n 
+0000030339 00000 n 
+0000035354 00000 n 
+0000040509 00000 n 
+0000045922 00000 n 
+0000050667 00000 n 
+0000053433 00000 n 
+0000053571 00000 n 
+0000053709 00000 n 
+0000053847 00000 n 
+0000053985 00000 n 
+0000054123 00000 n 
+0000054261 00000 n 
+0000054399 00000 n 
+0000054538 00000 n 
+0000054677 00000 n 
+0000054816 00000 n 
+0000054955 00000 n 
+0000055085 00000 n 
+0000055226 00000 n 
 trailer
 << /Size 28 /Root 27 0 R /Info 26 0 R >>
 startxref
-55257
+55277
 %%EOF

@@ -3,7 +3,7 @@
 **Effective Date:** April 9, 2026  
 **Last Updated:** April 9, 2026
 
-Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, sharing features, and related local or hosted experiences.
+Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
 This Privacy Policy explains how we collect, use, disclose, and otherwise process information when you:
 
@@ -20,7 +20,7 @@ This Privacy Policy does **not** govern third-party services, devices, identity 
 Murph may be used in more than one way:
 
 1. **Local or self-hosted use.** If you run Murph on your own device, workstation, or infrastructure, more of your data may remain within systems you control. In that case, your own infrastructure, configuration choices, and selected providers may determine much of the privacy and security posture.
-2. **Hosted Murph services.** If you use Murph’s hosted onboarding, billing, messaging, sharing, wearable sync, email sync, device sync, or execution features, Murph and its service providers may process information needed to provide and support those features.
+2. **Hosted Murph services.** If you use Murph’s hosted onboarding, billing, messaging, invite, import, export, wearable sync, email sync, device sync, or execution features, Murph and its service providers may process information needed to provide and support those features.
 
 This Privacy Policy applies to Murph-controlled processing. If you self-host Murph or connect Murph to providers of your choosing, your use of those providers and systems may also be subject to separate privacy policies, terms, security settings, and retention practices that Murph does not control.
 
@@ -137,7 +137,7 @@ We use information to:
 - sync, display, search, organize, and export records;
 - operate wearable and provider connections;
 - process prompts, messages, attachments, and requested outputs;
-- deliver hosted onboarding, invite, sharing, and import flows;
+- deliver hosted onboarding, invite, import, and export flows;
 - enable billing, entitlement, and subscription management; and
 - provide customer support and respond to requests.
 
