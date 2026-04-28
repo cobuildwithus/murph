@@ -21,7 +21,16 @@ export function SiteFooter({ authenticated }: { authenticated: boolean }) {
             signupLabel="Start your first experiment"
           />
         </div>
-        <div className="flex items-center justify-between border-t border-[#f5f0e8]/8 py-4 text-[0.8125rem] text-[#f5f0e8]/50">
+        <p className="border-t border-[#f5f0e8]/8 py-4 text-[0.75rem] leading-relaxed text-[#f5f0e8]/60">
+          Murph provides educational health information and tools to help you
+          understand your data and have better conversations with your
+          clinician. It is not intended to diagnose, treat, or prevent diseases
+          or other conditions and is not a substitute for professional medical
+          advice. If you are or may be pregnant, nursing, have a history of an
+          eating disorder, or have another medical condition, please talk to
+          your doctor before using Murph.
+        </p>
+        <div className="flex flex-col gap-3 border-t border-[#f5f0e8]/8 py-4 text-[0.8125rem] text-[#f5f0e8]/50 sm:flex-row sm:items-center sm:justify-between">
           <p>
             Early product, improving fast &middot; Open source &middot; Apache
             2.0

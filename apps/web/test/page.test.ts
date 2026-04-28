@@ -137,6 +137,9 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /Do I need a wearable\?/);
   assert.match(markup, /No\. A wearable can add useful signals/);
   assert.match(markup, /Wearable apps show status/);
+  assert.match(markup, /Murph provides educational health information/);
+  assert.match(markup, /not a substitute for professional medical advice/);
+  assert.doesNotMatch(markup, /Perplexity Health/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
 });
 
