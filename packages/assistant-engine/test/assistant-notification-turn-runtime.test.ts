@@ -39,7 +39,7 @@ afterEach(() => {
 })
 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
-  const persistedBeforeDelivery: string[] = []
+  const persistedBeforeOutbound: string[] = []
   const traceEvents: unknown[] = []
   const stopTyping = vi.fn(async () => undefined)
   const startTelegramTyping = vi.fn(async () => undefined)
@@ -106,7 +106,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     session: initialSession,
   })
   const deliverMessage = vi.fn(async (input) => {
-    persistedBeforeDelivery.push('deliver')
+    persistedBeforeOutbound.push('deliver')
     assert.equal(input.dedupeToken, 'cron-slot-token')
     return {
       delivery: null,
@@ -150,7 +150,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
         : (input.defaults ?? null),
     ),
     persistAssistantTurnAndSession: vi.fn(async (input) => {
-      persistedBeforeDelivery.push('persist')
+      persistedBeforeOutbound.push('persist')
       return savedSession
     }),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
@@ -260,7 +260,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     vault: '/vaults/test',
   })
 
-  assert.deepEqual(persistedBeforeDelivery, ['persist', 'deliver'])
+  assert.deepEqual(persistedBeforeOutbound, ['persist', 'deliver'])
   assert.equal(mocks.persistAssistantTurnAndSession.mock.calls.length, 1)
   assert.equal(
     mocks.persistAssistantTurnAndSession.mock.calls[0]?.[0]?.session,

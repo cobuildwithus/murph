@@ -215,6 +215,15 @@ export async function sendAssistantMessageLocal(
         'Manual active-turn input targeted a stale or different active turn.',
       )
     }
+    if (
+      steerResult.kind === 'no-active-turn' &&
+      typeof input.expectedActiveTurnId === 'string'
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+        'Manual active-turn input targeted a turn that is no longer active.',
+      )
+    }
   }
 
   const executionContext = normalizeAssistantExecutionContext(input.executionContext)
@@ -355,6 +364,13 @@ export async function sendAssistantMessageLocal(
                 providerAttemptId: null,
                 turnId: currentUserTurn.turnId,
               })
+            } else {
+              await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                continuation: providerOutcome.providerContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              })
             }
             throw providerOutcome.error
           }
@@ -369,6 +385,14 @@ export async function sendAssistantMessageLocal(
                 turnId: currentUserTurn.turnId,
               })
             providerRequestAcceptedInputIds = providerRequestJournal?.inputIds ?? []
+          } else {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                continuation: providerResult.providerContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              }) ?? providerRequestJournal
           }
           currentSession = providerResult.session
           responseText = providerResult.response

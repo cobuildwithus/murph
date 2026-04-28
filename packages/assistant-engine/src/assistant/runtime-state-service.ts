@@ -29,6 +29,7 @@ import {
   readAssistantAcceptedTurnInputJournal,
   recordAssistantAcceptedTurnInputProviderRequest,
   updateAssistantAcceptedTurnInputAdmissionState,
+  updateAssistantAcceptedTurnInputProviderRequest,
   updateAssistantAcceptedTurnInputTranscriptRefs,
   type AssistantAcceptedTurnInputJournal,
 } from './active-turn-input-journal.js'
@@ -84,6 +85,9 @@ type UpdateAssistantAcceptedTurnInputAdmissionStateInput = Omit<Parameters<
 type RecordAssistantAcceptedTurnInputProviderRequestInput = Omit<Parameters<
   typeof recordAssistantAcceptedTurnInputProviderRequest
 >[0], 'vault'>
+type UpdateAssistantAcceptedTurnInputProviderRequestInput = Omit<Parameters<
+  typeof updateAssistantAcceptedTurnInputProviderRequest
+>[0], 'vault'>
 type UpdateAssistantAcceptedTurnInputTranscriptRefsInput = Omit<Parameters<
   typeof updateAssistantAcceptedTurnInputTranscriptRefs
 >[0], 'vault'>
@@ -132,6 +136,7 @@ export interface AssistantRuntimeStateService {
       read: (turnId: string) => Promise<AssistantAcceptedTurnInputJournal | null>
       recordProviderRequest: (input: RecordAssistantAcceptedTurnInputProviderRequestInput) => Promise<AssistantAcceptedTurnInputJournal | null>
       updateAdmissionState: (input: UpdateAssistantAcceptedTurnInputAdmissionStateInput) => Promise<AssistantAcceptedTurnInputJournal | null>
+      updateProviderRequest: (input: UpdateAssistantAcceptedTurnInputProviderRequestInput) => Promise<AssistantAcceptedTurnInputJournal | null>
       updateTranscriptRefs: (input: UpdateAssistantAcceptedTurnInputTranscriptRefsInput) => Promise<AssistantAcceptedTurnInputJournal | null>
     }
     appendEvent: (input: AppendAssistantTurnReceiptEventInput) => ReturnType<typeof appendAssistantTurnReceiptEvent>
@@ -196,6 +201,8 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
           recordAssistantAcceptedTurnInputProviderRequest({ ...input, vault }),
         updateAdmissionState: (input) =>
           updateAssistantAcceptedTurnInputAdmissionState({ ...input, vault }),
+        updateProviderRequest: (input) =>
+          updateAssistantAcceptedTurnInputProviderRequest({ ...input, vault }),
         updateTranscriptRefs: (input) =>
           updateAssistantAcceptedTurnInputTranscriptRefs({ ...input, vault }),
       },

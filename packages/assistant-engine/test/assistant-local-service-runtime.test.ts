@@ -650,6 +650,57 @@ test('sendAssistantMessageLocal journals provider request before provider execut
   assert.equal(result.response, 'assistant response')
 })
 
+test('sendAssistantMessageLocal updates provider request metadata when final continuation changes', async () => {
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
+  })
+  mocks.executeProviderTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      providerContinuation: {
+        kind: 'provider-state-optimization',
+      },
+    })
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        response: 'assistant response',
+        session,
+      },
+    }
+  })
+
+  const result = await sendAssistantMessageLocal({
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result.response, 'assistant response')
+  assert.deepEqual(
+    mocks.runtimeState.turns.acceptedInputs.recordProviderRequest.mock.calls[0]?.[0]
+      ?.continuation,
+    {
+      kind: 'provider-state-optimization',
+    },
+  )
+  assert.deepEqual(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls[0]?.[0],
+    {
+      continuation: {
+        kind: 'explicit-structured-history',
+      },
+      ordinal: 0,
+      providerAttemptId: null,
+      turnId: 'turn-1',
+    },
+  )
+})
+
 test('sendAssistantMessageLocal persists late manual accepted-input transcript refs to disk before checkpoint resumes', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-journal-disk-',
@@ -1308,6 +1359,101 @@ test('active-turn controller only steers exact conversations while open', async 
   }
 })
 
+test('active-turn controller composes hook and manual pending input at one boundary', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => ({
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Hook input',
+          source: 'inbox',
+        },
+      ],
+      deliveryReplyToMessageId: 'reply-hook',
+      kind: 'accepted',
+      prompt: 'Hook input',
+      receiptMetadata: {
+        hook: 'yes',
+      },
+      transcriptText: 'Hook transcript',
+      userMessageContent: [
+        {
+          text: 'Hook input',
+          type: 'text',
+        },
+      ],
+    }),
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  try {
+    const steered = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      deliveryReplyToMessageId: 'reply-manual',
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'Manual input',
+      vault: '/vaults/test',
+    })
+    assert.ok(steered)
+    steered.catch(() => undefined)
+
+    assert.deepEqual(await controller.admit({
+      phase: 'request_boundary',
+      providerRequestOrdinal: 0,
+      response: 'draft',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Hook input',
+          source: 'inbox',
+        },
+        {
+          id: 'manual-1',
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: 'Manual input',
+          source: 'manual',
+        },
+      ],
+      deliveryReplyToMessageId: 'reply-manual',
+      kind: 'accepted',
+      prompt: 'Hook input\n\nManual input',
+      receiptMetadata: {
+        hook: 'yes',
+      },
+      transcriptText: 'Hook transcript',
+      userMessageContent: [
+        {
+          text: 'Hook input',
+          type: 'text',
+        },
+        {
+          text: 'Manual input',
+          type: 'text',
+        },
+      ],
+    })
+  } finally {
+    controller.fail(new Error('active-turn controller composition test complete'))
+    controller.close()
+  }
+})
+
 test('sendAssistantMessageLocal closes steering before commit checkpoint work starts', async () => {
   const session = createAssistantSession({
     binding: {
@@ -1384,13 +1530,25 @@ test('sendAssistantMessageLocal closes steering before commit checkpoint work st
     0,
   )
 
-  const secondResult = await sendAssistantMessageLocal({
+  await expect(sendAssistantMessageLocal({
     conversation: {
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
     },
     expectedActiveTurnId: 'turn-1',
+    prompt: 'Arrived after commit barrier',
+    vault: '/vaults/test',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_ACTIVE_TURN_NOT_ACTIVE',
+  })
+
+  const secondResult = await sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
     prompt: 'Arrived after commit barrier',
     vault: '/vaults/test',
   })
@@ -2280,6 +2438,18 @@ async function loadLocalServiceModule(input?: {
           ),
           updateAdmissionState: vi.fn(
             async (_input: { admissionState: string }) => null,
+          ),
+          updateProviderRequest: vi.fn(
+            async (_input: {
+              continuation: { kind: string }
+              ordinal: number
+              providerAttemptId?: string | null
+            }) => ({
+              admissionState: 'current-turn-open' as const,
+              inputIds: [...acceptedInputIds],
+              inputs: [],
+              providerRequests: [],
+            }),
           ),
         },
       },
