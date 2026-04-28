@@ -10,6 +10,21 @@ vi.mock("next/link", () => ({
   },
 }));
 
+vi.mock("@/src/components/ui/auth-button", () => ({
+  AuthButton(props: { children?: ReactNode; className?: string; size?: string }) {
+    return createElement(
+      "button",
+      {
+        className: props.className,
+        "data-size": props.size,
+        "data-slot": "auth-button",
+        type: "button",
+      },
+      props.children,
+    );
+  },
+}));
+
 import { ExperimentHeader } from "@/src/components/experiments/experiment-detail/experiment-header";
 
 test("removes the unwanted Bryan Johnson description qualifier from the rendered header copy", () => {
@@ -50,6 +65,7 @@ test("shows protocol days at the top level without counting baseline days", () =
 
   assert.match(markup, /14 DAYS/);
   assert.match(markup, /14-day protocol/);
+  assert.match(markup, /data-slot="auth-button"/);
   assert.doesNotMatch(markup, /7-day baseline/);
   assert.doesNotMatch(markup, /21 DAYS/);
   assert.doesNotMatch(markup, /21-day protocol/);
