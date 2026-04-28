@@ -579,6 +579,7 @@ Updated: 2026-04-24
     expect(profileHelper).toContain('will not restart a lane automatically')
     expect(profileHelper).not.toContain('--new-window')
     expect(profileHelper).not.toContain('open -g -na')
+    expect(profileHelper).not.toContain('REVIEW_GPT_ALLOW_BROWSER_FOREGROUND')
   })
 
   it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {

@@ -54,14 +54,30 @@ async function startFakeCdpServer(visibleTargets: string[]) {
       `
 const http = require("node:http");
 const visibleTargets = JSON.parse(process.argv[1]);
+const targetUrls = visibleTargets.map((target) =>
+  target.startsWith("http") ? target : "https://chatgpt.com/c/" + target
+);
 const server = http.createServer((request, response) => {
   if (request.url === "/json/list" || request.url === "/json") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify(visibleTargets.map((target, index) => ({
+    response.end(JSON.stringify(targetUrls.map((target, index) => ({
       id: "target-" + index,
       type: "page",
-      url: target.startsWith("http") ? target : "https://chatgpt.com/c/" + target,
+      url: target,
     }))));
+    return;
+  }
+
+  if (request.url && request.url.startsWith("/json/new?")) {
+    const target = request.url.slice("/json/new?".length);
+    targetUrls.push(target);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      id: "target-" + (targetUrls.length - 1),
+      type: "page",
+      url: target,
+      webSocketDebuggerUrl: "ws://127.0.0.1/fake-target",
+    }));
     return;
   }
 
@@ -310,7 +326,7 @@ describe("research init scaffold", () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-"));
     const outDir = path.join(tempRoot, "lane-state");
-    const phlebasBrowser = await startFakeCdpServer([]);
+    const phlebasBrowser = await startFakeCdpServer(["research-run-test"]);
     const herculesBrowser = await startFakeCdpServer(["research-run-test"]);
 
     try {
@@ -587,6 +603,7 @@ exit 64
     );
     const browser = await startFakeCdpServer([
       "restored-thread",
+      "new-thread-from-existing-tab-lane",
       "https://chatgpt.com/?temporary-chat=true",
     ]);
 
@@ -662,6 +679,375 @@ exit 64
       ) as { chatUrl: string; send: { status: string } };
       expect(seamState.chatUrl).toBe("https://chatgpt.com/c/new-thread-from-existing-tab-lane");
       expect(seamState.send.status).toBe("completed");
+    } finally {
+      await browser.close();
+      rmSync(foreignOwnerDir, { recursive: true, force: true });
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to record a sent ChatGPT URL that another seam already owns", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-duplicate-url-"));
+    const outDir = path.join(tempRoot, "duplicate-url");
+    const foreignOwnerDir = mkdtempSync(
+      path.join(researchOutputRoot, "tmp-research-run-duplicate-url-owner-"),
+    );
+    const browser = await startFakeCdpServer(["duplicate-thread"]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      mkdirSync(path.join(foreignOwnerDir, "state", "seams"), { recursive: true });
+      writeTextFileSync(
+        path.join(foreignOwnerDir, "state", "seams", "02-discovery.json"),
+        `${JSON.stringify(
+          {
+            chatUrl: "https://chatgpt.com/c/duplicate-thread",
+            schemaVersion: "murph.research.seam-run.v1",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(
+        commandPath,
+        `#!/usr/bin/env bash
+mkdir -p '${path.join(outDir, "state", "chat-urls")}'
+printf 'send command ran\\n' > '${path.join(outDir, "state", "send-ran.txt")}'
+printf 'https://chatgpt.com/c/duplicate-thread\\n' > '${path.join(outDir, "state", "chat-urls", "01-charter.txt")}'
+`,
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        [
+          "--workspace",
+          path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "testduplicate",
+        ],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(69);
+      expect(result.stderr).toContain("Refusing to use https://chatgpt.com/c/duplicate-thread");
+      expect(result.stderr).toContain("already recorded by another research seam");
+      expect(result.stderr).toContain("state/seams/02-discovery.json");
+      expect(readFileSync(path.join(outDir, "state", "send-ran.txt"), "utf8")).toBe(
+        "send command ran\n",
+      );
+      const seamState = JSON.parse(
+        readFileSync(path.join(outDir, "state", "seams", "01-charter.json"), "utf8"),
+      ) as { chatUrl?: string; send: { exitCode: number; status: string } };
+      expect(seamState.chatUrl).toBeUndefined();
+      expect(seamState.send.status).toBe("failed");
+      expect(seamState.send.exitCode).toBe(69);
+    } finally {
+      await browser.close();
+      rmSync(foreignOwnerDir, { recursive: true, force: true });
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat a seam thread export as a competing ChatGPT URL owner", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-own-export-"));
+    const outDir = path.join(tempRoot, "own-export");
+    const browser = await startFakeCdpServer(["own-export-thread"]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const workspaceArg = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", "01-charter.txt");
+      const threadExportPath = path.join(outDir, "state", "thread-exports", "01-charter.thread.json");
+      mkdirSync(path.dirname(seamStatePath), { recursive: true });
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      mkdirSync(path.dirname(threadExportPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/own-export-thread\n");
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            browserEndpoint: browser.endpoint,
+            chatUrl: "https://chatgpt.com/c/own-export-thread",
+            lane: "testexport",
+            schemaVersion: "murph.research.seam-run.v1",
+            seam: "01-charter",
+            send: {
+              browserEndpoint: browser.endpoint,
+              lane: "testexport",
+              status: "completed",
+            },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      writeTextFileSync(
+        threadExportPath,
+        `${JSON.stringify({ url: "https://chatgpt.com/c/own-export-thread" }, null, 2)}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.harvest.sh");
+      writeTextFileSync(
+        commandPath,
+        `#!/usr/bin/env bash
+printf 'harvest command ran\\n' > '${path.join(outDir, "state", "harvest-ran.txt")}'
+`,
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        ["--workspace", workspaceArg, "--seam", "01-charter", "--action", "harvest"],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(readFileSync(path.join(outDir, "state", "harvest-ran.txt"), "utf8")).toBe(
+        "harvest command ran\n",
+      );
+    } finally {
+      await browser.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to harvest when the saved ChatGPT URL is not visible in the recorded lane", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-stale-harvest-"));
+    const outDir = path.join(tempRoot, "stale-harvest");
+    const browser = await startFakeCdpServer([]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const workspaceArg = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", "01-charter.txt");
+      mkdirSync(path.dirname(seamStatePath), { recursive: true });
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/lost-thread\n");
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            browserEndpoint: browser.endpoint,
+            chatUrl: "https://chatgpt.com/c/lost-thread",
+            lane: "teststale",
+            schemaVersion: "murph.research.seam-run.v1",
+            seam: "01-charter",
+            send: {
+              browserEndpoint: browser.endpoint,
+              lane: "teststale",
+              status: "completed",
+            },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.harvest.sh");
+      writeTextFileSync(
+        commandPath,
+        `#!/usr/bin/env bash
+printf 'harvest command ran\\n' > '${path.join(outDir, "state", "harvest-ran.txt")}'
+`,
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        ["--workspace", workspaceArg, "--seam", "01-charter", "--action", "harvest"],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Refusing to harvest 01-charter");
+      expect(result.stderr).toContain("saved ChatGPT conversation is not visible in lane teststale");
+      expect(result.stderr).toContain("https://chatgpt.com/c/lost-thread");
+      expect(existsSync(path.join(outDir, "state", "harvest-ran.txt"))).toBe(false);
+      const seamState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        harvest?: { status: string };
+      };
+      expect(seamState.harvest).toBeUndefined();
+    } finally {
+      await browser.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to harvest a ChatGPT URL preserved in abandoned owner state", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-abandoned-owner-"));
+    const outDir = path.join(tempRoot, "abandoned-owner");
+    const foreignOwnerDir = mkdtempSync(
+      path.join(researchOutputRoot, "tmp-research-run-abandoned-owner-foreign-"),
+    );
+    const browser = await startFakeCdpServer(["abandoned-owner-thread"]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const workspaceArg = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", "01-charter.txt");
+      const abandonedStatePath = path.join(
+        foreignOwnerDir,
+        "state",
+        "abandoned",
+        "02-discovery-contaminated",
+        "seam-state.json",
+      );
+      mkdirSync(path.dirname(seamStatePath), { recursive: true });
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      mkdirSync(path.dirname(abandonedStatePath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/abandoned-owner-thread\n");
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            browserEndpoint: browser.endpoint,
+            chatUrl: "https://chatgpt.com/c/abandoned-owner-thread",
+            lane: "testabandoned",
+            schemaVersion: "murph.research.seam-run.v1",
+            seam: "01-charter",
+            send: {
+              browserEndpoint: browser.endpoint,
+              lane: "testabandoned",
+              status: "completed",
+            },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      writeTextFileSync(
+        abandonedStatePath,
+        `${JSON.stringify(
+          {
+            chatUrl: "https://chatgpt.com/c/abandoned-owner-thread",
+            seam: "02-discovery",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.harvest.sh");
+      writeTextFileSync(
+        commandPath,
+        `#!/usr/bin/env bash
+printf 'harvest command ran\\n' > '${path.join(outDir, "state", "harvest-ran.txt")}'
+`,
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        ["--workspace", workspaceArg, "--seam", "01-charter", "--action", "harvest"],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("already recorded by another research seam");
+      expect(result.stderr).toContain("state/abandoned/02-discovery-contaminated/seam-state.json");
+      expect(existsSync(path.join(outDir, "state", "harvest-ran.txt"))).toBe(false);
     } finally {
       await browser.close();
       rmSync(foreignOwnerDir, { recursive: true, force: true });

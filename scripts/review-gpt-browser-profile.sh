@@ -201,9 +201,6 @@ murph_review_gpt_profile_open_chatgpt() {
     curl --silent --show-error --fail --max-time 2 \
       --request PUT \
       "${browser_endpoint%/}/json/new?https://chatgpt.com/" >/dev/null
-    if [[ "${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-0}" =~ ^(1|true|yes|on)$ ]]; then
-      murph_review_gpt_profile_activate "$profile_slug"
-    fi
     return 0
   fi
 
@@ -213,16 +210,6 @@ murph_review_gpt_profile_open_chatgpt() {
   mkdir -p "$user_data_dir"
 
   # Keep managed research profiles in one window; repeated recovery opens tabs.
-  if [[ "${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-0}" =~ ^(1|true|yes|on)$ ]]; then
-    open -a "$profile_app" --args \
-      "--user-data-dir=$user_data_dir" \
-      "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
-      "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
-      --new-tab \
-      "https://chatgpt.com/"
-    return 0
-  fi
-
   open -g -j -a "$profile_app" --args \
     "--user-data-dir=$user_data_dir" \
     "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
@@ -474,7 +461,6 @@ murph_review_gpt_profile_run_research() {
   local profile_slug="$1"
   shift
 
-  export REVIEW_GPT_ALLOW_BROWSER_FOREGROUND="${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-0}"
   murph_review_gpt_profile_prepare_browser_env "$profile_slug" || return 1
 
   export RESEARCH_MANAGED_BROWSER_LANE="$profile_slug"
