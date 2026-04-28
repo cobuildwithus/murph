@@ -548,6 +548,19 @@ testPlans:
   - This plan is most interpretable when baseline triglycerides are elevated, but persistent or very high triglycerides belong in clinician-managed care.
   - Watch LDL-C and non-HDL-C rather than assuming all lipid markers improve.
   - If liver disease, elevated ALT/AST, LDL-C monitoring, severe hypertriglyceridemia, pancreatitis history, diabetes/CVD risk, or lipid-treatment decisions are present, route to clinician-managed care rather than using this as a stand-alone wellness experiment.
+expectedSignalDescriptions:
+-
+  biomarkerKey: biomarker:omega-3-index
+  description: EPA/DHA supplements can raise red-blood-cell EPA and DHA over weeks when intake is consistent. This is the clearest exposure signal for the protocol.
+-
+  biomarkerKey: biomarker:fasting-triglycerides
+  description: EPA/DHA can lower fasting triglycerides in some people, especially when baseline triglycerides are elevated. The likely path is altered liver fat handling and fewer triglyceride-rich particles.
+-
+  biomarkerKey: biomarker:ldl-cholesterol
+  description: EPA/DHA can move LDL-C differently by dose, baseline lipids, and EPA/DHA mix. DHA-heavy or higher-dose contexts may raise LDL-C in some evidence, so this is a watch signal.
+-
+  biomarkerKey: biomarker:non-hdl-cholesterol
+  description: Non-HDL-C may change if triglyceride-rich particles or LDL-C shift during the run. It helps show whether the lipid panel moved broadly or only in triglycerides.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

@@ -380,6 +380,22 @@ testPlans:
       - Treat morning blood pressure as optional but valuable when a validated home cuff and consistent routine are available.
       - Keep HRV and sleep-stage markers exploratory unless the personal signal is strong, repeated, and not obviously confounded.
       - Keep stand-alone sauna and post-exercise sauna interpretations separate whenever the workout context is materially different.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:resting-heart-rate
+    description: Repeated dry sauna is a short heat stress that can train sweating, blood-volume, and cooling responses. If the same heat load becomes easier, resting pulse may drift lower or stay steadier.
+  -
+    biomarkerKey: biomarker:morning-blood-pressure
+    description: Sauna opens skin blood vessels during heat exposure and may affect how they tighten or relax after repeated sessions. Morning blood pressure can show whether that carries into daily rest.
+  -
+    biomarkerKey: biomarker:hrv-rmssd
+    description: The cool-down after heat may help the body shift out of high-alert mode. HRV can move with that recovery shift, but the evidence is mixed.
+  -
+    biomarkerKey: biomarker:sleep-efficiency
+    description: A tolerable sauna session followed by cooling may make it easier to settle and stay asleep. If the heat burden is too high or too late, sleep continuity may worsen instead.
+  -
+    biomarkerKey: biomarker:deep-sleep-minutes
+    description: If sauna improves overnight recovery and sleep depth, deep-sleep minutes may rise. This is a weaker sleep-stage signal than overall sleep continuity.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

@@ -483,6 +483,13 @@ testPlans:
   - Pair wearable sleep-onset and sleep-efficiency trends with a one-tap subjective sleep-onset and pre-sleep-wiredness log.
   - Treat HRV, resting heart rate, next-day mood, cognition, and any consumer sleep-stage output as optional exploratory context only; do not use them as pass/fail signals for Digital Sunset.
   - A useful result should include adequate adherence, logged exceptions, stable sleep opportunity, and low burden.
+expectedSignalDescriptions:
+-
+  biomarkerKey: "biomarker:sleep-onset-latency"
+  description: "Stopping personal screens before bed may lower light exposure, message loops, and mental stimulation. If those were keeping the user wired, sleep onset can become easier."
+-
+  biomarkerKey: "biomarker:sleep-efficiency"
+  description: "If the curfew reduces in-bed pickups, delayed lights-out, or restless starts to the night, more time in bed may be spent asleep."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

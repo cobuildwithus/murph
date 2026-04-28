@@ -492,6 +492,19 @@ testPlans:
   notes:
   - Use this longer plan when the user wants a steadier baseline, has irregular restaurant or travel weeks, or wants more stable weight and waist context.
   - Do not use the longer plan to promise disease-risk changes; distal outcomes remain research context rather than personal self-experiment endpoints.
+expectedSignalDescriptions:
+-
+  biomarkerKey: biomarker:added-sugar-intake
+  description: This is the direct exposure the protocol changes. Label checks and food logs may show fewer grams when regular added-sugar sources are removed or replaced.
+-
+  biomarkerKey: biomarker:body-weight
+  description: Removing added sugar can lower total energy intake for some people, especially when sugary drinks or snacks are not replaced with similar calories. Weight may move if that calorie gap lasts long enough.
+-
+  biomarkerKey: biomarker:waist-circumference
+  description: If added-sugar reduction lowers sustained energy intake, waist size may change with body fat over time. A 21-day run is a short window, so this is a secondary signal.
+-
+  biomarkerKey: biomarker:morning-blood-pressure
+  description: Lower added sugar may affect blood pressure through lower total energy intake, weight change, or fewer sugar-sweetened drinks. The evidence is mixed, so this is a cautious secondary signal.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

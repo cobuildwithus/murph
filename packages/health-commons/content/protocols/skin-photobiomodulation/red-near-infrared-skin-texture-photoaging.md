@@ -339,6 +339,16 @@ testPlans:
       - "Analyze standardized photo scores separately from satisfaction or skin-feel ratings because subjective and objective signals can diverge."
       - "Use optional image-analysis method outputs only when the ROI template, lighting, calibration, and analysis settings are locked before comparing baseline with week-4 or week-6 images."
       - "Treat tolerability and eye symptoms as safety outcomes, not as noise to be averaged away."
+expectedSignalDescriptions:
+  -
+    biomarkerKey: "biomarker:standardized-skin-photo-score"
+    description: "Red and near-infrared light may affect skin-cell signaling and how skin rebuilds collagen over repeated sessions. Standardized photos show whether visible texture or photoaging changed."
+  -
+    biomarkerKey: "biomarker:periocular-wrinkle-score"
+    description: "The closest home-mask evidence includes crow's-feet and around-eye outcomes. If repeated red/NIR exposure affects skin remodeling there, lines in that region may soften."
+  -
+    biomarkerKey: "biomarker:skin-texture-roughness-score"
+    description: "Red/NIR light may affect cell energy, inflammation, and skin remodeling. That gives a plausible path to smoother texture, though direct evidence is mixed."
 measurementPlan:
   schemaVersion: "murph.commons.measurement-plan.v1"
   defaultPathId: "home-photo-score"

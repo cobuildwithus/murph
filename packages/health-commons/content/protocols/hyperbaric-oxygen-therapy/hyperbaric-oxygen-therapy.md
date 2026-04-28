@@ -585,6 +585,19 @@ testPlans:
       - "Replace the default intervention window and target sessions with the actual care plan when the prescription is known."
       - "The primary Murph outcome is session tolerability/adverse-event burden. Disease-specific benefit should be judged by clinician-defined outcomes, not by wearable proxies."
       - "Sleep efficiency, resting heart rate, and HRV are recovery context and confounders, not promised HBOT benefits."
+expectedSignalDescriptions:
+  -
+    biomarkerKey: "biomarker:hbot-session-tolerability"
+    description: "HBOT changes both pressure and oxygen exposure. Ear or sinus pressure, vision changes, confinement distress, glucose or blood-pressure issues, and stopped sessions are direct ways that dose can show up as symptoms."
+  -
+    biomarkerKey: "biomarker:sleep-efficiency"
+    description: "A prescribed HBOT course can add treatment burden, symptoms, and recovery stress. If sessions disturb or relieve that burden, sleep continuity may change."
+  -
+    biomarkerKey: "biomarker:resting-heart-rate"
+    description: "Pressure exposure, high oxygen dosing, symptoms, and the underlying care context can change overall strain. Resting pulse may shift if the course changes recovery load."
+  -
+    biomarkerKey: "biomarker:hrv-rmssd"
+    description: "HBOT sessions can affect nervous-system strain through oxygen dose, pressure exposure, symptoms, and recovery burden. HRV may move as context, not as proof that the treatment worked."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

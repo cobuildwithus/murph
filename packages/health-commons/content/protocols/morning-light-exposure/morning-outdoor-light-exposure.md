@@ -307,6 +307,16 @@ testPlans:
       - Primary interpretation should combine exposure adherence, subjective sleep quality, bedtime/final wake time, and morning alertness.
       - Sleep onset latency and sleep efficiency are secondary context; a wearable or sleep diary can be used, but consumer sleep stages are not promised endpoints.
       - Record evening light changes, travel, illness, alcohol, caffeine, exercise, stress, heat, UV, and weather as confounders.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:sleep-quality
+    description: Morning outdoor light may strengthen the day-night timing signal. For some users, that can make the next night feel more settled or restorative.
+  -
+    biomarkerKey: biomarker:sleep-onset-latency
+    description: Bright morning light can help anchor circadian timing earlier in the day. If evening timing becomes better aligned, sleep onset may become easier.
+  -
+    biomarkerKey: biomarker:sleep-efficiency
+    description: A stronger light-dark rhythm may support more consolidated sleep for some people, though this is a secondary signal rather than the main expected change.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

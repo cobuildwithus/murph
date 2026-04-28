@@ -629,6 +629,28 @@ testPlans:
   - Use this only when upper-body stretching is the selected target. Painful, unstable, post-surgical, or neurologically symptomatic shoulders are outside the unsupervised starter variant.
   - Chair sit-and-reach or seated/supported measurement variants should be used for older, fall-risk, dizzy, or floor-limited users when a standing or floor measure is unsafe.
   - Do not treat worsening pain, neurologic symptoms, pregnancy/postpartum warning signs, severe post-exertion symptoms, or post-surgical/rehab restrictions as adherence problems; they are stop or routing conditions.
+expectedSignalDescriptions:
+-
+  biomarkerKey: biomarker:toe-touch-distance
+  description: "Repeated back-of-leg holds can increase tolerated reach and range of motion. Fingertips may move closer to the floor over the run."
+-
+  biomarkerKey: biomarker:sit-and-reach-distance
+  description: "Hamstring and posterior-chain stretching can make the seated reach position more tolerable. Sit-and-reach distance may improve if that target area is trained."
+-
+  biomarkerKey: biomarker:ankle-knee-to-wall-distance
+  description: "Calf and ankle holds can increase how far the ankle bends forward. Knee-to-wall distance may rise when the ankle target is part of the routine."
+-
+  biomarkerKey: biomarker:shoulder-reach-distance
+  description: "Shoulder, chest, or upper-back holds can change the selected reach pattern. The shoulder measure may improve when the same side and reach are trained."
+-
+  biomarkerKey: biomarker:perceived-stiffness
+  description: "Gentle repeated holds can change stretch sensation and reduce the feeling of tightness. This may improve even when measured range changes only a little."
+-
+  biomarkerKey: biomarker:stretching-adherence-sessions
+  description: "A short home routine lowers setup cost and makes repeated exposure easier. Completed sessions may increase when the routine feels manageable."
+-
+  biomarkerKey: biomarker:stretching-session-burden
+  description: "The protocol uses simple self-applied holds, which can keep hassle low. Burden may still rise if too many target areas are included."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

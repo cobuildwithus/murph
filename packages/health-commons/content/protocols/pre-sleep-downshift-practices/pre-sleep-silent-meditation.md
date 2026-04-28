@@ -145,6 +145,22 @@ testPlans:
       - Compare the 14-night intervention average with the 7-night baseline for manual perceived sleep-onset latency and pre-bed wiredness.
       - "Treat wearable sleep-onset latency, sleep efficiency, deep sleep, HRV, and resting heart rate as repeated-night context, not one-night proof."
       - "Keep other sleep interventions and major evening routines stable; flag caffeine, alcohol, late exercise, illness, travel, stress, and medication or supplement changes."
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:sleep-onset-latency
+    description: Silent meditation may lower rumination and sleep effort before bed. If the mind is less activated, falling asleep can feel easier.
+  -
+    biomarkerKey: biomarker:sleep-efficiency
+    description: If meditation reduces the restless start of the night or bedtime rumination, more time in bed may be spent asleep.
+  -
+    biomarkerKey: biomarker:deep-sleep-minutes
+    description: Deep sleep is a downstream signal here. It might improve only if the practice first improves sleep continuity or reduces early-night disruption.
+  -
+    biomarkerKey: biomarker:hrv-rmssd
+    description: Lower pre-sleep arousal may ease overnight strain. HRV could rise or stabilize if the practice helps recovery rather than adding effort.
+  -
+    biomarkerKey: biomarker:resting-heart-rate
+    description: A calmer pre-bed state may reduce overnight load. Resting heart rate might drift lower if sleep becomes less effortful and more settled.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

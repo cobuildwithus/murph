@@ -189,6 +189,22 @@ testPlans:
       - Session fidelity is part of the outcome; record whether each interval reached the intended heart-rate zone without unsafe symptoms.
       - Resting heart rate and heart-rate recovery may be useful secondary signals, but sleep, illness, stress, alcohol, heat, and training load can confound them.
       - HRV is exploratory. Sleep efficiency is recovery context and a confounder; neither is a promised outcome.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:estimated-vo2max
+    description: "Four-minute hard intervals spend repeated time near high oxygen demand. Across weeks, that can improve how much oxygen the heart and muscles can deliver and use."
+  -
+    biomarkerKey: biomarker:resting-heart-rate
+    description: "If the heart pumps more blood per beat after training, it may need fewer beats at rest. Resting heart rate can drift lower as that adaptation builds."
+  -
+    biomarkerKey: biomarker:hrv-rmssd
+    description: "Hard intervals tax the nervous system, but better aerobic fitness can also support stronger recovery between efforts. HRV may rise or stabilize if the dose fits."
+  -
+    biomarkerKey: biomarker:sleep-efficiency
+    description: "Hard aerobic work can increase sleep pressure and recovery need. Sleep efficiency may improve when the dose is well matched, or flatten if the sessions are too taxing."
+  -
+    biomarkerKey: biomarker:morning-blood-pressure
+    description: "Repeated aerobic intervals may improve vessel function and blood-pressure regulation. Morning blood pressure can move lower if that adaptation appears."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

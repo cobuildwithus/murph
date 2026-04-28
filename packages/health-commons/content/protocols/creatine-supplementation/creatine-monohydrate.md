@@ -1028,6 +1028,25 @@ testPlans:
     notes:
       - Use this lighter plan when the main question is whether daily 3–5 g monohydrate is tolerable and easy to maintain.
       - This plan is not strong enough to judge hypertrophy or long-term strength adaptation.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:training-performance
+    description: "Creatine can raise quick energy stores in muscle. That helps recycle energy during short hard efforts and may improve repeated reps, power, or load under similar conditions."
+  -
+    biomarkerKey: biomarker:body-weight
+    description: "Creatine often pulls more water into muscle and can support more training work. Scale weight may rise even when fat mass has not changed."
+  -
+    biomarkerKey: biomarker:gi-tolerance
+    description: "Large servings or loading can leave the gut with more creatine to handle at once. Symptoms such as nausea, bloating, or diarrhea may change with dose size and splitting."
+  -
+    biomarkerKey: biomarker:lean-body-mass
+    description: "Creatine can increase muscle water, and with training it may help support more lean-mass gain. Short-term lean-mass estimates may move before true muscle growth is clear."
+  -
+    biomarkerKey: biomarker:training-volume
+    description: "Better quick-energy recycling may make repeated sets or sprints easier to complete. That can show up as more planned work finished."
+  -
+    biomarkerKey: biomarker:perceived-recovery
+    description: "Creatine may make short hard efforts easier to repeat by supporting quick muscle energy. Some users may feel more ready for the next session, but this signal is mixed."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
