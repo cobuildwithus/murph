@@ -216,6 +216,7 @@ export async function importHostedConversationMailboxItem(input: {
   }
   const linqProviderMessageId = resolveHostedConversationProviderCleanupMessageId(decoded.wake);
   const afterCheckpointBeforeAssistant = composeHostedConversationMailboxAfterCheckpointEffects(
+    imported.afterCheckpoint,
     linqProviderMessageId
       ? async () => {
           try {
@@ -246,7 +247,6 @@ export async function importHostedConversationMailboxItem(input: {
 
   if (imported.deduped) {
     return {
-      ...(imported.afterCheckpoint ? { afterCheckpoint: imported.afterCheckpoint } : {}),
       ...(afterCheckpointBeforeAssistant ? { afterCheckpointBeforeAssistant } : {}),
       captureId: imported.captureId,
       metrics: imported.metrics,
@@ -256,7 +256,6 @@ export async function importHostedConversationMailboxItem(input: {
   }
 
   return {
-    ...(imported.afterCheckpoint ? { afterCheckpoint: imported.afterCheckpoint } : {}),
     ...(afterCheckpointBeforeAssistant ? { afterCheckpointBeforeAssistant } : {}),
     captureId: imported.captureId,
     metrics: imported.metrics,

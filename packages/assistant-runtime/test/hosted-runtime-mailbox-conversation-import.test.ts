@@ -106,9 +106,9 @@ describe("hosted mailbox conversation import adapter", () => {
       nextWakeAt: null,
       parserProcessed: 0,
     });
-    assert.equal(outcome.afterCheckpointBeforeAssistant, undefined);
-    assert.equal(typeof outcome.afterCheckpoint, "function");
-    await outcome.afterCheckpoint?.();
+    assert.equal(outcome.afterCheckpoint, undefined);
+    assert.equal(typeof outcome.afterCheckpointBeforeAssistant, "function");
+    await outcome.afterCheckpointBeforeAssistant?.();
     expect(afterCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
   });
