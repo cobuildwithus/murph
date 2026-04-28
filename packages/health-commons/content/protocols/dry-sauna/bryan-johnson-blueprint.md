@@ -19,6 +19,12 @@ categories:
   - external-protocol
   - source-attributed
   - dry-sauna
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-bryan-johnson-sauna.jpg
+    mediaType: image/jpeg
+    caption: Bryan Johnson Sauna
 relations:
   -
     type: parent_family

@@ -22,6 +22,12 @@ categories:
 - lipids
 - lab-marker
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-04.png
+    mediaType: image/png
+    caption: Oral EPA/DHA Supplementation
 relations:
 -
   type: parent_family

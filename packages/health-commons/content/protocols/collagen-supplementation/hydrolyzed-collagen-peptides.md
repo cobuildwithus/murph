@@ -27,6 +27,12 @@ categories:
 - nutrition
 - field-testing
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-04.png
+    mediaType: image/png
+    caption: Hydrolyzed Collagen Peptides
 relations:
 -
   type: parent_family

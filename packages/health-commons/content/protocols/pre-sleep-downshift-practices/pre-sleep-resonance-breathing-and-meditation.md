@@ -24,6 +24,12 @@ categories:
   - nervous-system-downshift
   - wearable-measured
   - murph-research-umbrella
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-resonance-breathing-before-bed.jpeg
+    mediaType: image/jpeg
+    caption: Resonance Breathing Before Bed
 relations:
   -
     type: parent_family

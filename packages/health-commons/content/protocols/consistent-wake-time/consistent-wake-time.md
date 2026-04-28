@@ -27,6 +27,12 @@ categories:
   - "behavior-change"
   - "wearable-measured"
   - "murph-canonical"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-consistent-wake-time.jpeg
+    mediaType: image/jpeg
+    caption: Consistent Wake Time
 relations:
   -
     type: "parent_family"

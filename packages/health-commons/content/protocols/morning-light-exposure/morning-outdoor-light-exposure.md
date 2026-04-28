@@ -22,6 +22,12 @@ categories:
   - outdoor-light
   - morning-routine
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-morning-outdoor-light-exposure.jpeg
+    mediaType: image/jpeg
+    caption: Morning Outdoor Light Exposure
 relations:
   -
     type: parent_family

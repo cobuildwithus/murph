@@ -25,6 +25,12 @@ categories:
   - "product-quality"
   - "high-caution"
   - "murph-canonical"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-03.png
+    mediaType: image/png
+    caption: Red Yeast Rice For Cholesterol
 relations:
   -
     type: "parent_family"

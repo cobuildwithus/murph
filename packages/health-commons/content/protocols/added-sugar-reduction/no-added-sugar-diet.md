@@ -21,6 +21,12 @@ categories:
 - behavior-change
 - metabolic-health
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-no-added-sugar.jpeg
+    mediaType: image/jpeg
+    caption: No Added Sugar
 relations:
 -
   type: parent_family

@@ -24,6 +24,12 @@ categories:
   - "cardiovascular"
   - "lab-measured"
   - "diet-adjunct"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-03.png
+    mediaType: image/png
+    caption: Psyllium Husk For Cholesterol
 relations:
   -
     type: "parent_family"

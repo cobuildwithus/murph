@@ -23,6 +23,12 @@ categories:
   - sleep
   - recovery
   - wearable-measured
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-red-light-therapy.jpeg
+    mediaType: image/jpeg
+    caption: Red Light Therapy
 relations:
   -
     type: parent_family

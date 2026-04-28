@@ -19,6 +19,12 @@ categories:
   - knee-pain
   - physical-therapy
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-it-band-rehab.jpeg
+    mediaType: image/jpeg
+    caption: IT Band Rehab
 relations:
   -
     type: parent_family

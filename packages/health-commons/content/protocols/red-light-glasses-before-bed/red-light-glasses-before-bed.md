@@ -19,6 +19,12 @@ categories:
   - evening-light
   - wearable-measured
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-red-light-glasses-before-bed.jpeg
+    mediaType: image/jpeg
+    caption: Red-Light Glasses Before Bed
 relations:
   -
     type: parent_family

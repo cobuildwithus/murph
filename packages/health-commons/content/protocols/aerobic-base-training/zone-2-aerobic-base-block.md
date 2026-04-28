@@ -20,6 +20,12 @@ categories:
   - zone-2
   - behavior-change
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-zone-2-cardio.jpeg
+    mediaType: image/jpeg
+    caption: Zone 2 Cardio
 relations:
   -
     type: parent_family

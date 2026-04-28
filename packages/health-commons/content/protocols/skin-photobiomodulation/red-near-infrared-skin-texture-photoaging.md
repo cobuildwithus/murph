@@ -21,6 +21,12 @@ categories:
   - "cosmetic"
   - "light"
   - "murph-canonical"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-red-light-for-skin.jpeg
+    mediaType: image/jpeg
+    caption: Red Light For Skin
 relations:
   -
     type: "parent_family"

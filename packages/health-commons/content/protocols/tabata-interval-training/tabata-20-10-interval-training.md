@@ -23,6 +23,12 @@ categories:
   - tabata
   - vo2max
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-tabata-20-10-interval-training.jpeg
+    mediaType: image/jpeg
+    caption: Tabata 20/10 Interval Training
 relations:
   -
     type: parent_family

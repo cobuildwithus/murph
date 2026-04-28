@@ -24,6 +24,12 @@ categories:
 - behavior-change
 - wearable-measured
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-digital-sunset.jpeg
+    mediaType: image/jpeg
+    caption: Digital Sunset: No Screens Before Bed
 relations:
 -
   type: parent_family

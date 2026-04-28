@@ -23,6 +23,12 @@ categories:
   - evening-routine
   - wearable-measured
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-silent-meditation-before-bed.jpeg
+    mediaType: image/jpeg
+    caption: Silent Meditation Before Bed
 relations:
   -
     type: parent_family

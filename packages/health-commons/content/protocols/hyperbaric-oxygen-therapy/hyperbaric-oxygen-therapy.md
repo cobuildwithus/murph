@@ -19,6 +19,12 @@ categories:
   - "acute-care"
   - "safety-sensitive"
   - "murph-canonical"
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-hyperbaric-oxygen-therapy.jpeg
+    mediaType: image/jpeg
+    caption: Hyperbaric Oxygen Therapy
 relations:
   -
     type: "parent_family"

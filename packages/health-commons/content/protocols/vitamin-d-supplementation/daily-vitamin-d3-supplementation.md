@@ -19,6 +19,12 @@ categories:
   - vitamin-d
   - biomarker-feedback
   - lab-guided
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-04.png
+    mediaType: image/png
+    caption: Daily Vitamin D3 Supplementation
 relations:
   -
     type: parent_family

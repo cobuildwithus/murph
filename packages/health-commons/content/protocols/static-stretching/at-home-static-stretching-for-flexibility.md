@@ -19,6 +19,12 @@ categories:
 - home-experiment
 - manual-measurement
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-at-home-static-stretching-latest.jpeg
+    mediaType: image/jpeg
+    caption: At Home Static Stretching
 relations:
 -
   type: parent_family

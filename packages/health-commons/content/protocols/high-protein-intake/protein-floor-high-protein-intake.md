@@ -20,6 +20,12 @@ categories:
 - body-composition
 - satiety
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-high-protein-intake.jpeg
+    mediaType: image/jpeg
+    caption: High Protein Intake
 relations:
 -
   type: parent_family

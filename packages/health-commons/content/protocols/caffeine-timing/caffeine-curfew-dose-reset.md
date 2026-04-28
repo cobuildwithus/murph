@@ -19,6 +19,12 @@ categories:
   - circadian
   - behavior-change
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-caffeine-curfew.jpeg
+    mediaType: image/jpeg
+    caption: Caffeine Curfew
 relations:
   -
     type: parent_family

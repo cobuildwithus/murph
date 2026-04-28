@@ -24,6 +24,12 @@ categories:
   - safety-screened
   - symptom-log
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-prolonged-fasting.jpeg
+    mediaType: image/jpeg
+    caption: Prolonged Fasting
 relations:
   -
     type: parent_family

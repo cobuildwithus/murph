@@ -25,6 +25,12 @@ categories:
 - cardiometabolic
 - safety-screened
 - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-short-term-alcohol-abstinence.jpeg
+    mediaType: image/jpeg
+    caption: Short-Term Alcohol Abstinence
 relations:
 -
   type: parent_family
