@@ -1,6 +1,6 @@
 # Worker 08: Integration, Dependencies, Residue
 
-You are one of several parallel Codex workers editing the same current worktree. The user explicitly approved subagents for this hard-cut effort; you may spawn your own focused subagents for bounded exploration or review. Do not launch codex-workers recursively. Do not commit.
+You are one of several parallel Codex workers editing the same current worktree. The user explicitly approved subagents for this hard-cut effort; actively look for independent subtasks and spawn focused subagents to parallelize exploration, implementation, or review while you keep the immediate critical path local. Give each subagent a narrow scope, explicit file ownership, and a requirement not to commit or revert unrelated work. Do not launch codex-workers recursively. Do not commit.
 
 Read:
 
