@@ -47,6 +47,27 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/cold-plunge-tub.jpeg");
   });
 
+  it("uses cold plunge signal descriptions from the protocol page", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("cold-plunge");
+
+    expect(protocol).not.toBeNull();
+    expect(
+      protocol?.expectedSignals.find((signal) => signal.label === "Perceived Stress")?.description,
+    ).toBe(
+      "Cold water first puts the body on high alert: breathing, pulse, and blood pressure rise. The possible benefit comes later, when that stress response settles and you feel calmer.",
+    );
+    expect(
+      protocol?.expectedSignals.find((signal) => signal.label === "Mood / Affect")?.description,
+    ).toBe(
+      "Cold water first gives the body a stress jolt. The mood effect, if it happens, is likely the rebound afterward: less tension and a steadier mood later that day.",
+    );
+    expect(
+      protocol?.expectedSignals.find((signal) => signal.label === "Resting Heart Rate")?.description,
+    ).toBe(
+      "Repeated cold exposure can train the body to react less sharply to cold. If that stress response gets smaller, resting pulse may drift lower too.",
+    );
+  });
+
   it("prefers page-owned media over the route-mapped fallback image", () => {
     const protocol = healthCommonsCatalog.findByKey(
       "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",

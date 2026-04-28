@@ -181,19 +181,34 @@ export function toExpectedSignal(
   biomarker: HealthCommonsEntity,
 ): ExperimentProtocol["expectedSignals"][number] {
   const hint = resolveBiomarkerDisplayHint(protocol.key, biomarker.key);
+  const protocolSignal = resolveProtocolExpectedSignalDescription(protocol, biomarker.key);
+  const protocolProminence =
+    protocolSignal?.protocolProminence ?? hint.protocolProminence;
 
   return {
     label: biomarker.title,
     value: "",
     delta: "",
     direction: hint.direction,
-    expected: hint.expected,
+    expected: protocolSignal?.expected ?? hint.expected,
     description:
-      hint.description ?? biomarker.summary ?? summarizeBody(biomarker.body),
-    ...(hint.protocolProminence
-      ? { protocolProminence: hint.protocolProminence }
+      protocolSignal?.description
+      ?? hint.description
+      ?? biomarker.summary
+      ?? summarizeBody(biomarker.body),
+    ...(protocolProminence
+      ? { protocolProminence }
       : {}),
   };
+}
+
+function resolveProtocolExpectedSignalDescription(
+  protocol: HealthCommonsCatalogEntity,
+  biomarkerKey: string,
+) {
+  return protocol.expectedSignalDescriptions?.find(
+    (signal) => signal.biomarkerKey === biomarkerKey,
+  );
 }
 
 export function resolveBiomarkerDisplayHint(
