@@ -176,6 +176,15 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
         );
       }
     }
+    for (const signal of page.frontmatter.expectedSignalDescriptions ?? []) {
+      assertTargetExists(keys, signal.biomarkerKey, `${page.frontmatter.key} expected signal description`);
+      assertTargetEntityType(
+        pagesByKey,
+        signal.biomarkerKey,
+        "biomarker",
+        `${page.frontmatter.key} expected signal description`,
+      );
+    }
     for (const measuredBiomarkerKey of page.frontmatter.measurementMethod?.measuredBiomarkerKeys ?? []) {
       assertTargetExists(keys, measuredBiomarkerKey, `${page.frontmatter.key} measurementMethod.measuredBiomarkerKeys`);
       assertTargetEntityType(

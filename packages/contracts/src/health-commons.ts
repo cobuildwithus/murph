@@ -388,6 +388,19 @@ export const healthCommonsTestPlanSchema = z
 
 export type HealthCommonsTestPlan = z.infer<typeof healthCommonsTestPlanSchema>;
 
+export const healthCommonsExpectedSignalDescriptionSchema = z
+  .object({
+    biomarkerKey: healthCommonsKeySchema,
+    description: longStringSchema,
+    expected: shortStringSchema.optional(),
+    protocolProminence: z.enum(["focus", "context"]).optional(),
+  })
+  .strict();
+
+export type HealthCommonsExpectedSignalDescription = z.infer<
+  typeof healthCommonsExpectedSignalDescriptionSchema
+>;
+
 export const HEALTH_COMMONS_MEASUREMENT_METHOD_TIERS = [
   "default_home",
   "optional_home",
@@ -1577,6 +1590,7 @@ export const healthCommonsPageFrontmatterSchema = z
     protocolRanking: healthCommonsBiomarkerProtocolRankingSchema.optional(),
     communityOutcomeSummary: healthCommonsBiomarkerCommunityOutcomeSummarySchema.optional(),
     testPlans: z.array(healthCommonsTestPlanSchema).optional(),
+    expectedSignalDescriptions: z.array(healthCommonsExpectedSignalDescriptionSchema).optional(),
     measurementPlan: healthCommonsMeasurementPlanSchema.optional(),
     experimentOnboarding: healthCommonsExperimentOnboardingSchema.optional(),
     whyItWorks: z.array(longStringSchema).optional(),

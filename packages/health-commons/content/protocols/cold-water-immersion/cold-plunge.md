@@ -233,6 +233,16 @@ testPlans:
       - During the 14-day intervention, favor three planned sessions per week instead of daily exposure so the experiment stays conservative and easy to interpret.
       - Manual same-day stress and mood ratings are the main user-facing outcomes. Resting heart rate is the clearest repeated-use context measure; if you already track home morning blood pressure consistently, keep it as optional context rather than a promised endpoint.
       - Treat HRV, sleep, soreness, and recovery metrics as exploratory notes unless you are intentionally running a separate post-exercise variant.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:perceived-stress
+    description: "Cold water first puts the body on high alert: breathing, pulse, and blood pressure rise. The possible benefit comes later, when that stress response settles and you feel calmer."
+  -
+    biomarkerKey: biomarker:mood-affect
+    description: "Cold water first gives the body a stress jolt. The mood effect, if it happens, is likely the rebound afterward: less tension and a steadier mood later that day."
+  -
+    biomarkerKey: biomarker:resting-heart-rate
+    description: Repeated cold exposure can train the body to react less sharply to cold. If that stress response gets smaller, resting pulse may drift lower too.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
