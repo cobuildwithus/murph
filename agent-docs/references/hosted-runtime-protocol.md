@@ -54,6 +54,12 @@ the runtime refreshes mailbox rows, imports any new items, checkpoints accepted
 input state, and continues the same logical assistant turn before outbox intent
 creation.
 
+The hosted workspace snapshot preserves assistant runtime continuity under
+`vault/.runtime/operations/assistant/**` by default, excluding only explicit
+unsafe/process-local or repair-bin material such as assistant secrets,
+quarantine payloads, locks, pid/socket files, global cache/tmp, and rebuildable
+projections. Non-assistant `.runtime/**` paths remain descriptor-gated.
+
 ## Ownership Rules
 
 ### Web/Postgres Owns

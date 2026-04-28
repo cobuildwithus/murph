@@ -4,10 +4,14 @@ import { mkdir } from "node:fs/promises";
 
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
 import {
+  ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH,
   describeVaultLocalStateRelativePath,
   isPortableVaultOperationalContainerRelativePath,
+  RUNTIME_CACHE_ROOT_RELATIVE_PATH,
   RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH,
+  RUNTIME_PROJECTION_ROOT_RELATIVE_PATH,
   RUNTIME_ROOT_RELATIVE_PATH,
+  RUNTIME_TEMP_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
 import type { HostedBundleArtifactRef } from "./hosted-bundle.ts";
 import {
@@ -178,18 +182,12 @@ export async function materializeHostedExecutionArtifacts(input: {
 
 function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeWorkspaceSnapshotRelativePath(relativePath);
-  const localStateDescriptor = describeVaultLocalStateRelativePath(normalizedRelativePath);
 
   if (isVaultRuntimeRelativePath(normalizedRelativePath)) {
-    return (
-      !isEnvironmentRelativePath(normalizedRelativePath)
-      && (
-        localStateDescriptor?.portability === "portable"
-        || isPortableVaultOperationalContainerRelativePath(normalizedRelativePath)
-      )
-    );
+    return shouldIncludeWorkspaceSnapshotRuntimeRelativePath(normalizedRelativePath);
   }
 
+  const localStateDescriptor = describeVaultLocalStateRelativePath(normalizedRelativePath);
   return (
     !isDotGitRelativePath(normalizedRelativePath)
     && !isEnvironmentRelativePath(normalizedRelativePath)
@@ -198,6 +196,23 @@ function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): 
       localStateDescriptor === null
       || localStateDescriptor.portability === "portable"
     )
+  );
+}
+
+function shouldIncludeWorkspaceSnapshotRuntimeRelativePath(relativePath: string): boolean {
+  if (isHostedRuntimeSnapshotExcludedRelativePath(relativePath)) {
+    return false;
+  }
+
+  if (isAssistantRuntimeRelativePath(relativePath)) {
+    return !isHostedAssistantRuntimeSnapshotExcludedRelativePath(relativePath);
+  }
+
+  const localStateDescriptor = describeVaultLocalStateRelativePath(relativePath);
+  return (
+    isStrictAncestorPath(relativePath, ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH)
+    || localStateDescriptor?.portability === "portable"
+    || isPortableVaultOperationalContainerRelativePath(relativePath)
   );
 }
 
@@ -221,6 +236,46 @@ function isVaultRuntimeRelativePath(relativePath: string): boolean {
     || relativePath.startsWith(`${RUNTIME_ROOT_RELATIVE_PATH}${path.posix.sep}`);
 }
 
+function isAssistantRuntimeRelativePath(relativePath: string): boolean {
+  return hasWorkspaceSnapshotPathPrefix(relativePath, ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH);
+}
+
+function isHostedRuntimeSnapshotExcludedRelativePath(relativePath: string): boolean {
+  return (
+    isEnvironmentRelativePath(relativePath)
+    || hasWorkspaceSnapshotPathPrefix(relativePath, RUNTIME_CACHE_ROOT_RELATIVE_PATH)
+    || hasWorkspaceSnapshotPathPrefix(relativePath, RUNTIME_TEMP_ROOT_RELATIVE_PATH)
+    || hasWorkspaceSnapshotPathPrefix(relativePath, RUNTIME_PROJECTION_ROOT_RELATIVE_PATH)
+  );
+}
+
+function isHostedAssistantRuntimeSnapshotExcludedRelativePath(relativePath: string): boolean {
+  if (
+    ASSISTANT_RUNTIME_EXCLUDED_PATH_PREFIXES.some((prefix) =>
+      hasWorkspaceSnapshotPathPrefix(relativePath, prefix),
+    )
+  ) {
+    return true;
+  }
+
+  const basename = path.posix.basename(relativePath);
+  return (
+    basename === "tmp"
+    || basename === ".tmp"
+    || isHostedAssistantRuntimeLockTempBasename(basename)
+    || basename.endsWith(".lock")
+    || basename.endsWith(".pid")
+    || basename.endsWith(".sock")
+    || basename.endsWith(".socket")
+    || basename.endsWith(".tmp")
+    || basename.startsWith(".tmp-")
+  );
+}
+
+function isHostedAssistantRuntimeLockTempBasename(basename: string): boolean {
+  return /^\.(?:automation-run|runtime-write)\.lock\.(?:cleanup|pending|stale)\./u.test(basename);
+}
+
 function isDotGitRelativePath(relativePath: string): boolean {
   return relativePath === ".git" || relativePath.startsWith(`.git${path.posix.sep}`);
 }
@@ -237,6 +292,14 @@ function isExportPackRelativePath(relativePath: string): boolean {
     relativePath === "exports/packs"
     || relativePath.startsWith(`exports/packs${path.posix.sep}`)
   );
+}
+
+function hasWorkspaceSnapshotPathPrefix(relativePath: string, prefix: string): boolean {
+  return relativePath === prefix || relativePath.startsWith(`${prefix}${path.posix.sep}`);
+}
+
+function isStrictAncestorPath(ancestorPath: string, targetPath: string): boolean {
+  return ancestorPath !== targetPath && targetPath.startsWith(`${ancestorPath}${path.posix.sep}`);
 }
 
 function normalizeWorkspaceSnapshotRelativePath(relativePath: string): string {
@@ -370,3 +433,12 @@ const BINARY_RAW_ARTIFACT_EXTENSIONS = new Set([
   ".webm",
   ".webp",
 ]);
+
+const ASSISTANT_RUNTIME_EXCLUDED_PATH_PREFIXES = [
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/secrets`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/quarantine`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox/.quarantine`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/.locks`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/.runtime-write.lock`,
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/.automation-run.lock`,
+] as const;
