@@ -4166,6 +4166,62 @@ describe('assistant automation run loop', () => {
     )
   })
 
+  it('can finish a document-preservation retry pass without replying or outbox work', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: '2026-04-08T00:00:30.000Z',
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const result = await runLoop.runAssistantAutomationPass({
+      requestId: 'request-preserve-failed',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      cronProcessed: 0,
+      nextWakeAt: '2026-04-08T00:00:30.000Z',
+      outboxAttempted: 0,
+      progressed: false,
+      replies: {
+        considered: 0,
+        failed: 0,
+        replied: 0,
+        skipped: 0,
+      },
+      routing: {
+        considered: 0,
+        failed: 0,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+    })
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'request-preserve-failed',
+        vault: '/tmp/assistant-automation-vault',
+      }),
+    )
+    expect(runLoopMocks.drainAssistantOutbox).toHaveBeenCalledOnce()
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
+  })
+
   it('wakes immediately on non-self imported captures instead of waiting for the scan interval', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
