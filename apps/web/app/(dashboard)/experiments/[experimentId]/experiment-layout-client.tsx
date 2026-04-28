@@ -146,7 +146,7 @@ function ExperimentLayoutInner({
           </TabsList>
           <span
             aria-hidden={!isTabsSticky}
-            className="ml-auto min-w-0 truncate font-serif text-sm/5 font-semibold text-foreground transition-opacity duration-150 md:text-base/6"
+            className="ml-auto hidden min-w-0 truncate font-serif text-sm/5 font-semibold text-foreground transition-opacity duration-150 md:block md:text-base/6"
             style={{
               opacity: isTabsSticky ? 1 : 0,
               pointerEvents: isTabsSticky ? "auto" : "none",

@@ -31,6 +31,7 @@ export function composeExperimentDetail({
     signals: privateRun?.signals ?? [],
     trends: privateRun?.trends ?? [],
     timeline: privateRun?.timeline ?? [],
+    schedule: privateRun?.schedule,
     privateRun: privateRun ?? undefined,
     nextStep: privateRun?.nextStep,
     summary: privateRun?.summary,
