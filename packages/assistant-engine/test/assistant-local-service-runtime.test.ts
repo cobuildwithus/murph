@@ -1119,12 +1119,12 @@ test('sendAssistantMessageLocal starts a new turn when same-conversation input l
   assert.equal(mocks.executeProviderTurnWithRecovery.mock.calls.length, 2)
 })
 
-test('active-turn queue only steers exact conversations while open', async () => {
+test('active-turn controller only steers exact conversations while open', async () => {
   const {
-    createAssistantActiveTurnInputQueue,
+    createAssistantActiveTurnInputController,
     steerAssistantActiveTurnInput,
-  } = await import('../src/assistant/active-turn-input-queue.ts')
-  const queue = createAssistantActiveTurnInputQueue({
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const controller = createAssistantActiveTurnInputController({
     conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
     sessionId: 'session-test',
     turnId: 'turn-active',
@@ -1199,7 +1199,14 @@ test('active-turn queue only steers exact conversations while open', async () =>
     })
     assert.ok(steered)
     steered.catch(() => undefined)
-    assert.deepEqual(queue.admit(), {
+    assert.deepEqual(await controller.admit({
+      phase: 'request_boundary',
+      providerRequestOrdinal: 0,
+      response: 'draft',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
       acceptedInputs: [
         {
           id: 'manual-1',
@@ -1220,7 +1227,7 @@ test('active-turn queue only steers exact conversations while open', async () =>
       ],
     })
 
-    const sessionOnlyQueue = createAssistantActiveTurnInputQueue({
+    const sessionOnlyController = createAssistantActiveTurnInputController({
       sessionId: 'session-other',
       turnId: 'turn-session-only',
       vault: '/vaults/test',
@@ -1249,7 +1256,14 @@ test('active-turn queue only steers exact conversations while open', async () =>
       })
       assert.ok(sessionSteered)
       sessionSteered.catch(() => undefined)
-      assert.deepEqual(sessionOnlyQueue.admit(), {
+      assert.deepEqual(await sessionOnlyController.admit({
+        phase: 'request_boundary',
+        providerRequestOrdinal: 0,
+        response: 'draft',
+        sessionId: 'session-other',
+        turnId: 'turn-session-only',
+        vault: '/vaults/test',
+      }), {
         acceptedInputs: [
           {
             id: 'manual-1',
@@ -1270,11 +1284,11 @@ test('active-turn queue only steers exact conversations while open', async () =>
         ],
       })
     } finally {
-      sessionOnlyQueue.fail(new Error('session-only queue test complete'))
-      sessionOnlyQueue.close()
+      sessionOnlyController.fail(new Error('session-only controller test complete'))
+      sessionOnlyController.close()
     }
 
-    queue.close()
+    controller.close()
     assert.equal(
       steerAssistantActiveTurnInput({
         conversation: {
@@ -1289,8 +1303,8 @@ test('active-turn queue only steers exact conversations while open', async () =>
       null,
     )
   } finally {
-    queue.fail(new Error('active-turn queue test complete'))
-    queue.close()
+    controller.fail(new Error('active-turn controller test complete'))
+    controller.close()
   }
 })
 
