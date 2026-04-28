@@ -3,7 +3,7 @@ import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contrac
 import type { InboxServices } from '@murphai/inbox-services'
 import { routeInboxCaptureWithModel } from '../../inbox-model-harness.js'
 import { shouldBypassParserWaitForRouting } from '../../inbox-routing-vision.js'
-import type { AssistantModelSpec } from '../../model-harness.js'
+import type { AssistantModelSpec } from '../legacy-model-spec.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { errorMessage } from '../shared.js'
 import { assistantResultArtifactExists } from './artifacts.js'

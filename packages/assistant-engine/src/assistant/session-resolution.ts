@@ -6,7 +6,6 @@ import type { AssistantOperatorDefaults } from '@murphai/operator-config/operato
 import {
   compactAssistantProviderConfigInput,
   isAssistantCodexTargetConfig,
-  isAssistantOpenAICompatibleTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -95,6 +94,9 @@ export function buildResolveAssistantSessionInput(
     target,
     provider: resolveAssistantChatProviderFromConfig(providerConfig),
     model: providerConfig.target.model,
+    modelProvider: isAssistantCodexTargetConfig(providerConfig)
+      ? providerConfig.target.modelProvider
+      : null,
     sandbox: defaultSandbox,
     approvalPolicy: defaultApprovalPolicy,
     oss: isAssistantCodexTargetConfig(providerConfig) ? providerConfig.target.oss : false,
@@ -105,32 +107,6 @@ export function buildResolveAssistantSessionInput(
     ...(isAssistantCodexTargetConfig(providerConfig) && providerConfig.target.codexHome
       ? { codexHome: providerConfig.target.codexHome }
       : {}),
-    baseUrl:
-      isAssistantOpenAICompatibleTargetConfig(providerConfig)
-        ? providerConfig.target.baseUrl
-        : null,
-    apiKeyEnv:
-      isAssistantOpenAICompatibleTargetConfig(providerConfig)
-        ? providerConfig.target.apiKeyEnv
-        : null,
-    providerName:
-      isAssistantOpenAICompatibleTargetConfig(providerConfig)
-        ? providerConfig.target.providerName
-        : null,
-    ...(isAssistantOpenAICompatibleTargetConfig(providerConfig)
-      ? {
-          ...(providerConfig.target.gatewayOnlyProviders
-            ? { gatewayOnlyProviders: providerConfig.target.gatewayOnlyProviders }
-            : {}),
-          presetId: providerConfig.target.presetId,
-          webSearch: providerConfig.policy.webSearch,
-          zeroDataRetention: providerConfig.policy.zeroDataRetention ?? null,
-        }
-      : {}),
-    headers:
-      isAssistantOpenAICompatibleTargetConfig(providerConfig)
-        ? providerConfig.target.headers
-        : null,
     reasoningEffort: providerConfig.policy.reasoningEffort,
     maxSessionAgeMs: input.maxSessionAgeMs ?? null,
   }

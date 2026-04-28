@@ -11,7 +11,11 @@ import {
 import {
   HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+  HOSTED_ASSISTANT_PROVIDER_ENV,
 } from "@murphai/operator-config/hosted-assistant-config-constants";
+import {
+  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+} from "@murphai/operator-config/assistant/target-runtime";
 import {
   HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS,
   HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
@@ -38,7 +42,6 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
     HOSTED_AI_USAGE_BILLING_MODE_ENV,
     "HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY",
     "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
-    "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
     "HOSTED_AI_USAGE_REPORTING_SECRET",
     "HOSTED_LOG_FINGERPRINT_SECRET",
     "NODE_ENV",
@@ -141,6 +144,10 @@ export function buildHostedRuntimeForwardedEnv(
       typeof value !== "string"
       || value.length === 0
       || !allowedKeys.has(key)
+      || (
+        isHostedAssistantConfigEnvKey(key)
+        && !shouldForwardHostedCodexAssistantConfigEnv(source)
+      )
     ) {
       continue;
     }
@@ -164,6 +171,14 @@ export function buildHostedRuntimeForwardedEnv(
   values.HOSTED_EMAIL_SEND_READY = emailCapabilities.sendReady ? "true" : "false";
 
   return values;
+}
+
+function isHostedAssistantConfigEnvKey(key: string): boolean {
+  return (HOSTED_ASSISTANT_CONFIG_ENV_NAMES as readonly string[]).includes(key);
+}
+
+function shouldForwardHostedCodexAssistantConfigEnv(source: UnknownEnvSource): boolean {
+  return source[HOSTED_ASSISTANT_PROVIDER_ENV] === VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID;
 }
 
 export function buildHostedRuntimeChildEnv(input: {

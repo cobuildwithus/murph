@@ -87,10 +87,10 @@ describe("readHostedExecutionEnvironment", () => {
 
   it("reads optional runner-secret allowlist extensions", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY,CUSTOM_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY,CUSTOM_API_KEY",
     }));
 
-    expect(environment.allowedRunnerSecretKeys).toBe("OPENAI_API_KEY,CUSTOM_API_KEY");
+    expect(environment.allowedRunnerSecretKeys).toBe("VERCEL_AI_API_KEY,CUSTOM_API_KEY");
   });
 
   it("hard-fails when the local internal proxy is configured outside development", () => {
@@ -181,15 +181,15 @@ describe("readHostedExecutionEnvironment", () => {
   it("drops non-string worker bindings before config readers consume env", () => {
     expect(toStringEnvSource({
       BUNDLES: { fetch() {} },
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
       PORT: 8787,
     })).toEqual({
       BUNDLES: undefined,
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
       PORT: undefined,
     });
   });
@@ -197,7 +197,7 @@ describe("readHostedExecutionEnvironment", () => {
 
 describe("hosted runner secrets policy", () => {
   it("keeps parser executable selectors operator-only", () => {
-    expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedRunnerSecretKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
 
     expect(isHostedRunnerSecretKeyAllowed("FFMPEG_COMMAND")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HOSTED_AI_USAGE_REPORTING_SECRET")).toBe(false);
@@ -231,11 +231,11 @@ describe("hosted runner secrets policy", () => {
       HOSTED_AI_USAGE_REPORTING_SECRET: "usage-reporting-secret",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
       NODE_OPTIONS: "--require /tmp/evil-loader.js",
-      OPENAI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "sk-test",
       TELEGRAM_BOT_TOKEN: "telegram-token",
       WHISPER_COMMAND: "/tmp/evil-whisper",
     })).toEqual({
-      OPENAI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "sk-test",
     });
   });
 });

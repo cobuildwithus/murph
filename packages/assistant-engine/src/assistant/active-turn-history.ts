@@ -1,4 +1,4 @@
-import type { AssistantUserMessageContentPart } from '../model-harness.js'
+import type { AssistantUserMessageContentPart } from './content-types.js'
 
 export interface AssistantActiveTurnProviderHistoryMessage {
   content: string | AssistantUserMessageContentPart[]

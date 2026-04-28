@@ -120,7 +120,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
     })).toEqual({
-      HOSTED_ASSISTANT_BASE_URL: "http://host.docker.internal:4111/v1",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://host.docker.internal:4011/attachment-downloads",
@@ -141,7 +140,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       TELEGRAM_API_BASE_URL: "http://127.0.0.1:4012",
       TELEGRAM_FILE_BASE_URL: "http://127.0.0.1:4013",
     })).toEqual({
-      HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
@@ -154,18 +152,18 @@ describe("buildHostedRunnerContainerEnv", () => {
 
   it("does not forward worker-only runtime config into the child runner env", () => {
     expect(buildHostedRunnerContainerEnv({
-      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "VERCEL_AI_API_KEY",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "1000",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       NODE_ENV: "production",
-      OPENAI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "sk-test",
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
-      OPENAI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "sk-test",
     });
   });
 
@@ -253,18 +251,14 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       HF_TOKEN: "hf-user",
-      OPENAI_API_KEY: "sk-user",
+      VERCEL_AI_API_KEY: "sk-user",
       TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
       TELEGRAM_BOT_TOKEN: "telegram-user",
       TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
     })).toEqual({
-      DEEPSEEK_API_KEY: "deepseek-user",
-      HF_TOKEN: "hf-user",
-      OPENAI_API_KEY: "sk-user",
-      VENICE_API_KEY: "venice-user",
-      XAI_API_KEY: "xai-user",
+      VERCEL_AI_API_KEY: "sk-user",
     });
   });
 
@@ -367,17 +361,17 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       },
       forwardedEnv: {
-        OPENAI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "sk-worker",
       },
       runnerSecrets: {
         CUSTOM_API_KEY: "custom-user",
-        OPENAI_API_KEY: "sk-user",
+        VERCEL_AI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
       },
     })).toMatchObject({
       commitTimeoutMs: 45_000,
       forwardedEnv: {
-        OPENAI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "sk-worker",
       },
       resolvedConfig: {
         channelCapabilities: {
@@ -388,8 +382,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       },
       userEnv: {
         CUSTOM_API_KEY: "custom-user",
-        OPENAI_API_KEY: "sk-user",
-        VENICE_API_KEY: "venice-user",
+        VERCEL_AI_API_KEY: "sk-user",
       },
     });
   });
@@ -439,7 +432,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
   it("treats explicit platform env as platform-owned and does not backfill missing keys from forwarded env", () => {
     expect(buildHostedRunnerJobRuntime({
       forwardedEnv: {
-        OPENAI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "sk-worker",
         TELEGRAM_API_BASE_URL: "https://evil.telegram.example",
         TELEGRAM_FILE_BASE_URL: "https://evil-files.telegram.example",
       },
@@ -453,7 +446,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toMatchObject({
       commitTimeoutMs: 30_000,
       forwardedEnv: {
-        OPENAI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "sk-worker",
       },
       platformEnv: {
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
@@ -479,13 +472,13 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: '{"kty":"EC","d":"callback"}',
-        OPENAI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "sk-worker",
       },
       runnerSecrets: {},
     })).toMatchObject({
       forwardedEnv: {
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
-        OPENAI_API_KEY: "sk-worker",
+        VERCEL_AI_API_KEY: "sk-worker",
       },
       platformEnv: {
         HOSTED_WAKE_ENCRYPTION_KEY: "wake-key",
@@ -505,7 +498,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       runnerSecrets: {},
     })).toMatchObject({
       forwardedEnv: {
-        HOSTED_ASSISTANT_BASE_URL: "http://127.0.0.1:4111/v1",
         LINQ_API_BASE_URL: "http://localhost:4011",
       },
       platformEnv: {
@@ -650,13 +642,13 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
     expect(buildHostedRunnerChildRuntimeEnv({
       ambientSource: {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        OPENAI_API_KEY: "sk-test",
+        VERCEL_AI_API_KEY: "sk-test",
       },
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
-      OPENAI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "sk-test",
     });
   });
 
@@ -674,14 +666,14 @@ describe("buildHostedRunnerChildRuntimeEnv", () => {
         HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",
         HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
-        OPENAI_API_KEY: "sk-test",
+        VERCEL_AI_API_KEY: "sk-test",
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
     })).toEqual({
       HOSTED_WEB_BASE_URL: "https://forwarded.example.test",
-      OPENAI_API_KEY: "sk-test",
+      VERCEL_AI_API_KEY: "sk-test",
     });
   });
 });
@@ -786,9 +778,12 @@ describe("hosted deploy automation device-sync surface", () => {
         "GARMIN_API_BASE_URL",
         "HOSTED_AI_USAGE_BILLING_MODE",
         "HOSTED_AI_USAGE_VERCEL_STRIPE_BILLING_ENABLED",
-        "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
+        "HOSTED_ASSISTANT_PROVIDER",
         "WHOOP_SCOPES",
       ]),
+    );
+    expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
+      "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
     );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
       "OURA_WEBHOOK_VERIFICATION_TOKEN",

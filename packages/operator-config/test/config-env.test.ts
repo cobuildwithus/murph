@@ -369,41 +369,31 @@ test('assistant backend targets trim config input and strip sensitive headers be
     codexCommand: 'codex',
     codexHome: '/tmp/codex-home',
     model: 'gpt-4o',
+    modelProvider: null,
     oss: true,
     profile: 'default',
     reasoningEffort: 'medium',
     sandbox: 'workspace-write',
   })
 
-  const persistedOpenAiTarget = sanitizeAssistantBackendTargetForPersistence({
-    adapter: 'openai-compatible',
-    apiKeyEnv: '  OPENAI_API_KEY  ',
-    endpoint: '  https://api.example.com/v1  ',
-    headers: {
-      Authorization: 'Bearer abcdefghijklmnop',
-      'X-Empty': '   ',
-      'X-Trace': ' trace-id ',
-    },
-    model: '  gpt-4o  ',
-    presetId: null,
-    providerName: '  Example Provider  ',
-    reasoningEffort: 'high',
-    webSearch: null,
-  })
-
-  assert.deepEqual(persistedOpenAiTarget, {
-    adapter: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    endpoint: 'https://api.example.com/v1',
-    headers: {
-      'X-Trace': 'trace-id',
-    },
-    model: 'gpt-4o',
-    presetId: null,
-    providerName: 'Example Provider',
-    reasoningEffort: 'high',
-    webSearch: null,
-  })
+  assert.throws(
+    () =>
+      sanitizeAssistantBackendTargetForPersistence({
+        adapter: 'openai-compatible',
+        apiKeyEnv: '  OPENAI_API_KEY  ',
+        endpoint: '  https://api.example.com/v1  ',
+        headers: {
+          Authorization: 'Bearer abcdefghijklmnop',
+          'X-Trace': ' trace-id ',
+        },
+        model: '  gpt-4o  ',
+        presetId: null,
+        providerName: '  Example Provider  ',
+        reasoningEffort: 'high',
+        webSearch: null,
+      }),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
+  )
   assert.equal(
     assistantBackendTargetsEqual(
       normalizedCodexTarget,
@@ -451,18 +441,16 @@ test('representative contract schemas stay wired to the owned setup/operator sea
 
   assert.equal(assistantSessionIdSchema.safeParse('session_1').success, true)
   assert.equal(assistantSessionIdSchema.safeParse('../session').success, false)
-  const openAiCompatibleRuntime = resolveAssistantRuntimeTarget({
-    provider: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://api.example.test/v1',
-    headers: {
-      'X-Trace-Id': 'trace',
-    },
-    model: 'gpt-5.4',
-    presetId: 'openai',
-    providerName: 'Example',
-    reasoningEffort: 'high',
-  })
+  assert.throws(
+    () =>
+      resolveAssistantRuntimeTarget({
+        provider: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        baseUrl: 'https://api.example.test/v1',
+        model: 'gpt-5.4',
+      }),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
+  )
   const parsedAssistantSession = parseAssistantSessionRecord({
       alias: 'daily',
       binding: {
@@ -486,17 +474,15 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       schema: 'murph.assistant-session.v1',
       sessionId: 'session_1',
       target: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        endpoint: 'https://api.example.test/v1',
-        headers: {
-          'X-Trace-Id': 'trace',
-        },
-        model: 'gpt-5.4',
-        presetId: 'openai',
-        providerName: 'Example',
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        model: 'gpt-5.5',
+        modelProvider: 'vercel-ai-gateway',
+        oss: false,
+        profile: null,
         reasoningEffort: 'high',
-        webSearch: null,
+        sandbox: 'danger-full-access',
       },
       turnCount: 3,
       updatedAt: '2026-04-08T12:05:00.000Z',
@@ -506,23 +492,31 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     resumeRouteId: 'route-1',
   })
   assert.deepEqual(parsedAssistantSession.providerOptions, {
-    apiKeyEnv: 'OPENAI_API_KEY',
-    approvalPolicy: null,
-    baseUrl: 'https://api.example.test/v1',
-    continuityFingerprint: openAiCompatibleRuntime.continuityFingerprint,
-    executionDriver: 'openai-compatible',
-    headers: {
-      'X-Trace-Id': 'trace',
+    approvalPolicy: 'never',
+    continuityFingerprint: resolveAssistantRuntimeTarget({
+      provider: 'codex-cli',
+      approvalPolicy: 'never',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      reasoningEffort: 'high',
+      sandbox: 'danger-full-access',
+    }).continuityFingerprint,
+    executionDriver: 'codex-app-server',
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    modelProviderConfig: {
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      envKey: 'VERCEL_AI_API_KEY',
+      id: 'vercel-ai-gateway',
+      name: 'Vercel AI Gateway',
+      wireApi: 'responses',
     },
-    model: 'gpt-5.4',
     oss: false,
-    presetId: null,
     profile: null,
-    provider: 'openai-compatible',
-    providerName: 'Example',
+    provider: 'codex-cli',
     reasoningEffort: 'high',
-    resumeKind: null,
-    sandbox: null,
+    resumeKind: 'codex-thread',
+    sandbox: 'danger-full-access',
   })
   assert.deepEqual(
     assistantStatusAutomationSchema.parse({
@@ -581,45 +575,46 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     }).resumeState,
     null,
   )
-  assert.deepEqual(
-    parseAssistantSessionRecord({
-      alias: null,
-      binding: {
-        actorId: null,
-        channel: null,
-        conversationKey: null,
-        delivery: null,
-        identityId: null,
-        threadId: null,
-        threadIsDirect: null,
-      },
-      createdAt: '2026-04-08T12:00:00.000Z',
-      lastTurnAt: null,
-      resumeState: {
-        providerSessionId: '   ',
-        resumeRouteId: ' route-only ',
-      },
-      schema: 'murph.assistant-session.v1',
-      sessionId: 'session_route_only',
-      target: {
-        adapter: 'openai-compatible',
-        apiKeyEnv: null,
-        endpoint: null,
-        headers: null,
-        model: 'gpt-5.4',
-        presetId: null,
-        providerName: null,
-        reasoningEffort: 'medium',
-        webSearch: null,
-      },
-      turnCount: 1,
-      updatedAt: '2026-04-08T12:05:00.000Z',
-    }).resumeState,
-    null,
+  assert.throws(
+    () =>
+      parseAssistantSessionRecord({
+        alias: null,
+        binding: {
+          actorId: null,
+          channel: null,
+          conversationKey: null,
+          delivery: null,
+          identityId: null,
+          threadId: null,
+          threadIsDirect: null,
+        },
+        createdAt: '2026-04-08T12:00:00.000Z',
+        lastTurnAt: null,
+        resumeState: {
+          providerSessionId: '   ',
+          resumeRouteId: ' route-only ',
+        },
+        schema: 'murph.assistant-session.v1',
+        sessionId: 'session_route_only',
+        target: {
+          adapter: 'openai-compatible',
+          apiKeyEnv: null,
+          endpoint: null,
+          headers: null,
+          model: 'gpt-5.4',
+          presetId: null,
+          providerName: null,
+          reasoningEffort: 'medium',
+          webSearch: null,
+        },
+        turnCount: 1,
+        updatedAt: '2026-04-08T12:05:00.000Z',
+      }),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
 })
 
-test('hosted assistant config normalization keeps the active profile ready and strips secret headers', () => {
+test('hosted assistant config normalization keeps the active Codex profile ready', () => {
   const normalizedConfig = normalizeHostedAssistantConfig({
     activeProfileId: ' platform-profile ',
     profiles: [
@@ -628,18 +623,15 @@ test('hosted assistant config normalization keeps the active profile ready and s
         label: ' ',
         managedBy: 'platform',
         target: {
-          adapter: 'openai-compatible',
-          apiKeyEnv: '  OPENAI_API_KEY  ',
-          endpoint: '  https://api.example.com/v1  ',
-          headers: {
-            Authorization: 'Bearer abcdefghijklmnop',
-            'X-Trace': ' trace-id ',
-          },
-          model: '  gpt-4o  ',
-          presetId: null,
-          providerName: ' ',
+          adapter: 'codex-cli',
+          approvalPolicy: null,
+          codexCommand: null,
+          model: '  gpt-5.5  ',
+          modelProvider: '  vercel-ai-gateway  ',
+          oss: false,
+          profile: null,
           reasoningEffort: 'high',
-          webSearch: null,
+          sandbox: null,
         },
       },
     ],
@@ -652,20 +644,18 @@ test('hosted assistant config normalization keeps the active profile ready and s
     profiles: [
       {
         id: 'platform-profile',
-        label: 'api.example.com',
+        label: 'Vercel AI Gateway',
         managedBy: 'platform',
         target: {
-          adapter: 'openai-compatible',
-          apiKeyEnv: 'OPENAI_API_KEY',
-          endpoint: 'https://api.example.com/v1',
-          headers: {
-            'X-Trace': 'trace-id',
-          },
-          model: 'gpt-4o',
-          presetId: null,
-          providerName: null,
+          adapter: 'codex-cli',
+          approvalPolicy: null,
+          codexCommand: null,
+          model: 'gpt-5.5',
+          modelProvider: 'vercel-ai-gateway',
+          oss: false,
+          profile: null,
           reasoningEffort: 'high',
-          webSearch: null,
+          sandbox: null,
         },
       },
     ],
@@ -688,32 +678,30 @@ test('hosted assistant config normalization keeps the active profile ready and s
   )
   assert.deepEqual(resolveReadyHostedAssistantProfile(normalizedConfig), normalizedConfig?.profiles[0] ?? null)
   assert.deepEqual(resolveHostedAssistantProviderConfig(normalizedConfig), {
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://api.example.com/v1',
-    headers: {
-      'X-Trace': 'trace-id',
-    },
-    model: 'gpt-4o',
-    presetId: null,
-    provider: 'openai-compatible',
-    providerName: null,
+    approvalPolicy: null,
+    codexCommand: null,
+    codexHome: null,
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    oss: false,
+    profile: null,
+    provider: 'codex-cli',
     reasoningEffort: 'high',
-    webSearch: null,
-    zeroDataRetention: null,
+    sandbox: null,
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(normalizedConfig), {
     configured: true,
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
   })
   assert.equal(
     readHostedAssistantApiKeyEnvName({
-      [HOSTED_ASSISTANT_API_KEY_ENV]: '  OPENAI_API_KEY  ',
+      VERCEL_AI_API_KEY: 'secret-value',
     }),
-    'OPENAI_API_KEY',
+    'VERCEL_AI_API_KEY',
   )
   assert.equal(
     readHostedAssistantApiKeyEnvName({
-      [HOSTED_ASSISTANT_API_KEY_ENV]: '   ',
+      [HOSTED_ASSISTANT_API_KEY_ENV]: '  VERCEL_AI_API_KEY  ',
     }),
     null,
   )

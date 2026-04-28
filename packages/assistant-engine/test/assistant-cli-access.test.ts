@@ -58,6 +58,9 @@ describe("prepareAssistantDirectCliEnv", () => {
 
     expect(guidance).toContain("`vault-cli` is the canonical Murph CLI");
     expect(guidance).toContain("`murph` is the setup entrypoint");
-    expect(guidance).toContain("Do not edit canonical vault files directly");
+    expect(guidance).toContain("Use the matching local CLI command directly");
+    expect(guidance).toContain("prefer `--format json`");
+    expect(guidance).toContain("do not run recursive assistant or delivery commands");
+    expect(guidance).toContain("`assistant deliver`");
   });
 });

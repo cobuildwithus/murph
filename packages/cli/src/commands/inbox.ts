@@ -1,10 +1,6 @@
 import { Cli, z } from 'incur'
 import {
-  apiKeyEnvNameSchema,
   emptyArgsSchema,
-  httpBaseUrlSchema,
-  normalizeHttpBaseUrlOption,
-  parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
@@ -34,14 +30,8 @@ import {
   inboxSourceListResultSchema,
   inboxSourceRemoveResultSchema,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import {
-  inboxModelBundleResultSchema,
-  inboxModelRouteResultSchema,
-} from '../inbox-model-contracts.js'
-import {
-  materializeInboxModelBundle,
-  routeInboxCaptureWithModel,
-} from '../inbox-model-harness.js'
+import { inboxModelBundleResultSchema } from '../inbox-model-contracts.js'
+import { materializeInboxModelBundle } from '../inbox-model-harness.js'
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   formatForegroundLogLine,
@@ -881,7 +871,7 @@ export function registerInboxCommands(
 
   const model = Cli.create('model', {
     description:
-      'Build a normalized inbox bundle, attach supported routing images when available, and ask a Vercel AI SDK-backed model to choose canonical CLI actions.',
+      'Build a deterministic normalized inbox bundle for one captured inbox item.',
   })
 
   model.command('bundle', {
@@ -905,67 +895,6 @@ export function registerInboxCommands(
         vault: context.options.vault,
         vaultServices,
         includeSensitiveBundle: context.options.sensitive === true,
-      })
-    },
-  })
-
-  model.command('route', {
-    args: z.object({
-      captureId: z.string().min(1).describe('Inbox capture id to route.'),
-    }),
-    description:
-      'Use the shared assistant model harness to generate a CLI action plan for one inbox capture.',
-    hint:
-      'Pass --baseUrl to target a local or other OpenAI-compatible endpoint. Use the saved assistant backend for AI Gateway routing rather than omitting the endpoint here.',
-    options: withBaseOptions({
-      model: z
-        .string()
-        .min(1)
-        .describe('Model id to use, such as anthropic/claude-sonnet-4.5 or a local model id.'),
-      baseUrl: httpBaseUrlSchema
-        .describe('OpenAI-compatible base URL for local or custom model endpoints.'),
-      apiKey: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional explicit API key for OpenAI-compatible model endpoints.'),
-      apiKeyEnv: apiKeyEnvNameSchema
-        .optional()
-        .describe('Optional environment variable name that stores the API key.'),
-      providerName: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional stable provider label for OpenAI-compatible endpoints.'),
-      headersJson: z
-        .string()
-        .min(1)
-        .optional()
-        .describe('Optional JSON object of extra HTTP headers for OpenAI-compatible endpoints.'),
-      apply: z
-        .boolean()
-        .optional()
-        .describe('Execute the planned tool calls instead of previewing them.'),
-    }),
-    output: inboxModelRouteResultSchema,
-    async run(context) {
-      return routeInboxCaptureWithModel({
-        inboxServices: services,
-        requestId: requestIdFromOptions(context.options),
-        captureId: context.args.captureId,
-        vault: context.options.vault,
-        vaultServices,
-        apply: context.options.apply,
-        modelSpec: {
-          model: context.options.model,
-          baseUrl:
-            normalizeHttpBaseUrlOption(context.options.baseUrl) ??
-            context.options.baseUrl,
-          apiKey: context.options.apiKey,
-          apiKeyEnv: context.options.apiKeyEnv,
-          providerName: context.options.providerName,
-          headers: parseHeadersJsonOption(context.options.headersJson),
-        },
       })
     },
   })

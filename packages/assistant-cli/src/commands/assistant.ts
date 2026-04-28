@@ -16,6 +16,7 @@ import {
   assistantSelfDeliveryTargetSetResultSchema,
   assistantSelfDeliveryTargetShowResultSchema,
   assistantSandboxValues,
+  assistantReasoningEffortValues,
   assistantSessionListResultSchema,
   assistantSessionShowResultSchema,
   assistantStopResultSchema,
@@ -49,11 +50,7 @@ import {
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
 import {
-  apiKeyEnvNameSchema,
   emptyArgsSchema,
-  httpBaseUrlSchema,
-  normalizeHttpBaseUrlOption,
-  parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
@@ -146,12 +143,6 @@ function normalizeAssistantChannelAlias(value: string): string | null {
   }
 }
 
-function normalizeAssistantBaseUrlOption(
-  value?: string,
-): string | undefined {
-  return value ? normalizeHttpBaseUrlOption(value) ?? value : undefined
-}
-
 function optionalNonEmptyStringOption(description: string) {
   return z
     .string()
@@ -178,30 +169,26 @@ const assistantProviderOptionFields = {
     .enum(assistantChatProviderValues)
     .optional()
     .describe(
-      'Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.',
+      'Codex provider adapter for the local assistant surface.',
     ),
   codexCommand: optionalNonEmptyStringOption(
     'Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.',
   ),
+  codexHome: optionalNonEmptyStringOption(
+    'Optional Codex home directory used by local assistant chat.',
+  ),
   model: optionalNonEmptyStringOption(
-    'Optional provider model override for local chat turns.',
+    'Optional Codex model override for local chat turns.',
   ),
-  baseUrl: httpBaseUrlSchema
+  modelProvider: optionalNonEmptyStringOption(
+    'Optional Codex model provider id for local chat turns.',
+  ),
+  reasoningEffort: z
+    .enum(assistantReasoningEffortValues)
     .optional()
     .describe(
-      'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
+      'Optional Codex reasoning effort for local assistant chat turns.',
     ),
-  apiKeyEnv: apiKeyEnvNameSchema
-    .optional()
-    .describe(
-      'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
-    ),
-  providerName: optionalNonEmptyStringOption(
-    'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
-  ),
-  headersJson: optionalNonEmptyStringOption(
-    'Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.',
-  ),
   sandbox: z
     .enum(assistantSandboxValues)
     .optional()
@@ -372,16 +359,15 @@ type AssistantConversationCliOptions = {
 }
 
 type AssistantProviderCliOptions = {
-  apiKeyEnv?: string
   approvalPolicy?: AssistantChatOptions['approvalPolicy']
-  baseUrl?: string
   codexCommand?: string
-  headersJson?: string
+  codexHome?: string
   model?: string
+  modelProvider?: string
   oss?: boolean
   profile?: string
   provider?: AssistantChatOptions['provider']
-  providerName?: string
+  reasoningEffort?: AssistantChatOptions['reasoningEffort']
   sandbox?: AssistantChatOptions['sandbox']
 }
 
@@ -548,19 +534,17 @@ function assistantConversationOptionsFromCli<T extends AssistantConversationCliO
 function assistantProviderOverridesFromCli<T extends AssistantProviderCliOptions>(
   options: T,
 ) {
-  const headers = parseHeadersJsonOption(options.headersJson)
   return {
     provider: options.provider,
     codexCommand: options.codexCommand,
+    codexHome: options.codexHome,
     model: options.model,
-    baseUrl: normalizeAssistantBaseUrlOption(options.baseUrl),
-    apiKeyEnv: options.apiKeyEnv,
-    providerName: options.providerName,
+    modelProvider: options.modelProvider,
+    reasoningEffort: options.reasoningEffort,
     sandbox: options.sandbox,
     approvalPolicy: options.approvalPolicy,
     profile: options.profile,
     oss: options.oss,
-    ...(headers ? { headers } : {}),
   }
 }
 
@@ -683,36 +667,6 @@ function createAssistantChatCommandDefinition(input?: {
 }
 
 const assistantRunOptionsSchema = withBaseOptions({
-  model: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional model id for canonical inbox triage routing, such as gpt-oss:20b or an AI Gateway model string. Omit it when you only want channel auto-reply.',
-    ),
-  baseUrl: httpBaseUrlSchema
-    .optional()
-    .describe('Optional OpenAI-compatible base URL for the inbox routing model.'),
-  apiKey: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional explicit API key for the OpenAI-compatible routing endpoint.'),
-  apiKeyEnv: apiKeyEnvNameSchema
-    .optional()
-    .describe('Optional environment variable name that stores the routing API key.'),
-  providerName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional stable provider label for the routing endpoint.'),
-  headersJson: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.',
-    ),
   maxPerScan: z
     .number()
     .int()
@@ -741,19 +695,6 @@ const assistantRunOptionsSchema = withBaseOptions({
     .describe('Run one assistant scan and then exit.'),
 })
 
-function assertAssistantRunModelOptions(
-  options: z.infer<typeof assistantRunOptionsSchema>,
-): void {
-  if (!options.model || normalizeAssistantBaseUrlOption(options.baseUrl)) {
-    return
-  }
-
-  throw new VaultCliError(
-    'invalid_option',
-    'assistant run --model requires --baseUrl for the OpenAI-compatible routing endpoint. Omit --model when you only want channel auto-reply.',
-  )
-}
-
 function createAssistantRunCommandDefinition(
   inboxServices: InboxServices,
   vaultServices?: VaultServices,
@@ -766,27 +707,17 @@ function createAssistantRunCommandDefinition(
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured local channels such as Telegram or email, and optionally applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, and auto-replies over configured local channels such as Telegram or email.',
     hint:
       input?.hint ??
-      'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and due automations fire while this loop is active.',
+      'Channel auto-reply and due automations run through the saved Codex assistant backend while this loop is active.',
     examples: [
       {
         options: {
           vault: './vault',
-          model: 'gpt-oss:20b',
-          baseUrl: 'http://127.0.0.1:11434/v1',
-        },
-        description: 'Run the always-on inbox assistant against a local Ollama model.',
-      },
-      {
-        options: {
-          vault: './vault',
-          model: 'gpt-oss:20b',
-          baseUrl: 'http://127.0.0.1:11434/v1',
           once: true,
         },
-        description: 'Run a single inbox scan in one-shot mode.',
+        description: 'Run a single assistant automation scan in one-shot mode.',
       },
       {
         options: {
@@ -801,23 +732,12 @@ function createAssistantRunCommandDefinition(
     output: assistantRunResultSchema,
     async run(context: { options: z.infer<typeof assistantRunOptionsSchema> }) {
       const terminalLogOptions = resolveForegroundTerminalLogOptions(process.env)
-      assertAssistantRunModelOptions(context.options)
 
       return runAssistantAutomation({
         inboxServices,
         vaultServices,
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
-        modelSpec: context.options.model
-          ? {
-              model: context.options.model,
-              baseUrl: normalizeAssistantBaseUrlOption(context.options.baseUrl),
-              apiKey: context.options.apiKey,
-              apiKeyEnv: context.options.apiKeyEnv,
-              providerName: context.options.providerName,
-              headers: parseHeadersJsonOption(context.options.headersJson),
-            }
-          : undefined,
         maxPerScan: context.options.maxPerScan,
         allowSelfAuthored: context.options.allowSelfAuthored,
         sessionMaxAgeMs:

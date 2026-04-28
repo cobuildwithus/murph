@@ -100,7 +100,7 @@ test("package manifest declares the hosted assistant env, hosted runtime contrac
   assert.ok(HOSTED_ASSISTANT_CONFIG_ENV_NAMES.length > 0);
   assert.ok(Array.isArray(HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured));
   assert.ok(HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES.includes("LINQ_WEBHOOK_SECRET"));
-  assert.ok(HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES.includes("OPENAI_API_KEY"));
+  assert.ok(HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES.includes("VERCEL_AI_API_KEY"));
   assert.ok(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES.includes("HOSTED_WAKE_ENCRYPTION_KEY"));
   assert.ok(HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES.includes("TELEGRAM_BOT_TOKEN"));
   assert.equal(typeof readHostedAssistantApiKeyEnvName, "function");

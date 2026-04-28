@@ -1,4 +1,5 @@
-import { access, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import {
   parseAssistantSessionRecord,
@@ -48,7 +49,7 @@ afterEach(async () => {
 })
 
 describe('assistant store persistence seams', () => {
-  it('creates assistant state directories, persists sessions with secret sidecars, and appends or replaces transcripts', async () => {
+  it('creates assistant state directories, persists Codex sessions, and appends or replaces transcripts', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-roundtrip-')
     const session = createSession()
     const transcriptPath = resolveAssistantTranscriptPath(paths, session.sessionId)
@@ -103,20 +104,12 @@ describe('assistant store persistence seams', () => {
         conversationKey: 'telegram:user-1:thread-1',
       },
       target: {
-        headers: {
-          'X-Trace': 'trace-123',
-        },
+        adapter: 'codex-cli',
+        modelProvider: 'vercel-ai-gateway',
       },
     })
-    expect(await readFile(sessionPath, 'utf8')).not.toContain('secret-token')
-    expect(JSON.parse(await readFile(secretsPath, 'utf8'))).toEqual({
-      schema: 'murph.assistant-session-secrets.v1',
-      sessionId: session.sessionId,
-      updatedAt: session.updatedAt,
-      providerHeaders: {
-        Authorization: 'Bearer secret-token',
-        Cookie: 'session-cookie',
-      },
+    await expect(readFile(secretsPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
     })
     const roundTrippedSession = await readAssistantSession({
       paths,
@@ -140,13 +133,17 @@ describe('assistant store persistence seams', () => {
       updatedAt: session.updatedAt,
     })
     expect(roundTrippedSession.providerOptions).toMatchObject({
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'https://api.example.com/v1',
-      executionDriver: 'openai-compatible',
-      model: 'gpt-5.4',
-      providerName: 'murph-openai',
+      executionDriver: 'codex-app-server',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
       reasoningEffort: 'medium',
-      resumeKind: null,
+      resumeKind: 'codex-thread',
+    })
+    expect(roundTrippedSession.providerOptions.modelProviderConfig).toMatchObject({
+      envKey: 'VERCEL_AI_API_KEY',
+      id: 'vercel-ai-gateway',
+      wireApi: 'responses',
     })
     expect(roundTrippedSession.providerOptions.continuityFingerprint).toEqual(
       expect.any(String),
@@ -286,7 +283,7 @@ describe('assistant store persistence seams', () => {
     ).toBe(false)
   })
 
-  it('leaves the previous secret sidecar committed when the main session write fails', async () => {
+  it('leaves a stale legacy secret sidecar committed when a Codex session write fails', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-sidecar-stage-')
     const session = createSession({
       sessionId: 'session-sidecar-stage',
@@ -295,6 +292,21 @@ describe('assistant store persistence seams', () => {
     await writeAssistantSession(paths, session)
     const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
     const secretsPath = resolveAssistantSessionSecretsPath(paths, session.sessionId)
+    await mkdir(path.dirname(secretsPath), {
+      recursive: true,
+    })
+    await writeFile(
+      secretsPath,
+      JSON.stringify({
+        schema: 'murph.assistant-session-secrets.v1',
+        sessionId: session.sessionId,
+        updatedAt: '2026-04-08T00:04:00.000Z',
+        providerHeaders: {
+          Authorization: 'Bearer stale-secret-token',
+        },
+      }),
+      'utf8',
+    )
     const originalSidecar = await readFile(secretsPath, 'utf8')
 
     vi.resetModules()
@@ -316,10 +328,6 @@ describe('assistant store persistence seams', () => {
     const { writeAssistantSession: writeAssistantSessionWithFailure } =
       await import('../src/assistant/store/persistence.ts')
     const rotatedSession = createSession({
-      headers: {
-        Authorization: 'Bearer rotated-secret-token',
-        'X-Trace': 'trace-456',
-      },
       sessionId: session.sessionId,
       updatedAt: '2026-04-08T00:06:00.000Z',
     })
@@ -331,7 +339,7 @@ describe('assistant store persistence seams', () => {
     await expect(readFile(secretsPath, 'utf8')).resolves.toBe(originalSidecar)
   })
 
-  it('ignores stale leftover secret sidecars for non-openai sessions', async () => {
+  it('ignores stale leftover secret sidecars for Codex sessions', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-codex-sidecar-')
     const session = createCodexSession({
       sessionId: 'session-codex-leftover-sidecar',
@@ -557,7 +565,7 @@ describe('assistant store persistence seams', () => {
     )
   })
 
-  it('treats corrupted session files and corrupted session secret sidecars as missing when requested', async () => {
+  it('treats corrupted session files as missing and ignores corrupted legacy sidecars for Codex sessions', async () => {
     const corruptedPaths = await createAssistantPaths(
       'assistant-store-persistence-corrupted-session-',
     )
@@ -604,29 +612,23 @@ describe('assistant store persistence seams', () => {
         sessionId: session.sessionId,
         treatCorruptedAsMissing: true,
       }),
-    ).resolves.toBeNull()
+    ).resolves.toMatchObject({
+      sessionId: session.sessionId,
+      target: {
+        adapter: 'codex-cli',
+      },
+    })
     await expect(
       readFile(resolveAssistantSessionPath(sidecarPaths, session.sessionId), 'utf8'),
     ).resolves.toContain('"sessionId": "session-corrupt-sidecar"')
     await expect(
       readFile(resolveAssistantSessionSecretsPath(sidecarPaths, session.sessionId), 'utf8'),
-    ).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
+    ).resolves.toBe('{bad-sidecar')
 
     const quarantines = await listAssistantQuarantineEntriesAtPaths(sidecarPaths, {
       artifactKind: 'session',
     })
-    expect(quarantines).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          originalPath: resolveAssistantSessionSecretsPath(
-            sidecarPaths,
-            session.sessionId,
-          ),
-        }),
-      ]),
-    )
+    expect(quarantines).toEqual([])
   })
 
   it('reads and writes automation state, then quarantines corrupted automation files and rebuilds defaults', async () => {
@@ -728,6 +730,66 @@ describe('assistant store persistence seams', () => {
       ]),
     )
   })
+
+  it('fails closed and quarantines legacy OpenAI-compatible session records', async () => {
+    const paths = await createAssistantPaths('assistant-store-persistence-legacy-session-')
+    await ensureAssistantState(paths)
+    const sessionId = 'session-legacy-openai'
+    const sessionPath = resolveAssistantSessionPath(paths, sessionId)
+    await writeFile(
+      sessionPath,
+      JSON.stringify({
+        schema: 'murph.assistant-session.v1',
+        sessionId,
+        target: {
+          adapter: 'openai-compatible',
+          apiKeyEnv: 'OPENAI_API_KEY',
+          endpoint: 'https://api.example.com/v1',
+          headers: null,
+          model: 'gpt-5.4',
+          presetId: null,
+          providerName: 'legacy-openai',
+          reasoningEffort: 'medium',
+          webSearch: null,
+        },
+        resumeState: null,
+        alias: null,
+        binding: {
+          conversationKey: null,
+          channel: null,
+          identityId: null,
+          actorId: null,
+          threadId: null,
+          threadIsDirect: null,
+          delivery: null,
+        },
+        createdAt: '2026-04-08T00:00:00.000Z',
+        updatedAt: '2026-04-08T00:00:00.000Z',
+        lastTurnAt: null,
+        turnCount: 0,
+      }),
+      'utf8',
+    )
+
+    await expect(
+      readAssistantSession({
+        paths,
+        sessionId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_CORRUPTED',
+      context: expect.objectContaining({
+        sessionId,
+      }),
+    })
+    const quarantines = await listAssistantQuarantineEntriesAtPaths(paths, {
+      artifactKind: 'session',
+    })
+    expect(quarantines).toHaveLength(1)
+    await expect(readFile(quarantines[0]!.quarantinedPath, 'utf8')).resolves.toContain(
+      '"adapter":"openai-compatible"',
+    )
+  })
 })
 
 async function createAssistantPaths(prefix: string) {
@@ -764,11 +826,13 @@ function createCodexSession(input?: {
       adapter: 'codex-cli',
       approvalPolicy: 'never',
       codexCommand: null,
-      model: 'gpt-5.4',
+      codexHome: null,
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
       reasoningEffort: 'medium',
-      sandbox: 'workspace-write',
+      sandbox: 'danger-full-access',
     },
     resumeState: null,
     alias: 'codex',
@@ -792,7 +856,6 @@ function createSession(input?: {
   alias?: string | null
   conversationKey?: string | null
   createdAt?: string
-  headers?: Record<string, string>
   lastTurnAt?: string | null
   sessionId?: string
   threadId?: string | null
@@ -809,18 +872,16 @@ function createSession(input?: {
     schema: 'murph.assistant-session.v1',
     sessionId,
     target: {
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      endpoint: 'https://api.example.com/v1',
-      headers: input?.headers ?? {
-        Authorization: 'Bearer secret-token',
-        Cookie: 'session-cookie',
-        'X-Trace': 'trace-123',
-      },
-      model: 'gpt-5.4',
-      presetId: 'openai',
-      providerName: 'murph-openai',
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: null,
+      codexHome: null,
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      oss: false,
+      profile: null,
       reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
     },
     resumeState: null,
     alias: input?.alias ?? 'alpha',

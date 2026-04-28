@@ -31,25 +31,21 @@ test('buildAssistantCliGuidanceText keeps only non-duplicative CLI guidance', ()
   assert.match(guidance, /canonical Murph CLI/u)
   assert.match(guidance, /setup entrypoint/u)
   assert.match(guidance, /same top-level `chat` and `run` aliases/u)
-  assert.match(guidance, /Do not edit canonical vault files directly/u)
-  assert.match(guidance, /matching canonical CLI command/u)
+  assert.match(guidance, /matching local CLI command directly/u)
+  assert.match(guidance, /prefer `--format json`/u)
+  assert.match(guidance, /do not run recursive assistant or delivery commands/u)
+  assert.match(guidance, /`assistant deliver`/u)
   assert.doesNotMatch(guidance, /vault-cli <command> --help/u)
   assert.doesNotMatch(guidance, /vault-cli <command> --schema --format json/u)
   assert.doesNotMatch(guidance, /vault-cli --llms-full/u)
 })
 
-test('buildAssistantCliGuidanceText falls back to exact command suggestions when the provider path is prompt-only', () => {
+test('buildAssistantCliGuidanceText omits provider-bound tool guidance', () => {
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
     setupCommand: 'murph',
   })
 
-  assert.match(
-    guidance,
-    /Prefer the bound assistant tools when they are available/u,
-  )
-  assert.match(
-    guidance,
-    /Otherwise use the matching canonical CLI command/u,
-  )
+  assert.doesNotMatch(guidance, /bound assistant tools/u)
+  assert.match(guidance, /Use the matching local CLI command directly/u)
 })

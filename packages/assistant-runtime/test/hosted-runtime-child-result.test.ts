@@ -100,7 +100,7 @@ describe("hosted runtime child-result helpers", () => {
     const output = formatHostedRuntimeChildResult({
       error: {
         details: {
-          assistantNotificationProvider: "openai-compatible",
+          assistantNotificationProvider: "codex-cli",
         },
         message: "child aborted",
         name: "Error",
@@ -111,7 +111,7 @@ describe("hosted runtime child-result helpers", () => {
     expect(parseHostedRuntimeChildResult(output)).toEqual({
       error: {
         details: {
-          assistantNotificationProvider: "openai-compatible",
+          assistantNotificationProvider: "codex-cli",
         },
         message: "child aborted",
         name: "Error",

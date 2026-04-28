@@ -16,20 +16,22 @@ describe('configureSetupOperatorDefaults', () => {
     try {
       const assistant = await configureSetupOperatorDefaults({
         assistant: {
-          preset: 'openai-compatible',
+          preset: 'codex',
           enabled: true,
-          provider: 'openai-compatible',
-          model: 'gpt-5.4-mini',
-          baseUrl: 'https://example.test/v1',
-          apiKeyEnv: 'EXAMPLE_API_KEY',
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'vercel-ai-gateway',
+          baseUrl: null,
+          apiKeyEnv: null,
           presetId: null,
-          providerName: 'Example',
-          codexCommand: null,
+          providerName: null,
+          codexCommand: 'codex',
+          codexHome: null,
           profile: null,
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          oss: null,
+          reasoningEffort: 'medium',
+          sandbox: 'danger-full-access',
+          approvalPolicy: 'never',
+          oss: false,
           detail: 'configured for dry-run coverage',
         },
         dryRun: true,
@@ -39,14 +41,12 @@ describe('configureSetupOperatorDefaults', () => {
         vault,
       })
 
-      expect(assistant?.provider).toBe('openai-compatible')
+      expect(assistant?.provider).toBe('codex-cli')
       expect(steps.map((step) => [step.id, step.status])).toEqual([
         ['default-vault', 'planned'],
         ['assistant-defaults', 'planned'],
       ])
-      expect(notes).toEqual([
-        'Export EXAMPLE_API_KEY before using the saved OpenAI-compatible assistant backend.',
-      ])
+      expect(notes).toEqual([])
 
       await expect(stat(resolveOperatorConfigPath(homeDirectory))).rejects.toMatchObject({
         code: 'ENOENT',

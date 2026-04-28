@@ -8,22 +8,25 @@ export interface HostedRunnerSmokeInput {
 }
 
 export interface HostedRunnerSmokeResult {
-  childCwd: string;
+  childCwdIsIsolated: boolean;
+  codexAppServerHelpBytes: number;
+  codexCommandDiscovered: boolean;
+  codexVersion: string;
   healthCommonsCatalogHash: string;
   healthCommonsCliProtocolListBytes: number;
   healthCommonsCliSearchBytes: number;
   healthCommonsFinnishDrySaunaTitle: string;
   healthCommonsRuntimeProtocolHitKeys: readonly string[];
   healthCommonsRuntimeSearchHitKeys: readonly string[];
-  murphBin: string;
+  murphCommandDiscovered: boolean;
   normalizedTranscriptMatchesExpectedSnippet: boolean;
   normalizedTranscriptProviderId: string;
   normalizedTranscriptSha256: string;
-  operatorHomeRoot: string;
+  operatorHomeRebound: boolean;
   reportedVaultId: string;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
-  vaultCliBin: string;
-  vaultRoot: string;
+  vaultCliCommandDiscovered: boolean;
+  vaultRootRebound: boolean;
   vaultShowBytes: number;
   wavTranscriptMatchesExpectedSnippet: boolean;
   wavTranscriptProviderId: string;
@@ -60,7 +63,22 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
   }
 
   return {
-    childCwd: readNonEmptyString(record.childCwd, "Hosted runner smoke result.childCwd"),
+    childCwdIsIsolated: readBoolean(
+      record.childCwdIsIsolated,
+      "Hosted runner smoke result.childCwdIsIsolated",
+    ),
+    codexAppServerHelpBytes: readFiniteNumber(
+      record.codexAppServerHelpBytes,
+      "Hosted runner smoke result.codexAppServerHelpBytes",
+    ),
+    codexCommandDiscovered: readBoolean(
+      record.codexCommandDiscovered,
+      "Hosted runner smoke result.codexCommandDiscovered",
+    ),
+    codexVersion: readNonEmptyString(
+      record.codexVersion,
+      "Hosted runner smoke result.codexVersion",
+    ),
     healthCommonsCatalogHash: readNonEmptyString(
       record.healthCommonsCatalogHash,
       "Hosted runner smoke result.healthCommonsCatalogHash",
@@ -85,7 +103,10 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.healthCommonsRuntimeSearchHitKeys,
       "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys",
     ),
-    murphBin: readNonEmptyString(record.murphBin, "Hosted runner smoke result.murphBin"),
+    murphCommandDiscovered: readBoolean(
+      record.murphCommandDiscovered,
+      "Hosted runner smoke result.murphCommandDiscovered",
+    ),
     normalizedTranscriptMatchesExpectedSnippet: readBoolean(
       record.normalizedTranscriptMatchesExpectedSnippet,
       "Hosted runner smoke result.normalizedTranscriptMatchesExpectedSnippet",
@@ -98,20 +119,23 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.normalizedTranscriptSha256,
       "Hosted runner smoke result.normalizedTranscriptSha256",
     ),
-    operatorHomeRoot: readNonEmptyString(
-      record.operatorHomeRoot,
-      "Hosted runner smoke result.operatorHomeRoot",
+    operatorHomeRebound: readBoolean(
+      record.operatorHomeRebound,
+      "Hosted runner smoke result.operatorHomeRebound",
     ),
     reportedVaultId: readNonEmptyString(
       record.reportedVaultId,
       "Hosted runner smoke result.reportedVaultId",
     ),
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
-    vaultCliBin: readNonEmptyString(
-      record.vaultCliBin,
-      "Hosted runner smoke result.vaultCliBin",
+    vaultCliCommandDiscovered: readBoolean(
+      record.vaultCliCommandDiscovered,
+      "Hosted runner smoke result.vaultCliCommandDiscovered",
     ),
-    vaultRoot: readNonEmptyString(record.vaultRoot, "Hosted runner smoke result.vaultRoot"),
+    vaultRootRebound: readBoolean(
+      record.vaultRootRebound,
+      "Hosted runner smoke result.vaultRootRebound",
+    ),
     vaultShowBytes: readFiniteNumber(
       record.vaultShowBytes,
       "Hosted runner smoke result.vaultShowBytes",

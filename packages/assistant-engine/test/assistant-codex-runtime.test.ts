@@ -24,6 +24,7 @@ vi.mock('node:os', async (importOriginal) => {
 })
 
 import {
+  buildCodexAppServerSteerRequest,
   buildCodexAppServerArgs,
   executeCodexAppServerTurn,
   resolveCodexDisplayOptions,
@@ -82,6 +83,41 @@ describe('assistant codex runtime', () => {
     ])
 
     expect(buildCodexAppServerArgs({})).toEqual(['-a', 'never', 'app-server'])
+  })
+
+  it('builds typed Codex app-server turn steer requests for live turns', () => {
+    expect(
+      buildCodexAppServerSteerRequest({
+        imagePaths: ['/tmp/steer-image.png'],
+        prompt: 'Add this context',
+        threadId: ' thread-steer ',
+        turnId: ' turn-steer ',
+      }),
+    ).toEqual({
+      method: 'turn/steer',
+      params: {
+        expectedTurnId: 'turn-steer',
+        input: [
+          {
+            type: 'text',
+            text: 'Add this context',
+          },
+          {
+            type: 'localImage',
+            path: '/tmp/steer-image.png',
+          },
+        ],
+        threadId: 'thread-steer',
+      },
+    })
+
+    expect(() =>
+      buildCodexAppServerSteerRequest({
+        prompt: 'missing turn',
+        threadId: 'thread-steer',
+        turnId: ' ',
+      }),
+    ).toThrowError('Codex app-server turnId is required for live turn requests.')
   })
 
   it('resolves display options from config files and explicit overrides', async () => {
@@ -169,6 +205,7 @@ describe('assistant codex runtime', () => {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
               model: 'gpt-5',
+              modelProvider: 'vercel-ai-gateway',
               sandbox: 'workspace-write',
               serviceName: 'murph',
             },
@@ -197,6 +234,7 @@ describe('assistant codex runtime', () => {
           expect(asRecord(turnStart.params).approvalPolicy).toBeUndefined()
           expect(asRecord(turnStart.params).cwd).toBeUndefined()
           expect(asRecord(turnStart.params).model).toBeUndefined()
+          expect(asRecord(turnStart.params).modelProvider).toBeUndefined()
           expect(asRecord(turnStart.params).sandboxPolicy).toBeUndefined()
           const inputItems = readTurnStartInputItems(turnStart)
           expect(inputItems[0]).toEqual({
@@ -327,6 +365,7 @@ describe('assistant codex runtime', () => {
         approvalPolicy: 'never',
         configOverrides: ['model="gpt-5"'],
         model: 'gpt-5',
+        modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
         prompt: 'Explain this',
         sandbox: 'workspace-write',
@@ -337,6 +376,8 @@ describe('assistant codex runtime', () => {
       providerActionCount: 1,
       sessionId: 'thread-1',
       stderr: 'Retrying after timeout',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
     })
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
@@ -448,6 +489,70 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       finalMessage: '',
       sessionId: 'thread-path',
+      threadId: 'thread-path',
+      turnId: 'turn-path',
+    })
+  })
+
+  it('captures turn ids from turn/started when turn/start returns no turn id', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-turn-started-id-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-started-fallback',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({ id: 3, result: {} }))
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turnId: 'turn-started-fallback',
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-started-fallback',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        prompt: 'capture fallback turn id',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-started-fallback',
+      threadId: 'thread-started-fallback',
+      turnId: 'turn-started-fallback',
     })
   })
 
@@ -749,6 +854,7 @@ describe('assistant codex runtime', () => {
         approvalPolicy: 'never',
         cwd: path.resolve(workingDirectory),
         model: 'gpt-5',
+        modelProvider: 'vercel-ai-gateway',
         sandbox: expectedSandbox,
       }
       const threadRequests: Record<string, unknown>[] = []
@@ -841,6 +947,7 @@ describe('assistant codex runtime', () => {
         executeCodexAppServerTurn({
           approvalPolicy: 'never',
           model: 'gpt-5',
+          modelProvider: 'vercel-ai-gateway',
           prompt: 'fresh prompt',
           reasoningEffort: 'high',
           sandbox,
@@ -854,6 +961,7 @@ describe('assistant codex runtime', () => {
         executeCodexAppServerTurn({
           approvalPolicy: 'never',
           model: 'gpt-5',
+          modelProvider: 'vercel-ai-gateway',
           prompt: 'resume prompt',
           reasoningEffort: 'high',
           resumeSessionId: 'thread-resume-request',
@@ -882,6 +990,7 @@ describe('assistant codex runtime', () => {
         expect(turnParams.approvalPolicy).toBeUndefined()
         expect(turnParams.cwd).toBeUndefined()
         expect(turnParams.model).toBeUndefined()
+        expect(turnParams.modelProvider).toBeUndefined()
       }
     },
   )

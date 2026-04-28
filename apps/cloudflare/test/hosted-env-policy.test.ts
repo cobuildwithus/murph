@@ -26,15 +26,15 @@ const requiredWorkerSecrets = {
 } satisfies Record<string, string>;
 
 describe("buildHostedRunnerContainerEnv", () => {
-  it("forwards only explicit assistant provider env names", () => {
+  it("does not forward legacy assistant api key selectors or unrelated referenced secrets", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "STRIPE_SECRET_KEY",
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
       STRIPE_SECRET_KEY: "stripe-secret",
     });
 
-    expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBe("STRIPE_SECRET_KEY");
-    expect(env.OPENAI_API_KEY).toBe("openai-secret");
+    expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
+    expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
     expect(env.STRIPE_SECRET_KEY).toBeUndefined();
   });
 
@@ -91,7 +91,7 @@ describe("hosted runner log categories", () => {
     expect(summarizeHostedRunnerForwardedEnvLogCategories({
       TELEGRAM_BOT_USERNAME: "murph_bot",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "5000",
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
     })).toEqual({
       assistantConfigured: true,
       hostedEmailConfigured: false,
@@ -105,7 +105,7 @@ describe("hosted runner log categories", () => {
   it("preserves the runner secret category summaries used by runner logging", () => {
     expect(summarizeHostedRunnerSecretLogCategories({
       CUSTOM_API_KEY: "custom-secret",
-      OPENAI_API_KEY: "openai-secret",
+      VERCEL_AI_API_KEY: "vercel-secret",
     })).toEqual({
       modelCredentialConfigured: true,
     });
@@ -146,7 +146,7 @@ describe("buildHostedWorkerSecretsPayload", () => {
 
 describe("isHostedAssistantApiKeyEnvName", () => {
   it("accepts only the shared hosted assistant provider env names", () => {
-    expect(isHostedAssistantApiKeyEnvName("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedAssistantApiKeyEnvName("VERCEL_AI_API_KEY")).toBe(true);
     expect(isHostedAssistantApiKeyEnvName("STRIPE_SECRET_KEY")).toBe(false);
     expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("VERCEL_AI_API_KEY");
   });

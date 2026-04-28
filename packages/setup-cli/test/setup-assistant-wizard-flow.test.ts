@@ -45,47 +45,11 @@ async function expectAssistantWizardCancellation(
 }
 
 test.sequential(
-  'assistant wizard walks the default OpenAI sign-in flow to a saved selection',
+  'assistant wizard saves the default Codex cloud selection',
   async () => {
     await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
       const wizardResultPromise = runSetupAssistantWizard({
         initialAssistantPreset: 'codex',
-      })
-
-      await waitForRenderedText(
-        flush,
-        readOutput,
-        /How should Murph answer\?/u,
-      )
-      await writeInput('\r')
-      await waitForRenderedText(
-        flush,
-        readOutput,
-        /How should Murph connect to OpenAI\?/u,
-      )
-      await writeInput('\r')
-      await waitForRenderedText(flush, readOutput, /Review/u)
-      await writeInput('\r')
-
-      assert.deepEqual(await wizardResultPromise, {
-        assistantApiKeyEnv: null,
-        assistantBaseUrl: null,
-        assistantOss: false,
-        assistantPreset: 'codex',
-        assistantProviderName: null,
-      })
-    })
-  },
-  WIZARD_TEST_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant wizard can finish with a named compatible provider',
-  async () => {
-    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
-      const wizardResultPromise = runSetupAssistantWizard({
-        initialAssistantPreset: 'openai-compatible',
-        initialAssistantProviderPreset: 'openrouter',
       })
 
       await waitForRenderedText(
@@ -99,15 +63,44 @@ test.sequential(
         readOutput,
         /Review/u,
       )
-      assert.match(reviewOutput, /OpenRouter/u)
+      assert.match(reviewOutput, /ChatGPT \/ Codex sign-in/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
-        assistantApiKeyEnv: 'OPENROUTER_API_KEY',
-        assistantBaseUrl: 'https://openrouter.ai/api/v1',
         assistantOss: false,
-        assistantPreset: 'openai-compatible',
-        assistantProviderName: 'openrouter',
+        assistantPreset: 'codex',
+      })
+    })
+  },
+  WIZARD_TEST_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant wizard can finish with the Codex local model selection',
+  async () => {
+    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+      const wizardResultPromise = runSetupAssistantWizard({
+        initialAssistantOss: true,
+        initialAssistantPreset: 'codex',
+      })
+
+      await waitForRenderedText(
+        flush,
+        readOutput,
+        /How should Murph answer\?/u,
+      )
+      await writeInput('\r')
+      const reviewOutput = await waitForRenderedText(
+        flush,
+        readOutput,
+        /Review/u,
+      )
+      assert.match(reviewOutput, /Codex local model/u)
+      await writeInput('\r')
+
+      assert.deepEqual(await wizardResultPromise, {
+        assistantOss: true,
+        assistantPreset: 'codex',
       })
     })
   },
@@ -145,7 +138,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant wizard can go back from review to the method step before saving',
+  'assistant wizard can go back from review before saving',
   async () => {
     await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
       const wizardResultPromise = runSetupAssistantWizard({
@@ -156,12 +149,6 @@ test.sequential(
         flush,
         readOutput,
         /How should Murph answer\?/u,
-      )
-      await writeInput('\r')
-      await waitForRenderedText(
-        flush,
-        readOutput,
-        /How should Murph connect to OpenAI\?/u,
       )
       await writeInput('\u001B[B')
       await writeInput('\r')
@@ -170,62 +157,15 @@ test.sequential(
       await waitForRenderedText(
         flush,
         readOutput,
-        /How should Murph connect to OpenAI\?/u,
+        /How should Murph answer\?/u,
       )
       await writeInput('\r')
       await waitForRenderedText(flush, readOutput, /Review/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
-        assistantApiKeyEnv: 'OPENAI_API_KEY',
-        assistantBaseUrl: 'https://api.openai.com/v1',
-        assistantOss: false,
-        assistantPreset: 'openai-compatible',
-        assistantProviderName: 'openai',
-      })
-    })
-  },
-  WIZARD_TEST_TIMEOUT_MS,
-)
-
-test.sequential(
-  'assistant wizard lets the user back out of the method step and switch providers',
-  async () => {
-    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
-      const wizardResultPromise = runSetupAssistantWizard({
-        initialAssistantPreset: 'codex',
-      })
-
-      await waitForRenderedText(
-        flush,
-        readOutput,
-        /How should Murph answer\?/u,
-      )
-      await writeInput('\r')
-      await waitForRenderedText(
-        flush,
-        readOutput,
-        /How should Murph connect to OpenAI\?/u,
-      )
-      await writeInput('\u001B')
-      await flush()
-      await writeInput('\u001B[B')
-      await flush()
-      await writeInput('\r')
-      const reviewOutput = await waitForRenderedText(
-        flush,
-        readOutput,
-        /Review/u,
-      )
-      assert.match(reviewOutput, /Assistant: Vercel AI Gateway/u)
-      await writeInput('\r')
-
-      assert.deepEqual(await wizardResultPromise, {
-        assistantApiKeyEnv: 'VERCEL_AI_API_KEY',
-        assistantBaseUrl: 'https://ai-gateway.vercel.sh/v1',
-        assistantOss: false,
-        assistantPreset: 'openai-compatible',
-        assistantProviderName: 'vercel-ai-gateway',
+        assistantOss: true,
+        assistantPreset: 'codex',
       })
     })
   },

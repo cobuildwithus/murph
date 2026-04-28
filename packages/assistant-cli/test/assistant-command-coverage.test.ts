@@ -373,7 +373,7 @@ test('assistant onboarding commands read and write the shared lifecycle state', 
   assert.equal(reopenResult.onboarding.status, 'open')
 })
 
-test('assistant ask resolves saved delivery defaults and forwards parsed provider overrides', async () => {
+test('assistant ask resolves saved delivery defaults and forwards Codex overrides', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const ask = readCommand(assistant.commands, 'ask')
@@ -393,21 +393,17 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
     },
     options: {
       alias: 'chat:demo',
-      apiKeyEnv: 'OLLAMA_API_KEY',
       approvalPolicy: 'never',
-      baseUrl: 'http://127.0.0.1:11434/v1',
       channel: 'telegram',
       codexCommand: 'codex-bin',
       deliverResponse: true,
       deliveryTarget: 'chat_original',
-      headersJson: '{"x-trace":"1"}',
       identity: 'identity_cli',
       model: 'gpt-5.4',
       oss: true,
       participant: 'participant_cli',
       profile: 'ops',
-      provider: 'openai-compatible',
-      providerName: 'ollama',
+      provider: 'codex-cli',
       sandbox: 'workspace-write',
       session: undefined,
       thread: 'thread_cli',
@@ -438,24 +434,21 @@ test('assistant ask resolves saved delivery defaults and forwards parsed provide
   )
   assert.deepEqual(commandMocks.sendAssistantMessage.mock.calls[0]?.[0], {
     alias: 'chat:demo',
-    apiKeyEnv: 'OLLAMA_API_KEY',
     approvalPolicy: 'never',
-    baseUrl: 'http://127.0.0.1:11434/v1',
     channel: 'telegram',
     codexCommand: 'codex-bin',
+    codexHome: undefined,
     deliverResponse: true,
     deliveryTarget: 'telegram:thread_saved',
-    headers: {
-      'x-trace': '1',
-    },
     identityId: 'identity_saved',
     model: 'gpt-5.4',
+    modelProvider: undefined,
     oss: true,
     participantId: 'participant_saved',
     profile: 'ops',
     prompt: 'hello from command coverage',
-    provider: 'openai-compatible',
-    providerName: 'ollama',
+    provider: 'codex-cli',
+    reasoningEffort: undefined,
     sandbox: 'workspace-write',
     sessionId: undefined,
     threadId: 'thread_saved',
@@ -758,14 +751,8 @@ test('assistant run forwards automation options and emits formatted foreground l
   const result = await run.run({
     options: {
       allowSelfAuthored: true,
-      apiKey: 'secret',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      headersJson: '{"x-route":"triage"}',
       maxPerScan: 3,
-      model: 'gpt-5.4',
       once: true,
-      providerName: 'ollama',
       requestId: 'req_assistant_run',
       sessionRolloverHours: 2,
       vault: '/tmp/vault',
@@ -781,16 +768,6 @@ test('assistant run forwards automation options and emits formatted foreground l
     allowSelfAuthored: true,
     inboxServices: {},
     maxPerScan: 3,
-    modelSpec: {
-      apiKey: 'secret',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      headers: {
-        'x-route': 'triage',
-      },
-      model: 'gpt-5.4',
-      providerName: 'ollama',
-    },
     once: true,
     requestId: 'req_assistant_run',
     sessionMaxAgeMs: 7_200_000,
@@ -1110,16 +1087,12 @@ test('assistant command help describes routing shapes and flat header JSON input
     true,
   )
   assert.equal(
-    readOptionDescription(ask, 'headersJson')?.includes(
-      'flat JSON object of extra HTTP headers with string values',
-    ),
-    true,
+    readOptionDescription(ask, 'headersJson'),
+    undefined,
   )
   assert.equal(
-    readOptionDescription(run, 'headersJson')?.includes(
-      'flat JSON object of extra HTTP headers with string values',
-    ),
-    true,
+    readOptionDescription(run, 'headersJson'),
+    undefined,
   )
   assert.equal(
     run.description?.includes('Telegram, Linq, or email'),

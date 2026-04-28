@@ -11,7 +11,7 @@ import {
   type InboxModelAttachmentBundle,
 } from '../src/inbox-model-contracts.ts'
 import { createTempVaultContext } from './test-helpers.ts'
-import type { AssistantUserMessageContentPart } from '../src/model-harness.ts'
+import type { AssistantUserMessageContentPart } from '../src/assistant/content-types.ts'
 
 const promptBuilderMocks = vi.hoisted(() => ({
   buildInboxModelAttachmentBundles: vi.fn(),

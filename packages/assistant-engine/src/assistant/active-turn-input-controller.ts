@@ -5,7 +5,7 @@ import type {
   AssistantActiveTurnInputAdmissionInput,
   AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
-import type { AssistantUserMessageContentPart } from '../model-harness.js'
+import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantSessionLocator } from './store/types.js'
 import { normalizeNullableString } from './shared.js'
 import { resolveAssistantConversationLookupKey } from './store/paths.js'

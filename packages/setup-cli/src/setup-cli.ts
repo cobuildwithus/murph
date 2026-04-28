@@ -16,7 +16,6 @@ import { showWearablePreferences } from '@murphai/vault-usecases'
 import {
   normalizeSetupWearables,
   type SetupAssistantPreset,
-  type SetupAssistantProviderPreset,
   type SetupChannel,
   type SetupCommandOptions,
   type SetupConfiguredWearable,
@@ -112,12 +111,8 @@ export interface SetupWizardRunner {
     channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
     commandName: string
     deviceSyncLocalBaseUrl?: string | null
-    initialAssistantApiKeyEnv?: string | null
-    initialAssistantBaseUrl?: string | null
     initialAssistantOss?: boolean | null
     initialAssistantPreset?: SetupAssistantPreset
-    initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
-    initialAssistantProviderName?: string | null
     initialChannels: readonly SetupChannel[]
     initialScheduledUpdates: readonly string[]
     initialWearables: readonly SetupWearable[]
@@ -179,15 +174,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     let selectedScheduledUpdates: string[] | null = null
     let selectedWearables: SetupWearable[] | null = null
     let selectedAssistantPreset: SetupAssistantPreset | null = null
-    let selectedAssistantProviderPreset: SetupAssistantProviderPreset | null | undefined =
-      context.options.assistantProviderPreset
-    let selectedAssistantBaseUrl: string | null | undefined =
-      context.options.assistantBaseUrl
-    let selectedAssistantApiKeyEnv: string | null | undefined =
-      context.options.assistantApiKeyEnv
     let selectedAssistantOss: boolean | undefined = context.options.assistantOss
-    let selectedAssistantProviderName: string | null | undefined =
-      context.options.assistantProviderName
     let envOverrides: NodeJS.ProcessEnv | undefined
 
     if (interactiveWizard) {
@@ -197,15 +184,10 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         commandName,
         deviceSyncLocalBaseUrl:
           resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
-        initialAssistantApiKeyEnv: context.options.assistantApiKeyEnv,
-        initialAssistantBaseUrl: context.options.assistantBaseUrl,
         initialAssistantOss: context.options.assistantOss ?? null,
         initialAssistantPreset:
           inferSetupAssistantPresetFromOptions(context.options) ??
           getDefaultSetupAssistantPreset(),
-        initialAssistantProviderPreset:
-          context.options.assistantProviderPreset ?? null,
-        initialAssistantProviderName: context.options.assistantProviderName,
         initialChannels: await resolveInitialSetupWizardChannels(
           context.options.vault,
           getPlatform(),
@@ -229,20 +211,10 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         wizardResult.assistantPreset ??
         context.options.assistantPreset ??
         null
-      if ('assistantBaseUrl' in wizardResult) {
-        selectedAssistantBaseUrl = wizardResult.assistantBaseUrl
-      }
-      if ('assistantApiKeyEnv' in wizardResult) {
-        selectedAssistantApiKeyEnv = wizardResult.assistantApiKeyEnv
-      }
       if ('assistantOss' in wizardResult) {
         selectedAssistantOss = wizardResult.assistantOss ?? false
       }
-      if ('assistantProviderName' in wizardResult) {
-        selectedAssistantProviderName = wizardResult.assistantProviderName
-      }
 
-      selectedAssistantProviderPreset = undefined
       const publicUrlHelpText = buildSetupWizardPublicUrlHelpText({
         review: buildSetupWizardPublicUrlReview({
           channels: selectedChannels,
@@ -253,7 +225,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         }),
       })
       envOverrides = await runtimeEnv.promptForMissing({
-        assistantApiKeyEnv: selectedAssistantApiKeyEnv,
+        assistantApiKeyEnv: null,
         channels: selectedChannels,
         env: currentEnv,
         helpText: publicUrlHelpText,
@@ -266,11 +238,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
 
     const resolvedAssistantOptions = {
       ...context.options,
-      assistantProviderPreset: selectedAssistantProviderPreset,
-      assistantApiKeyEnv: selectedAssistantApiKeyEnv,
-      assistantBaseUrl: selectedAssistantBaseUrl,
       assistantOss: selectedAssistantOss,
-      assistantProviderName: selectedAssistantProviderName,
     }
 
     const selectedAssistant =
@@ -711,10 +679,10 @@ function registerSetupCommand(
       },
       {
         description:
-          'Save a local Ollama-compatible assistant during setup without using the interactive wizard.',
+          'Save a local Codex OSS assistant during setup without using the interactive wizard.',
         options: {
-          assistantPreset: 'openai-compatible',
-          assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+          assistantPreset: 'codex',
+          assistantOss: true,
           assistantModel: 'gpt-oss:20b',
           vault: './vault',
         },

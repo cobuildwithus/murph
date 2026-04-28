@@ -62,33 +62,10 @@ function expectAssistantTarget(
   return target
 }
 
-function createOpenAiTarget(
-  overrides: Partial<{
-    apiKeyEnv: string
-    baseUrl: string
-    model: string
-    providerName: string
-    reasoningEffort: string
-    headers: Record<string, string>
-  }> = {},
-): AssistantModelTarget {
-  return expectAssistantTarget(createAssistantModelTarget({
-    provider: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    baseUrl: 'https://gateway.example.com/v1',
-    model: 'gpt-5-mini',
-    providerName: 'Example Gateway',
-    reasoningEffort: 'high',
-    headers: {
-      'x-trace-id': 'trace-123',
-    },
-    ...overrides,
-  }))
-}
-
 function createCodexTarget(
   overrides: Partial<{
     approvalPolicy: 'never' | 'on-request' | 'untrusted'
+    modelProvider: string
     codexHome: string
     model: string
     oss: boolean
@@ -169,7 +146,7 @@ function createResolvedAssistantSessionForTest(input: {
 }
 
 describe('assistant session resolution', () => {
-  it('prefers conversation identifiers over message fields and shapes openai-compatible config', () => {
+  it('prefers conversation identifiers over message fields and shapes Codex config', () => {
     const defaults = createOperatorDefaults({
       identityId: 'default-identity',
     })
@@ -179,8 +156,7 @@ describe('assistant session resolution', () => {
         actorId: 'message-actor',
         alias: 'message-alias',
         allowBindingRebind: true,
-        apiKeyEnv: 'OPENAI_API_KEY',
-        baseUrl: 'https://gateway.example.com/v1',
+        approvalPolicy: 'never',
         channel: 'sms',
         conversation: {
           alias: 'conversation-alias',
@@ -191,15 +167,13 @@ describe('assistant session resolution', () => {
           sessionId: 'conversation-session',
           threadId: 'conversation-thread',
         },
-        headers: {
-          'x-trace-id': 'trace-123',
-        },
         identityId: 'message-identity',
         maxSessionAgeMs: 90_000,
-        model: 'gpt-5-mini',
-        provider: 'openai-compatible',
-        providerName: 'Example Gateway',
+        model: 'gpt-5.5',
+        modelProvider: 'vercel-ai-gateway',
+        provider: 'codex-cli',
         reasoningEffort: 'high',
+        sandbox: 'workspace-write',
         sessionId: 'message-session',
         threadId: 'message-thread',
         threadIsDirect: true,
@@ -217,22 +191,20 @@ describe('assistant session resolution', () => {
       actorId: 'conversation-participant',
       threadId: 'conversation-thread',
       threadIsDirect: true,
-      target: createOpenAiTarget(),
-      provider: 'openai-compatible',
-      model: 'gpt-5-mini',
-      sandbox: null,
-      approvalPolicy: null,
+      target: createCodexTarget({
+        approvalPolicy: 'never',
+        model: 'gpt-5.5',
+        modelProvider: 'vercel-ai-gateway',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+      }),
+      provider: 'codex-cli',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'never',
       oss: false,
-      presetId: null,
       profile: null,
-      baseUrl: 'https://gateway.example.com/v1',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      providerName: 'Example Gateway',
-      webSearch: null,
-      zeroDataRetention: null,
-      headers: {
-        'X-Trace-Id': 'trace-123',
-      },
       reasoningEffort: 'high',
       maxSessionAgeMs: 90_000,
     })
@@ -267,10 +239,6 @@ describe('assistant session resolution', () => {
       approvalPolicy: 'never',
       oss: false,
       profile: null,
-      headers: null,
-      baseUrl: null,
-      apiKeyEnv: null,
-      providerName: null,
       reasoningEffort: 'medium',
       maxSessionAgeMs: null,
     })
@@ -282,19 +250,15 @@ describe('assistant session resolution', () => {
       reasoningEffort: 'medium',
       sandbox: null,
     })
-  })
+    })
 
   it('resolves targets from boundary defaults, operator defaults, and explicit overrides in order', () => {
     const boundaryDefaultTarget = createDefaultLocalAssistantModelTarget()
-    const defaultsBackend = createOpenAiTarget({
-      apiKeyEnv: 'DEFAULT_OPENAI_KEY',
-      baseUrl: 'https://defaults.example.com/v1',
-      headers: {
-        'x-default-trace': 'defaults',
-      },
+    const defaultsBackend = createCodexTarget({
+      modelProvider: 'vercel-ai-gateway',
       model: 'gpt-5-default',
-      providerName: 'Defaults Gateway',
       reasoningEffort: 'low',
+      sandbox: 'read-only',
     })
 
     expect(
@@ -322,15 +286,11 @@ describe('assistant session resolution', () => {
         input: createResolutionInput(),
       }),
     ).toMatchObject({
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'DEFAULT_OPENAI_KEY',
-      endpoint: 'https://defaults.example.com/v1',
-      headers: {
-        'X-Default-Trace': 'defaults',
-      },
+      adapter: 'codex-cli',
+      modelProvider: 'vercel-ai-gateway',
       model: 'gpt-5-default',
-      providerName: 'Defaults Gateway',
       reasoningEffort: 'low',
+      sandbox: 'read-only',
     })
 
     expect(
@@ -347,6 +307,7 @@ describe('assistant session resolution', () => {
       }),
     ).toEqual(createCodexTarget({
       model: 'gpt-5-codex-override',
+      modelProvider: 'vercel-ai-gateway',
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
     }))
@@ -429,19 +390,20 @@ describe('assistant session resolution', () => {
   })
 
   it('projects hosted message sessions onto the hosted default target and clears stale resume state', async () => {
-    const previousTarget = createOpenAiTarget({
-      model: 'openai/gpt-5.4',
+    const previousTarget = createCodexTarget({
+      model: 'gpt-5.4',
+      modelProvider: 'vercel-ai-gateway',
       reasoningEffort: 'medium',
     })
-    const hostedDefaultTarget = createOpenAiTarget({
-      model: 'openai/gpt-5.5',
-      providerName: 'Platform Gateway',
+    const hostedDefaultTarget = createCodexTarget({
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
       reasoningEffort: 'high',
     })
     const resolvedSession = createResolvedAssistantSessionForTest({
       target: previousTarget,
       resumeState: {
-        providerSessionId: 'resp_old',
+        providerSessionId: 'thread_old',
         resumeRouteId: 'route-old',
       },
     })
@@ -468,17 +430,18 @@ describe('assistant session resolution', () => {
     expect(result.paths).toBe(resolvedSession.paths)
     expect(result.session.sessionId).toBe(resolvedSession.session.sessionId)
     expect(result.session.target).toEqual(hostedDefaultTarget)
-    expect(result.session.providerOptions.model).toBe('openai/gpt-5.5')
+    expect(result.session.providerOptions.model).toBe('gpt-5.5')
+    expect(result.session.providerOptions.modelProvider).toBe('vercel-ai-gateway')
     expect(result.session.providerOptions.reasoningEffort).toBe('high')
     expect(result.session.resumeState).toBeNull()
     expect(resolvedSession.session.target).toEqual(previousTarget)
-    expect(resolvedSession.session.resumeState?.providerSessionId).toBe('resp_old')
+    expect(resolvedSession.session.resumeState?.providerSessionId).toBe('thread_old')
   })
 
   it('keeps hosted resume state when the hosted default continuity has not changed', async () => {
-    const hostedDefaultTarget = createOpenAiTarget({
-      model: 'openai/gpt-5.5',
-      providerName: 'Platform Gateway',
+    const hostedDefaultTarget = createCodexTarget({
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
       reasoningEffort: 'high',
     })
     const resumeState = {

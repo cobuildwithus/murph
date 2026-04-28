@@ -67,17 +67,14 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
 
   const providerPatch = buildAssistantProviderDefaultsPatch({
     defaults: null,
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     providerConfig: {
-      apiKeyEnv: ' OPENAI_API_KEY ',
-      baseUrl: ' https://api.example.test/v1 ',
-      headers: {
-        authorization: 'Bearer should-not-persist',
-        'x-trace-id': ' trace-id ',
-      },
-      model: ' gpt-4.1 ',
-      providerName: ' Example API ',
+      approvalPolicy: 'never',
+      codexHome: ' /tmp/codex-home ',
+      model: ' gpt-5.5 ',
+      modelProvider: ' vercel-ai-gateway ',
       reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
     },
   })
 
@@ -93,22 +90,18 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       },
       failoverRoutes: [
         {
-          apiKeyEnv: null,
           approvalPolicy: null,
-          baseUrl: null,
           codexCommand: null,
           codexHome: null,
           cooldownMs: null,
-          headers: null,
           model: null,
+          modelProvider: null,
           name: 'fallback',
           oss: false,
           profile: null,
           provider: 'codex-cli',
-          providerName: null,
           reasoningEffort: null,
           sandbox: null,
-          zeroDataRetention: undefined,
         },
       ],
       identityId: ' user-123 ',
@@ -118,23 +111,29 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
 
   assert.equal(savedDefaultsConfig.assistant?.identityId, ' user-123 ')
   assert.deepEqual(
-    resolveAssistantProviderDefaults(savedDefaultsConfig.assistant, 'openai-compatible'),
+    resolveAssistantProviderDefaults(savedDefaultsConfig.assistant, 'codex-cli'),
     {
-      approvalPolicy: null,
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'https://api.example.test/v1',
+      approvalPolicy: 'never',
+      apiKeyEnv: null,
+      baseUrl: null,
       codexCommand: null,
-      codexHome: null,
-      headers: {
-        'X-Trace-Id': 'trace-id',
+      codexHome: '/tmp/codex-home',
+      headers: null,
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      modelProviderConfig: {
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        envKey: 'VERCEL_AI_API_KEY',
+        id: 'vercel-ai-gateway',
+        name: 'Vercel AI Gateway',
+        wireApi: 'responses',
       },
-      model: 'gpt-4.1',
       oss: false,
       presetId: null,
       profile: null,
-      providerName: 'Example API',
+      providerName: null,
       reasoningEffort: 'medium',
-      sandbox: null,
+      sandbox: 'danger-full-access',
       webSearch: null,
       zeroDataRetention: null,
     },
@@ -147,11 +146,9 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
         id: 'platform-default',
         managedBy: 'platform',
         providerConfig: {
-          apiKeyEnv: 'HOSTED_API_KEY',
-          baseUrl: 'https://gateway.example.test/v1',
-          model: 'gpt-4.1',
-          provider: 'openai-compatible',
-          providerName: 'Gateway',
+          model: 'gpt-5.5',
+          modelProvider: 'vercel-ai-gateway',
+          provider: 'codex-cli',
         },
       }),
     ],
@@ -556,9 +553,9 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
             deliveryTarget: 'chat-123',
             identityId: 'identity-3',
             participantId: null,
-            threadId: null,
-          },
+          threadId: null,
         },
+      },
       },
       defaultVault: null,
       hostedAssistant: null,
@@ -568,55 +565,10 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
     'utf8',
   )
 
-  assert.deepEqual((await readOperatorConfig(homeDirectory))?.assistant, {
-    account: {
-      kind: 'account',
-      planCode: 'pro',
-      planName: 'Pro',
-      quota: null,
-      source: 'billing',
-    },
-    backend: {
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      endpoint: 'https://api.example.test/v1',
-      headers: {
-        'X-Trace-Id': 'trace-1',
-      },
-      model: 'gpt-5.4',
-      presetId: null,
-      providerName: 'Example Gateway',
-      reasoningEffort: 'high',
-      webSearch: null,
-    },
-    failoverRoutes: [
-      {
-        approvalPolicy: null,
-        baseUrl: null,
-        codexCommand: null,
-        cooldownMs: null,
-        headers: null,
-        model: 'gpt-5.4-mini',
-        name: 'fallback',
-        oss: false,
-        profile: null,
-        provider: 'openai-compatible',
-        providerName: null,
-        reasoningEffort: 'medium',
-        sandbox: null,
-      },
-    ],
-    identityId: ' operator-123 ',
-    selfDeliveryTargets: {
-      telegram: {
-        channel: 'telegram',
-        deliveryTarget: 'chat-123',
-        identityId: 'identity-3',
-        participantId: null,
-        threadId: null,
-      },
-    },
-  })
+  await assert.rejects(
+    () => readOperatorConfig(homeDirectory),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
+  )
 })
 
 test('assistant self delivery targets treat iMessage as the linq route alias', async () => {

@@ -30,7 +30,7 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
-vi.mock("../src/hosted-runtime/channel-typing.ts", () => ({
+vi.mock("../src/hosted-runtime/channel-activity.ts", () => ({
   createHostedAssistantChannelTypingDependencies:
     mocks.createHostedAssistantChannelTypingDependencies,
 }));
@@ -101,15 +101,15 @@ beforeEach(() => {
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("hydrates the hosted default assistant target before running automation", async () => {
     const hostedDefaultTarget = {
-      adapter: "openai-compatible" as const,
-      providerOptions: {
-        apiKeyEnv: "OPENROUTER_API_KEY",
-        baseUrl: "https://openrouter.ai/api/v1",
-        headers: null,
-        model: "openai/gpt-5.4",
-        providerName: "openrouter",
-        zeroDataRetention: null,
-      },
+      adapter: "codex-cli" as const,
+      approvalPolicy: "never" as const,
+      codexCommand: null,
+      model: "gpt-5.5",
+      modelProvider: "vercel-ai-gateway",
+      oss: false,
+      profile: null,
+      reasoningEffort: "medium" as const,
+      sandbox: "danger-full-access" as const,
     };
     mocks.hydrateHostedExecutionDefaultTarget.mockImplementationOnce(async (value) => ({
       ...value,

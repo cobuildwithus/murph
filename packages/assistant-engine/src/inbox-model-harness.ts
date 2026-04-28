@@ -1,48 +1,32 @@
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
+
+import type { InboxServices } from '@murphai/inbox-services'
+import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   resolveAssistantInboxArtifactPath,
 } from '@murphai/vault-usecases/assistant-vault-paths'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+
 import {
-  createInboxRoutingAssistantToolCatalog,
-} from './assistant-cli-tools.js'
+  buildInboxModelAttachmentBundles,
+  inferInboxMultimodalInputMode,
+} from './inbox-multimodal.js'
 import {
-  generateAssistantObject,
-  resolveAssistantLanguageModel,
-  type AssistantModelMessage,
-  type AssistantModelSpec,
-} from './model-harness.js'
-import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
-import type { InboxServices } from '@murphai/inbox-services'
-import {
-  assistantExecutionPlanSchema,
   inboxModelBundleResultSchema,
   inboxModelBundleSchema,
-  inboxModelRouteResultSchema,
   type InboxModelAttachmentBundle,
   type InboxModelBundle,
   type InboxModelBundleResult,
   type InboxModelInputMode,
   type InboxModelRouteResult,
 } from './inbox-model-contracts.js'
-import {
-  buildInboxModelAttachmentBundles,
-  inferInboxMultimodalInputMode,
-  prepareInboxMultimodalUserMessageContent,
-} from './inbox-multimodal.js'
-import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantModelSpec } from './assistant/legacy-model-spec.js'
 
 const DEFAULT_MAX_ROUTING_CHARS = 24000
 const PRIVATE_ARTIFACT_DIRECTORY_MODE = 0o700
 const PRIVATE_ARTIFACT_FILE_MODE = 0o600
-
-interface PreparedInboxPlacementInput {
-  prompt: string
-  inputMode: InboxModelInputMode
-  messages?: AssistantModelMessage[]
-  fallbackError: string | null
-}
 
 export interface BuildInboxModelBundleInput {
   inboxServices: InboxServices
@@ -62,13 +46,13 @@ export interface RouteInboxCaptureWithModelInput
 export async function buildInboxModelBundle(
   input: BuildInboxModelBundleInput,
 ): Promise<InboxModelBundle> {
-  return (await prepareInboxModelSession(input)).bundle
+  return await prepareInboxModelBundle(input)
 }
 
 export async function materializeInboxModelBundle(
   input: BuildInboxModelBundleInput,
 ): Promise<InboxModelBundleResult> {
-  const { bundle } = await prepareInboxModelSession(input)
+  const bundle = await prepareInboxModelBundle(input)
   const bundlePath = await writeAssistantArtifact(
     input.vault,
     input.captureId,
@@ -85,111 +69,25 @@ export async function materializeInboxModelBundle(
 }
 
 export async function routeInboxCaptureWithModel(
-  input: RouteInboxCaptureWithModelInput,
+  _input: RouteInboxCaptureWithModelInput,
 ): Promise<InboxModelRouteResult> {
-  const { bundle, toolCatalog } = await prepareInboxModelSession(input)
-  const bundlePath = await writeAssistantArtifact(
-    input.vault,
-    input.captureId,
-    'bundle.json',
-    bundle,
-  )
-  const model = resolveAssistantLanguageModel(input.modelSpec)
-  const preparedInput = await prepareInboxPlacementInput({
-    bundle,
-    vaultRoot: input.vault,
-  })
-
-  let inputMode = preparedInput.inputMode
-  let fallbackError = preparedInput.fallbackError
-  let rawPlan: unknown
-
-  try {
-    rawPlan = await generateAssistantObject(
-      buildInboxPlacementGenerationInput(model, preparedInput),
-    )
-  } catch (error) {
-    if (inputMode === 'multimodal' && shouldRetryMultimodalAsTextOnly(error)) {
-      inputMode = 'text-only'
-      fallbackError = errorMessage(error)
-      rawPlan = await generateAssistantObject({
-        model,
-        schema: assistantExecutionPlanSchema,
-        schemaName: 'murph_assistant_plan',
-        system: buildInboxPlacementSystemPrompt(),
-        prompt: preparedInput.prompt,
-      })
-    } else {
-      throw error
-    }
-  }
-
-  const plan = validateAssistantPlan(rawPlan, toolCatalog)
-  const planPath = await writeAssistantArtifact(
-    input.vault,
-    input.captureId,
-    'plan.json',
-    plan,
-  )
-  const results = await toolCatalog.executeCalls({
-    calls: plan.actions,
-    maxCalls: 4,
-    mode: input.apply ? 'apply' : 'preview',
-  })
-  const resultPath = await writeAssistantArtifact(
-    input.vault,
-    input.captureId,
-    'result.json',
+  throw new VaultCliError(
+    'ASSISTANT_INBOX_MODEL_ROUTE_UNAVAILABLE',
+    '`inbox model route` has been disabled for the Codex app-server hard cut because the AI SDK model/tool harness was removed.',
     {
-      schema: 'murph.assistant-plan-result.v1',
-      apply: input.apply ?? false,
-      preparedInputMode: bundle.preparedInputMode,
-      inputMode,
-      fallbackError,
-      results,
+      retryable: false,
     },
   )
-
-  return inboxModelRouteResultSchema.parse({
-    vault: input.vault,
-    captureId: input.captureId,
-    apply: input.apply ?? false,
-    bundlePath,
-    planPath,
-    resultPath,
-    preparedInputMode: bundle.preparedInputMode,
-    inputMode,
-    fallbackError,
-    model: {
-      model: input.modelSpec.model,
-      providerMode: 'openai-compatible',
-      baseUrl: input.modelSpec.baseUrl ?? null,
-      providerName: input.modelSpec.providerName ?? null,
-    },
-    plan,
-    results,
-  })
 }
 
-async function prepareInboxModelSession(
+async function prepareInboxModelBundle(
   input: BuildInboxModelBundleInput,
-): Promise<{
-  bundle: InboxModelBundle
-  toolCatalog: ReturnType<typeof createInboxRoutingAssistantToolCatalog>
-}> {
+): Promise<InboxModelBundle> {
   const shown = await input.inboxServices.show({
     vault: input.vault,
     requestId: input.requestId ?? null,
     captureId: input.captureId,
   })
-  const toolCatalog = createInboxRoutingAssistantToolCatalog({
-    inboxServices: input.inboxServices,
-    requestId: input.requestId ?? null,
-    captureId: input.captureId,
-    vault: input.vault,
-    vaultServices: input.vaultServices,
-  })
-  const tools = toolCatalog.listTools()
   const attachments = await buildInboxModelAttachmentBundles({
     attachments: shown.capture.attachments,
     captureId: shown.capture.captureId,
@@ -201,151 +99,27 @@ async function prepareInboxModelSession(
     DEFAULT_MAX_ROUTING_CHARS,
   ).text
 
-  return {
-    toolCatalog,
-    bundle: inboxModelBundleSchema.parse({
-      schema: 'murph.inbox-model-bundle.v1',
-      captureId: shown.capture.captureId,
-      eventId: shown.capture.eventId,
-      source: shown.capture.source,
-      accountId: shown.capture.accountId ?? null,
-      threadId: shown.capture.threadId,
-      threadTitle: shown.capture.threadTitle ?? null,
-      actorId: shown.capture.actorId ?? null,
-      actorName: shown.capture.actorName ?? null,
-      actorIsSelf: shown.capture.actorIsSelf,
-      occurredAt: shown.capture.occurredAt,
-      receivedAt: shown.capture.receivedAt ?? null,
-      envelopePath: shown.capture.envelopePath,
-      captureText: shown.capture.text ?? null,
-      attachments,
-      tools,
-      preparedInputMode,
-      routingText,
-    }),
-  }
-}
-
-function buildInboxPlacementSystemPrompt(): string {
-  return [
-    'You are the Murph assistant routing model.',
-    'Choose the smallest safe set of tool calls needed to place the capture into canonical storage.',
-    'Stored document attachments should normally end up preserved as canonical documents even when no stronger structured write is obvious.',
-    'Prefer inbox.promote.* tools when a single capture-level promotion fits the evidence.',
-    'Use broader vault.* tools only when the capture clearly contains structured data that should be written directly.',
-    'When routing images or fallback PDF files are attached, treat them as raw evidence alongside the normalized text bundle.',
-    'Treat QR or barcode payloads as decoded only when they appear in normalized parsed text; otherwise you may inspect the raw image or PDF but must not describe parser output that is absent.',
-    'Do not invent facts that are not present in the normalized bundle or clearly visible in attached routing images or PDFs.',
-    'If the capture should not be written yet, return an empty actions array.',
-    'Return JSON only.',
-  ].join(' ')
-}
-
-function buildInboxPlacementPrompt(bundle: InboxModelBundle): string {
-  const responseShape = {
-    schema: 'murph.assistant-plan.v1',
-    summary: 'one-sentence routing summary',
-    rationale: 'brief explanation grounded in the bundle',
-    actions: [
-      {
-        tool: 'inbox.promote.journal',
-        input: {
-          captureId: bundle.captureId,
-        },
-      },
-    ],
-  }
-
-  return [
-    'Choose zero to four tool calls from the catalog below.',
-    'When a single inbox promotion tool safely captures the intent, prefer that over lower-level writes.',
-    'If you choose a tool, copy the input field names exactly as shown in the example.',
-    'If raw routing images or fallback PDFs are attached as additional message parts, use them as evidence. Otherwise rely only on the text bundle below.',
-    '',
-    'Available tools:',
-    renderToolCatalog(bundle.tools),
-    '',
-    'Return JSON with exactly this shape:',
-    JSON.stringify(responseShape, null, 2),
-    '',
-    'Normalized capture bundle:',
-    bundle.routingText,
-  ].join('\n')
-}
-
-function buildInboxPlacementGenerationInput(
-  model: ReturnType<typeof resolveAssistantLanguageModel>,
-  preparedInput: PreparedInboxPlacementInput,
-) {
-  return {
-    model,
-    schema: assistantExecutionPlanSchema,
-    schemaName: 'murph_assistant_plan',
-    system: buildInboxPlacementSystemPrompt(),
-    ...(preparedInput.inputMode === 'multimodal' && preparedInput.messages
-      ? {
-          messages: preparedInput.messages,
-        }
-      : {
-          prompt: preparedInput.prompt,
-        }),
-  }
-}
-
-async function prepareInboxPlacementInput(input: {
-  bundle: InboxModelBundle
-  vaultRoot: string
-}): Promise<PreparedInboxPlacementInput> {
-  const prompt = buildInboxPlacementPrompt(input.bundle)
-  const preparedMultimodalInput = await prepareInboxMultimodalUserMessageContent({
-    attachmentSources: input.bundle.attachments.map((attachment) => ({
-      attachment,
-      captureId: input.bundle.captureId,
-    })),
-    fallbackContextLabel: 'routing',
-    prompt,
-    vaultRoot: input.vaultRoot,
+  return inboxModelBundleSchema.parse({
+    schema: 'murph.inbox-model-bundle.v1',
+    captureId: shown.capture.captureId,
+    eventId: shown.capture.eventId,
+    source: shown.capture.source,
+    accountId: shown.capture.accountId ?? null,
+    threadId: shown.capture.threadId,
+    threadTitle: shown.capture.threadTitle ?? null,
+    actorId: shown.capture.actorId ?? null,
+    actorName: shown.capture.actorName ?? null,
+    actorIsSelf: shown.capture.actorIsSelf,
+    occurredAt: shown.capture.occurredAt,
+    receivedAt: shown.capture.receivedAt ?? null,
+    envelopePath: shown.capture.envelopePath,
+    captureText: shown.capture.text ?? null,
+    attachments,
+    tools: [],
+    preparedInputMode,
+    routingText,
   })
-
-  if (preparedMultimodalInput.userMessageContent === null) {
-    return {
-      prompt,
-      inputMode: 'text-only',
-      fallbackError: preparedMultimodalInput.fallbackError,
-    }
-  }
-
-  return {
-    prompt,
-    inputMode: 'multimodal',
-    messages: [
-      {
-        role: 'user',
-        content: preparedMultimodalInput.userMessageContent,
-      },
-    ],
-    fallbackError: null,
-  }
 }
-
-function validateAssistantPlan(
-  value: unknown,
-  toolCatalog: ReturnType<typeof createInboxRoutingAssistantToolCatalog>,
-) {
-  const plan = assistantExecutionPlanSchema.parse(value)
-
-  for (const action of plan.actions) {
-    if (!toolCatalog.hasTool(action.tool)) {
-      throw new VaultCliError(
-        'ASSISTANT_PLAN_TOOL_UNKNOWN',
-        `Assistant plan selected unknown tool "${action.tool}".`,
-      )
-    }
-  }
-
-  return plan
-}
-
 
 function renderRoutingText(
   capture: InboxShowResult['capture'],
@@ -379,60 +153,6 @@ function renderRoutingText(
   }
 
   return lines.join('\n')
-}
-
-function renderToolCatalog(tools: InboxModelBundle['tools']): string {
-  return tools
-    .map((tool, index) => {
-      const example = tool.inputExample ? JSON.stringify(tool.inputExample) : '{}'
-      const provenanceBits = [
-        tool.provenance.origin,
-        tool.provenance.localOnly ? 'local-only' : 'networked',
-        tool.provenance.generatedFrom ? `generated:${tool.provenance.generatedFrom}` : null,
-        tool.provenance.policyWrappers.length > 0
-          ? `policies:${tool.provenance.policyWrappers.join(',')}`
-          : null,
-      ].filter((value): value is string => value !== null)
-
-      const executionBits = [
-        `backend:${tool.backendKind}`,
-        `mutation:${tool.mutationSemantics}`,
-        `risk:${tool.riskClass}`,
-        `preferred-host:${tool.preferredHostKind}`,
-        `selected-host:${tool.selectedHostKind}`,
-      ]
-
-      return `${index + 1}. ${tool.name}\n   Description: ${tool.description}\n   Provenance: ${provenanceBits.join(' | ')}\n   Execution: ${executionBits.join(' | ')}\n   Input example: ${example}`
-    })
-    .join('\n\n')
-}
-
-function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
-  const message = errorMessage(error).toLowerCase()
-  const mentionsImageInput = [
-    'image',
-    'file',
-    'pdf',
-    'document',
-    'vision',
-    'multimodal',
-    'multi-modal',
-    'media type',
-    'mime type',
-    'input_image',
-    'image_url',
-    'input_file',
-  ].some((token) => message.includes(token))
-  const signalsUnsupported = [
-    'unsupported',
-    'not support',
-    'does not support',
-    'invalid',
-    'reject',
-    'unknown',
-  ].some((token) => message.includes(token))
-
-  return mentionsImageInput && signalsUnsupported
 }
 
 async function writeAssistantArtifact(

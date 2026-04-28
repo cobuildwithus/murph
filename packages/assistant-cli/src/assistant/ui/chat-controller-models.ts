@@ -10,97 +10,30 @@ import {
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import {
-  discoverAssistantProviderModels,
   resolveAssistantModelCatalog,
-  type AssistantModelDiscoveryResult,
 } from '@murphai/assistant-engine/assistant-provider-catalog'
 import { updateAssistantSessionOptions, type AssistantChatInput } from '../service.js'
-
-function assistantModelDiscoveryResultsEqual(
-  left: AssistantModelDiscoveryResult | null,
-  right: AssistantModelDiscoveryResult | null,
-): boolean {
-  if (left === right) {
-    return true
-  }
-
-  if (!left || !right) {
-    return false
-  }
-
-  return (
-    left.status === right.status &&
-    (normalizeNullableString(left.message) ?? null) ===
-      (normalizeNullableString(right.message) ?? null) &&
-    left.models.length === right.models.length &&
-    left.models.every((model, index) => model.id === right.models[index]?.id)
-  )
-}
 
 export function useAssistantModelCatalogState(input: {
   activeModel: string | null
   activeReasoningEffort: string | null
   session: AssistantSession
 }) {
-  const [modelDiscovery, setModelDiscovery] =
-    React.useState<AssistantModelDiscoveryResult | null>(null)
-  const modelCatalog = resolveAssistantModelCatalog({
-    provider: input.session.provider,
-    baseUrl: input.session.providerOptions.baseUrl,
-    currentModel: input.activeModel,
-    currentReasoningEffort: input.activeReasoningEffort,
-    discovery: modelDiscovery,
-    headers: input.session.providerOptions.headers ?? null,
-    apiKeyEnv: input.session.providerOptions.apiKeyEnv,
-    oss: input.session.providerOptions.oss,
-    presetId: input.session.providerOptions.presetId,
-    providerName: input.session.providerOptions.providerName,
-  })
-
-  React.useEffect(() => {
-    let cancelled = false
-    const baseUrl = normalizeNullableString(input.session.providerOptions.baseUrl)
-
-    if (!modelCatalog.capabilities.supportsModelDiscovery || !baseUrl) {
-      setModelDiscovery((existing) => (existing === null ? existing : null))
-      return () => {
-        cancelled = true
-      }
-    }
-
-    void (async () => {
-      const nextDiscovery = await discoverAssistantProviderModels({
+  return React.useMemo(
+    () =>
+      resolveAssistantModelCatalog({
         provider: input.session.provider,
-        baseUrl,
-        apiKeyEnv: input.session.providerOptions.apiKeyEnv,
-        headers: input.session.providerOptions.headers ?? null,
-        providerName: input.session.providerOptions.providerName,
-      })
-
-      if (cancelled) {
-        return
-      }
-
-      setModelDiscovery((existing) =>
-        assistantModelDiscoveryResultsEqual(existing, nextDiscovery)
-          ? existing
-          : nextDiscovery,
-      )
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    modelCatalog.capabilities.supportsModelDiscovery,
-    input.session.provider,
-    input.session.providerOptions.apiKeyEnv,
-    input.session.providerOptions.baseUrl,
-    input.session.providerOptions.headers,
-    input.session.providerOptions.providerName,
-  ])
-
-  return modelCatalog
+        currentModel: input.activeModel,
+        currentReasoningEffort: input.activeReasoningEffort,
+        oss: input.session.providerOptions.oss,
+      }),
+    [
+      input.activeModel,
+      input.activeReasoningEffort,
+      input.session.provider,
+      input.session.providerOptions.oss,
+    ],
+  )
 }
 
 export async function persistAssistantModelSelection(input: {

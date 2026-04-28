@@ -690,6 +690,12 @@ export async function updateAssistantSessionOptionsLocal(input: {
   )
   const nextTarget =
     createAssistantModelTarget(providerConfig) ?? session.session.target
+  if (nextTarget.adapter !== 'codex-cli') {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      'Assistant sessions only support Codex app-server targets.',
+    )
+  }
   const nextProviderOptions = serializeAssistantProviderSessionOptions(providerConfig)
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==

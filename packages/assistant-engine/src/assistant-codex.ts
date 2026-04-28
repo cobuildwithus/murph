@@ -25,8 +25,10 @@ import {
   normalizeStreamingText,
 } from './assistant-codex-events.js'
 import {
+  buildCodexTurnInterruptParams,
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
+  buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
@@ -92,6 +94,7 @@ export interface CodexAppServerTurnInput {
   codexHome?: string | null
   env?: NodeJS.ProcessEnv
   model?: string | null
+  modelProvider?: string | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean
@@ -111,6 +114,36 @@ export interface CodexAppServerTurnResult {
   sessionId: string | null
   stderr: string
   stdout: string
+  threadId: string | null
+  turnId: string | null
+}
+
+export type CodexAppServerSteerInput = {
+  threadId: string
+  turnId: string
+  prompt: string
+  images?: readonly CodexAppServerImageInput[] | null
+}
+
+export type CodexAppServerSteerRequestInput = Omit<
+  CodexAppServerSteerInput,
+  'images'
+> & {
+  imagePaths?: readonly string[] | null
+}
+
+export interface CodexAppServerSteerRequest {
+  method: 'turn/steer'
+  params: Record<string, unknown>
+}
+
+export function buildCodexAppServerSteerRequest(
+  input: CodexAppServerSteerRequestInput,
+): CodexAppServerSteerRequest {
+  return {
+    method: 'turn/steer',
+    params: buildCodexTurnSteerParams(input),
+  }
 }
 
 export async function executeCodexAppServerTurn(
@@ -302,10 +335,10 @@ async function runCodexAppServerTurn(
         void tryWriteRpcMessage({
           id: nextRequestId,
           method: 'turn/interrupt',
-          params: {
+          params: buildCodexTurnInterruptParams({
             threadId: providerSessionId,
             turnId,
-          },
+          }),
         })
         nextRequestId += 1
       }
@@ -601,6 +634,8 @@ async function runCodexAppServerTurn(
     sessionId: providerSessionId,
     stderr: stderr.trim(),
     stdout: stdout.trim(),
+    threadId: providerSessionId,
+    turnId,
   }
 }
 

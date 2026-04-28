@@ -84,11 +84,13 @@ async function runSmokeChecks(input: {
     throw new Error("Hosted runner smoke child did not rebind VAULT to the restored vault root.");
   }
 
-  const murphBin = await resolveCommandPath("murph");
-  const vaultCliBin = await resolveCommandPath("vault-cli");
+  await resolveCommandPath("murph");
+  await resolveCommandPath("vault-cli");
+  await resolveCommandPath("codex");
 
   await runTextCommand("murph", ["--help"]);
   await runTextCommand("vault-cli", ["--help"]);
+  const codexPreflight = await runCodexPreflight();
 
   const vaultShowOutput = await runTextCommand("vault-cli", [
     "vault",
@@ -128,25 +130,28 @@ async function runSmokeChecks(input: {
   });
 
   return {
-    childCwd: process.cwd(),
+    childCwdIsIsolated: true,
+    codexAppServerHelpBytes: codexPreflight.appServerHelpBytes,
+    codexCommandDiscovered: true,
+    codexVersion: codexPreflight.version,
     healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
     healthCommonsCliProtocolListBytes: healthCommonsCli.protocolListBytes,
     healthCommonsCliSearchBytes: healthCommonsCli.searchBytes,
     healthCommonsFinnishDrySaunaTitle: healthCommonsRuntime.finnishDrySaunaTitle,
     healthCommonsRuntimeProtocolHitKeys: healthCommonsRuntime.runtimeProtocolHitKeys,
     healthCommonsRuntimeSearchHitKeys: healthCommonsRuntime.runtimeSearchHitKeys,
-    murphBin,
+    murphCommandDiscovered: true,
     normalizedTranscriptMatchesExpectedSnippet: transcriptMatchesExpectedSnippet(
       normalizedParse.text,
       input.expectedTranscriptSnippet,
     ),
     normalizedTranscriptProviderId: normalizedParse.providerId,
     normalizedTranscriptSha256: sha256Hex(normalizedParse.text),
-    operatorHomeRoot: process.env.HOME ?? "",
+    operatorHomeRebound: true,
     reportedVaultId,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
-    vaultCliBin,
-    vaultRoot: input.vaultRoot,
+    vaultCliCommandDiscovered: true,
+    vaultRootRebound: true,
     vaultShowBytes: Buffer.byteLength(vaultShowOutput, "utf8"),
     wavTranscriptMatchesExpectedSnippet: transcriptMatchesExpectedSnippet(
       wavParse.text,
@@ -261,7 +266,13 @@ async function assertPathExists(filePath: string): Promise<void> {
 }
 
 async function resolveCommandPath(command: string): Promise<string> {
-  return runTextCommand("/bin/sh", ["-c", `command -v ${escapeShellWord(command)}`]);
+  try {
+    return await runTextCommand("/bin/sh", ["-c", `command -v ${escapeShellWord(command)}`]);
+  } catch {
+    throw new Error(
+      `Hosted runner smoke required command "${command}" was not found on PATH.`,
+    );
+  }
 }
 
 async function runTextCommand(file: string, args: string[]): Promise<string> {
@@ -333,6 +344,25 @@ async function runHealthCommonsSmoke(): Promise<{
     runtimeProtocolHitKeys,
     runtimeSearchHitKeys,
   };
+}
+
+async function runCodexPreflight(): Promise<{
+  appServerHelpBytes: number;
+  version: string;
+}> {
+  try {
+    const version = await runTextCommand("codex", ["--version"]);
+    const appServerHelp = await runTextCommand("codex", ["app-server", "--help"]);
+
+    return {
+      appServerHelpBytes: Buffer.byteLength(appServerHelp, "utf8"),
+      version,
+    };
+  } catch {
+    throw new Error(
+      "Hosted runner smoke Codex CLI preflight failed. Install Codex CLI in the hosted runner image and ensure `codex app-server --help` succeeds.",
+    );
+  }
 }
 
 async function runHealthCommonsCliSmoke(): Promise<{

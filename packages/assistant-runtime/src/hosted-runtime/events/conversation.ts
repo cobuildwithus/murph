@@ -19,7 +19,10 @@ import {
 } from "@murphai/inboxd";
 import { createConfiguredParserRegistry } from "@murphai/parsers";
 
-import { markHostedConversationReadBestEffort } from "../channel-activity.ts";
+import {
+  buildHostedTelegramChannelEnv,
+  markHostedConversationReadBestEffort,
+} from "../channel-activity.ts";
 import { readHostedRawEmailMessage } from "./email.ts";
 import {
   createHostedLinqAttachmentDownloadDriver,
@@ -30,11 +33,10 @@ import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
-import { buildHostedPlatformBackedRuntimeEnv } from "../environment.ts";
 
 export async function ingestHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
@@ -48,7 +50,7 @@ export interface HostedConversationWakeLocalImportResult {
 
 export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
   vaultRoot: string;
 }): Promise<HostedConversationWakeLocalImportResult> {
   const capture = await normalizeHostedConversationMessageWake(input);
@@ -73,7 +75,8 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     });
     const persistedCapture = await pipeline.processCapture(capture);
     await markHostedConversationReadBestEffort({
-      runtimeEnv: input.runtime.platformEnv,
+      forwardedEnv: input.runtime.forwardedEnv,
+      userEnv: input.runtime.userEnv,
       wake: input.wake,
     });
 
@@ -95,7 +98,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
 
 async function normalizeHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
 }) {
   if (isHostedLinqConversationMessageWake(input.wake)) {
     return normalizeHostedLinqConversationCapture({
@@ -111,7 +114,7 @@ async function normalizeHostedConversationMessageWake(input: {
     return normalizeHostedTelegramConversationCapture({
       accountId: "bot",
       downloadDriver: createHostedTelegramAttachmentDownloadDriver(
-        buildHostedPlatformBackedRuntimeEnv({
+        buildHostedTelegramChannelEnv({
           forwardedEnv: input.runtime.forwardedEnv,
           platformEnv: input.runtime.platformEnv,
         }),

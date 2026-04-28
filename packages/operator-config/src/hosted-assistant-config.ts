@@ -19,12 +19,9 @@ import {
   type HostedAssistantProfile,
 } from './assistant/hosted-config.js'
 import {
-  resolveOpenAICompatibleProviderPresetFromId,
-  resolveOpenAICompatibleProviderPresetFromProviderName,
-  resolveOpenAICompatibleProviderTargetPresetId,
-  type SetupAssistantProviderPreset,
-} from './assistant/openai-compatible-provider-presets.js'
-import { resolveAssistantRuntimeTarget } from './assistant/target-runtime.js'
+  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+  resolveAssistantCodexModelProviderConfig,
+} from './assistant/target-runtime.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
 import {
   readOperatorConfig,
@@ -73,6 +70,14 @@ const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
 )
 
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
+const HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV =
+  resolveAssistantCodexModelProviderConfig(
+    VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+  )?.envKey ?? 'VERCEL_AI_API_KEY'
+const DEFAULT_HOSTED_ASSISTANT_MODEL = 'gpt-5.5'
+const DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT: AssistantReasoningEffort = 'medium'
+const DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY: AssistantApprovalPolicy = 'never'
+const DEFAULT_HOSTED_ASSISTANT_SANDBOX: AssistantSandbox = 'danger-full-access'
 
 export type HostedAssistantConfigurationErrorCode =
   | 'HOSTED_ASSISTANT_CONFIG_INVALID'
@@ -93,7 +98,7 @@ export class HostedAssistantConfigurationError extends Error {
 
 export interface HostedAssistantOperatorConfigState {
   configured: boolean
-  provider: 'openai-compatible' | null
+  provider: 'codex-cli' | null
 }
 
 export interface HostedAssistantBootstrapResult extends HostedAssistantOperatorConfigState {
@@ -198,7 +203,9 @@ export function isHostedAssistantProfileReady(
     return false
   }
 
-  return normalizeHostedAssistantString(providerConfig.baseUrl) !== null
+  return (
+    resolveAssistantCodexModelProviderConfig(providerConfig.modelProvider) !== null
+  )
 }
 
 export function resolveReadyHostedAssistantProfile(
@@ -282,7 +289,8 @@ export async function ensureHostedAssistantOperatorDefaults(input: {
   if (input.allowMissing) {
     return {
       configured: false,
-      provider: existingActiveProfile?.target.adapter ?? null,
+      provider:
+        existingActiveProfile?.target.adapter === 'codex-cli' ? 'codex-cli' : null,
       seeded: false,
       source: 'missing',
     }
@@ -315,7 +323,11 @@ export function resolveHostedAssistantOperatorDefaultsState(
 
     return {
       configured: readyProfile !== null,
-      provider: readyProfile?.target.adapter ?? activeProfile?.target.adapter ?? null,
+      provider:
+        readyProfile?.target.adapter === 'codex-cli' ||
+        activeProfile?.target.adapter === 'codex-cli'
+          ? 'codex-cli'
+          : null,
     }
   }
 
@@ -328,7 +340,11 @@ export function resolveHostedAssistantOperatorDefaultsState(
 export function readHostedAssistantApiKeyEnvName(
   source: Readonly<Record<string, unknown>>,
 ): string | null {
-  return normalizeHostedAssistantString(source[HOSTED_ASSISTANT_API_KEY_ENV])
+  return normalizeHostedAssistantString(
+    source[HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV],
+  )
+    ? HOSTED_ASSISTANT_CODEX_PROVIDER_SECRET_ENV
+    : null
 }
 
 export function isHostedAssistantApiKeyEnvName(
@@ -353,7 +369,10 @@ function resolveHostedAssistantEnvProfile(
 
   return createHostedAssistantProfile({
     id: platformProfile?.id ?? HOSTED_ASSISTANT_PLATFORM_PROFILE_ID,
-    label: resolveHostedAssistantProfileLabel(seedPlan.providerConfig),
+    label: resolveHostedAssistantProfileLabel({
+      modelProvider: seedPlan.providerConfig.modelProvider,
+      provider: 'codex-cli',
+    }),
     managedBy: 'platform',
     providerConfig: seedPlan.providerConfig,
   })
@@ -397,87 +416,32 @@ function resolveHostedAssistantSeedPlan(
     )
   }
 
-  const providerSelection = resolveHostedAssistantProviderPreset(raw.providerToken)
-
-  if (!raw.model) {
-    throw new HostedAssistantConfigurationError(
-      'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_MODEL_ENV} must be configured for hosted assistant provider ${providerSelection.label}.`,
-    )
-  }
+  const providerSelection = resolveHostedAssistantCodexModelProvider(raw.providerToken)
 
   requireAbsentHostedAssistantValues(
     providerSelection.label,
     [
+      [HOSTED_ASSISTANT_API_KEY_ENV, raw.apiKeyEnv],
+      [HOSTED_ASSISTANT_BASE_URL_ENV, raw.baseUrl],
       [HOSTED_ASSISTANT_CODEX_COMMAND_ENV, raw.codexCommand],
-      [HOSTED_ASSISTANT_APPROVAL_POLICY_ENV, raw.approvalPolicy],
-      [HOSTED_ASSISTANT_SANDBOX_ENV, raw.sandbox],
+      [HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV, raw.gatewayOnlyProviders],
       [HOSTED_ASSISTANT_PROFILE_ENV, raw.profile],
+      [HOSTED_ASSISTANT_PROVIDER_NAME_ENV, raw.providerName],
       [HOSTED_ASSISTANT_OSS_ENV, raw.oss],
+      [HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV, raw.zeroDataRetention],
     ],
   )
 
-  const baseUrl = raw.baseUrl ?? providerSelection.presetBaseUrl
-  if (!baseUrl) {
-    throw new HostedAssistantConfigurationError(
-      'HOSTED_ASSISTANT_CONFIG_INVALID',
-      [
-        `${HOSTED_ASSISTANT_BASE_URL_ENV} must be configured for hosted assistant provider ${providerSelection.label}.`,
-        `Named providers like ${HOSTED_ASSISTANT_PROVIDER_ENV}=openai or openrouter set this automatically.`,
-      ].join(' '),
-    )
-  }
-
-  const runtimeTarget = resolveAssistantRuntimeTarget({
-    provider: 'openai-compatible',
-    apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
-    baseUrl,
-    gatewayOnlyProviders: raw.gatewayOnlyProviders,
-    model: raw.model,
-    presetId: providerSelection.presetId,
-    providerName: raw.providerName ?? providerSelection.presetProviderName,
-    reasoningEffort: raw.reasoningEffort,
-    zeroDataRetention: raw.zeroDataRetention === true,
-  })
-
-  if (raw.zeroDataRetention !== null && !runtimeTarget.supportsZeroDataRetention) {
-    throw new HostedAssistantConfigurationError(
-      'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV} can be used only with a hosted target that enforces zero data retention.`,
-    )
-  }
-
-  if (
-    raw.gatewayOnlyProviders &&
-    !isHostedAssistantVercelAiGatewayTarget({
-      baseUrl,
-      presetId: providerSelection.presetId,
-      providerName: raw.providerName ?? providerSelection.presetProviderName,
-    })
-  ) {
-    throw new HostedAssistantConfigurationError(
-      'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS_ENV} can be used only with Vercel AI Gateway hosted assistant targets.`,
-    )
-  }
-
-  const zeroDataRetention = runtimeTarget.supportsZeroDataRetention
-    ? (raw.zeroDataRetention ?? true)
-    : raw.zeroDataRetention
-
   return {
     providerConfig: {
-      provider: 'openai-compatible',
-      apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
-      baseUrl,
-      ...(raw.gatewayOnlyProviders
-        ? { gatewayOnlyProviders: raw.gatewayOnlyProviders }
-        : {}),
-      model: raw.model,
-      presetId: providerSelection.presetId,
-      providerName: raw.providerName ?? providerSelection.presetProviderName,
-      reasoningEffort: raw.reasoningEffort,
-      ...(zeroDataRetention === true ? { zeroDataRetention: true } : {}),
+      provider: 'codex-cli',
+      approvalPolicy:
+        raw.approvalPolicy ?? DEFAULT_HOSTED_ASSISTANT_APPROVAL_POLICY,
+      model: raw.model ?? DEFAULT_HOSTED_ASSISTANT_MODEL,
+      modelProvider: providerSelection.modelProvider,
+      reasoningEffort:
+        raw.reasoningEffort ?? DEFAULT_HOSTED_ASSISTANT_REASONING_EFFORT,
+      sandbox: raw.sandbox ?? DEFAULT_HOSTED_ASSISTANT_SANDBOX,
     },
   }
 }
@@ -589,52 +553,21 @@ function readHostedAssistantContainerReachableHost(
   }
 }
 
-function resolveHostedAssistantProviderPreset(providerToken: string): {
+function resolveHostedAssistantCodexModelProvider(providerToken: string): {
   label: string
-  presetApiKeyEnv: string | null
-  presetBaseUrl: string | null
-  presetId: SetupAssistantProviderPreset
-  presetProviderName: string | null
+  modelProvider: string
 } {
-  if (providerToken === 'codex-cli') {
+  if (providerToken !== VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID) {
     throw new HostedAssistantConfigurationError(
       'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_PROVIDER_ENV}=codex-cli is not supported for hosted assistant execution. Hosted assistant bootstrap accepts only openai-compatible providers and named OpenAI-compatible aliases.`,
-    )
-  }
-
-  const preset =
-    resolveOpenAICompatibleProviderPresetFromId(providerToken) ??
-    resolveOpenAICompatibleProviderPresetFromProviderName(providerToken)
-
-  if (!preset) {
-    throw new HostedAssistantConfigurationError(
-      'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_PROVIDER_ENV} must be openai-compatible or a supported OpenAI-compatible provider alias. Received: ${providerToken}`,
+      `${HOSTED_ASSISTANT_PROVIDER_ENV} must be ${VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID} for Codex App Server hosted assistant execution.`,
     )
   }
 
   return {
-    label: preset.id,
-    presetApiKeyEnv: preset.apiKeyEnv,
-    presetBaseUrl: preset.baseUrl,
-    presetId: preset.id,
-    presetProviderName: preset.providerName,
+    label: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
+    modelProvider: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_ID,
   }
-}
-
-function isHostedAssistantVercelAiGatewayTarget(input: {
-  baseUrl: string | null
-  presetId: SetupAssistantProviderPreset | null
-  providerName: string | null
-}): boolean {
-  return (
-    resolveOpenAICompatibleProviderTargetPresetId({
-      baseUrl: input.baseUrl,
-      presetId: input.presetId,
-      providerName: input.providerName,
-    }) === 'vercel-ai-gateway'
-  )
 }
 
 function normalizeHostedAssistantString(value: unknown): string | null {

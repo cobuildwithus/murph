@@ -14,7 +14,7 @@ const providerMocks = vi.hoisted(() => ({
   resolveAssistantProviderLabel: vi.fn((profile) =>
     (profile.target?.kind ?? profile.provider) === 'codex-cli'
       ? 'Codex CLI'
-      : 'OpenAI Compatible',
+      : 'Unsupported provider',
   ),
   resolveAssistantProviderStaticModels: vi.fn((profile) =>
     (profile.target?.kind ?? profile.provider) === 'codex-cli'
@@ -52,8 +52,6 @@ vi.mock('../src/assistant-provider.js', () => ({
 import {
   DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
   DEFAULT_ASSISTANT_REASONING_OPTIONS,
-  defaultDiscoverOpenAICompatibleModels,
-  discoverAssistantProviderModels,
   findAssistantCatalogModelOptionIndex,
   findAssistantCatalogReasoningOptionIndex,
   resolveAssistantCatalogReasoningOptions,
@@ -89,7 +87,7 @@ describe('assistant provider catalog', () => {
     })
     expect(
       resolveAssistantTargetCapabilities({
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
       }),
     ).toEqual({
       supportedUserMessageContentTypes: ['text', 'image', 'file'],
@@ -101,7 +99,7 @@ describe('assistant provider catalog', () => {
     providerMocks.resolveAssistantProviderLabel.mockImplementation((profile) =>
       (profile.target?.kind ?? profile.provider) === 'codex-cli'
         ? 'Codex CLI'
-        : 'OpenAI Compatible',
+        : 'Unsupported provider',
     )
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text', 'image'],
@@ -124,21 +122,7 @@ describe('assistant provider catalog', () => {
               },
             },
           ]
-        : [
-            {
-              id: 'omni-small',
-              label: 'Omni Small',
-              description: 'Static compatible model',
-              source: 'static',
-              capabilities: {
-                images: true,
-                pdf: true,
-                reasoning: false,
-                streaming: true,
-                tools: true,
-              },
-            },
-          ],
+        : [],
     )
 
     const profile = resolveAssistantProviderProfile({
@@ -182,118 +166,6 @@ describe('assistant provider catalog', () => {
     ])
   })
 
-  it('normalizes discovery capabilities for non-codex providers and discovers compatible models', async () => {
-    providerMocks.resolveAssistantProviderLabel.mockReturnValue('OpenAI Compatible')
-    providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
-      supportsReasoningEffort: false,
-    })
-    providerMocks.resolveAssistantProviderStaticModels.mockReturnValue([
-      {
-        id: 'omni-small',
-        label: 'Omni Small',
-        description: 'Static compatible model',
-        source: 'static',
-        capabilities: {
-          images: true,
-          pdf: true,
-          reasoning: false,
-          streaming: true,
-          tools: true,
-        },
-      },
-    ])
-    providerMocks.discoverAssistantProviderModelsWithRegistry
-      .mockResolvedValueOnce({
-        status: 'ok',
-        message: null,
-        models: [
-          {
-            id: 'omni-large',
-            label: 'Omni Large',
-            description: 'Discovered compatible model',
-            source: 'discovered',
-            capabilities: {
-              images: true,
-              pdf: true,
-              reasoning: true,
-              streaming: true,
-              tools: true,
-            },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        status: 'ok',
-        message: null,
-        models: [
-          {
-            id: 'omni-large',
-            label: 'Omni Large',
-            description: 'Discovered compatible model',
-            source: 'discovered',
-            capabilities: {
-              images: true,
-              pdf: true,
-              reasoning: true,
-              streaming: true,
-              tools: true,
-            },
-          },
-        ],
-      })
-
-    await expect(
-      discoverAssistantProviderModels({
-        provider: 'openai-compatible',
-        baseUrl: 'https://models.example.com',
-      }),
-    ).resolves.toMatchObject({
-      status: 'ok',
-      models: [expect.objectContaining({ id: 'omni-large' })],
-    })
-
-    await expect(
-      defaultDiscoverOpenAICompatibleModels('https://models.example.com', {
-        apiKeyEnv: 'OPENAI_API_KEY',
-      }),
-    ).resolves.toEqual(['omni-large'])
-
-    const catalog = resolveAssistantModelCatalog({
-      currentModel: 'omni-large',
-      discovery: {
-        status: 'ok',
-        message: null,
-        models: [
-          {
-            id: 'omni-large',
-            label: 'Omni Large',
-            description: 'Discovered compatible model',
-            source: 'discovered',
-            capabilities: {
-              images: true,
-              pdf: true,
-              reasoning: true,
-              streaming: true,
-              tools: true,
-            },
-          },
-        ],
-      },
-      provider: 'openai-compatible',
-    })
-
-    expect(catalog.selectedModel?.id).toBe('omni-large')
-    expect(catalog.selectedModel?.capabilities).toEqual({
-      images: true,
-      pdf: true,
-      reasoning: false,
-      streaming: true,
-      tools: true,
-    })
-    expect(resolveAssistantCatalogReasoningOptions(catalog.selectedModel)).toEqual([])
-  })
-
   it('finds stable fallback indexes for model and reasoning selections', () => {
     expect(
       findAssistantCatalogModelOptionIndex('missing', [
@@ -317,27 +189,26 @@ describe('assistant provider catalog', () => {
     ).toBe(2)
   })
 
-  it('handles empty catalogs and uses the openai-compatible current-model description branch', () => {
-    providerMocks.resolveAssistantProviderLabel.mockReturnValue('OpenAI Compatible')
+  it('handles empty Codex catalogs and uses the Codex current-model description branch', () => {
+    providerMocks.resolveAssistantProviderLabel.mockReturnValue('Codex CLI')
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
     providerMocks.resolveAssistantProviderStaticModels.mockReturnValue([])
 
     const catalog = resolveAssistantModelCatalog({
-      currentModel: 'custom-compatible',
-      provider: 'openai-compatible',
-      providerName: 'compatible',
+      currentModel: 'custom-codex',
+      provider: 'codex-cli',
     })
 
     expect(catalog.models).toEqual([
       expect.objectContaining({
-        id: 'custom-compatible',
-        description: 'Current model from OpenAI Compatible.',
+        id: 'custom-codex',
+        description: 'Current Codex model.',
       }),
     ])
-    expect(catalog.selectedModel?.id).toBe('custom-compatible')
+    expect(catalog.selectedModel?.id).toBe('custom-codex')
     expect(resolveAssistantCatalogReasoningOptions(null)).toEqual([])
     expect(findAssistantCatalogModelOptionIndex(null, [])).toBe(0)
   })

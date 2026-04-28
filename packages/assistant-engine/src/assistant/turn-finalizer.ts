@@ -9,6 +9,7 @@ import {
   compactAssistantProviderConfigInput,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionProviderSessionId,
@@ -101,6 +102,12 @@ export async function persistAssistantTurnAndSession(input: {
       ...assistantBackendTargetToProviderConfigInput(input.session.target),
       ...(compactAssistantProviderConfigInput(input.input) ?? {}),
     }) ?? input.session.target
+  if (nextTarget.adapter !== 'codex-cli') {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      'Assistant turn finalization only supports Codex app-server targets.',
+    )
+  }
   const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
   const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
   const nextResumeState =

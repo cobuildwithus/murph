@@ -25,22 +25,15 @@ export interface AssistantSessionLocator {
 
 export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   approvalPolicy?: AssistantApprovalPolicy | null
-  apiKeyEnv?: string | null
-  baseUrl?: string | null
   codexHome?: string | null
-  gatewayOnlyProviders?: readonly string[] | null
-  headers?: Record<string, string> | null
   model?: string | null
+  modelProvider?: string | null
   now?: Date
   oss?: boolean
-  presetId?: string | null
   profile?: string | null
   provider?: AssistantChatProvider
-  providerName?: string | null
   reasoningEffort?: string | null
-  webSearch?: string | null
   sandbox?: AssistantSandbox | null
-  zeroDataRetention?: boolean | null
   target?: AssistantModelTarget | null
   vault: string
 }

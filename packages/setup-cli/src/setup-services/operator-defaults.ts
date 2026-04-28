@@ -26,7 +26,7 @@ export async function ensureDefaultVaultSelection(input: {
   steps: SetupStepResult[]
   vault: string
 }): Promise<void> {
-  const existing = await readOperatorConfig(input.homeDirectory)
+  const existing = await readOperatorConfigForSetupPatch(input.homeDirectory)
   const existingDefaultVault =
     existing?.defaultVault === null || existing?.defaultVault === undefined
       ? null
@@ -112,7 +112,7 @@ export async function ensureAssistantDefaultSelection(input: {
     return input.assistant
   }
 
-  const existing = await readOperatorConfig(input.homeDirectory)
+  const existing = await readOperatorConfigForSetupPatch(input.homeDirectory)
   const nextDefaults = assistantSelectionToOperatorDefaults(
     input.assistant,
     existing?.assistant ?? null,
@@ -137,16 +137,6 @@ export async function ensureAssistantDefaultSelection(input: {
     await saveAssistantOperatorDefaultsPatch(nextDefaults, input.homeDirectory)
   }
 
-  if (
-    input.assistant.provider === 'openai-compatible' &&
-    input.assistant.apiKeyEnv &&
-    !input.env?.[input.assistant.apiKeyEnv]?.trim()
-  ) {
-    input.notes.push(
-      `Export ${input.assistant.apiKeyEnv} before using the saved OpenAI-compatible assistant backend.`,
-    )
-  }
-
   input.steps.push(
     createStep({
       detail,
@@ -158,4 +148,27 @@ export async function ensureAssistantDefaultSelection(input: {
   )
 
   return input.assistant
+}
+
+async function readOperatorConfigForSetupPatch(
+  homeDirectory: string,
+): Promise<Awaited<ReturnType<typeof readOperatorConfig>>> {
+  try {
+    return await readOperatorConfig(homeDirectory)
+  } catch (error) {
+    if (hasErrorCode(error, 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED')) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === code
+  )
 }

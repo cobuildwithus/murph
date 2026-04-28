@@ -3,7 +3,7 @@ import type {
   AssistantChatProvider,
   AssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type { AssistantUserMessageContentPart } from '../../src/model-harness.js'
+import type { AssistantUserMessageContentPart } from '../../src/assistant/content-types.ts'
 import type { ResolvedAssistantFailoverRoute } from '../../src/assistant/failover.js'
 import {
   assistantRouteSupportsRichUserMessageContent,
@@ -63,41 +63,31 @@ describe('rich-content-routing', () => {
 
   it('keeps Codex CLI eligible when the current rich content is image-only', () => {
     const codexRoute = createRoute('codex-cli')
-    const openAiRoute = createRoute('openai-compatible')
 
     const prioritizedRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
-      routes: [codexRoute, openAiRoute],
+      routes: [codexRoute],
       userMessageContent: TEXT_AND_IMAGE_USER_MESSAGE_CONTENT,
     })
 
-    expect(prioritizedRoutes).toEqual([codexRoute, openAiRoute])
+    expect(prioritizedRoutes).toEqual([codexRoute])
   })
 
-  it('prefers non-Codex routes when the current rich content is unsupported files', () => {
+  it('keeps Codex as the only route even when files must be dropped', () => {
     const codexRoute = createRoute('codex-cli')
-    const openAiRoute = createRoute('openai-compatible')
 
     const prioritizedRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
-      routes: [codexRoute, openAiRoute],
+      routes: [codexRoute],
       userMessageContent: TEXT_AND_FILE_USER_MESSAGE_CONTENT,
     })
 
-    expect(prioritizedRoutes).toEqual([openAiRoute, codexRoute])
+    expect(prioritizedRoutes).toEqual([codexRoute])
   })
 
   it('keeps image evidence for Codex CLI but still drops unsupported file parts', () => {
     const codexRoute = createRoute('codex-cli')
-    const openAiRoute = createRoute('openai-compatible')
 
     expect(assistantRouteSupportsRichUserMessageContent(codexRoute)).toBe(true)
-    expect(assistantRouteSupportsRichUserMessageContent(openAiRoute)).toBe(true)
 
-    expect(
-      resolveAssistantRouteUserMessageContent({
-        route: openAiRoute,
-        userMessageContent: TEXT_AND_IMAGE_USER_MESSAGE_CONTENT,
-      }),
-    ).toEqual(TEXT_AND_IMAGE_USER_MESSAGE_CONTENT)
     expect(
       resolveAssistantRouteUserMessageContent({
         route: codexRoute,
@@ -142,14 +132,14 @@ function createProviderOptions(
   return {
     continuityFingerprint: `${provider}-fingerprint`,
     provider,
-    model: provider === 'codex-cli' ? 'gpt-5.4' : 'gpt-4.1-mini',
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
+    model: 'gpt-5.4',
+    reasoningEffort: 'medium',
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     profile: null,
     oss: false,
-    executionDriver:
-      provider === 'codex-cli' ? 'codex-app-server' : 'openai-compatible',
-    resumeKind: null,
+    executionDriver: 'codex-app-server',
+    modelProvider: null,
+    resumeKind: 'codex-thread',
   }
 }

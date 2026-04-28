@@ -43,7 +43,7 @@ async function createSendingIntent(input: {
   await createAssistantTurnReceipt({
     deliveryRequested: true,
     prompt: 'hello from the outbox seam',
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     providerModel: 'gpt-5.4',
     sessionId: 'asst_outbox_test',
     turnId: `turn_outbox_${input.attemptCount}`,
@@ -137,7 +137,7 @@ describe('assistant outbox dispatch-state', () => {
       await createAssistantTurnReceipt({
         deliveryRequested: true,
         prompt: 'hello from the outbox seam',
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
         providerModel: 'gpt-5.4',
         sessionId: 'asst_outbox_test',
         turnId: 'turn_outbox_mirror',

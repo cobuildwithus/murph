@@ -395,7 +395,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
     })
     assert.deepEqual(promptCalls, [
       {
-        assistantApiKeyEnv: undefined,
+        assistantApiKeyEnv: null,
         channels: [],
         env: {
           DEVICE_SYNC_BASE_URL: ' http://127.0.0.1:9000 ',
@@ -413,10 +413,12 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
           approvalPolicy: null,
           baseUrl: null,
           codexCommand: null,
+          codexHome: null,
           detail:
             'Skipped assistant setup. Murph will keep your current assistant settings as they are.',
           enabled: false,
           model: null,
+          modelProvider: null,
           oss: null,
           preset: 'skip',
           presetId: null,
@@ -510,162 +512,38 @@ test('interactive onboard restores canonical wearable preferences into the wizar
   }
 })
 
-test('interactive onboard carries assistant API key defaults from the wizard into runtime prompts and assistant setup', async () => {
-  const promptCalls: Array<Record<string, unknown>> = []
-  const assistantCalls: Array<Record<string, unknown>> = []
-  const previousOpenAiApiKey = process.env.OPENAI_API_KEY
-
-  delete process.env.OPENAI_API_KEY
-
-  try {
-    await runSetupCli(
-      ['onboard', '--vault', './assistant-api-key-vault'],
-      {
-        assistantSetup: {
-          async resolve(input) {
-            assistantCalls.push({
-              assistantApiKeyEnv: input.options.assistantApiKeyEnv,
-              assistantBaseUrl: input.options.assistantBaseUrl,
-              assistantProviderName: input.options.assistantProviderName,
-              preset: input.preset,
-            })
-
-            return {
-              account: null,
-              apiKeyEnv: input.options.assistantApiKeyEnv ?? null,
-              approvalPolicy: null,
-              baseUrl: input.options.assistantBaseUrl ?? null,
-              codexCommand: null,
-              detail: 'configured',
-              enabled: true,
-              model: 'gpt-5.4',
-              oss: false,
-              preset: input.preset,
-              profile: null,
-              provider: 'openai-compatible',
-              providerName: input.options.assistantProviderName ?? null,
-              reasoningEffort: null,
-              sandbox: null,
-            }
-          },
-        },
-        commandName: 'murph',
-        runtimeEnv: {
-          getCurrentEnv() {
-            return {}
-          },
-          async promptForMissing(input) {
-            promptCalls.push({
-              assistantApiKeyEnv: input.assistantApiKeyEnv,
-              channels: [...input.channels],
-              env: { ...input.env },
-              wearables: [...input.wearables],
-            })
-            return {
-              OPENAI_API_KEY: 'sk-openai-key',
-            }
-          },
-        },
-        services: {
-          async setupHost(input) {
-            return makeSetupResult(input.vault, {
-              assistant: input.assistant,
-            })
-          },
-          async setupMacos(input) {
-            return makeSetupResult(input.vault, {
-              assistant: input.assistant,
-            })
-          },
-        } satisfies NonNullable<SetupCliOptions['services']>,
-        terminal: {
-          stdinIsTTY: true,
-          stderrIsTTY: true,
-        },
-        wizard: {
-          async run() {
-            return {
-              assistantApiKeyEnv: 'OPENAI_API_KEY',
-              assistantBaseUrl: 'https://api.openai.com/v1',
-              assistantPreset: 'openai-compatible',
-              assistantProviderName: 'OpenAI',
-              channels: [],
-              scheduledUpdates: [],
-              wearables: [],
-            }
-          },
-        },
-      },
-    )
-
-    assert.deepEqual(promptCalls, [
-      {
-        assistantApiKeyEnv: 'OPENAI_API_KEY',
-        channels: [],
-        env: {},
-        wearables: [],
-      },
-    ])
-    assert.deepEqual(assistantCalls, [
-      {
-        assistantApiKeyEnv: 'OPENAI_API_KEY',
-        assistantBaseUrl: 'https://api.openai.com/v1',
-        assistantProviderName: 'OpenAI',
-        preset: 'openai-compatible',
-      },
-    ])
-    assert.equal(process.env.OPENAI_API_KEY, 'sk-openai-key')
-  } finally {
-    if (previousOpenAiApiKey === undefined) {
-      delete process.env.OPENAI_API_KEY
-    } else {
-      process.env.OPENAI_API_KEY = previousOpenAiApiKey
-    }
-  }
-})
-
-test('interactive onboard clears stale assistant endpoint defaults when the wizard switches back to Codex sign-in', async () => {
+test('interactive onboard carries Codex wizard choices into runtime prompts and assistant setup', async () => {
   const promptCalls: Array<Record<string, unknown>> = []
   const assistantCalls: Array<Record<string, unknown>> = []
 
   await runSetupCli(
-    [
-      'onboard',
-      '--vault',
-      './assistant-codex-vault',
-      '--assistantBaseUrl',
-      'https://api.openai.com/v1',
-      '--assistantApiKeyEnv',
-      'OPENAI_API_KEY',
-      '--assistantProviderName',
-      'OpenAI',
-    ],
+    ['onboard', '--vault', './assistant-codex-local-vault'],
     {
       assistantSetup: {
         async resolve(input) {
           assistantCalls.push({
-            assistantApiKeyEnv: input.options.assistantApiKeyEnv,
-            assistantBaseUrl: input.options.assistantBaseUrl,
-            assistantProviderName: input.options.assistantProviderName,
+            assistantOss: input.options.assistantOss,
             preset: input.preset,
           })
 
           return {
             account: null,
             apiKeyEnv: null,
-            approvalPolicy: null,
+            approvalPolicy: 'never',
             baseUrl: null,
             codexCommand: null,
+            codexHome: null,
             detail: 'configured',
             enabled: true,
-            model: 'gpt-5.4',
-            oss: false,
+            model: 'gpt-oss:20b',
+            modelProvider: null,
+            oss: input.options.assistantOss === true,
             preset: input.preset,
             profile: null,
             provider: 'codex-cli',
             providerName: null,
-            reasoningEffort: null,
-            sandbox: null,
+            reasoningEffort: 'medium',
+            sandbox: 'danger-full-access',
           }
         },
       },
@@ -703,10 +581,8 @@ test('interactive onboard clears stale assistant endpoint defaults when the wiza
       wizard: {
         async run() {
           return {
-            assistantApiKeyEnv: null,
-            assistantBaseUrl: null,
+            assistantOss: true,
             assistantPreset: 'codex',
-            assistantProviderName: null,
             channels: [],
             scheduledUpdates: [],
             wearables: [],
@@ -726,9 +602,108 @@ test('interactive onboard clears stale assistant endpoint defaults when the wiza
   ])
   assert.deepEqual(assistantCalls, [
     {
+      assistantOss: true,
+      preset: 'codex',
+    },
+  ])
+})
+
+test('interactive onboard lets the wizard switch a local Codex flag back to cloud Codex', async () => {
+  const promptCalls: Array<Record<string, unknown>> = []
+  const assistantCalls: Array<Record<string, unknown>> = []
+
+  await runSetupCli(
+    [
+      'onboard',
+      '--vault',
+      './assistant-codex-vault',
+      '--assistantOss',
+    ],
+    {
+      assistantSetup: {
+        async resolve(input) {
+          assistantCalls.push({
+            assistantOss: input.options.assistantOss,
+            preset: input.preset,
+          })
+
+          return {
+            account: null,
+            apiKeyEnv: null,
+            approvalPolicy: 'never',
+            baseUrl: null,
+            codexCommand: null,
+            codexHome: null,
+            detail: 'configured',
+            enabled: true,
+            model: 'gpt-5.5',
+            modelProvider: null,
+            oss: false,
+            preset: input.preset,
+            profile: null,
+            provider: 'codex-cli',
+            providerName: null,
+            reasoningEffort: 'medium',
+            sandbox: 'danger-full-access',
+          }
+        },
+      },
+      commandName: 'murph',
+      runtimeEnv: {
+        getCurrentEnv() {
+          return {}
+        },
+        async promptForMissing(input) {
+          promptCalls.push({
+            assistantApiKeyEnv: input.assistantApiKeyEnv,
+            channels: [...input.channels],
+            env: { ...input.env },
+            wearables: [...input.wearables],
+          })
+          return {}
+        },
+      },
+      services: {
+        async setupHost(input) {
+          return makeSetupResult(input.vault, {
+            assistant: input.assistant,
+          })
+        },
+        async setupMacos(input) {
+          return makeSetupResult(input.vault, {
+            assistant: input.assistant,
+          })
+        },
+      } satisfies NonNullable<SetupCliOptions['services']>,
+      terminal: {
+        stdinIsTTY: true,
+        stderrIsTTY: true,
+      },
+      wizard: {
+        async run() {
+          return {
+            assistantOss: false,
+            assistantPreset: 'codex',
+            channels: [],
+            scheduledUpdates: [],
+            wearables: [],
+          }
+        },
+      },
+    },
+  )
+
+  assert.deepEqual(promptCalls, [
+    {
       assistantApiKeyEnv: null,
-      assistantBaseUrl: null,
-      assistantProviderName: null,
+      channels: [],
+      env: {},
+      wearables: [],
+    },
+  ])
+  assert.deepEqual(assistantCalls, [
+    {
+      assistantOss: false,
       preset: 'codex',
     },
   ])

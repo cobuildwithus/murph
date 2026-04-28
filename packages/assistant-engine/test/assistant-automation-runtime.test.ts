@@ -1142,7 +1142,7 @@ describe('assistant inbox routing', () => {
     routingMocks.routeInboxCaptureWithModel.mockRejectedValue(
       new VaultCliError(
         'assistant_model_config_invalid',
-        'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+        'Assistant model configuration is invalid: Codex app-server model provider is not available.',
       ),
     )
     const inboxServices = createInboxServices({
@@ -1165,7 +1165,7 @@ describe('assistant inbox routing', () => {
 
     expect(outcome).toEqual({
       advanceCursor: false,
-      details: 'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+      details: 'Assistant model configuration is invalid: Codex app-server model provider is not available.',
       nextWakeAt: expect.any(String),
       status: 'failed',
     })
@@ -1298,7 +1298,7 @@ describe('assistant inbox routing', () => {
     routingMocks.routeInboxCaptureWithModel.mockRejectedValue(
       new VaultCliError(
         'assistant_model_config_invalid',
-        'Assistant model configuration is invalid: OpenAI-compatible routing requires a base URL.',
+        'Assistant model configuration is invalid: Codex app-server model provider is not available.',
       ),
     )
     const later = createCaptureSummary({

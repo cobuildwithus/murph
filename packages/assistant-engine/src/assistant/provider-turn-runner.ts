@@ -15,11 +15,6 @@ import {
   recordAssistantToolFailureRuntimeIssues,
 } from './issue-reporting.js'
 import {
-  getAssistantFailoverCooldownUntil,
-  readAssistantFailoverState,
-  recordAssistantFailoverRouteFailure,
-  recordAssistantFailoverRouteSuccess,
-  shouldAttemptAssistantProviderFailover,
   type ResolvedAssistantFailoverRoute,
 } from './failover.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
@@ -27,7 +22,6 @@ import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
-import { resolveOpenAiCompatibleVercelStripeBillingHeaders } from './providers/openai-compatible.js'
 import {
   resolveAssistantRouteUserMessageContent,
 } from './rich-content-routing.js'
@@ -55,17 +49,13 @@ import {
   recordProviderAttemptFailed,
   recordProviderAttemptStarted,
   recordProviderAttemptSucceeded,
-  recordProviderCooldownFailoverApplied,
-  recordProviderFailoverApplied,
 } from './provider-turn/attempt-observability.js'
 import {
   buildAssistantProviderTurnExecutionPlan,
-  prioritizeAssistantFailoverRoutes,
   resolveAssistantProviderAttemptPlan,
 } from './provider-turn/planning.js'
 import type {
   AssistantProviderAttemptPlan,
-  AssistantProviderFailoverState,
   AssistantProviderTurnContinuityProfile,
   AssistantProviderTurnExecutionPlan,
   AssistantProviderTurnExecutionProfile,
@@ -92,19 +82,11 @@ type AssistantProviderAttemptOutcome =
   | {
       kind: 'failed_terminal'
       error: unknown
-      failoverState: AssistantProviderFailoverState
       providerContinuation: AssistantProviderContinuation
       session: AssistantSession
     }
   | {
-      kind: 'retry_next_route'
-      error: unknown
-      failoverState: AssistantProviderFailoverState
-      session: AssistantSession
-    }
-  | {
       kind: 'succeeded'
-      failoverState: AssistantProviderFailoverState
       result: ExecutedAssistantProviderTurnResult
     }
 
@@ -136,87 +118,49 @@ export async function executeProviderTurnWithRecovery(input: {
   turnId: string
 }): Promise<AssistantProviderTurnRecoveryOutcome> {
   const executionPlan = await buildAssistantProviderTurnExecutionPlan(input)
-  let failoverState = await readAssistantFailoverState(input.input.vault)
   const attemptedRouteIds = new Set<string>()
-  let lastRetriableFailure: unknown = null
-  let lastAttemptedRoute: ResolvedAssistantFailoverRoute | null = null
-  let lastAttemptedProviderContinuation: AssistantProviderContinuation = {
-    kind: 'explicit-structured-history',
-  }
-  let nextAttemptCount = 1
-  let currentSession = input.resolvedSession
-  let providerRequestPlanned = false
-
-  while (attemptedRouteIds.size < executionPlan.routes.length) {
-    const attemptPlan = await resolveAssistantProviderAttemptPlan({
-      attemptCount: nextAttemptCount,
-      attemptedRouteIds,
-      executionPlan,
-      failoverState,
-      session: currentSession,
-    })
-    if (!attemptPlan) {
-      break
-    }
-
-    attemptedRouteIds.add(attemptPlan.route.routeId)
-    lastAttemptedRoute = attemptPlan.route
-    lastAttemptedProviderContinuation = attemptPlan.routePlan.providerContinuation
-    nextAttemptCount = attemptPlan.attemptCount + 1
-
-    if (!providerRequestPlanned) {
-      await input.onProviderRequestPlanned?.({
-        providerAttemptId: null,
-        providerContinuation: attemptPlan.routePlan.providerContinuation,
-      })
-      providerRequestPlanned = true
-    }
-
-    const attemptOutcome = await executeAssistantProviderAttempt({
-      attemptPlan,
-      executionPlan,
-      failoverState,
-    })
-
-    failoverState = attemptOutcome.failoverState
-    if (attemptOutcome.kind !== 'succeeded') {
-      currentSession = attemptOutcome.session
-    }
-
-    switch (attemptOutcome.kind) {
-      case 'succeeded':
-        return {
-          kind: 'succeeded',
-          providerTurn: attemptOutcome.result,
-        }
-      case 'retry_next_route':
-        lastRetriableFailure = attemptOutcome.error
-        break
-      case 'failed_terminal':
-        return {
-          kind: 'failed_terminal',
-          error: attemptOutcome.error,
-          providerContinuation: attemptOutcome.providerContinuation,
-          route: attemptPlan.route,
-          session: attemptOutcome.session,
-        }
+  const attemptPlan = await resolveAssistantProviderAttemptPlan({
+    attemptCount: 1,
+    attemptedRouteIds,
+    executionPlan,
+    session: input.resolvedSession,
+  })
+  if (!attemptPlan) {
+    return {
+      kind: 'failed_terminal',
+      error: new Error('Assistant provider route was not available. Reconfigure the assistant to use Codex.'),
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      route: null,
+      session: input.resolvedSession,
     }
   }
 
-  return {
-    kind: 'failed_terminal',
-    error:
-      lastRetriableFailure === null
-        ? new Error('Assistant provider routes were exhausted before any attempt completed.')
-        : attachAssistantFailoverExhaustionContext({
-            attemptedRoutes: executionPlan.routes.filter((route) =>
-              attemptedRouteIds.has(route.routeId),
-            ),
-            error: lastRetriableFailure,
-          }),
-    providerContinuation: lastAttemptedProviderContinuation,
-    route: lastAttemptedRoute,
-    session: currentSession,
+  await input.onProviderRequestPlanned?.({
+    providerAttemptId: null,
+    providerContinuation: attemptPlan.routePlan.providerContinuation,
+  })
+
+  const attemptOutcome = await executeAssistantProviderAttempt({
+    attemptPlan,
+    executionPlan,
+  })
+
+  switch (attemptOutcome.kind) {
+    case 'succeeded':
+      return {
+        kind: 'succeeded',
+        providerTurn: attemptOutcome.result,
+      }
+    case 'failed_terminal':
+      return {
+        kind: 'failed_terminal',
+        error: attemptOutcome.error,
+        providerContinuation: attemptOutcome.providerContinuation,
+        route: attemptPlan.route,
+        session: attemptOutcome.session,
+      }
   }
 }
 
@@ -230,29 +174,15 @@ function createAssistantProviderUsageAttribution(input: {
     return null
   }
 
-  const apiKeyEnv = input.attemptPlan.route.providerOptions.apiKeyEnv ?? null
   const credentialSource = resolveAssistantUsageCredentialSource({
-    apiKeyEnv,
+    apiKeyEnv: null,
     effectiveEnv: input.env,
-    headers: input.attemptPlan.route.providerOptions.headers ?? null,
+    headers: null,
     provider: input.attemptPlan.route.provider,
     userEnvKeys: [...(input.executionPlan.executionContext?.hosted?.userEnvKeys ?? [])],
   })
   const stripeCustomerId =
     input.executionPlan.executionContext?.hosted?.stripeCustomerId ?? null
-  const stripeMeterSource =
-    input.attemptPlan.route.provider === 'openai-compatible' &&
-    resolveOpenAiCompatibleVercelStripeBillingHeaders({
-      billingContext: {
-        credentialSource,
-        stripeCustomerId,
-      },
-      env: input.env,
-      providerTarget: input.attemptPlan.route.providerOptions,
-    })
-      ? 'vercel-ai-gateway'
-      : 'murph'
-
   return createAssistantUsageAttribution({
     credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
@@ -268,18 +198,17 @@ function createAssistantProviderUsageAttribution(input: {
       session: input.attemptPlan.session,
     }),
     stripeCustomerId,
-    stripeMeterSource,
+    stripeMeterSource: 'murph',
     triggerKind: resolveAssistantUsageTriggerKind(
       input.executionPlan.input.turnTrigger ?? 'manual-ask',
     ),
-    zeroDataRetention: input.attemptPlan.route.providerOptions.zeroDataRetention ?? null,
+    zeroDataRetention: null,
   })
 }
 
 async function executeAssistantProviderAttempt(input: {
   attemptPlan: AssistantProviderAttemptPlan
   executionPlan: AssistantProviderTurnExecutionPlan
-  failoverState: AssistantProviderFailoverState
 }): Promise<AssistantProviderAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
   let attemptMetadata: AssistantProviderAttemptMetadata = {
@@ -287,16 +216,6 @@ async function executeAssistantProviderAttempt(input: {
     executedToolCount: 0,
     providerActionCount: 0,
     rawToolEvents: [] as readonly unknown[],
-  }
-
-  if (attemptPlan.primaryRouteCooldownFailover && executionPlan.primaryRoute) {
-    await recordProviderCooldownFailoverApplied({
-      primaryRoute: executionPlan.primaryRoute,
-      route: attemptPlan.route,
-      sessionId: attemptPlan.session.sessionId,
-      turnId: executionPlan.turnId,
-      vault: executionPlan.input.vault,
-    })
   }
 
   const attemptAt = new Date().toISOString()
@@ -316,17 +235,6 @@ async function executeAssistantProviderAttempt(input: {
       fault: 'provider',
       message: 'Injected assistant provider failure.',
     })
-    const { toolCatalog } = executionPlan
-    const toolRuntime = attemptPlan.routePlan.supportsToolRuntime
-      ? {
-          allowSensitiveHealthContext:
-            executionPlan.sharedPlan.allowSensitiveHealthContext,
-          requestId: executionPlan.turnId,
-          sessionId: attemptPlan.session.sessionId,
-          toolCatalog,
-          vault: executionPlan.input.vault,
-        }
-      : null
     const attemptEnv = {
       ...attemptPlan.routePlan.cliEnv,
       ...executionPlan.memoryTurnEnv,
@@ -354,7 +262,6 @@ async function executeAssistantProviderAttempt(input: {
       }),
       continuityContext: attemptPlan.routePlan.continuityContext,
       systemPrompt: attemptPlan.routePlan.systemPrompt,
-      toolRuntime,
       sessionContext: attemptPlan.routePlan.sessionContext
         ? {
             binding: attemptPlan.session.binding,
@@ -367,18 +274,10 @@ async function executeAssistantProviderAttempt(input: {
         undefined,
       codexHome: attemptPlan.route.providerOptions.codexHome,
       model: attemptPlan.route.providerOptions.model,
+      modelProvider: attemptPlan.route.providerOptions.modelProvider,
       reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
       sandbox: attemptPlan.route.providerOptions.sandbox,
       approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
-      baseUrl: attemptPlan.route.providerOptions.baseUrl,
-      apiKeyEnv: attemptPlan.route.providerOptions.apiKeyEnv,
-      providerName: attemptPlan.route.providerOptions.providerName,
-      presetId: attemptPlan.route.providerOptions.presetId,
-      gatewayOnlyProviders: attemptPlan.route.providerOptions.gatewayOnlyProviders,
-      headers: attemptPlan.route.providerOptions.headers,
-      webSearch: attemptPlan.route.providerOptions.webSearch,
-      zeroDataRetention:
-        attemptPlan.route.providerOptions.zeroDataRetention ?? null,
       activeTurnMessages: attemptPlan.routePlan.activeTurnMessages,
       conversationMessages: attemptPlan.routePlan.conversationMessages,
       onEvent: executionPlan.input.onProviderEvent ?? undefined,
@@ -400,11 +299,6 @@ async function executeAssistantProviderAttempt(input: {
     }
     const result = attemptResult.result
 
-    const nextFailoverState = await recordAssistantFailoverRouteSuccess({
-      vault: executionPlan.input.vault,
-      route: attemptPlan.route,
-      at: new Date().toISOString(),
-    })
     await recordProviderAttemptSucceeded({
       activityLabels: attemptMetadata.activityLabels,
       attemptCount: attemptPlan.attemptCount,
@@ -414,7 +308,6 @@ async function executeAssistantProviderAttempt(input: {
     })
     return {
       kind: 'succeeded',
-      failoverState: nextFailoverState,
       result: {
         ...result,
         attemptCount: attemptPlan.attemptCount,
@@ -458,20 +351,10 @@ async function executeAssistantProviderAttempt(input: {
       }),
     ).catch(() => undefined)
 
-    const nextFailoverState = await recordAssistantFailoverRouteFailure({
-      error,
-      route: attemptPlan.route,
-      vault: executionPlan.input.vault,
-    })
-    const cooldownUntil = getAssistantFailoverCooldownUntil({
-      route: attemptPlan.route,
-      state: nextFailoverState,
-    })
-
     await recordProviderAttemptFailed({
       activityLabels: attemptMetadata.activityLabels,
       attemptCount: attemptPlan.attemptCount,
-      cooldownUntil,
+      cooldownUntil: null,
       detail: errorMessage(error),
       errorCode,
       route: attemptPlan.route,
@@ -480,73 +363,13 @@ async function executeAssistantProviderAttempt(input: {
       vault: executionPlan.input.vault,
     })
 
-    const nextRoute =
-      executionPlan.activeTurnHistory?.nonReplayableProviderWork === true
-        ? null
-        : prioritizeAssistantFailoverRoutes(
-            attemptPlan.remainingRoutes,
-            nextFailoverState,
-          )[0] ?? null
-    const outcomeKind = classifyAssistantProviderAttemptFailure({
-      abortSignal: executionPlan.input.abortSignal,
-      error,
-      nonReplayableProviderWork:
-        executionPlan.activeTurnHistory?.nonReplayableProviderWork === true ||
-        attemptMetadata.executedToolCount > 0 ||
-        attemptMetadata.providerActionCount > 0 ||
-        readAssistantProviderErrorActionCount(error) > 0,
-      nextRoute,
-    })
-
-    if (outcomeKind === 'retry_next_route' && nextRoute) {
-      await recordProviderFailoverApplied({
-        errorCode,
-        fromRoute: attemptPlan.route,
-        sessionId: session.sessionId,
-        toRoute: nextRoute,
-        turnId: executionPlan.turnId,
-        vault: executionPlan.input.vault,
-      })
-
-      return {
-        kind: 'retry_next_route',
-        failoverState: nextFailoverState,
-        error,
-        session,
-      }
-    }
-
     return {
-      kind: outcomeKind,
+      kind: 'failed_terminal',
       error,
-      failoverState: nextFailoverState,
       providerContinuation: effectiveProviderContinuation,
       session,
     }
   }
-}
-
-function classifyAssistantProviderAttemptFailure(input: {
-  abortSignal?: AbortSignal
-  error: unknown
-  nonReplayableProviderWork: boolean
-  nextRoute: ResolvedAssistantFailoverRoute | null
-}): 'failed_terminal' | 'retry_next_route' {
-  if (input.nonReplayableProviderWork) {
-    return 'failed_terminal'
-  }
-
-  if (
-    !shouldAttemptAssistantProviderFailover({
-      abortSignal: input.abortSignal,
-      error: input.error,
-    }) ||
-    input.nextRoute === null
-  ) {
-    return 'failed_terminal'
-  }
-
-  return 'retry_next_route'
 }
 
 function emitHostedProviderRequestDebugTrace(input: {
@@ -569,7 +392,7 @@ function emitHostedProviderRequestDebugTrace(input: {
     const promptCacheMetadata = attemptPlan.routePlan.promptCacheMetadata
     const activeTurnMessages = attemptPlan.routePlan.activeTurnMessages ?? []
     const conversationMessages = attemptPlan.routePlan.conversationMessages ?? []
-    const toolNames = listAssistantToolCatalogNames(executionPlan.toolCatalog)
+    const toolNames: string[] = []
 
     onTraceEvent({
       providerSessionId: null,
@@ -583,19 +406,14 @@ function emitHostedProviderRequestDebugTrace(input: {
         conversationMessageCount: conversationMessages.length,
         conversationMessageRoles: conversationMessages.map((message) => message.role),
         deliveryDispatchMode: executionPlan.input.deliveryDispatchMode ?? null,
-        gatewayOnlyProviderCount:
-          providerOptions.gatewayOnlyProviders?.length ?? 0,
-        gatewayOnlyProviders: providerOptions.gatewayOnlyProviders ?? null,
-        previousResponseIdPresent:
+        providerResumeSessionIdPresent:
           attemptPlan.routePlan.resumeProviderSessionId !== null,
         provider: attemptPlan.route.provider,
         providerExecutionDriver: providerOptions.executionDriver,
         providerModel: providerOptions.model ?? null,
-        providerName: providerOptions.providerName ?? null,
         promptProfile: executionPlan.profile.promptProfile,
         routeId: attemptPlan.route.routeId,
         sessionContextPresent: attemptPlan.routePlan.sessionContext != null,
-        supportsToolRuntime: attemptPlan.routePlan.supportsToolRuntime,
         turnContinuityPolicy: executionPlan.profile.turnContinuityPolicy,
         promptCacheDynamicContextStartsAfterStaticCore:
           promptCacheMetadata?.dynamicContextStartsAfterStaticCore ?? null,
@@ -613,8 +431,6 @@ function emitHostedProviderRequestDebugTrace(input: {
         turnTrigger: executionPlan.input.turnTrigger ?? null,
         userPromptHash: hashAssistantProviderDebugText(executionPlan.input.prompt),
         userPromptLength: executionPlan.input.prompt.length,
-        webSearch: providerOptions.webSearch ?? null,
-        zeroDataRetention: providerOptions.zeroDataRetention ?? null,
       },
       updates: [
         {
@@ -632,16 +448,6 @@ function hashAssistantProviderDebugText(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function listAssistantToolCatalogNames(
-  toolCatalog: AssistantProviderTurnExecutionPlan['toolCatalog'],
-): string[] {
-  return toolCatalog
-    .listTools()
-    .map((tool) => tool.name)
-    .filter((name): name is string => typeof name === 'string' && name.length > 0)
-    .sort()
-}
-
 function readAssistantErrorCode(error: unknown): string | null {
   if (!error || typeof error !== 'object' || !('code' in error)) {
     return null
@@ -649,46 +455,4 @@ function readAssistantErrorCode(error: unknown): string | null {
 
   const code = (error as { code?: unknown }).code
   return typeof code === 'string' && code.trim().length > 0 ? code : null
-}
-
-function readAssistantProviderErrorActionCount(error: unknown): number {
-  if (!error || typeof error !== 'object' || !('context' in error)) {
-    return 0
-  }
-
-  const context = (error as { context?: unknown }).context
-  if (!context || typeof context !== 'object' || Array.isArray(context)) {
-    return 0
-  }
-
-  const value = (context as { providerActionCount?: unknown }).providerActionCount
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : 0
-}
-
-function attachAssistantFailoverExhaustionContext(input: {
-  attemptedRoutes: readonly ResolvedAssistantFailoverRoute[]
-  error: unknown
-}): unknown {
-  if (input.error && typeof input.error === 'object') {
-    const currentContext =
-      'context' in input.error &&
-      typeof (input.error as { context?: unknown }).context === 'object' &&
-      (input.error as { context?: unknown }).context !== null &&
-      !Array.isArray((input.error as { context?: unknown }).context)
-        ? ((input.error as { context?: unknown }).context as Record<string, unknown>)
-        : {}
-    ;(input.error as { context?: Record<string, unknown> }).context = {
-      ...currentContext,
-      failoverExhausted: true,
-      attemptedRouteIds: input.attemptedRoutes.map((route) => route.routeId),
-      attemptedRouteLabels: input.attemptedRoutes.map((route) => route.label),
-    }
-    return input.error
-  }
-
-  return new Error('Assistant provider routes were exhausted.', {
-    cause: input.error,
-  })
 }

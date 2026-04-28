@@ -2,13 +2,13 @@ import assert from 'node:assert/strict'
 
 import { test } from 'vitest'
 
+import { isValidAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
   assistantModelTargetsEqual,
   assistantModelTargetToProviderConfigInput,
   createAssistantModelTarget,
   createDefaultLocalAssistantModelTarget,
   normalizeAssistantModelTarget,
-  sanitizeAssistantBackendTargetForPersistence,
   sanitizeAssistantModelTargetForPersistence,
 } from '../src/assistant-backend.ts'
 import {
@@ -21,18 +21,6 @@ import {
   resolveHostedAssistantProfileLabel,
 } from '../src/assistant/hosted-config.ts'
 import {
-  getOpenAICompatibleProviderPreset,
-  isOpenAICompatibleProviderPresetId,
-  listNamedOpenAICompatibleProviderPresets,
-  listOpenAICompatibleProviderPresets,
-  resolveOpenAICompatibleProviderPreset,
-  resolveOpenAICompatibleProviderPresetFromApiKeyEnv,
-  resolveOpenAICompatibleProviderPresetFromBaseUrl,
-  resolveOpenAICompatibleProviderPresetFromId,
-  resolveOpenAICompatibleProviderPresetFromProviderName,
-  resolveOpenAICompatibleProviderTitle,
-} from '../src/assistant/openai-compatible-provider-presets.ts'
-import {
   assistantProviderConfigsEqual,
   compactAssistantProviderConfigInput,
   inferAssistantProviderFromConfigInput,
@@ -42,8 +30,8 @@ import {
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
   resolveAssistantChatProviderFromConfig,
-  resolveAssistantProviderRuntimeTarget,
   resolveAssistantProvider,
+  resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
   shouldUseAssistantOpenAIResponsesApi,
@@ -58,7 +46,9 @@ import {
   isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '../src/assistant/shared.ts'
-import { isValidAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
+import {
+  VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+} from '../src/assistant/target-runtime.ts'
 
 test('assistant shared and state-id helpers handle empty, invalid, and valid inputs', () => {
   const nonStringEnv = { ...process.env }
@@ -89,13 +79,14 @@ test('assistant shared and state-id helpers handle empty, invalid, and valid inp
   assert.equal(isValidAssistantOpaqueId(null), false)
 })
 
-test('assistant backend helpers cover null, codex, and openai-compatible persistence branches', () => {
+test('assistant backend helpers cover Codex persistence branches and legacy fail-closed input', () => {
   assert.deepEqual(createDefaultLocalAssistantModelTarget(), {
     adapter: 'codex-cli',
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
     model: null,
+    modelProvider: null,
     oss: false,
     profile: null,
     reasoningEffort: 'medium',
@@ -103,19 +94,13 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
   })
 
   assert.equal(createAssistantModelTarget(null), null)
-  assert.equal(
-    createAssistantModelTarget({
-      provider: 'openai-compatible',
-      headers: {},
-    }),
-    null,
-  )
   assert.equal(normalizeAssistantModelTarget(null), null)
   assert.equal(normalizeAssistantModelTarget({ adapter: 'missing' }), null)
 
   const codexTarget = createAssistantModelTarget({
     provider: 'codex-cli',
     codexHome: ' /tmp/codex ',
+    modelProvider: ' Vercel-AI-Gateway ',
   })
   assert.deepEqual(codexTarget, {
     adapter: 'codex-cli',
@@ -123,6 +108,7 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
     codexCommand: null,
     codexHome: '/tmp/codex',
     model: null,
+    modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,
     reasoningEffort: 'medium',
@@ -130,64 +116,17 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
   })
   assert.deepEqual(sanitizeAssistantModelTargetForPersistence(codexTarget), codexTarget)
   assert.equal(sanitizeAssistantModelTargetForPersistence(null), null)
-
-  const openAiTarget = createAssistantModelTarget({
-    provider: 'openai-compatible',
-    apiKeyEnv: ' OPENAI_API_KEY ',
-    baseUrl: ' https://api.openai.com/v1 ',
-    headers: {
-      authorization: 'Bearer top-secret-token',
-      'x-trace-id': ' trace-123 ',
-    },
-    model: ' gpt-5 ',
-    providerName: ' OpenAI ',
-    reasoningEffort: ' high ',
-  })
-  const gatewayTarget = createAssistantModelTarget({
-    provider: 'openai-compatible',
-    apiKeyEnv: ' VERCEL_AI_API_KEY ',
-    baseUrl: ' https://ai-gateway.vercel.sh/v1 ',
-    model: ' openai/gpt-5.4 ',
-    presetId: 'vercel-ai-gateway',
-    providerName: ' vercel-ai-gateway ',
-    zeroDataRetention: true,
-  })
-
-  assert.deepEqual(sanitizeAssistantModelTargetForPersistence(openAiTarget), {
-    adapter: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    endpoint: 'https://api.openai.com/v1',
-    headers: {
-      'X-Trace-Id': 'trace-123',
-    },
-    model: 'gpt-5',
-    presetId: 'openai',
-    providerName: 'OpenAI',
-    reasoningEffort: 'high',
-    webSearch: null,
-  })
   assert.deepEqual(assistantModelTargetToProviderConfigInput(codexTarget), {
     approvalPolicy: null,
     codexCommand: null,
     codexHome: '/tmp/codex',
     model: null,
+    modelProvider: 'vercel-ai-gateway',
     oss: false,
     profile: null,
     provider: 'codex-cli',
     reasoningEffort: 'medium',
     sandbox: null,
-  })
-  assert.deepEqual(sanitizeAssistantModelTargetForPersistence(gatewayTarget), {
-    adapter: 'openai-compatible',
-    apiKeyEnv: 'VERCEL_AI_API_KEY',
-    endpoint: 'https://ai-gateway.vercel.sh/v1',
-    headers: null,
-    model: 'openai/gpt-5.4',
-    presetId: 'vercel-ai-gateway',
-    providerName: 'vercel-ai-gateway',
-    reasoningEffort: null,
-    webSearch: null,
-    zeroDataRetention: true,
   })
   assert.equal(
     assistantModelTargetsEqual(codexTarget, {
@@ -196,6 +135,7 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
       codexCommand: null,
       codexHome: ' /tmp/codex ',
       model: null,
+      modelProvider: 'vercel-ai-gateway',
       oss: false,
       profile: null,
       reasoningEffort: null,
@@ -203,58 +143,18 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
     }),
     true,
   )
-  assert.equal(
-    assistantModelTargetsEqual(codexTarget, {
-      adapter: 'codex-cli',
-      approvalPolicy: codexTarget.approvalPolicy,
-      codexCommand: codexTarget.codexCommand,
-      codexHome: '/tmp/other-codex',
-      model: codexTarget.model,
-      oss: codexTarget.oss,
-      profile: codexTarget.profile,
-      reasoningEffort: codexTarget.reasoningEffort,
-      sandbox: codexTarget.sandbox,
-    }),
-    false,
-  )
-  assert.deepEqual(
-    normalizeAssistantModelTarget({
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      endpoint: 'https://api.openai.com/v1',
-      headers: null,
-      model: 'gpt-5',
-      providerName: 'OpenAI',
-      reasoningEffort: 'invalid',
-    }),
-    null,
-  )
-  assert.deepEqual(
-    normalizeAssistantModelTarget({
-      adapter: 'codex-cli',
-      approvalPolicy: null,
-      codexCommand: null,
-      codexHome: null,
-      model: null,
-      oss: true,
-      profile: null,
-      reasoningEffort: null,
-      sandbox: null,
-    }),
-    {
-      adapter: 'codex-cli',
-      approvalPolicy: null,
-      codexCommand: null,
-      model: null,
-      oss: true,
-      profile: null,
-      reasoningEffort: 'medium',
-      sandbox: null,
-    },
+  assert.throws(
+    () =>
+      createAssistantModelTarget({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5',
+      }),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
 })
 
-test('assistant provider helpers cover null inference and empty header canonicalization branches', () => {
+test('assistant provider helpers cover Codex inference and serialization branches', () => {
   assert.equal(resolveAssistantProvider(null), 'codex-cli')
   assert.equal(inferAssistantProviderFromConfigInput({}), null)
   assert.equal(compactAssistantProviderConfigInput(null), null)
@@ -267,264 +167,124 @@ test('assistant provider helpers cover null inference and empty header canonical
     persistedHeaders: { 'X-Trace-Id': 'trace-123' },
     secretHeaders: null,
   })
-  const normalizedCompatible = normalizeAssistantProviderConfig({
-    provider: 'openai-compatible',
-    baseUrl: ' https://example.test/v1 ',
-    headers: { ' --- ': 'value' },
-  })
-  assert.deepEqual(
-    {
-      policy: normalizedCompatible.policy,
-      target: normalizedCompatible.target,
-    },
-    {
-      policy: {
-        approvalPolicy: null,
-        reasoningEffort: null,
-        sandbox: null,
-        webSearch: null,
-        zeroDataRetention: null,
-      },
-      target: {
-        kind: 'openai-compatible',
-        apiKeyEnv: null,
-        baseUrl: 'https://example.test/v1',
-        gatewayOnlyProviders: null,
-        headers: {
-          '': 'value',
-        },
-        model: null,
-        presetId: null,
-        providerName: null,
-      },
-    },
-  )
-  assert.equal(
-    resolveAssistantChatProviderFromConfig(normalizedCompatible),
-    'openai-compatible',
-  )
+
   const mergedCodex = mergeAssistantProviderConfigs(null, {
     provider: 'codex-cli',
-    model: ' gpt-5 ',
+    model: ' gpt-5.5 ',
+    modelProvider: ' Vercel-AI-Gateway ',
   })
-  assert.deepEqual(
-    {
-      policy: mergedCodex.policy,
-      target: mergedCodex.target,
-    },
-    {
-      policy: {
-        approvalPolicy: null,
-        reasoningEffort: 'medium',
-        sandbox: null,
-        webSearch: null,
-        zeroDataRetention: null,
-      },
-      target: {
-        kind: 'codex-cli',
-        codexCommand: null,
-        codexHome: null,
-        model: 'gpt-5',
-        oss: false,
-        profile: null,
-      },
-    },
-  )
-  assert.equal(resolveAssistantChatProviderFromConfig(mergedCodex), 'codex-cli')
-  const mergedCompatible = mergeAssistantProviderConfigsForProvider(
-    'openai-compatible',
-    null,
-    {
-      providerName: ' Example ',
-    },
-  )
-  assert.deepEqual(
-    {
-      policy: mergedCompatible.policy,
-      target: mergedCompatible.target,
-    },
-    {
-      policy: {
-        approvalPolicy: null,
-        reasoningEffort: null,
-        sandbox: null,
-        webSearch: null,
-        zeroDataRetention: null,
-      },
-      target: {
-        kind: 'openai-compatible',
-        apiKeyEnv: null,
-        baseUrl: null,
-        gatewayOnlyProviders: null,
-        headers: null,
-        model: null,
-        presetId: null,
-        providerName: 'Example',
-      },
-    },
-  )
-  assert.equal(
-    resolveAssistantChatProviderFromConfig(mergedCompatible),
-    'openai-compatible',
-  )
-  assert.deepEqual(
-    serializeAssistantProviderSessionOptions({ provider: 'codex-cli', model: 'gpt-5' }),
-    {
-      continuityFingerprint: resolveAssistantProviderRuntimeTarget({
-        provider: 'codex-cli',
-        model: 'gpt-5',
-      }).continuityFingerprint,
-      executionDriver: 'codex-app-server',
+  assert.deepEqual(mergedCodex, {
+    policy: {
       approvalPolicy: null,
-      model: 'gpt-5',
-      oss: false,
-      profile: null,
-      provider: 'codex-cli',
-      reasoningEffort: 'medium',
-      resumeKind: 'codex-thread',
-      sandbox: null,
-    },
-  )
-  assert.deepEqual(
-    serializeAssistantProviderOperatorDefaults({ provider: 'codex-cli', model: 'gpt-5' }),
-    {
-      approvalPolicy: null,
-      apiKeyEnv: null,
-      baseUrl: null,
-      codexCommand: null,
-      codexHome: null,
-      headers: null,
-      model: 'gpt-5',
-      oss: false,
-      presetId: null,
-      profile: null,
-      providerName: null,
       reasoningEffort: 'medium',
       sandbox: null,
       webSearch: null,
       zeroDataRetention: null,
     },
+    target: {
+      kind: 'codex-cli',
+      codexCommand: null,
+      codexHome: null,
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+      oss: false,
+      profile: null,
+    },
+  })
+  assert.equal(resolveAssistantChatProviderFromConfig(mergedCodex), 'codex-cli')
+  assert.deepEqual(
+    mergeAssistantProviderConfigsForProvider('codex-cli', null, {
+      profile: ' hosted ',
+    }).target,
+    {
+      kind: 'codex-cli',
+      codexCommand: null,
+      codexHome: null,
+      model: null,
+      modelProvider: null,
+      modelProviderConfig: null,
+      oss: false,
+      profile: 'hosted',
+    },
   )
+  assert.deepEqual(serializeAssistantProviderSessionOptions(mergedCodex), {
+    continuityFingerprint: resolveAssistantProviderRuntimeTarget(mergedCodex)
+      .continuityFingerprint,
+    executionDriver: 'codex-app-server',
+    approvalPolicy: null,
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+    oss: false,
+    profile: null,
+    provider: 'codex-cli',
+    reasoningEffort: 'medium',
+    resumeKind: 'codex-thread',
+    sandbox: null,
+  })
+  assert.deepEqual(serializeAssistantProviderOperatorDefaults(mergedCodex), {
+    approvalPolicy: null,
+    apiKeyEnv: null,
+    baseUrl: null,
+    codexCommand: null,
+    codexHome: null,
+    headers: null,
+    model: 'gpt-5.5',
+    modelProvider: 'vercel-ai-gateway',
+    modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
+    oss: false,
+    presetId: null,
+    profile: null,
+    providerName: null,
+    reasoningEffort: 'medium',
+    sandbox: null,
+    webSearch: null,
+    zeroDataRetention: null,
+  })
   assert.equal(
     assistantProviderConfigsEqual({ provider: 'codex-cli', model: 'gpt-5' }, null),
     false,
   )
-  assert.equal(
-    shouldUseAssistantOpenAIResponsesApi({ provider: 'codex-cli', model: 'gpt-5' }),
-    false,
-  )
-  assert.equal(
-    supportsAssistantReasoningEffort({
-      provider: 'openai-compatible',
-      baseUrl: 'https://api.openai.com/v1',
-      presetId: 'openai',
-    }),
-    true,
-  )
-  assert.equal(
-    supportsAssistantZeroDataRetention({
-      provider: 'openai-compatible',
-      baseUrl: 'https://ai-gateway.vercel.sh/v1',
-      presetId: 'vercel-ai-gateway',
-      zeroDataRetention: true,
-    }),
-    true,
+  assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedCodex), false)
+  assert.equal(supportsAssistantReasoningEffort(mergedCodex), true)
+  assert.equal(supportsAssistantZeroDataRetention(mergedCodex), false)
+  assert.throws(
+    () =>
+      normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+      }),
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
 })
 
-test('openai-compatible provider preset helpers resolve aliases, fallbacks, and non-matches', () => {
-  const allPresets = listOpenAICompatibleProviderPresets()
-  const namedPresets = listNamedOpenAICompatibleProviderPresets()
-
-  assert.equal(allPresets.some((preset) => preset.id === 'custom'), true)
-  assert.equal(namedPresets.some((preset) => preset.id === 'custom'), false)
-  assert.equal(getOpenAICompatibleProviderPreset('custom').id, 'custom')
-  assert.equal(getOpenAICompatibleProviderPreset('missing' as never).id, 'custom')
-  assert.equal(isOpenAICompatibleProviderPresetId('openai'), true)
-  assert.equal(isOpenAICompatibleProviderPresetId('unknown'), false)
-  assert.equal(resolveOpenAICompatibleProviderPresetFromId('openrouter')?.id, 'openrouter')
-  assert.equal(
-    resolveOpenAICompatibleProviderPresetFromId('vercel-ai-gateway')?.id,
-    'vercel-ai-gateway',
-  )
-  assert.equal(resolveOpenAICompatibleProviderPresetFromId('unknown'), null)
-  assert.equal(
-    resolveOpenAICompatibleProviderPresetFromProviderName(' Hugging Face ' )?.id,
-    'huggingface',
-  )
-  assert.equal(resolveOpenAICompatibleProviderPresetFromProviderName(''), null)
-  assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' ngc_api_key ')?.id, 'nvidia')
-  assert.equal(
-    resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' vercel_ai_api_key ')?.id,
-    'vercel-ai-gateway',
-  )
-  assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' ai_gateway_api_key '), null)
-  assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv('missing'), null)
-  assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('https://openrouter.ai/api/v1/chat/completions')?.id, 'openrouter')
-  assert.equal(
-    resolveOpenAICompatibleProviderPresetFromBaseUrl('https://ai-gateway.vercel.sh/v1/chat/completions')?.id,
-    'vercel-ai-gateway',
-  )
-  assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('http://localhost:11434/api/tags')?.id, 'ollama')
-  assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('http://localhost:9999/v1'), null)
-  assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('not a url'), null)
-  assert.equal(
-    resolveOpenAICompatibleProviderPreset({
-      baseUrl: 'https://router.huggingface.co/v1',
-      providerName: 'OpenAI',
-      apiKeyEnv: 'OPENAI_API_KEY',
-    })?.id,
-    'huggingface',
-  )
-  assert.equal(
-    resolveOpenAICompatibleProviderPreset({
-      providerName: 'lite llm',
-    })?.id,
-    'litellm',
-  )
-  assert.equal(
-    resolveOpenAICompatibleProviderPreset({
-      providerName: 'vercel ai gateway',
-    })?.id,
-    'vercel-ai-gateway',
-  )
-  assert.equal(
-    resolveOpenAICompatibleProviderPreset({
-      apiKeyEnv: 'OPENAI_API_KEY',
-    })?.id,
-    'openai',
-  )
-  assert.equal(resolveOpenAICompatibleProviderPreset({ providerName: 'missing' }), null)
-  assert.equal(resolveOpenAICompatibleProviderTitle({ providerName: 'lm studio' }), 'LM Studio')
-  assert.equal(resolveOpenAICompatibleProviderTitle({ providerName: 'missing' }), null)
-})
-
-test('hosted assistant config helpers reject invalid profiles and normalize sparse fallbacks', () => {
+test('hosted assistant config helpers normalize Codex profiles and sparse fallbacks', () => {
   assert.throws(
     () =>
       createHostedAssistantProfile({
         id: 'bad-profile',
         providerConfig: {
-          provider: 'codex-cli',
-          profile: 'default',
+          provider: 'openai-compatible',
+          model: 'gpt-5',
         },
       }),
-    /OpenAI-compatible target/u,
+    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
 
-  const customProfile = createHostedAssistantProfile({
-    id: ' custom-profile ',
+  const codexProfile = createHostedAssistantProfile({
+    id: ' codex-profile ',
     providerConfig: {
-      provider: 'openai-compatible',
-      baseUrl: ' not a valid url ',
-      model: ' gpt-5 ',
+      provider: 'codex-cli',
+      model: ' gpt-5.5 ',
+      modelProvider: ' vercel-ai-gateway ',
     },
   })
-  assert.equal(customProfile.label, 'not a valid url')
+  assert.equal(codexProfile.label, 'Vercel AI Gateway')
 
   const hostedConfig = createHostedAssistantConfig({
     activeProfileId: null,
-    profiles: [customProfile],
+    profiles: [codexProfile],
     updatedAt: '2026-04-08T10:00:00.000Z',
   })
   const emptyHostedConfig = createHostedAssistantConfig({
@@ -533,18 +293,10 @@ test('hosted assistant config helpers reject invalid profiles and normalize spar
     updatedAt: '2026-04-08T10:00:00.000Z',
   })
 
-  assert.deepEqual(resolveHostedAssistantActiveProfile(hostedConfig), customProfile)
+  assert.deepEqual(resolveHostedAssistantActiveProfile(hostedConfig), codexProfile)
   assert.equal(resolveHostedAssistantActiveProfile(emptyHostedConfig), null)
-  assert.equal(
-    resolveHostedAssistantProfileLabel({
-      providerName: '  ',
-    }),
-    'Hosted assistant profile',
-  )
-  assert.equal(
-    hostedAssistantProfilesEqual(customProfile, null),
-    false,
-  )
+  assert.equal(resolveHostedAssistantProfileLabel({ provider: 'codex-cli' }), 'Codex App Server')
+  assert.equal(hostedAssistantProfilesEqual(codexProfile, null), false)
   assert.equal(hostedAssistantProfilesEqual(null, null), true)
   assert.equal(resolveHostedAssistantActiveProfile(null), null)
   assert.equal(
@@ -569,60 +321,14 @@ test('hosted assistant config helpers reject invalid profiles and normalize spar
     } as never),
     null,
   )
-  assert.equal(
-    normalizeHostedAssistantConfig({
-      schema: 'murph.hosted-assistant-config.v1',
-      activeProfileId: null,
-      updatedAt: '2026-04-08T10:00:00.000Z',
-      extra: true,
-    } as never)?.profiles.length,
-    0,
-  )
-  const fallbackNormalized = normalizeHostedAssistantConfig({
-    schema: 'murph.hosted-assistant-config.v1',
-    activeProfileId: 'custom-profile',
-    updatedAt: '2026-04-08T10:00:00.000Z',
-    extra: true,
-    profiles: [customProfile],
-  } as never)
-  assert.deepEqual(resolveHostedAssistantActiveProfile(fallbackNormalized), customProfile)
-  assert.equal(
-    normalizeHostedAssistantConfig({
-      schema: 'murph.hosted-assistant-config.v1',
-      activeProfileId: null,
-      profiles: [
-        {
-          id: 'bad',
-          label: 'Bad',
-          managedBy: 'member',
-          target: {
-            adapter: 'codex-cli',
-            profile: 'default',
-          },
-        },
-      ],
-      updatedAt: '2026-04-08T10:00:00.000Z',
-    } as never),
-    null,
-  )
-  assert.equal(
-    normalizeHostedAssistantConfig({
-      schema: 'murph.hosted-assistant-config.v1',
-      activeProfileId: 'custom-profile',
-      updatedAt: '2026-04-08T10:00:00.000Z',
-      profiles: [{ bad: true }],
-      extra: true,
-    } as never),
-    null,
-  )
   assert.throws(
     () =>
       createHostedAssistantProfile({
         id: '   ',
         providerConfig: {
-          provider: 'openai-compatible',
-          baseUrl: 'https://api.openai.com/v1',
-          model: 'gpt-5',
+          provider: 'codex-cli',
+          model: 'gpt-5.5',
+          modelProvider: 'vercel-ai-gateway',
         },
       }),
     /profile id is required/u,

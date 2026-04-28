@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 import * as assistantAutomation from '../src/assistant-automation.ts'
 import * as assistantCodex from '../src/assistant-codex.ts'
 import * as assistantChannelAdapters from '../src/assistant-channel-adapters.ts'
-import * as assistantCliTools from '../src/assistant-cli-tools.ts'
 import * as assistantCron from '../src/assistant-cron.ts'
 import * as assistantEngineIndex from '../src/index.ts'
 import * as assistantOutbox from '../src/assistant-outbox.ts'
@@ -43,15 +42,6 @@ const wrapperCases = [
       'getAssistantChannelAdapter',
       'startLinqTypingIndicator',
       'startTelegramTypingIndicator',
-    ],
-  ],
-  [
-    'assistant-cli-tools',
-    assistantCliTools,
-    [
-      'createDefaultAssistantToolCatalog',
-      'createProviderTurnAssistantCapabilityRuntime',
-      'readAssistantCliLlmsManifest',
     ],
   ],
   [

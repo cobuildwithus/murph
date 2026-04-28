@@ -51,7 +51,6 @@ export interface AssistantNotificationDecisionSystemPromptInput {
 }
 
 export type AssistantHealthCommonsAccessMode =
-  | "bound-tools"
   | "direct-cli"
   | "none";
 
@@ -407,15 +406,11 @@ function buildAssistantHealthCommonsCoreGuidanceText(): string {
 function buildHealthCommonsDiscoverySurfaceText(
   assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode,
 ): string {
-  if (assistantHealthCommonsAccessMode === "bound-tools") {
-    return "Use `healthCommons.search` or `healthCommons.listProtocols` for discovery, `healthCommons.get` for the exact page, and `healthCommons.listSources` when the user asks what evidence backs a protocol.";
-  }
-
   if (assistantHealthCommonsAccessMode === "direct-cli") {
     return "Use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for discovery, `vault-cli commons protocol show <key-or-slug> --format json` for the exact page, and `vault-cli commons source list --protocol <key-or-slug> --format json` when the user asks what evidence backs a protocol.";
   }
 
-  return "Use the Health Commons command or tool surface only when one is exposed in the route; if no Health Commons surface is available, do not claim to have inspected the corpus.";
+  return "Use Health Commons only when a direct CLI surface is available; if no Health Commons surface is available, do not claim to have inspected the corpus.";
 }
 
 function buildAssistantVaultNavigationText(input: {
@@ -423,7 +418,6 @@ function buildAssistantVaultNavigationText(input: {
   assistantHostedDeviceConnectAvailable: boolean;
   assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[];
 }): string {
-  const usesBoundTools = input.assistantCommandAccessMode === "bound-tools";
   const usesDirectCli = input.assistantCommandAccessMode === "direct-cli";
 
   const hostedDeviceConnectGuidance =
@@ -432,24 +426,17 @@ function buildAssistantVaultNavigationText(input: {
     ? `${hostedDeviceConnectGuidance} Do not route supported hosted connect flows through local \`device connect\` CLI commands.\n`
     : "";
 
-  const canonicalRuntimeSurfaceLine = usesBoundTools
-    ? "- Use `vault.cli.run` as the canonical Murph runtime surface for this bound vault. It shells out to the real local `vault-cli`, so use it directly instead of guessing command shapes."
-    : usesDirectCli
+  const canonicalRuntimeSurfaceLine = usesDirectCli
     ? "- Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route."
-    : "- Use the canonical `vault-cli` surface when no bound Murph command surface is exposed in this route.";
+    : "- Use the canonical `vault-cli` surface only when a direct local command surface is exposed in this route.";
 
-  const routeEstimateLine = usesBoundTools
-    ? "- When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, call `vault.cli.run` with `route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
-    : usesDirectCli
+  const routeEstimateLine = usesDirectCli
     ? "- When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, use `vault-cli route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
     : "- When route estimation is available, prefer `vault-cli route estimate ...` for distance, duration, traffic time, or approximate elevation between recognizable points or along a route-bearing trip or workout, with the matching profile for `walking`, `cycling`, `driving`, or `driving-traffic`, instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct.";
-  const boundToolResultLine = usesBoundTools
-    ? "\n- Bound tool calls return structured execution receipts. Use `result` when `status` is `succeeded` or `previewed`. When `status` is `failed`, inspect `errorMessage`, adjust the input or choose a different tool, and do not repeat the same failing call unchanged."
-    : "";
 
   return `Vault and tool usage:
 ${hostedDeviceConnectLine}${canonicalRuntimeSurfaceLine}
-${routeEstimateLine}${boundToolResultLine}
+${routeEstimateLine}
 - Use canonical query surfaces first for health data: \`vault-cli show\` for an exact record, \`vault-cli list\` for filtered recent records, \`vault-cli search query\` for fuzzy recall, and \`vault-cli timeline\` for change-over-time or cross-record questions.
 - For the user's saved current-state context, prefer \`vault-cli memory show\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
 - For common wearable questions, prefer the normalized first reads first: \`vault-cli wearables latest\` for recent nightly summaries, \`vault-cli wearables metric latest <metric>\` for one metric's freshest reading, \`vault-cli wearables metric trend <metric>\` for recent direction, and \`vault-cli wearables drift\` for "what changed?" explanations. Use \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command when the question is date-specific or you need one summary family in more detail. Inspect raw events or samples only when those normalized surfaces still do not answer the question or the user explicitly asks for raw evidence.
@@ -472,7 +459,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection is currently supported only for ${providerList}. Use \`murph.device.connect\` for those providers only; for other apps or devices, say automatic connection is not available.`;
+  return `- Hosted wearable connection is currently supported only for ${providerList}, but the hosted connect helper is not exposed in this route. Say automatic connection links are temporarily unavailable instead of trying to create one through local files or assistant runtime state.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(input: {
@@ -480,9 +467,7 @@ function buildAssistantExperimentOnboardingGuidanceText(input: {
   assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode;
 }): string {
   const commandSurface =
-    input.assistantCommandAccessMode === "bound-tools"
-      ? "Use `vault.cli.run` to execute these `vault-cli ...` commands in the bound vault."
-      : input.assistantCommandAccessMode === "direct-cli"
+    input.assistantCommandAccessMode === "direct-cli"
         ? "Use direct `vault-cli ...` commands in this privileged local route."
         : "Use the canonical `vault-cli ...` commands when a command surface is available; otherwise explain what you would need to inspect or write.";
 
@@ -505,21 +490,17 @@ function buildAssistantExperimentOnboardingGuidanceText(input: {
 - Create the run only after explicit confirmation, then use \`vault-cli experiment create <slug> --title "<title>" --hypothesis "<hypothesis>" --started-on <YYYY-MM-DD> --status active\` for a simple run and \`vault-cli experiment apply-onboarding <id> ...\` for richer \`commonsProtocolRef\`, optional private \`protocolRef\`, \`runPlan\`, onboarding answers, or assistant-support fields. Inspect \`vault-cli experiment apply-onboarding --schema --format json\` before writing so you use the accepted scalar flags. When you write a richer run, preserve the exact Health Commons protocol \`key\`, \`pageRevisionId\`, \`runSpecRevisionId\`, and chosen \`testPlanId\` under \`commonsProtocolRef\` instead of copying protocol prose into ad hoc fields; include a private \`protocolRef\` only when the run uses a saved adaptation.
 - Before scheduled experiment check-ins, missed-log reminders, weekly digests, or review nudges, use \`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json\` when the notification kind is known, and skip when it returns \`skip\`. Use \`vault-cli experiment progress <id> --format json\` when you need progress details for a message that is due.
 - Use \`vault-cli experiment outcome analyze <id> --format json\` when the user asks for a run review, end-of-run interpretation, or worth-repeating judgment, and follow its confidence and confounder framing rather than improvising causal claims. If the deterministic outcome is good enough to save and the user wants it persisted, use \`vault-cli experiment outcome write <id> --format json\`.
-- Do not create an active experiment or automation before the user confirms the final experiment plan. After a confirmed experiment plan, assistant support may default on when it is included in the agreed plan, with clear opt-out. When the provider tool \`assistant.automation.createReminderForCurrentThread\` is available for the current direct chat, use it so the route is derived from the active session. Otherwise prefer \`vault-cli automation save <title> --instructions "<text>" --schedule-kind <kind> --channel <channel>\` with typed flags; reserve \`vault-cli automation import-json --input -\` for advanced payloads the typed surface cannot express. Missed-log checks should be neutral, at most once per planned session, and easy to decline.`;
+- Do not create an active experiment or automation before the user confirms the final experiment plan. After a confirmed experiment plan, assistant support may default on when it is included in the agreed plan, with clear opt-out. Prefer \`vault-cli automation save <title> --instructions "<text>" --schedule-kind <kind> --channel <channel>\` with typed flags; reserve \`vault-cli automation import-json --input -\` for advanced payloads the typed surface cannot express. Missed-log checks should be neutral, at most once per planned session, and easy to decline.`;
 }
 
 function buildHealthCommonsProtocolResolutionText(
   assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode,
 ): string {
-  if (assistantHealthCommonsAccessMode === "bound-tools") {
-    return "Resolve the public protocol reference through Health Commons first: use `healthCommons.search` or `healthCommons.listProtocols` for fuzzy discovery, then `healthCommons.get` for the exact `protocol_variant` page before planning. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
-  }
-
   if (assistantHealthCommonsAccessMode === "direct-cli") {
     return "Resolve the public protocol reference through Health Commons first: use `vault-cli commons search \"<query>\" --format json` or `vault-cli commons protocol list --format json` for fuzzy discovery, then `vault-cli commons protocol show <key-or-slug> --format json` for the exact `protocol_variant` page before planning. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
   }
 
-  return "Resolve the public protocol reference through Health Commons first when a Health Commons surface is available. If no Health Commons command or tool surface is exposed, do not claim to have inspected public protocol options; explain what you would need. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
+  return "Resolve the public protocol reference through Health Commons first when a direct Health Commons CLI surface is available. If no Health Commons command surface is exposed, do not claim to have inspected public protocol options; explain what you would need. Do not use private `vault-cli protocol show` or `vault-cli protocol list` to discover public protocol options.";
 }
 
 function buildAssistantAudienceSafetyText(
@@ -536,7 +517,7 @@ Prefer higher-level wording for sensitive topics, and suggest a more private fol
 }
 
 function buildAssistantToolTruthfulnessText(): string {
-  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real tool call happened.";
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real local command or runtime action happened.";
 }
 
 function buildAssistantNotificationDecisionGuidanceText(
@@ -551,10 +532,10 @@ function buildAssistantNotificationDecisionGuidanceText(
 - This turn is a scheduled notification decision, not a normal chat reply.
 - The user prompt contains private execution instructions for the scheduled run. It is not itself the user-facing message.
 - Your job is to decide whether to skip or send exactly one outbound message.
-- You may use read-only tools to inspect relevant vault or web context before deciding.
+- You may use direct read-only CLI commands to inspect relevant vault context before deciding when the route exposes local command access.
 - For experiment-related scheduled checks, call \`vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json\` first when the target experiment and notification kind are identifiable from the prompt or schedule context. If it returns \`skip\`, skip.
 - Default to skip for experiment notifications unless the deterministic due check says \`notify\`, broken or missing data blocks interpretation, a review-ready transition is due, or a safety follow-up genuinely needs outreach.
-- Never send, draft, or narrate outbound delivery with tools. The platform will deliver the single user-facing message you return in structured output.
+- Never send, draft, or narrate outbound delivery yourself. The platform will deliver the single user-facing message you return in structured output.
 - If there is no useful notification to send right now, choose skip.`,
     channelText,
     `Structured output contract:
@@ -611,9 +592,7 @@ function buildAssistantOnboardingGuidanceText(input: {
   }
 
   const completionCommand =
-    input.assistantCommandAccessMode === "bound-tools"
-      ? "Use `vault.cli.run` to execute `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
-      : input.assistantCommandAccessMode === "direct-cli"
+    input.assistantCommandAccessMode === "direct-cli"
         ? "Use `vault-cli assistant onboarding complete --reason <user_answered|user_declined|concrete_request>`."
         : "If no assistant command surface is available in this route, do not claim onboarding was marked complete; the runtime will settle only clear declines or concrete requests automatically.";
 
@@ -683,7 +662,7 @@ function buildAssistantOnboardingHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `5. Wearables: if a supported hosted wearable connection is already visible in context, acknowledge that Murph can use it and do not ask the user to reconnect. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, offer to connect it now with \`murph.device.connect\`. Keep it optional.`;
+  return `5. Wearables: if a supported hosted wearable connection is already visible in context, acknowledge that Murph can use it and do not ask the user to reconnect. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, say connection links are temporarily unavailable in this route and keep it optional.`;
 }
 
 function buildAssistantCliContractText(contract: string | null): string | null {
@@ -697,12 +676,6 @@ function buildAssistantCliContractText(contract: string | null): string | null {
 function buildAssistantCronGuidanceText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
 }): string {
-  if (input.assistantCommandAccessMode === "bound-tools") {
-    return buildAssistantAvailableAutomationGuidanceText(
-      "Scheduled assistant automation commands are exposed in this session through `vault.cli.run`. Use `vault-cli automation ...` there rather than editing assistant runtime files directly."
-    );
-  }
-
   if (input.assistantCommandAccessMode === "direct-cli") {
     return buildAssistantAvailableAutomationGuidanceText(
       "Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route."
@@ -736,12 +709,6 @@ function buildAssistantSharedAutomationActionText(
   )} for advanced payload imports that the typed surface cannot express.
 
 ${buildAssistantSharedAutomationPreferenceText()}
-
-When the provider tool ${code(
-    "assistant.automation.createReminderForCurrentThread"
-  )} is available and the user asks to be reminded, texted, or notified in this current chat, use that tool instead of copying route fields into a scaffolded payload. It derives the current direct-thread route; refer to internal ${code(
-    "linq"
-  )} routes as iMessage in user-facing copy.
 
 Automation schedules execute while ${code(
     assistantRunCommand
@@ -788,13 +755,9 @@ function buildAssistantKnowledgeGuidanceText(input: {
 function buildHealthCommonsKnowledgeDistinctionText(
   assistantHealthCommonsAccessMode: AssistantHealthCommonsAccessMode,
 ): string {
-  if (assistantHealthCommonsAccessMode === "bound-tools") {
-    return "`assistant.knowledge.*` and `vault-cli knowledge ...` are for the user's derived knowledge wiki. They are not the canonical Health Commons corpus; use `healthCommons.*` for public Health Commons protocol, biomarker, and source discovery.";
-  }
-
   if (assistantHealthCommonsAccessMode === "direct-cli") {
     return "`vault-cli knowledge ...` is for the user's derived knowledge wiki. It is not the canonical Health Commons corpus; use `vault-cli commons ...` for public Health Commons protocol, biomarker, and source discovery.";
   }
 
-  return "`assistant.knowledge.*` and `vault-cli knowledge ...` are for the user's derived knowledge wiki. They are not the canonical Health Commons corpus; use a Health Commons-specific surface for public protocol, biomarker, and source discovery when one is exposed.";
+  return "`vault-cli knowledge ...` is for the user's derived knowledge wiki. It is not the canonical Health Commons corpus; use a Health Commons-specific direct CLI surface for public protocol, biomarker, and source discovery when one is exposed.";
 }

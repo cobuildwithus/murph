@@ -1645,8 +1645,8 @@ test('interactive onboarding prompts for missing channel and wearable credential
   }
 })
 
-test('interactive onboarding carries assistant API key defaults from the wizard into runtime prompts and assistant setup', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-assistant-api-key-'))
+test('interactive onboarding carries the Codex wizard preset into assistant setup', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-assistant-codex-'))
   const promptedInputs: Array<{
     assistantApiKeyEnv: string | null | undefined
     channels: string[]
@@ -1655,45 +1655,38 @@ test('interactive onboarding carries assistant API key defaults from the wizard 
   }> = []
   const assistantCalls: Array<{
     options: {
-      assistantApiKeyEnv: string | null | undefined
-      assistantBaseUrl: string | null | undefined
-      assistantProviderName: string | null | undefined
+      assistantModelProvider: string | null | undefined
     }
     preset: string
   }> = []
-  const previousEnv = {
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-  }
-  delete process.env.OPENAI_API_KEY
 
   const cli = createSetupCli({
     assistantSetup: {
       async resolve(input: any) {
         assistantCalls.push({
           options: {
-            assistantApiKeyEnv: input.options.assistantApiKeyEnv,
-            assistantBaseUrl: input.options.assistantBaseUrl,
-            assistantProviderName: input.options.assistantProviderName,
+            assistantModelProvider: input.options.assistantModelProvider,
           },
           preset: input.preset,
         })
 
         return {
           account: null,
-          apiKeyEnv: input.options.assistantApiKeyEnv ?? null,
-          approvalPolicy: null,
-          baseUrl: input.options.assistantBaseUrl ?? null,
+          apiKeyEnv: null,
+          approvalPolicy: 'never',
+          baseUrl: null,
           codexCommand: null,
           detail: 'configured',
           enabled: true,
           model: 'gpt-5.4',
+          modelProvider: input.options.assistantModelProvider ?? null,
           oss: false,
           preset: input.preset,
           profile: null,
-          provider: 'openai-compatible',
-          providerName: input.options.assistantProviderName ?? null,
+          provider: 'codex-cli',
+          providerName: null,
           reasoningEffort: null,
-          sandbox: null,
+          sandbox: 'danger-full-access',
         }
       },
     },
@@ -1709,9 +1702,7 @@ test('interactive onboarding carries assistant API key defaults from the wizard 
           env: { ...input.env },
           wearables: [...input.wearables],
         })
-        return {
-          OPENAI_API_KEY: 'sk-openai-key',
-        }
+        return {}
       },
     },
     terminal: {
@@ -1728,10 +1719,7 @@ test('interactive onboarding carries assistant API key defaults from the wizard 
     wizard: {
       async run() {
         return {
-          assistantApiKeyEnv: 'OPENAI_API_KEY',
-          assistantBaseUrl: 'https://api.openai.com/v1',
-          assistantPreset: 'openai-compatible',
-          assistantProviderName: 'OpenAI',
+          assistantPreset: 'codex',
           channels: [],
           scheduledUpdates: [],
           wearables: [],
@@ -1749,7 +1737,7 @@ test('interactive onboarding carries assistant API key defaults from the wizard 
 
     assert.deepEqual(promptedInputs, [
       {
-        assistantApiKeyEnv: 'OPENAI_API_KEY',
+        assistantApiKeyEnv: null,
         channels: [],
         env: {},
         wearables: [],
@@ -1758,26 +1746,17 @@ test('interactive onboarding carries assistant API key defaults from the wizard 
     assert.deepEqual(assistantCalls, [
       {
         options: {
-          assistantApiKeyEnv: 'OPENAI_API_KEY',
-          assistantBaseUrl: 'https://api.openai.com/v1',
-          assistantProviderName: 'OpenAI',
+          assistantModelProvider: undefined,
         },
-        preset: 'openai-compatible',
+        preset: 'codex',
       },
     ])
-    assert.equal(process.env.OPENAI_API_KEY, 'sk-openai-key')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
-
-    if (previousEnv.OPENAI_API_KEY === undefined) {
-      delete process.env.OPENAI_API_KEY
-    } else {
-      process.env.OPENAI_API_KEY = previousEnv.OPENAI_API_KEY
-    }
   }
 })
 
-test('interactive onboarding clears stale assistant endpoint defaults when the wizard switches back to Codex sign-in', async () => {
+test('interactive onboarding keeps Codex selections clear of endpoint defaults', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-assistant-clear-'))
   const promptedInputs: Array<{
     assistantApiKeyEnv: string | null | undefined
@@ -1868,20 +1847,7 @@ test('interactive onboarding clears stale assistant endpoint defaults when the w
 
   try {
     await cli.serve(
-      [
-        'onboard',
-        '--vault',
-        vaultRoot,
-        '--format',
-        'toon',
-        '--full-output',
-        '--assistantBaseUrl',
-        'https://api.openai.com/v1',
-        '--assistantApiKeyEnv',
-        'OPENAI_API_KEY',
-        '--assistantProviderName',
-        'OpenAI',
-      ],
+      ['onboard', '--vault', vaultRoot, '--format', 'toon', '--full-output'],
       {
         env: process.env,
         exit: () => {},
@@ -1900,9 +1866,9 @@ test('interactive onboarding clears stale assistant endpoint defaults when the w
     assert.deepEqual(assistantCalls, [
       {
         options: {
-          assistantApiKeyEnv: null,
-          assistantBaseUrl: null,
-          assistantProviderName: null,
+          assistantApiKeyEnv: undefined,
+          assistantBaseUrl: undefined,
+          assistantProviderName: undefined,
         },
         preset: 'codex',
       },
@@ -1912,50 +1878,39 @@ test('interactive onboarding clears stale assistant endpoint defaults when the w
   }
 })
 
-test('wizard infers Ollama from the default local endpoint even when it reuses OPENAI_API_KEY', () => {
+test('wizard infers Codex cloud for signed-in Codex defaults', () => {
   assert.equal(
     inferSetupWizardAssistantProvider({
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      preset: 'openai-compatible',
-      providerName: null,
+      oss: false,
+      preset: 'codex',
     }),
-    'ollama',
+    'codex-cloud',
   )
 })
 
-test('wizard still falls back to a custom endpoint when a non-OpenAI base URL reuses OPENAI_API_KEY', () => {
+test('wizard infers Codex local for OSS defaults', () => {
   assert.equal(
     inferSetupWizardAssistantProvider({
-      apiKeyEnv: 'OPENAI_API_KEY',
-      baseUrl: 'https://models.example.test/v1',
-      preset: 'openai-compatible',
-      providerName: null,
+      oss: true,
+      preset: 'codex',
     }),
-    'custom',
+    'codex-local',
   )
 })
 
-test('wizard preserves existing named provider metadata when that provider stays selected', () => {
+test('wizard resolves Codex cloud selection without endpoint metadata', () => {
   assert.deepEqual(
     resolveSetupWizardAssistantSelection({
-      initialApiKeyEnv: 'OPENROUTER_API_KEY',
-      initialBaseUrl: 'https://openrouter.ai/api/v1',
-      initialProvider: 'openrouter',
-      initialProviderName: 'OpenRouter',
-      method: 'compatible-provider',
-      provider: 'openrouter',
+      method: 'codex-cloud',
+      provider: 'codex-cloud',
     }),
     {
-      apiKeyEnv: 'OPENROUTER_API_KEY',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      detail: 'Murph will use OpenRouter and read the key from OPENROUTER_API_KEY. It will ask which model to save next.',
+      detail: 'Murph will use your saved Codex / ChatGPT sign-in.',
       methodLabel: null,
       oss: false,
-      preset: 'openai-compatible',
-      providerLabel: 'OpenRouter',
-      providerName: 'OpenRouter',
-      summary: 'OpenRouter',
+      preset: 'codex',
+      providerLabel: 'ChatGPT / Codex sign-in',
+      summary: 'ChatGPT / Codex sign-in',
     },
   )
 })
@@ -1992,7 +1947,7 @@ test('setup wearable helpers split ready and pending selections', () => {
   assert.deepEqual(listSetupPendingWearables(result), [result.wearables[2]])
 })
 
-test('onboard resolves assistant defaults from explicit assistant options when the wizard is skipped', async () => {
+test('onboard resolves assistant defaults from explicit Codex options when the wizard is skipped', async () => {
   const resolvedAssistants: any[] = []
   const receivedAssistants: any[] = []
   const cli = createSetupCli({
@@ -2005,24 +1960,27 @@ test('onboard resolves assistant defaults from explicit assistant options when t
       async resolve(input) {
         resolvedAssistants.push({
           allowPrompt: input.allowPrompt,
+          assistantModel: input.options.assistantModel,
+          assistantModelProvider: input.options.assistantModelProvider,
           preset: input.preset,
         })
 
         return {
-          preset: 'openai-compatible',
+          preset: 'codex',
           enabled: true,
-          provider: 'openai-compatible',
-          model: 'gpt-oss:20b',
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          apiKeyEnv: 'OLLAMA_API_KEY',
-          providerName: 'ollama',
+          provider: 'codex-cli',
+          model: input.options.assistantModel ?? 'gpt-5.4',
+          modelProvider: input.options.assistantModelProvider ?? null,
+          baseUrl: null,
+          apiKeyEnv: null,
+          providerName: null,
           codexCommand: null,
           profile: null,
           reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
+          sandbox: 'danger-full-access',
+          approvalPolicy: 'never',
           oss: false,
-          detail: 'Use gpt-oss:20b through Ollama.',
+          detail: 'Use Codex with the selected model provider.',
         }
       },
     },
@@ -2038,13 +1996,11 @@ test('onboard resolves assistant defaults from explicit assistant options when t
     [
       'onboard',
       '--assistantPreset',
-      'openai-compatible',
-      '--assistantBaseUrl',
-      'http://127.0.0.1:11434/v1',
+      'codex',
       '--assistantModel',
-      'gpt-oss:20b',
-      '--assistantApiKeyEnv',
-      'OLLAMA_API_KEY',
+      'gpt-5.5',
+      '--assistantModelProvider',
+      'vercel-ai-gateway',
       '--format',
       'json',
       '--full-output',
@@ -2059,27 +2015,53 @@ test('onboard resolves assistant defaults from explicit assistant options when t
   assert.deepEqual(resolvedAssistants, [
     {
       allowPrompt: false,
-      preset: 'openai-compatible',
+      assistantModel: 'gpt-5.5',
+      assistantModelProvider: 'vercel-ai-gateway',
+      preset: 'codex',
     },
   ])
   assert.deepEqual(receivedAssistants, [
     {
-      preset: 'openai-compatible',
+      preset: 'codex',
       enabled: true,
-      provider: 'openai-compatible',
-      model: 'gpt-oss:20b',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
+      provider: 'codex-cli',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
       codexCommand: null,
       profile: null,
       reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
       oss: false,
-      detail: 'Use gpt-oss:20b through Ollama.',
+      detail: 'Use Codex with the selected model provider.',
     },
   ])
+})
+
+test('onboard rejects removed OpenAI-compatible assistant options when the wizard is skipped', async () => {
+  const result = await runSetupCli<unknown>(
+    [
+      'onboard',
+      '--assistantBaseUrl',
+      'http://127.0.0.1:11434/v1',
+      '--assistantApiKeyEnv',
+      'OLLAMA_API_KEY',
+    ],
+    {
+      async setupMacos() {
+        throw new Error('setup services should not run for removed assistant options')
+      },
+    },
+  )
+
+  assert.equal(result.ok, false)
+  assert.match(
+    result.error?.message ?? '',
+    /OpenAI-compatible assistant setup options have been removed|assistantBaseUrl|assistantApiKeyEnv/u,
+  )
 })
 
 test('setup handoff launches assistant automation instead of chat when auto-reply channels are enabled', () => {
@@ -2760,133 +2742,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   }
 })
 
-test.sequential('setup preserves saved public OpenAI-compatible headers when re-saving assistant defaults', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-openai-compatible-headers-'))
-  const homeRoot = path.join(tempRoot, 'home')
-  const vaultRoot = path.join(homeRoot, 'vault')
-  const expectedWhisperModelPath = path.join(
-    homeRoot,
-    '.murph',
-    'toolchain',
-    'models',
-    'whisper',
-    'ggml-base.en.bin',
-  )
-  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
-  const formulaPrefixes = {
-    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
-  }
-  const brewCommand = path.join(homebrewBin, 'brew')
-  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-
-  await saveAssistantOperatorDefaultsPatch(
-    buildAssistantProviderDefaultsPatch({
-      defaults: null,
-      provider: 'openai-compatible',
-      providerConfig: {
-        model: 'llama3.2:latest',
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiKeyEnv: 'OLLAMA_API_KEY',
-        providerName: 'ollama',
-        headers: {
-          Authorization: 'Bearer override-token',
-          'X-Foo': 'bar',
-        },
-      },
-    }),
-    homeRoot,
-  )
-
-  await writeExecutable(brewCommand)
-  await writeExecutable(ffmpegCommand)
-  await writeExecutable(whisperCommand)
-  await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
-  await writeFile(expectedWhisperModelPath, 'model', 'utf8')
-
-  const services = createSetupServices({
-    arch: () => 'arm64',
-    env: () => ({ PATH: homebrewBin, SHELL: '/bin/zsh' }),
-    getHomeDirectory: () => homeRoot,
-    inboxServices: {
-      async bootstrap() {
-        return makeBootstrapResult(vaultRoot)
-      },
-    },
-    log() {},
-    platform: () => 'darwin',
-    resolveCliBinPath: () => buildOwnedCliBinPath(homeRoot),
-    runCommand: async ({ file, args }) => {
-      const baseName = path.basename(file)
-
-      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: `${args[2] ?? ''} 1.0.0\n`,
-        }
-      }
-
-      if (baseName === 'brew' && args[0] === '--prefix') {
-        const formula = args[1] as keyof typeof formulaPrefixes
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: `${formulaPrefixes[formula]}\n`,
-        }
-      }
-
-      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
-    },
-    vaultServices: {
-      core: {
-        async init(input: { vault: string }) {
-          return {
-            created: true,
-            directories: [],
-            files: [],
-            vault: input.vault,
-          }
-        },
-      },
-    } as any,
-  })
-
-  try {
-    await services.setupMacos({
-      assistant: {
-        preset: 'openai-compatible',
-        enabled: true,
-        provider: 'openai-compatible',
-        model: 'gpt-oss:20b',
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiKeyEnv: 'OLLAMA_API_KEY',
-        providerName: 'ollama',
-        codexCommand: null,
-        profile: null,
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        oss: false,
-        account: null,
-        detail: 'Use gpt-oss:20b through Ollama.',
-      },
-      vault: vaultRoot,
-      whisperModel: 'base.en',
-    })
-
-    const operatorConfig = await readOperatorConfig(homeRoot)
-    assert.equal(operatorConfig?.assistant?.backend?.adapter, 'openai-compatible')
-    assert.equal(operatorConfig?.assistant?.backend?.model, 'gpt-oss:20b')
-    assert.deepEqual(operatorConfig?.assistant?.backend?.headers, {
-      'X-Foo': 'bar',
-    })
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
 test.sequential('setup updates codexCommand when provided and preserves a saved custom path when omitted on rerun', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-codex-command-'))
   const homeRoot = path.join(tempRoot, 'home')
@@ -3037,6 +2892,50 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
         ? preservedOperatorConfig.assistant.backend.codexCommand
         : null,
       '/opt/bin/codex-new',
+    )
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup persistence can replace legacy OpenAI-compatible assistant defaults', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-replace-legacy-openai-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(homeRoot, 'vault')
+
+  try {
+    await writeLegacySetupAssistantOperatorConfig(homeRoot)
+
+    await saveDefaultVaultConfig(vaultRoot, homeRoot)
+    await saveAssistantOperatorDefaultsPatch(
+      buildAssistantProviderDefaultsPatch({
+        defaults: null,
+        provider: 'codex-cli',
+        providerConfig: {
+          model: 'gpt-5.5',
+          modelProvider: 'vercel-ai-gateway',
+          sandbox: 'danger-full-access',
+          approvalPolicy: 'never',
+          oss: false,
+        },
+      }),
+      homeRoot,
+    )
+
+    const config = await readOperatorConfig(homeRoot)
+    assert.equal(config?.defaultVault, '~/vault')
+    assert.equal(config?.assistant?.backend?.adapter, 'codex-cli')
+    assert.equal(
+      config?.assistant?.backend?.adapter === 'codex-cli'
+        ? config.assistant.backend.model
+        : null,
+      'gpt-5.5',
+    )
+    assert.equal(
+      config?.assistant?.backend?.adapter === 'codex-cli'
+        ? config.assistant.backend.modelProvider
+        : null,
+      'vercel-ai-gateway',
     )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -3441,6 +3340,25 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
 
   try {
     const result = await services.setupMacos({
+      assistant: {
+        preset: 'codex',
+        enabled: true,
+        provider: 'codex-cli',
+        model: 'gpt-5.4',
+        modelProvider: null,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        codexCommand: path.join(homeRoot, '.codex', 'bin', 'codex'),
+        codexHome: path.join(homeRoot, '.codex'),
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'danger-full-access',
+        approvalPolicy: 'never',
+        oss: false,
+        account: null,
+        detail: `Use Codex at ${path.join(homeRoot, '.codex')}.`,
+      },
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -3471,6 +3389,9 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
         siblingPrefixPath,
       ],
     )
+    assert.equal(result.assistant?.codexCommand, '[path]')
+    assert.equal(result.assistant?.codexHome, '[path]')
+    assert.equal(result.assistant?.detail, 'Use Codex at ~/.codex.')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -4337,6 +4258,37 @@ test('setup service rejects non-macOS hosts', async () => {
     },
   )
 })
+
+async function writeLegacySetupAssistantOperatorConfig(homeRoot: string): Promise<void> {
+  const configPath = resolveOperatorConfigPath(homeRoot)
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      schema: 'murph.operator-config.v1',
+      defaultVault: null,
+      assistant: {
+        backend: {
+          adapter: 'openai-compatible',
+          apiKeyEnv: 'OPENAI_API_KEY',
+          endpoint: 'https://api.openai.example/v1',
+          headers: null,
+          model: 'gpt-4.1-mini',
+          presetId: 'openai',
+          providerName: 'openai',
+          reasoningEffort: null,
+          webSearch: null,
+        },
+        account: null,
+        failoverRoutes: null,
+        identityId: null,
+        selfDeliveryTargets: null,
+      },
+      updatedAt: '2026-04-28T00:00:00.000Z',
+    }),
+    'utf8',
+  )
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

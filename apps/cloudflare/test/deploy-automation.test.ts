@@ -75,8 +75,11 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID: "tee-automation:v1",
       HOSTED_WAKE_ENCRYPTION_KEY_VERSION: "wake:v2",
-      HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS: "openai",
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
+      HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
@@ -204,8 +207,11 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID).toBe("tee-automation:v1");
     expect(config.vars.HOSTED_WAKE_ENCRYPTION_KEY_VERSION).toBe("wake:v2");
     expect(config.vars.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID).toBe("callback:v2");
-    expect(config.vars.HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS).toBe("openai");
-    expect(config.vars.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBe("true");
+    expect(config.vars.HOSTED_ASSISTANT_APPROVAL_POLICY).toBe("never");
+    expect(config.vars.HOSTED_ASSISTANT_MODEL).toBe("gpt-5.5");
+    expect(config.vars.HOSTED_ASSISTANT_PROVIDER).toBe("vercel-ai-gateway");
+    expect(config.vars.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
+    expect(config.vars.HOSTED_ASSISTANT_SANDBOX).toBe("danger-full-access");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
@@ -493,7 +499,6 @@ describe("hosted deploy automation helpers", () => {
       NVIDIA_API_KEY: "nvidia-key",
       NGC_API_KEY: "ngc-key",
       OLLAMA_API_KEY: "ollama-key",
-      OPENAI_API_KEY: "sk-user",
       PERPLEXITY_API_KEY: "perplexity-key",
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
@@ -530,7 +535,6 @@ describe("hosted deploy automation helpers", () => {
       NVIDIA_API_KEY: "nvidia-key",
       NGC_API_KEY: "ngc-key",
       OLLAMA_API_KEY: "ollama-key",
-      OPENAI_API_KEY: "sk-user",
       PERPLEXITY_API_KEY: "perplexity-key",
       STRAVA_CLIENT_ID: "strava-client-id",
       STRAVA_CLIENT_SECRET: "strava-client-secret",
@@ -542,25 +546,23 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps only known hosted assistant provider env names in deploy automation", () => {
     expect(buildHostedWorkerSecretsPayload({
-      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       HOSTED_WAKE_ENCRYPTION_KEY: "hosted-mailbox-encryption-key",
-      OPENAI_API_KEY: "sk-user",
+      VERCEL_AI_API_KEY: "sk-user",
     })).toMatchObject({
-      OPENAI_API_KEY: "sk-user",
+      VERCEL_AI_API_KEY: "sk-user",
     });
 
     expect(buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
@@ -575,8 +577,8 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
-      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
 
     expect(readHostedDeployAutomationEnvironment({
@@ -584,8 +586,8 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
-      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
     }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
   });
 

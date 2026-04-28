@@ -289,8 +289,8 @@ describe('assistant status', () => {
         routes: [
           {
             routeId: 'route-openai',
-            label: 'OpenAI',
-            provider: 'openai-compatible',
+            label: 'Codex',
+            provider: 'codex-cli',
             model: 'gpt-5.4',
             failureCount: 1,
             successCount: 0,
@@ -331,7 +331,7 @@ describe('assistant status', () => {
         schema: 'murph.assistant-turn-receipt.v1',
         turnId: 'turn-1',
         sessionId: 'session-123',
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
         providerModel: 'gpt-5.4',
         promptPreview: 'hi',
         responsePreview: 'hello',
@@ -542,7 +542,7 @@ describe('assistant status', () => {
 })
 
 describe('assistant service-result seam', () => {
-  it('normalizes ask results for return by redacting session secrets', () => {
+  it('normalizes ask results for return with Codex session options', () => {
     const result = normalizeAssistantAskResultForReturn({
       vault: '/tmp/assistant-vault',
       status: 'completed',
@@ -552,16 +552,16 @@ describe('assistant service-result seam', () => {
         schema: 'murph.assistant-session.v1',
         sessionId: 'session-service-result',
         target: {
-          adapter: 'openai-compatible',
-          apiKeyEnv: 'OPENAI_API_KEY',
-          endpoint: 'https://api.example.com/v1',
-          headers: {
-            Authorization: 'Bearer target-secret',
-            'X-Trace': 'trace-target',
-          },
-          model: 'gpt-5.4',
-          providerName: 'murph-openai',
+          adapter: 'codex-cli',
+          approvalPolicy: 'never',
+          codexCommand: null,
+          codexHome: null,
+          model: 'gpt-5.5',
+          modelProvider: 'vercel-ai-gateway',
+          oss: false,
+          profile: null,
           reasoningEffort: 'medium',
+          sandbox: 'danger-full-access',
         },
         resumeState: {
           providerSessionId: 'provider-session-1',
@@ -590,15 +590,16 @@ describe('assistant service-result seam', () => {
 
     expect(assistantAskResultSchema.parse(result)).toEqual(result)
     expect(result.session.target).toMatchObject({
-      adapter: 'openai-compatible',
-      headers: {
-        Authorization: '[REDACTED]',
-        'X-Trace': 'trace-target',
-      },
+      adapter: 'codex-cli',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
     })
-    expect(result.session.providerOptions.headers).toEqual({
-      Authorization: '[REDACTED]',
-      'X-Trace': 'trace-target',
+    expect(result.session.providerOptions).toMatchObject({
+      executionDriver: 'codex-app-server',
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
+      resumeKind: 'codex-thread',
     })
     expect(result.session.resumeState).toEqual({
       providerSessionId: 'provider-session-1',
@@ -695,7 +696,7 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
         schema: 'murph.assistant-turn-receipt.v1',
         turnId: 'turn-stored',
         sessionId: 'session-stored',
-        provider: 'openai-compatible',
+        provider: 'codex-cli',
         providerModel: 'gpt-5.4',
         promptPreview: 'stored prompt',
         responsePreview: 'stored response',

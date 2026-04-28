@@ -754,11 +754,16 @@ test('model schema explains preset-gated non-interactive updates', async () => {
 
   assert.match(
     String(schema.options.properties.preset?.description ?? ''),
-    /Required for non-interactive updates/u,
+    /only accepts Codex/u,
   )
+  assert.equal('providerPreset' in schema.options.properties, false)
+  assert.equal('baseUrl' in schema.options.properties, false)
+  assert.equal('apiKeyEnv' in schema.options.properties, false)
+  assert.equal('headersJson' in schema.options.properties, false)
+  assert.equal('modelProvider' in schema.options.properties, true)
   assert.match(
-    String(schema.options.properties.providerPreset?.description ?? ''),
-    /Only applies with `--preset openai-compatible`/u,
+    String(schema.options.properties.modelProvider?.description ?? ''),
+    /Codex model provider/u,
   )
   assert.match(
     String(schema.options.properties.profile?.description ?? ''),

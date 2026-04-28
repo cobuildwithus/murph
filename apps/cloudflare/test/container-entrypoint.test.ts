@@ -790,7 +790,7 @@ describe("startHostedContainerEntrypoint", () => {
           }).job,
           runtime: {
             userEnv: {
-              OPENAI_API_KEY: 123,
+              VERCEL_AI_API_KEY: 123,
             },
           },
         },
@@ -806,7 +806,7 @@ describe("startHostedContainerEntrypoint", () => {
     await expect(response.json()).resolves.toMatchObject({
       code: "type_error",
       details: {
-        errorDetail: expect.stringContaining("config.userEnv.OPENAI_API_KEY must be a string"),
+        errorDetail: expect.stringContaining("config.userEnv.VERCEL_AI_API_KEY must be a string"),
       },
       error: "Invalid request.",
       errorName: "TypeError",
@@ -863,7 +863,7 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("redacts downstream runtime secrets while surfacing safe failure diagnostics", async () => {
     const spy = vi.spyOn(nodeRunner, "runHostedWorkspaceInvocation").mockRejectedValue(
-      new Error("Authorization: Bearer placeholder for ops@example.com OPENAI_API_KEY=placeholder"),
+      new Error("Authorization: Bearer placeholder for ops@example.com VERCEL_AI_API_KEY=placeholder"),
     );
 
     try {
@@ -898,7 +898,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(payload).toMatchObject({
         code: "authorization_error",
         details: {
-          errorDetail: "Authorization=Bearer [redacted] for [redacted-email] OPENAI_API_KEY=[redacted]",
+          errorDetail: "Authorization=Bearer [redacted] for [redacted-email] VERCEL_AI_API_KEY=[redacted]",
         },
         error: "Hosted execution authorization failed.",
         errorName: "Error",

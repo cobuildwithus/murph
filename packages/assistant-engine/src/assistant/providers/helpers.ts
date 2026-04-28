@@ -1,152 +1,18 @@
-import type { ModelMessage, UserModelMessage } from 'ai'
 import { getAssistantBindingContextLines } from '../bindings.js'
-import { resolveOpenAICompatibleProviderTitle } from '@murphai/operator-config/assistant/openai-compatible-provider-presets'
 import {
   normalizeNullableString,
-  readAssistantEnvString,
 } from '../shared.js'
 import {
-  isAssistantCodexTargetConfig,
-  isAssistantOpenAICompatibleTargetConfig,
-  isAssistantResponsesTargetConfig,
-  normalizeAssistantHeaders,
   supportsAssistantNativeResume,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import type {
   AssistantUserMessageContentPart,
-} from '../../model-harness.js'
+} from '../content-types.js'
 import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
 } from './types.js'
-
-export function buildOpenAICompatibleDiscoveryHeaders(input: {
-  config: AssistantProviderConfig
-  env?: NodeJS.ProcessEnv
-}): Record<string, string> {
-  const headers =
-    normalizeAssistantHeaders({
-      Accept: 'application/json',
-      ...(isAssistantOpenAICompatibleTargetConfig(input.config)
-        ? (input.config.target.headers ?? {})
-        : {}),
-    }) ?? {
-      Accept: 'application/json',
-    }
-  const env = {
-    ...process.env,
-    ...(input.env ?? {}),
-  }
-  const apiKeyValue = readAssistantEnvString(
-    env,
-    isAssistantOpenAICompatibleTargetConfig(input.config)
-      ? input.config.target.apiKeyEnv
-      : null,
-  )
-
-  if (apiKeyValue && !('Authorization' in headers)) {
-    headers.Authorization = `Bearer ${apiKeyValue}`
-  }
-
-  return headers
-}
-
-export function buildAssistantProviderLabel(config: AssistantProviderConfig): string {
-  const explicitProviderName = normalizeNullableString(
-    isAssistantOpenAICompatibleTargetConfig(config)
-      ? config.target.providerName
-      : null,
-  )
-  if (explicitProviderName) {
-    return (
-      resolveOpenAICompatibleProviderTitle({
-        providerName: explicitProviderName,
-      }) ?? explicitProviderName
-    )
-  }
-
-  if (isAssistantCodexTargetConfig(config)) {
-    return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
-  }
-  if (!isAssistantOpenAICompatibleTargetConfig(config)) {
-    return 'OpenAI-compatible endpoint'
-  }
-
-  const normalizedBaseUrl = normalizeNullableString(config.target.baseUrl)
-  const presetTitle = resolveOpenAICompatibleProviderTitle({
-    baseUrl: normalizedBaseUrl,
-  })
-  if (presetTitle) {
-    return presetTitle
-  }
-
-  if (!normalizedBaseUrl) {
-    return 'OpenAI-compatible endpoint'
-  }
-
-  try {
-    const parsed = new URL(normalizedBaseUrl)
-    return parsed.host
-      ? `OpenAI-compatible endpoint at ${parsed.host}`
-      : 'OpenAI-compatible endpoint'
-  } catch {
-    return 'OpenAI-compatible endpoint'
-  }
-}
-
-export function ensureTrailingSlash(baseUrl: string): string {
-  return baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
-}
-
-function sanitizeAssistantProviderConversationMessages(
-  messages: AssistantProviderTurnExecutionInput['conversationMessages'],
-): ModelMessage[] {
-  const sanitized: ModelMessage[] = []
-
-  for (const message of messages ?? []) {
-    if (message.role === 'assistant') {
-      const content =
-        Array.isArray(message.content)
-          ? serializeAssistantConversationContent(message.content)
-          : message.content.trim()
-      if (content.length === 0) {
-        continue
-      }
-
-      sanitized.push({
-        role: 'assistant',
-        content,
-      })
-      continue
-    }
-
-    if (Array.isArray(message.content)) {
-      const content = sanitizeAssistantModelContentParts(message.content)
-      if (content.length === 0) {
-        continue
-      }
-
-      sanitized.push({
-        role: 'user',
-        content,
-      } satisfies UserModelMessage)
-      continue
-    }
-
-    const content = message.content.trim()
-    if (content.length === 0) {
-      continue
-    }
-
-    sanitized.push({
-      role: 'user',
-      content,
-    } satisfies UserModelMessage)
-  }
-
-  return sanitized
-}
 
 function requireAssistantProviderUserPrompt(
   input: AssistantProviderTurnExecutionInput,
@@ -182,9 +48,8 @@ function hasAssistantProviderUsableNativeResume(
     return false
   }
 
-  return isAssistantResponsesTargetConfig(input.providerConfig)
-    ? resumeProviderSessionId.startsWith('resp_')
-    : true
+  void resumeProviderSessionId
+  return true
 }
 
 export type AssistantProviderHistoryMode =
@@ -316,29 +181,6 @@ function serializeAssistantConversationContent(
     .trim()
 }
 
-function buildAssistantProviderUserMessageContent(
-  input: AssistantProviderTurnExecutionInput,
-): string | AssistantUserMessageContentPart[] | null {
-  const explicitContent = Array.isArray(input.userMessageContent)
-    ? sanitizeAssistantModelContentParts(input.userMessageContent)
-    : []
-
-  if (explicitContent.length === 0) {
-    return null
-  }
-
-  const content: AssistantUserMessageContentPart[] = []
-  const contextSections = resolveAssistantProviderContextSections(input)
-  if (contextSections.length > 0) {
-    content.push({
-      type: 'text',
-      text: contextSections.join('\n\n'),
-    })
-  }
-  content.push(...explicitContent)
-  return content
-}
-
 export function resolveAssistantProviderPrompt(
   input: AssistantProviderTurnExecutionInput,
 ): string {
@@ -361,57 +203,6 @@ export function resolveAssistantProviderPrompt(
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n\n')
-}
-
-export function buildAssistantProviderMessages(
-  input: AssistantProviderTurnExecutionInput,
-): ModelMessage[] {
-  const messages = buildAssistantProviderHistoryMessages(input)
-  const userMessageContent = buildAssistantProviderUserMessageContent(input)
-  if (userMessageContent) {
-    messages.push({
-      role: 'user',
-      content: userMessageContent,
-    })
-    return messages
-  }
-
-  const prompt = normalizeNullableString(input.prompt)
-  if (prompt) {
-    messages.push({
-      role: 'user',
-      content: prompt,
-    })
-    return messages
-  }
-
-  messages.push({
-    role: 'user',
-    content: resolveAssistantProviderComposedUserContent(input, {
-      labelUserPrompt: false,
-    }),
-  })
-  return messages
-}
-
-function buildAssistantProviderHistoryMessages(
-  input: AssistantProviderTurnExecutionInput,
-): ModelMessage[] {
-  const appendActiveTurnMessages = (messages: ModelMessage[]): ModelMessage[] => [
-    ...messages,
-    ...sanitizeAssistantProviderConversationMessages(input.activeTurnMessages),
-  ]
-
-  switch (resolveAssistantProviderHistoryMode(input)) {
-    case 'none':
-      return appendActiveTurnMessages([])
-    case 'structured-messages':
-      return appendActiveTurnMessages(
-        sanitizeAssistantProviderConversationMessages(
-          input.conversationMessages,
-        ),
-      )
-  }
 }
 
 export function mergeCodexConfigOverrides(input: {
@@ -445,124 +236,6 @@ function upsertCodexConfigOverride(
   }
 
   overrides.push(`${key}=${value}`)
-}
-
-export function extractOpenAICompatibleAssistantProviderUsage(input: {
-  providerConfig: AssistantProviderConfig
-  result: unknown
-}): AssistantProviderUsage {
-  const resultRecord = readAssistantProviderRecord(input.result)
-  const usageRecord =
-    readAssistantProviderRecord(resultRecord?.totalUsage) ??
-    readAssistantProviderRecord(resultRecord?.usage)
-  const providerMetadata = readAssistantProviderRecord(resultRecord?.providerMetadata)
-  const openAiProviderMetadata = readAssistantProviderRecord(providerMetadata?.openai)
-  const rawRecord = readAssistantProviderRecord(resultRecord?.raw)
-  const responseRecord = readAssistantProviderRecord(resultRecord?.response)
-  const requestRecord = readAssistantProviderRecord(resultRecord?.request)
-  const inputTokens =
-    readAssistantProviderInteger(
-      usageRecord,
-      'inputTokens',
-      'promptTokens',
-      'prompt_tokens',
-      'input_tokens',
-    ) ??
-    readAssistantProviderInteger(rawRecord, 'inputTokens', 'promptTokens')
-  const outputTokens =
-    readAssistantProviderInteger(
-      usageRecord,
-      'outputTokens',
-      'completionTokens',
-      'completion_tokens',
-      'output_tokens',
-    ) ??
-    readAssistantProviderInteger(rawRecord, 'outputTokens', 'completionTokens')
-  const cachedInputTokens =
-    readAssistantProviderInteger(
-      usageRecord,
-      'cachedInputTokens',
-      'cached_input_tokens',
-    ) ??
-    readAssistantProviderNestedInteger(
-      usageRecord,
-      ['inputTokensDetails', 'input_tokens_details'],
-      ['cachedTokens', 'cached_tokens'],
-    ) ??
-    readAssistantProviderNestedInteger(
-      usageRecord,
-      ['promptTokensDetails', 'prompt_tokens_details'],
-      ['cachedTokens', 'cached_tokens'],
-    )
-
-  return {
-    apiKeyEnv:
-      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
-        ? input.providerConfig.target.apiKeyEnv
-        : null,
-    baseUrl:
-      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
-        ? input.providerConfig.target.baseUrl
-        : null,
-    cacheWriteTokens: readAssistantProviderInteger(
-      usageRecord,
-      'cacheWriteTokens',
-      'cache_write_tokens',
-    ),
-    cachedInputTokens,
-    inputTokens,
-    outputTokens,
-    providerMetadataJson: providerMetadata ?? null,
-    providerName:
-      isAssistantOpenAICompatibleTargetConfig(input.providerConfig)
-        ? input.providerConfig.target.providerName
-        : null,
-    providerRequestId: readAssistantProviderString(
-      openAiProviderMetadata?.responseId,
-      responseRecord?.requestId,
-      responseRecord?.id,
-      requestRecord?.id,
-      rawRecord?.id,
-    ),
-    rawUsageJson:
-      usageRecord
-      ?? readAssistantProviderRecord(resultRecord?.usage)
-      ?? rawRecord
-      ?? null,
-    reasoningTokens: readAssistantProviderInteger(
-      usageRecord,
-      'reasoningTokens',
-      'reasoning_tokens',
-    ),
-    requestedModel: input.providerConfig.target.model,
-    servedModel: readAssistantProviderString(
-      responseRecord?.modelId,
-      responseRecord?.model,
-      rawRecord?.model,
-      providerMetadata?.model,
-    ) ?? input.providerConfig.target.model,
-    totalTokens:
-      readAssistantProviderInteger(usageRecord, 'totalTokens', 'total_tokens')
-      ?? resolveAssistantProviderTotalTokens({
-        inputTokens,
-        outputTokens,
-      }),
-  }
-}
-
-export function extractOpenAICompatibleProviderSessionId(
-  result: unknown,
-): string | null {
-  const resultRecord = readAssistantProviderRecord(result)
-  const providerMetadata = readAssistantProviderRecord(resultRecord?.providerMetadata)
-  const openAiProviderMetadata = readAssistantProviderRecord(providerMetadata?.openai)
-  const responseRecord = readAssistantProviderRecord(resultRecord?.response)
-
-  return readAssistantProviderString(
-    openAiProviderMetadata?.responseId,
-    responseRecord?.id,
-    responseRecord?.responseId,
-  )
 }
 
 export function extractCodexAssistantProviderUsage(input: {
@@ -702,27 +375,6 @@ function readAssistantProviderInteger(
     const value = record[key]
 
     if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
-      return value
-    }
-  }
-
-  return null
-}
-
-function readAssistantProviderNestedInteger(
-  record: Record<string, unknown> | null | undefined,
-  recordKeys: readonly string[],
-  valueKeys: readonly string[],
-): number | null {
-  if (!record) {
-    return null
-  }
-
-  for (const recordKey of recordKeys) {
-    const nested = readAssistantProviderRecord(record[recordKey])
-    const value = readAssistantProviderInteger(nested, ...valueKeys)
-
-    if (value !== null) {
       return value
     }
   }

@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildHostLoopbackStubBaseUrl,
   mergeRequiredEnvProfile,
-  startAssistantProviderStubServer,
-  stopHttpStubServer,
+  resolveHostedAssistantLocalDevEnv,
 } from "./helpers/hosted-local-e2e-support.js";
 
 describe("mergeRequiredEnvProfile", () => {
@@ -17,73 +15,40 @@ describe("mergeRequiredEnvProfile", () => {
   });
 });
 
-describe("startAssistantProviderStubServer", () => {
-  it("serves queued responses through the OpenAI Responses API shape", async () => {
-    const server = await startAssistantProviderStubServer({
-      responseState: {
-        queuedResponseTexts: ['{"kind":"send_message","privateSummary":"deliver","text":"hello"}'],
+describe("resolveHostedAssistantLocalDevEnv", () => {
+  it("seeds Codex Vercel AI Gateway config in local stub mode", () => {
+    const env = resolveHostedAssistantLocalDevEnv(
+      {
+        HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "12345",
       },
+      "stub",
+      null,
+      "Hosted local test",
+    );
+
+    expect(env).toMatchObject({
+      HOSTED_ASSISTANT_MODEL: "gpt-5.5",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
+      HOSTED_EXECUTION_RUNNER_TIMEOUT_MS: "12345",
+      VERCEL_AI_API_KEY: "stub-local-vercel-ai-gateway-key",
     });
+    expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
+    expect(env.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
+    expect(env.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
 
-    try {
-      const response = await fetch(
-        `${buildHostLoopbackStubBaseUrl(server, "assistant provider stub")}/v1/responses`,
-        {
-          body: JSON.stringify({
-            input: "hello",
-            model: "stub-openrouter-model",
-          }),
-          headers: {
-            "content-type": "application/json",
-          },
-          method: "POST",
-        },
-      );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({
-        id: "resp_stub_hosted_local_e2e",
-        model: "stub-openrouter-model",
-        output: [
-          {
-            content: [
-              {
-                annotations: [],
-                text: '{"kind":"send_message","privateSummary":"deliver","text":"hello"}',
-                type: "output_text",
-              },
-            ],
-            id: "msg_stub_hosted_local_e2e",
-            role: "assistant",
-            type: "message",
-          },
-        ],
-        usage: {
-          input_tokens: 24,
-          output_tokens: 11,
-        },
-      });
-
-      const unqueuedResponse = await fetch(
-        `${buildHostLoopbackStubBaseUrl(server, "assistant provider stub")}/v1/responses`,
-        {
-          body: JSON.stringify({
-            input: "hello again",
-            model: "stub-openrouter-model",
-          }),
-          headers: {
-            "content-type": "application/json",
-          },
-          method: "POST",
-        },
-      );
-
-      expect(unqueuedResponse.status).toBe(500);
-      await expect(unqueuedResponse.json()).resolves.toMatchObject({
-        error: expect.stringContaining("without a queued response"),
-      });
-    } finally {
-      await stopHttpStubServer(server);
-    }
+  it("fails closed in live mode without explicit hosted assistant provider and model", () => {
+    expect(() =>
+      resolveHostedAssistantLocalDevEnv(
+        {},
+        "live",
+        null,
+        "Hosted local test",
+      )
+    ).toThrow(
+      "Hosted local test requires explicit hosted assistant config in live mode.",
+    );
   });
 });

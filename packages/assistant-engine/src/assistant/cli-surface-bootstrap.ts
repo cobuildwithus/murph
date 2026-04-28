@@ -6,8 +6,8 @@ import {
   type AssistantCliLlmsManifest,
   type AssistantCliLlmsManifestCommand,
   type AssistantCliLlmsManifestSchemaNode,
-} from '../assistant-cli-tools.js'
-import { buildAssistantCliProcessEnv } from '../assistant-cli-tools/execution-adapters.js'
+  buildAssistantCliProcessEnv,
+} from './cli-surface-manifest.js'
 import { ensureAssistantStateDirectory, isMissingFileError, writeJsonFileAtomic } from './shared.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
@@ -20,6 +20,14 @@ const assistantCliSurfaceBootstrapOptionalOptionLimit = 4
 const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'requestId',
   'vault',
+])
+const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
+  'assistant ask',
+  'assistant chat',
+  'assistant deliver',
+  'assistant run',
+  'chat',
+  'run',
 ])
 
 const cachedAssistantCliSurfaceContractPromises = new Map<
@@ -196,7 +204,6 @@ async function generateAssistantCliSurfaceContract(input: {
       cliEnv: input.cliEnv,
       detail: 'full',
       executionContext: input.executionContext,
-      vault: input.vault,
       workingDirectory: input.workingDirectory,
     })
     return buildAssistantCliSurfaceContract(manifest, {
@@ -207,7 +214,6 @@ async function generateAssistantCliSurfaceContract(input: {
       cliEnv: input.cliEnv,
       detail: 'compact',
       executionContext: input.executionContext,
-      vault: input.vault,
       workingDirectory: input.workingDirectory,
     })
     return buildAssistantCliSurfaceContract(manifest, {
@@ -224,7 +230,11 @@ function normalizeAssistantCliManifestCommands(
 
   for (const command of manifest.commands) {
     const name = command.name.trim()
-    if (name.length === 0 || seenCommandNames.has(name)) {
+    if (
+      name.length === 0 ||
+      seenCommandNames.has(name) ||
+      assistantCliSurfaceBootstrapIgnoredCommandNames.has(name)
+    ) {
       continue
     }
 
@@ -260,7 +270,7 @@ function renderAssistantCliSurfaceContract(
   const groupedCommands = groupAssistantCliManifestCommands(commands)
   const lines = [
     'Murph CLI Contract:',
-    'Canonical executor: `vault.cli.run`. Pass only the tokens after `vault-cli`.',
+    'Use `vault-cli` directly from the local process. Command names below are the tokens after `vault-cli`.',
     sourceDetail === 'full'
       ? 'This block is compiled automatically from `vault-cli --llms-full --format json` at session bootstrap.'
       : 'This block is compiled automatically from `vault-cli --llms --format json` at session bootstrap because the full manifest was unavailable.',

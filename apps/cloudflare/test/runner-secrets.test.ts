@@ -11,27 +11,22 @@ describe("hosted runner secrets payload decoding", () => {
     expect(decodeHostedRunnerSecretsPayload(null)).toEqual({});
   });
 
-  it("decodes canonical model credentials from the stored payload", () => {
+  it("decodes the canonical hosted Codex model credential from the stored payload", () => {
     const payload = encodeRunnerSecretsPayload({
-      OPENAI_API_KEY: "sk-user",
-      XAI_API_KEY: "xai-user",
+      VERCEL_AI_API_KEY: "sk-user",
     });
 
     expect(decodeHostedRunnerSecretsPayload(payload)).toEqual({
-      OPENAI_API_KEY: "sk-user",
-      XAI_API_KEY: "xai-user",
+      VERCEL_AI_API_KEY: "sk-user",
     });
   });
 
   it("drops blank values during normalization", () => {
     const payload = encodeRunnerSecretsPayload({
-      OPENAI_API_KEY: "  ",
-      XAI_API_KEY: "xai-user",
+      VERCEL_AI_API_KEY: "  ",
     });
 
-    expect(decodeHostedRunnerSecretsPayload(payload)).toEqual({
-      XAI_API_KEY: "xai-user",
-    });
+    expect(decodeHostedRunnerSecretsPayload(payload)).toEqual({});
   });
 
   it("accepts extension-only keys only when the same allowlist source is provided on read", () => {
@@ -72,14 +67,14 @@ describe("hosted runner secrets payload decoding", () => {
   it("rejects invalid secret value types", () => {
     const payload = new TextEncoder().encode(JSON.stringify({
       env: {
-        OPENAI_API_KEY: 123,
+        VERCEL_AI_API_KEY: 123,
       },
       schema: HOSTED_RUNNER_SECRETS_SCHEMA,
       updatedAt: "2026-03-26T12:00:00.000Z",
     }));
 
     expect(() => decodeHostedRunnerSecretsPayload(payload)).toThrow(
-      "Hosted runner secret value for OPENAI_API_KEY must be a string.",
+      "Hosted runner secret value for VERCEL_AI_API_KEY must be a string.",
     );
   });
 });

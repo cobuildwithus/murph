@@ -34,39 +34,30 @@ const BASE_SESSION: AssistantSession = {
   schema: 'murph.assistant-session.v1',
   sessionId: 'session-security-demo',
   target: {
-    adapter: 'openai-compatible',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    endpoint: 'http://127.0.0.1:11434/v1',
-    headers: {
-      Authorization: 'Bearer secret-token-12345678',
-      'X-Workspace': 'murph',
-    },
+    adapter: 'codex-cli',
+    approvalPolicy: 'never',
+    codexCommand: null,
+    codexHome: null,
     model: null,
-    presetId: null,
-    providerName: 'ollama',
+    modelProvider: null,
+    oss: false,
+    profile: null,
     reasoningEffort: null,
-    webSearch: null,
+    sandbox: 'danger-full-access',
   },
   resumeState: null,
-  provider: 'openai-compatible',
+  provider: 'codex-cli',
   providerOptions: {
     continuityFingerprint: 'fingerprint-doctor-security',
-    provider: 'openai-compatible',
+    provider: 'codex-cli',
     model: null,
     reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
+    sandbox: 'danger-full-access',
+    approvalPolicy: 'never',
     profile: null,
     oss: false,
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnv: 'OPENAI_API_KEY',
-    executionDriver: 'openai-compatible',
-    providerName: 'ollama',
+    executionDriver: 'codex-app-server',
     resumeKind: null,
-    headers: {
-      Authorization: 'Bearer secret-token-12345678',
-      'X-Workspace': 'murph',
-    },
   },
   alias: 'chat:security',
   binding: {
@@ -112,7 +103,7 @@ afterEach(async () => {
   )
 })
 
-test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sidecars, and orphan sidecars', async () => {
+test('inspectAndRepairAssistantStateSecrecy counts malformed sidecars and orphan sidecars', async () => {
   runtimeMocks.auditAssistantStatePermissions.mockResolvedValueOnce({
     incorrectEntries: 2,
     issues: [],
@@ -209,8 +200,8 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
       scannedOtherEntries: 0,
     },
     sessionFilesScanned: 1,
-    sessionInlineSecretFiles: 1,
-    sessionInlineSecretHeaders: 1,
+    sessionInlineSecretFiles: 0,
+    sessionInlineSecretHeaders: 0,
     sessionSecretSidecarFiles: 5,
   })
 

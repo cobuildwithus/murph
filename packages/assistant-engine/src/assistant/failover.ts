@@ -450,6 +450,7 @@ function buildAssistantFailoverRouteIdentity(input: {
     provider: input.provider,
     executionDriver: input.providerOptions.executionDriver,
     model: input.providerOptions.model,
+    modelProvider: input.providerOptions.modelProvider ?? null,
     reasoningEffort: input.providerOptions.reasoningEffort,
     sandbox: input.providerOptions.sandbox,
     approvalPolicy: input.providerOptions.approvalPolicy,

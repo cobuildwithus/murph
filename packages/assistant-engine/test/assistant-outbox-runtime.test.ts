@@ -132,7 +132,7 @@ describe('assistant outbox runtime', () => {
     await createAssistantTurnReceipt({
       deliveryRequested: true,
       prompt: 'queue this message',
-      provider: 'openai-compatible',
+      provider: 'codex-cli',
       providerModel: 'gpt-5.4',
       sessionId: 'session-dedupe-repair',
       turnId: 'turn-dedupe-repair',
@@ -1516,7 +1516,7 @@ function createAssistantSession(input?: {
     },
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
-    provider: target.adapter,
+    provider: 'codex-cli',
     providerOptions: serializeAssistantProviderSessionOptions({
       approvalPolicy: 'never',
       codexHome: null,

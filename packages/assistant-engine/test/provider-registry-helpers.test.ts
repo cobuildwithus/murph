@@ -11,21 +11,16 @@ import {
   normalizeDiscoveredModelIds,
 } from '../src/assistant/providers/catalog.ts'
 import {
-  buildAssistantProviderLabel,
-  buildAssistantProviderMessages,
-  buildOpenAICompatibleDiscoveryHeaders,
-  ensureTrailingSlash,
   extractCodexAssistantProviderUsage,
-  extractOpenAICompatibleProviderSessionId,
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
 import {
-  discoverAssistantProviderModels,
   executeAssistantProviderTurnAttemptWithDefinition,
   listAssistantProviderDefinitions,
   listAssistantProviders,
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderExecutionCapabilities,
+  resolveAssistantProviderLabel,
   resolveAssistantProviderStaticModels,
   resolveAssistantProviderTargetCapabilities,
   resolveAssistantProviderTargetExecutionCapabilities,
@@ -41,57 +36,9 @@ afterEach(() => {
 })
 
 describe('assistant provider registry helpers', () => {
-  it('builds discovery headers from normalized config and injects auth only when missing', () => {
-    const injected = buildOpenAICompatibleDiscoveryHeaders({
-      config: normalizeAssistantProviderConfig({
-        provider: 'openai-compatible',
-        apiKeyEnv: 'TEST_PROVIDER_API_KEY',
-        headers: {
-          ' x-trace ': '  trace-id  ',
-        },
-      }),
-      env: {
-        TEST_PROVIDER_API_KEY: 'secret-token',
-      },
-    })
-
-    expect(injected).toEqual({
-      Accept: 'application/json',
-      Authorization: 'Bearer secret-token',
-      'X-Trace': 'trace-id',
-    })
-
-    const explicitAuthorization = buildOpenAICompatibleDiscoveryHeaders({
-      config: normalizeAssistantProviderConfig({
-        provider: 'openai-compatible',
-        apiKeyEnv: 'TEST_PROVIDER_API_KEY',
-        headers: {
-          authorization: 'Bearer preconfigured',
-        },
-      }),
-      env: {
-        TEST_PROVIDER_API_KEY: 'secret-token',
-      },
-    })
-
-    expect(explicitAuthorization).toEqual({
-      Accept: 'application/json',
-      Authorization: 'Bearer preconfigured',
-    })
-  })
-
-  it('resolves provider labels for presets, codex variants, unknown hosts, and generic endpoints', () => {
+  it('resolves provider labels for Codex app-server variants', () => {
     expect(
-      buildAssistantProviderLabel(
-        normalizeAssistantProviderConfig({
-          provider: 'openai-compatible',
-          providerName: 'openrouter',
-        }),
-      ),
-    ).toBe('OpenRouter')
-
-    expect(
-      buildAssistantProviderLabel(
+      resolveAssistantProviderLabel(
         normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           oss: false,
@@ -100,59 +47,16 @@ describe('assistant provider registry helpers', () => {
     ).toBe('Codex app-server')
 
     expect(
-      buildAssistantProviderLabel(
+      resolveAssistantProviderLabel(
         normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           oss: true,
         }),
       ),
     ).toBe('Codex OSS app-server')
-
-    expect(
-      buildAssistantProviderLabel(
-        normalizeAssistantProviderConfig({
-          provider: 'openai-compatible',
-          baseUrl: 'https://models.example.com/v1',
-        }),
-      ),
-    ).toBe('OpenAI-compatible endpoint at models.example.com')
-
-    expect(
-      buildAssistantProviderLabel(
-        normalizeAssistantProviderConfig({
-          provider: 'openai-compatible',
-        }),
-      ),
-    ).toBe('OpenAI-compatible endpoint')
   })
 
-  it('ensures trailing slashes before appending discovery paths', () => {
-    expect(ensureTrailingSlash('https://example.com/v1')).toBe(
-      'https://example.com/v1/',
-    )
-    expect(ensureTrailingSlash('https://example.com/v1/')).toBe(
-      'https://example.com/v1/',
-    )
-  })
-
-  it('extracts provider session ids and codex usage from sparse provider metadata', () => {
-    expect(
-      extractOpenAICompatibleProviderSessionId({
-        providerMetadata: {
-          openai: {
-            responseId: 'resp-openai-1',
-          },
-        },
-      }),
-    ).toBe('resp-openai-1')
-    expect(
-      extractOpenAICompatibleProviderSessionId({
-        response: {
-          id: 'resp-fallback-2',
-        },
-      }),
-    ).toBe('resp-fallback-2')
-
+  it('extracts Codex usage from sparse provider metadata', () => {
     expect(
       extractCodexAssistantProviderUsage({
         providerConfig: normalizeAssistantProviderConfig({
@@ -279,7 +183,7 @@ describe('assistant provider registry helpers', () => {
     ).toThrow('Assistant provider turns require either prompt or userPrompt.')
   })
 
-  it('sanitizes conversation history and preserves structured user content with context', () => {
+  it('serializes conversation history and active turn content into a Codex flat prompt', () => {
     const binding = createAssistantBinding({
       actorId: 'actor-9',
       channel: 'linq',
@@ -289,7 +193,13 @@ describe('assistant provider registry helpers', () => {
     })
 
     expect(
-      buildAssistantProviderMessages({
+      resolveAssistantProviderPrompt({
+        activeTurnMessages: [
+          {
+            role: 'assistant',
+            content: '  Draft answer  ',
+          },
+        ],
         continuityContext: 'Prefer the latest delivery target.',
         conversationMessages: [
           {
@@ -331,133 +241,49 @@ describe('assistant provider registry helpers', () => {
           },
         ],
         providerConfig: normalizeAssistantProviderConfig({
-          provider: 'openai-compatible',
+          provider: 'codex-cli',
         }),
         sessionContext: {
           binding,
         },
-        userMessageContent: [
-          {
-            type: 'text',
-            text: '   ',
-          },
-          {
-            type: 'text',
-            text: '  Latest structured question  ',
-          },
-          {
-            type: 'file',
-            data: 'note-blob',
-            filename: 'summary.txt',
-            mediaType: 'text/plain',
-          },
-        ],
-        userPrompt: 'ignored when structured content is present',
+        systemPrompt: 'You are Murph.',
+        userPrompt: 'Latest question.',
         workingDirectory: '/tmp/provider-tests',
       }),
-    ).toEqual([
-      {
-        role: 'assistant',
-        content: [
+    ).toBe(
+      [
+        'You are Murph.',
+        '',
+        'Conversation so far:',
+        'Assistant:',
+        [
           'Earlier assistant answer',
           'Assistant shared file (notes.pdf).',
           'Assistant shared image (image/png).',
         ].join('\n\n'),
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: 'Earlier user reply',
-          },
-        ],
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: [
-              'Conversation context:',
-              'channel: linq (user-facing: iMessage)',
-              'identity: identity-9',
-              'actor: actor-9',
-              'thread: chat-9',
-              'thread is direct: false',
-              'delivery: thread -> chat-9',
-              'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
-              '',
-              'Prefer the latest delivery target.',
-            ].join('\n'),
-          },
-          {
-            type: 'text',
-            text: 'Latest structured question',
-          },
-          {
-            type: 'file',
-            data: 'note-blob',
-            filename: 'summary.txt',
-            mediaType: 'text/plain',
-          },
-        ],
-      },
-    ])
-  })
-
-  it('falls back to prompt or composed plain user content when no structured content exists', () => {
-    expect(
-      buildAssistantProviderMessages({
-        prompt: '  use the explicit prompt  ',
-        providerConfig: normalizeAssistantProviderConfig({
-          provider: 'openai-compatible',
-        }),
-        workingDirectory: '/tmp/provider-tests',
-      }),
-    ).toEqual([
-      {
-        role: 'user',
-        content: 'use the explicit prompt',
-      },
-    ])
-
-    const binding = createAssistantBinding({
-      actorId: 'actor-2',
-      channel: 'telegram',
-      threadId: 'thread-2',
-      threadIsDirect: true,
-    })
-
-    expect(
-      buildAssistantProviderMessages({
-        continuityContext: 'Use the thread binding.',
-        providerConfig: normalizeAssistantProviderConfig({
-          provider: 'openai-compatible',
-        }),
-        sessionContext: {
-          binding,
-        },
-        userPrompt: '  send the reply now  ',
-        workingDirectory: '/tmp/provider-tests',
-      }),
-    ).toEqual([
-      {
-        role: 'user',
-        content: [
-          'Conversation context:',
-          'channel: telegram',
-          'actor: actor-2',
-          'thread: thread-2',
-          'thread is direct: true',
-          'delivery: thread -> thread-2',
-          '',
-          'Use the thread binding.',
-          '',
-          'send the reply now',
-        ].join('\n'),
-      },
-    ])
+        '',
+        'User:',
+        'Earlier user reply',
+        '',
+        'Active turn so far:',
+        'Assistant:',
+        'Draft answer',
+        '',
+        'Conversation context:',
+        'channel: linq (user-facing: iMessage)',
+        'identity: identity-9',
+        'actor: actor-9',
+        'thread: chat-9',
+        'thread is direct: false',
+        'delivery: thread -> chat-9',
+        'iMessage route note: this is not a confirmed direct iMessage thread, so do not use it as a personal reminder route unless the user explicitly asks to send in this thread; use internal channel "linq" only for route fields.',
+        '',
+        'Prefer the latest delivery target.',
+        '',
+        'User message:',
+        'Latest question.',
+      ].join('\n'),
+    )
   })
 
   it('normalizes discovered model ids and clones catalog capabilities', () => {
@@ -518,12 +344,9 @@ describe('assistant provider registry helpers', () => {
     })
   })
 
-  it('exposes registry capabilities and static model lists for both providers', () => {
-    expect(listAssistantProviders()).toEqual([
-      'codex-cli',
-      'openai-compatible',
-    ])
-    expect(listAssistantProviderDefinitions()).toHaveLength(2)
+  it('exposes Codex-only registry capabilities and static model lists', () => {
+    expect(listAssistantProviders()).toEqual(['codex-cli'])
+    expect(listAssistantProviderDefinitions()).toHaveLength(1)
 
     expect(resolveAssistantProviderCapabilities('codex-cli')).toEqual({
       supportedUserMessageContentTypes: ['text', 'image'],
@@ -535,28 +358,12 @@ describe('assistant provider registry helpers', () => {
     })
 
     expect(
-      resolveAssistantProviderExecutionCapabilities('openai-compatible'),
-    ).toEqual({
-      murphCommandSurface: 'bound-tools',
-      requestFormat: 'messages',
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
-      supportsModelDiscovery: true,
-      supportsNativeResume: false,
-      supportsReasoningEffort: false,
-      supportsRichUserMessageContent: true,
-      supportsZeroDataRetention: false,
-      supportsToolRuntime: true,
-    })
-
-    expect(
       resolveAssistantProviderTargetCapabilities({
-        provider: 'openai-compatible',
-        baseUrl: 'https://api.openai.com/v1',
-        presetId: 'openai',
+        provider: 'codex-cli',
       }),
     ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
-      supportsModelDiscovery: true,
+      supportedUserMessageContentTypes: ['text', 'image'],
+      supportsModelDiscovery: false,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
@@ -565,109 +372,22 @@ describe('assistant provider registry helpers', () => {
 
     expect(
       resolveAssistantProviderTargetExecutionCapabilities({
-        provider: 'openai-compatible',
-        baseUrl: 'https://api.openai.com/v1',
-        presetId: 'openai',
+        provider: 'codex-cli',
       }),
     ).toEqual({
-      murphCommandSurface: 'bound-tools',
-      requestFormat: 'messages',
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
-      supportsModelDiscovery: true,
+      murphCommandSurface: 'direct-cli',
+      requestFormat: 'flat-prompt',
+      supportedUserMessageContentTypes: ['text', 'image'],
+      supportsModelDiscovery: false,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
       supportsZeroDataRetention: false,
-      supportsToolRuntime: true,
     })
 
     expect(resolveAssistantProviderStaticModels({ provider: 'codex-cli' })).toEqual(
       DEFAULT_CODEX_MODELS,
     )
-    expect(
-      resolveAssistantProviderStaticModels({
-        provider: 'openai-compatible',
-      }),
-    ).toEqual([])
-  })
-
-  it('delegates model discovery through the registry with normalized headers and model ids', async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: [
-              { id: '  model-a  ' },
-              { id: 'model-a' },
-              { id: 'model-b' },
-              { id: null },
-            ],
-          }),
-          {
-            status: 200,
-            headers: {
-              'content-type': 'application/json',
-            },
-          },
-        ),
-      )
-
-    const result = await discoverAssistantProviderModels({
-      apiKeyEnv: 'DISCOVERY_KEY',
-      baseUrl: 'https://models.example.com/v1',
-      env: {
-        DISCOVERY_KEY: 'secret-key',
-      },
-      headers: {
-        ' x-request-id ': '  req-123  ',
-      },
-      provider: 'openai-compatible',
-    })
-
-    expect(fetchMock).toHaveBeenCalledOnce()
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      'https://models.example.com/v1/models',
-    )
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      headers: {
-        Accept: 'application/json',
-        Authorization: 'Bearer secret-key',
-        'X-Request-Id': 'req-123',
-      },
-    })
-    expect(result).toEqual({
-      message: null,
-      models: [
-        {
-          capabilities: {
-            images: true,
-            pdf: true,
-            reasoning: false,
-            streaming: true,
-            tools: true,
-          },
-          description: 'Discovered from OpenAI-compatible endpoint at models.example.com.',
-          id: 'model-a',
-          label: 'model-a',
-          source: 'discovered',
-        },
-        {
-          capabilities: {
-            images: true,
-            pdf: true,
-            reasoning: false,
-            streaming: true,
-            tools: true,
-          },
-          description: 'Discovered from OpenAI-compatible endpoint at models.example.com.',
-          id: 'model-b',
-          label: 'model-b',
-          source: 'discovered',
-        },
-      ],
-      status: 'ok',
-    })
   })
 
   it('merges progress activity labels into successful delegated execution attempts', async () => {

@@ -9,17 +9,17 @@ import { splitAssistantHeadersForPersistence } from './redaction.js'
 import { normalizeNullableString } from './shared.js'
 import {
   normalizeAssistantWebSearchMode,
+  createUnsupportedAssistantRuntimeTargetError,
+  normalizeAssistantCodexModelProvider,
+  resolveAssistantCodexModelProviderConfig,
   resolveAssistantRuntimeTarget,
-  shouldAssistantTargetUseGatewayWebSearch,
-  shouldAssistantTargetUseMurphWebSearch,
-  shouldAssistantTargetUseProviderWebSearch,
+  type AssistantCodexModelProviderConfig,
   type AssistantResolvedRuntimeTarget,
   type AssistantTargetVia,
   type AssistantWebSearchMode,
 } from './target-runtime.js'
 import {
   resolveOpenAICompatibleProviderPresetFromId,
-  resolveOpenAICompatibleProviderTargetPresetId,
   type SetupAssistantProviderPreset,
 } from './openai-compatible-provider-presets.js'
 
@@ -28,6 +28,8 @@ export interface AssistantCodexTargetConfig {
   codexCommand: string | null
   codexHome: string | null
   model: string | null
+  modelProvider: string | null
+  modelProviderConfig: AssistantCodexModelProviderConfig | null
   oss: boolean
   profile: string | null
 }
@@ -82,6 +84,8 @@ export interface AssistantProviderDefaultsConfig {
   gatewayOnlyProviders?: readonly string[] | null
   headers: Record<string, string> | null
   model: string | null
+  modelProvider: string | null
+  modelProviderConfig: AssistantCodexModelProviderConfig | null
   oss: boolean
   presetId: SetupAssistantProviderPreset | null
   profile: string | null
@@ -103,16 +107,19 @@ export type AssistantProviderConfigInput = {
   gatewayOnlyProviders?: readonly string[] | null
   headers?: Record<string, string> | null
   model?: string | null
+  modelProvider?: string | null
   oss?: boolean | null
   presetId?: string | null
   profile?: string | null
-  provider?: AssistantChatProvider | null
+  provider?: AssistantProviderInputProvider | null
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
   webSearch?: string | null
   zeroDataRetention?: boolean | null
 }
+
+type AssistantProviderInputProvider = AssistantChatProvider | 'openai-compatible'
 
 export type AssistantProviderConfigLike =
   | AssistantProviderConfigInput
@@ -127,6 +134,7 @@ const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
   'gatewayOnlyProviders',
   'headers',
   'model',
+  'modelProvider',
   'oss',
   'presetId',
   'profile',
@@ -138,14 +146,14 @@ const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
 ] as const satisfies readonly (keyof AssistantProviderConfigInput)[]
 
 export function resolveAssistantProvider(
-  provider: AssistantChatProvider | null | undefined,
-): AssistantChatProvider {
+  provider: AssistantProviderInputProvider | null | undefined,
+): AssistantProviderInputProvider {
   return provider ?? 'codex-cli'
 }
 
 export function inferAssistantProviderFromConfigInput(
   input: AssistantProviderConfigInput | null | undefined,
-): AssistantChatProvider | null {
+): AssistantProviderInputProvider | null {
   return input?.provider ?? null
 }
 
@@ -165,96 +173,37 @@ export function normalizeAssistantProviderConfig(
 }
 
 export function sanitizeAssistantProviderConfig(
-  provider: AssistantChatProvider,
+  provider: AssistantProviderInputProvider,
   input: AssistantProviderConfigInput | null | undefined,
 ): AssistantProviderConfig {
+  if (provider !== 'codex-cli') {
+    throw createUnsupportedAssistantRuntimeTargetError()
+  }
+
   const policy: AssistantProviderPolicyConfig = {
-    approvalPolicy: provider === 'codex-cli' ? input?.approvalPolicy ?? null : null,
+    approvalPolicy: input?.approvalPolicy ?? null,
     reasoningEffort:
       normalizeNullableString(input?.reasoningEffort) ??
-      (provider === 'codex-cli' ? DEFAULT_MURPH_CODEX_REASONING_EFFORT : null),
-    sandbox: provider === 'codex-cli' ? input?.sandbox ?? null : null,
-    webSearch:
-      provider === 'openai-compatible'
-        ? normalizeAssistantWebSearchMode(input?.webSearch)
-        : null,
-    zeroDataRetention:
-      provider === 'openai-compatible' && input?.zeroDataRetention === true
-        ? true
-        : null,
+      DEFAULT_MURPH_CODEX_REASONING_EFFORT,
+    sandbox: input?.sandbox ?? null,
+    webSearch: null,
+    zeroDataRetention: null,
   }
 
-  if (provider === 'codex-cli') {
-    const target: AssistantCodexTargetConfig = {
-      kind: 'codex-cli',
-      codexCommand: normalizeNullableString(input?.codexCommand),
-      codexHome: normalizeNullableString(input?.codexHome),
-      model: normalizeNullableString(input?.model),
-      oss: input?.oss === true,
-      profile: normalizeNullableString(input?.profile),
-    }
-
-    return {
-      policy,
-      target,
-    }
-  }
-
-  const presetId = resolveAssistantCompatiblePresetId(input)
-  const resolved = resolveAssistantRuntimeTarget({
-    apiKeyEnv: input?.apiKeyEnv,
-    baseUrl: input?.baseUrl,
-    gatewayOnlyProviders: input?.gatewayOnlyProviders,
-    headers: input?.headers,
-    model: input?.model,
-    presetId,
-    provider: 'openai-compatible',
-    providerName: input?.providerName,
-    reasoningEffort: policy.reasoningEffort,
-    webSearch: policy.webSearch,
-    zeroDataRetention: policy.zeroDataRetention,
-  })
-
-  const normalizedBaseUrl = normalizeNullableString(input?.baseUrl)
-  const normalizedProviderName = normalizeNullableString(input?.providerName)
-  const gatewayOnlyProviders = isAssistantGatewayOnlyProviderTarget({
-    baseUrl: normalizedBaseUrl,
-    presetId: resolved.presetId,
-    providerName: normalizedProviderName,
-  })
-    ? normalizeAssistantGatewayOnlyProviders(input?.gatewayOnlyProviders)
-    : null
-  const sharedTargetFields = {
-    apiKeyEnv: normalizeNullableString(input?.apiKeyEnv),
-    baseUrl: normalizedBaseUrl,
-    gatewayOnlyProviders,
-    headers: normalizeAssistantHeaders(input?.headers),
+  const modelProvider = normalizeAssistantCodexModelProvider(input?.modelProvider)
+  const target: AssistantCodexTargetConfig = {
+    kind: 'codex-cli',
+    codexCommand: normalizeNullableString(input?.codexCommand),
+    codexHome: normalizeNullableString(input?.codexHome),
     model: normalizeNullableString(input?.model),
-    presetId: resolved.presetId,
-    providerName: normalizedProviderName,
+    modelProvider,
+    modelProviderConfig: resolveAssistantCodexModelProviderConfig(modelProvider),
+    oss: input?.oss === true,
+    profile: normalizeNullableString(input?.profile),
   }
-
-  const nextPolicy: AssistantProviderPolicyConfig = {
-    ...policy,
-    zeroDataRetention:
-      resolved.supportsZeroDataRetention && policy.zeroDataRetention === true
-        ? true
-        : null,
-  }
-  const target: AssistantProviderTargetConfig =
-    resolved.target.kind === 'responses'
-      ? {
-          kind: 'responses',
-          via: resolved.target.via,
-          ...sharedTargetFields,
-        }
-      : {
-          kind: 'openai-compatible',
-          ...sharedTargetFields,
-        }
 
   return {
-    policy: nextPolicy,
+    policy,
     target,
   }
 }
@@ -262,7 +211,11 @@ export function sanitizeAssistantProviderConfig(
 export function resolveAssistantChatProviderFromConfig(
   config: AssistantProviderConfig,
 ): AssistantChatProvider {
-  return config.target.kind === 'codex-cli' ? 'codex-cli' : 'openai-compatible'
+  if (config.target.kind !== 'codex-cli') {
+    throw createUnsupportedAssistantRuntimeTargetError()
+  }
+
+  return 'codex-cli'
 }
 
 export function isAssistantCodexTargetConfig(
@@ -286,14 +239,17 @@ export function isAssistantOpenAICompatibleTargetConfig(
 }
 
 export function mergeAssistantProviderConfigsForProvider(
-  provider: AssistantChatProvider,
-  ...inputs: ReadonlyArray<AssistantProviderConfigInput | null | undefined>
+  provider: AssistantProviderInputProvider,
+  ...inputs: ReadonlyArray<AssistantProviderConfigLike | null | undefined>
 ): AssistantProviderConfig {
   const merged: AssistantProviderConfigInput = {
     provider,
   }
 
-  for (const input of inputs) {
+  for (const rawInput of inputs) {
+    const input = isAssistantProviderConfig(rawInput)
+      ? assistantProviderConfigToInput(rawInput)
+      : rawInput
     if (!input) {
       continue
     }
@@ -313,11 +269,14 @@ export function mergeAssistantProviderConfigsForProvider(
 }
 
 export function mergeAssistantProviderConfigs(
-  ...inputs: ReadonlyArray<AssistantProviderConfigInput | null | undefined>
+  ...inputs: ReadonlyArray<AssistantProviderConfigLike | null | undefined>
 ): AssistantProviderConfig {
-  let provider: AssistantChatProvider = 'codex-cli'
+  let provider: AssistantProviderInputProvider = 'codex-cli'
 
-  for (const input of inputs) {
+  for (const rawInput of inputs) {
+    const input = isAssistantProviderConfig(rawInput)
+      ? assistantProviderConfigToInput(rawInput)
+      : rawInput
     if (input?.provider) {
       provider = input.provider
     }
@@ -363,6 +322,13 @@ export function serializeAssistantProviderSessionOptions(
     executionDriver: resolved.executionDriver,
     provider,
     model: normalized.target.model,
+    ...(isAssistantCodexTargetConfig(normalized) && normalized.target.modelProvider
+      ? { modelProvider: normalized.target.modelProvider }
+      : {}),
+    ...(isAssistantCodexTargetConfig(normalized) &&
+    normalized.target.modelProviderConfig
+      ? { modelProviderConfig: normalized.target.modelProviderConfig }
+      : {}),
     reasoningEffort: normalized.policy.reasoningEffort,
     resumeKind: resolved.resumeKind,
     sandbox: normalized.policy.sandbox,
@@ -371,37 +337,6 @@ export function serializeAssistantProviderSessionOptions(
     oss: isAssistantCodexTargetConfig(normalized) ? normalized.target.oss : false,
     ...(isAssistantCodexTargetConfig(normalized) && normalized.target.codexHome
       ? { codexHome: normalized.target.codexHome }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.target.baseUrl
-      ? { baseUrl: normalized.target.baseUrl }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.target.apiKeyEnv
-      ? { apiKeyEnv: normalized.target.apiKeyEnv }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.target.providerName
-      ? { providerName: normalized.target.providerName }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) && resolved.presetId
-      ? { presetId: resolved.presetId }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.target.headers
-      ? { headers: normalized.target.headers }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.target.gatewayOnlyProviders
-      ? { gatewayOnlyProviders: normalized.target.gatewayOnlyProviders }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.policy.webSearch
-      ? { webSearch: normalized.policy.webSearch }
-      : {}),
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.policy.zeroDataRetention
-      ? { zeroDataRetention: true }
       : {}),
   })
 }
@@ -419,38 +354,24 @@ export function serializeAssistantProviderOperatorDefaults(
       ? normalized.target.codexHome
       : null,
     model: normalized.target.model,
+    modelProvider: isAssistantCodexTargetConfig(normalized)
+      ? normalized.target.modelProvider
+      : null,
+    modelProviderConfig: isAssistantCodexTargetConfig(normalized)
+      ? normalized.target.modelProviderConfig
+      : null,
     reasoningEffort: normalized.policy.reasoningEffort,
     sandbox: normalized.policy.sandbox,
     approvalPolicy: normalized.policy.approvalPolicy,
     profile: isAssistantCodexTargetConfig(normalized) ? normalized.target.profile : null,
     oss: isAssistantCodexTargetConfig(normalized) ? normalized.target.oss : false,
-    baseUrl: isAssistantOpenAICompatibleTargetConfig(normalized)
-      ? normalized.target.baseUrl
-      : null,
-    apiKeyEnv: isAssistantOpenAICompatibleTargetConfig(normalized)
-      ? normalized.target.apiKeyEnv
-      : null,
-    presetId: isAssistantOpenAICompatibleTargetConfig(normalized)
-      ? normalized.target.presetId
-      : null,
-    providerName: isAssistantOpenAICompatibleTargetConfig(normalized)
-      ? normalized.target.providerName
-      : null,
-    headers: isAssistantOpenAICompatibleTargetConfig(normalized)
-      ? normalizeAssistantPersistedHeaders(normalized.target.headers)
-      : null,
-    ...(isAssistantOpenAICompatibleTargetConfig(normalized) &&
-    normalized.target.gatewayOnlyProviders
-      ? { gatewayOnlyProviders: normalized.target.gatewayOnlyProviders }
-      : {}),
-    webSearch: isAssistantOpenAICompatibleTargetConfig(normalized)
-      ? normalized.policy.webSearch
-      : null,
-    zeroDataRetention:
-      isAssistantOpenAICompatibleTargetConfig(normalized) &&
-      normalized.policy.zeroDataRetention
-        ? true
-        : null,
+    baseUrl: null,
+    apiKeyEnv: null,
+    presetId: null,
+    providerName: null,
+    headers: null,
+    webSearch: null,
+    zeroDataRetention: null,
   }
 }
 
@@ -510,7 +431,8 @@ export function resolveAssistantProviderContinuityFingerprint(
 export function shouldUseAssistantOpenAIResponsesApi(
   input: AssistantProviderConfigLike | null | undefined,
 ): boolean {
-  return resolveAssistantProviderRuntimeTarget(input).executionDriver === 'responses'
+  void input
+  return false
 }
 
 export function supportsAssistantNativeResume(
@@ -528,31 +450,29 @@ export function supportsAssistantReasoningEffort(
 export function supportsAssistantZeroDataRetention(
   input: AssistantProviderConfigLike | null | undefined,
 ): boolean {
-  return resolveAssistantProviderRuntimeTarget(input).supportsZeroDataRetention
+  void input
+  return false
 }
 
 export function shouldAssistantProviderUseProviderWebSearch(
   input: AssistantProviderConfigLike | null | undefined,
 ): boolean {
-  return shouldAssistantTargetUseProviderWebSearch(
-    normalizeAssistantProviderConfig(input),
-  )
+  void input
+  return false
 }
 
 export function shouldAssistantProviderUseGatewayWebSearch(
   input: AssistantProviderConfigLike | null | undefined,
 ): boolean {
-  return shouldAssistantTargetUseGatewayWebSearch(
-    normalizeAssistantProviderConfig(input),
-  )
+  void input
+  return false
 }
 
 export function shouldAssistantProviderUseMurphWebSearch(
   input: AssistantProviderConfigLike | null | undefined,
 ): boolean {
-  return shouldAssistantTargetUseMurphWebSearch(
-    normalizeAssistantProviderConfig(input),
-  )
+  void input
+  return false
 }
 
 export function normalizeAssistantHeaders(
@@ -599,20 +519,6 @@ function normalizeAssistantGatewayProviderSlug(
     : null
 }
 
-function isAssistantGatewayOnlyProviderTarget(input: {
-  baseUrl: string | null
-  presetId: SetupAssistantProviderPreset | null
-  providerName: string | null
-}): boolean {
-  return (
-    resolveOpenAICompatibleProviderTargetPresetId({
-      baseUrl: input.baseUrl,
-      presetId: input.presetId,
-      providerName: input.providerName,
-    }) === 'vercel-ai-gateway'
-  )
-}
-
 function assistantProviderConfigToInput(
   config: AssistantProviderConfig,
 ): AssistantProviderConfigInput {
@@ -624,6 +530,7 @@ function assistantProviderConfigToInput(
         codexCommand: config.target.codexCommand,
         codexHome: config.target.codexHome,
         model: config.target.model,
+        modelProvider: config.target.modelProvider,
         oss: config.target.oss,
         profile: config.target.profile,
         reasoningEffort: config.policy.reasoningEffort,
@@ -632,21 +539,7 @@ function assistantProviderConfigToInput(
     case 'responses':
     case 'openai-compatible':
     default:
-      return {
-        provider: 'openai-compatible',
-        apiKeyEnv: config.target.apiKeyEnv,
-        baseUrl: config.target.baseUrl,
-        ...(config.target.gatewayOnlyProviders
-          ? { gatewayOnlyProviders: config.target.gatewayOnlyProviders }
-          : {}),
-        headers: config.target.headers,
-        model: config.target.model,
-        presetId: config.target.presetId,
-        providerName: config.target.providerName,
-        reasoningEffort: config.policy.reasoningEffort,
-        webSearch: config.policy.webSearch,
-        zeroDataRetention: config.policy.zeroDataRetention === true ? true : null,
-      }
+      throw createUnsupportedAssistantRuntimeTargetError()
   }
 }
 
@@ -661,20 +554,9 @@ function isAssistantProviderConfig(
   )
 }
 
-function resolveAssistantCompatiblePresetId(
-  input: AssistantProviderConfigInput | null | undefined,
-): SetupAssistantProviderPreset | null {
-  return resolveOpenAICompatibleProviderTargetPresetId({
-    apiKeyEnv: input?.apiKeyEnv,
-    baseUrl: input?.baseUrl,
-    presetId: input?.presetId,
-    providerName: input?.providerName,
-  })
-}
-
 function resolveAssistantProviderForNormalization(
   input: AssistantProviderConfigInput | null | undefined,
-): AssistantChatProvider | null {
+): AssistantProviderInputProvider | null {
   if (input?.provider) {
     return input.provider
   }
@@ -695,6 +577,7 @@ function resolveAssistantProviderForNormalization(
   if (
     normalizeNullableString(input?.codexCommand) ||
     normalizeNullableString(input?.codexHome) ||
+    normalizeAssistantCodexModelProvider(input?.modelProvider) ||
     normalizeNullableString(input?.profile) ||
     input?.approvalPolicy !== null && input?.approvalPolicy !== undefined ||
     input?.sandbox !== null && input?.sandbox !== undefined ||

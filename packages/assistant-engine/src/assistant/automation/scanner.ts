@@ -1,6 +1,6 @@
 import type { AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
-import type { AssistantModelSpec } from '../../model-harness.js'
+import type { AssistantModelSpec } from '../legacy-model-spec.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
