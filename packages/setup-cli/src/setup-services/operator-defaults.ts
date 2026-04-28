@@ -63,6 +63,7 @@ export async function ensureDefaultVaultSelection(input: {
 export async function configureSetupOperatorDefaults(input: {
   assistant: SetupConfiguredAssistant | null
   dryRun: boolean
+  env?: NodeJS.ProcessEnv
   homeDirectory: string
   notes: string[]
   steps: SetupStepResult[]
@@ -82,6 +83,7 @@ export async function configureSetupOperatorDefaults(input: {
   return await ensureAssistantDefaultSelection({
     assistant: input.assistant,
     dryRun: input.dryRun,
+    env: input.env,
     homeDirectory: input.homeDirectory,
     notes: input.notes,
     steps: input.steps,
@@ -91,6 +93,7 @@ export async function configureSetupOperatorDefaults(input: {
 export async function ensureAssistantDefaultSelection(input: {
   assistant: SetupConfiguredAssistant
   dryRun: boolean
+  env?: NodeJS.ProcessEnv
   homeDirectory: string
   notes: string[]
   steps: SetupStepResult[]
@@ -134,7 +137,11 @@ export async function ensureAssistantDefaultSelection(input: {
     await saveAssistantOperatorDefaultsPatch(nextDefaults, input.homeDirectory)
   }
 
-  if (input.assistant.provider === 'openai-compatible' && input.assistant.apiKeyEnv) {
+  if (
+    input.assistant.provider === 'openai-compatible' &&
+    input.assistant.apiKeyEnv &&
+    !input.env?.[input.assistant.apiKeyEnv]?.trim()
+  ) {
     input.notes.push(
       `Export ${input.assistant.apiKeyEnv} before using the saved OpenAI-compatible assistant backend.`,
     )

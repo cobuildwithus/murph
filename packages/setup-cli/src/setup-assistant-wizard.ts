@@ -112,7 +112,7 @@ const setupWizardOpenAIAssistantMethodOptions: readonly SetupWizardAssistantMeth
       title: 'ChatGPT / Codex sign-in',
       description: 'Best if you already use the Codex sign-in flow.',
       detail:
-        'Murph will use your saved Codex / ChatGPT login and ask which default model to use next.',
+        'Murph will use your saved Codex / ChatGPT login and ask which model id to use next.',
       badges: [{ label: 'recommended', tone: 'success' }],
     },
     {
@@ -336,7 +336,7 @@ export function resolveSetupWizardAssistantSelection(input: {
       apiKeyEnv: null,
       baseUrl: null,
       detail:
-        'Murph will use your saved Codex / ChatGPT sign-in and ask which default model to use next.',
+        'Murph will use your saved Codex / ChatGPT sign-in and ask which model id to use next.',
       methodLabel: 'ChatGPT / Codex sign-in',
       oss: false,
       preset: 'codex',
@@ -378,8 +378,10 @@ export function resolveSetupWizardAssistantSelection(input: {
   const preset =
     resolveOpenAICompatibleProviderPresetFromId(input.provider) ??
     resolveOpenAICompatibleProviderPresetFromId('custom')
-  const apiKeyEnv =
-    preservedSelection.apiKeyEnv ?? preset?.apiKeyEnv ?? null
+  const apiKeyEnv = normalizeSetupWizardAssistantApiKeyEnv({
+    preservedApiKeyEnv: preservedSelection.apiKeyEnv,
+    preset,
+  })
   return {
     apiKeyEnv,
     baseUrl:
@@ -397,6 +399,29 @@ export function resolveSetupWizardAssistantSelection(input: {
     providerName: preservedSelection.providerName ?? preset?.providerName ?? null,
     summary: preset?.title ?? 'OpenAI-compatible provider',
   }
+}
+
+function normalizeSetupWizardAssistantApiKeyEnv(input: {
+  preservedApiKeyEnv: string | null
+  preset: OpenAICompatibleProviderPreset | null | undefined
+}): string | null {
+  if (!input.preset) {
+    return input.preservedApiKeyEnv
+  }
+
+  if (looksLikeInlineApiKey(input.preservedApiKeyEnv)) {
+    return input.preset.apiKeyEnv
+  }
+
+  return input.preservedApiKeyEnv ?? input.preset.apiKeyEnv ?? null
+}
+
+function looksLikeInlineApiKey(value: string | null): boolean {
+  if (!value) {
+    return false
+  }
+
+  return /^(?:AIza|vck_|sk-|sk_|pk_|hf_|nvapi-|xai-|gsk_|csk_|fn_|tgp_)/iu.test(value)
 }
 
 export function buildSetupWizardAssistantProviderBadges(input: {

@@ -1,5 +1,7 @@
 import readline from 'node:readline/promises'
 import { stderr as defaultOutput, stdin as defaultInput } from 'node:process'
+import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { Cli, z } from 'incur'
 import {
   assistantModelTargetSchema,
@@ -22,11 +24,12 @@ import {
   setupAssistantAccountSchema,
   setupCommandOptionsSchema,
   setupAssistantProviderPresetSchema,
+  type SetupConfiguredAssistant,
   type SetupAssistantPreset,
   type SetupCommandOptions,
 } from '@murphai/operator-config/setup-cli-contracts'
-import { prepareSetupPromptInput } from '@murphai/operator-config/setup-prompt-io'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { prepareSetupPromptInput } from '@murphai/operator-config/setup-prompt-io'
 import {
   createSetupAssistantResolver,
   type SetupAssistantResolver,
@@ -82,7 +85,7 @@ const modelCommandOptionsSchema = z.object({
       )} Named presets carry provider-specific runtime behavior in addition to endpoint defaults.`,
     ),
   model: optionalNonEmptyStringOption(
-    'Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
+    'Model id to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
   ),
   baseUrl: httpBaseUrlSchema
     .optional()
@@ -158,6 +161,11 @@ const modelCommandResultSchema = z
 
 type ModelCommandOptions = z.infer<typeof modelCommandOptionsSchema>
 type ModelCommandPreset = z.infer<typeof modelCommandPresetSchema>
+type ModelCommandResult = z.infer<typeof modelCommandResultSchema>
+type ModelCommandBackend = NonNullable<ModelCommandResult['backend']>
+type HiddenPromptReadline = ReturnType<typeof readline.createInterface> & {
+  _writeToOutput?: (stringToWrite: string) => void
+}
 
 interface ModelCommandDependencies {
   assistantSetup?: SetupAssistantResolver
@@ -221,7 +229,7 @@ export function registerModelCommands(
         description: 'Interactively switch the saved backend using the existing setup prompts.',
       },
       {
-        description: 'Save a Codex default model without re-running onboarding.',
+        description: 'Save a Codex model id without re-running onboarding.',
         options: {
           preset: 'codex',
           model: 'gpt-5.5',
@@ -298,6 +306,15 @@ export function registerModelCommands(
         )
       }
 
+      await saveMissingInteractiveApiKey({
+        allowPrompt,
+        assistant: selectedAssistant,
+        cwd: process.cwd(),
+        env: process.env,
+        input,
+        output,
+      })
+
       const nextDefaults = assistantSelectionToOperatorDefaults(
         selectedAssistant,
         existingDefaults,
@@ -316,12 +333,12 @@ export function registerModelCommands(
         action: 'set' as const,
         changed,
         configured: true,
-        backend: currentDefaults?.backend ?? null,
+        backend: sanitizeAssistantBackendForOutput(currentDefaults?.backend ?? null),
         account: currentDefaults?.account ?? selectedAssistant.account ?? null,
         summary:
           formatSavedAssistantDefaultsSummary(currentDefaults) ??
           formatAssistantDefaultsSummary(selectedAssistant),
-        notes: buildAssistantBackendNotes(currentDefaults),
+        notes: buildAssistantBackendNotes(currentDefaults, process.env),
       }
     },
   })
@@ -654,7 +671,7 @@ function buildModelCommandResult(input: {
     action: input.action,
     changed: input.changed,
     configured: input.defaults?.backend !== null && input.defaults?.backend !== undefined,
-    backend: input.defaults?.backend ?? null,
+    backend: sanitizeAssistantBackendForOutput(input.defaults?.backend ?? null),
     account: input.defaults?.account ?? null,
     summary: formatSavedAssistantDefaultsSummary(input.defaults),
     notes: buildAssistantBackendNotes(input.defaults),
@@ -663,17 +680,258 @@ function buildModelCommandResult(input: {
 
 function buildAssistantBackendNotes(
   defaults: AssistantOperatorDefaults | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const backend = defaults?.backend
   if (backend?.adapter === 'codex-cli' && backend.codexHome) {
     return [`Use the saved Codex home at ${backend.codexHome}.`]
   }
 
-  return backend?.adapter === 'openai-compatible' && backend.apiKeyEnv
-    ? [
+  if (backend?.adapter !== 'openai-compatible' || !backend.apiKeyEnv) {
+    return []
+  }
+
+  if (looksLikeInlineApiKey(backend.apiKeyEnv)) {
+    return [
+      'Saved OpenAI-compatible API key metadata looks like a raw key. Re-run `murph model` to save it as a local environment value.',
+    ]
+  }
+
+  return env[backend.apiKeyEnv]?.trim()
+    ? []
+    : [
         `Export ${backend.apiKeyEnv} before using the saved OpenAI-compatible assistant backend.`,
       ]
-    : []
+}
+
+async function saveMissingInteractiveApiKey(input: {
+  allowPrompt: boolean
+  assistant: SetupConfiguredAssistant
+  cwd: string
+  env: NodeJS.ProcessEnv
+  input: NodeJS.ReadableStream
+  output: NodeJS.WritableStream
+}): Promise<void> {
+  if (!input.allowPrompt || input.assistant.provider !== 'openai-compatible') {
+    return
+  }
+
+  const apiKeyEnv = input.assistant.apiKeyEnv?.trim()
+  if (!apiKeyEnv || !isDotenvKey(apiKeyEnv) || looksLikeInlineApiKey(apiKeyEnv)) {
+    return
+  }
+
+  if (isLocalAssistantBaseUrl(input.assistant.baseUrl)) {
+    return
+  }
+
+  if (input.env[apiKeyEnv]?.trim()) {
+    return
+  }
+
+  const apiKey = await promptForApiKeyValue({
+    apiKeyEnv,
+    input: input.input,
+    output: input.output,
+  })
+  if (!apiKey) {
+    return
+  }
+
+  await persistLocalEnvEntry({
+    cwd: input.cwd,
+    key: apiKeyEnv,
+    value: apiKey,
+  })
+  input.env[apiKeyEnv] = apiKey
+}
+
+async function promptForApiKeyValue(input: {
+  apiKeyEnv: string
+  input: NodeJS.ReadableStream
+  output: NodeJS.WritableStream
+}): Promise<string | null> {
+  prepareSetupPromptInput(input.input)
+  const rl = readline.createInterface({
+    input: input.input,
+    output: input.output,
+  })
+  const promptRl: HiddenPromptReadline = rl
+  const originalWriteToOutput = promptRl._writeToOutput?.bind(rl)
+  let hideAnswer = false
+  promptRl._writeToOutput = (stringToWrite) => {
+    if (hideAnswer) {
+      return
+    }
+
+    if (originalWriteToOutput) {
+      originalWriteToOutput(stringToWrite)
+      return
+    }
+
+    input.output.write(stringToWrite)
+  }
+
+  try {
+    const answerPromise = rl.question(
+      `API key for ${input.apiKeyEnv} (saved to .env.local, leave blank to skip): `,
+    )
+    hideAnswer = true
+    const answer = await answerPromise
+    input.output.write('\n')
+    const trimmed = answer.trim()
+    return trimmed.length > 0 ? trimmed : null
+  } finally {
+    rl.close()
+  }
+}
+
+async function persistLocalEnvEntry(input: {
+  cwd: string
+  key: string
+  value: string
+}): Promise<void> {
+  const envPath = path.join(input.cwd, '.env.local')
+  await mkdir(input.cwd, { recursive: true })
+  await assertSafeLocalEnvPath(envPath)
+  const previous = await readOptionalTextFile(envPath)
+  const next = mergeDotenvEntries(previous, [[input.key, input.value]])
+  await writeTextFileNoFollow(envPath, next)
+}
+
+async function assertSafeLocalEnvPath(filePath: string): Promise<void> {
+  try {
+    const existing = await lstat(filePath)
+    if (existing.isSymbolicLink() || !existing.isFile()) {
+      throw new VaultCliError(
+        'setup_local_env_unsafe_path',
+        'Refusing to save the API key because .env.local is not a regular file.',
+      )
+    }
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return
+    }
+    throw error
+  }
+}
+
+async function writeTextFileNoFollow(filePath: string, contents: string): Promise<void> {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await writeFile(tempPath, contents, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    await chmod(tempPath, 0o600)
+    await rename(tempPath, filePath)
+    await chmod(filePath, 0o600)
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
+function mergeDotenvEntries(
+  previous: string | null,
+  entries: readonly (readonly [string, string])[],
+): string {
+  const pending = new Map(entries)
+  const lines = previous?.split(/\r?\n/u) ?? []
+  const merged = lines.map((line) => {
+    const key = parseDotenvAssignmentKey(line)
+    if (!key || !pending.has(key)) {
+      return line
+    }
+
+    const value = pending.get(key)
+    pending.delete(key)
+    return `${key}=${JSON.stringify(value ?? '')}`
+  })
+
+  if (pending.size > 0) {
+    if (merged.length > 0 && merged[merged.length - 1] !== '') {
+      merged.push('')
+    }
+    if (!merged.includes('# Added by Murph setup.')) {
+      merged.push('# Added by Murph setup.')
+    }
+    for (const [key, value] of pending) {
+      merged.push(`${key}=${JSON.stringify(value)}`)
+    }
+  }
+
+  return `${trimTrailingBlankLines(merged).join('\n')}\n`
+}
+
+function parseDotenvAssignmentKey(line: string): string | null {
+  const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(line)
+  return match?.[1] ?? null
+}
+
+function trimTrailingBlankLines(lines: string[]): string[] {
+  const next = [...lines]
+  while (next.length > 0 && next[next.length - 1] === '') {
+    next.pop()
+  }
+  return next
+}
+
+function isDotenvKey(key: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)
+}
+
+async function readOptionalTextFile(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, 'utf8')
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return null
+    }
+    throw error
+  }
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code
+}
+
+function sanitizeAssistantBackendForOutput(
+  backend: AssistantOperatorDefaults['backend'] | null | undefined,
+): ModelCommandBackend | null {
+  if (!backend) {
+    return null
+  }
+
+  if (backend.adapter !== 'openai-compatible' || !looksLikeInlineApiKey(backend.apiKeyEnv)) {
+    return backend
+  }
+
+  return {
+    ...backend,
+    apiKeyEnv: '<redacted-inline-api-key>',
+  }
+}
+
+function looksLikeInlineApiKey(value: string | null | undefined): boolean {
+  const trimmed = value?.trim() ?? ''
+  return /^(?:AIza|vck_|sk-|sk_|pk_|hf_|nvapi-|xai-|gsk_|csk_|fn_|tgp_)/u.test(trimmed)
+}
+
+function isLocalAssistantBaseUrl(baseUrl: string | null | undefined): boolean {
+  if (!baseUrl) {
+    return false
+  }
+
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase()
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '0.0.0.0' ||
+      hostname === '[::1]' ||
+      hostname === '::1'
+    )
+  } catch {
+    return false
+  }
 }
 
 function buildSetupAssistantWizardInputFromDefaults(

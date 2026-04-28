@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -1195,8 +1195,7 @@ test('configureSetupChannels covers missing-env Telegram reuse messaging', async
         channel: 'telegram',
         configured: true,
         connectorId: 'telegram-existing',
-        detail:
-          'Reused the Telegram connector "telegram-existing", but skipped assistant auto-reply until a bot token is available in the current environment. Murph can use keys from your current shell for this setup run. Anything you enter here is only used for this run and is not written to a file.',
+        detail: `Reused the Telegram connector "telegram-existing", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`,
         enabled: true,
         missingEnv: ['TELEGRAM_BOT_TOKEN'],
       },
@@ -2476,6 +2475,9 @@ test('createSetupServices on linux records apt provisioning failures and saves a
     const result = await services.setupHost({
       assistant,
       dryRun: false,
+      envOverrides: {
+        OPENROUTER_API_KEY: 'test-openrouter-key',
+      },
       strict: false,
       toolchainRoot,
       vault: './vault',
@@ -2494,9 +2496,18 @@ test('createSetupServices on linux records apt provisioning failures and saves a
       'completed',
     )
     assert.match(result.notes.join('\n'), /apt update denied/u)
-    assert.match(
+    assert.doesNotMatch(
       result.notes.join('\n'),
       /Export OPENROUTER_API_KEY before using the saved OpenAI-compatible assistant backend\./u,
+    )
+    assert.match(
+      await readFile(path.join(cwd, '.env.local'), 'utf8'),
+      /OPENROUTER_API_KEY="test-openrouter-key"/u,
+    )
+    assert.equal((await stat(path.join(cwd, '.env.local'))).mode & 0o777, 0o600)
+    assert.equal(
+      result.steps.find((step) => step.id === 'local-env')?.status,
+      'completed',
     )
     assert.equal(result.tools.ffmpegCommand, null)
     assert.equal(result.tools.whisperCommand, null)
@@ -2563,6 +2574,76 @@ test('createSetupServices on linux records apt provisioning failures and saves a
       noAptResult.notes.join('\n'),
       /apt-get or passwordless sudo is unavailable on this host\./u,
     )
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test('createSetupServices refuses to write setup keys through a symlinked local env file', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-services-env-symlink-'))
+  const cwd = path.join(root, 'workspace')
+  const homeDirectory = path.join(root, 'home')
+  const targetEnvPath = path.join(root, 'outside-env')
+  const bootstrapConfigPath = path.join(homeDirectory, '.runtime', 'toolchain.json')
+
+  try {
+    await mkdir(cwd, { recursive: true })
+    await mkdir(homeDirectory, { recursive: true })
+    await writeFile(targetEnvPath, 'EXISTING=true\n', 'utf8')
+    await symlink(targetEnvPath, path.join(cwd, '.env.local'))
+
+    const vaultCore = createIntegratedVaultServices().core
+    const services = createSetupServices({
+      env: () => ({
+        PATH: '',
+        SHELL: '/bin/zsh',
+      }),
+      getCwd: () => cwd,
+      getHomeDirectory: () => homeDirectory,
+      inboxServices: {
+        async bootstrap(input) {
+          return makeInboxBootstrapResult(input.vault, bootstrapConfigPath)
+        },
+      },
+      platform: () => 'linux',
+      resolveCliBinPath: () => path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js'),
+      runCommand: async () => ({
+        exitCode: 0,
+        stderr: '',
+        stdout: '',
+      }),
+      vaultServices: {
+        core: {
+          ...vaultCore,
+          async init(input) {
+            await mkdir(input.vault, { recursive: true })
+            await writeFile(path.join(input.vault, 'vault.json'), '{}', 'utf8')
+            return {
+              created: true,
+              directories: [input.vault],
+              files: [path.join(input.vault, 'vault.json')],
+              vault: input.vault,
+            }
+          },
+        },
+      },
+    })
+
+    await assert.rejects(
+      services.setupHost({
+        dryRun: false,
+        envOverrides: {
+          OPENROUTER_API_KEY: 'test-openrouter-key',
+        },
+        strict: false,
+        toolchainRoot: path.join(homeDirectory, '.murph', 'toolchain'),
+        vault: './vault',
+      }),
+      (error) =>
+        error instanceof VaultCliError &&
+        error.code === 'setup_local_env_unsafe_path',
+    )
+    assert.equal(await readFile(targetEnvPath, 'utf8'), 'EXISTING=true\n')
   } finally {
     await rm(root, { force: true, recursive: true })
   }

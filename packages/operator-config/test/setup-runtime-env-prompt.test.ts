@@ -65,7 +65,7 @@ test('setup runtime resolver prompts for missing keys in deterministic order and
     OPENAI_API_KEY: 'openai-key',
     TELEGRAM_BOT_TOKEN: 'telegram-token',
   })
-  assert.match(stderrWrites.join(''), /only used for this run/u)
+  assert.match(stderrWrites.join(''), /saved to local `\.env\.local`/u)
   assert.match(stderrWrites.join(''), /Leave a prompt blank to skip/u)
 })
 

@@ -161,7 +161,7 @@ test('setup runtime resolver clones process env and surfaces ready channel and w
       ready: true,
     },
   )
-  assert.match(SETUP_RUNTIME_ENV_NOTICE, /only used for this run/u)
+  assert.match(SETUP_RUNTIME_ENV_NOTICE, /saved to local `\.env\.local`/u)
   assert.equal(
     describeSelectedSetupWearables({
       env: {},

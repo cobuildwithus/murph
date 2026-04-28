@@ -245,8 +245,8 @@ export function createSetupAssistantResolver(
             input,
             output,
             prompt: useLocalModel
-              ? 'Default local model to use with Codex'
-              : 'Default model to use with Codex',
+              ? 'Local model id to use with Codex'
+              : 'Model id to use with Codex',
           })
 
           resolvedAssistant = {
@@ -311,7 +311,7 @@ export function createSetupAssistantResolver(
             prompt: buildSetupAssistantBaseUrlPrompt(initialProviderPreset),
           })
 
-          const apiKeyEnv = await resolveOptionalPromptedValue({
+          const apiKeyEnv = await resolveSetupAssistantApiKeyEnv({
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
               normalizeNullableString(
@@ -321,7 +321,7 @@ export function createSetupAssistantResolver(
               null,
             input,
             output,
-            prompt: buildSetupAssistantApiKeyEnvPrompt(initialProviderPreset),
+            providerPreset: initialProviderPreset,
           })
           const explicitProviderName = normalizeNullableString(
             resolutionInput.options.assistantProviderName,
@@ -337,8 +337,11 @@ export function createSetupAssistantResolver(
           const providerName =
             explicitProviderName ??
             resolvedProviderPreset.providerName
+          const explicitModel = normalizeNullableString(
+            resolutionInput.options.assistantModel,
+          )
           const discovery =
-            normalizeNullableString(resolutionInput.options.assistantModel) === null
+            explicitModel === null && resolvedProviderPreset.kind !== 'gateway'
               ? await discoverModels({
                   baseUrl,
                   apiKeyEnv,
@@ -349,9 +352,7 @@ export function createSetupAssistantResolver(
           const model = await resolveOpenAICompatibleModel({
             allowPrompt: resolutionInput.allowPrompt,
             discovery,
-            explicitModel: normalizeNullableString(
-              resolutionInput.options.assistantModel,
-            ),
+            explicitModel,
             input,
             output,
           })
@@ -491,7 +492,31 @@ async function resolveOpenAICompatibleModel(input: {
     allowPrompt: true,
     input: input.input,
     output: input.output,
-    prompt: 'Default model to use',
+    prompt: 'Model id to use',
+  })
+}
+
+async function resolveSetupAssistantApiKeyEnv(input: {
+  allowPrompt: boolean
+  defaultValue: string | null
+  input: NodeJS.ReadableStream
+  output: NodeJS.WritableStream
+  providerPreset: OpenAICompatibleProviderPreset
+}): Promise<string | null> {
+  if (
+    input.providerPreset.id !== 'custom' &&
+    input.providerPreset.kind !== 'local' &&
+    input.defaultValue
+  ) {
+    return input.defaultValue
+  }
+
+  return await resolveOptionalPromptedValue({
+    allowPrompt: input.allowPrompt,
+    defaultValue: input.defaultValue,
+    input: input.input,
+    output: input.output,
+    prompt: buildSetupAssistantApiKeyEnvPrompt(input.providerPreset),
   })
 }
 
