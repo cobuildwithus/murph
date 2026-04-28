@@ -21,7 +21,7 @@ categories:
 media:
   -
     kind: image
-    relativePath: design-assets/hero-norwegian-4x4-latest.jpeg
+    relativePath: design-assets/hero-norwegian-4x4.jpeg
     mediaType: image/jpeg
     caption: Norwegian 4x4 Intervals
 relations:
