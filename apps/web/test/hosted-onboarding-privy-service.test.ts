@@ -439,70 +439,7 @@ describe("completeHostedPrivyVerification", () => {
     });
   });
 
-  it.each([
-    {
-      identity: makeIdentity(),
-      label: "phone",
-    },
-    {
-      identity: makeIdentity({
-        email: {
-          address: "user@example.com",
-          verifiedAt: 1743064200,
-        },
-        phone: null,
-        wallet: null,
-      }),
-      label: "email",
-    },
-    {
-      identity: makeIdentity({
-        phone: null,
-        telegram: {
-          firstName: "Alice",
-          lastName: null,
-          photoUrl: null,
-          telegramUserId: "456",
-          username: "alice",
-        },
-        wallet: null,
-      }),
-      label: "telegram",
-    },
-  ])("fails closed for existing-account $label sign-in when no hosted binding exists", async ({
-    identity,
-  }) => {
-    const prisma = asCompleteHostedPrivyVerificationPrisma({
-      hostedInvite: {
-        create: vi.fn(),
-        findFirst: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
-      },
-      hostedMember: {
-        create: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
-    });
-
-    await expect(
-      completeHostedPrivyVerification({
-        identity,
-        intent: "signin",
-        now: NOW,
-        prisma,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
-      httpStatus: 403,
-    });
-
-    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberEmailAuthorization.upsert).not.toHaveBeenCalled();
-  });
-
-  it("resolves an existing sign-in by verified email without creating a duplicate member", async () => {
+  it("resolves an existing auth by verified email without creating a duplicate member", async () => {
     const existingMember = makeMember({
       id: "member_email_existing",
       maskedPhoneNumberHint: null,
@@ -575,7 +512,6 @@ describe("completeHostedPrivyVerification", () => {
           phone: null,
           wallet: null,
         }),
-        intent: "signin",
         now: NOW,
         prisma,
       }),
@@ -596,7 +532,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
   });
 
-  it("resolves an existing sign-in by Telegram binding without creating a duplicate member", async () => {
+  it("resolves an existing auth by Telegram binding without creating a duplicate member", async () => {
     const existingMember = makeMember({
       id: "member_telegram_existing",
       maskedPhoneNumberHint: null,
@@ -685,7 +621,6 @@ describe("completeHostedPrivyVerification", () => {
           },
           wallet: null,
         }),
-        intent: "signin",
         now: NOW,
         prisma,
       }),
@@ -706,7 +641,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalled();
   });
 
-  it("fails closed when Telegram sign-in resolves to multiple members across blind-index read candidates", async () => {
+  it("fails closed when Telegram auth resolves to multiple members across blind-index read candidates", async () => {
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn(),
@@ -756,7 +691,6 @@ describe("completeHostedPrivyVerification", () => {
           },
           wallet: null,
         }),
-        intent: "signin",
         now: NOW,
         prisma,
       }),

@@ -46,7 +46,6 @@ test("completeHostedPrivyAuth sends active members to settings", async () => {
   await expect(
     completeHostedPrivyAuth({
       createWallet: vi.fn(),
-      intent: "signup",
       refreshUser,
       user: null,
     }),
@@ -78,7 +77,6 @@ test("completeHostedPrivyAuth sends checkout users back to the invite join flow"
   await expect(
     completeHostedPrivyAuth({
       createWallet: vi.fn(),
-      intent: "signup",
       refreshUser: vi.fn().mockResolvedValue(null),
       user: {
         linkedAccounts: [{ type: "email" }],
@@ -96,7 +94,6 @@ test("completeHostedPrivyAuth falls back to the current user when refreshUser fa
 
   await completeHostedPrivyAuth({
     createWallet: vi.fn(),
-    intent: "signup",
     refreshUser: vi.fn().mockRejectedValue(new Error("stale user")),
     user: {
       linkedAccounts: [{ type: "telegram" }],
@@ -126,7 +123,6 @@ test("completeHostedPrivyAuth does not prefetch checkout sessions for checkout-s
   await expect(
     completeHostedPrivyAuth({
       createWallet: vi.fn(),
-      intent: "signup",
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
     }),
@@ -143,7 +139,6 @@ test("completeHostedPrivyAuth uses the phone readiness path when requested", asy
   await expect(
     completeHostedPrivyAuth({
       createWallet: vi.fn(),
-      intent: "signin",
       requirePhone: true,
       user: {
         linkedAccounts: [{ type: "phone" }],

@@ -15,17 +15,14 @@ import {
   completeHostedPrivyAuth,
   type HostedPrivyClientSessionInput,
 } from "./hosted-auth-completion";
-import type { HostedAuthIntent } from "./hosted-auth-shared";
 import { toErrorMessage } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 
 export function HostedTelegramAuthButton({
   active = false,
-  intent,
   onActivate,
 }: {
   active?: boolean;
-  intent: HostedAuthIntent;
   onActivate: () => void;
 }) {
   const { createWallet } = useCreateWallet();
@@ -50,7 +47,6 @@ export function HostedTelegramAuthButton({
     try {
       await login();
       const result = await completeHostedPrivyAuth({
-        intent,
         ...authSession,
       });
       window.location.assign(result.redirectUrl);
@@ -58,9 +54,7 @@ export function HostedTelegramAuthButton({
       setErrorMessage(
         toErrorMessage(
           error,
-          intent === "signin"
-            ? "Could not sign in with Telegram right now."
-            : "Could not continue with Telegram right now.",
+          "Could not continue with Telegram right now.",
         ),
       );
       setRedirectPending(false);

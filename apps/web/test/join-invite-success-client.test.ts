@@ -49,7 +49,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("verify-stage success page keeps the copy neutral while sign-in settles", () => {
+test("verify-stage success page keeps the copy neutral while verification settles", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("verify"),
@@ -58,7 +58,7 @@ test("verify-stage success page keeps the copy neutral while sign-in settles", (
     }),
   );
 
-  assert.match(markup, /Finishing sign-in/);
+  assert.match(markup, /Finishing verification/);
   assert.match(markup, /Checking your signup status\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.match(markup, /Back to invite/);

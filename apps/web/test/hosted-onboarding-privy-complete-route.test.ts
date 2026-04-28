@@ -92,7 +92,6 @@ describe("hosted onboarding Privy completion route", () => {
         userId: "did:privy:user_123",
         wallet: null,
       },
-      intent: "signup",
       inviteCode: "invite_123",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -130,7 +129,7 @@ describe("hosted onboarding Privy completion route", () => {
     });
   });
 
-  it("passes an explicit existing-account sign-in intent to the completion service", async () => {
+  it("ignores legacy auth intent values and uses unified completion", async () => {
     await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
@@ -143,8 +142,8 @@ describe("hosted onboarding Privy completion route", () => {
       }),
     );
 
-    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.objectContaining({
-      intent: "signin",
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith(expect.not.objectContaining({
+      intent: expect.any(String),
     }));
   });
 

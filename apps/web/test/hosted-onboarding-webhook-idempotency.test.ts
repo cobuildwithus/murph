@@ -182,7 +182,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         chatId: "chat_123",
         idempotencyKey: "linq-message:evt_123",
         message: buildHostedInviteReply({
-          activeSubscription: false,
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
         replyToMessageId: "msg_123",

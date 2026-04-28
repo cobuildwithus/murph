@@ -23,7 +23,6 @@ import {
   type HostedPrivyClientPendingAction,
   type HostedPrivyFinalizationState,
 } from "@/src/lib/hosted-onboarding/privy-client";
-import type { HostedAuthenticationIntent } from "@/src/lib/hosted-onboarding/authentication-intent";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedPrivyClientSessionInput } from "./hosted-auth-completion";
@@ -40,7 +39,6 @@ import {
   runHostedPhonePendingAction,
   runHostedPrivyFinalizationAttempt,
   isHostedPrivyAccountConflictError,
-  isHostedSignInMemberNotFoundError,
   toErrorMessage,
 } from "./hosted-phone-auth-support";
 import {
@@ -69,7 +67,7 @@ const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
 export function useHostedPhoneAuthController({
   inviteCode,
-  intent = "signup",
+  intent = "auth",
   onCompleted,
   onLinked,
   onSignOut,
@@ -81,7 +79,6 @@ export function useHostedPhoneAuthController({
   const { refreshUser, user } = useUser();
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [signInAccountNotFound, setSignInAccountNotFound] = useState(false);
   const [requiresAuthenticatedSessionRestart, setRequiresAuthenticatedSessionRestart] =
     useState(false);
   const [finalizationState, setFinalizationState] =
@@ -136,7 +133,6 @@ export function useHostedPhoneAuthController({
   const allowAuthenticatedSessionStateUi = !suppressAuthenticatedSessionIssue;
   const showAuthenticatedManualResumeState =
     allowAuthenticatedSessionStateUi
-    && !signInAccountNotFound
     && !requiresAuthenticatedSessionRestart
     && intent !== "link"
     && shouldShowHostedPrivyManualResumeState({
@@ -146,32 +142,23 @@ export function useHostedPhoneAuthController({
     });
   const showAuthenticatedRestartState =
     allowAuthenticatedSessionStateUi
-    && !signInAccountNotFound
     && intent !== "link"
     && (requiresAuthenticatedSessionRestart || shouldShowHostedPrivyRestartState({
       authenticated,
       issue: authenticatedSessionIssue,
       showAuthenticatedLoadingState,
     }));
-  const authenticatedView = allowAuthenticatedSessionStateUi && signInAccountNotFound
-    ? "signin-account-not-found"
-    : resolveHostedAuthenticatedPhoneAuthView({
-        showAuthenticatedLoadingState,
-        showAuthenticatedManualResumeState,
-        showAuthenticatedRestartState,
-      });
+  const authenticatedView = resolveHostedAuthenticatedPhoneAuthView({
+    showAuthenticatedLoadingState,
+    showAuthenticatedManualResumeState,
+    showAuthenticatedRestartState,
+  });
   const authenticatedLoadingTitle =
-    intent === "signin"
-      ? "Signing you in..."
-      : intent === "link"
-        ? "Saving your phone..."
-        : "Finishing setup...";
+    intent === "link" ? "Saving your phone..." : "Finishing setup...";
   const authenticatedLoadingBody =
-    intent === "signin"
-      ? "Keep this tab open. We are verifying your number and signing you into your account."
-      : intent === "link"
-        ? "Keep this tab open. We are verifying your number and linking it to your account."
-        : "Keep this tab open. We are verifying your number and preparing your account.";
+    intent === "link"
+      ? "Keep this tab open. We are verifying your number and linking it to your account."
+      : "Keep this tab open. We are verifying your number and preparing your account.";
   const authSession: HostedPrivyClientSessionInput = {
     createWallet,
     refreshUser,
@@ -209,7 +196,6 @@ export function useHostedPhoneAuthController({
 
   function resetPhoneAuthFlow() {
     setErrorMessage(null);
-    setSignInAccountNotFound(false);
     setRequiresAuthenticatedSessionRestart(false);
     setCode("");
     setPhoneVerificationAttempt(null);
@@ -270,7 +256,6 @@ export function useHostedPhoneAuthController({
       action: "send-code",
       onBeforeAction: () => {
         setErrorMessage(null);
-        setSignInAccountNotFound(false);
         setRequiresAuthenticatedSessionRestart(false);
       },
       onError: (error) => {
@@ -301,7 +286,6 @@ export function useHostedPhoneAuthController({
         action: "send-code",
         onBeforeAction: () => {
           setErrorMessage(null);
-          setSignInAccountNotFound(false);
         },
         onError: (error) => {
           setErrorMessage(
@@ -338,15 +322,6 @@ export function useHostedPhoneAuthController({
       await loginWithCode({ code: submittedCode });
       await runHostedPrivyFinalization(intent === "link" ? "continue" : "verify-code");
     } catch (error) {
-      if (isHostedSignInMemberNotFoundError({ error, intent })) {
-        setErrorMessage(null);
-        setSignInAccountNotFound(true);
-        setRequiresAuthenticatedSessionRestart(false);
-        setCode("");
-        setPhoneVerificationAttempt(null);
-        return;
-      }
-
       if (isHostedPrivyAccountConflictError(error)) {
         transitionToAuthenticatedSessionRestart();
         setCode("");
@@ -363,23 +338,11 @@ export function useHostedPhoneAuthController({
   }
 
   async function handleContinueAuthenticated() {
-    if (signInAccountNotFound) {
-      await handleSignupAfterRejectedSignIn();
-      return;
-    }
-
     setErrorMessage(null);
 
     try {
       await runHostedPrivyFinalization("continue");
     } catch (error) {
-      if (isHostedSignInMemberNotFoundError({ error, intent })) {
-        setErrorMessage(null);
-        setSignInAccountNotFound(true);
-        setRequiresAuthenticatedSessionRestart(false);
-        return;
-      }
-
       if (isHostedPrivyAccountConflictError(error)) {
         transitionToAuthenticatedSessionRestart();
         return;
@@ -427,33 +390,11 @@ export function useHostedPhoneAuthController({
 
   function transitionToAuthenticatedSessionRestart() {
     setErrorMessage(null);
-    setSignInAccountNotFound(false);
     setRequiresAuthenticatedSessionRestart(true);
-  }
-
-  async function handleSignupAfterRejectedSignIn() {
-    setErrorMessage(null);
-    setSignInAccountNotFound(false);
-    setRequiresAuthenticatedSessionRestart(false);
-
-    try {
-      await runHostedPrivyFinalization("continue", "signup");
-    } catch (error) {
-      setSignInAccountNotFound(true);
-      setErrorMessage(
-        toErrorMessage(
-          error,
-          "We could not start signup with this verified session.",
-        ),
-      );
-    }
   }
 
   async function runHostedPrivyFinalization(
     action: "continue" | "verify-code",
-    completionIntent: HostedAuthenticationIntent = intent === "signin"
-      ? "signin"
-      : "signup",
   ) {
     await runHostedPrivyFinalizationAttempt({
       action,
@@ -467,7 +408,6 @@ export function useHostedPhoneAuthController({
 
         await finalizeHostedPrivyVerification({
           inviteCode,
-          intent: completionIntent,
           onCompleted,
           ...authSession,
         });
@@ -482,7 +422,7 @@ export function useHostedPhoneAuthController({
     authenticatedLoadingBody,
     authenticatedLoadingTitle,
     authenticatedSessionDescription: requiresAuthenticatedSessionRestart
-      ? "This browser is signed into account details that cannot use that phone number. Sign out, then choose the number linked to your Murph account."
+      ? "This browser is signed into account details that cannot use that phone number. Sign out, then choose the number you want to use with Murph."
       : describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
         ?? "Sign out and request a fresh code to continue.",
     authenticatedView,

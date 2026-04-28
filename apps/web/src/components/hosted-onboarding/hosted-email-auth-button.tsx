@@ -20,7 +20,6 @@ import {
 import {
   isValidEmailAddress,
   normalizeEmailAddress,
-  type HostedAuthIntent,
   toErrorMessage,
 } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
@@ -28,11 +27,9 @@ import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 
 export function HostedEmailAuthButton({
   active = false,
-  intent,
   onActivate,
 }: {
   active?: boolean;
-  intent: HostedAuthIntent;
   onActivate: () => void;
 }) {
   const { createWallet } = useCreateWallet();
@@ -140,7 +137,6 @@ export function HostedEmailAuthButton({
     try {
       await loginWithCode({ code: submittedCode });
       const result = await completeHostedPrivyAuth({
-        intent,
         ...authSession,
       });
       window.location.assign(result.redirectUrl);
@@ -148,9 +144,7 @@ export function HostedEmailAuthButton({
       setErrorMessage(
         toErrorMessage(
           error,
-          intent === "signin"
-            ? "We could not sign you in with that code."
-            : "We could not verify that code.",
+          "We could not verify that code.",
         ),
       );
       setRedirectPending(false);
@@ -184,10 +178,8 @@ export function HostedEmailAuthButton({
               disabled={disabled}
               inputRef={codeInputRef}
               pendingAction={loading ? "verify-code" : null}
-              primaryActionLabel={intent === "signin" ? "Sign in" : "Verify email"}
-              primaryActionPendingLabel={
-                intent === "signin" ? "Signing in..." : "Verifying..."
-              }
+              primaryActionLabel="Verify email"
+              primaryActionPendingLabel="Verifying..."
               secondaryAction={
                 <Button
                   type="button"
@@ -226,9 +218,7 @@ export function HostedEmailAuthButton({
               >
                 {state.status === "sending-code"
                   ? "Sending..."
-                  : intent === "signin"
-                    ? "Email me a sign-in code"
-                    : "Email me a code"}
+                  : "Email me a code"}
               </Button>
             </form>
           )}

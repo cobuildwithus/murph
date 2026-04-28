@@ -1,10 +1,9 @@
-export type HostedPhoneAuthIntent = "signup" | "signin" | "link";
+export type HostedPhoneAuthIntent = "auth" | "link";
 export type HostedPhoneAuthPendingAction = "continue" | "logout" | "send-code" | "verify-code" | null;
 export type HostedAuthenticatedPhoneAuthView =
   | "loading"
   | "manual-resume"
   | "restart"
-  | "signin-account-not-found"
   | null;
 
 export interface HostedPhoneVerificationAttempt {

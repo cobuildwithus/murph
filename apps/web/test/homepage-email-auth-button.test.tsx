@@ -75,7 +75,6 @@ function HomepageEmailAuthButtonHarness() {
   return (
     <HostedEmailAuthButton
       active={active}
-      intent="signup"
       onActivate={() => setActive(true)}
     />
   );
@@ -136,7 +135,6 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
   });
   expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
     createWallet: mocks.createWallet,
-    intent: "signup",
     refreshUser: expect.any(Function),
     user: null,
   });

@@ -13,11 +13,10 @@ import { LandingAuthActions } from "@/app/auth-controls";
 import { renderClientComponent } from "./render-client-component";
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
-  HostedAuthPanel(props: { intent?: string; showLegalNotice?: boolean }) {
+  HostedAuthPanel(props: { showLegalNotice?: boolean }) {
     return createElement(
       "div",
       {
-        "data-hosted-auth-intent": props.intent ?? "signup",
         "data-hosted-auth-legal-notice":
           props.showLegalNotice ? "shown" : "hidden",
       },
@@ -62,12 +61,12 @@ afterEach(async () => {
   }
 });
 
-test("LandingAuthActions opens the homepage-backed signup flow and passes the signup intent", async () => {
+test("LandingAuthActions opens the unified homepage auth flow", async () => {
   const { button, cleanup, window } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
       context: "hero",
-      signupLabel: "See what works for your body",
+      authLabel: "See what works for your body",
     }),
   );
   cleanupRender = cleanup;
@@ -76,22 +75,22 @@ test("LandingAuthActions opens the homepage-backed signup flow and passes the si
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });
 
-  const signupPanel = window.document.querySelector(
-    '[data-hosted-auth-intent="signup"]',
+  const authPanel = window.document.querySelector(
+    '[data-hosted-auth-legal-notice="shown"]',
   );
-  expect(signupPanel).toBeTruthy();
-  expect(signupPanel?.getAttribute("data-hosted-auth-legal-notice")).toBe(
+  expect(authPanel).toBeTruthy();
+  expect(authPanel?.getAttribute("data-hosted-auth-legal-notice")).toBe(
     "shown",
   );
-  expect(window.document.body.textContent).toContain("Sign up for Murph");
+  expect(window.document.body.textContent).toContain("Log in or sign up");
 });
 
-test("LandingAuthActions opens the homepage-backed sign-in flow and passes the sign-in intent", async () => {
-  const { cleanup, container, window } = await renderClientComponent(
+test("LandingAuthActions does not render a separate sign-in action", async () => {
+  const { cleanup, container } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
       context: "nav",
-      signupLabel: "Sign up",
+      authLabel: "Log in or sign up",
     }),
   );
   cleanupRender = cleanup;
@@ -99,22 +98,8 @@ test("LandingAuthActions opens the homepage-backed sign-in flow and passes the s
   const buttons = Array.from(
     container.querySelectorAll("button"),
   ) as HTMLButtonElement[];
-  const signInButton = buttons.find((button) => button.textContent?.includes("Sign in"));
-
-  expect(signInButton).toBeTruthy();
-
-  await act(async () => {
-    signInButton?.dispatchEvent(new Event("click", { bubbles: true }));
-  });
-
-  const signinPanel = window.document.querySelector(
-    '[data-hosted-auth-intent="signin"]',
-  );
-  expect(signinPanel).toBeTruthy();
-  expect(signinPanel?.getAttribute("data-hosted-auth-legal-notice")).toBe(
-    "hidden",
-  );
-  expect(window.document.body.textContent).toContain("Sign in to Murph");
+  expect(buttons).toHaveLength(1);
+  expect(buttons[0]?.textContent).toContain("Log in or sign up");
 });
 
 test("LandingAuthActions shows only an Open settings link for authenticated users", async () => {
@@ -126,7 +111,7 @@ test("LandingAuthActions shows only an Open settings link for authenticated user
       createElement(LandingAuthActions, {
         authenticated: true,
         context: "footer",
-        signupLabel: "Start your first experiment",
+        authLabel: "Start your first experiment",
       }),
     ),
   );
@@ -136,5 +121,5 @@ test("LandingAuthActions shows only an Open settings link for authenticated user
   expect(links).toHaveLength(1);
   expect(links[0]?.getAttribute("href")).toBe("/settings");
   expect(links[0]?.textContent).toContain("Your account");
-  expect(container.textContent).not.toContain("Sign in");
+  expect(container.textContent).not.toContain("Log in or sign up");
 });

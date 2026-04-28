@@ -46,7 +46,6 @@ interface AuthenticatedStateProps {
   body: string;
   description: string;
   disabled: boolean;
-  intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
   secondaryActionSize: "sm" | "lg";
   title: string;
@@ -66,7 +65,6 @@ export function HostedPhoneAuthScaffold({
   description,
   disabled,
   errorMessage,
-  intent,
   pendingAction,
   secondaryActionSize,
   title,
@@ -88,7 +86,6 @@ export function HostedPhoneAuthScaffold({
           body={body}
           description={description}
           disabled={disabled}
-          intent={intent}
           pendingAction={pendingAction}
           secondaryActionSize={secondaryActionSize}
           title={title}
@@ -144,7 +141,6 @@ export function HostedAuthenticatedPhoneAuthState({
   body,
   description,
   disabled,
-  intent,
   pendingAction,
   secondaryActionSize,
   title,
@@ -165,11 +161,7 @@ export function HostedAuthenticatedPhoneAuthState({
   if (view === "manual-resume") {
     return (
       <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>
-          {intent === "signin"
-            ? "You already started signing in."
-            : "You already started signup."}
-        </AlertTitle>
+        <AlertTitle>You already started logging in or signing up.</AlertTitle>
         <div className="mt-3 flex flex-wrap gap-3">
           <Button
             type="button"
@@ -178,7 +170,7 @@ export function HostedAuthenticatedPhoneAuthState({
             size="lg"
             className="w-full"
           >
-            {intent === "signin" ? "Continue sign in" : "Continue signup"}
+            Continue
           </Button>
           <HostedUseDifferentNumberButton
             disabled={disabled}
@@ -191,46 +183,10 @@ export function HostedAuthenticatedPhoneAuthState({
     );
   }
 
-  if (view === "signin-account-not-found") {
-    return (
-      <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>No Murph account found</AlertTitle>
-        <AlertDescription>
-          This sign-in method was verified, but it is not linked to a Murph account yet.
-        </AlertDescription>
-        <div className="mt-3 flex flex-wrap gap-3">
-          <Button
-            type="button"
-            onClick={onContinue}
-            disabled={disabled}
-            size="lg"
-            className="w-full"
-          >
-            Sign up instead
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={disabled}
-            size={secondaryActionSize}
-            className="w-full"
-            onClick={onUseDifferentNumber}
-          >
-            Try another sign-in method
-          </Button>
-        </div>
-      </Alert>
-    );
-  }
-
   if (view === "restart") {
     return (
       <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>
-          {intent === "signin"
-            ? "This browser needs a fresh phone sign-in."
-            : "This browser needs a fresh phone signup."}
-        </AlertTitle>
+        <AlertTitle>This browser needs a fresh phone verification.</AlertTitle>
         <AlertDescription>{description}</AlertDescription>
         <div className="mt-3 flex flex-wrap gap-3">
           <Button

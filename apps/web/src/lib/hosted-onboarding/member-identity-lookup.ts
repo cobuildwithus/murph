@@ -134,7 +134,7 @@ export function createHostedPrivyIdentityConflictError() {
   return hostedOnboardingError({
     code: "PRIVY_IDENTITY_CONFLICT",
     message:
-      "This verified sign-in session conflicts with an existing Murph account. Contact support so we can merge it safely.",
+      "This verified session conflicts with an existing Murph account. Contact support so we can merge it safely.",
     httpStatus: 409,
   });
 }

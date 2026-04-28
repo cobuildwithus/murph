@@ -249,7 +249,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   return buildSignupLinkResponse({
-    activeSubscription: hasHostedMemberActiveAccess(member),
     chatId: summary.chatId,
     inviteCode: invite.inviteCode,
     inviteId: invite.id,

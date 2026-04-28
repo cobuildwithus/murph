@@ -1,6 +1,3 @@
-import {
-  isHostedAuthenticationIntent,
-} from "@/src/lib/hosted-onboarding/authentication-intent";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -27,7 +24,6 @@ export const POST = withJsonError(async (request: Request) => {
     const result = await completeHostedPrivyVerification({
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
-      intent: isHostedAuthenticationIntent(body.intent) ? body.intent : "signup",
       ...(timeZone ? { timeZone } : {}),
       verifiedPrivyUser: auth.verifiedPrivyUser,
     });

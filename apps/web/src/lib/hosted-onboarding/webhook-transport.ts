@@ -35,7 +35,7 @@ export type HostedLinqInviteMessagePayload = {
   chatId: string;
   inviteId: string;
   replyToMessageId: string | null;
-  template: "invite_signin" | "invite_signup";
+  template: "invite_signup" | "invite_signin";
 };
 
 export type HostedLinqMessagePayload =
@@ -68,7 +68,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       inviteId: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
-      template: "invite_signin" | "invite_signup";
+      template: "invite_signup";
     };
 
 export function createHostedWebhookLinqMessageSideEffect(
@@ -209,8 +209,8 @@ async function buildHostedLinqSideEffectMessage(
         homeRecipientPhone,
       });
     }
-    case "invite_signin":
     case "invite_signup":
+    case "invite_signin":
       return buildHostedInviteSideEffectMessage({
         effectId: effect.effectId,
         payload: effect.payload,
@@ -272,7 +272,6 @@ async function buildHostedInviteSideEffectMessage(input: {
   }
 
   return buildHostedInviteReply({
-    activeSubscription: input.payload.template === "invite_signin",
     joinUrl: buildHostedInviteUrl(invite.inviteCode),
   });
 }
@@ -280,7 +279,9 @@ async function buildHostedInviteSideEffectMessage(input: {
 function isHostedInviteLinqMessagePayload(
   payload: HostedLinqMessagePayload,
 ): payload is HostedLinqInviteMessagePayload {
-  return payload.template === "invite_signin" || payload.template === "invite_signup";
+  return (
+    payload.template === "invite_signup" || payload.template === "invite_signin"
+  );
 }
 
 async function markHostedInviteSentBestEffort(
@@ -325,7 +326,6 @@ function buildHostedWebhookLinqMessagePayload(
         replyToMessageId,
         template: input.template,
       };
-    case "invite_signin":
     case "invite_signup":
       return {
         chatId: input.chatId,

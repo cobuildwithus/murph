@@ -145,9 +145,7 @@ export function HostedPhoneEntryStep({
       <div className="space-y-3">
         <Label htmlFor={phoneInputId}>
           {phoneFieldLabel ??
-            (intent === "signin" || intent === "link"
-              ? "Phone number"
-              : "Your phone")}
+            (intent === "link" ? "Phone number" : "Your phone")}
         </Label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <Combobox
@@ -218,7 +216,7 @@ export function HostedPhoneEntryStep({
             : "Text me a code"}
         </Button>
       </div>
-      {intent === "signup" && showPassiveConsentNotice ? (
+      {intent === "auth" && showPassiveConsentNotice ? (
         <HostedAuthLegalNotice />
       ) : null}
     </form>
@@ -252,9 +250,7 @@ export function HostedCodeEntryStep({
     <HostedVerificationCodeStep
       code={code}
       description={`We texted the latest ${
-        intent === "signin"
-          ? "sign-in code"
-          : intent === "link"
+        intent === "link"
           ? "verification code"
           : "code"
       } to ${verificationPhoneNumberHint}.`}
@@ -265,16 +261,12 @@ export function HostedCodeEntryStep({
           : null
       }
       primaryActionLabel={
-        intent === "signin"
-          ? "Sign in"
-          : intent === "link"
+        intent === "link"
           ? "Link phone"
           : "Verify phone"
       }
       primaryActionPendingLabel={
-        intent === "signin"
-          ? "Signing in..."
-          : intent === "link"
+        intent === "link"
           ? "Saving phone..."
           : "Finishing setup..."
       }

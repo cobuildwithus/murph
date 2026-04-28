@@ -6,7 +6,6 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 
 import {
   HostedAuthLegalNotice,
-  type HostedAuthIntent,
 } from "./hosted-auth-shared";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
@@ -17,13 +16,11 @@ type HostedAuthMethod = "phone" | "telegram" | "email";
 type HostedAlternateMethod = Exclude<HostedAuthMethod, "phone"> | null;
 
 export function HostedAuthPanel({
-  intent = "signup",
   methods,
   onCompleted,
   onSignOut,
   showLegalNotice = false,
 }: {
-  intent?: HostedAuthIntent;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
@@ -40,7 +37,6 @@ export function HostedAuthPanel({
       <HostedPrivyCaptcha />
       {includesPhone ? (
         <HostedPhoneAuth
-          intent={intent}
           onCompleted={onCompleted}
           onSignOut={onSignOut}
           renderCaptcha={false}
@@ -60,14 +56,12 @@ export function HostedAuthPanel({
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={activeMethod === "telegram"}
-                intent={intent}
                 onActivate={() => setActiveMethod("telegram")}
               />
             ) : null}
             {includesEmail ? (
               <HostedEmailAuthButton
                 active={activeMethod === "email"}
-                intent={intent}
                 onActivate={() => setActiveMethod("email")}
               />
             ) : null}
@@ -75,7 +69,7 @@ export function HostedAuthPanel({
         </>
       ) : null}
 
-      {showLegalNotice && intent === "signup" ? <HostedAuthLegalNotice /> : null}
+      {showLegalNotice ? <HostedAuthLegalNotice /> : null}
     </div>
   );
 }

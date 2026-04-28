@@ -52,7 +52,7 @@ export function HostedInvitePhoneAuth({
   const [manualEntryVisible, setManualEntryVisible] = useState(false);
   const controller = useHostedPhoneAuthController({
     inviteCode,
-    intent: "signup",
+    intent: "auth",
     onCompleted,
     onSignOut: async () => {
       setManualEntryVisible(false);
@@ -151,7 +151,6 @@ export function HostedInvitePhoneAuth({
       description={controller.authenticatedSessionDescription}
       disabled={controller.flowDisabled}
       errorMessage={controller.errorMessage}
-      intent="signup"
       pendingAction={controller.pendingAction}
       secondaryActionSize="sm"
       title={controller.authenticatedLoadingTitle}

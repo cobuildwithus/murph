@@ -168,20 +168,6 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
-export async function requireExistingHostedMemberForPrivyIdentity(input: {
-  identity: HostedPrivyIdentity;
-  now: Date;
-  prisma?: PrismaClient;
-}): Promise<HostedMemberCoreState> {
-  const prisma = input.prisma ?? getPrisma();
-
-  return prisma.$transaction((tx) => requireExistingHostedMemberForPrivyIdentityTx({
-    identity: input.identity,
-    now: input.now,
-    prisma: tx,
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
 export async function reconcileHostedPrivyIdentityOnMember(input: {
   expectedPhoneHint?: string;
   expectedPhoneLookupKey?: string;
@@ -239,33 +225,6 @@ export async function ensureHostedMemberForPrivyIdentityTx(input: {
       }),
     });
     return createdMember;
-  }
-
-  return reconcileHostedPrivyIdentityOnMemberTx({
-    identity: input.identity,
-    member: existingMemberLookup.core,
-    now: input.now,
-    prisma: input.prisma,
-  });
-}
-
-export async function requireExistingHostedMemberForPrivyIdentityTx(input: {
-  identity: HostedPrivyIdentity;
-  now: Date;
-  prisma: Prisma.TransactionClient;
-}): Promise<HostedMemberCoreState> {
-  const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
-    identity: input.identity,
-    prisma: input.prisma,
-  });
-
-  if (!existingMemberLookup) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SIGNIN_MEMBER_NOT_FOUND",
-      message:
-        "We could not find an existing Murph account for this verified sign-in method. Use a previously linked phone number, email address, or Telegram account, or sign up first.",
-      httpStatus: 403,
-    });
   }
 
   return reconcileHostedPrivyIdentityOnMemberTx({

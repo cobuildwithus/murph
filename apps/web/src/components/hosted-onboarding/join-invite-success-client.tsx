@@ -243,7 +243,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         buttonLabel: "Back to invite",
         description: "Checking your signup status.",
         pending: true,
-        title: "Finishing sign-in",
+        title: "Finishing verification",
         variant: "pending",
       };
     case "checkout":
