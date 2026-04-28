@@ -820,11 +820,16 @@ async function readHostedAiUsageMemberStripeCustomerId(input: {
 }
 
 function isHostedAiUsageVercelAiGatewayRecord(record: AssistantUsageRecord): boolean {
+  const normalizedProviderName = normalizeOptionalString(record.providerName, "providerName");
+
+  if (record.provider === "codex-cli") {
+    return normalizedProviderName?.toLowerCase() === "vercel-ai-gateway";
+  }
+
   if (record.provider !== "openai-compatible") {
     return false;
   }
 
-  const normalizedProviderName = normalizeOptionalString(record.providerName, "providerName");
   if (normalizedProviderName?.toLowerCase() === "vercel-ai-gateway") {
     return true;
   }

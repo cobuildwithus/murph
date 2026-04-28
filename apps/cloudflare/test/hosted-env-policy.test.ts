@@ -88,6 +88,7 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("does not allow runner secrets to override process environment keys", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
+        "CODEX_HOME",
         "HTTPS_PROXY",
         "NODE_EXTRA_CA_CERTS",
         "NPM_CONFIG_USERCONFIG",
@@ -96,6 +97,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       ].join(","),
     };
 
+    expect(isHostedRunnerSecretKeyAllowed("CODEX_HOME", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("HTTPS_PROXY", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("NODE_EXTRA_CA_CERTS", source)).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("NPM_CONFIG_USERCONFIG", source)).toBe(false);

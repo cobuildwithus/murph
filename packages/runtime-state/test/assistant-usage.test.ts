@@ -515,6 +515,17 @@ test("assistant usage credential source resolves against the hosted user env sna
   assert.equal(
     resolveAssistantUsageCredentialSource({
       apiKeyEnv: null,
+      effectiveEnv: {
+        VERCEL_AI_API_KEY: "member-vercel-key",
+      },
+      provider: "codex-cli",
+      userEnvKeys: ["VERCEL_AI_API_KEY"],
+    }),
+    "unknown",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
       provider: "openai-compatible",
       userEnvKeys: ["VENICE_API_KEY"],
     }),
@@ -592,6 +603,17 @@ test("assistant usage credential source treats blank effective env overrides as 
       },
       provider: "codex-cli",
       userEnvKeys: ["OPENAI_API_KEY"],
+    }),
+    "platform",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
+      effectiveEnv: {
+        VERCEL_AI_API_KEY: " ",
+      },
+      provider: "codex-cli",
+      userEnvKeys: ["VERCEL_AI_API_KEY"],
     }),
     "platform",
   );

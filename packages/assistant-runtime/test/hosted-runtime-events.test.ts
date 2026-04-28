@@ -55,7 +55,6 @@ vi.mock("../src/hosted-runtime/events/conversation.ts", () => ({
 }));
 
 import {
-  emitHostedAssistantProviderTraceLog,
   executeHostedMailboxEvent,
 } from "../src/hosted-runtime/events.ts";
 import { emitHostedAssistantContextTraceLog } from "../src/hosted-runtime/context-diagnostics.ts";
@@ -170,8 +169,6 @@ describe("executeHostedMailboxEvent", () => {
       vaultCreated: false,
     };
     mocks.prepareHostedWakeContext.mockResolvedValue(bootstrapResult);
-    const debugSystemPrompt = "System prompt headed to Azure with notification rules. ".repeat(16);
-    const debugUserPrompt = "Send exactly the signup welcome.";
     mocks.sendAssistantNotification.mockImplementationOnce(async (input) => {
       input.onTraceEvent?.({
         providerSessionId: null,
@@ -199,43 +196,6 @@ describe("executeHostedMailboxEvent", () => {
           sessionTurnCount: 0,
           existingTranscriptEntryCount: 0,
           existingTranscriptWelcomeVisible: false,
-        },
-        updates: [],
-      });
-      input.onTraceEvent?.({
-        providerSessionId: null,
-        rawEvent: {
-          schema: "murph.assistant-provider-request-debug.v1",
-          type: "assistant.provider.request.debug",
-          attemptCount: 1,
-          channel: "linq",
-          conversationMessageCount: 0,
-          conversationMessageRoles: [],
-          deliveryDispatchMode: "queue-only",
-          gatewayOnlyProviderCount: 1,
-          gatewayOnlyProviders: ["vercel-ai-gateway"],
-          nativeResumePolicy: "disabled",
-          previousResponseIdPresent: false,
-          promptCacheDynamicContextStartsAfterStaticCore: 2048,
-          promptCacheStableRouteCapabilityPromptHash: "hash-stable-route",
-          promptCacheStaticPromptHash: "hash-static",
-          promptCacheToolSchemaHash: "hash-tools",
-          promptProfile: "notification-decision",
-          provider: "codex-cli",
-          providerExecutionDriver: "codex-app-server",
-          providerModel: "gpt-5.5",
-          providerName: "vercel-ai-gateway",
-          routeId: "route-notification",
-          sessionContextPresent: false,
-          supportsToolRuntime: true,
-          systemPromptHash: "hash-system-prompt",
-          systemPromptLength: debugSystemPrompt.length,
-          toolCount: 0,
-          toolNames: [],
-          turnTrigger: "automation-cron",
-          userPromptHash: "hash-user-prompt",
-          userPromptLength: debugUserPrompt.length,
-          zeroDataRetention: true,
         },
         updates: [],
       });
@@ -354,23 +314,6 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       3,
       expect.objectContaining({
-        component: "runtime.provider",
-        details: expect.objectContaining({
-          assistantProviderRequestGatewayOnlyProviders: ["vercel-ai-gateway"],
-          assistantProviderRequestProviderExecutionDriver: "codex-app-server",
-          assistantProviderRequestProviderModel: "gpt-5.5",
-          assistantProviderRequestProviderName: "vercel-ai-gateway",
-          assistantProviderRequestPreviousResponseIdPresent: false,
-          assistantProviderRequestSchema: "murph.assistant-provider-request-debug.v1",
-        }),
-        message: "Hosted assistant provider request summary captured.",
-        phase: "wake.running",
-        wake,
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
-      4,
-      expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
           notificationRouteChannel: "linq",
@@ -381,15 +324,6 @@ describe("executeHostedMailboxEvent", () => {
         wake,
       }),
     );
-    expect(result.redactedLogEntries?.[2]?.redacted).toEqual(
-      expect.objectContaining({
-        assistantProviderRequestProviderModel: "gpt-5.5",
-      }),
-    );
-    expect(result.redactedLogEntries?.[2]?.redacted).not.toEqual(expect.objectContaining({
-      assistantProviderRequestSystemPromptHash: expect.anything(),
-      assistantProviderRequestUserPromptHash: expect.anything(),
-    }));
     expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
@@ -432,19 +366,6 @@ describe("executeHostedMailboxEvent", () => {
             sessionFingerprint: "h1_444444444444444444444444",
             sessionResolutionCreated: true,
             stage: "assistant-session-resolved",
-          }),
-        },
-        {
-          component: "runtime.provider",
-          eventId: "evt_notification",
-          level: "info",
-          message: "Hosted assistant provider request summary captured.",
-          phase: "wake.running",
-          redacted: expect.objectContaining({
-            assistantProviderRequestGatewayOnlyProviders: ["vercel-ai-gateway"],
-            assistantProviderRequestProviderExecutionDriver: "codex-app-server",
-            assistantProviderRequestProviderModel: "gpt-5.5",
-            assistantProviderRequestProviderName: "vercel-ai-gateway",
           }),
         },
         {

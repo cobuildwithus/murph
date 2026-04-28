@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto'
-
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -92,6 +90,8 @@ type AssistantProviderAttemptOutcome =
       kind: 'succeeded'
       result: ExecutedAssistantProviderTurnResult
     }
+
+const VERCEL_AI_GATEWAY_MODEL_PROVIDER_ID = 'vercel-ai-gateway' as const
 
 export type AssistantProviderTurnRecoveryOutcome =
   | {
@@ -187,6 +187,15 @@ function createAssistantProviderUsageAttribution(input: {
   })
   const stripeCustomerId =
     input.executionPlan.executionContext?.hosted?.stripeCustomerId ?? null
+  const stripeMeterSource =
+    stripeCustomerId
+    && credentialSource === 'platform'
+    && input.attemptPlan.route.provider === 'codex-cli'
+    && input.attemptPlan.route.providerOptions.modelProvider ===
+      VERCEL_AI_GATEWAY_MODEL_PROVIDER_ID
+      ? VERCEL_AI_GATEWAY_MODEL_PROVIDER_ID
+      : 'murph'
+
   return createAssistantUsageAttribution({
     credentialSource,
     environment: resolveAssistantUsageEnvironment(input.env),
@@ -202,7 +211,7 @@ function createAssistantProviderUsageAttribution(input: {
       session: input.attemptPlan.session,
     }),
     stripeCustomerId,
-    stripeMeterSource: 'murph',
+    stripeMeterSource,
     triggerKind: resolveAssistantUsageTriggerKind(
       input.executionPlan.input.turnTrigger ?? 'manual-ask',
     ),
@@ -248,10 +257,6 @@ async function executeAssistantProviderAttempt(input: {
       env: attemptEnv,
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
-    })
-    emitHostedProviderRequestDebugTrace({
-      attemptPlan,
-      executionPlan,
     })
     const attemptResult = await executeAssistantProviderTurnAttempt({
       abortSignal: executionPlan.input.abortSignal,
@@ -377,82 +382,6 @@ async function executeAssistantProviderAttempt(input: {
       session,
     }
   }
-}
-
-function emitHostedProviderRequestDebugTrace(input: {
-  attemptPlan: AssistantProviderAttemptPlan
-  executionPlan: AssistantProviderTurnExecutionPlan
-}): void {
-  const { attemptPlan, executionPlan } = input
-  const onTraceEvent = executionPlan.input.onTraceEvent
-
-  if (
-    !onTraceEvent ||
-    executionPlan.executionContext?.hosted == null
-  ) {
-    return
-  }
-
-  try {
-    const providerOptions = attemptPlan.route.providerOptions
-    const systemPrompt = attemptPlan.routePlan.systemPrompt ?? null
-    const promptCacheMetadata = attemptPlan.routePlan.promptCacheMetadata
-    const activeTurnMessages = attemptPlan.routePlan.activeTurnMessages ?? []
-    const conversationMessages = attemptPlan.routePlan.conversationMessages ?? []
-    const toolNames: string[] = []
-
-    onTraceEvent({
-      providerSessionId: null,
-      rawEvent: {
-        schema: 'murph.assistant-provider-request-debug.v1',
-        type: 'assistant.provider.request.debug',
-        attemptCount: attemptPlan.attemptCount,
-        channel: executionPlan.input.channel ?? attemptPlan.session.binding.channel,
-        activeTurnMessageCount: activeTurnMessages.length,
-        activeTurnMessageRoles: activeTurnMessages.map((message) => message.role),
-        conversationMessageCount: conversationMessages.length,
-        conversationMessageRoles: conversationMessages.map((message) => message.role),
-        deliveryDispatchMode: executionPlan.input.deliveryDispatchMode ?? null,
-        providerResumeSessionIdPresent:
-          attemptPlan.routePlan.resumeProviderSessionId !== null,
-        provider: attemptPlan.route.provider,
-        providerExecutionDriver: providerOptions.executionDriver,
-        providerModel: providerOptions.model ?? null,
-        promptProfile: executionPlan.profile.promptProfile,
-        routeId: attemptPlan.route.routeId,
-        sessionContextPresent: attemptPlan.routePlan.sessionContext != null,
-        turnContinuityPolicy: executionPlan.profile.turnContinuityPolicy,
-        promptCacheDynamicContextStartsAfterStaticCore:
-          promptCacheMetadata?.dynamicContextStartsAfterStaticCore ?? null,
-        promptCacheStableRouteCapabilityPromptHash:
-          promptCacheMetadata?.stableRouteCapabilityPromptHash ?? null,
-        promptCacheStaticPromptHash:
-          promptCacheMetadata?.staticPromptHash ?? null,
-        promptCacheToolSchemaHash:
-          promptCacheMetadata?.toolSchemaHash ?? null,
-        systemPromptHash:
-          systemPrompt === null ? null : hashAssistantProviderDebugText(systemPrompt),
-        systemPromptLength: systemPrompt?.length ?? 0,
-        toolCount: toolNames.length,
-        toolNames,
-        turnTrigger: executionPlan.input.turnTrigger ?? null,
-        userPromptHash: hashAssistantProviderDebugText(executionPlan.input.prompt),
-        userPromptLength: executionPlan.input.prompt.length,
-      },
-      updates: [
-        {
-          kind: 'status',
-          text: 'Hosted provider request summary captured.',
-        },
-      ],
-    })
-  } catch {
-    // Debug trace observers must not block the provider call.
-  }
-}
-
-function hashAssistantProviderDebugText(value: string): string {
-  return createHash('sha256').update(value).digest('hex')
 }
 
 function readAssistantErrorCode(error: unknown): string | null {

@@ -62,6 +62,7 @@ describe('assistant provider registry helpers', () => {
         providerConfig: normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           model: 'codex-mini',
+          modelProvider: 'vercel-ai-gateway',
           oss: false,
         }),
         rawEvents: [
@@ -73,6 +74,7 @@ describe('assistant provider registry helpers', () => {
     ).toMatchObject({
       inputTokens: null,
       outputTokens: null,
+      providerName: 'vercel-ai-gateway',
       providerMetadataJson: null,
       providerRequestId: null,
       rawUsageJson: null,

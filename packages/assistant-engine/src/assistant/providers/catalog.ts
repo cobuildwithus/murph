@@ -14,14 +14,6 @@ export const DEFAULT_CODEX_MODEL_CAPABILITIES: AssistantModelCapabilities = {
   tools: true,
 }
 
-export const DEFAULT_OPENAI_COMPATIBLE_MODEL_CAPABILITIES: AssistantModelCapabilities = {
-  images: true,
-  pdf: true,
-  reasoning: false,
-  streaming: true,
-  tools: true,
-}
-
 export const DEFAULT_CODEX_MODELS: readonly AssistantCatalogModel[] = [
   {
     id: 'gpt-5.5',

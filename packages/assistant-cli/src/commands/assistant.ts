@@ -98,7 +98,7 @@ const assistantKnownChannelOptionSchema = z
         ? assistantChannelNameSchema.safeParse(normalized).success
         : false
     },
-    'Supported assistant channels: telegram, linq/iMessage, email.',
+    'Known assistant channel names: telegram, linq/iMessage, email.',
   )
 const assistantLocalChannelOptionSchema = z
   .string()
@@ -655,7 +655,7 @@ function createAssistantChatCommandDefinition(input?: {
     args: assistantChatArgsSchema,
     description:
       input?.description ??
-      'Open an Ink terminal chat UI backed by the chosen provider while Murph stores session metadata plus a local transcript outside the canonical vault. This command requires interactive terminal input.',
+      'Open an Ink terminal chat UI backed by Codex App Server while Murph stores session metadata plus a local transcript outside the canonical vault. This command requires interactive terminal input.',
     hint:
       input?.hint ??
       'Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
@@ -776,7 +776,7 @@ export function registerAssistantCommands(
 ) {
   const assistant = Cli.create('assistant', {
     description:
-      'Murph-native assistant runtime with provider-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
+      'Murph-native assistant runtime with Codex App Server-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation.',
   })
 
   const registerConversationCommands = () => {
@@ -785,9 +785,9 @@ export function registerAssistantCommands(
         prompt: z.string().min(1).describe('Prompt to send to the local assistant session.'),
       }),
       description:
-        'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
+        'Send one message through the local Codex App Server-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
       hint:
-        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as Telegram or email.',
+        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses Codex thread continuity when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as Telegram or email.',
       examples: [
         {
           args: {
@@ -866,7 +866,7 @@ export function registerAssistantCommands(
           .describe('Outbound message body to deliver over the mapped assistant channel.'),
       }),
       description:
-        'Deliver one outbound assistant message without invoking the chat provider. Telegram and email both use the same stored assistant channel binding surface.',
+        'Deliver one explicit outbound assistant message through a stored Telegram or email assistant channel binding. Use `assistant ask --deliverResponse` when Codex should compose the reply.',
       hint:
         'Use --deliveryTarget to override the stored delivery target for one send only. For Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for email it can be a recipient address while thread-bound sessions reply in place.',
       examples: [
