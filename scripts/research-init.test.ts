@@ -310,7 +310,7 @@ describe("research init scaffold", () => {
     mkdirSync(researchOutputRoot, { recursive: true });
     const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-"));
     const outDir = path.join(tempRoot, "lane-state");
-    const phlebasBrowser = await startFakeCdpServer(["research-run-test"]);
+    const phlebasBrowser = await startFakeCdpServer([]);
     const herculesBrowser = await startFakeCdpServer(["research-run-test"]);
     const mountainBrowser = await startFakeCdpServer([
       "https://example.com/c/research-run-test",
@@ -328,9 +328,9 @@ set -euo pipefail
 
 endpoint_for_lane() {
   case "$1" in
-    phlebas) printf '%s\\n' '${phlebasBrowser.endpoint}' ;;
-    hercules) printf '%s\\n' '${herculesBrowser.endpoint}' ;;
-    mountain) printf '%s\\n' '${mountainBrowser.endpoint}' ;;
+    testphlebas) printf '%s\\n' '${phlebasBrowser.endpoint}' ;;
+    testhercules) printf '%s\\n' '${herculesBrowser.endpoint}' ;;
+    testmountain) printf '%s\\n' '${mountainBrowser.endpoint}' ;;
     *) exit 65 ;;
   esac
 }
@@ -453,14 +453,16 @@ exit 64
           "--action",
           "send",
           "--lane",
-          "Phlebas",
+          "TestPhlebas",
         ],
         env,
       );
 
       expect(sendResult.status).toBe(0);
       expect(sendResult.stderr).toBe("");
-      expect(readFileSync(path.join(outDir, "state", "send-lane.txt"), "utf8")).toBe("phlebas\n");
+      expect(readFileSync(path.join(outDir, "state", "send-lane.txt"), "utf8")).toBe(
+        "testphlebas\n",
+      );
       expect(readFileSync(path.join(outDir, "state", "send-endpoint.txt"), "utf8")).toBe(
         `${phlebasBrowser.endpoint}\n`,
       );
@@ -474,7 +476,7 @@ exit 64
         send: { command: string; exitCode: number; lane: string; status: string };
       };
       expect(sendState.schemaVersion).toBe("murph.research.seam-run.v1");
-      expect(sendState.lane).toBe("phlebas");
+      expect(sendState.lane).toBe("testphlebas");
       expect(sendState.browserEndpoint).toBe(phlebasBrowser.endpoint);
       expect(sendState.chatUrl).toBe("https://chatgpt.com/c/research-run-test");
       expect(sendState.send.command).toBe(`${workspaceArg}/commands/01-charter.send.sh`);
@@ -487,7 +489,7 @@ exit 64
           {
             ...sendState,
             browserEndpoint: herculesBrowser.endpoint,
-            lane: "hercules",
+            lane: "testhercules",
           },
           null,
           2,
@@ -503,14 +505,16 @@ exit 64
           "--action",
           "harvest",
           "--lane",
-          "hercules",
+          "testhercules",
         ],
         env,
       );
 
       expect(mismatchResult.status).toBe(1);
-      expect(mismatchResult.stderr).toContain("Refusing to harvest 01-charter from lane hercules");
-      expect(mismatchResult.stderr).toContain("this seam was sent on phlebas");
+      expect(mismatchResult.stderr).toContain(
+        "Refusing to harvest 01-charter from lane testhercules",
+      );
+      expect(mismatchResult.stderr).toContain("this seam was sent on testphlebas");
       expect(mismatchResult.stderr).toContain("--explore-lane");
       expect(existsSync(path.join(outDir, "state", "harvest-lane.txt"))).toBe(false);
 
@@ -522,7 +526,7 @@ exit 64
       expect(harvestResult.status).toBe(0);
       expect(harvestResult.stderr).toBe("");
       expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
-        "phlebas\n",
+        "testphlebas\n",
       );
       expect(readFileSync(path.join(outDir, "state", "harvest-endpoint.txt"), "utf8")).toBe(
         `${phlebasBrowser.endpoint}\n`,
@@ -536,9 +540,9 @@ exit 64
         harvest: { exitCode: number; lane: string; status: string };
         lane: string;
       };
-      expect(harvestState.lane).toBe("phlebas");
+      expect(harvestState.lane).toBe("testphlebas");
       expect(harvestState.browserEndpoint).toBe(phlebasBrowser.endpoint);
-      expect(harvestState.harvest.lane).toBe("phlebas");
+      expect(harvestState.harvest.lane).toBe("testphlebas");
       expect(harvestState.harvest.status).toBe("completed");
       expect(harvestState.harvest.exitCode).toBe(0);
       expect(readFileSync(path.join(outDir, "responses", "01-charter.md"), "utf8")).toContain(
@@ -554,7 +558,7 @@ exit 64
           "--action",
           "harvest",
           "--lane",
-          "mountain",
+          "testmountain",
           "--explore-lane",
         ],
         env,
@@ -562,13 +566,13 @@ exit 64
 
       expect(invisibleExploratoryResult.status).toBe(1);
       expect(invisibleExploratoryResult.stderr).toContain(
-        "Refusing exploratory harvest for 01-charter on mountain",
+        "Refusing exploratory harvest for 01-charter on testmountain",
       );
       expect(invisibleExploratoryResult.stderr).toContain(
         "ChatGPT conversation research-run-test is not visible",
       );
       expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
-        "phlebas\n",
+        "testphlebas\n",
       );
 
       const exploratoryResult = runResearchRun(
@@ -580,7 +584,7 @@ exit 64
           "--action",
           "harvest",
           "--lane",
-          "hercules",
+          "testhercules",
           "--explore-lane",
         ],
         env,
@@ -589,16 +593,16 @@ exit 64
       expect(exploratoryResult.status).toBe(0);
       expect(exploratoryResult.stderr).toContain("Exploratory harvest override");
       expect(readFileSync(path.join(outDir, "state", "harvest-lane.txt"), "utf8")).toBe(
-        "hercules\n",
+        "testhercules\n",
       );
       const exploratoryState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
         browserEndpoint: string;
         harvest: { browserEndpoint: string; lane: string };
         lane: string;
       };
-      expect(exploratoryState.lane).toBe("phlebas");
+      expect(exploratoryState.lane).toBe("testphlebas");
       expect(exploratoryState.browserEndpoint).toBe(phlebasBrowser.endpoint);
-      expect(exploratoryState.harvest.lane).toBe("hercules");
+      expect(exploratoryState.harvest.lane).toBe("testhercules");
       expect(exploratoryState.harvest.browserEndpoint).toBe(herculesBrowser.endpoint);
 
       const resendResult = runResearchRun(
@@ -610,9 +614,12 @@ exit 64
           "--action",
           "send",
           "--lane",
-          "phlebas",
+          "testphlebas",
         ],
-        env,
+        {
+          ...env,
+          RESEARCH_ALLOW_RESEND_WITH_EXISTING_CHAT_URL: "1",
+        },
       );
 
       expect(resendResult.status).toBe(0);
@@ -659,6 +666,361 @@ exit 64
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("--lane is required for send");
     } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("allows send into a lane with restored ChatGPT conversation tabs", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-guard-"));
+    const outDir = path.join(tempRoot, "send-guard");
+    const foreignOwnerDir = mkdtempSync(
+      path.join(researchOutputRoot, "tmp-research-run-send-guard-owner-"),
+    );
+    const browser = await startFakeCdpServer([
+      "restored-thread",
+      "https://chatgpt.com/?temporary-chat=true",
+    ]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+      mkdirSync(path.join(foreignOwnerDir, "state", "seams"), { recursive: true });
+      writeTextFileSync(
+        path.join(foreignOwnerDir, "state", "seams", "02-discovery.json"),
+        `${JSON.stringify(
+          {
+            chatUrl: "https://chatgpt.com/c/restored-thread",
+            schemaVersion: "murph.research.seam-run.v1",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(
+        commandPath,
+        `#!/usr/bin/env bash
+mkdir -p '${path.join(outDir, "state", "chat-urls")}'
+printf 'send command ran\\n' > '${path.join(outDir, "state", "send-ran.txt")}'
+printf 'https://chatgpt.com/c/new-thread-from-existing-tab-lane\\n' > '${path.join(outDir, "state", "chat-urls", "01-charter.txt")}'
+`,
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        [
+          "--workspace",
+          path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "testtabreuse",
+        ],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(readFileSync(path.join(outDir, "state", "send-ran.txt"), "utf8")).toBe(
+        "send command ran\n",
+      );
+      const seamState = JSON.parse(
+        readFileSync(path.join(outDir, "state", "seams", "01-charter.json"), "utf8"),
+      ) as { chatUrl: string; send: { status: string } };
+      expect(seamState.chatUrl).toBe("https://chatgpt.com/c/new-thread-from-existing-tab-lane");
+      expect(seamState.send.status).toBe("completed");
+    } finally {
+      await browser.close();
+      rmSync(foreignOwnerDir, { recursive: true, force: true });
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to resend a seam with an existing recorded ChatGPT URL", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-clear-"));
+    const outDir = path.join(tempRoot, "send-clear");
+    const browser = await startFakeCdpServer([]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", "01-charter.txt");
+      mkdirSync(path.dirname(seamStatePath), { recursive: true });
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/stale-thread\n");
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            chatUrl: "https://chatgpt.com/c/stale-thread",
+            schemaVersion: "murph.research.seam-run.v1",
+            seam: "01-charter",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(commandPath, "#!/usr/bin/env bash\nexit 65\n");
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        [
+          "--workspace",
+          path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "teststalechat",
+        ],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Refusing to resend 01-charter");
+      expect(result.stderr).toContain("https://chatgpt.com/c/stale-thread");
+      expect(existsSync(chatUrlPath)).toBe(true);
+      const seamState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        chatUrl?: string;
+        send?: { status: string };
+      };
+      expect(seamState.chatUrl).toBe("https://chatgpt.com/c/stale-thread");
+      expect(seamState.send).toBeUndefined();
+    } finally {
+      await browser.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("clears stale chat URL scratch files before a fresh resend attempt starts", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-clear-"));
+    const outDir = path.join(tempRoot, "send-clear");
+    const browser = await startFakeCdpServer([]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const seamStatePath = path.join(outDir, "state", "seams", "01-charter.json");
+      const chatUrlPath = path.join(outDir, "state", "chat-urls", "01-charter.txt");
+      mkdirSync(path.dirname(seamStatePath), { recursive: true });
+      mkdirSync(path.dirname(chatUrlPath), { recursive: true });
+      writeTextFileSync(chatUrlPath, "https://chatgpt.com/c/stale-thread\n");
+      writeTextFileSync(
+        seamStatePath,
+        `${JSON.stringify(
+          {
+            schemaVersion: "murph.research.seam-run.v1",
+            seam: "01-charter",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(commandPath, "#!/usr/bin/env bash\nexit 65\n");
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const result = runResearchRun(
+        [
+          "--workspace",
+          path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep),
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "hercules",
+        ],
+        {
+          ...process.env,
+          MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+        },
+      );
+
+      expect(result.status).toBe(65);
+      expect(existsSync(chatUrlPath)).toBe(false);
+      const seamState = JSON.parse(readFileSync(seamStatePath, "utf8")) as {
+        chatUrl?: string;
+        send: { status: string };
+      };
+      expect("chatUrl" in seamState).toBe(false);
+      expect(seamState.send.status).toBe("failed");
+    } finally {
+      await browser.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses concurrent sends on the same browser lane", async () => {
+    mkdirSync(researchOutputRoot, { recursive: true });
+    const tempRoot = mkdtempSync(path.join(researchOutputRoot, "tmp-research-run-send-lock-"));
+    const outDir = path.join(tempRoot, "send-lock");
+    const browser = await startFakeCdpServer([]);
+
+    try {
+      expect(runResearchInit("cold plunge", "--out-dir", outDir).status).toBe(0);
+
+      const commandPath = path.join(outDir, "commands", "01-charter.send.sh");
+      writeTextFileSync(
+        commandPath,
+        `#!/usr/bin/env bash
+printf 'started\\n' > '${path.join(outDir, "state", "send-command-started.txt")}'
+sleep 2
+`,
+      );
+      chmodSync(commandPath, 0o755);
+
+      const profileHelperPath = path.join(tempRoot, "profile-helper.sh");
+      writeTextFileSync(
+        profileHelperPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "browser-endpoint" ]]; then
+  printf '%s\\n' '${browser.endpoint}'
+  exit 0
+fi
+if [[ "$1" == "research" ]]; then
+  shift 2
+  exec "$@"
+fi
+echo "unexpected profile helper args: $*" >&2
+exit 64
+`,
+      );
+      chmodSync(profileHelperPath, 0o755);
+
+      const workspaceArg = path.relative(repoRoot, outDir).split(path.sep).join(path.posix.sep);
+      const env = {
+        ...process.env,
+        MURPH_RESEARCH_PROFILE_HELPER: profileHelperPath,
+      };
+      const first = spawn(
+        "node",
+        [
+          runScriptPath,
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "testsendlock",
+        ],
+        {
+          cwd: repoRoot,
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+
+      const lockPath = path.join(researchOutputRoot, "_locks", "send-testsendlock.lock.json");
+      for (let attempt = 0; attempt < 50 && !existsSync(lockPath); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(existsSync(lockPath)).toBe(true);
+
+      const commandStartedPath = path.join(outDir, "state", "send-command-started.txt");
+      for (let attempt = 0; attempt < 50 && !existsSync(commandStartedPath); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(existsSync(commandStartedPath)).toBe(true);
+
+      const second = runResearchRun(
+        [
+          "--workspace",
+          workspaceArg,
+          "--seam",
+          "01-charter",
+          "--action",
+          "send",
+          "--lane",
+          "testsendlock",
+        ],
+        env,
+      );
+      expect(second.status).toBe(1);
+      expect(second.stderr).toContain("another send is already staging");
+
+      await new Promise<void>((resolve) => {
+        first.on("exit", () => resolve());
+      });
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      await browser.close();
       rmSync(tempRoot, { recursive: true, force: true });
     }
   });
@@ -756,6 +1118,7 @@ exit 64
       expect(helperScript).toContain("--send");
       expect(helperScript).toContain("thread wake");
       expect(helperScript).toContain("--skip-resume");
+      expect(helperScript).toContain('RESEARCH_CLOSE_HARVEST_TAB:-0');
       expect(helperScript).toContain("murph-workspace");
       expect(helperScript).toContain('$0 send <label> <prompt-file>');
       expect(helperScript).toContain('$0 harvest <label> [response-file|-]');
@@ -1632,6 +1995,7 @@ exit 64
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
           RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT: browserEndpoint,
+          RESEARCH_CLOSE_HARVEST_TAB: "1",
         },
       );
 
@@ -1791,6 +2155,7 @@ exit 64
           ...process.env,
           PATH: `${stubBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
           RESEARCH_THREAD_EXPORT_BROWSER_ENDPOINT: browserEndpoint,
+          RESEARCH_CLOSE_HARVEST_TAB: "1",
         },
       );
 

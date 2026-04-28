@@ -200,21 +200,23 @@ murph_review_gpt_profile_open_chatgpt() {
 
   mkdir -p "$user_data_dir"
 
+  # Keep managed research profiles in one window; repeated recovery opens tabs.
   if [[ "${REVIEW_GPT_ALLOW_BROWSER_FOREGROUND:-1}" =~ ^(0|false|no|off)$ ]]; then
     nohup "$browser_binary" \
       "--user-data-dir=$user_data_dir" \
       "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
       "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
-      --no-startup-window \
+      --new-tab \
+      "https://chatgpt.com/" \
       >/dev/null 2>&1 &
     return 0
   fi
 
-  open -g -na "$MURPH_REVIEW_GPT_PROFILE_ROOT/$MURPH_REVIEW_GPT_PROFILE_NAME.app" --args \
+  open -g -a "$MURPH_REVIEW_GPT_PROFILE_ROOT/$MURPH_REVIEW_GPT_PROFILE_NAME.app" --args \
     "--user-data-dir=$user_data_dir" \
     "--profile-directory=$MURPH_REVIEW_GPT_PROFILE_BROWSER_PROFILE" \
     "--remote-debugging-port=$MURPH_REVIEW_GPT_PROFILE_PORT" \
-    --new-window \
+    --new-tab \
     "https://chatgpt.com/"
 }
 
@@ -242,6 +244,20 @@ murph_review_gpt_profile_endpoint_ready() {
   curl --silent --show-error --fail --max-time 1 "$browser_endpoint/json/version" >/dev/null 2>&1
 }
 
+murph_review_gpt_profile_has_page_target() {
+  local profile_slug="$1"
+  local browser_endpoint
+  browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
+  curl --silent --show-error --fail --max-time 1 "$browser_endpoint/json/list" \
+    | node -e 'let input = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { const targets = JSON.parse(input || "[]"); process.exit(Array.isArray(targets) && targets.some((target) => target && target.type === "page") ? 0 : 1); });' \
+    >/dev/null 2>&1
+}
+
+murph_review_gpt_profile_browser_ready() {
+  local profile_slug="$1"
+  murph_review_gpt_profile_endpoint_ready "$profile_slug" && murph_review_gpt_profile_has_page_target "$profile_slug"
+}
+
 murph_review_gpt_profile_wait_for_endpoint() {
   local profile_slug="$1"
   local browser_endpoint=""
@@ -259,6 +275,66 @@ murph_review_gpt_profile_wait_for_endpoint() {
   done
 
   echo "Error: managed browser failed to start on ${browser_endpoint}." >&2
+  return 1
+}
+
+murph_review_gpt_profile_wait_for_browser_ready() {
+  local profile_slug="$1"
+  local browser_endpoint=""
+  local attempt=0
+  local max_attempts="${2:-50}"
+
+  browser_endpoint="$(murph_review_gpt_profile_browser_endpoint "$profile_slug")" || return 1
+
+  while (( attempt < max_attempts )); do
+    if murph_review_gpt_profile_browser_ready "$profile_slug"; then
+      return 0
+    fi
+    sleep 0.2
+    attempt=$((attempt + 1))
+  done
+
+  echo "Error: managed browser failed to become ready on ${browser_endpoint}." >&2
+  return 1
+}
+
+murph_review_gpt_profile_prepare_lock_dir() {
+  local profile_slug="$1"
+  murph_review_gpt_load_profile "$profile_slug" || return 1
+  printf '%s\n' "$MURPH_REVIEW_GPT_PROFILE_ROOT/.browser-prepare.lock"
+}
+
+murph_review_gpt_profile_acquire_prepare_lock() {
+  local profile_slug="$1"
+  local lock_dir=""
+  local pid_path=""
+  local owner_pid=""
+  local attempt=0
+  lock_dir="$(murph_review_gpt_profile_prepare_lock_dir "$profile_slug")" || return 1
+  pid_path="$lock_dir/pid"
+
+  while (( attempt < 100 )); do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      printf '%s\n' "$$" >"$pid_path"
+      printf '%s\n' "$lock_dir"
+      return 0
+    fi
+
+    owner_pid="$(cat "$pid_path" 2>/dev/null || true)"
+    if [[ -n "$owner_pid" ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+      rm -rf "$lock_dir"
+      continue
+    fi
+
+    if murph_review_gpt_profile_browser_ready "$profile_slug"; then
+      return 2
+    fi
+
+    sleep 0.2
+    attempt=$((attempt + 1))
+  done
+
+  echo "Error: timed out waiting for managed browser prepare lock for ${profile_slug}." >&2
   return 1
 }
 
@@ -322,19 +398,70 @@ murph_review_gpt_profile_apply_browser_defaults() {
 murph_review_gpt_profile_prepare_browser_env() {
   local profile_slug="$1"
   local running_pids
+  local lock_dir=""
+  local lock_status=0
 
   murph_review_gpt_profile_export_browser_env "$profile_slug" || return 1
 
-  if murph_review_gpt_profile_endpoint_ready "$profile_slug"; then
+  if murph_review_gpt_profile_browser_ready "$profile_slug"; then
     return 0
   fi
 
-  running_pids="$(murph_review_gpt_profile_process_ids "$profile_slug")" || return 1
-  if [[ -n "$running_pids" ]]; then
-    murph_review_gpt_profile_stop_processes "$profile_slug" || return 1
+  lock_dir="$(murph_review_gpt_profile_acquire_prepare_lock "$profile_slug")" || lock_status=$?
+  if [[ "$lock_status" -eq 2 ]]; then
+    return 0
   fi
-  murph_review_gpt_profile_open_chatgpt "$profile_slug" >/dev/null 2>&1 || return 1
-  murph_review_gpt_profile_wait_for_endpoint "$profile_slug" || return 1
+  if [[ "$lock_status" -ne 0 ]]; then
+    return "$lock_status"
+  fi
+
+  if murph_review_gpt_profile_browser_ready "$profile_slug"; then
+    rm -rf "$lock_dir"
+    return 0
+  fi
+
+  if murph_review_gpt_profile_endpoint_ready "$profile_slug"; then
+    murph_review_gpt_profile_open_chatgpt "$profile_slug" >/dev/null 2>&1 || {
+      rm -rf "$lock_dir"
+      return 1
+    }
+    murph_review_gpt_profile_wait_for_browser_ready "$profile_slug" || {
+      rm -rf "$lock_dir"
+      return 1
+    }
+    rm -rf "$lock_dir"
+    return 0
+  fi
+
+  running_pids="$(murph_review_gpt_profile_process_ids "$profile_slug")" || {
+    rm -rf "$lock_dir"
+    return 1
+  }
+  if [[ -n "$running_pids" ]]; then
+    case "${MURPH_REVIEW_GPT_PROFILE_RESTART_IF_ENDPOINT_MISSING:-0}" in
+      1|true|TRUE|yes|YES)
+        murph_review_gpt_profile_stop_processes "$profile_slug" || {
+          rm -rf "$lock_dir"
+          return 1
+        }
+        ;;
+      *)
+        rm -rf "$lock_dir"
+        echo "Error: ${profile_slug} has running browser processes but no ready remote-debugging endpoint." >&2
+        echo "Refusing to restart the lane automatically because that would close existing tabs. Close/reopen the lane manually, or set MURPH_REVIEW_GPT_PROFILE_RESTART_IF_ENDPOINT_MISSING=1 for an intentional restart." >&2
+        return 1
+        ;;
+    esac
+  fi
+  murph_review_gpt_profile_open_chatgpt "$profile_slug" >/dev/null 2>&1 || {
+    rm -rf "$lock_dir"
+    return 1
+  }
+  murph_review_gpt_profile_wait_for_browser_ready "$profile_slug" || {
+    rm -rf "$lock_dir"
+    return 1
+  }
+  rm -rf "$lock_dir"
 }
 
 murph_review_gpt_resolve_config_path() {

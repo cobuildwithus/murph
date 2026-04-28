@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  rmSync,
   readdirSync,
   readFileSync,
   unlinkSync,
@@ -245,6 +246,66 @@ function writeJsonFile(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireSendLaneLock(lane, workspaceDir, seam) {
+  const locksDir = path.join(researchRoot, "_locks");
+  const lockPath = path.join(locksDir, `send-${lane}.lock.json`);
+  mkdirSync(locksDir, { recursive: true });
+  const lockState = {
+    acquiredAt: new Date().toISOString(),
+    lane,
+    pid: process.pid,
+    seam,
+    workspace: toPosixRelative(workspaceDir),
+  };
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(lockPath, `${JSON.stringify(lockState, null, 2)}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+      return () => {
+        const current = readJsonFile(lockPath);
+        if (current.pid === process.pid) {
+          rmSync(lockPath, { force: true });
+        }
+      };
+    } catch (error) {
+      if (error && error.code !== "EEXIST") {
+        throw error;
+      }
+
+      const existing = readJsonFile(lockPath);
+      if (!isProcessAlive(Number(existing.pid))) {
+        rmSync(lockPath, { force: true });
+        continue;
+      }
+
+      throw new Error(
+        [
+          `Refusing to send ${seam} on lane ${lane}: another send is already staging in that browser profile.`,
+          `Active send: ${existing.workspace || "unknown-workspace"}:${existing.seam || "unknown-seam"} (pid ${existing.pid})`,
+          "Use a different lane or retry after that send records its ChatGPT URL.",
+        ].join("\n"),
+      );
+    }
+  }
+
+  throw new Error(`Unable to acquire send lock for lane ${lane}.`);
+}
+
 function readChatUrl(workspaceDir, seam) {
   const chatUrlPath = path.join(workspaceDir, "state", "chat-urls", `${seam}.txt`);
   if (!existsSync(chatUrlPath)) {
@@ -274,6 +335,14 @@ function extractChatConversationId(chatUrl) {
   } catch {
     return "";
   }
+}
+
+function normalizeChatConversationUrl(chatUrl) {
+  const conversationId = extractChatConversationId(chatUrl);
+  if (!conversationId) {
+    return "";
+  }
+  return `https://chatgpt.com/c/${conversationId}`;
 }
 
 function clearChatUrl(workspaceDir, seam) {
@@ -309,7 +378,7 @@ function findActiveChatUrlOwners(chatUrl, currentWorkspaceDir, currentSeam) {
       }
 
       const state = readJsonFile(path.join(seamsDir, fileName));
-      if (readStateString(state, "chatUrl") === chatUrl) {
+      if (normalizeChatConversationUrl(readStateString(state, "chatUrl")) === chatUrl) {
         owners.push(`${toPosixRelative(workspaceDir)}:${ownerSeam}`);
       }
     }
@@ -319,13 +388,14 @@ function findActiveChatUrlOwners(chatUrl, currentWorkspaceDir, currentSeam) {
 }
 
 function validateSendChatUrl(workspaceDir, seam) {
-  const chatUrl = readChatUrl(workspaceDir, seam);
-  if (!chatUrl) {
+  const rawChatUrl = readChatUrl(workspaceDir, seam);
+  if (!rawChatUrl) {
     return;
   }
+  const chatUrl = normalizeChatConversationUrl(rawChatUrl);
   if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9-]+$/u.test(chatUrl)) {
     clearChatUrl(workspaceDir, seam);
-    throw new Error(`Refusing to record malformed ChatGPT URL for ${seam}: ${chatUrl}`);
+    throw new Error(`Refusing to record malformed ChatGPT URL for ${seam}: ${rawChatUrl}`);
   }
 
   const owners = findActiveChatUrlOwners(chatUrl, workspaceDir, seam);
@@ -338,6 +408,27 @@ function validateSendChatUrl(workspaceDir, seam) {
       ].join("\n"),
     );
   }
+}
+
+function assertSendHasNoExistingChatUrl({ existingState, seam, workspaceDir }) {
+  const existingChatUrl = normalizeChatConversationUrl(readStateString(existingState, "chatUrl"));
+  if (!existingChatUrl) {
+    return;
+  }
+
+  if (process.env.RESEARCH_ALLOW_RESEND_WITH_EXISTING_CHAT_URL === "1") {
+    console.warn(
+      `RESEARCH_ALLOW_RESEND_WITH_EXISTING_CHAT_URL=1 is set; replacing existing ChatGPT URL for ${seam}: ${existingChatUrl}`,
+    );
+    return;
+  }
+
+  throw new Error(
+    [
+      `Refusing to resend ${seam} because it already has a recorded ChatGPT conversation: ${existingChatUrl}`,
+      `Quarantine or clear ${toPosixRelative(statePathFor(workspaceDir, seam))} first if this is an intentional retry.`,
+    ].join("\n"),
+  );
 }
 
 function readBrowserTargets(browserEndpoint) {
@@ -496,7 +587,7 @@ function writeRunState({
     const chatUrl = readChatUrl(workspaceDir, seam);
     if (chatUrl) {
       nextState.chatUrl = chatUrl;
-    } else {
+    } else if (phase === "completed" && exitCode === 0) {
       delete nextState.chatUrl;
       delete nextState.sentAt;
     }
@@ -626,6 +717,17 @@ function main(argv) {
   const lane = laneSelection.lane;
   const profileHelper = resolveProfileHelper();
   const browserEndpoint = resolveBrowserEndpoint(profileHelper, lane);
+  let releaseSendLaneLock = () => {};
+
+  if (action === "send") {
+    assertSendHasNoExistingChatUrl({
+      existingState,
+      seam,
+      workspaceDir,
+    });
+    releaseSendLaneLock = acquireSendLaneLock(lane, workspaceDir, seam);
+    clearChatUrl(workspaceDir, seam);
+  }
 
   if (laneSelection.exploratoryMismatch) {
     const recordedEndpoint = readRecordedSendEndpoint(existingState);
@@ -644,47 +746,51 @@ function main(argv) {
     );
   }
 
-  console.log(
-    `Running research ${action} for ${seam} via lane ${lane} (${browserEndpoint}).`,
-  );
-  writeRunState({
-    action,
-    browserEndpoint,
-    commandPath,
-    lane,
-    phase: "started",
-    seam,
-    statePath,
-    workspaceDir,
-  });
+  try {
+    console.log(
+      `Running research ${action} for ${seam} via lane ${lane} (${browserEndpoint}).`,
+    );
+    writeRunState({
+      action,
+      browserEndpoint,
+      commandPath,
+      lane,
+      phase: "started",
+      seam,
+      statePath,
+      workspaceDir,
+    });
 
-  let exitCode = runLaneCommand(profileHelper, lane, commandPath);
+    let exitCode = runLaneCommand(profileHelper, lane, commandPath);
 
-  if (action === "send" && exitCode === 0) {
-    try {
-      validateSendChatUrl(workspaceDir, seam);
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
-      exitCode = 69;
+    if (action === "send" && exitCode === 0) {
+      try {
+        validateSendChatUrl(workspaceDir, seam);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        exitCode = 69;
+      }
     }
-  }
 
-  writeRunState({
-    action,
-    browserEndpoint,
-    commandPath,
-    exitCode,
-    lane,
-    phase: "completed",
-    seam,
-    statePath,
-    workspaceDir,
-  });
+    writeRunState({
+      action,
+      browserEndpoint,
+      commandPath,
+      exitCode,
+      lane,
+      phase: "completed",
+      seam,
+      statePath,
+      workspaceDir,
+    });
 
-  if (exitCode === 0) {
-    console.log(`Recorded research ${action} state: ${toPosixRelative(statePath)}`);
+    if (exitCode === 0) {
+      console.log(`Recorded research ${action} state: ${toPosixRelative(statePath)}`);
+    }
+    return exitCode;
+  } finally {
+    releaseSendLaneLock();
   }
-  return exitCode;
 }
 
 try {

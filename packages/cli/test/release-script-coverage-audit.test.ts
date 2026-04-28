@@ -564,6 +564,22 @@ Updated: 2026-04-24
     )
   })
 
+  it('keeps review-gpt browser profile recovery on existing windows', () => {
+    const profileHelper = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'),
+      'utf8',
+    )
+
+    expect(profileHelper).toContain('--new-tab')
+    expect(profileHelper).toContain('open -g -a "$MURPH_REVIEW_GPT_PROFILE_ROOT/$MURPH_REVIEW_GPT_PROFILE_NAME.app"')
+    expect(profileHelper).toContain('murph_review_gpt_profile_acquire_prepare_lock')
+    expect(profileHelper).toContain('murph_review_gpt_profile_wait_for_browser_ready')
+    expect(profileHelper).toContain('MURPH_REVIEW_GPT_PROFILE_RESTART_IF_ENDPOINT_MISSING:-0')
+    expect(profileHelper).toContain('Refusing to restart the lane automatically')
+    expect(profileHelper).not.toContain('--new-window')
+    expect(profileHelper).not.toContain('open -g -na')
+  })
+
   it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {
     const leanBundle = createAuditZip('package-audit-context.sh', 'murph-lean-audit')
     const fullBundle = createAuditZip('package-audit-context-full.sh', 'murph-full-audit')
