@@ -9,6 +9,7 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.ts'
+import type { AssistantProviderContinuation } from '../src/assistant/active-turn-input-journal.ts'
 import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.ts'
 
 const runnerMocks = vi.hoisted(() => ({
@@ -296,6 +297,7 @@ describe('executeProviderTurnWithRecovery', () => {
       .mockReset()
       .mockReturnValue({
         murphCommandSurface: 'bound-tools',
+        requestFormat: 'messages',
         supportsNativeResume: false,
         supportsToolRuntime: true,
       })
@@ -573,6 +575,7 @@ describe('executeProviderTurnWithRecovery', () => {
 
     runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
       murphCommandSurface: 'bound-tools',
+      requestFormat: 'messages',
       supportsNativeResume: true,
       supportsToolRuntime: true,
     })
@@ -1366,6 +1369,308 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
+  it('reports provider-state continuation metadata when native resume is planned', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'resp_123',
+      resumeRouteId: 'route-primary',
+      turnCount: 2,
+    })
+    const route = createRoute({
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
+      routeId: 'route-primary',
+    })
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'bound-tools',
+      requestFormat: 'messages',
+      supportsNativeResume: true,
+      supportsToolRuntime: true,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.resumeState,
+    )
+    runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue('resp_123')
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'resp_456',
+        response: 'Native resume answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput(),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-native-resume-metadata',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        providerContinuation: {
+          kind: 'provider-state-optimization',
+        },
+      },
+    })
+  })
+
+  it('uses provider-reported continuation metadata when native resume is downgraded', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'gen_gateway_123',
+      resumeRouteId: 'route-primary',
+      turnCount: 2,
+    })
+    const route = createRoute({
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
+      routeId: 'route-primary',
+    })
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'bound-tools',
+      requestFormat: 'messages',
+      supportsNativeResume: true,
+      supportsToolRuntime: true,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.resumeState,
+    )
+    runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue('gen_gateway_123')
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        providerSessionId: null,
+        response: 'Downgraded fresh answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput(),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-native-resume-downgrade-metadata',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+      },
+    })
+  })
+
+  it('reports the successful failover route continuation metadata', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'resp_failed_primary',
+      resumeRouteId: 'route-primary',
+      turnCount: 2,
+    })
+    const primaryRoute = createRoute({
+      label: 'Primary',
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
+      routeId: 'route-primary',
+    })
+    const backupRoute = createRoute({
+      label: 'Backup',
+      routeId: 'route-backup',
+    })
+    const retryableError = Object.assign(new Error('retryable primary failure'), {
+      context: {
+        retryable: true,
+      },
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities
+      .mockReturnValueOnce({
+        murphCommandSurface: 'bound-tools',
+        requestFormat: 'messages',
+        supportsNativeResume: true,
+        supportsToolRuntime: true,
+      })
+      .mockReturnValueOnce({
+        murphCommandSurface: 'bound-tools',
+        requestFormat: 'messages',
+        supportsNativeResume: false,
+        supportsToolRuntime: true,
+      })
+    runnerMocks.resolveAssistantRouteResumeBinding
+      .mockReturnValueOnce(session.resumeState)
+      .mockReturnValueOnce(null)
+    runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue('resp_failed_primary')
+    runnerMocks.shouldAttemptAssistantProviderFailover.mockReturnValue(true)
+    runnerMocks.executeAssistantProviderTurnAttempt
+      .mockResolvedValueOnce(
+        createFailedAttemptResult({
+          error: retryableError,
+          executedToolCount: 0,
+        }),
+      )
+      .mockResolvedValueOnce(
+        createSuccessfulAttemptResult({
+          providerSessionId: null,
+          response: 'Backup answer',
+        }),
+      )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput(),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [primaryRoute, backupRoute],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-failover-continuation-metadata',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        route: {
+          routeId: 'route-backup',
+        },
+      },
+    })
+  })
+
+  it('reports explicit structured history metadata when ZDR disables native resume', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'resp_zdr_123',
+      resumeRouteId: 'route-zdr',
+      turnCount: 2,
+    })
+    const route = createRoute({
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+        zeroDataRetention: true,
+      },
+      routeId: 'route-zdr',
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'bound-tools',
+      requestFormat: 'messages',
+      supportsNativeResume: false,
+      supportsToolRuntime: true,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.resumeState,
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: null,
+        response: 'ZDR explicit history answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput(),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-zdr-explicit-history-metadata',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
+      },
+    })
+    expect(runnerMocks.resolveAssistantProviderResumeKey).not.toHaveBeenCalled()
+  })
+
+  it('reports flat prompt replay metadata for active-turn flat-prompt continuations', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'codex-session-primary',
+      resumeRouteId: 'route-codex',
+      turnCount: 2,
+    })
+    const route = createRoute({
+      providerOptions: {
+        provider: 'codex-cli',
+        resumeKind: 'codex-thread',
+      },
+      routeId: 'route-codex',
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'direct-cli',
+      requestFormat: 'flat-prompt',
+      supportsNativeResume: true,
+      supportsToolRuntime: false,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.resumeState,
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'codex-session-next',
+        response: 'Flat prompt replay answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      activeTurnHistory: {
+        acceptedInputIds: ['initial'],
+        messages: [
+          {
+            content: 'Initial active-turn prompt',
+            role: 'user',
+          },
+          {
+            content: 'Draft response before late input',
+            role: 'assistant',
+          },
+        ],
+        nonReplayableProviderWork: false,
+      },
+      input: createMessageInput({
+        prompt: 'Late active-turn follow-up',
+      }),
+      plan: createTurnPlan({
+        onboardingGuidanceOpen: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-flat-prompt-replay-metadata',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        providerContinuation: {
+          kind: 'flat-prompt-replay',
+        },
+      },
+    })
+    expect(runnerMocks.resolveAssistantProviderResumeKey).not.toHaveBeenCalled()
+  })
+
   it('does not fail over active continuations after prior non-replayable work', async () => {
     const primaryRoute = createRoute({
       label: 'Primary',
@@ -1420,6 +1725,9 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: retryableError,
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
       route: primaryRoute,
       session: createAssistantSession(),
     })
@@ -2047,6 +2355,9 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: toolError,
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
       route: primaryRoute,
       session: recoveredSession,
     })
@@ -2117,6 +2428,9 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: appServerError,
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
       route: primaryRoute,
       session: recoveredSession,
     })
@@ -2176,6 +2490,9 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: providerWorkError,
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
       route: primaryRoute,
       session: recoveredSession,
     })
@@ -2233,6 +2550,9 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: providerNativeActionError,
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
       route: primaryRoute,
       session,
     })
@@ -2308,6 +2628,9 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(outcome).toEqual({
       kind: 'failed_terminal',
       error: exhaustedError,
+      providerContinuation: {
+        kind: 'explicit-structured-history',
+      },
       route: duplicatePrimary,
       session: createAssistantSession(),
     })
@@ -2376,14 +2699,14 @@ function extractReceiptKinds(): string[] {
 function createFailedAttemptResult(input: {
   activityLabels?: readonly string[]
   error: unknown
-  executedToolCount: number
+  executedToolCount?: number
   providerActionCount?: number
   rawToolEvents?: readonly unknown[]
 }) {
   return {
     metadata: {
       activityLabels: input.activityLabels ?? [],
-      executedToolCount: input.executedToolCount,
+      executedToolCount: input.executedToolCount ?? 0,
       providerActionCount: input.providerActionCount ?? 0,
       rawToolEvents: input.rawToolEvents ?? [],
     },
@@ -2394,6 +2717,7 @@ function createFailedAttemptResult(input: {
 
 function createSuccessfulAttemptResult(input: {
   activityLabels?: readonly string[]
+  providerContinuation?: AssistantProviderContinuation
   providerSessionId: string | null
   response: string
 }) {
@@ -2407,6 +2731,11 @@ function createSuccessfulAttemptResult(input: {
     ok: true as const,
     result: {
       provider: 'openai-compatible',
+      ...(input.providerContinuation
+        ? {
+            providerContinuation: input.providerContinuation,
+          }
+        : {}),
       providerSessionId: input.providerSessionId,
       rawEvents: [],
       response: input.response,

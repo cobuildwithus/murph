@@ -18,6 +18,7 @@ import type {
   AssistantToolCatalog,
 } from '../../model-harness.js'
 import type { AssistantUsageAttribution } from '../usage-attribution.js'
+import type { AssistantProviderContinuation } from '../active-turn-input-journal.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -171,6 +172,7 @@ export interface AssistantProviderUsage {
 
 export interface AssistantProviderTurnExecutionResult {
   provider: AssistantChatProvider
+  providerContinuation?: AssistantProviderContinuation
   providerSessionId: string | null
   rawEvents: unknown[]
   response: string
@@ -196,6 +198,7 @@ export type AssistantProviderTurnAttemptResult =
       error: unknown
       metadata: AssistantProviderAttemptMetadata
       ok: false
+      providerContinuation?: AssistantProviderContinuation
     }
 
 export interface AssistantProviderDefinition {

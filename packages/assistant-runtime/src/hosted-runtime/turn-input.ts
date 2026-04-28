@@ -1,4 +1,5 @@
 import {
+  AssistantActiveTurnInputUnavailableError,
   createInboxBackedAssistantTurnInputPort,
   type AssistantTurnInputRefreshResult,
   type AssistantTurnInputPort,
@@ -11,6 +12,10 @@ import {
 import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+import {
+  HostedMailboxImportCheckpointConflictError,
+  HostedMailboxImportCheckpointUserMismatchError,
+} from "./mailbox-checkpoint.ts";
 
 export function createHostedAssistantTurnInputPort(input: {
   inboxServices: Parameters<typeof createInboxBackedAssistantTurnInputPort>[0]["inboxServices"];
@@ -40,10 +45,14 @@ export function createHostedAssistantTurnInputPort(input: {
 
   return {
     async checkpointAcceptedInput(checkpointInput) {
-      await checkpointActiveTurnInput({
-        ...checkpointInput,
-        requestId: input.requestId,
-      });
+      try {
+        await checkpointActiveTurnInput({
+          ...checkpointInput,
+          requestId: input.requestId,
+        });
+      } catch (error) {
+        throw normalizeHostedActiveTurnInputUnavailableError(error) ?? error;
+      }
     },
     async refresh(refreshInput) {
       let mailboxRefresh: AssistantTurnInputRefreshResult | null = null;
@@ -68,7 +77,7 @@ export function createHostedAssistantTurnInputPort(input: {
             phase: "wake.running",
             wake: input.wake,
           });
-          throw error;
+          throw normalizeHostedActiveTurnInputUnavailableError(error) ?? error;
         }
       }
 
@@ -82,6 +91,25 @@ export function createHostedAssistantTurnInputPort(input: {
       return basePort.listNewConversationCaptures(query);
     },
   };
+}
+
+function normalizeHostedActiveTurnInputUnavailableError(
+  error: unknown,
+): AssistantActiveTurnInputUnavailableError | null {
+  if (error instanceof AssistantActiveTurnInputUnavailableError) {
+    return error;
+  }
+
+  if (
+    error instanceof HostedMailboxImportCheckpointConflictError ||
+    error instanceof HostedMailboxImportCheckpointUserMismatchError
+  ) {
+    return new AssistantActiveTurnInputUnavailableError(
+      "Active turn checkpoint was rejected before outbox commit; will retry later.",
+    );
+  }
+
+  return null;
 }
 
 function mergeHostedTurnInputRefreshResult(input: {

@@ -29,6 +29,7 @@ import {
   readAssistantAcceptedTurnInputJournal,
   recordAssistantAcceptedTurnInputProviderRequest,
   updateAssistantAcceptedTurnInputAdmissionState,
+  updateAssistantAcceptedTurnInputTranscriptRefs,
   type AssistantAcceptedTurnInputJournal,
 } from './active-turn-input-journal.js'
 import {
@@ -83,6 +84,9 @@ type UpdateAssistantAcceptedTurnInputAdmissionStateInput = Omit<Parameters<
 type RecordAssistantAcceptedTurnInputProviderRequestInput = Omit<Parameters<
   typeof recordAssistantAcceptedTurnInputProviderRequest
 >[0], 'vault'>
+type UpdateAssistantAcceptedTurnInputTranscriptRefsInput = Omit<Parameters<
+  typeof updateAssistantAcceptedTurnInputTranscriptRefs
+>[0], 'vault'>
 
 export interface AssistantRuntimeStateService {
   diagnostics: {
@@ -128,6 +132,7 @@ export interface AssistantRuntimeStateService {
       read: (turnId: string) => Promise<AssistantAcceptedTurnInputJournal | null>
       recordProviderRequest: (input: RecordAssistantAcceptedTurnInputProviderRequestInput) => Promise<AssistantAcceptedTurnInputJournal | null>
       updateAdmissionState: (input: UpdateAssistantAcceptedTurnInputAdmissionStateInput) => Promise<AssistantAcceptedTurnInputJournal | null>
+      updateTranscriptRefs: (input: UpdateAssistantAcceptedTurnInputTranscriptRefsInput) => Promise<AssistantAcceptedTurnInputJournal | null>
     }
     appendEvent: (input: AppendAssistantTurnReceiptEventInput) => ReturnType<typeof appendAssistantTurnReceiptEvent>
     createReceipt: (input: CreateAssistantTurnReceiptInput) => ReturnType<typeof createAssistantTurnReceipt>
@@ -191,6 +196,8 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
           recordAssistantAcceptedTurnInputProviderRequest({ ...input, vault }),
         updateAdmissionState: (input) =>
           updateAssistantAcceptedTurnInputAdmissionState({ ...input, vault }),
+        updateTranscriptRefs: (input) =>
+          updateAssistantAcceptedTurnInputTranscriptRefs({ ...input, vault }),
       },
       appendEvent: (input) => appendAssistantTurnReceiptEvent({ ...input, vault }),
       createReceipt: (input) => createAssistantTurnReceipt({ ...input, vault }),

@@ -1281,6 +1281,9 @@ function createProviderResult(input?: {
   return {
     attemptCount: 1,
     provider: 'openai-compatible',
+    providerContinuation: {
+      kind: 'explicit-structured-history',
+    },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     providerSessionId: input?.providerSessionId ?? 'provider-session-1',
     rawEvents: [],

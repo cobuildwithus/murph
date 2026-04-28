@@ -30,6 +30,9 @@ import type {
   AssistantTurnInputRefreshResult,
   AssistantTurnInputPort,
 } from "@murphai/assistant-engine";
+import {
+  AssistantActiveTurnInputUnavailableError,
+} from "@murphai/assistant-engine";
 import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -37,6 +40,9 @@ import type {
 import {
   createHostedAssistantTurnInputPort,
 } from "../src/hosted-runtime/turn-input.ts";
+import {
+  HostedMailboxImportCheckpointUserMismatchError,
+} from "../src/hosted-runtime/mailbox-checkpoint.ts";
 import type {
   HostedRuntimeActiveTurnInputCheckpoint,
   HostedRuntimeActiveTurnInputMailboxRefresh,
@@ -268,6 +274,47 @@ describe("createHostedAssistantTurnInputPort", () => {
       turnId: "turn_123",
       vault: "/tmp/vault-root",
     });
+  });
+
+  it("normalizes hosted active-turn checkpoint failures to engine unavailable errors", async () => {
+    const basePort: AssistantTurnInputPort = {
+      async refresh() {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      },
+      async listNewConversationCaptures(input) {
+        return {
+          captures: [],
+          nextCursor: input.afterCursor,
+        };
+      },
+    };
+    const checkpointActiveTurnInput = vi.fn(async () => {
+      throw new HostedMailboxImportCheckpointUserMismatchError({
+        actualUserId: "member_other",
+        expectedUserId: "member_123",
+      });
+    });
+    const port = createPort({
+      activeTurnInputCheckpoint: checkpointActiveTurnInput,
+      activeTurnInputRefresh: vi.fn(async () => ({
+        progressed: false,
+        reason: "no_new_input" as const,
+      })),
+      basePort,
+    });
+
+    await expect(
+      port?.checkpointAcceptedInput?.({
+        acceptedInputIds: ["request-1"],
+        providerRequestOrdinal: 0,
+        sessionId: "session_123",
+        turnId: "turn_123",
+        vault: "/tmp/vault-root",
+      }),
+    ).rejects.toBeInstanceOf(AssistantActiveTurnInputUnavailableError);
   });
 
   it("runs the hosted mailbox refresh during active turn input admission before listing captures", async () => {

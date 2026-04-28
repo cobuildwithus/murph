@@ -7,6 +7,7 @@ import {
   recordAssistantAcceptedTurnInputProviderRequest,
   resolveAssistantAcceptedTurnInputJournalPath,
   updateAssistantAcceptedTurnInputAdmissionState,
+  updateAssistantAcceptedTurnInputTranscriptRefs,
 } from '../src/assistant/active-turn-input-journal.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -129,8 +130,124 @@ describe('assistant accepted active-turn input journal', () => {
     ).resolves.toEqual(journal)
   })
 
+  it('updates transcript refs without persisting raw prompt fallback text', async () => {
+    const { paths, vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-ref-update-',
+    )
+
+    await appendAssistantAcceptedTurnInputItems({
+      inputs: [
+        {
+          id: 'input_initial',
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: 'Initial sensitive prompt',
+          source: 'manual',
+        },
+      ],
+      now: new Date('2026-04-22T10:00:00.000Z'),
+      sessionId: 'session_ref_update',
+      turnId: 'turn_ref_update',
+      vault: vaultRoot,
+    })
+
+    const updated = await updateAssistantAcceptedTurnInputTranscriptRefs({
+      now: new Date('2026-04-22T10:00:01.000Z'),
+      refs: [
+        {
+          inputId: 'input_initial',
+          transcriptRef: {
+            entryCreatedAt: '2026-04-22T10:00:00.000Z',
+            entryIndex: 2,
+            entryKind: 'user',
+            sessionId: 'session_ref_update',
+          },
+        },
+      ],
+      turnId: 'turn_ref_update',
+      vault: vaultRoot,
+    })
+
+    expect(updated?.inputs[0]?.transcriptRef).toEqual({
+      entryCreatedAt: '2026-04-22T10:00:00.000Z',
+      entryIndex: 2,
+      entryKind: 'user',
+      sessionId: 'session_ref_update',
+    })
+    expect(updated?.updatedAt).toBe('2026-04-22T10:00:01.000Z')
+
+    const persistedRaw = await readFile(
+      resolveAssistantAcceptedTurnInputJournalPath(paths, 'turn_ref_update'),
+      'utf8',
+    )
+    expect(persistedRaw).not.toContain('Initial sensitive prompt')
+
+    await expect(
+      updateAssistantAcceptedTurnInputTranscriptRefs({
+        refs: [
+          {
+            inputId: 'input_initial',
+            transcriptRef: {
+              entryCreatedAt: '2026-04-22T10:00:00.000Z',
+              entryIndex: null,
+              entryKind: 'user',
+              sessionId: 'session_ref_update',
+            },
+          },
+        ],
+        turnId: 'turn_ref_update',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TURN_INPUT_JOURNAL_INCOMPLETE_TRANSCRIPT_REF',
+    })
+    await expect(
+      updateAssistantAcceptedTurnInputTranscriptRefs({
+        refs: [
+          {
+            inputId: 'input_initial',
+            transcriptRef: {
+              entryCreatedAt: '2026-04-22T10:00:00.000Z',
+              entryIndex: 3,
+              entryKind: 'user',
+              sessionId: 'session_ref_update',
+            },
+          },
+        ],
+        turnId: 'turn_ref_update',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TURN_INPUT_JOURNAL_TRANSCRIPT_REF_ALREADY_SET',
+    })
+
+    await updateAssistantAcceptedTurnInputAdmissionState({
+      admissionState: 'passive-input-next-turn',
+      turnId: 'turn_ref_update',
+      vault: vaultRoot,
+    })
+    await expect(
+      updateAssistantAcceptedTurnInputTranscriptRefs({
+        refs: [
+          {
+            inputId: 'input_initial',
+            transcriptRef: {
+              entryCreatedAt: '2026-04-22T10:00:00.000Z',
+              entryIndex: 2,
+              entryKind: 'user',
+              sessionId: 'session_ref_update',
+            },
+          },
+        ],
+        turnId: 'turn_ref_update',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
+    })
+  })
+
   it('updates admission state and provider request ordinal metadata', async () => {
-    const { vaultRoot } = await createAssistantPaths(
+    const { paths, vaultRoot } = await createAssistantPaths(
       'assistant-active-turn-input-provider-request-',
     )
 
@@ -160,7 +277,6 @@ describe('assistant accepted active-turn input journal', () => {
     const withProviderRequest = await recordAssistantAcceptedTurnInputProviderRequest({
       continuation: {
         kind: 'provider-state-optimization',
-        responseId: 'resp_1',
       },
       now: new Date('2026-04-22T10:01:00.000Z'),
       ordinal: 2,
@@ -173,7 +289,6 @@ describe('assistant accepted active-turn input journal', () => {
         acceptedInputIds: ['input_initial', 'input_late'],
         continuation: {
           kind: 'provider-state-optimization',
-          responseId: 'resp_1',
         },
         ordinal: 2,
         providerAttemptId: 'attempt_2',
@@ -193,6 +308,33 @@ describe('assistant accepted active-turn input journal', () => {
     })
     expect(committed?.admissionState).toBe('commit-started')
     expect(committed?.updatedAt).toBe('2026-04-22T10:02:00.000Z')
+    const journalPath = resolveAssistantAcceptedTurnInputJournalPath(
+      paths,
+      'turn_provider_request',
+    )
+    const legacyRaw = JSON.parse(await readFile(journalPath, 'utf8'))
+    legacyRaw.providerRequests[0].continuation.responseId = 'resp_legacy'
+    await writeFile(journalPath, `${JSON.stringify(legacyRaw, null, 2)}\n`)
+
+    const legacyRead = await readAssistantAcceptedTurnInputJournal(
+      vaultRoot,
+      'turn_provider_request',
+    )
+    expect(legacyRead?.providerRequests[0]?.continuation).toEqual({
+      kind: 'provider-state-optimization',
+    })
+    const nextRequest = await recordAssistantAcceptedTurnInputProviderRequest({
+      continuation: {
+        kind: 'explicit-structured-history',
+      },
+      now: new Date('2026-04-22T10:03:00.000Z'),
+      ordinal: 3,
+      providerAttemptId: 'attempt_3',
+      turnId: 'turn_provider_request',
+      vault: vaultRoot,
+    })
+    expect(nextRequest?.providerRequests).toHaveLength(2)
+    expect(await readFile(journalPath, 'utf8')).not.toContain('resp_legacy')
     await expect(
       updateAssistantAcceptedTurnInputAdmissionState({
         admissionState: 'current-turn-open',
@@ -216,6 +358,40 @@ describe('assistant accepted active-turn input journal', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
+    })
+  })
+
+  it('records flat prompt replay provider request metadata', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-flat-prompt-',
+    )
+
+    await appendAssistantAcceptedTurnInputItems({
+      inputs: [
+        {
+          id: 'input_initial',
+          promptFallbackText: 'Initial prompt',
+          source: 'initial',
+        },
+      ],
+      now: new Date('2026-04-22T10:00:00.000Z'),
+      sessionId: 'session_flat_prompt',
+      turnId: 'turn_flat_prompt',
+      vault: vaultRoot,
+    })
+
+    const journal = await recordAssistantAcceptedTurnInputProviderRequest({
+      continuation: {
+        kind: 'flat-prompt-replay',
+      },
+      now: new Date('2026-04-22T10:01:00.000Z'),
+      ordinal: 0,
+      turnId: 'turn_flat_prompt',
+      vault: vaultRoot,
+    })
+
+    expect(journal?.providerRequests[0]?.continuation).toEqual({
+      kind: 'flat-prompt-replay',
     })
   })
 

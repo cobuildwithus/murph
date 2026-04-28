@@ -85,6 +85,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     } as const
 
     let result
+    let providerContinuation
     try {
       result = await executeCodexAppServerTurn({
         ...baseAppServerInput,
@@ -105,6 +106,9 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
           }),
           resumeSessionId: undefined,
         })
+        providerContinuation = {
+          kind: 'flat-prompt-replay' as const,
+        }
       } else {
         throw error
       }
@@ -120,6 +124,11 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       ok: true,
       result: {
         provider: resolveAssistantChatProviderFromConfig(providerConfig),
+        ...(providerContinuation
+          ? {
+              providerContinuation,
+            }
+          : {}),
         providerSessionId: result.sessionId,
         response: result.finalMessage,
         stderr: result.stderr,

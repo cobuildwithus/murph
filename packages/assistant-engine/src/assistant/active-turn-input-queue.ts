@@ -18,29 +18,59 @@ interface QueuedAssistantActiveTurnInput {
   input: AssistantMessageInput
 }
 
+type AssistantActiveTurnInputSteerResult =
+  | {
+      completion: Promise<AssistantAskResult>
+      kind: 'queued'
+    }
+  | {
+      kind: 'no-active-turn'
+    }
+  | {
+      kind: 'turn-id-mismatch'
+    }
+
 class AssistantActiveTurnInputQueue {
   private nextInputOrdinal = 1
   private completionObserved = false
+  private closed = false
   private pending: QueuedAssistantActiveTurnInput[] = []
   private readonly completion: Promise<AssistantAskResult>
   private rejectCompletion!: (error: unknown) => void
   private resolveCompletion!: (result: AssistantAskResult) => void
 
-  constructor() {
+  constructor(private readonly turnId: string) {
     this.completion = new Promise<AssistantAskResult>((resolve, reject) => {
       this.resolveCompletion = resolve
       this.rejectCompletion = reject
     })
   }
 
-  enqueue(input: AssistantMessageInput): Promise<AssistantAskResult> {
+  enqueue(input: AssistantMessageInput): AssistantActiveTurnInputSteerResult {
+    if (this.closed || typeof input.expectedActiveTurnId !== 'string') {
+      return {
+        kind: 'no-active-turn',
+      }
+    }
+    if (input.expectedActiveTurnId !== this.turnId) {
+      return {
+        kind: 'turn-id-mismatch',
+      }
+    }
     this.completionObserved = true
     this.pending.push({
       id: `manual-${this.nextInputOrdinal}`,
       input,
     })
     this.nextInputOrdinal += 1
-    return this.completion
+    return {
+      completion: this.completion,
+      kind: 'queued',
+    }
+  }
+
+  close(): void {
+    this.closed = true
   }
 
   admit(): AssistantActiveTurnInputAdmissionResult {
@@ -93,6 +123,7 @@ const activeTurnInputQueues = new Map<
 export function createAssistantActiveTurnInputQueue(input: {
   conversationKeys?: readonly string[] | null
   sessionId: string
+  turnId: string
   vault: string
 }): {
   admit(): AssistantActiveTurnInputAdmissionResult
@@ -101,7 +132,7 @@ export function createAssistantActiveTurnInputQueue(input: {
   fail(error: unknown): void
 } {
   const keys = resolveAssistantActiveTurnInputQueueKeys(input)
-  const queue = new AssistantActiveTurnInputQueue()
+  const queue = new AssistantActiveTurnInputQueue(input.turnId)
   for (const key of keys) {
     activeTurnInputQueues.set(key, queue)
   }
@@ -109,6 +140,7 @@ export function createAssistantActiveTurnInputQueue(input: {
   return {
     admit: () => queue.admit(),
     close() {
+      queue.close()
       for (const key of keys) {
         if (activeTurnInputQueues.get(key) === queue) {
           activeTurnInputQueues.delete(key)
@@ -123,31 +155,39 @@ export function createAssistantActiveTurnInputQueue(input: {
 export function steerAssistantActiveTurnInput(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> | null {
+  const result = steerAssistantActiveTurnInputWithStatus(input)
+  return result.kind === 'queued' ? result.completion : null
+}
+
+export function steerAssistantActiveTurnInputWithStatus(
+  input: AssistantMessageInput,
+): AssistantActiveTurnInputSteerResult {
   const conversationKey = resolveAssistantConversationLookupKey(input)
   if (conversationKey) {
-    return (
-      activeTurnInputQueues
-        .get(formatAssistantActiveTurnInputQueueKey({
-          kind: 'conversation',
-          value: conversationKey,
-          vault: input.vault,
-        }))
-        ?.enqueue(input) ?? null
-    )
+    const queue = activeTurnInputQueues.get(formatAssistantActiveTurnInputQueueKey({
+      kind: 'conversation',
+      value: conversationKey,
+      vault: input.vault,
+    }))
+    return queue?.enqueue(input) ?? {
+      kind: 'no-active-turn',
+    }
   }
 
   const sessionId = resolveAssistantActiveTurnInputSessionId(input)
-  return sessionId
-    ? (
-        activeTurnInputQueues
-          .get(formatAssistantActiveTurnInputQueueKey({
-            kind: 'session',
-            value: sessionId,
-            vault: input.vault,
-          }))
-          ?.enqueue(input) ?? null
-      )
-    : null
+  if (sessionId) {
+    const queue = activeTurnInputQueues.get(formatAssistantActiveTurnInputQueueKey({
+      kind: 'session',
+      value: sessionId,
+      vault: input.vault,
+    }))
+    return queue?.enqueue(input) ?? {
+      kind: 'no-active-turn',
+    }
+  }
+  return {
+    kind: 'no-active-turn',
+  }
 }
 
 function resolveAssistantActiveTurnInputQueueKeys(

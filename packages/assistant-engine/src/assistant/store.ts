@@ -64,12 +64,14 @@ export type {
   ResolveAssistantSessionInput,
   ResolvedAssistantSession,
   AssistantTranscriptEntryInput,
+  AssistantTranscriptEntryRef,
 } from './store/types.js'
 import type {
   AssistantSessionLocator,
   ResolveAssistantSessionInput,
   ResolvedAssistantSession,
   AssistantTranscriptEntryInput,
+  AssistantTranscriptEntryRef,
 } from './store/types.js'
 
 const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v1'
@@ -354,13 +356,34 @@ export async function appendAssistantTranscriptEntries(
   sessionId: string,
   entries: readonly AssistantTranscriptEntryInput[],
 ): Promise<AssistantTranscriptEntry[]> {
+  const result = await appendAssistantTranscriptEntriesWithRefs(
+    vault,
+    sessionId,
+    entries,
+  )
+  return result.entries
+}
+
+export async function appendAssistantTranscriptEntriesWithRefs(
+  vault: string,
+  sessionId: string,
+  entries: readonly AssistantTranscriptEntryInput[],
+): Promise<{
+  entries: AssistantTranscriptEntry[]
+  refs: AssistantTranscriptEntryRef[]
+}> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
 
     if (entries.length === 0) {
-      return []
+      return {
+        entries: [],
+        refs: [],
+      }
     }
 
+    const existingEntries = await readAssistantTranscriptEntries(paths, sessionId)
+    const firstEntryIndex = existingEntries.length
     const parsed = entries.map((entry) =>
       assistantTranscriptEntrySchema.parse({
         schema: 'murph.assistant-transcript-entry.v1',
@@ -371,7 +394,15 @@ export async function appendAssistantTranscriptEntries(
     )
     await appendTranscriptEntries(paths, sessionId, parsed)
 
-    return parsed
+    return {
+      entries: parsed,
+      refs: parsed.map((entry, index) => ({
+        entryCreatedAt: entry.createdAt,
+        entryIndex: firstEntryIndex + index,
+        entryKind: entry.kind,
+        sessionId,
+      })),
+    }
   })
 }
 
