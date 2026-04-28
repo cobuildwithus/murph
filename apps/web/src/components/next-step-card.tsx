@@ -24,7 +24,6 @@ export function NextStepCard({
         className
       )}
     >
-      <div className="w-1 shrink-0 bg-ring" />
       <div className="flex flex-1 items-center justify-between px-7 py-6">
         <div className="flex flex-col gap-1.5">
           <span className="font-mono text-[10px] uppercase tracking-widest text-primary">
