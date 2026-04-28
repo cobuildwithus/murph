@@ -16,6 +16,7 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
 } from './store.js'
+import { resolveAssistantConversationLookupKey } from './store/paths.js'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
   normalizeAssistantDeliveryError,
@@ -268,6 +269,10 @@ export async function sendAssistantMessageLocal(
         })
         activeTurnInputQueue = isManualAssistantTurnTrigger(input.turnTrigger)
           ? createAssistantActiveTurnInputQueue({
+              conversationKeys: [
+                resolved.session.binding.conversationKey,
+                resolveAssistantConversationLookupKey(input),
+              ].filter((key): key is string => key !== null),
               sessionId: resolved.session.sessionId,
               vault: input.vault,
             })
@@ -327,9 +332,10 @@ export async function sendAssistantMessageLocal(
                 providerRequestOrdinal,
                 providerResult,
                 userTurn,
-              })
+            })
             if (activeTurnInput?.kind !== 'accepted') {
               if (activeTurnInput && phase === 'commit_barrier') {
+                activeTurnInputQueue?.close()
                 await currentInput.activeTurnCheckpoint?.({
                   acceptedInputIds: [],
                   providerRequestOrdinal,
@@ -421,6 +427,7 @@ export async function sendAssistantMessageLocal(
           throw new Error('Assistant provider turn did not produce a result.')
         }
 
+        activeTurnInputQueue?.close()
         await runtimeState.turns.acceptedInputs.updateAdmissionState({
           admissionState: 'commit-started',
           turnId: userTurn.turnId,
