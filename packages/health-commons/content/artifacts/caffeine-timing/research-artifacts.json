@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "murph.commons.artifact-manifest.v1",
+  "manifestKey": "source_artifact:caffeine-timing/research-artifacts",
+  "description": "Rights-safe manifest stubs for Caffeine Timing research artifacts. Copyrighted PDFs do not go in Git; entries remain external metadata unless redistribution rights are verified.",
+  "artifacts": []
+}
