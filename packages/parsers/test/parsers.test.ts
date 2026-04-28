@@ -917,6 +917,52 @@ test("whisper.cpp provider rejects stdout-only logs when no transcript artifact 
   );
 });
 
+test("whisper.cpp provider reports command signals before checking transcript files", async () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const directory = await makeTempDirectory("murph-parser-whisper-signal");
+  const audioPath = await writeExternalFile(directory, "note.wav", "wav-bytes-placeholder");
+  const modelPath = await writeExternalFile(directory, "ggml-base.en.bin", "model-placeholder");
+  const commandPath = await writeExecutableFile(
+    directory,
+    "fake-whisper-signal.sh",
+    [
+      "#!/usr/bin/env sh",
+      "echo 'sensitive transcript text' >&2",
+      "kill -TERM $$",
+    ].join("\n"),
+  );
+  const provider = createWhisperCppProvider({
+    commandCandidates: [commandPath],
+    modelPath,
+  });
+
+  await assert.rejects(
+    provider.run({
+      intent: "attachment_text",
+      artifact: {
+        captureId: "cap_whisper_signal",
+        attachmentId: "att_whisper_signal",
+        kind: "audio",
+        fileName: "note.wav",
+        mime: "audio/wav",
+        storedPath: "raw/inbox/example/note.wav",
+        absolutePath: audioPath,
+      },
+      inputPath: audioPath,
+      scratchDirectory: directory,
+    }),
+    (error: unknown) => {
+      assert(error instanceof Error);
+      assert.match(error.message, /Command failed \(fake-whisper-signal\.sh\): signal SIGTERM/u);
+      assert.doesNotMatch(error.message, /sensitive transcript text/u);
+      return true;
+    },
+  );
+});
+
 test("registry prefers built-in text parsing for markdown documents", async () => {
   const directory = await makeTempDirectory("murph-parser-registry");
   const filePath = await writeExternalFile(directory, "note.md", "# Breakfast\n\nEggs and toast");

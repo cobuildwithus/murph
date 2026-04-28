@@ -183,8 +183,26 @@ export async function runCommand(
       stderr += chunk;
     });
     child.on("error", reject);
-    child.on("close", (code) => {
-      const exitCode = code ?? 0;
+    child.on("close", (code, signal) => {
+      if (signal) {
+        reject(
+          new Error(
+            `Command failed (${path.basename(command)}): signal ${signal}`,
+          ),
+        );
+        return;
+      }
+
+      if (code === null) {
+        reject(
+          new Error(
+            `Command failed (${path.basename(command)}): exit unknown`,
+          ),
+        );
+        return;
+      }
+
+      const exitCode = code;
       if (exitCode !== 0) {
         reject(new Error(`Command failed (${path.basename(command)}): ${redactSensitiveText(stderr.trim() || stdout.trim() || `exit ${exitCode}`)}`));
         return;
