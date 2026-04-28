@@ -17,6 +17,12 @@ categories:
   - recovery
   - cardiovascular
   - murph-canonical
+media:
+  -
+    kind: image
+    relativePath: design-assets/hero-finnish-sauna.jpeg
+    mediaType: image/jpeg
+    caption: Finnish Dry Sauna
 relations:
   -
     type: parent_family
