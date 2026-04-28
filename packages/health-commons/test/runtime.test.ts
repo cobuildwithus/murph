@@ -266,11 +266,11 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     const protocols = reader.listProtocolVariants({ limit: 6 });
     expect(protocols.map((protocol) => protocol.key)).toEqual([
       "protocol_variant:added-sugar-reduction/no-added-sugar-diet",
+      "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+      "protocol_variant:alcohol-abstinence/short-term-alcohol-abstinence",
+      "protocol_variant:caffeine-timing/caffeine-curfew-dose-reset",
       "protocol_variant:cold-water-immersion/cold-plunge",
       "protocol_variant:collagen-supplementation/hydrolyzed-collagen-peptides",
-      "protocol_variant:consistent-wake-time/consistent-wake-time",
-      "protocol_variant:creatine-supplementation/creatine-monohydrate",
-      "protocol_variant:dry-sauna/bryan-johnson-blueprint",
     ]);
     expect(Object.keys(protocols[0] ?? {})).not.toContain("body");
     expect(protocols[0]?.protocol?.runSpecRevisionId).toEqual(expect.stringMatching(/^sha256:/u));
