@@ -51,5 +51,6 @@ child-control stripping) have been removed from the touched source/test surface.
 Focused assistant-runtime and Cloudflare runner env/policy tests pass, as does
 the hosted-assistant runner env suite. The broader node-runner suite now passes
 37/39 tests; its two failures are the unrelated active protocol hard-cut
-protocol/regimen share-pack fixture drift. Full owner typechecks are blocked by unrelated
-active protocol/regimen/share-pack hard-cut drift in the shared checkout.
+protocol/regimen fixture drift from the removed share-pack path has been resolved by
+the completed share-pack hard cut. Full owner typechecks may still be blocked by
+unrelated active hosted/CLI dirty work in the shared checkout.

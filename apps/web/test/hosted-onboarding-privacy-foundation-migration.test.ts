@@ -122,6 +122,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const dropHostedShareTablesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260428010000_drop_hosted_share_tables/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -130,6 +137,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260426010000_hosted_mailbox_workspace_groundwork",
       "20260426020000_hosted_mailbox_payload_hash",
       "2026042700_hosted_runtime_hard_cut",
+      "20260428010000_drop_hosted_share_tables",
       "migration_lock.toml",
     ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
@@ -179,6 +187,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(dropRevnetIssuanceMigrationSql).toContain(
       'DROP TYPE IF EXISTS "HostedRevnetIssuanceStatus"',
     );
+    expect(dropHostedShareTablesMigrationSql).toContain(
+      'DELETE FROM "hosted_mailbox_item"',
+    );
+    expect(dropHostedShareTablesMigrationSql).toContain(
+      "WHERE \"kind\" = 'vault.share.accepted'",
+    );
+    expect(dropHostedShareTablesMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_share_payload" CASCADE');
+    expect(dropHostedShareTablesMigrationSql).toContain('DROP TABLE IF EXISTS "hosted_share_link" CASCADE');
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');
     expect(baselineMigrationSql).toContain('"trigger_kind" TEXT');

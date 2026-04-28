@@ -1147,7 +1147,6 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   const tools = catalog.listTools()
   const readTextTool = tools.find((tool) => tool.name === 'vault.fs.readText')
   const goalImportJsonTool = tools.find((tool) => tool.name === 'vault.goal.importJson')
-  const shareLinkTool = tools.find((tool) => tool.name === 'vault.share.createLink')
   const toolNames = tools.map((tool) => tool.name).sort()
 
   assert.equal(catalog.hasTool('assistant.state.show'), false)
@@ -1185,7 +1184,6 @@ test('createDefaultAssistantToolCatalog exposes the current assistant runtime, r
   assert.equal(goalImportJsonTool?.mutationSemantics, 'canonical-write')
   assert.equal(goalImportJsonTool?.riskClass, 'high')
   assert.equal(goalImportJsonTool?.preferredHostKind, 'native-local')
-  assert.equal(shareLinkTool, undefined)
   assert.ok(toolNames.includes('vault.goal.importJson'))
   assert.equal(toolNames.includes('vault.goal.upsert'), false)
   assert.ok(toolNames.includes('vault.fs.readText'))
