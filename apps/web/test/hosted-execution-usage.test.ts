@@ -267,7 +267,7 @@ describe("importHostedAiUsageRecords", () => {
         ],
       }),
     ).rejects.toThrow(
-      "usageId must match the canonical turnId/attemptCount-derived value turn_123.attempt-1.",
+      "usageId must match the canonical turnId/providerRequestOrdinal/attemptCount-derived value turn_123.attempt-1.",
     );
 
     expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
