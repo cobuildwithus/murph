@@ -20,11 +20,11 @@ snapshot_attachment_name="murph-review-gpt.repo-snapshot.zip"
 include_tests=0
 include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
-package_script="scripts/package-audit-context.sh"
+package_script="scripts/package-review-gpt-context.sh"
 
-# Repo-owned repomix exclusions. Keep `output-packages/**` included so
-# research workspaces can be surfaced to ChatGPT when the package script
-# intentionally stages them.
+# Repo-owned repomix exclusions for ordinary review-gpt uploads. Health
+# Commons research workspaces use their own generated review-gpt config and
+# package script, so do not widen this ordinary review bundle for them.
 repomix_ignore_patterns=(
   ".git/**"
   ".env"
@@ -44,6 +44,9 @@ repomix_ignore_patterns=(
   "*.tsbuildinfo"
   "**/*.tsbuildinfo"
   "audit-packages/**"
+  "output-packages/**"
+  "packages/health-commons/content/**"
+  "packages/health-commons/generated/**"
 )
 
 review_gpt_register_dir_preset "security" "security-audit.md" \
