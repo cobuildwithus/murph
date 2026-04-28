@@ -45,7 +45,6 @@ export interface WorkerRouteContext {
   request: Request;
   requestText?: Promise<string>;
   url: URL;
-  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 export async function resolveUserRunnerStub(

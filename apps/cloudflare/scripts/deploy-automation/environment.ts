@@ -60,6 +60,7 @@ export interface HostedDeployAutomationEnvironment {
   runnerCommitTimeoutMs: string;
   runnerReadyTimeoutMs: string;
   runnerTimeoutMs: string;
+  runnerWakeQueueName: string;
   traceHeadSamplingRate: number;
   webControlTimeoutMs: string;
   workerName: string;
@@ -69,13 +70,17 @@ export interface HostedDeployAutomationEnvironment {
 export function readHostedDeployAutomationEnvironment(
   source: EnvSource = process.env,
 ): HostedDeployAutomationEnvironment {
+  const bundlesBucketName = requireConfiguredString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET");
+  const bundlesPreviewBucketName = requireConfiguredString(
+    source.CF_BUNDLES_PREVIEW_BUCKET,
+    "CF_BUNDLES_PREVIEW_BUCKET",
+  );
+  const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
+
   return {
     allowedRunnerSecretKeys: normalizeOptionalString(source.CF_ALLOWED_RUNNER_SECRET_KEYS),
-    bundlesBucketName: requireConfiguredString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET"),
-    bundlesPreviewBucketName: requireConfiguredString(
-      source.CF_BUNDLES_PREVIEW_BUCKET,
-      "CF_BUNDLES_PREVIEW_BUCKET",
-    ),
+    bundlesBucketName,
+    bundlesPreviewBucketName,
     platformEnvelopeKeyId: normalizeOptionalString(source.CF_PLATFORM_ENVELOPE_KEY_ID) ?? "v1",
     compatibilityDate: normalizeOptionalString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
     containerInstanceType: normalizeContainerInstanceType(
@@ -118,6 +123,8 @@ export function readHostedDeployAutomationEnvironment(
       "600000",
       "CF_RUNNER_TIMEOUT_MS",
     ),
+    runnerWakeQueueName: normalizeOptionalString(source.CF_RUNNER_WAKE_QUEUE)
+      ?? `${workerName}-runner-wake`,
     traceHeadSamplingRate: normalizeSamplingRate(
       source.CF_TRACE_HEAD_SAMPLING_RATE,
       DEFAULT_TRACE_HEAD_SAMPLING_RATE,
@@ -128,7 +135,7 @@ export function readHostedDeployAutomationEnvironment(
       "30000",
       "CF_WEB_CONTROL_TIMEOUT_MS",
     ),
-    workerName: requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
+    workerName,
     workerVars: readHostedWorkerVars(source),
   };
 }

@@ -5,6 +5,30 @@ export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
 }
 
+export interface WorkerQueueBindingLike<Body = unknown> {
+  send(message: Body): Promise<void>;
+}
+
+export interface WorkerQueueRetryOptionsLike {
+  delaySeconds?: number;
+}
+
+export interface WorkerQueueMessageLike<Body = unknown> {
+  readonly attempts?: number;
+  readonly body: Body;
+  readonly id?: string;
+  readonly timestamp?: Date;
+  ack(): void;
+  retry(options?: WorkerQueueRetryOptionsLike): void;
+}
+
+export interface WorkerQueueMessageBatchLike<Body = unknown> {
+  readonly messages: readonly WorkerQueueMessageLike<Body>[];
+  readonly queue?: string;
+  ackAll?(): void;
+  retryAll?(options?: WorkerQueueRetryOptionsLike): void;
+}
+
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   ownsActiveInvocationLease?(input: {
@@ -74,6 +98,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_FROM_ADDRESS?: string;
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
+  RUNNER_WAKE_QUEUE?: WorkerQueueBindingLike;
   HOSTED_WAKE_ENCRYPTION_KEY?: string;
   HOSTED_WAKE_ENCRYPTION_KEYRING_JSON?: string;
   HOSTED_WAKE_ENCRYPTION_KEY_VERSION?: string;
