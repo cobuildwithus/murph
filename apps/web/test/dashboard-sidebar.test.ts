@@ -6,6 +6,9 @@ import { test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   usePathname: vi.fn(),
+  useUser: vi.fn<() => { user: { email: { address: string } } | null }>(() => ({
+    user: { email: { address: "test@example.com" } },
+  })),
 }));
 
 vi.mock("next/link", () => ({
@@ -24,7 +27,36 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@privy-io/react-auth", () => ({
   usePrivy: () => ({ logout: vi.fn() }),
-  useUser: () => ({ user: { email: { address: "test@example.com" } } }),
+  useUser: mocks.useUser,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
+  HostedAuthPanel: () => createElement("div", null, "Hosted auth panel"),
+}));
+
+vi.mock("@/src/components/ui/button", () => ({
+  Button: ({
+    children,
+    className,
+    type,
+  }: {
+    children?: ReactNode;
+    className?: string;
+    type?: "button" | "submit" | "reset";
+  }) => createElement("button", { className, type }, children),
+}));
+
+vi.mock("@/src/components/ui/dialog", () => ({
+  Dialog: ({ children }: { children: ReactNode }) =>
+    createElement("div", null, children),
+  DialogContent: ({ children }: { children: ReactNode }) =>
+    createElement("div", null, children),
+  DialogDescription: ({ children }: { children: ReactNode }) =>
+    createElement("p", null, children),
+  DialogHeader: ({ children }: { children: ReactNode }) =>
+    createElement("div", null, children),
+  DialogTitle: ({ children }: { children: ReactNode }) =>
+    createElement("h2", null, children),
 }));
 
 vi.mock("@/src/components/ui/sidebar", () => ({
@@ -120,7 +152,10 @@ test("Sidebar keeps the Biomarkers tab active across biomarker section routes", 
 });
 
 test("Sidebar renders account menu with signed-in user label", () => {
-  mocks.usePathname.mockReturnValue("/overview");
+  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.useUser.mockReturnValue({
+    user: { email: { address: "test@example.com" } },
+  });
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
@@ -128,8 +163,25 @@ test("Sidebar renders account menu with signed-in user label", () => {
   assert.match(markup, /Sign out/);
 });
 
+test("Sidebar renders a login CTA card when signed out", () => {
+  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.useUser.mockReturnValue({ user: null });
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.match(markup, /Experiments tailored to you/);
+  assert.match(markup, /<button[^>]*>Log in or sign up<\/button>/);
+  assert.match(markup, /w-full/);
+  assert.doesNotMatch(markup, /Sign up/);
+  assert.doesNotMatch(markup, />Account</);
+  assert.doesNotMatch(markup, /Sign out/);
+});
+
 test("Sidebar does not render a hardcoded wearable connection status", () => {
-  mocks.usePathname.mockReturnValue("/overview");
+  mocks.usePathname.mockReturnValue("/experiments");
+  mocks.useUser.mockReturnValue({
+    user: { email: { address: "test@example.com" } },
+  });
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 

@@ -8,7 +8,16 @@ import { ChevronsUpDown } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
+import { Button } from "@/src/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/src/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +74,49 @@ function BrandMark() {
   );
 }
 
+function SidebarAuthActions() {
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+
+  return (
+    <div className="-mx-2 border-t border-white/10 px-4 py-5">
+      <div className="mb-4 flex flex-col gap-2">
+        <p className="font-serif text-base font-medium leading-snug tracking-tight text-white">
+          Experiments tailored to you
+        </p>
+        <p className="text-[13px] leading-relaxed text-white/60">
+          Discover what actually makes you healthier. Connect your data and track your progress.
+        </p>
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        className="h-9 w-full rounded-2xl bg-[#5a6e32] text-sm font-medium text-white hover:bg-[#7a8c6e]"
+        onClick={() => setAuthDialogOpen(true)}
+      >
+        Log in or sign up
+      </Button>
+      <Dialog open={authDialogOpen} onOpenChange={setAuthDialogOpen}>
+        <DialogContent className="max-w-md p-6 md:p-7">
+          <DialogHeader className="pr-10">
+            <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
+              Log in or sign up
+            </DialogTitle>
+            <DialogDescription>
+              Discover what actually makes you healthier.
+            </DialogDescription>
+          </DialogHeader>
+          {authDialogOpen ? (
+            <HostedAuthPanel
+              methods={["phone", "telegram", "email"]}
+              showLegalNotice
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function AccountMenu() {
   const { user } = useUser();
   const { logout } = usePrivy();
@@ -113,6 +165,10 @@ function AccountMenu() {
       cancelled = true;
     };
   }, [userKey]);
+
+  if (!user) {
+    return <SidebarAuthActions />;
+  }
 
   return (
     <SidebarMenu>
