@@ -101,6 +101,10 @@ testPlans:
       - Primary endpoint is baseline-to-follow-up 25(OH)D, preferably same lab and same unit.
       - The baseline week is for context capture; the dose-change signal usually needs weeks rather than days.
       - Secondary notes should capture adverse symptoms, supplement stacking, calcium intake changes, sun exposure, travel, and diet changes.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:serum-25-hydroxyvitamin-d
+    description: Daily D3 gives the body vitamin D it can convert into circulating 25(OH)D over weeks. This is the direct lab signal for the protocol.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

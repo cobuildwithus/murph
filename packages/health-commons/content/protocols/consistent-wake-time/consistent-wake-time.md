@@ -327,6 +327,25 @@ testPlans:
       - "Use the same wearable and diary method across baseline and intervention when possible; manually correct obvious wake-time detection errors."
       - "The 7-day baseline and 28-day intervention are Murph-pragmatic defaults, not source-validated optimum lengths."
       - "Interpret the 20/28 minimum only after separating unsafe or medically appropriate safety overrides from ordinary missed adherence days."
+expectedSignalDescriptions:
+  -
+    biomarkerKey: "biomarker:wake-time-variability"
+    description: "The protocol directly targets wake timing, so this signal should move if the chosen wake window is realistic and followed often enough."
+  -
+    biomarkerKey: "biomarker:total-sleep-time"
+    description: "A stable wake time only helps if bedtime and sleep opportunity adjust with it. Total sleep time may stay stable or improve when the anchor reduces drift without creating short sleep."
+  -
+    biomarkerKey: "biomarker:daytime-sleepiness"
+    description: "More regular timing may make mornings feel steadier, but sleepiness should improve only if the plan preserves enough sleep."
+  -
+    biomarkerKey: "biomarker:sleep-efficiency"
+    description: "A steadier sleep-wake rhythm can support more consolidated sleep for some people. The effect is secondary because the protocol does not directly treat awakenings."
+  -
+    biomarkerKey: "biomarker:sleep-onset-latency"
+    description: "A consistent wake anchor may make sleep pressure and circadian timing more predictable by evening, so sleep onset might become easier."
+  -
+    biomarkerKey: "biomarker:hrv-rmssd"
+    description: "If regular timing improves sleep continuity and reduces sleep debt, overnight recovery strain may ease. HRV is expected to be a weak downstream signal."
 experimentOnboarding:
   schemaVersion: "murph.commons.experiment-onboarding.v1"
   startIntent:

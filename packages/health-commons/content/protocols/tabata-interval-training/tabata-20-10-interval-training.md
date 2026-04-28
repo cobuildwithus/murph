@@ -438,6 +438,22 @@ testPlans:
       - Session fidelity is part of the outcome; record completed rounds, timing, modality, effort, symptoms, and recovery.
       - Resting heart rate, HRV, sleep efficiency, and morning blood pressure are secondary context signals that can be confounded by sleep, illness, heat, stress, alcohol, medication changes, and other training.
       - Stop and seek appropriate care when protocol stop conditions occur; a clean trend is not worth overriding safety signals.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:estimated-vo2max
+    description: "A true 20/10 block can create high oxygen demand in a short time. Repeated sessions may improve cardio-fitness signals if enough work is completed safely."
+  -
+    biomarkerKey: biomarker:resting-heart-rate
+    description: "High-intensity aerobic work can improve how much blood the heart moves per beat. If that adaptation builds, resting pulse may drift lower."
+  -
+    biomarkerKey: biomarker:hrv-rmssd
+    description: "Tabata-style work adds strong nervous-system stress. HRV may improve after adaptation, but it can also dip if recovery demand stays high."
+  -
+    biomarkerKey: biomarker:sleep-efficiency
+    description: "Hard intervals can increase sleep pressure and recovery need. Sleep efficiency may improve when the dose fits, or flatten when the workload is too much."
+  -
+    biomarkerKey: biomarker:morning-blood-pressure
+    description: "Repeated high-intensity aerobic work may improve blood-vessel function and blood-pressure control. Morning blood pressure can move lower if the adaptation carries over."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

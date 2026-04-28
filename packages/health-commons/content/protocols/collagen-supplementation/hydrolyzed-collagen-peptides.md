@@ -512,6 +512,16 @@ testPlans:
   targetAdherenceSessions: 28
   notes:
   - Use this shorter plan only as a setup, tolerability, and adherence check. It should not be interpreted as proof of efficacy for skin, joint, tendon, bone, or performance outcomes.
+expectedSignalDescriptions:
+-
+  biomarkerKey: biomarker:chosen-primary-outcome-score
+  description: Oral collagen can raise small collagen pieces in the blood. That makes a skin, joint, tendon, or recovery change plausible, but the chosen score must match the target.
+-
+  biomarkerKey: biomarker:supplement-adherence
+  description: This protocol only creates a steady exposure if the planned grams are taken often enough. Adherence shows whether the product and dose had a fair chance to matter.
+-
+  biomarkerKey: biomarker:gi-symptom-score
+  description: Collagen peptides, source proteins, sweeteners, or active coingredients can bother digestion in some people. A GI score shows whether the supplement is adding tolerability burden.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

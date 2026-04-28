@@ -154,6 +154,37 @@ testPlans:
   - Use the primary biomarker as achieved exposure, not as an outcome win.
   - Body-composition, appetite, and weight outcomes must be interpreted by energy balance and training context; source keys for this guardrail include source_artifact:pmid-18990242, source_artifact:pmid-19158228, source_artifact:pmid-23739654, source_artifact:pmid-33975325, and source_artifact:pmid-19246357
   - Safety labs are optional for low-risk users but important when kidney, gout, stone, metabolic, lipid, age, diabetes-related renal-risk, or clinician context makes them relevant; source keys include source_artifact:pmid-38490803, source_artifact:pmid-32829751, source_artifact:pmid-24857648, source_artifact:eau-urolithiasis-guidelines-2026-04-26, and source_artifact:pmid-32391934
+expectedSignalDescriptions:
+-
+  biomarkerKey: biomarker:daily-protein-g-per-kg
+  description: This is the achieved dose, not a health outcome. It shows whether daily protein reached the declared g/kg target using the chosen body-weight denominator.
+-
+  biomarkerKey: biomarker:daily-protein-grams
+  description: This checks the actual grams eaten each day. It helps separate a real higher-protein exposure from an assigned target that was not reached.
+-
+  biomarkerKey: biomarker:daily-energy-intake-kcal
+  description: Higher protein can change meal structure and fullness. Calories show whether any weight or body-composition change may be tied to energy balance rather than protein alone.
+-
+  biomarkerKey: biomarker:subjective-satiety
+  description: Protein can increase fullness for some people. Satiety ratings test whether that mechanism shows up in this run instead of assuming it.
+-
+  biomarkerKey: biomarker:body-weight
+  description: Protein may affect scale weight through fullness, calorie intake, and body-composition changes. The direction depends on energy balance and training context.
+-
+  biomarkerKey: biomarker:body-fat-percent
+  description: In energy-restricted or training-adjacent settings, higher protein may shift weight change more toward fat loss than lean loss. This signal is less clear in weight-stable runs.
+-
+  biomarkerKey: biomarker:lean-mass
+  description: Adequate protein supports muscle repair and rebuilding, especially with resistance training. Lean-mass change still depends strongly on training, calories, and measurement method.
+-
+  biomarkerKey: biomarker:digestive-comfort
+  description: A higher-protein plan can change stool pattern, reflux, bloating, or nausea, especially if source mix changes or fiber gets crowded out. Digestive comfort shows whether the dose is tolerable.
+-
+  biomarkerKey: biomarker:dietary-fiber-g-day
+  description: Protein-focused meals can displace legumes, whole grains, fruit, and other plant foods. Fiber is a guardrail for whether the plan stayed balanced.
+-
+  biomarkerKey: biomarker:saturated-fat-g-day
+  description: The same protein target can come from lean foods or from higher-saturated-fat sources. Saturated fat shows whether the source mix changed in a lipid-relevant way.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

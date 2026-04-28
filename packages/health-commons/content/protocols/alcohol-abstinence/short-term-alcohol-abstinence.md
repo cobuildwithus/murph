@@ -1000,6 +1000,28 @@ testPlans:
   - Best default full challenge because direct one-month evidence is richest; Dry January-style campaign evidence remains adjacent implementation and review context.
   - Optional labs are most defensible here if the user is already getting labs or can measure consistently.
   - Include an end-of-challenge review and a next-week drinking or continued-abstinence plan.
+expectedSignalDescriptions:
+-
+  biomarkerKey: biomarker:alcohol-free-days
+  description: This is the direct exposure for the challenge. More alcohol-free days mean less alcohol exposure during the chosen interval.
+-
+  biomarkerKey: biomarker:alcohol-withdrawal-symptoms
+  description: Stopping alcohol can uncover withdrawal symptoms in people with dependence or higher-risk use. This safety signal should take priority over sleep or wearable changes.
+-
+  biomarkerKey: biomarker:alcohol-craving
+  description: Removing alcohol changes cue, reward, and social routines. Craving may rise early or settle as new coping patterns form.
+-
+  biomarkerKey: biomarker:resting-heart-rate
+  description: Alcohol can keep the body more activated overnight. Removing it may let resting pulse drift lower, especially when sleep and hydration improve.
+-
+  biomarkerKey: biomarker:hrv-rmssd
+  description: Alcohol can make overnight recovery less steady. Abstinence may raise HRV if the body is under less alcohol-related stress.
+-
+  biomarkerKey: biomarker:sleep-efficiency
+  description: Alcohol can fragment sleep even when it feels sedating at first. Abstinence may improve sleep continuity after the early adjustment period.
+-
+  biomarkerKey: biomarker:sleep-onset-latency
+  description: If alcohol was being used as a sleep cue, stopping can change how long it takes to fall asleep. The direction may vary in the first week.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

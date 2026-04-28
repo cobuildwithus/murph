@@ -227,6 +227,22 @@ testPlans:
       - Compare intervention-window averages against the user’s own 7-day baseline rather than highlighting single-night changes.
       - Treat HRV, resting heart rate, sleep stages, and total sleep time as exploratory unless the personal signal is repeated and not obviously confounded.
       - The primary practical question is whether evenings feel less wired and sleep onset appears earlier, not whether every sleep metric improves.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:sleep-onset-latency
+    description: High-filtering evening glasses may reduce the blue-green light signal that keeps the brain alert. If that alerting drops, sleep onset can feel easier.
+  -
+    biomarkerKey: biomarker:sleep-efficiency
+    description: If evening light reduction lowers alertness and shortens the restless start of the night, more time in bed may be spent asleep.
+  -
+    biomarkerKey: biomarker:deep-sleep-minutes
+    description: Deep sleep is a downstream signal. It might shift only if the glasses improve circadian timing or sleep continuity enough to affect early-night sleep.
+  -
+    biomarkerKey: biomarker:hrv-rmssd
+    description: Better evening downshift and sleep continuity may reduce overnight strain. HRV could rise or stabilize, but it is not the main mechanism.
+  -
+    biomarkerKey: biomarker:resting-heart-rate
+    description: If the glasses reduce pre-bed alerting and improve sleep, overnight resting pulse may drift lower as a secondary recovery signal.
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:

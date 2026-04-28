@@ -345,6 +345,19 @@ testPlans:
       - Use the baseline week to log normal pain pattern, current running exposure, terrain, footwear, and cross-training.
       - During the intervention, treat strength/control sessions and pain-guided running exposure as the main signals.
       - Do not interpret a faster pace or longer run as success if next-day pain or gait compensation worsens.
+expectedSignalDescriptions:
+  -
+    biomarkerKey: biomarker:lateral-knee-pain
+    description: "Reducing the running load that provokes symptoms can give the irritated outside-knee area a chance to settle. Hip, glute, and movement-control work may also reduce strain during running."
+  -
+    biomarkerKey: biomarker:running-tolerance
+    description: "A run/walk progression gives the knee small, repeated exposures below the flare threshold. Tolerance may improve as strength and control catch up."
+  -
+    biomarkerKey: biomarker:training-volume
+    description: "The protocol first cuts back provocative running, then rebuilds volume gradually. Training volume may rise again if pain stays controlled."
+  -
+    biomarkerKey: biomarker:adherence
+    description: "Short strength/control sessions and clear step-back rules can make rehab easier to complete. Adherence may improve when the plan does not require pushing through pain."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1
   startIntent:
