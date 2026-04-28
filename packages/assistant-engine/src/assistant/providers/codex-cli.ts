@@ -24,11 +24,15 @@ import {
   supportsAnyAssistantRichUserMessageContent,
   type AssistantProviderDefinition,
 } from './types.js'
+import { normalizeNullableString } from '../shared.js'
 import type {
   AssistantModelImagePart,
   AssistantUserMessageContentPart,
 } from '../content-types.js'
-import type { CodexAppServerImageInput } from '../../assistant-codex.js'
+import type {
+  CodexAppServerImageInput,
+  CodexAppServerLiveTurn,
+} from '../../assistant-codex.js'
 import { fileURLToPath } from 'node:url'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
@@ -74,6 +78,32 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       env: prepareAssistantDirectCliEnv(input.env),
       model: providerConfig.target.model ?? undefined,
       modelProvider: providerConfig.target.modelProvider ?? undefined,
+      onLiveTurn:
+        input.activeTurnSteering
+          ? (turn: CodexAppServerLiveTurn) => {
+              const sessionId = normalizeNullableString(input.activeTurnSessionId)
+              const murphTurnId = normalizeNullableString(input.activeTurnId)
+              if (!sessionId || !murphTurnId) {
+                return undefined
+              }
+
+              return input.activeTurnSteering?.registerLiveProviderTurn({
+                interrupt: turn.interrupt,
+                providerSessionId: turn.threadId,
+                providerTurnId: turn.turnId,
+                sessionId,
+                steer: async (steerInput) => {
+                  await turn.steer({
+                    images: extractCodexAppServerUserMessageImages(
+                      steerInput.userMessageContent,
+                    ),
+                    prompt: steerInput.prompt,
+                  })
+                },
+                turnId: murphTurnId,
+              })
+            }
+          : undefined,
       onProgress: input.onEvent ?? undefined,
       onTraceEvent: input.onTraceEvent,
       oss: providerConfig.target.oss,

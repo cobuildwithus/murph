@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -50,5 +51,15 @@ describe('operator config Codex-only hard-cut contracts', () => {
         model: 'gpt-5',
       }),
     ).toThrow(/Reconfigure the assistant for Codex App Server/u)
+  })
+
+  it('does not publish legacy OpenAI-compatible provider presets', async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { exports?: Record<string, unknown> }
+
+    expect(
+      packageJson.exports?.['./assistant/openai-compatible-provider-presets'],
+    ).toBeUndefined()
   })
 })

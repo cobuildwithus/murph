@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildAssistantCliGuidanceText,
+  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
   prepareAssistantDirectCliEnv,
   resolveAssistantCliAccessContext,
 } from "../src/assistant-cli-access.js";
@@ -48,6 +49,49 @@ describe("prepareAssistantDirectCliEnv", () => {
 
     expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".local", "bin"));
     expect(new Set(pathEntries).size).toBe(pathEntries.length);
+  });
+
+  it("projects hosted Codex child env to the needed Codex and Vercel surface", () => {
+    const env = prepareAssistantDirectCliEnv({
+      [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
+      AGENTMAIL_API_KEY: "agentmail-secret",
+      AMBIENT_SECRET: "ambient-secret",
+      ASSISTANT_MEMORY_BOUND_PRIVATE_CONTEXT: "1",
+      ASSISTANT_MEMORY_BOUND_SESSION_ID: "asst_123",
+      ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: "hello",
+      ASSISTANT_MEMORY_BOUND_TURN_ID: "turn_123",
+      ASSISTANT_MEMORY_BOUND_VAULT: "/tmp/murph-vault",
+      BRAVE_API_KEY: "brave-secret",
+      CODEX_HOME: "/tmp/murph-home/.codex-hosted",
+      HOME: "/tmp/murph-home",
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
+      LINQ_API_TOKEN: "linq-secret",
+      NODE_ENV: "production",
+      NODE_OPTIONS: "--require /tmp/injected.js",
+      PATH: "/usr/bin",
+      TELEGRAM_BOT_TOKEN: "telegram-secret",
+      VAULT: "/tmp/murph-vault",
+      VERCEL_AI_API_KEY: "vercel-secret",
+    });
+
+    const pathEntries = (env.PATH ?? "").split(path.delimiter);
+
+    expect(env[HOSTED_RUNTIME_PROCESS_ENV_MARKER]).toBe("1");
+    expect(env.CODEX_HOME).toBe("/tmp/murph-home/.codex-hosted");
+    expect(env.HOME).toBe("/tmp/murph-home");
+    expect(env.VAULT).toBe("/tmp/murph-vault");
+    expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
+    expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
+    expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
+    expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".local", "bin"));
+    expect(pathEntries).toContain("/usr/bin");
+    expect(env.AGENTMAIL_API_KEY).toBeUndefined();
+    expect(env.AMBIENT_SECRET).toBeUndefined();
+    expect(env.BRAVE_API_KEY).toBeUndefined();
+    expect(env.HOSTED_EXECUTION_CONTROL_TOKEN).toBeUndefined();
+    expect(env.LINQ_API_TOKEN).toBeUndefined();
+    expect(env.NODE_OPTIONS).toBeUndefined();
+    expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
   });
 
   it("builds operator guidance that points callers back to the CLI surface", () => {

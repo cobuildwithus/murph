@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, test } from 'vitest'
 import { runRawCli } from './cli-test-helpers.js'
 
@@ -130,7 +131,7 @@ test('inbox help surfaces the first-pass operator commands', async () => {
   assert.match(help, /show\s+Show one captured inbox item/u)
   assert.match(help, /search\s+Search captured inbox items/u)
   assert.match(help, /promote\s+Promote captured inbox items/u)
-  assert.match(help, /model\s+Build a deterministic normalized inbox bundle/u)
+  assert.match(help, /model\s+Build deterministic inbox capture audit bundles/u)
 })
 
 test('inbox promote help includes document promotion', async () => {
@@ -144,17 +145,73 @@ test('inbox promote help includes document promotion', async () => {
 
 test('inbox model help exposes bundle only and omits removed route backend options', async () => {
   const help = await runInboxRawCli(['inbox', 'model', '--help'])
-  const removedRouteOutput = await runInboxRawCli(['inbox', 'model', 'route', '--help'])
+  const removedRouteOutput = await runInboxRawCli([
+    'inbox',
+    'model',
+    'route',
+    '--format',
+    'json',
+    '--full-output',
+  ])
+  const bundleSchema = JSON.parse(
+    await runInboxRawCli(['inbox', 'model', 'bundle', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+    }
+  }
+  const compactManifest = JSON.parse(
+    await runInboxRawCli(['--llms', '--format', 'json']),
+  ) as {
+    commands: Array<{ name: string }>
+  }
+  const fullManifest = JSON.parse(
+    await runInboxRawCli(['--llms-full', '--format', 'json']),
+  ) as {
+    commands: Array<{ name: string }>
+  }
 
-  assert.match(help, /bundle\s+Materialize the normalized routing bundle/u)
+  assert.match(help, /bundle\s+Materialize the normalized capture bundle/u)
   assert.doesNotMatch(help, /\broute\b/u)
   assert.doesNotMatch(help, /\bbaseUrl\b/u)
   assert.doesNotMatch(help, /\bapiKey\b/u)
   assert.doesNotMatch(help, /\bheadersJson\b/u)
-  assert.match(removedRouteOutput, /unknown|invalid|not found|route/iu)
+  assert.equal('sensitive' in bundleSchema.options.properties, true)
+  assert.equal('baseUrl' in bundleSchema.options.properties, false)
+  assert.equal('apiKey' in bundleSchema.options.properties, false)
+  assert.equal('headersJson' in bundleSchema.options.properties, false)
+  assert.equal(
+    compactManifest.commands.some((command) => command.name === 'inbox model bundle'),
+    true,
+  )
+  assert.equal(
+    compactManifest.commands.some((command) => command.name === 'inbox model route'),
+    false,
+  )
+  assert.equal(
+    fullManifest.commands.some((command) => command.name === 'inbox model bundle'),
+    true,
+  )
+  assert.equal(
+    fullManifest.commands.some((command) => command.name === 'inbox model route'),
+    false,
+  )
+  assert.match(removedRouteOutput, /COMMAND_NOT_FOUND/u)
+  assert.match(removedRouteOutput, /not a command for 'vault-cli inbox model'/u)
   assert.doesNotMatch(removedRouteOutput, /\bbaseUrl\b/u)
   assert.doesNotMatch(removedRouteOutput, /\bapiKey\b/u)
   assert.doesNotMatch(removedRouteOutput, /\bheadersJson\b/u)
+})
+
+test('inbox smoke scenarios keep the bundle audit helper and omit the removed route scenario', async () => {
+  const scenarioDirectory = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../e2e/smoke/scenarios',
+  )
+  const scenarioFiles = await readdir(scenarioDirectory)
+
+  assert.ok(scenarioFiles.includes('inbox-model-bundle.json'))
+  assert.ok(!scenarioFiles.includes('inbox-model-route.json'))
 })
 
 async function runInboxRawCli(args: string[]): Promise<string> {

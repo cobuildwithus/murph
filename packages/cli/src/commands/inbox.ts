@@ -871,7 +871,7 @@ export function registerInboxCommands(
 
   const model = Cli.create('model', {
     description:
-      'Build a deterministic normalized inbox bundle for one captured inbox item.',
+      'Build deterministic inbox capture audit bundles for captured inbox items.',
   })
 
   model.command('bundle', {
@@ -879,12 +879,12 @@ export function registerInboxCommands(
       captureId: z.string().min(1).describe('Inbox capture id to bundle.'),
     }),
     description:
-      'Materialize the normalized routing bundle for one inbox capture, including multimodal image-routing eligibility metadata.',
+      'Materialize the normalized capture bundle for one inbox capture, including multimodal image eligibility metadata.',
     options: withBaseOptions({
       sensitive: z
         .boolean()
         .optional()
-        .describe('Return the full sensitive routing bundle in CLI output. The artifact file is always written privately.'),
+        .describe('Return the full sensitive capture bundle in CLI output. The artifact file is always written privately.'),
     }),
     output: inboxModelBundleResultSchema,
     async run(context) {

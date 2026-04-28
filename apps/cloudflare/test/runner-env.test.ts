@@ -773,6 +773,15 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining(["GARMIN_CLIENT_ID", "GARMIN_CLIENT_SECRET"]),
     );
+    expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
+      expect.arrayContaining([
+        "BRAVE_API_KEY",
+        "LINQ_API_TOKEN",
+        "MAPBOX_ACCESS_TOKEN",
+        "TELEGRAM_BOT_TOKEN",
+        "VERCEL_AI_API_KEY",
+      ]),
+    );
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "GARMIN_API_BASE_URL",
@@ -785,6 +794,18 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).not.toContain(
       "HOSTED_ASSISTANT_GATEWAY_ONLY_PROVIDERS",
     );
+    for (const removedProviderSecret of [
+      "ANTHROPIC_API_KEY",
+      "LITELLM_PROXY_API_KEY",
+      "OLLAMA_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENROUTER_API_KEY",
+      "VENICE_API_KEY",
+    ]) {
+      expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
+        removedProviderSecret,
+      );
+    }
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(
       "OURA_WEBHOOK_VERIFICATION_TOKEN",
     );

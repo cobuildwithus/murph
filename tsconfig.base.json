@@ -181,9 +181,6 @@
       "@murphai/assistant-engine/assistant-cli-access": [
         "packages/assistant-engine/src/assistant-cli-access.ts"
       ],
-      "@murphai/assistant-engine/assistant-cli-tools": [
-        "packages/assistant-engine/src/assistant-cli-tools.ts"
-      ],
       "@murphai/assistant-engine/assistant-channel-adapters": [
         "packages/assistant-engine/src/assistant-channel-adapters.ts"
       ],

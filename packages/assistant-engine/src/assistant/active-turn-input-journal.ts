@@ -595,6 +595,7 @@ export async function recordAssistantAcceptedTurnInputProviderRequest(input: {
 }
 
 export async function updateAssistantAcceptedTurnInputProviderRequest(input: {
+  acceptedInputIds?: readonly string[] | null
   continuation: AssistantProviderContinuation
   now?: Date
   ordinal: number
@@ -620,10 +621,17 @@ export async function updateAssistantAcceptedTurnInputProviderRequest(input: {
     }
 
     const updatedAt = (input.now ?? new Date()).toISOString()
+    const acceptedInputIds = Object.hasOwn(input, 'acceptedInputIds')
+      ? normalizeProviderRequestAcceptedInputIds({
+          acceptedInputIds: input.acceptedInputIds,
+          inputIds: existing.inputIds,
+        })
+      : null
     const providerRequests = existing.providerRequests.map((request, index) =>
       index === requestIndex
         ? assistantAcceptedTurnInputProviderRequestSchema.parse({
             ...request,
+            acceptedInputIds: acceptedInputIds ?? request.acceptedInputIds,
             continuation: input.continuation,
             providerAttemptId: Object.hasOwn(input, 'providerAttemptId')
               ? input.providerAttemptId ?? null

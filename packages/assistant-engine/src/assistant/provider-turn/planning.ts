@@ -41,6 +41,9 @@ import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../service-contracts.js'
+import type {
+  AssistantActiveTurnLiveProviderSteering,
+} from '../turn-input.js'
 import {
   listAssistantTranscriptEntries,
 } from '../store.js'
@@ -139,6 +142,7 @@ export interface AssistantProviderTurnContinuityPlan {
 }
 
 export interface AssistantProviderTurnExecutionPlan {
+  activeTurnSteering: AssistantActiveTurnLiveProviderSteering | null
   activeTurnHistory: AssistantActiveTurnProviderHistory | null
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext>
   input: AssistantMessageInput
@@ -220,6 +224,7 @@ export function resolveAssistantProviderTurnContinuityPolicy(input: {
 
 export async function buildAssistantProviderTurnExecutionPlan(input: {
   activeTurnHistory?: AssistantActiveTurnProviderHistory | null
+  activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
@@ -243,6 +248,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
   const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
 
   return {
+    activeTurnSteering: input.activeTurnSteering ?? null,
     executionContext,
     activeTurnHistory: input.activeTurnHistory ?? null,
     input: input.input,

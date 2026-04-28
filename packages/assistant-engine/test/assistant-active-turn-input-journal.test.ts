@@ -812,6 +812,67 @@ describe('assistant accepted active-turn input journal', () => {
       updatedAt: '2026-04-22T11:11:00.000Z',
     })
   })
+
+  it('can widen an existing provider request after live-steered input is appended', async () => {
+    const { vaultRoot } = await createAssistantPaths(
+      'assistant-active-turn-input-live-steer-provider-request-',
+    )
+    const service = createAssistantRuntimeStateService(vaultRoot)
+
+    await service.turns.acceptedInputs.append({
+      inputs: [
+        {
+          id: 'input_initial',
+          source: 'initial',
+        },
+      ],
+      now: new Date('2026-04-22T11:20:00.000Z'),
+      sessionId: 'session_live_steer_provider_request',
+      turnId: 'turn_live_steer_provider_request',
+    })
+    await service.turns.acceptedInputs.recordProviderRequest({
+      acceptedInputIds: ['input_initial'],
+      now: new Date('2026-04-22T11:21:00.000Z'),
+      ordinal: 0,
+      turnId: 'turn_live_steer_provider_request',
+    })
+    await service.turns.acceptedInputs.append({
+      inputs: [
+        {
+          id: 'input_late',
+          promptFallbackReason: 'manual-input',
+          promptFallbackText: 'Late input',
+          source: 'manual',
+        },
+      ],
+      now: new Date('2026-04-22T11:22:00.000Z'),
+      sessionId: 'session_live_steer_provider_request',
+      turnId: 'turn_live_steer_provider_request',
+    })
+
+    await expect(
+      service.turns.acceptedInputs.updateProviderRequest({
+        acceptedInputIds: ['input_initial', 'input_late'],
+        continuation: {
+          kind: 'explicit-structured-history',
+        },
+        now: new Date('2026-04-22T11:23:00.000Z'),
+        ordinal: 0,
+        providerAttemptId: 'attempt-live-steer',
+        turnId: 'turn_live_steer_provider_request',
+      }),
+    ).resolves.toMatchObject({
+      inputIds: ['input_initial', 'input_late'],
+      providerRequests: [
+        {
+          acceptedInputIds: ['input_initial', 'input_late'],
+          ordinal: 0,
+          providerAttemptId: 'attempt-live-steer',
+        },
+      ],
+      updatedAt: '2026-04-22T11:23:00.000Z',
+    })
+  })
 })
 
 async function createAssistantPaths(prefix: string) {

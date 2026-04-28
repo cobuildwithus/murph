@@ -70,6 +70,13 @@ export function getWorkspacePackageExportFailure({
 
   if (
     packageJson.name === "@murphai/operator-config"
+    && exportKey === "./assistant/openai-compatible-provider-presets"
+  ) {
+    return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; OpenAI-compatible provider presets are legacy setup internals and must not leak through the operator-config package surface.`;
+  }
+
+  if (
+    packageJson.name === "@murphai/operator-config"
     && exportKey === "./runtime-errors"
   ) {
     return `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; runtime-unavailable helpers belong with @murphai/vault-usecases/runtime instead of the operator-config contract surface.`;

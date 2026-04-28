@@ -45,8 +45,6 @@ type HostedMailboxOutcome = HostedMailboxEffect & {
 
 const HOSTED_PROVIDER_REQUEST_DEBUG_SCHEMA = "murph.assistant-provider-request-debug.v1";
 const HOSTED_PROVIDER_REQUEST_DEBUG_TYPE = "assistant.provider.request.debug";
-const HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA = "murph.assistant-responses-request-debug.v1";
-const HOSTED_RESPONSES_REQUEST_DEBUG_TYPE = "assistant.responses.request.debug";
 
 export async function executeHostedMailboxEvent(input: {
   wake: HostedExecutionWake;
@@ -423,36 +421,7 @@ export function emitHostedAssistantProviderTraceLog(input: {
     };
   }
 
-  const responsesDebug = readHostedResponsesRequestDebugTrace(input.event);
-  if (!responsesDebug) {
-    return null;
-  }
-
-  const responsesSummary = buildHostedResponsesRequestSummary(responsesDebug);
-  const redactedDetails = sanitizeHostedExecutionStructuredLogDetails({
-    ...(input.details ?? {}),
-    ...prefixHostedProviderTraceDetails(
-      responsesSummary,
-      "assistantResponsesRequest",
-    ),
-  });
-
-  emitHostedExecutionStructuredLog({
-    component: "runtime.provider.http",
-    details: redactedDetails,
-    message: "Hosted assistant final Responses request summary captured.",
-    phase: "wake.running",
-    wake: input.wake,
-  });
-
-  return {
-    component: "runtime.provider.http",
-    eventId: input.wake.eventId,
-    level: "info",
-    message: "Hosted assistant final Responses request summary captured.",
-    phase: "wake.running",
-    redacted: redactedDetails,
-  };
+  return null;
 }
 
 function prefixHostedProviderTraceDetails(
@@ -536,28 +505,6 @@ function readHostedProviderRequestDebugTrace(
     : null;
 }
 
-function readHostedResponsesRequestDebugTrace(
-  event: unknown,
-): Record<string, unknown> | null {
-  if (!event || typeof event !== "object" || Array.isArray(event)) {
-    return null;
-  }
-
-  const rawEvent = (event as { rawEvent?: unknown }).rawEvent;
-  if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
-    return null;
-  }
-
-  const record = rawEvent as Record<string, unknown>;
-  const schema = readHostedProviderDebugString(record, "schema");
-  const type = readHostedProviderDebugString(record, "type");
-
-  return schema === HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA
-    || type === HOSTED_RESPONSES_REQUEST_DEBUG_TYPE
-    ? record
-    : null;
-}
-
 function buildHostedProviderRequestSummary(
   debug: Record<string, unknown>,
 ): HostedExecutionStructuredLogDetails {
@@ -614,79 +561,6 @@ function buildHostedProviderRequestSummary(
   };
 }
 
-function buildHostedResponsesRequestSummary(
-  debug: Record<string, unknown>,
-): HostedExecutionStructuredLogDetails {
-  return {
-    contextManagementPresent:
-      readHostedProviderDebugBoolean(debug, "contextManagementPresent"),
-    functionCallCount:
-      readHostedProviderDebugNumber(debug, "functionCallCount"),
-    functionCallNames:
-      readHostedProviderDebugStringArray(debug, "functionCallNames"),
-    functionCallOutputArrayCount:
-      readHostedProviderDebugNumber(debug, "functionCallOutputArrayCount"),
-    functionCallOutputCount:
-      readHostedProviderDebugNumber(debug, "functionCallOutputCount"),
-    functionCallOutputHashes:
-      readHostedProviderDebugStringArray(debug, "functionCallOutputHashes"),
-    functionCallOutputKinds:
-      readHostedProviderDebugStringArray(debug, "functionCallOutputKinds"),
-    functionCallOutputLongestLength:
-      readHostedProviderDebugNumber(debug, "functionCallOutputLongestLength"),
-    functionCallOutputMissingCount:
-      readHostedProviderDebugNumber(debug, "functionCallOutputMissingCount"),
-    functionCallOutputNonStringCount:
-      readHostedProviderDebugNumber(debug, "functionCallOutputNonStringCount"),
-    functionCallOutputOrphanCount:
-      readHostedProviderDebugNumber(debug, "functionCallOutputOrphanCount"),
-    functionCallOutputStringJsonArrayCount:
-      readHostedProviderDebugNumber(debug, "functionCallOutputStringJsonArrayCount"),
-    functionCallOutputStringJsonObjectCount:
-      readHostedProviderDebugNumber(debug, "functionCallOutputStringJsonObjectCount"),
-    functionCallOutputStringLengths:
-      readHostedProviderDebugNumberArray(debug, "functionCallOutputStringLengths"),
-    gatewayOnlyProviderCount:
-      readHostedProviderDebugNumber(debug, "gatewayOnlyProviderCount"),
-    gatewayTagsCount: readHostedProviderDebugNumber(debug, "gatewayTagsCount"),
-    gatewayUserPresent: readHostedProviderDebugBoolean(debug, "gatewayUserPresent"),
-    gatewayZeroDataRetention:
-      readHostedProviderDebugBoolean(debug, "gatewayZeroDataRetention"),
-    inputEntryCount: readHostedProviderDebugNumber(debug, "inputEntryCount"),
-    inputEntryKinds:
-      readHostedProviderDebugStringArray(debug, "inputEntryKinds"),
-    inputMessageCount: readHostedProviderDebugNumber(debug, "inputMessageCount"),
-    inputRoles: readHostedProviderDebugStringArray(debug, "inputRoles"),
-    inputTextFieldCount:
-      readHostedProviderDebugNumber(debug, "inputTextFieldCount"),
-    inputTextHash: readHostedProviderDebugString(debug, "inputTextHash"),
-    inputTextLength: readHostedProviderDebugNumber(debug, "inputTextLength"),
-    instructionsHash: readHostedProviderDebugString(debug, "instructionsHash"),
-    instructionsLength:
-      readHostedProviderDebugNumber(debug, "instructionsLength"),
-    method: readHostedProviderDebugString(debug, "method"),
-    model: readHostedProviderDebugString(debug, "model"),
-    payloadTopLevelKeys:
-      readHostedProviderDebugStringArray(debug, "payloadTopLevelKeys"),
-    previousResponseIdPresent:
-      readHostedProviderDebugBoolean(debug, "previousResponseIdPresent"),
-    providerOptionsHash:
-      readHostedProviderDebugString(debug, "providerOptionsHash"),
-    requestBodyHash: readHostedProviderDebugString(debug, "requestBodyHash"),
-    requestBodyLength: readHostedProviderDebugNumber(debug, "requestBodyLength"),
-    requestUrlOrigin: readHostedProviderDebugString(debug, "requestUrlOrigin"),
-    requestUrlPath: readHostedProviderDebugString(debug, "requestUrlPath"),
-    responseFormatHash:
-      readHostedProviderDebugString(debug, "responseFormatHash"),
-    schema: HOSTED_RESPONSES_REQUEST_DEBUG_SCHEMA,
-    textConfigHash: readHostedProviderDebugString(debug, "textConfigHash"),
-    toolChoice: readHostedProviderDebugString(debug, "toolChoice"),
-    toolCount: readHostedProviderDebugNumber(debug, "toolCount"),
-    toolNames: readHostedProviderDebugStringArray(debug, "toolNames"),
-    toolsHash: readHostedProviderDebugString(debug, "toolsHash"),
-  };
-}
-
 function readHostedProviderDebugString(
   debug: Record<string, unknown>,
   key: string,
@@ -720,19 +594,6 @@ function readHostedProviderDebugStringArray(
     ? value.filter(
         (entry): entry is string =>
           typeof entry === "string" && entry.trim().length > 0,
-      )
-    : [];
-}
-
-function readHostedProviderDebugNumberArray(
-  debug: Record<string, unknown>,
-  key: string,
-): number[] {
-  const value = debug[key];
-  return Array.isArray(value)
-    ? value.filter(
-        (entry): entry is number =>
-          typeof entry === "number" && Number.isFinite(entry),
       )
     : [];
 }

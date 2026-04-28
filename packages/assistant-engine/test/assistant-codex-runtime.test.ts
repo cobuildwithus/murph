@@ -29,6 +29,7 @@ import {
   executeCodexAppServerTurn,
   resolveCodexDisplayOptions,
 } from '../src/assistant-codex.ts'
+import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
   extractAssistantMessageFallback,
   extractCodexErrorMessage,
@@ -43,6 +44,12 @@ import {
 } from '../src/assistant-codex-events.ts'
 
 const tempRoots: string[] = []
+
+type Deferred<T> = {
+  promise: Promise<T>
+  reject(error: unknown): void
+  resolve(value: T): void
+}
 
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -416,6 +423,116 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('keeps one Codex app-server process open and steers late input into the active turn', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-live-steer-')
+    const liveTurnReady = createDeferred<CodexAppServerLiveTurn>()
+    const releaseLiveTurn = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-live',
+                },
+              },
+            }),
+          )
+
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-live',
+                },
+              },
+            }),
+          )
+
+          const steer = await waitForRpcMethod(child, 'turn/steer')
+          expect(steer).toEqual({
+            id: 4,
+            method: 'turn/steer',
+            params: {
+              expectedTurnId: 'turn-live',
+              input: [
+                {
+                  text: 'Late follow-up',
+                  type: 'text',
+                },
+              ],
+              threadId: 'thread-live',
+            },
+          })
+          child.stdout.write(jsonLine({ id: 4, result: {} }))
+          child.stdout.write(
+            jsonLine({
+              method: 'assistant.message.delta',
+              params: {
+                item: {
+                  id: 'assistant-live',
+                  type: 'assistant_message',
+                },
+                delta: 'Final after live steer',
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-live',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    const resultPromise = executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      onLiveTurn: (turn) => {
+        liveTurnReady.resolve(turn)
+        return releaseLiveTurn
+      },
+      prompt: 'Initial prompt',
+      workingDirectory,
+    })
+
+    const liveTurn = await liveTurnReady.promise
+    expect(liveTurn.threadId).toBe('thread-live')
+    expect(liveTurn.turnId).toBe('turn-live')
+    await liveTurn.steer({
+      prompt: 'Late follow-up',
+    })
+
+    await expect(resultPromise).resolves.toMatchObject({
+      finalMessage: 'Final after live steer',
+      threadId: 'thread-live',
+      turnId: 'turn-live',
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    expect(releaseLiveTurn).toHaveBeenCalledTimes(1)
+  })
+
   it('passes readable image paths through to Codex app-server without rematerializing them', async () => {
     const workingDirectory = await createTempDir('assistant-codex-path-image-')
     const imagePath = path.join(workingDirectory, 'evidence.png')
@@ -576,7 +693,7 @@ describe('assistant codex runtime', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_IMAGE_INVALID',
-      message: `Codex app-server image input path is not readable: ${imagePath}`,
+      message: 'Codex app-server image input path is not readable.',
     })
 
     expect(codexMocks.spawn).not.toHaveBeenCalled()
@@ -618,7 +735,7 @@ describe('assistant codex runtime', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_HOME_INVALID',
-      message: `Configured Codex home is not accessible: ${filePath}`,
+      message: 'Configured Codex home is not accessible. Check --codexHome permissions.',
     })
 
     expect(codexMocks.spawn).not.toHaveBeenCalled()
@@ -641,7 +758,7 @@ describe('assistant codex runtime', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_HOME_INVALID',
-      message: `Configured Codex home does not exist: ${missingPath}`,
+      message: 'Configured Codex home does not exist. Check --codexHome or CODEX_HOME.',
     })
 
     await expect(
@@ -652,7 +769,7 @@ describe('assistant codex runtime', () => {
       }),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_HOME_INVALID',
-      message: `Configured Codex home is not a directory: ${executableFilePath}`,
+      message: 'Configured Codex home is not a directory. Check --codexHome.',
     })
   })
 
@@ -2621,4 +2738,18 @@ function requireMockChildProcess(
     throw new Error('Expected Codex execution to spawn a child process.')
   }
   return child
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let rejectDeferred!: (error: unknown) => void
+  let resolveDeferred!: (value: T) => void
+  const promise = new Promise<T>((resolve, reject) => {
+    rejectDeferred = reject
+    resolveDeferred = resolve
+  })
+  return {
+    promise,
+    reject: rejectDeferred,
+    resolve: resolveDeferred,
+  }
 }

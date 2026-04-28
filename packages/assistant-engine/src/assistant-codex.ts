@@ -84,6 +84,7 @@ const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
 const CODEX_RPC_CLIENT_VERSION = '1.0.0'
 const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
+const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 
 export interface CodexAppServerTurnInput {
@@ -95,6 +96,7 @@ export interface CodexAppServerTurnInput {
   env?: NodeJS.ProcessEnv
   model?: string | null
   modelProvider?: string | null
+  onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
   onProgress?: ((event: CodexProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   oss?: boolean
@@ -137,6 +139,13 @@ export interface CodexAppServerSteerRequest {
   params: Record<string, unknown>
 }
 
+export interface CodexAppServerLiveTurn {
+  interrupt(): Promise<void>
+  steer(input: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>): Promise<void>
+  threadId: string
+  turnId: string
+}
+
 export function buildCodexAppServerSteerRequest(
   input: CodexAppServerSteerRequestInput,
 ): CodexAppServerSteerRequest {
@@ -173,6 +182,7 @@ export async function executeCodexAppServerTurn(
       args,
       codexCommand,
       imagePaths,
+      tempRoot,
       workingDirectory,
       env: childEnv,
     })
@@ -221,6 +231,7 @@ async function runCodexAppServerTurn(
     codexCommand: string
     env: NodeJS.ProcessEnv
     imagePaths: readonly string[]
+    tempRoot: string
     workingDirectory: string
   },
 ): Promise<CodexAppServerTurnResult> {
@@ -252,6 +263,8 @@ async function runCodexAppServerTurn(
 
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
+  let liveTurnOpen = false
+  let releaseLiveTurn = () => {}
   const turnCompleted = new Promise<void>((resolve, reject) => {
     completeTurn = resolve
     failTurn = reject
@@ -265,9 +278,41 @@ async function runCodexAppServerTurn(
     }
 
     settled = true
+    closeLiveTurn()
     cleanupAbortListener()
     rejectPendingCodexRpcRequests(pendingRequests, error)
     failTurn?.(error)
+  }
+
+  const buildLiveTurnInactiveError = () =>
+    new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+      'Codex app-server live turn is no longer active.',
+      {
+        retryable: true,
+      },
+    )
+
+  const rejectPendingLiveTurnRequests = (error: unknown) => {
+    for (const [id, pending] of pendingRequests.entries()) {
+      if (
+        pending.method !== 'turn/steer' &&
+        pending.method !== 'turn/interrupt'
+      ) {
+        continue
+      }
+      pendingRequests.delete(id)
+      pending.reject(error)
+    }
+  }
+
+  const closeLiveTurn = () => {
+    if (liveTurnOpen) {
+      rejectPendingLiveTurnRequests(buildLiveTurnInactiveError())
+    }
+    liveTurnOpen = false
+    releaseLiveTurn()
+    releaseLiveTurn = () => {}
   }
 
   const handleCodexStdinError = (error: unknown): VaultCliError | null => {
@@ -428,6 +473,7 @@ async function runCodexAppServerTurn(
     const method = typeof message.method === 'string' ? message.method : null
     if (method === 'turn/started') {
       turnId = extractCodexTurnIdFromMessage(message) ?? turnId
+      registerLiveTurn()
     }
 
     if (method !== 'turn/completed') {
@@ -477,6 +523,66 @@ async function runCodexAppServerTurn(
       method,
       params: stripUndefinedRpcParams(params),
     })
+  }
+
+  const requireLiveTurnIds = (): {
+    threadId: string
+    turnId: string
+  } => {
+    if (!liveTurnOpen || !providerSessionId || !turnId) {
+      throw buildLiveTurnInactiveError()
+    }
+
+    return {
+      threadId: providerSessionId,
+      turnId,
+    }
+  }
+
+  const steerLiveTurn = async (
+    steerInput: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>,
+  ): Promise<void> => {
+    const liveTurn = requireLiveTurnIds()
+    const steerImagePaths = await materializeCodexImagePaths({
+      images: steerInput.images,
+      tempRoot: input.tempRoot,
+    })
+    await withCodexRpcTimeout(
+      sendRequest(
+        'turn/steer',
+        buildCodexTurnSteerParams({
+          ...liveTurn,
+          imagePaths: steerImagePaths,
+          prompt: steerInput.prompt,
+        }),
+      ),
+      CODEX_RPC_STEER_TIMEOUT_MS,
+      'turn/steer',
+    )
+  }
+
+  const interruptLiveTurn = async (): Promise<void> => {
+    const liveTurn = requireLiveTurnIds()
+    await withCodexRpcTimeout(
+      sendRequest('turn/interrupt', buildCodexTurnInterruptParams(liveTurn)),
+      CODEX_RPC_STEER_TIMEOUT_MS,
+      'turn/interrupt',
+    )
+  }
+
+  const registerLiveTurn = () => {
+    if (liveTurnOpen || !input.onLiveTurn || !providerSessionId || !turnId) {
+      return
+    }
+
+    liveTurnOpen = true
+    const cleanup = input.onLiveTurn({
+      interrupt: interruptLiveTurn,
+      steer: steerLiveTurn,
+      threadId: providerSessionId,
+      turnId,
+    })
+    releaseLiveTurn = typeof cleanup === 'function' ? cleanup : () => {}
   }
 
   child.on('error', (error) => {
@@ -598,8 +704,10 @@ async function runCodexAppServerTurn(
       'turn/start',
     )
     turnId = extractCodexTurnIdFromResult(turnResult) ?? turnId
+    registerLiveTurn()
 
     await turnCompleted
+    closeLiveTurn()
     normalShutdown = true
     await stopCodexAppServerChild({
       child,
@@ -609,6 +717,7 @@ async function runCodexAppServerTurn(
       throw stdinFailure
     }
   } catch (error) {
+    closeLiveTurn()
     normalShutdown = true
     await stopCodexAppServerChild({
       child,
@@ -616,6 +725,7 @@ async function runCodexAppServerTurn(
     }).catch(() => undefined)
     throw error
   } finally {
+    closeLiveTurn()
     cleanupAbortListener()
   }
 

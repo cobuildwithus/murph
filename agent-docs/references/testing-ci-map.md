@@ -28,7 +28,7 @@ Last verified: 2026-04-27
 
 - Repo-level automation still does not run full end-to-end CLI scenario flows; it typechecks/builds the published shell plus the extracted `assistant-cli` and `setup-cli` packages, now includes inbox service/runtime tests plus parser-worker/runtime tests, and the `test:smoke` lane still covers fixture/scenario-manifest integrity separately.
 - The current fixture/scenario lane still validates manifests and command-surface coverage, not end-to-end package orchestration.
-- No automated check hits a live AI Gateway or OpenAI-compatible endpoint; inbox model routing is currently verified through type/build/test coverage around the CLI surface and static scenario-manifest coverage only.
+- No automated check launches a live Codex App Server or a live inbox model-routing backend; Codex assistant command surfaces and the audit-only inbox bundle helper are currently verified through type/build/test coverage around the CLI surface and static scenario-manifest coverage only.
 - No automated check hits a live Linq endpoint; Linq webhook delivery and outbound reply behavior are currently verified through mocked CLI, inboxd, and hosted `apps/web` tests only.
 - No automated check hits a live AgentMail endpoint; email provisioning, polling, and in-thread reply behavior are currently verified through mocked CLI and inboxd tests only.
 - No automated check hits a live WHOOP or other wearable OAuth provider; device-syncd auth/webhook behavior is currently verified through local service tests, route tests, and stubbed control-plane callers.

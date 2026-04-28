@@ -51,6 +51,24 @@ describe("hosted runner secrets payload decoding", () => {
     }), {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "NODE_OPTIONS",
     })).toThrow(/not allowed/u);
+
+    expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
+      NODE_EXTRA_CA_CERTS: "/tmp/custom-ca.pem",
+    }), {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "NODE_EXTRA_CA_CERTS",
+    })).toThrow(/not allowed/u);
+
+    expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
+      NPM_CONFIG_USERCONFIG: "/tmp/npmrc",
+    }), {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "NPM_CONFIG_USERCONFIG",
+    })).toThrow(/not allowed/u);
+
+    expect(() => decodeHostedRunnerSecretsPayload(encodeRunnerSecretsPayload({
+      TMPDIR: "/tmp/tenant-controlled",
+    }), {
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "TMPDIR",
+    })).toThrow(/not allowed/u);
   });
 
   it("rejects legacy schemas", () => {

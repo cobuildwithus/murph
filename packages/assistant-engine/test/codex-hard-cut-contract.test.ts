@@ -32,12 +32,53 @@ describe('Codex-only assistant hard-cut contracts', () => {
 
   it('removes obsolete OpenAI-compatible provider and model-harness execution modules', () => {
     expect([
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'automation', 'routing.ts'),
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'providers', 'openai-compatible.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'inbox-model-harness.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'model-spec.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'responses-policy.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'tool-catalog.ts'),
       path.join('packages', 'cli', 'src', 'inbox-model-runtime.ts'),
     ].filter((filePath) => existsSync(resolveRepoPath(filePath)))).toEqual([])
+  })
+
+  it('removes inbox model route contracts and OpenAI-compatible model-route residue', async () => {
+    const contractPaths = [
+      path.join('packages', 'assistant-engine', 'src', 'inbox-model-contracts.ts'),
+      path.join('packages', 'cli', 'src', 'inbox-model-contracts.ts'),
+    ]
+    const removedContractSymbols = [
+      'assistantToolSpecSchema',
+      'assistantExecutionPlanSchema',
+      'inboxModelRouteResultSchema',
+      'AssistantToolExecutionResult',
+      'AssistantExecutionPlan',
+      'InboxModelRouteResult',
+      'providerMode',
+      'openai-compatible',
+    ]
+
+    for (const contractPath of contractPaths) {
+      const source = await readFile(resolveRepoPath(contractPath), 'utf8')
+      for (const symbol of removedContractSymbols) {
+        expect(source).not.toContain(symbol)
+      }
+    }
+  })
+
+  it('removes dead modelSpec forwarding from assistant automation runtime surfaces', async () => {
+    const runtimePaths = [
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'automation', 'run-loop.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'automation', 'scanner.ts'),
+      path.join('packages', 'assistant-cli', 'src', 'assistant', 'automation', 'run-loop.ts'),
+      path.join('packages', 'assistant-cli', 'src', 'assistant-daemon-client.ts'),
+      path.join('packages', 'assistantd', 'src', 'service.ts'),
+    ]
+
+    for (const runtimePath of runtimePaths) {
+      const source = await readFile(resolveRepoPath(runtimePath), 'utf8')
+      expect(source).not.toContain('modelSpec')
+    }
   })
 
   it('keeps Codex app-server model provider, steer, and interrupt protocol support explicit', async () => {

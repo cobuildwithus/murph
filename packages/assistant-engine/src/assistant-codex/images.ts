@@ -80,7 +80,7 @@ async function resolveReadableCodexImagePath(candidatePath: string): Promise<str
   } catch {
     throw new VaultCliError(
       'ASSISTANT_CODEX_IMAGE_INVALID',
-      `Codex app-server image input path is not readable: ${resolvedPath}`,
+      'Codex app-server image input path is not readable.',
     )
   }
 

@@ -18,6 +18,3 @@ export {
 export {
   scanAssistantAutoReplyOnce,
 } from '@murphai/assistant-engine/assistant-automation'
-export {
-  scanAssistantInboxOnce,
-} from '@murphai/assistant-engine/assistant-automation'

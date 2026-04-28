@@ -53,6 +53,25 @@ const HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES = [
   "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
   "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
 ] as const;
+const HOSTED_RUNTIME_PROCESS_ENV_MARKER = "MURPH_HOSTED_RUNTIME_PROCESS";
+const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
+  "LANG",
+  "LANGUAGE",
+  "LC_ALL",
+  "LC_CTYPE",
+  "NODE_ENV",
+  "NODE_EXTRA_CA_CERTS",
+  "PATH",
+  "PATHEXT",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "SystemDrive",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "TZ",
+] as const;
 const HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES = [
   "HOSTED_ASSISTANT_API_KEY_ENV",
   "HOSTED_ASSISTANT_BASE_URL",
@@ -63,12 +82,26 @@ const HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES = [
   "HOSTED_ASSISTANT_PROVIDER_NAME",
   "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
 ] as const;
+const HOSTED_RUNTIME_USER_PROCESS_ENV_OVERRIDE_NAMES = [
+  "ALL_PROXY",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+] as const;
 const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
   [
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
     ...HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES,
     ...HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES,
+    ...HOSTED_RUNTIME_USER_PROCESS_ENV_OVERRIDE_NAMES,
+    HOSTED_RUNTIME_PROCESS_ENV_MARKER,
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",
@@ -83,12 +116,18 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     "VAULT",
   ],
 );
+const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST_PREFIXES = [
+  "NPM_CONFIG_",
+  "npm_config_",
+] as const;
 const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
   [
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
     ...HOSTED_RUNTIME_CONTROL_PLANE_ENV_NAMES,
     ...HOSTED_RUNTIME_REJECTED_HOSTED_ASSISTANT_SEED_ENV_NAMES,
+    ...HOSTED_RUNTIME_USER_PROCESS_ENV_OVERRIDE_NAMES,
+    HOSTED_RUNTIME_PROCESS_ENV_MARKER,
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",
@@ -107,6 +146,8 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES = [
   "HOSTED_EXECUTION_",
   "HOSTED_WAKE_",
   "HOSTED_WEB_CALLBACK_SIGNING_",
+  "NPM_CONFIG_",
+  "npm_config_",
 ] as const;
 let hostedProcessEnvironmentQueue: Promise<void> = Promise.resolve();
 
@@ -152,7 +193,10 @@ export function sanitizeHostedAssistantRuntimeForwardedEnv(
   forwardedEnv: Readonly<Record<string, string>>,
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(forwardedEnv).filter(([key]) => !HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST.has(key)),
+    Object.entries(forwardedEnv).filter(([key]) =>
+      !HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST.has(key)
+      && !HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ),
   );
 }
 
@@ -262,27 +306,47 @@ async function runWithHostedProcessEnvironment<T>(input: {
   operatorHomeRoot: string;
   vaultRoot: string;
 }, run: () => Promise<T>): Promise<T> {
-  const previousValues = new Map<string, string | undefined>();
-  const nextValues: Record<string, string> = {
+  const previousEnvironment = { ...process.env };
+  const nextEnvironment: NodeJS.ProcessEnv = {
+    ...buildHostedBaseProcessEnvironment(previousEnvironment),
     ...input.envOverrides,
     HOME: input.operatorHomeRoot,
+    [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
     VAULT: input.vaultRoot,
   };
 
-  for (const [key, value] of Object.entries(nextValues)) {
-    previousValues.set(key, process.env[key]);
-    process.env[key] = value;
-  }
+  replaceProcessEnvironment(nextEnvironment);
 
   try {
     return await run();
   } finally {
-    for (const [key, previousValue] of previousValues) {
-      if (previousValue === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = previousValue;
-      }
+    replaceProcessEnvironment(previousEnvironment);
+  }
+}
+
+function buildHostedBaseProcessEnvironment(
+  source: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+
+  for (const key of HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES) {
+    const value = source[key];
+    if (typeof value === "string") {
+      env[key] = value;
+    }
+  }
+
+  return env;
+}
+
+function replaceProcessEnvironment(nextEnvironment: NodeJS.ProcessEnv): void {
+  for (const key of Object.keys(process.env)) {
+    delete process.env[key];
+  }
+
+  for (const [key, value] of Object.entries(nextEnvironment)) {
+    if (typeof value === "string") {
+      process.env[key] = value;
     }
   }
 }

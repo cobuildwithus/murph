@@ -1,6 +1,5 @@
 import type { AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
-import type { AssistantModelSpec } from '../legacy-model-spec.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
@@ -13,10 +12,6 @@ import {
   createAssistantAutoReplyGroupContext,
   processAssistantAutoReplyGroup,
 } from './reply.js'
-import {
-  applyRoutingOutcome,
-  routeAssistantInboxCapture,
-} from './routing.js'
 import {
   compareAssistantCaptureOrder,
   computeAssistantAutomationRetryAt,
@@ -33,14 +28,11 @@ import {
 type AssistantInboxCaptureSummary = Awaited<
   ReturnType<InboxServices['list']>
 >['items'][number]
-type AssistantInboxListResult = Awaited<ReturnType<InboxServices['list']>>
 type AssistantPreserveDocumentAttachmentsResult = Awaited<
   ReturnType<NonNullable<InboxServices['preserveDocumentAttachments']>>
 >
 
 interface AssistantAutomationCandidate {
-  replyPending: boolean
-  routingPending: boolean
   summary: AssistantInboxCaptureSummary
 }
 
@@ -53,7 +45,6 @@ export async function scanAssistantAutomationOnce(input: {
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   maxPerScan?: number
-  modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onStateProgress?: (
@@ -75,8 +66,7 @@ export async function scanAssistantAutomationOnce(input: {
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
-  const routingModelSpec = input.modelSpec?.model ? input.modelSpec : null
-  const routingEnabled = routingModelSpec !== null
+  void input.vaultServices
   const replyChannels = applyCanonicalWrites
     ? scanState.autoReply.map((entry) => entry.channel)
     : []
@@ -91,28 +81,20 @@ export async function scanAssistantAutomationOnce(input: {
     })
   }
 
-  if (!routingEnabled && replyChannels.length === 0) {
+  if (replyChannels.length === 0) {
     return {
       replies,
       routing,
     }
   }
 
-  const candidateBatches = await listAssistantAutomationCandidates({
+  const candidates = (await listAssistantReplyCandidates({
     autoReply: applyCanonicalWrites ? scanState.autoReply : [],
     inboxServices: input.inboxServices,
-    maxPerScan: input.maxPerScan,
+    limit: normalizeScanLimit(input.maxPerScan),
     requestId: input.requestId ?? null,
-    routingEnabled,
-    scanState,
     vault: input.vault,
-  })
-
-  const candidates = constrainAssistantAutomationCandidates({
-    candidates: mergeAssistantAutomationCandidates(candidateBatches),
-    maxPerScan: input.maxPerScan,
-    reply: candidateBatches.reply,
-  })
+  })).map((summary) => ({ summary }))
   if (candidates.length === 0) {
     return {
       replies,
@@ -133,7 +115,6 @@ export async function scanAssistantAutomationOnce(input: {
     string,
     AssistantPreserveDocumentAttachmentsResult
   >()
-  let routingCursorBlocked = false
 
   const preserveCandidateDocuments = async (
     candidate: AssistantAutomationCandidate,
@@ -165,55 +146,16 @@ export async function scanAssistantAutomationOnce(input: {
       const nextWakeAt = computeAssistantAutomationRetryAt(
         ASSISTANT_DOCUMENT_PRESERVATION_RETRY_DELAY_MS,
       )
-      if (candidate.replyPending || !candidate.routingPending) {
-        replies.nextWakeAt = earliestAssistantAutomationWakeAt(
-          replies.nextWakeAt,
-          nextWakeAt,
-        )
-      }
-      if (candidate.routingPending || !candidate.replyPending) {
-        routing.nextWakeAt = earliestAssistantAutomationWakeAt(
-          routing.nextWakeAt,
-          nextWakeAt,
-        )
-      }
+      replies.nextWakeAt = earliestAssistantAutomationWakeAt(
+        replies.nextWakeAt,
+        nextWakeAt,
+      )
       input.onEvent?.({
         type: 'capture.failed',
         captureId: candidate.summary.captureId,
         details: `automatic document preservation failed: ${errorMessage(error)}`,
       })
       return false
-    }
-  }
-
-  const routeCandidate = async (candidate: AssistantAutomationCandidate) => {
-    if (!routingModelSpec) {
-      return
-    }
-
-    routing.considered += 1
-    const outcome = await routeAssistantInboxCapture({
-      applyCanonicalWrites,
-      capture: candidate.summary,
-      inboxServices: input.inboxServices,
-      modelSpec: routingModelSpec,
-      requestId: input.requestId,
-      vault: input.vault,
-      vaultServices: input.vaultServices,
-    })
-    applyRoutingOutcome({
-      captureId: candidate.summary.captureId,
-      onEvent: input.onEvent,
-      outcome,
-      summary: routing,
-    })
-    if (!outcome.advanceCursor) {
-      routingCursorBlocked = true
-      return
-    }
-
-    if (applyCanonicalWrites && !routingCursorBlocked) {
-      scanState.inboxScanCursor = cursorFromCapture(candidate.summary)
     }
   }
 
@@ -227,139 +169,68 @@ export async function scanAssistantAutomationOnce(input: {
       continue
     }
 
-    if (candidate.replyPending) {
-      const group = await collectAssistantAutoReplyGroup({
-        captures: candidateSummaries,
-        startIndex: index,
-        vault: input.vault,
-      })
-      index = group.endIndex
+    const group = await collectAssistantAutoReplyGroup({
+      captures: candidateSummaries,
+      startIndex: index,
+      vault: input.vault,
+    })
+    index = group.endIndex
 
-      const context = createAssistantAutoReplyGroupContext(group.items)
-      if (!context) {
+    const context = createAssistantAutoReplyGroupContext(group.items)
+    if (!context) {
+      continue
+    }
+
+    for (const item of context.items) {
+      const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
+      if (!groupCandidate) {
         continue
       }
 
-      for (const item of context.items) {
-        const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
-        if (!groupCandidate) {
-          continue
-        }
-
-        if (!(await preserveCandidateDocuments(groupCandidate))) {
-          break scanLoop
-        }
-
-        if (!groupCandidate.routingPending || !routingModelSpec) {
-          continue
-        }
-
-        await routeCandidate(groupCandidate)
+      if (!(await preserveCandidateDocuments(groupCandidate))) {
+        break scanLoop
       }
-
-      replies.considered += context.captureCount
-      const replyResult = await processAssistantAutoReplyGroup({
-        allowSelfAuthored: input.allowSelfAuthored ?? false,
-        context,
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        enabledChannels: replyChannels,
-        executionContext: input.executionContext,
-        inboxServices: input.inboxServices,
-        onEvent: input.onEvent,
-        onTraceEvent: input.onTraceEvent,
-        providerHeartbeatMs: input.providerHeartbeatMs,
-        providerLongRunningCommandStallTimeoutMs:
-          input.providerLongRunningCommandStallTimeoutMs,
-        providerStallTimeoutMs: input.providerStallTimeoutMs,
-        requestId: input.requestId ?? null,
-        signal: input.signal,
-        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-        turnInputPort: input.turnInputPort,
-        vault: input.vault,
-      })
-      const stopReplyScan = applyAssistantAutoReplyProcessResult({
-        context,
-        result: replyResult,
-        summary: replies,
-        updateCursor: (cursor) => {
-          updateAutoReplyChannelCursor(scanState, context.firstItem.summary.source, cursor)
-        },
-      })
-
-      await persistScanState()
-
-      if (stopReplyScan) {
-        break
-      }
-
-      continue
     }
 
-    if (!candidate.routingPending || !routingModelSpec) {
-      if (!(await preserveCandidateDocuments(candidate))) {
-        break
-      }
-      continue
-    }
+    replies.considered += context.captureCount
+    const replyResult = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: input.allowSelfAuthored ?? false,
+      context,
+      deliveryDispatchMode: input.deliveryDispatchMode,
+      enabledChannels: replyChannels,
+      executionContext: input.executionContext,
+      inboxServices: input.inboxServices,
+      onEvent: input.onEvent,
+      onTraceEvent: input.onTraceEvent,
+      providerHeartbeatMs: input.providerHeartbeatMs,
+      providerLongRunningCommandStallTimeoutMs:
+        input.providerLongRunningCommandStallTimeoutMs,
+      providerStallTimeoutMs: input.providerStallTimeoutMs,
+      requestId: input.requestId ?? null,
+      signal: input.signal,
+      sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+      turnInputPort: input.turnInputPort,
+      vault: input.vault,
+    })
+    const stopReplyScan = applyAssistantAutoReplyProcessResult({
+      context,
+      result: replyResult,
+      summary: replies,
+      updateCursor: (cursor) => {
+        updateAutoReplyChannelCursor(scanState, context.firstItem.summary.source, cursor)
+      },
+    })
 
-    if (!(await preserveCandidateDocuments(candidate))) {
+    await persistScanState()
+
+    if (stopReplyScan) {
       break
     }
-
-    await routeCandidate(candidate)
-    await persistScanState()
   }
 
   return {
     replies,
     routing,
-  }
-}
-
-async function listAssistantAutomationCandidates(input: {
-  autoReply: AssistantAutomationScanStateProgress['autoReply']
-  inboxServices: InboxServices
-  maxPerScan?: number
-  requestId: string | null
-  routingEnabled: boolean
-  scanState: AssistantAutomationScanStateProgress
-  vault: string
-}): Promise<{
-  reply: AssistantInboxCaptureSummary[]
-  routing: AssistantInboxCaptureSummary[]
-}> {
-  const limit = normalizeScanLimit(input.maxPerScan)
-  const [reply, routingListed] = await Promise.all([
-    listAssistantReplyCandidates({
-      autoReply: input.autoReply,
-      inboxServices: input.inboxServices,
-      limit,
-      requestId: input.requestId,
-      vault: input.vault,
-    }),
-    input.routingEnabled
-      ? input.inboxServices.list({
-          vault: input.vault,
-          requestId: input.requestId,
-          limit,
-          sourceId: null,
-          afterCreatedAt: input.scanState.inboxScanCursor?.createdAt ?? null,
-          afterOccurredAt: input.scanState.inboxScanCursor?.occurredAt ?? null,
-          afterCaptureId: input.scanState.inboxScanCursor?.captureId ?? null,
-          oldestFirst: true,
-        })
-      : Promise.resolve(
-          createEmptyAssistantInboxListResult(
-            input.vault,
-            limit,
-            input.scanState.inboxScanCursor,
-          ),
-        ),
-  ])
-
-  return {
-    reply,
-    routing: [...routingListed.items].sort(compareAssistantCaptureOrder),
   }
 }
 
@@ -414,81 +285,6 @@ async function listAssistantReplyCandidates(input: {
     .flat()
     .sort(compareAssistantCaptureOrder)
     .slice(0, input.limit)
-}
-
-function mergeAssistantAutomationCandidates(input: {
-  reply: readonly AssistantInboxCaptureSummary[]
-  routing: readonly AssistantInboxCaptureSummary[]
-}): AssistantAutomationCandidate[] {
-  const merged = new Map<string, AssistantAutomationCandidate>()
-
-  for (const capture of input.routing) {
-    merged.set(capture.captureId, {
-      replyPending: false,
-      routingPending: true,
-      summary: capture,
-    })
-  }
-
-  for (const capture of input.reply) {
-    const existing = merged.get(capture.captureId)
-    if (existing) {
-      existing.replyPending = true
-      existing.summary = capture
-      continue
-    }
-
-    merged.set(capture.captureId, {
-      replyPending: true,
-      routingPending: false,
-      summary: capture,
-    })
-  }
-
-  return [...merged.values()].sort((left, right) =>
-    compareAssistantCaptureOrder(left.summary, right.summary),
-  )
-}
-
-function createEmptyAssistantInboxListResult(
-  vault: string,
-  limit: number,
-  cursor: AssistantAutomationScanStateProgress['inboxScanCursor'],
-): AssistantInboxListResult {
-  return {
-    vault,
-    filters: {
-      sourceId: null,
-      limit,
-      afterCreatedAt: cursor?.createdAt ?? null,
-      afterOccurredAt: cursor?.occurredAt ?? null,
-      afterCaptureId: cursor?.captureId ?? null,
-      oldestFirst: true,
-    },
-    items: [],
-  }
-}
-
-function constrainAssistantAutomationCandidates(input: {
-  candidates: readonly AssistantAutomationCandidate[]
-  maxPerScan?: number
-  reply: readonly AssistantInboxCaptureSummary[]
-}): AssistantAutomationCandidate[] {
-  const limit = normalizeScanLimit(input.maxPerScan)
-  if (input.reply.length === 0 || input.reply.length < limit) {
-    return [...input.candidates]
-  }
-
-  const replyBoundary = input.reply[input.reply.length - 1]
-  if (!replyBoundary) {
-    return [...input.candidates]
-  }
-
-  return input.candidates.filter(
-    (candidate) =>
-      candidate.replyPending ||
-      compareAssistantCaptureOrder(candidate.summary, replyBoundary) <= 0,
-  )
 }
 
 function updateAutoReplyChannelCursor(
