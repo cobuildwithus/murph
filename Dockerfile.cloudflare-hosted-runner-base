@@ -24,10 +24,14 @@ RUN curl -fsSL --retry 5 --retry-delay 2 \
     | tar -xz --strip-components=1 \
   && cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=ON \
+    -DGGML_BACKEND_DL=ON \
+    -DGGML_CPU_ALL_VARIANTS=ON \
     -DGGML_NATIVE=OFF \
   && cmake --build build -j"$(nproc)" --config Release --target whisper-cli \
   && install -d /opt/whisper/bin /opt/whisper/lib \
   && install -Dm755 build/bin/whisper-cli /opt/whisper/bin/whisper-cli \
+  && cp -a build/bin/libggml-cpu*.so /opt/whisper/bin/ \
   && cp -a build/src/libwhisper.so* /opt/whisper/lib/ \
   && cp -a build/ggml/src/libggml*.so* /opt/whisper/lib/ \
   && curl -fsSL --retry 5 --retry-delay 2 \
@@ -68,6 +72,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whisper-builder /opt/whisper/bin/libggml-cpu*.so /usr/local/bin/
 COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/
 COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}
 

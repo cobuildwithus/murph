@@ -349,12 +349,17 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_CPP_VERSION}.tar.gz",
     );
+    expect(baseDockerfile).toContain("-DBUILD_SHARED_LIBS=ON");
+    expect(baseDockerfile).toContain("-DGGML_BACKEND_DL=ON");
+    expect(baseDockerfile).toContain("-DGGML_CPU_ALL_VARIANTS=ON");
     expect(baseDockerfile).toContain("-DGGML_NATIVE=OFF");
     expect(baseDockerfile).not.toContain("GGML_CPU_ARM_ARCH");
     expect(baseDockerfile).toContain(
       "cmake --build build -j\"$(nproc)\" --config Release --target whisper-cli",
     );
+    expect(baseDockerfile).toContain("cp -a build/bin/libggml-cpu*.so /opt/whisper/bin/");
     expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli");
+    expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/libggml-cpu*.so /usr/local/bin/");
     expect(baseDockerfile).toContain("COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/");
     expect(baseDockerfile).toContain(
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
