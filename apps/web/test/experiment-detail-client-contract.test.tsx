@@ -35,6 +35,12 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.refresh,
   }),
+  usePathname: () => "/experiments/finnish-sauna",
+}));
+
+vi.mock("next/link", () => ({
+  default: ({ children, href }: { children: ReactNode; href: string }) =>
+    createElement("a", { href }, children),
 }));
 
 vi.mock("@/src/components/ui/tabs", () => ({
@@ -89,6 +95,7 @@ vi.mock("@/src/lib/experiments/experiment-detail", async (importOriginal) => {
 });
 
 import { ExperimentDetailClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-detail-client";
+import { ExperimentLayoutClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-layout-client";
 
 const activeCleanups = new Set<() => Promise<void> | void>();
 const requireFromExperimentDetailClientTest = createRequire(import.meta.url);
@@ -117,11 +124,14 @@ test("pins the experiment protocol contract to greenfield v1", () => {
 });
 
 test("refreshes instead of hydrating the new protocol UI against a stale contract payload", async () => {
-  const view = await renderExperimentDetailClient({
-    protocol: createProtocol({
-      protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION - 1,
+  const view = await renderClient(
+    createElement(ExperimentLayoutClient, {
+      protocol: createProtocol({
+        protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION - 1,
+      }),
+      children: createElement("div", null, "child content"),
     }),
-  });
+  );
 
   expect(mocks.refresh).toHaveBeenCalledTimes(1);
   expect(mocks.protocolTab).not.toHaveBeenCalled();
@@ -130,21 +140,24 @@ test("refreshes instead of hydrating the new protocol UI against a stale contrac
   await view.cleanup();
 });
 
-test("renders the protocol tab without forcing a refresh when the contract is current", async () => {
-  const view = await renderExperimentDetailClient({
-    protocol: createProtocol(),
-  });
+test("renders the protocol tab with a link to the research subroute", async () => {
+  const view = await renderClient(
+    createElement(ExperimentDetailClient, {
+      protocol: createProtocol(),
+    }),
+  );
 
-  expect(mocks.refresh).not.toHaveBeenCalled();
   expect(mocks.protocolTab).toHaveBeenCalledTimes(1);
+  const protocolTabProps = (mocks.protocolTab.mock.calls.at(-1) as
+    | [{ researchHref?: string }]
+    | undefined)?.[0];
+  expect(protocolTabProps?.researchHref).toBe("/experiments/finnish-sauna/research");
   assert.match(view.container.textContent ?? "", /protocol tab/);
 
   await view.cleanup();
 });
 
-async function renderExperimentDetailClient(input: {
-  protocol: ExperimentProtocol;
-}) {
+async function renderClient(element: ReturnType<typeof createElement>) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
   const cleanupGlobals = installGlobals(window, document);
   activeCleanups.add(cleanupGlobals);
@@ -154,7 +167,7 @@ async function renderExperimentDetailClient(input: {
   let root: Root | null = createRoot(container);
 
   await act(async () => {
-    root?.render(createElement(ExperimentDetailClient, input));
+    root?.render(element);
   });
 
   return {
