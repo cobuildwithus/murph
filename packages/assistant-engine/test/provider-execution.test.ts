@@ -646,6 +646,9 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     expect(result).toMatchObject({
       ok: true,
       result: {
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        },
         providerSessionId: null,
         response: 'Fresh answer',
       },
@@ -1737,6 +1740,9 @@ describe('codexCliProviderDefinition', () => {
     ).resolves.toMatchObject({
       ok: true,
       result: {
+        providerContinuation: {
+          kind: 'flat-prompt-replay',
+        },
         providerSessionId: 'codex-session-fresh',
         response: 'Recovered with fresh session',
       },

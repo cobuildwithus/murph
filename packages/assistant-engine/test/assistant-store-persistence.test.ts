@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { listAssistantQuarantineEntriesAtPaths } from '../src/assistant/quarantine.ts'
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
+import { appendAssistantTranscriptEntriesWithRefs } from '../src/assistant/store.ts'
 import {
   appendTranscriptEntries,
   ensureAssistantState,
@@ -199,6 +200,61 @@ describe('assistant store persistence seams', () => {
         level: 'info',
       }),
     )
+  })
+
+  it('returns durable transcript entry refs from the locked append helper', async () => {
+    const context = await createTempVaultContext(
+      'assistant-store-persistence-transcript-refs-',
+    )
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    const session = createSession({
+      sessionId: 'session-transcript-refs',
+    })
+    await ensureAssistantState(paths)
+    await writeAssistantSession(paths, session)
+    await appendTranscriptEntries(paths, session.sessionId, [
+      createTranscriptEntry(
+        'user',
+        'first prompt',
+        '2026-04-08T00:01:00.000Z',
+      ),
+    ])
+
+    const appended = await appendAssistantTranscriptEntriesWithRefs(
+      context.vaultRoot,
+      session.sessionId,
+      [
+        {
+          createdAt: '2026-04-08T00:02:00.000Z',
+          kind: 'user',
+          text: 'late follow up',
+        },
+        {
+          createdAt: '2026-04-08T00:03:00.000Z',
+          kind: 'assistant',
+          text: 'draft answer',
+        },
+      ],
+    )
+
+    expect(appended.refs).toEqual([
+      {
+        entryCreatedAt: '2026-04-08T00:02:00.000Z',
+        entryIndex: 1,
+        entryKind: 'user',
+        sessionId: session.sessionId,
+      },
+      {
+        entryCreatedAt: '2026-04-08T00:03:00.000Z',
+        entryIndex: 2,
+        entryKind: 'assistant',
+        sessionId: session.sessionId,
+      },
+    ])
+    await expect(
+      readAssistantTranscriptEntries(paths, session.sessionId),
+    ).resolves.toHaveLength(3)
   })
 
   it('treats expired sessions according to last-turn precedence and ignores disabled age limits', () => {

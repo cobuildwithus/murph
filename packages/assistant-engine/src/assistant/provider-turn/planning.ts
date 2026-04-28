@@ -69,9 +69,13 @@ import {
   type AssistantActiveTurnProviderHistory,
   type AssistantActiveTurnProviderHistoryMessage,
 } from '../active-turn-history.js'
+import type {
+  AssistantProviderContinuation,
+} from '../active-turn-input-journal.js'
 import {
   resolveAssistantOnboardingCompletionFallbackReason,
 } from './onboarding-fallback.js'
+import { normalizeNullableString } from '../shared.js'
 
 export interface AssistantRouteTurnPlan {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode
@@ -86,6 +90,7 @@ export interface AssistantRouteTurnPlan {
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingCompletionFallbackReason: AssistantOnboardingCompletionReason | null
   onboardingGuidanceInjected: boolean
+  providerContinuation: AssistantProviderContinuation
   resumeProviderSessionId: string | null
   sessionContext?: {
     binding: AssistantSession['binding']
@@ -369,8 +374,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
-      ? resolveAssistantProviderResumeKey({
-          resumeState: resumeBinding,
+      ? resolveAssistantEffectiveProviderResumeSessionId({
+          resumeProviderSessionId: resolveAssistantProviderResumeKey({
+            resumeState: resumeBinding,
+          }),
+          route: input.route,
         })
       : null
   const continuityPlan = resolveAssistantProviderTurnContinuityPlan({
@@ -509,6 +517,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         prompt: input.input.prompt,
       }),
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
+    providerContinuation: resolveAssistantProviderContinuation({
+      capabilities: routeProviderCapabilities,
+      resumeProviderSessionId,
+    }),
     resumeProviderSessionId,
     sessionContext: shouldPrepareBootstrapContext
       ? {
@@ -728,6 +740,45 @@ function providerUsesFlatPrompt(
   capabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>,
 ): boolean {
   return capabilities.requestFormat === 'flat-prompt'
+}
+
+function resolveAssistantProviderContinuation(input: {
+  capabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
+  resumeProviderSessionId: string | null
+}): AssistantProviderContinuation {
+  if (input.resumeProviderSessionId) {
+    return {
+      kind: 'provider-state-optimization',
+    }
+  }
+
+  if (providerUsesFlatPrompt(input.capabilities)) {
+    return {
+      kind: 'flat-prompt-replay',
+    }
+  }
+
+  return {
+    kind: 'explicit-structured-history',
+  }
+}
+
+function resolveAssistantEffectiveProviderResumeSessionId(input: {
+  resumeProviderSessionId: string | null
+  route: ResolvedAssistantFailoverRoute
+}): string | null {
+  const resumeProviderSessionId = normalizeNullableString(
+    input.resumeProviderSessionId,
+  )
+  if (
+    resumeProviderSessionId &&
+    input.route.providerOptions.executionDriver === 'responses' &&
+    !resumeProviderSessionId.startsWith('resp_')
+  ) {
+    return null
+  }
+
+  return resumeProviderSessionId
 }
 
 export async function loadAssistantConversationMessages(input: {

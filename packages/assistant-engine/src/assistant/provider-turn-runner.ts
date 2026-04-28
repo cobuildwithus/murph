@@ -49,6 +49,7 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
+import type { AssistantProviderContinuation } from './active-turn-input-journal.js'
 import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
 import {
   recordProviderAttemptFailed,
@@ -92,6 +93,7 @@ type AssistantProviderAttemptOutcome =
       kind: 'failed_terminal'
       error: unknown
       failoverState: AssistantProviderFailoverState
+      providerContinuation: AssistantProviderContinuation
       session: AssistantSession
     }
   | {
@@ -110,6 +112,7 @@ export type AssistantProviderTurnRecoveryOutcome =
   | {
       kind: 'failed_terminal'
       error: unknown
+      providerContinuation: AssistantProviderContinuation
       route?: ResolvedAssistantFailoverRoute | null
       session: AssistantSession
     }
@@ -121,6 +124,10 @@ export type AssistantProviderTurnRecoveryOutcome =
 export async function executeProviderTurnWithRecovery(input: {
   activeTurnHistory?: AssistantActiveTurnProviderHistory | null
   input: AssistantMessageInput
+  onProviderRequestPlanned?: (event: {
+    providerAttemptId: string | null
+    providerContinuation: AssistantProviderContinuation
+  }) => Promise<void>
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
   resolvedSession: AssistantSession
@@ -133,8 +140,12 @@ export async function executeProviderTurnWithRecovery(input: {
   const attemptedRouteIds = new Set<string>()
   let lastRetriableFailure: unknown = null
   let lastAttemptedRoute: ResolvedAssistantFailoverRoute | null = null
+  let lastAttemptedProviderContinuation: AssistantProviderContinuation = {
+    kind: 'explicit-structured-history',
+  }
   let nextAttemptCount = 1
   let currentSession = input.resolvedSession
+  let providerRequestPlanned = false
 
   while (attemptedRouteIds.size < executionPlan.routes.length) {
     const attemptPlan = await resolveAssistantProviderAttemptPlan({
@@ -150,7 +161,16 @@ export async function executeProviderTurnWithRecovery(input: {
 
     attemptedRouteIds.add(attemptPlan.route.routeId)
     lastAttemptedRoute = attemptPlan.route
+    lastAttemptedProviderContinuation = attemptPlan.routePlan.providerContinuation
     nextAttemptCount = attemptPlan.attemptCount + 1
+
+    if (!providerRequestPlanned) {
+      await input.onProviderRequestPlanned?.({
+        providerAttemptId: null,
+        providerContinuation: attemptPlan.routePlan.providerContinuation,
+      })
+      providerRequestPlanned = true
+    }
 
     const attemptOutcome = await executeAssistantProviderAttempt({
       attemptPlan,
@@ -176,6 +196,7 @@ export async function executeProviderTurnWithRecovery(input: {
         return {
           kind: 'failed_terminal',
           error: attemptOutcome.error,
+          providerContinuation: attemptOutcome.providerContinuation,
           route: attemptPlan.route,
           session: attemptOutcome.session,
         }
@@ -193,6 +214,7 @@ export async function executeProviderTurnWithRecovery(input: {
             ),
             error: lastRetriableFailure,
           }),
+    providerContinuation: lastAttemptedProviderContinuation,
     route: lastAttemptedRoute,
     session: currentSession,
   }
@@ -286,6 +308,7 @@ async function executeAssistantProviderAttempt(input: {
     turnId: executionPlan.turnId,
     vault: executionPlan.input.vault,
   })
+  let effectiveProviderContinuation = attemptPlan.routePlan.providerContinuation
 
   try {
     maybeThrowInjectedAssistantFault({
@@ -371,6 +394,8 @@ async function executeAssistantProviderAttempt(input: {
       vault: executionPlan.input.vault,
     }).catch(() => undefined)
     if (!attemptResult.ok) {
+      effectiveProviderContinuation =
+        attemptResult.providerContinuation ?? attemptPlan.routePlan.providerContinuation
       throw attemptResult.error
     }
     const result = attemptResult.result
@@ -399,6 +424,8 @@ async function executeAssistantProviderAttempt(input: {
         onboardingCompletionFallbackReason:
           attemptPlan.routePlan.onboardingCompletionFallbackReason,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
+        providerContinuation:
+          result.providerContinuation ?? effectiveProviderContinuation,
         providerOptions: attemptPlan.route.providerOptions,
         route: attemptPlan.route,
         session: attemptPlan.session,
@@ -493,6 +520,7 @@ async function executeAssistantProviderAttempt(input: {
       kind: outcomeKind,
       error,
       failoverState: nextFailoverState,
+      providerContinuation: effectiveProviderContinuation,
       session,
     }
   }

@@ -63,3 +63,10 @@ export interface AssistantTranscriptEntryInput {
   kind: AssistantTranscriptEntryKind
   text: string
 }
+
+export interface AssistantTranscriptEntryRef {
+  entryCreatedAt: string
+  entryIndex: number
+  entryKind: AssistantTranscriptEntryKind
+  sessionId: string
+}

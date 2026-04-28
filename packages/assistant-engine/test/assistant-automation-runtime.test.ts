@@ -15,6 +15,7 @@ import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-c
 import type { InboxServices } from '@murphai/inbox-services'
 import {
   AssistantActiveTurnInputBudgetExceededError,
+  AssistantActiveTurnInputUnavailableError,
   type AssistantTurnConversationCaptureQuery,
 } from '../src/assistant/turn-input.ts'
 
@@ -2270,7 +2271,6 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
-    console.error('source unavailable result', result)
 
     expect(result).toMatchObject({
       advanceCursor: false,
@@ -3428,6 +3428,184 @@ describe('assistant auto-reply runtime', () => {
       stopScanning: true,
     })
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('defers without advancing the cursor when active-turn refresh is unavailable', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
+        createShowResult(
+          createCaptureDetail({
+            captureId: input.captureId,
+            occurredAt: '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const sourceUnavailable = new AssistantActiveTurnInputUnavailableError(
+      'Active turn input source is temporarily unavailable; will retry later.',
+    )
+    const turnInputPort = {
+      async refresh() {
+        throw sourceUnavailable
+      },
+      async listNewConversationCaptures(input: AssistantTurnConversationCaptureQuery) {
+        return {
+          captures: [],
+          nextCursor: input.afterCursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        phase: 'request_boundary' | 'commit_barrier'
+        providerRequestOrdinal: number
+        response: string
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await input.activeTurnInput?.({
+        phase: 'request_boundary',
+        providerRequestOrdinal: 0,
+        response: 'draft response',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      throw new Error('expected active-turn admission to defer')
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      turnInputPort,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
+    expect(replyMocks.writeAssistantAutoReplyGroupOutcomeArtifact).not.toHaveBeenCalled()
+  })
+
+  it('defers without advancing the cursor when active-turn checkpoint is unavailable before outbox commit', async () => {
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockImplementation(async (input: { captureId: string }) =>
+        createShowResult(
+          createCaptureDetail({
+            captureId: input.captureId,
+            occurredAt: '2026-04-08T00:02:00.000Z',
+          }),
+        ),
+      ),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(
+        createCaptureSummary({
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:02:00.000Z',
+        }),
+      ),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const checkpointConflict = new AssistantActiveTurnInputUnavailableError(
+      'Active turn checkpoint was rejected before outbox commit; will retry later.',
+    )
+    const checkpointAcceptedInput = vi.fn(async () => {
+      throw checkpointConflict
+    })
+    const turnInputPort = {
+      checkpointAcceptedInput,
+      async refresh() {
+        return {
+          progressed: false,
+          reason: 'no_new_input' as const,
+        }
+      },
+      async listNewConversationCaptures(input: AssistantTurnConversationCaptureQuery) {
+        return {
+          captures: [],
+          nextCursor: input.afterCursor,
+        }
+      },
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (checkpoint: {
+        acceptedInputIds: readonly string[]
+        providerRequestOrdinal: number
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<void>
+    }) => {
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      throw new Error('expected active-turn checkpoint to defer')
+    })
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      turnInputPort,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(checkpointAcceptedInput).toHaveBeenCalledTimes(1)
+    expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
+    expect(replyMocks.writeAssistantAutoReplyGroupOutcomeArtifact).not.toHaveBeenCalled()
   })
 
   it('does not create a default turn-input port for hosted automation passes', async () => {

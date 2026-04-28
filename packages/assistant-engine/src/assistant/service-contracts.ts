@@ -33,7 +33,10 @@ import type {
   AssistantActiveTurnInputCheckpointHook,
   AssistantActiveTurnInputAdmissionHook,
 } from './turn-input.js'
-import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
+import type {
+  AssistantAcceptedTurnInputItemInput,
+  AssistantProviderContinuation,
+} from './active-turn-input-journal.js'
 import type {
   ResolvedAssistantFailoverRoute,
   readAssistantFailoverState,
@@ -89,6 +92,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliverySubject?: string | null
   deliveryTarget?: string | null
   executionContext?: AssistantExecutionContext | null
+  expectedActiveTurnId?: string | null
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
   includeEarlySessionOnboarding?: boolean
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -139,6 +143,7 @@ export interface AssistantRouteTurnPlan {
 export interface PersistedUserTurn {
   turnCreatedAt: string
   turnId: string
+  userTranscriptRef: AssistantAcceptedTurnInputItemInput['transcriptRef'] | null
   userPersisted: boolean
 }
 
@@ -147,6 +152,7 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   nonReplayableProviderWork?: boolean
   onboardingCompletionFallbackReason?: AssistantOnboardingCompletionReason | null
   onboardingGuidanceInjected?: boolean
+  providerContinuation: AssistantProviderContinuation
   providerOptions: AssistantProviderSessionOptions
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
@@ -181,6 +187,7 @@ export type AssistantProviderAttemptOutcome =
       kind: 'failed_terminal'
       error: unknown
       failoverState: AssistantProviderFailoverState
+      providerContinuation: AssistantProviderContinuation
       session: AssistantSession
     }
   | {
@@ -199,6 +206,7 @@ export type AssistantProviderTurnRecoveryOutcome =
   | {
       kind: 'failed_terminal'
       error: unknown
+      providerContinuation: AssistantProviderContinuation
       route?: ResolvedAssistantFailoverRoute | null
       session: AssistantSession
     }

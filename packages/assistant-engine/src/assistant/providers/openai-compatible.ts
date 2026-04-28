@@ -272,12 +272,21 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
     const usesResponsesApi =
       (languageModelSpec.executionDriver ?? 'openai-compatible') === 'responses'
+    const requestedResumeProviderSessionId = normalizeNullableString(
+      input.resumeProviderSessionId,
+    )
     const resumeProviderSessionId =
       resolveOpenAiCompatibleEffectiveResumeProviderSessionId({
         providerConfig,
-        resumeProviderSessionId: input.resumeProviderSessionId,
+        resumeProviderSessionId: requestedResumeProviderSessionId,
         usesResponsesApi,
       })
+    const providerContinuation =
+      requestedResumeProviderSessionId && !resumeProviderSessionId
+        ? {
+            kind: 'explicit-structured-history' as const,
+          }
+        : undefined
     const providerOptions = resolveOpenAiCompatibleProviderOptions({
       providerConfig,
       resumeProviderSessionId,
@@ -334,6 +343,11 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         ok: true,
         result: {
           provider: resolveAssistantChatProviderFromConfig(providerConfig),
+          ...(providerContinuation
+            ? {
+                providerContinuation,
+              }
+            : {}),
           providerSessionId:
             shouldUseOpenAiCompatibleProviderState(providerConfig)
               ? (
@@ -366,6 +380,11 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
           rawToolEvents: toolEvents,
         },
         ok: false,
+        ...(providerContinuation
+          ? {
+              providerContinuation,
+            }
+          : {}),
       }
     }
   },

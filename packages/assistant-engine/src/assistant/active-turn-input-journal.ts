@@ -40,6 +40,7 @@ export const assistantAcceptedTurnInputSourceValues = [
 
 export const assistantProviderContinuationKindValues = [
   'explicit-structured-history',
+  'flat-prompt-replay',
   'provider-state-optimization',
 ] as const
 
@@ -123,7 +124,7 @@ export const assistantAcceptedTurnInputItemSchema = z
   })
   .strict()
 
-const assistantProviderContinuationSchema = z.discriminatedUnion('kind', [
+const assistantProviderContinuationSchema = z.union([
   z
     .object({
       kind: z.literal('explicit-structured-history'),
@@ -131,10 +132,22 @@ const assistantProviderContinuationSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
-      kind: z.literal('provider-state-optimization'),
-      responseId: z.string().min(1),
+      kind: z.literal('flat-prompt-replay'),
     })
     .strict(),
+  z.preprocess(
+    (value) =>
+      value &&
+      typeof value === 'object' &&
+      Reflect.get(value, 'kind') === 'provider-state-optimization'
+        ? { kind: 'provider-state-optimization' }
+        : value,
+    z
+      .object({
+        kind: z.literal('provider-state-optimization'),
+      })
+      .strict(),
+  ),
 ])
 
 export const assistantAcceptedTurnInputProviderRequestSchema = z
@@ -286,6 +299,11 @@ export interface AssistantAcceptedTurnInputItemInput {
   transcriptRef?: z.input<typeof assistantAcceptedTurnInputTranscriptRefSchema> | null
 }
 
+export interface AssistantAcceptedTurnInputTranscriptRefUpdateInput {
+  inputId: string
+  transcriptRef: z.input<typeof assistantAcceptedTurnInputTranscriptRefSchema>
+}
+
 export async function readAssistantAcceptedTurnInputJournal(
   vault: string,
   turnId: string,
@@ -364,6 +382,139 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
     await writeAssistantAcceptedTurnInputJournalAtPaths(paths, updated)
     return updated
   })
+}
+
+export async function updateAssistantAcceptedTurnInputTranscriptRefs(input: {
+  now?: Date
+  refs: readonly AssistantAcceptedTurnInputTranscriptRefUpdateInput[]
+  turnId: string
+  vault: string
+}): Promise<AssistantAcceptedTurnInputJournal | null> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const existing = await readAssistantAcceptedTurnInputJournalAtPaths(
+      paths,
+      input.turnId,
+    )
+    if (!existing) {
+      return null
+    }
+    if (input.refs.length === 0) {
+      return existing
+    }
+    if (existing.admissionState !== 'current-turn-open') {
+      throw new VaultCliError(
+        'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
+        'Accepted turn input transcript refs cannot be updated after current-turn admission closes.',
+      )
+    }
+
+    const refsByInputId = new Map<string, AssistantAcceptedTurnInputTranscriptRef>()
+    for (const refUpdate of input.refs) {
+      if (refsByInputId.has(refUpdate.inputId)) {
+        throw new VaultCliError(
+          'ASSISTANT_TURN_INPUT_JOURNAL_DUPLICATE_REF_UPDATE',
+          'Accepted turn input transcript ref updates must target each input id at most once.',
+        )
+      }
+      const transcriptRef = assistantAcceptedTurnInputTranscriptRefSchema.parse(
+        refUpdate.transcriptRef,
+      )
+      if (transcriptRef.sessionId !== existing.sessionId) {
+        throw new VaultCliError(
+          'ASSISTANT_TURN_INPUT_JOURNAL_IDENTITY_MISMATCH',
+          'Accepted turn input transcript refs must use the journal session id.',
+        )
+      }
+      assertAssistantAcceptedTurnInputTranscriptRefMaterialized(transcriptRef)
+      refsByInputId.set(refUpdate.inputId, transcriptRef)
+    }
+
+    let appliedUpdateCount = 0
+    const nextInputs = existing.inputs.map((item) => {
+      const transcriptRef = refsByInputId.get(item.id)
+      if (!transcriptRef) {
+        return item
+      }
+      appliedUpdateCount += 1
+      assertAssistantAcceptedTurnInputTranscriptRefNotOverwritten({
+        existing: item.transcriptRef,
+        next: transcriptRef,
+      })
+      return {
+        ...item,
+        transcriptRef,
+      }
+    })
+
+    if (appliedUpdateCount !== refsByInputId.size) {
+      throw new VaultCliError(
+        'ASSISTANT_TURN_INPUT_JOURNAL_INPUT_NOT_FOUND',
+        'Accepted turn input transcript ref updates must target existing input ids.',
+      )
+    }
+
+    const updated = assistantAcceptedTurnInputJournalSchema.parse({
+      ...existing,
+      inputs: nextInputs,
+      updatedAt: (input.now ?? new Date()).toISOString(),
+    })
+    await writeAssistantAcceptedTurnInputJournalAtPaths(paths, updated)
+    return updated
+  })
+}
+
+function assertAssistantAcceptedTurnInputTranscriptRefMaterialized(
+  transcriptRef: AssistantAcceptedTurnInputTranscriptRef,
+): void {
+  if (
+    transcriptRef.entryCreatedAt === null ||
+    transcriptRef.entryIndex === null ||
+    transcriptRef.entryKind === null
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_TURN_INPUT_JOURNAL_INCOMPLETE_TRANSCRIPT_REF',
+      'Accepted turn input transcript ref updates must use persisted transcript entry coordinates.',
+    )
+  }
+}
+
+function assertAssistantAcceptedTurnInputTranscriptRefNotOverwritten(input: {
+  existing: AssistantAcceptedTurnInputTranscriptRef | null
+  next: AssistantAcceptedTurnInputTranscriptRef
+}): void {
+  if (!input.existing || !isAssistantAcceptedTurnInputTranscriptRefMaterialized(input.existing)) {
+    return
+  }
+  if (areAssistantAcceptedTurnInputTranscriptRefsEqual(input.existing, input.next)) {
+    return
+  }
+  throw new VaultCliError(
+    'ASSISTANT_TURN_INPUT_JOURNAL_TRANSCRIPT_REF_ALREADY_SET',
+    'Accepted turn input transcript refs cannot overwrite existing persisted transcript entry coordinates.',
+  )
+}
+
+function isAssistantAcceptedTurnInputTranscriptRefMaterialized(
+  transcriptRef: AssistantAcceptedTurnInputTranscriptRef,
+): boolean {
+  return (
+    transcriptRef.entryCreatedAt !== null &&
+    transcriptRef.entryIndex !== null &&
+    transcriptRef.entryKind !== null
+  )
+}
+
+function areAssistantAcceptedTurnInputTranscriptRefsEqual(
+  left: AssistantAcceptedTurnInputTranscriptRef,
+  right: AssistantAcceptedTurnInputTranscriptRef,
+): boolean {
+  return (
+    left.entryCreatedAt === right.entryCreatedAt &&
+    left.entryIndex === right.entryIndex &&
+    left.entryKind === right.entryKind &&
+    left.sessionId === right.sessionId
+  )
 }
 
 export async function updateAssistantAcceptedTurnInputAdmissionState(input: {
