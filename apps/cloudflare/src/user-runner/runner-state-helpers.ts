@@ -17,6 +17,8 @@ import type {
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
   active_invocation_id: string | null;
+  active_invocation_last_heartbeat_at: string | null;
+  active_invocation_orphan_observed_at: string | null;
   active_invocation_reason: string | null;
   active_invocation_started_at: string | null;
   active_workspace_version: string | null;
@@ -37,6 +39,8 @@ export interface RunnerStateProjection {
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
     active_invocation_id: null,
+    active_invocation_last_heartbeat_at: null,
+    active_invocation_orphan_observed_at: null,
     active_invocation_reason: null,
     active_invocation_started_at: null,
     active_workspace_version: null,
@@ -74,6 +78,8 @@ export function projectRunnerStateRecord(input: {
       workspaceInvocation: hasPersistedInvocationLease
         ? {
             attemptId: input.meta.active_invocation_id ?? "",
+            lastHeartbeatAt: input.meta.active_invocation_last_heartbeat_at,
+            orphanObservedAt: input.meta.active_invocation_orphan_observed_at,
             reason: input.meta.active_invocation_reason,
             startedAt: input.meta.active_invocation_started_at ?? "",
             workspaceVersion: input.meta.active_workspace_version,

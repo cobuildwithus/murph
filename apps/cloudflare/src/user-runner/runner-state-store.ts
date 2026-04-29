@@ -27,6 +27,33 @@ export interface RunnerInvocationLease {
   workspaceVersion: string | null;
 }
 
+export interface RunnerInvocationLeaseOwnershipResult {
+  clearedOrphanObservation: boolean;
+  owns: boolean;
+  record: RunnerStateRecord;
+}
+
+export interface RunnerInvocationCheckpointResult {
+  clearedOrphanObservation: boolean;
+  recorded: boolean;
+  record: RunnerStateRecord;
+}
+
+export type RunnerInvocationHeartbeatResult =
+  | {
+    ok: true;
+    record: RunnerStateRecord;
+  }
+  | {
+    ok: false;
+    reason:
+      | "no_active_invocation"
+      | "stale_attempt"
+      | "stale_generation"
+      | "wrong_user";
+    record: RunnerStateRecord;
+  };
+
 export class RunnerStateStore {
   private userId: string | null = null;
 
@@ -85,6 +112,8 @@ export class RunnerStateStore {
     meta.in_flight = 1;
     meta.lease_generation = nextLeaseGeneration;
     meta.active_invocation_id = attemptId;
+    meta.active_invocation_last_heartbeat_at = null;
+    meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = input.reason;
     meta.active_invocation_started_at = startedAt;
     meta.active_workspace_version = null;
@@ -112,6 +141,8 @@ export class RunnerStateStore {
     }
 
     meta.active_workspace_version = input.workspaceVersion;
+    meta.active_invocation_last_heartbeat_at = null;
+    meta.active_invocation_orphan_observed_at = null;
     this.writeMetaRowSync(meta);
     return {
       ...input.lease,
@@ -122,35 +153,59 @@ export class RunnerStateStore {
   async completeInvocation(input: {
     finishedAt?: string | null;
     lease: RunnerInvocationLease;
-  }): Promise<RunnerStateRecord> {
+  }): Promise<{
+    completed: boolean;
+    record: RunnerStateRecord;
+  }> {
     const meta = this.requireMetaRowSync();
-    this.clearActiveInvocationLeaseSync(meta, input.lease);
+    if (!this.clearActiveInvocationLeaseSync(meta, input.lease)) {
+      return {
+        completed: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     this.clearLastErrorMetaSync(meta);
     meta.last_invocation_at = input.finishedAt ?? new Date().toISOString();
     this.writeMetaRowSync(meta);
 
-    return this.readStateFromMetaSync(meta);
+    return {
+      completed: true,
+      record: this.readStateFromMetaSync(meta),
+    };
   }
 
   async failInvocation(input: {
     error: unknown;
     finishedAt?: string | null;
     lease: RunnerInvocationLease;
-  }): Promise<RunnerStateRecord> {
+  }): Promise<{
+    failed: boolean;
+    record: RunnerStateRecord;
+  }> {
     const meta = this.requireMetaRowSync();
-    this.clearActiveInvocationLeaseSync(meta, input.lease);
+    if (!this.clearActiveInvocationLeaseSync(meta, input.lease)) {
+      return {
+        failed: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
     meta.last_error_at = input.finishedAt ?? new Date().toISOString();
     meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
     this.writeMetaRowSync(meta);
 
-    return this.readStateFromMetaSync(meta);
+    return {
+      failed: true,
+      record: this.readStateFromMetaSync(meta),
+    };
   }
 
-  async markPendingInvocationNudge(): Promise<RunnerStateRecord> {
+  async markPendingInvocationNudge(input: {
+    preferredWakeAt?: string | null;
+  } = {}): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     meta.pending_nudge = 1;
     meta.next_wake_at = resolveRunnerNextWakeAt({
-      preferredWakeAt: new Date().toISOString(),
+      preferredWakeAt: input.preferredWakeAt ?? new Date().toISOString(),
     });
     this.writeMetaRowSync(meta);
 
@@ -166,28 +221,7 @@ export class RunnerStateStore {
     leaseGeneration: string;
     userId: string;
     workspaceVersion?: string | null;
-  }): Promise<boolean> {
-    const lease = await this.readActiveInvocationLease();
-    if (
-      !lease
-      || lease.attemptId !== input.attemptId
-      || lease.leaseGeneration !== input.leaseGeneration
-      || lease.userId !== input.userId
-    ) {
-      return false;
-    }
-
-    return input.workspaceVersion === undefined
-      || input.workspaceVersion === null
-      || lease.workspaceVersion === input.workspaceVersion;
-  }
-
-  async recordActiveInvocationWorkspaceCheckpoint(input: {
-    attemptId: string;
-    leaseGeneration: string;
-    userId: string;
-    workspaceVersion: string;
-  }): Promise<{ recorded: boolean }> {
+  }): Promise<RunnerInvocationLeaseOwnershipResult> {
     const meta = this.requireMetaRowSync();
     const lease = this.readActiveInvocationLeaseSync(meta);
     if (
@@ -196,16 +230,112 @@ export class RunnerStateStore {
       || lease.leaseGeneration !== input.leaseGeneration
       || lease.userId !== input.userId
     ) {
-      return { recorded: false };
+      return {
+        clearedOrphanObservation: false,
+        owns: false,
+        record: this.readStateFromMetaSync(meta),
+      };
     }
 
+    const ownsLease = input.workspaceVersion === undefined
+      || input.workspaceVersion === null
+      || lease.workspaceVersion === input.workspaceVersion;
+    const clearedOrphanObservation = ownsLease
+      && meta.active_invocation_orphan_observed_at !== null;
+    if (ownsLease) {
+      meta.active_invocation_last_heartbeat_at = new Date().toISOString();
+      meta.active_invocation_orphan_observed_at = null;
+      this.writeMetaRowSync(meta);
+    }
+
+    return {
+      clearedOrphanObservation,
+      owns: ownsLease,
+      record: this.readStateFromMetaSync(meta),
+    };
+  }
+
+  async recordActiveInvocationWorkspaceCheckpoint(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+    workspaceVersion: string;
+  }): Promise<RunnerInvocationCheckpointResult> {
+    const meta = this.requireMetaRowSync();
+    const lease = this.readActiveInvocationLeaseSync(meta);
+    if (
+      !lease
+      || lease.attemptId !== input.attemptId
+      || lease.leaseGeneration !== input.leaseGeneration
+      || lease.userId !== input.userId
+    ) {
+      return {
+        clearedOrphanObservation: false,
+        recorded: false,
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+
+    const clearedOrphanObservation = meta.active_invocation_orphan_observed_at !== null;
     meta.active_workspace_version = input.workspaceVersion;
+    meta.active_invocation_last_heartbeat_at = new Date().toISOString();
+    meta.active_invocation_orphan_observed_at = null;
     this.writeMetaRowSync(meta);
-    return { recorded: true };
+    return {
+      clearedOrphanObservation,
+      recorded: true,
+      record: this.readStateFromMetaSync(meta),
+    };
+  }
+
+  async recordActiveInvocationHeartbeat(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    nowMs?: number | null;
+    userId: string;
+  }): Promise<RunnerInvocationHeartbeatResult> {
+    const meta = this.requireMetaRowSync();
+    const lease = this.readActiveInvocationLeaseSync(meta);
+    if (!lease) {
+      return {
+        ok: false,
+        reason: "no_active_invocation",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (lease.attemptId !== input.attemptId) {
+      return {
+        ok: false,
+        reason: "stale_attempt",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (lease.leaseGeneration !== input.leaseGeneration) {
+      return {
+        ok: false,
+        reason: "stale_generation",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    if (lease.userId !== input.userId) {
+      return {
+        ok: false,
+        reason: "wrong_user",
+        record: this.readStateFromMetaSync(meta),
+      };
+    }
+    meta.active_invocation_last_heartbeat_at = new Date(input.nowMs ?? Date.now()).toISOString();
+    meta.active_invocation_orphan_observed_at = null;
+    this.writeMetaRowSync(meta);
+    return {
+      ok: true,
+      record: this.readStateFromMetaSync(meta),
+    };
   }
 
   async clearStaleInvocationIfExpired(input: {
     nowMs: number;
+    orphanGraceMs?: number | null;
     timeoutMs: number;
   }): Promise<{
     attemptId: string | null;
@@ -224,9 +354,28 @@ export class RunnerStateStore {
     }
 
     const startedAtMs = Date.parse(startedAt);
-    const isExpired = !Number.isFinite(startedAtMs)
+    const isHardExpired = !Number.isFinite(startedAtMs)
       || input.nowMs - startedAtMs >= input.timeoutMs;
-    if (!isExpired) {
+    const orphanGraceMs = input.orphanGraceMs ?? null;
+    let isOrphanExpired = false;
+    if (!isHardExpired && orphanGraceMs !== null) {
+      const lastHeartbeatAtMs = meta.active_invocation_last_heartbeat_at
+        ? Date.parse(meta.active_invocation_last_heartbeat_at)
+        : Number.NaN;
+      const observedAtMs = meta.active_invocation_orphan_observed_at
+        ? Date.parse(meta.active_invocation_orphan_observed_at)
+        : Number.NaN;
+      if (Number.isFinite(lastHeartbeatAtMs)) {
+        isOrphanExpired = input.nowMs - lastHeartbeatAtMs >= orphanGraceMs;
+      } else if (Number.isFinite(observedAtMs)) {
+        isOrphanExpired = input.nowMs - observedAtMs >= orphanGraceMs;
+      } else {
+        meta.active_invocation_orphan_observed_at = new Date(input.nowMs).toISOString();
+        this.writeMetaRowSync(meta);
+      }
+    }
+
+    if (!isHardExpired && !isOrphanExpired) {
       return {
         attemptId,
         cleared: false,
@@ -307,6 +456,8 @@ export class RunnerStateStore {
       `SELECT
         user_id,
         active_invocation_id,
+        active_invocation_last_heartbeat_at,
+        active_invocation_orphan_observed_at,
         active_invocation_reason,
         active_invocation_started_at,
         active_workspace_version,
@@ -334,6 +485,8 @@ export class RunnerStateStore {
         singleton,
         user_id,
         active_invocation_id,
+        active_invocation_last_heartbeat_at,
+        active_invocation_orphan_observed_at,
         active_invocation_reason,
         active_invocation_started_at,
         active_workspace_version,
@@ -344,10 +497,12 @@ export class RunnerStateStore {
         last_invocation_at,
         next_wake_at,
         pending_nudge
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.active_invocation_id,
+      meta.active_invocation_last_heartbeat_at,
+      meta.active_invocation_orphan_observed_at,
       meta.active_invocation_reason,
       meta.active_invocation_started_at,
       meta.active_workspace_version,
@@ -369,17 +524,20 @@ export class RunnerStateStore {
   private clearActiveInvocationLeaseSync(
     meta: RunnerMetaRow,
     lease: RunnerInvocationLease,
-  ): void {
+  ): boolean {
     if (!this.hasActiveInvocationLeaseSync(meta, lease)) {
-      return;
+      return false;
     }
 
     this.clearActiveInvocationMetaSync(meta);
     meta.in_flight = 0;
+    return true;
   }
 
   private clearActiveInvocationMetaSync(meta: RunnerMetaRow): void {
     meta.active_invocation_id = null;
+    meta.active_invocation_last_heartbeat_at = null;
+    meta.active_invocation_orphan_observed_at = null;
     meta.active_invocation_reason = null;
     meta.active_invocation_started_at = null;
     meta.active_workspace_version = null;

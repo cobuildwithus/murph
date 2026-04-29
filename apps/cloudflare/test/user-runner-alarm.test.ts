@@ -1,16 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_RUNTIME_STATUS_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
-  HostedRuntimeWebStatusResponse,
   HostedWorkspaceState,
   HostedWorkspaceInvocationReason,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import type { HostedExecutionContainerStubLike } from "../src/runner-container.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -63,48 +62,40 @@ class TestHostedUserRunner extends HostedUserRunner {
 
 describe("HostedUserRunner alarm routing", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
   });
 
-  it("prefers the web-owned workspace nextWakeAt when no pending nudge is stored", async () => {
+  it("invokes the runtime directly when an alarm fires without a pending nudge", async () => {
     const { alarms, runner, sql } = createRunnerHarness();
     await runner.bindUser("member_123");
     sql.exec(
       "UPDATE runner_meta SET next_wake_at = NULL, pending_nudge = 0 WHERE user_id = ?",
       "member_123",
     );
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(createWebStatusResponseBody());
 
     await runner.alarm();
 
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        boundUserId: "member_123",
-        method: "GET",
-        path: HOSTED_RUNTIME_STATUS_PATH,
-      }),
-    );
-    expect(runner.runCalls).toEqual([]);
-    expect(alarms).toEqual([FUTURE_WAKE_AT]);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(runner.runCalls).toEqual(["alarm"]);
+    expect(alarms).toEqual([]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "hosted.runner",
-        message: "Hosted runner alarm skipped because no wake is due.",
-        phase: "scheduled",
+        message: "Hosted runner alarm starting workspace invocation.",
+        phase: "wake.running",
         details: expect.objectContaining({
           pendingNudge: false,
           runnerNextWakePresent: false,
-          workspaceNextWakePresent: true,
-          workspaceWakeDue: false,
         }),
         userId: "member_123",
       }),
     );
   });
 
-  it("treats a stored pending nudge as immediate work even when the web wake is in the future", async () => {
+  it("does not second-guess runtime state when an alarm fires with a stored pending nudge", async () => {
     const { alarms, runner, sql } = createRunnerHarness();
     await runner.bindUser("member_123");
     sql.exec(
@@ -112,17 +103,10 @@ describe("HostedUserRunner alarm routing", () => {
       FUTURE_WAKE_AT,
       "member_123",
     );
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(createWebStatusResponseBody());
 
     await runner.alarm();
 
-    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        boundUserId: "member_123",
-        method: "GET",
-        path: HOSTED_RUNTIME_STATUS_PATH,
-      }),
-    );
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
     expect(runner.runCalls).toEqual(["alarm"]);
     expect(alarms).toEqual([]);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -131,8 +115,6 @@ describe("HostedUserRunner alarm routing", () => {
         details: expect.objectContaining({
           pendingNudge: true,
           runnerNextWakePresent: true,
-          workspaceNextWakePresent: true,
-          workspaceWakeDue: false,
         }),
         message: "Hosted runner alarm starting workspace invocation.",
         phase: "wake.running",
@@ -170,7 +152,6 @@ describe("HostedUserRunner alarm routing", () => {
   it("runs the workspace invocation when an idle nudge alarm fires", async () => {
     const { runner } = createRunnerHarness();
     await runner.bindUser("member_123");
-    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(createWebStatusResponseBody());
 
     await runner.nudgeHostedRunner();
     await runner.alarm();
@@ -181,7 +162,6 @@ describe("HostedUserRunner alarm routing", () => {
         component: "hosted.runner",
         details: expect.objectContaining({
           pendingNudge: true,
-          workspaceWakeDue: false,
         }),
         message: "Hosted runner alarm starting workspace invocation.",
         phase: "wake.running",
@@ -193,9 +173,335 @@ describe("HostedUserRunner alarm routing", () => {
 
 describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
+  });
+
+  it("marks a live invocation pending without scheduling another immediate alarm", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocation = createDeferred<{
+      nextWakeAt: null;
+      status: "idle";
+    }>();
+    const { alarms, invoke, runner } = createRunnerBootstrapHarness(null, {
+      invoke: vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => invocation.promise),
+    });
+    await runner.bindUser("member_123");
+
+    const run = runner.runUntilIdleOrBudget({ reason: "nudge" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+
+    const nudge = await runner.nudgeHostedRunner();
+    expect(nudge).toMatchObject({
+      accepted: true,
+      alreadyRunning: true,
+      inFlight: true,
+    });
+    expect(nudge.nextAlarmAt).toBe("2026-04-27T00:00:45.100Z");
+    expect(alarms).toEqual([nudge.nextAlarmAt]);
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
+      nextWakeAt: "2026-04-27T00:01:31.100Z",
+      status: "scheduled",
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(alarms).toEqual([
+      "2026-04-27T00:00:45.100Z",
+      "2026-04-27T00:01:31.100Z",
+    ]);
+
+    invocation.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await expect(run).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(alarms).toHaveLength(3);
+    expect(Date.parse(alarms[2] ?? "")).toBeGreaterThanOrEqual(Date.parse(FIXED_NOW));
+    expect(Date.parse(alarms[2] ?? "")).toBeLessThan(Date.parse(FIXED_NOW) + 47_000);
+  });
+
+  it("keeps a newly observed persisted-only invocation pending until the orphan grace deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      null,
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
+      nextWakeAt: "2026-04-27T00:00:45.000Z",
+      status: "scheduled",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+  });
+
+  it("clears a persisted-only invocation on the second wake after orphan observation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      null,
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toEqual({
+      nextWakeAt: "2026-04-27T00:00:45.000Z",
+      status: "scheduled",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+
+    vi.setSystemTime(new Date("2026-04-27T00:00:46.000Z"));
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      status: "idle",
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
+  it("clears a persisted-only invocation after the observed orphan grace and starts a replacement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:50:00.000Z",
+      "2026-04-26T23:59:10.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "hosted.runner",
+        message: "Hosted workspace invocation lease expired; clearing stale in-flight state.",
+        phase: "wake.running",
+        userId: "member_123",
+      }),
+    );
+  });
+
+  it("reports an expired persisted-only invocation as not running so the route can enqueue recovery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:50:00.000Z",
+      "2026-04-26T23:59:10.000Z",
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.nudgeHostedRunner()).resolves.toMatchObject({
+      accepted: true,
+      alreadyRunning: false,
+      inFlight: false,
+    });
+  });
+
+  it("moves a pending nudge to the orphan check deadline when lease liveness clears orphan observation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        next_wake_at = ?,
+        pending_nudge = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "2026-04-26T23:59:10.000Z",
+      "0",
+      "2026-04-27T00:00:45.000Z",
+      "member_123",
+    );
+
+    await expect(runner.ownsActiveInvocationLease({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "0",
+    })).resolves.toBe(true);
+
+    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+  });
+
+  it("moves a pending nudge to the orphan check deadline when checkpoint liveness clears orphan observation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        next_wake_at = ?,
+        pending_nudge = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "2026-04-26T23:59:10.000Z",
+      "0",
+      "2026-04-27T00:00:45.000Z",
+      "member_123",
+    );
+
+    await expect(runner.recordActiveInvocationWorkspaceCheckpoint({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+      workspaceVersion: "1",
+    })).resolves.toEqual({ recorded: true });
+
+    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+  });
+
+  it("records heartbeat liveness and schedules pending work at the next orphan check deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { alarms, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1,
+        next_wake_at = ?,
+        pending_nudge = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      "2026-04-26T23:59:10.000Z",
+      "0",
+      "2026-04-27T00:00:45.000Z",
+      "member_123",
+    );
+
+    await expect(runner.recordActiveInvocationHeartbeat({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    })).resolves.toEqual({
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+    });
+
+    expect(alarms).toEqual(["2026-04-27T00:00:45.000Z"]);
+  });
+
+  it("clears a persisted-only invocation after the last heartbeat grace and starts a replacement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:46.000Z"));
+    const { invoke, runner, sql } = createRunnerBootstrapHarness(null);
+    await runner.bindUser("member_123");
+    sql.exec(
+      `UPDATE runner_meta
+      SET active_invocation_id = ?,
+        active_invocation_last_heartbeat_at = ?,
+        active_invocation_reason = ?,
+        active_invocation_started_at = ?,
+        active_invocation_orphan_observed_at = ?,
+        active_workspace_version = ?,
+        in_flight = 1,
+        lease_generation = 1
+      WHERE user_id = ?`,
+      "workspace-invocation-1",
+      "2026-04-27T00:00:00.000Z",
+      "nudge",
+      "2026-04-26T23:59:30.000Z",
+      null,
+      "0",
+      "member_123",
+    );
+
+    await expect(runner.runUntilIdleOrBudget({ reason: "nudge" })).resolves.toMatchObject({
+      status: "idle",
+    });
+
+    expect(invoke).toHaveBeenCalledOnce();
   });
 
   it("provisions managed user crypto before invoking a version-0 workspace without a snapshot", async () => {
@@ -354,7 +660,12 @@ function createRunnerHarness() {
   };
 }
 
-function createRunnerBootstrapHarness(workspace: HostedWorkspaceState | null) {
+function createRunnerBootstrapHarness(
+  workspace: HostedWorkspaceState | null,
+  options: {
+    invoke?: ReturnType<typeof vi.fn<HostedExecutionContainerStubLike["invoke"]>>;
+  } = {},
+) {
   const sql = createTestSqlStorage();
   const values = new Map<string, unknown>();
   const alarms: string[] = [];
@@ -383,7 +694,7 @@ function createRunnerBootstrapHarness(workspace: HostedWorkspaceState | null) {
     },
     sql,
   };
-  const invoke = vi.fn(async () => ({
+  const invoke = options.invoke ?? vi.fn<HostedExecutionContainerStubLike["invoke"]>(async () => ({
     nextWakeAt: null,
     status: "idle" as const,
   }));
@@ -437,34 +748,18 @@ function createRunnerBootstrapHarness(workspace: HostedWorkspaceState | null) {
   };
 }
 
-function createWebStatusResponse(): HostedRuntimeWebStatusResponse {
-  return {
-    mailboxLag: [],
-    recentLogs: [],
-    userId: "member_123",
-    workspace: {
-      checkpointedAt: FIXED_NOW,
-      createdAt: FIXED_NOW,
-      nextWakeAt: FUTURE_WAKE_AT,
-      nextWakeReason: "mailbox",
-      redactedStatus: {
-        hostedMailboxConversationImportedSeq: "12",
-      },
-      snapshotRef: null,
-      updatedAt: FIXED_NOW,
-      userId: "member_123",
-      version: "7",
-    },
-  };
-}
-
-function createWebStatusResponseBody(): Response {
-  return new Response(JSON.stringify(createWebStatusResponse()), {
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    status: 200,
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
   });
+  return {
+    promise,
+    reject,
+    resolve,
+  };
 }
 
 function createWorkspaceReadResponseBody(workspace: HostedWorkspaceState | null): Response {
