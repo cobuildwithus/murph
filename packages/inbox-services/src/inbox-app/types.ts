@@ -585,6 +585,7 @@ export interface ListInput extends CommandContext {
   afterCaptureId?: string | null
   afterCreatedAt?: string | null
   afterOccurredAt?: string | null
+  includeRuntimeOnly?: boolean
   oldestFirst?: boolean
   sourceId?: string | null
   limit?: number
@@ -592,6 +593,11 @@ export interface ListInput extends CommandContext {
 
 export interface SearchInput extends ListInput {
   text: string
+}
+
+export interface ShowInput extends CommandContext {
+  captureId: string
+  includeRuntimeOnly?: boolean
 }
 
 export interface PromoteInput extends CommandContext {
@@ -640,7 +646,7 @@ export interface InboxServices {
   reparseAttachment(
     input: CommandContext & { attachmentId: string },
   ): Promise<InboxAttachmentReparseResult>
-  show(input: CommandContext & { captureId: string }): Promise<InboxShowResult>
+  show(input: ShowInput): Promise<InboxShowResult>
   search(input: SearchInput): Promise<InboxSearchResult>
   preserveDocumentAttachments(
     input: PromoteInput,

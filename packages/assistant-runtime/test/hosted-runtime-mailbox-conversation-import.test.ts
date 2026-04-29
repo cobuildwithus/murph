@@ -212,6 +212,39 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(serialized.includes("source_cursor"), false);
   });
 
+  test("leaves mailbox conversation imports retryable when only the transient runtime projection succeeded", async () => {
+    const item = createResolvedConversationMailboxItem();
+    const preparedWakeIds: string[] = [];
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+      async importConversationWake() {
+        return {
+          captureId: "cap_synthetic_runtime_only",
+          deduped: false,
+          durable: false,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext(input) {
+        preparedWakeIds.push(input.wake.eventId);
+      },
+      item,
+      runtime: createRuntime(),
+      vaultRoot: "synthetic-vault-root",
+    });
+
+    assert.deepEqual(preparedWakeIds, ["evt_synthetic_conversation_001"]);
+    assert.deepEqual(outcome, {
+      reasonCode: "conversation_import.capture_persist_failed",
+      retryable: true,
+      status: "blocked",
+    });
+  });
+
   test("defers unexpected routes before decrypting or importing", async () => {
     const item = createResolvedSystemMailboxItem();
     let decodeCalls = 0;

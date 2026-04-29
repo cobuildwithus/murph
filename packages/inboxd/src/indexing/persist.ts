@@ -28,14 +28,18 @@ import {
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
   normalizeStoredAttachments,
-  normalizeAccountKey,
   normalizeRelativePath,
   redactSensitivePaths,
   resolveVaultPath,
   sanitizeFileName,
-  sanitizeSegment,
 } from "../shared.ts";
 import { replaceInboxCaptureProjection, type InboxRuntimeStore } from "../kernel/sqlite.ts";
+import {
+  buildInboxCaptureDirectory,
+  buildInboxEnvelopePath,
+  buildUnstoredAttachment,
+  stripEphemeralAttachmentFields,
+} from "./capture-shape.js";
 import {
   INBOX_CAPTURE_LEDGER_DIRECTORY,
   buildInboxCaptureLedgerPathForOccurredAt,
@@ -285,7 +289,7 @@ async function prepareRawCapturePersistence({
     }
   }
 
-  const envelopePath = normalizeRelativePath(path.posix.join(sourceDirectory, "envelope.json"));
+  const envelopePath = buildInboxEnvelopePath(input, captureId);
 
   const storedCapture: StoredCapture = {
     captureId,
@@ -498,29 +502,6 @@ export async function rebuildRuntimeFromVault(input: {
     databasePath: input.runtime.databasePath,
     entries: projectionEntries,
   });
-}
-
-function buildInboxAccountDirectory(input: InboundCapture): string {
-  const accountSegment = sanitizeSegment(normalizeAccountKey(input.accountId) || "default", "default");
-  const sourceSegment = sanitizeSegment(input.source, "source");
-  return normalizeRelativePath(
-    path.posix.join(VAULT_LAYOUT.rawInboxDirectory, sourceSegment, accountSegment),
-  );
-}
-
-function buildInboxCaptureDirectory(input: InboundCapture, captureId: string): string {
-  return normalizeRelativePath(
-    path.posix.join(
-      buildInboxAccountDirectory(input),
-      input.occurredAt.slice(0, 4),
-      input.occurredAt.slice(5, 7),
-      captureId,
-    ),
-  );
-}
-
-function buildInboxEnvelopePath(input: InboundCapture, captureId: string): string {
-  return normalizeRelativePath(path.posix.join(buildInboxCaptureDirectory(input, captureId), "envelope.json"));
 }
 
 async function readStoredCaptureEnvelope(input: {
@@ -979,30 +960,6 @@ function compareInboxCaptureRecords(
   }
 
   return left.envelopePath.localeCompare(right.envelopePath);
-}
-
-type PersistableInboundAttachment = Omit<InboundCapture["attachments"][number], "data">;
-
-function stripEphemeralAttachmentFields(
-  attachment: InboundCapture["attachments"][number],
-): PersistableInboundAttachment {
-  const { data, ...sanitized } = attachment;
-  return sanitized;
-}
-
-function buildUnstoredAttachment(input: {
-  attachment: PersistableInboundAttachment;
-  attachmentId: string;
-  ordinal: number;
-}): StoredAttachment {
-  return {
-    ...input.attachment,
-    attachmentId: input.attachmentId,
-    ordinal: input.ordinal,
-    originalPath: null,
-    storedPath: null,
-    sha256: null,
-  };
 }
 
 function normalizeStoredCaptureInboundInput(value: unknown, context: string): InboundCapture {

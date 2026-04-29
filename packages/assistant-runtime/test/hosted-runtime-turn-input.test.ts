@@ -52,9 +52,15 @@ import type {
 type InboxServicesInput = Parameters<
   typeof import("@murphai/assistant-engine").createInboxBackedAssistantTurnInputPort
 >[0]["inboxServices"];
+type CreateInboxBackedAssistantTurnInputPortInput = Parameters<
+  typeof import("@murphai/assistant-engine").createInboxBackedAssistantTurnInputPort
+>[0];
 type AssistantInboxCaptureSummary = Awaited<
   ReturnType<AssistantTurnInputPort["listNewConversationCaptures"]>
 >["captures"][number];
+type AssistantTurnConversationCaptureQuery = Parameters<
+  AssistantTurnInputPort["listNewConversationCaptures"]
+>[0];
 
 const TIMER_WAKE = {
   eventId: "evt_timer",
@@ -97,9 +103,10 @@ function createCaptureSummary(
 function createPort(input: {
   activeTurnInputCheckpoint?: HostedRuntimeActiveTurnInputCheckpoint;
   basePort: AssistantTurnInputPort;
+  inboxServices?: InboxServicesInput;
   activeTurnInputRefresh?: HostedRuntimeActiveTurnInputMailboxRefresh;
 }): AssistantTurnInputPort | undefined {
-  const inboxServices = {} as InboxServicesInput;
+  const inboxServices = input.inboxServices ?? ({} as InboxServicesInput);
   mocks.createInboxBackedAssistantTurnInputPort.mockReturnValueOnce(input.basePort);
 
   return createHostedAssistantTurnInputPort({
@@ -158,6 +165,135 @@ describe("createHostedAssistantTurnInputPort", () => {
     ).toBeUndefined();
 
     expect(mocks.createInboxBackedAssistantTurnInputPort).not.toHaveBeenCalled();
+  });
+
+  it("uses hosted-only runtime inbox reads for active-turn conversation input", async () => {
+    vi.clearAllMocks();
+
+    const list = vi.fn<InboxServicesInput["list"]>(async (input) => ({
+      vault: input.vault,
+      filters: {
+        sourceId: null,
+        limit: input.limit ?? 50,
+        afterCreatedAt: input.afterCreatedAt ?? null,
+        afterOccurredAt: input.afterOccurredAt ?? null,
+        afterCaptureId: input.afterCaptureId ?? null,
+        oldestFirst: input.oldestFirst ?? false,
+      },
+      items: [],
+    }));
+    const show = vi.fn<InboxServicesInput["show"]>(async (input) => ({
+      vault: input.vault,
+      capture: {
+        ...createCaptureSummary({
+          captureId: input.captureId,
+          text: "runtime-only hosted input",
+        }),
+        attachments: [],
+        createdAt: "2026-04-23T00:00:03.000Z",
+      },
+    }));
+    const inboxServices: InboxServicesInput = {
+      ...({} as InboxServicesInput),
+      list,
+      show,
+    };
+
+    mocks.createInboxBackedAssistantTurnInputPort.mockImplementationOnce((
+      input: CreateInboxBackedAssistantTurnInputPortInput,
+    ) => ({
+      async refresh() {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      },
+      async listNewConversationCaptures(query: AssistantTurnConversationCaptureQuery) {
+        await input.inboxServices.list({
+          afterCaptureId: query.afterCursor.captureId,
+          afterCreatedAt: query.afterCursor.createdAt ?? null,
+          afterOccurredAt: query.afterCursor.occurredAt,
+          limit: 1,
+          oldestFirst: true,
+          requestId: "req_turn_input",
+          sourceId: null,
+          vault: "/tmp/vault-root",
+        });
+        await input.inboxServices.show({
+          captureId: "cap_runtime_only",
+          requestId: "req_turn_input",
+          vault: "/tmp/vault-root",
+        });
+
+        return {
+          captures: [],
+          nextCursor: query.afterCursor,
+        };
+      },
+    }));
+
+    const port = createHostedAssistantTurnInputPort({
+      inboxServices,
+      requestId: "req_turn_input",
+      runtime: {
+        forwardedEnv: {},
+        platform: {
+          artifactStore: {
+            get: vi.fn(async () => null),
+            put: vi.fn(async () => undefined),
+          },
+          checkpointActiveTurnInput: vi.fn(async () => undefined),
+          effectsPort: {
+            readRawEmailMessage: vi.fn(async () => null),
+            sendEmail: vi.fn(async () => undefined),
+          },
+          refreshMailboxForActiveTurnInput: vi.fn<HostedRuntimeActiveTurnInputMailboxRefresh>(async () => ({
+            progressed: false,
+            reason: "no_new_input",
+          })),
+        },
+        platformEnv: {},
+      },
+      vaultRoot: "/tmp/vault-root",
+      wake: TIMER_WAKE,
+    });
+
+    await expect(
+      port?.listNewConversationCaptures({
+        afterCursor: {
+          captureId: "cap_previous",
+          createdAt: "2026-04-23T00:00:01.000Z",
+          occurredAt: "2026-04-23T00:00:00.000Z",
+        },
+        conversation: {
+          accountId: "acct_1",
+          actorId: "actor_1",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "thread_1",
+          threadIsDirect: true,
+        },
+      }),
+    ).resolves.toEqual({
+      captures: [],
+      nextCursor: {
+        captureId: "cap_previous",
+        createdAt: "2026-04-23T00:00:01.000Z",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+      },
+    });
+
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeRuntimeOnly: true,
+      }),
+    );
+    expect(show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureId: "cap_runtime_only",
+        includeRuntimeOnly: true,
+      }),
+    );
   });
 
   it("fails closed when hosted mailbox refresh lacks acceptance checkpointing", () => {

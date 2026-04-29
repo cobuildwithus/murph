@@ -680,10 +680,29 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
       attachments: [],
     },
   });
+  const staleRuntimeOnlyCaptureId = "cap_runtime_projection_hidden";
+  runtime.upsertCaptureIndex({
+    captureId: staleRuntimeOnlyCaptureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RO",
+    input: createCapture({
+      externalId: "msg-stale-runtime-only-projection",
+      occurredAt: "2026-03-13T11:07:00.000Z",
+      text: "Hidden runtime-only projection row",
+    }),
+    persistence: "runtime_only",
+    stored: {
+      captureId: staleRuntimeOnlyCaptureId,
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2RO",
+      storedAt: "2026-03-13T11:07:30.000Z",
+      sourceDirectory: "raw/inbox/email/self/2026/03/cap_runtime_projection_hidden",
+      envelopePath: "raw/inbox/email/self/2026/03/cap_runtime_projection_hidden/envelope.json",
+      attachments: [],
+    },
+  });
 
   const headBefore = await readInboxCaptureMutationHead(vaultRoot);
   assert.ok(headBefore > 0);
-  assert.equal(countRows(runtime.databasePath, "capture"), 2);
+  assert.equal(countRows(runtime.databasePath, "capture"), 3);
   assert.equal(runtime.getCapture(captureId)?.attachments[0]?.parseState, "succeeded");
 
   await rebuildRuntimeFromVault({ vaultRoot, runtime });
@@ -692,6 +711,10 @@ test("rebuildRuntimeFromVault replaces stale runtime projection rows, resets par
   assert.ok(rebuilt);
   assert.deepEqual(runtime.getCursor("email", "self"), { messageId: "msg-rebuild-reset" });
   assert.equal(runtime.getCapture(staleCaptureId), null);
+  assert.equal(
+    runtime.getCapture(staleRuntimeOnlyCaptureId, { includeRuntimeOnly: true }),
+    null,
+  );
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
   assert.equal(countRows(runtime.databasePath, "capture_mutation_tombstone"), 1);

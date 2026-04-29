@@ -21,6 +21,9 @@ import {
   HostedRawEmailMessageMissingError,
 } from "./events/email.ts";
 
+const CONVERSATION_CAPTURE_PERSIST_FAILED_REASON =
+  "conversation_import.capture_persist_failed";
+
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
       status: "decoded";
@@ -53,6 +56,7 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 export interface HostedConversationMailboxLocalImportResult {
   captureId: string | null;
   deduped: boolean;
+  durable?: boolean;
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -195,6 +199,13 @@ export async function importHostedConversationMailboxItem(input: {
 
     throw error;
   }
+  if (imported.durable === false) {
+    return {
+      reasonCode: CONVERSATION_CAPTURE_PERSIST_FAILED_REASON,
+      retryable: true,
+      status: "blocked",
+    };
+  }
   if (imported.deduped) {
     return {
       captureId: imported.captureId,
@@ -223,6 +234,7 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   return {
     captureId: result.capture.captureId,
     deduped: result.capture.deduped,
+    durable: result.capturePersistence === "canonical",
     metrics: result.metrics,
   };
 }
