@@ -2,8 +2,8 @@ import Link from "next/link";
 
 const PROMISES = [
   "We don't sell your data.",
-  "Encrypted at rest.",
-  "Health data isn't used for general AI training.",
+  "Encrypted by default.",
+  "Your chats never train models.",
   "Open source. See for yourself.",
 ] as const;
 
@@ -19,13 +19,12 @@ export function SecurityTeaserSection() {
             </span>
           </div>
           <h2 className="mt-6 max-w-[18ch] font-serif text-[clamp(1.875rem,4vw,2.75rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]">
-            Health data,{" "}
-            <span className="italic text-[#8a6a3a]">handled</span> carefully.
+            Your health data{" "}
+            <span className="italic text-[#8a6a3a]">stays</span> yours.
           </h2>
           <p className="mt-6 max-w-[52ch] text-base leading-[1.7] text-pretty text-[#4d4533] sm:text-[1.0625rem]">
-            Hosted Murph encrypts sensitive data at rest. Task workers decrypt
-            workspace data for requested work, then write encrypted results
-            back.
+            Your records stay locked by default. Murph opens them for a few
+            seconds to run a task, then locks them again.
           </p>
 
           <ul className="mt-8 grid gap-3 sm:grid-cols-2">
