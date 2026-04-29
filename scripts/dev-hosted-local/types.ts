@@ -1,6 +1,7 @@
 export interface HostedLocalDevConfig {
   databaseUrlOverride: string | null;
   forceResetLocalDatabase: boolean;
+  skipHealthCommonsWatch: boolean;
   skipRunnerSmoke: boolean;
   skipPrismaMigrate: boolean;
   skipStripeListen: boolean;
@@ -14,6 +15,8 @@ export interface HostedLocalDevConfig {
   workerPort: number;
   workerProtocol: "http" | "https";
 }
+
+export type HostedLocalChildProcessName = "cloudflare" | "health-commons" | "stripe" | "web";
 
 export interface HostedExecutionOidcIdentity {
   environment: "development" | "preview" | "production";
@@ -41,7 +44,7 @@ export interface HostedLocalChildProcess {
 
 export interface NamedChildProcess {
   child: HostedLocalChildProcess;
-  name: "cloudflare" | "stripe" | "web";
+  name: HostedLocalChildProcessName;
 }
 
 export interface BufferedNamedChildProcess extends NamedChildProcess {

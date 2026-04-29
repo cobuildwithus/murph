@@ -65,6 +65,7 @@ export interface HostedLocalDevStack {
   oidcToken: string;
   processes: {
     cloudflare: BufferedNamedChildProcess | null;
+    healthCommons: BufferedNamedChildProcess | null;
     stripe: BufferedNamedChildProcess | null;
     web: BufferedNamedChildProcess | null;
   };
@@ -137,6 +138,7 @@ export async function startHostedLocalDevStack(input: {
   let stopped = false;
   let stopPromise: Promise<void> | null = null;
   const children: BufferedNamedChildProcess[] = [];
+  let healthCommonsWatcher: BufferedNamedChildProcess | null = null;
   let stripeListener: BufferedNamedChildProcess | null = null;
   let workerRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
@@ -284,6 +286,14 @@ export async function startHostedLocalDevStack(input: {
       }
     }
 
+    if (!config.skipWeb) {
+      await runCommand("pnpm", ["health-commons:generate"], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+      });
+    }
+
     if (workerRuntimeEnv !== null) {
       if (initialEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE !== "1") {
         await runCommand("pnpm", ["--dir", "apps/cloudflare", "runner:bundle"], {
@@ -362,6 +372,22 @@ export async function startHostedLocalDevStack(input: {
           ].join(""),
         );
       });
+    }
+
+    healthCommonsWatcher = config.skipWeb || config.skipHealthCommonsWatch
+      ? null
+      : spawnChildProcess("health-commons", "pnpm", [
+        "health-commons:generate:watch",
+      ], {
+        ...runtimeEnv,
+        MURPH_HEALTH_COMMONS_WATCH_SKIP_INITIAL: "1",
+      }, {
+        pipeOutput: input.pipeOutput,
+        stderrTarget: input.stderrTarget,
+        stdoutTarget: input.stdoutTarget,
+      });
+    if (healthCommonsWatcher) {
+      children.push(healthCommonsWatcher);
     }
 
     const webProcess = config.skipWeb
@@ -493,6 +519,7 @@ export async function startHostedLocalDevStack(input: {
       oidcToken,
       processes: {
         cloudflare: cloudflareProcess,
+        healthCommons: healthCommonsWatcher,
         stripe: stripeListener,
         web: webProcess,
       },

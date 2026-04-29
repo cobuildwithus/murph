@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   BufferedNamedChildProcess,
   HostedLocalChildProcess,
+  HostedLocalChildProcessName,
   HostedLocalDevConfig,
 } from "./types.ts";
 import type { HostedLocalWorkerPortMode } from "./runtime.ts";
@@ -30,6 +31,7 @@ class CapturingWritable extends Writable {
 const defaultConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
   forceResetLocalDatabase: false,
+  skipHealthCommonsWatch: true,
   skipRunnerSmoke: false,
   skipPrismaMigrate: false,
   skipStripeListen: true,
@@ -56,7 +58,7 @@ const runCommand = vi.fn<(
 let nextChildPid = 100;
 const spawnChildProcess = vi.fn<
   (
-    name: "cloudflare" | "stripe" | "web",
+    name: HostedLocalChildProcessName,
     command: string,
     args: string[],
     env: NodeJS.ProcessEnv,
@@ -208,7 +210,7 @@ vi.mock("./vercel.ts", () => ({
 
 function createBufferedChild(input: {
   exitCode: number | null;
-  name: "cloudflare" | "stripe" | "web";
+  name: HostedLocalChildProcessName;
   pid: number;
 }): BufferedNamedChildProcess {
   const child: HostedLocalChildProcess = {
@@ -335,6 +337,47 @@ describe("hosted local dev stack", () => {
       port: 3000,
       protocol: "http",
     });
+  });
+
+  it("generates Health Commons once and starts the markdown watcher before web dev", async () => {
+    const configModule = await import("./config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      skipHealthCommonsWatch: false,
+    });
+
+    const { startHostedLocalDevStack } = await import("./stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand).toHaveBeenCalledWith(
+      "pnpm",
+      ["health-commons:generate"],
+      expect.objectContaining({
+        cwd: expect.stringContaining("murph"),
+        name: "setup",
+      }),
+    );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "health-commons",
+      "pnpm",
+      ["health-commons:generate:watch"],
+      expect.objectContaining({
+        MURPH_HEALTH_COMMONS_WATCH_SKIP_INITIAL: "1",
+      }),
+      expect.any(Object),
+    );
+    const healthCommonsCallIndex = spawnChildProcess.mock.calls.findIndex(
+      ([name]) => name === "health-commons",
+    );
+    const webCallIndex = spawnChildProcess.mock.calls.findIndex(([name]) => name === "web");
+    expect(healthCommonsCallIndex).toBeGreaterThanOrEqual(0);
+    expect(webCallIndex).toBeGreaterThan(healthCommonsCallIndex);
+    expect(stack.processes.healthCommons?.name).toBe("health-commons");
   });
 
   it("can skip the runner container smoke proof for focused debugging", async () => {
