@@ -9,6 +9,7 @@ import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
+import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import {
   formatHostedDeviceSyncProviderLabel,
   type HostedDeviceSyncSettingsResponse,
@@ -52,6 +53,7 @@ export function HostedDeviceSyncSettingsClient(props: {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<HostedDeviceSyncSettingsSource | null>(null);
+  const [consentRetrySource, setConsentRetrySource] = useState<HostedDeviceSyncSettingsSource | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
@@ -135,6 +137,11 @@ export function HostedDeviceSyncSettingsClient(props: {
           "action",
         ),
       );
+      setConsentRetrySource(
+        error instanceof HostedOnboardingApiError && error.code === "HOSTED_CONSENT_REQUIRED"
+          ? source
+          : null,
+      );
       setPendingActionKey(null);
     }
   }
@@ -186,6 +193,7 @@ export function HostedDeviceSyncSettingsClient(props: {
 
   const errorMessage = errorState?.message ?? null;
   const showUnavailableState = props.authenticated && errorState?.phase === "load" && sources.length === 0;
+  const showConsentRequiredState = props.authenticated && isHostedDeviceSyncConsentRequiredState(errorState);
   const errorAlertTitle = errorState?.phase === "load"
     ? "Unable to load wearable sources"
     : "Unable to update wearable sources";
@@ -206,11 +214,26 @@ export function HostedDeviceSyncSettingsClient(props: {
         </Alert>
       ) : null}
 
-      {errorMessage ? (
+      {errorMessage && !showConsentRequiredState ? (
         <Alert variant="destructive">
           <AlertTitle>{errorAlertTitle}</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
+      ) : null}
+
+      {showConsentRequiredState ? (
+        <HostedLegalConsentCard
+          mode="compact"
+          preferredScope="feature.connected-health-source"
+          source="settings-device-sync"
+          onAccepted={async () => {
+            if (consentRetrySource) {
+              await handleConnect(consentRetrySource);
+              return;
+            }
+            await loadSources();
+          }}
+        />
       ) : null}
 
       {!props.authenticated ? (
@@ -296,6 +319,12 @@ function isHostedDeviceSyncBlockedState(
   errorState: HostedDeviceSyncSettingsErrorState | null,
 ): boolean {
   return errorState?.code === "HOSTED_ACCESS_REQUIRED" || errorState?.code === "HOSTED_MEMBER_SUSPENDED";
+}
+
+function isHostedDeviceSyncConsentRequiredState(
+  errorState: HostedDeviceSyncSettingsErrorState | null,
+): boolean {
+  return errorState?.code === "HOSTED_CONSENT_REQUIRED";
 }
 
 function readOptionalErrorCode(error: Error): string | null {

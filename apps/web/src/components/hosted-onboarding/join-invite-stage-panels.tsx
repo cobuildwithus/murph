@@ -35,6 +35,7 @@ import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-s
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
+import { HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
 import { HostedTelegramSettings } from "../settings/hosted-telegram-settings";
 
@@ -357,6 +358,7 @@ export function JoinInviteActivePanel({
   stage: HostedAccessibleOnboardingStage;
 }) {
   const activationPending = stage === "activating";
+  const [legalConsentRequired, setLegalConsentRequired] = useState(true);
 
   return (
     <div className="flex flex-col gap-8">
@@ -381,7 +383,16 @@ export function JoinInviteActivePanel({
         </div>
       )}
 
-      <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
+      <HostedLegalConsentCard
+        mode="panel"
+        onRequirementChange={setLegalConsentRequired}
+        preferredScope="launch.required"
+        source="join-invite-active"
+      />
+
+      {!legalConsentRequired ? (
+        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
+      ) : null}
 
       <div className="border-t border-[#c4a882]/25 pt-6">
         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">

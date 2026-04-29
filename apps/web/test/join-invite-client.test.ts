@@ -44,6 +44,7 @@ import {
   shouldAwaitHostedInviteSessionResolution,
 } from "@/src/components/hosted-onboarding/join-invite-client";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import {
   getHostedDefaultBillingPlanCode,
   listHostedBillingPlanPresentations,
@@ -513,22 +514,28 @@ test("already-active checkout refreshes return to verify when the invite session
   await view.cleanup();
 });
 
-test("active invite state renders message and settings actions with client navigation markup", () => {
-  const markup = renderToStaticMarkup(
-    createElement(JoinInviteClient, {
-      initialLinkedAccounts: [],
-      initialStatus: createStatus({
-        murphPhoneNumber: "+15550100001",
-        session: {
-          authenticated: true,
-          expiresAt: null,
-          matchesInvite: true,
-        },
-        stage: "active",
-      }),
-      inviteCode: "invite-code",
+test("active invite state renders message and settings actions after launch consent is current", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: true })), {
+      status: 200,
     }),
   );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      murphPhoneNumber: "+15550100001",
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "active",
+    }),
+  });
+
+  await flushReactEffects();
+  const markup = view.container.innerHTML;
 
   assert.match(markup, /Murph will text you shortly\. Reply to start\./);
   assert.ok(markup.includes('href="sms:+15550100001"'));
@@ -537,6 +544,8 @@ test("active invite state renders message and settings actions with client navig
   assert.match(markup, /Add Murph to Contacts/);
   assert.ok(markup.includes('href="/experiments"'));
   assert.match(markup, /View experiments/);
+
+  await view.cleanup();
 });
 
 test("active invite state omits Murph contact actions when no assigned number is available", () => {
@@ -558,6 +567,37 @@ test("active invite state omits Murph contact actions when no assigned number is
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /Add Murph to Contacts/);
   assert.ok(markup.includes('href="/experiments"'));
+});
+
+test("active invite state surfaces launch legal consent when signup has not recorded it yet", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createConsentStatus({ launchGranted: false })), {
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteClientForEffects({
+    initialStatus: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "active",
+    }),
+  });
+
+  await flushReactEffects();
+
+  assert.match(view.container.textContent ?? "", /Review Murph legal consent/);
+  assert.match(view.container.textContent ?? "", /Murph Terms of Service/);
+  assert.match(view.container.textContent ?? "", /Accept and continue/);
+  expect(fetchMock).toHaveBeenCalledWith("/api/legal/consent/status", expect.objectContaining({
+    method: "GET",
+  }));
+
+  await view.cleanup();
 });
 
 test("activating invite state explains when vault and assistant setup is still running", () => {
@@ -818,6 +858,7 @@ function installJoinInviteClientGlobals(
   };
   const restoreEntries = [
     setJoinInviteClientGlobal("window", window),
+    setJoinInviteClientGlobal("self", window),
     setJoinInviteClientGlobal("document", document),
     setJoinInviteClientGlobal("location", location),
     setJoinInviteClientGlobal("navigator", window.navigator),
@@ -848,6 +889,13 @@ function installJoinInviteClientGlobals(
 async function waitForCheckoutSuccessHold() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 700));
+  });
+}
+
+async function flushReactEffects() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
   });
 }
 
@@ -891,6 +939,80 @@ function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElemen
   );
   assert.ok(button);
   return button as HTMLButtonElement;
+}
+
+function createConsentStatus(input: {
+  connectedHealthGranted?: boolean;
+  launchGranted: boolean;
+}): HostedConsentStatus {
+  const launchDocuments = [
+    consentDocument("terms-of-service", "Murph Terms of Service", "/legal/terms"),
+    consentDocument("privacy-policy", "Murph Privacy Policy", "/legal/privacy"),
+    consentDocument(
+      "consumer-health-data-notice",
+      "Murph Consumer Health Data Notice",
+      "/consumer-health-data-privacy-policy",
+    ),
+    consentDocument(
+      "health-ai-safety-disclosure",
+      "Murph Health AI Safety Disclosure",
+      "/legal/health-ai-safety-disclosure",
+    ),
+  ];
+  const connectedHealthDocuments = launchDocuments.filter((document) =>
+    document.id === "privacy-policy" || document.id === "consumer-health-data-notice",
+  );
+
+  return {
+    documents: launchDocuments,
+    generatedAt: "2026-04-30T00:00:00.000Z",
+    launchRequired: {
+      granted: input.launchGranted,
+      missingDocuments: input.launchGranted ? [] : launchDocuments,
+      scope: "launch.required",
+    },
+    ok: true,
+    schema: "murph.hosted-consent-status.v1",
+    scopes: [
+      consentScope("launch.required", "Launch-required legal consent", false, launchDocuments, input.launchGranted),
+      consentScope(
+        "feature.connected-health-source",
+        "Connected health source consent",
+        true,
+        connectedHealthDocuments,
+        input.connectedHealthGranted === true,
+      ),
+    ],
+  };
+}
+
+function consentDocument(id: string, title: string, href: string) {
+  return {
+    href,
+    id: id as HostedConsentStatus["documents"][number]["id"],
+    pdfHref: `${href}.pdf`,
+    title,
+    version: "2026-04-29",
+  };
+}
+
+function consentScope(
+  scope: HostedConsentStatus["scopes"][number]["scope"],
+  label: string,
+  revocable: boolean,
+  documents: HostedConsentStatus["documents"],
+  granted: boolean,
+): HostedConsentStatus["scopes"][number] {
+  return {
+    current: granted,
+    documents,
+    grant: null,
+    granted,
+    label,
+    missingDocuments: granted ? [] : documents,
+    revocable,
+    scope,
+  };
 }
 
 function loadJoinInviteClientLinkedom(): {
