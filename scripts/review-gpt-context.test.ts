@@ -51,14 +51,21 @@ describe("review-gpt context packaging", () => {
   it("uses review-gpt-only package scripts without changing generic source zips", () => {
     const config = readFileSync(path.join(repoRoot, "scripts", "review-gpt.config.sh"), "utf8");
     const fullConfig = readFileSync(path.join(repoRoot, "scripts", "review-gpt-full.config.sh"), "utf8");
+    const protocolConfig = readFileSync(
+      path.join(repoRoot, "scripts", "review-gpt-protocol.config.sh"),
+      "utf8",
+    );
     const packageScript = readFileSync(path.join(repoRoot, "scripts", "package-audit-context.sh"), "utf8");
 
     expect(config).toContain('package_script="scripts/package-review-gpt-context.sh"');
     expect(fullConfig).toContain('package_script="scripts/package-review-gpt-context-full.sh"');
+    expect(protocolConfig).toContain('package_script="scripts/package-review-gpt-protocol-context.sh"');
     expect(packageScript).not.toContain("packages/health-commons/content/**");
     expect(config).toContain('"output-packages/**"');
     expect(config).toContain('"packages/health-commons/content/**"');
     expect(config).toContain('"packages/health-commons/generated/**"');
+    expect(protocolConfig).toContain('"packages/health-commons/content/**"');
+    expect(protocolConfig).toContain('"packages/health-commons/generated/**"');
   });
 
   it("omits output packages and Health Commons data from the normal review-gpt ZIP", () => {
@@ -94,6 +101,26 @@ describe("review-gpt context packaging", () => {
       expectReviewGptPrunedEntries(entries);
       expect(entries).toContain("packages/query/test/overview-vault-source-coverage.test.ts");
       expect(entries).toContain(".github/workflows/host-support.yml");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("includes Health Commons content and generated data in the protocol review-gpt ZIP", () => {
+    const tempRoot = mkdtempSync(path.join(os.tmpdir(), "murph-review-gpt-protocol-context-"));
+
+    try {
+      const zipPath = runPackageScript(
+        "package-review-gpt-protocol-context.sh",
+        tempRoot,
+        "protocol-review-gpt-context",
+      );
+      const entries = listZipEntries(zipPath);
+
+      expect(entries.some((entry) => entry.startsWith("output-packages/"))).toBe(false);
+      expect(entries).toContain("packages/health-commons/content/protocols/norwegian-4x4/norwegian-4x4.md");
+      expect(entries).toContain("packages/health-commons/content/artifacts/norwegian-4x4/research-artifacts.json");
+      expect(entries).toContain("packages/health-commons/generated/catalog.json");
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
