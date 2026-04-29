@@ -8,6 +8,7 @@ import {
   buildHealthCommonsSourceIndex,
 } from "./catalog.ts";
 import { stablePrettyJson } from "./normalize.ts";
+import { buildHealthCommonsWebGeneratedArtifacts } from "./web-artifacts.ts";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,7 +30,9 @@ export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions):
   await mkdir(options.generatedRoot, { recursive: true });
 
   for (const [fileName, nextContent] of files.entries()) {
-    await writeFile(path.join(options.generatedRoot, fileName), nextContent, "utf8");
+    const outputPath = path.join(options.generatedRoot, fileName);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, nextContent, "utf8");
   }
 }
 
@@ -38,8 +41,8 @@ function buildGeneratedFiles(
 ): Map<string, string> {
   const sourceIndex = buildHealthCommonsSourceIndex(catalog);
   const sourceArtifactIndex = buildHealthCommonsSourceArtifactIndex(catalog);
-
-  return new Map<string, string>([
+  const webArtifacts = buildHealthCommonsWebGeneratedArtifacts(catalog);
+  const files = new Map<string, string>([
     ["catalog.json", stablePrettyJson(catalog)],
     ["catalog.hash", `${catalog.catalogHash}\n`],
     ["entities.ndjson", catalog.entities.map((entity) => JSON.stringify(entity)).join("\n") + "\n"],
@@ -50,7 +53,16 @@ function buildGeneratedFiles(
     ["source-index.json", stablePrettyJson(sourceIndex)],
     ["source-identities.ndjson", sourceIndex.identityLookup.map((entry) => JSON.stringify(entry)).join("\n") + "\n"],
     ["source-artifact-index.json", stablePrettyJson(sourceArtifactIndex)],
+    ["web/routes/index.json", stablePrettyJson(webArtifacts.routeIndex)],
+    ["web/browse/experiments.json", stablePrettyJson(webArtifacts.experimentIndex)],
+    ["web/browse/biomarkers.json", stablePrettyJson(webArtifacts.biomarkerIndex)],
   ]);
+
+  for (const [fileName, bundle] of webArtifacts.routeBundles.entries()) {
+    files.set(`web/${fileName}`, stablePrettyJson(bundle));
+  }
+
+  return files;
 }
 
 async function assertGeneratedArtifactsDeterministic(

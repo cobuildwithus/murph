@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   healthCommonsCatalogSchema,
@@ -12,6 +14,16 @@ import {
   type HealthCommonsRelation,
   type HealthCommonsRelationType,
 } from "@murphai/contracts";
+import {
+  HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
+  HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
+  HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION,
+  HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
+  type HealthCommonsWebBiomarkerIndex,
+  type HealthCommonsWebExperimentIndex,
+  type HealthCommonsWebRouteBundle,
+  type HealthCommonsWebRouteIndex,
+} from "./web-artifacts.ts";
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
 
@@ -53,6 +65,10 @@ export type HealthCommonsSearchMatchedField =
 
 export interface LoadGeneratedHealthCommonsCatalogOptions {
   catalogPath?: string | URL;
+}
+
+export interface LoadGeneratedHealthCommonsWebArtifactOptions {
+  generatedWebRoot?: string | URL;
 }
 
 export interface HealthCommonsCompactProtocol {
@@ -211,6 +227,11 @@ export interface HealthCommonsCatalogReader {
   }): HealthCommonsEntity | null;
   findBySlug(slug: string): HealthCommonsEntity | null;
   listByEntityType(entityType: HealthCommonsEntityType): HealthCommonsEntity[];
+  listEvidenceAppraisals(input?: {
+    groupId?: string;
+    sourceKey?: string;
+    targetKey?: string;
+  }): HealthCommonsEvidenceAppraisal[];
   listMeasurementMethods(options?: HealthCommonsEntityListOptions): HealthCommonsCompactEntity[];
   listProtocolVariants(options?: HealthCommonsEntityListOptions): HealthCommonsCompactEntity[];
   listRelated(input: {
@@ -226,7 +247,19 @@ export interface HealthCommonsCatalogReader {
   search(input?: HealthCommonsCatalogSearchInput): HealthCommonsCatalogSearchResult[];
 }
 
+export interface HealthCommonsRouteBundleReader extends HealthCommonsCatalogReader {
+  bundle: HealthCommonsWebRouteBundle;
+  getSourceSnippet(sourceKey: string): HealthCommonsWebRouteBundle["sourceSnippets"][string] | null;
+  listReverseEdges(input?: {
+    relationTypes?: readonly HealthCommonsRelationType[];
+    targetKey?: string;
+  }): HealthCommonsWebRouteBundle["reverseEdges"];
+  revisionManifest: HealthCommonsWebRouteBundle["revisionManifest"];
+  route: HealthCommonsWebRouteBundle["route"];
+}
+
 const DEFAULT_GENERATED_CATALOG_URL = new URL("../generated/catalog.json", import.meta.url);
+const DEFAULT_GENERATED_WEB_ROOT_URL = new URL("../generated/web/", import.meta.url);
 const DEFAULT_LIST_LIMIT = 25;
 const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -234,6 +267,10 @@ const DEFAULT_SOURCE_LIMIT = 8;
 const MAX_LIMIT = 500;
 
 let cachedGeneratedCatalogReader: HealthCommonsCatalogReader | null = null;
+let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = null;
+let cachedGeneratedWebExperimentIndex: HealthCommonsWebExperimentIndex | null = null;
+let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;
+const cachedGeneratedWebRouteBundles = new Map<string, HealthCommonsWebRouteBundle>();
 
 export function loadGeneratedHealthCommonsCatalog(
   options: LoadGeneratedHealthCommonsCatalogOptions = {},
@@ -249,6 +286,150 @@ export function getGeneratedHealthCommonsCatalogReader(): HealthCommonsCatalogRe
   return cachedGeneratedCatalogReader;
 }
 
+export function loadGeneratedHealthCommonsWebRouteIndex(
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsWebRouteIndex {
+  const raw = readFileSync(
+    new URL("routes/index.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
+    "utf8",
+  );
+  const parsed = parseJsonObject(raw);
+  assertGeneratedWebRouteIndex(parsed);
+  return parsed;
+}
+
+export function loadGeneratedHealthCommonsWebExperimentIndex(
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsWebExperimentIndex {
+  const raw = readFileSync(
+    new URL("browse/experiments.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
+    "utf8",
+  );
+  const parsed = parseJsonObject(raw);
+  assertGeneratedWebExperimentIndex(parsed);
+  return parsed;
+}
+
+export function loadGeneratedHealthCommonsWebBiomarkerIndex(
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsWebBiomarkerIndex {
+  const raw = readFileSync(
+    new URL("browse/biomarkers.json", normalizeGeneratedWebRoot(options.generatedWebRoot)),
+    "utf8",
+  );
+  const parsed = parseJsonObject(raw);
+  assertGeneratedWebBiomarkerIndex(parsed);
+  return parsed;
+}
+
+export function getGeneratedHealthCommonsWebRouteIndex(
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsWebRouteIndex {
+  if (options.generatedWebRoot) {
+    return loadGeneratedHealthCommonsWebRouteIndex(options);
+  }
+
+  cachedGeneratedWebRouteIndex ??= loadGeneratedHealthCommonsWebRouteIndex();
+  return cachedGeneratedWebRouteIndex;
+}
+
+export function getGeneratedHealthCommonsWebExperimentIndex(
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsWebExperimentIndex {
+  if (options.generatedWebRoot) {
+    return loadGeneratedHealthCommonsWebExperimentIndex(options);
+  }
+
+  cachedGeneratedWebExperimentIndex ??= loadGeneratedHealthCommonsWebExperimentIndex();
+  return cachedGeneratedWebExperimentIndex;
+}
+
+export function getGeneratedHealthCommonsWebBiomarkerIndex(
+  options: LoadGeneratedHealthCommonsWebArtifactOptions = {},
+): HealthCommonsWebBiomarkerIndex {
+  if (options.generatedWebRoot) {
+    return loadGeneratedHealthCommonsWebBiomarkerIndex(options);
+  }
+
+  cachedGeneratedWebBiomarkerIndex ??= loadGeneratedHealthCommonsWebBiomarkerIndex();
+  return cachedGeneratedWebBiomarkerIndex;
+}
+
+export function loadGeneratedHealthCommonsWebRouteBundle(input: {
+  entityType: HealthCommonsEntityType;
+  generatedWebRoot?: string | URL;
+  routeId: string;
+}): HealthCommonsWebRouteBundle | null {
+  const routeIndex = getGeneratedHealthCommonsWebRouteIndex({
+    generatedWebRoot: input.generatedWebRoot,
+  });
+  const normalizedRouteId = normalizeRouteId(input.routeId);
+  const route = routeIndex.routes.find((entry) =>
+    entry.entityType === input.entityType && entry.routeId === normalizedRouteId
+  );
+
+  if (!route) {
+    return null;
+  }
+
+  const cacheKey = `${routeIndex.catalogHash}:${route.bundlePath}`;
+  if (!input.generatedWebRoot && cachedGeneratedWebRouteBundles.has(cacheKey)) {
+    return cachedGeneratedWebRouteBundles.get(cacheKey) ?? null;
+  }
+
+  const raw = readFileSync(
+    new URL(route.bundlePath, normalizeGeneratedWebRoot(input.generatedWebRoot)),
+    "utf8",
+  );
+  const bundle = parseJsonObject(raw);
+  assertGeneratedWebRouteBundle(bundle, route.bundlePath);
+
+  if (!input.generatedWebRoot) {
+    cachedGeneratedWebRouteBundles.set(cacheKey, bundle);
+  }
+
+  return bundle;
+}
+
+export function createHealthCommonsRouteBundleReader(
+  bundle: HealthCommonsWebRouteBundle,
+): HealthCommonsRouteBundleReader {
+  const reader = createHealthCommonsCatalogReader({
+    artifactManifests: [],
+    catalogHash: bundle.catalogHash,
+    changes: [],
+    entities: Object.values(bundle.entitiesByKey),
+    evidenceAppraisals: bundle.evidenceAppraisals,
+    redirects: bundle.redirects,
+    schemaVersion: "murph.commons.catalog.v1",
+  });
+
+  return {
+    ...reader,
+    bundle,
+    getSourceSnippet(sourceKey) {
+      return bundle.sourceSnippets[stripRevision(sourceKey)] ?? null;
+    },
+    listReverseEdges(input = {}) {
+      const relationTypes: ReadonlySet<string> | null = input.relationTypes
+        ? new Set(input.relationTypes)
+        : null;
+      const targetKey = input.targetKey ? stripRevision(input.targetKey) : null;
+      return bundle.reverseEdges.filter((edge) => {
+        if (relationTypes && !relationTypes.has(edge.relation.type)) {
+          return false;
+        }
+        if (targetKey && stripRevision(edge.relation.target) !== targetKey) {
+          return false;
+        }
+        return true;
+      });
+    },
+    revisionManifest: bundle.revisionManifest,
+    route: bundle.route,
+  };
+}
+
 export function createHealthCommonsCatalogReader(
   catalog: HealthCommonsCatalog,
 ): HealthCommonsCatalogReader {
@@ -259,6 +440,7 @@ export function createHealthCommonsCatalogReader(
   const redirectsBySource = new Map(catalog.redirects.map((redirect) => [redirect.from, redirect.to]));
   const redirectSourcesByTarget = new Map<string, string[]>();
   const evidenceAppraisalsByTarget = new Map<string, HealthCommonsEvidenceAppraisal[]>();
+  const evidenceAppraisals = catalog.evidenceAppraisals;
 
   for (const appraisal of catalog.evidenceAppraisals) {
     const targetKey = stripRevision(appraisal.targetKey);
@@ -518,6 +700,22 @@ export function createHealthCommonsCatalogReader(
     findBySlug,
     listByEntityType(entityType: HealthCommonsEntityType) {
       return entitiesByType.get(entityType)?.slice() ?? [];
+    },
+    listEvidenceAppraisals(input = {}) {
+      const sourceKey = input.sourceKey ? stripRevision(resolveKey(input.sourceKey)) : null;
+      const targetKey = input.targetKey ? stripRevision(resolveKey(input.targetKey)) : null;
+      return evidenceAppraisals.filter((appraisal) => {
+        if (sourceKey && stripRevision(resolveKey(appraisal.sourceKey)) !== sourceKey) {
+          return false;
+        }
+        if (targetKey && stripRevision(resolveKey(appraisal.targetKey)) !== targetKey) {
+          return false;
+        }
+        if (input.groupId && appraisal.groupId !== input.groupId) {
+          return false;
+        }
+        return true;
+      });
     },
     listMeasurementMethods(options) {
       return filterAndCompactList("measurement_method", options);
@@ -1126,6 +1324,220 @@ function safeDecodeURIComponent(value: string): string {
   }
 }
 
+function normalizeGeneratedWebRoot(value: string | URL | undefined): URL {
+  if (!value) {
+    return DEFAULT_GENERATED_WEB_ROOT_URL;
+  }
+
+  const url = typeof value === "string"
+    ? stringToGeneratedWebRootUrl(value)
+    : value;
+  return url.href.endsWith("/") ? url : new URL(`${url.href}/`);
+}
+
+function stringToGeneratedWebRootUrl(value: string): URL {
+  if (/^[a-z][a-z\d+.-]*:/iu.test(value)) {
+    return new URL(value);
+  }
+
+  return pathToFileURL(resolve(value));
+}
+
+function parseJsonObject(raw: string): unknown {
+  const parsed = JSON.parse(raw) as unknown;
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Health Commons generated web artifact must be a JSON object.");
+  }
+
+  return parsed;
+}
+
+function assertGeneratedWebRouteIndex(
+  value: unknown,
+): asserts value is HealthCommonsWebRouteIndex {
+  if (!isRecord(value)) {
+    throw new Error("Health Commons generated web route index is invalid.");
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    !Array.isArray(value["routes"]) ||
+    !value["routes"].every(isGeneratedWebRouteIndexEntry)
+  ) {
+    throw new Error("Health Commons generated web route index is invalid.");
+  }
+}
+
+function assertGeneratedWebExperimentIndex(
+  value: unknown,
+): asserts value is HealthCommonsWebExperimentIndex {
+  if (!isRecord(value)) {
+    throw new Error("Health Commons generated web experiment index is invalid.");
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    !Array.isArray(value["experiments"]) ||
+    !value["experiments"].every(isGeneratedWebExperimentIndexEntry)
+  ) {
+    throw new Error("Health Commons generated web experiment index is invalid.");
+  }
+}
+
+function assertGeneratedWebBiomarkerIndex(
+  value: unknown,
+): asserts value is HealthCommonsWebBiomarkerIndex {
+  if (!isRecord(value)) {
+    throw new Error("Health Commons generated web biomarker index is invalid.");
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    !Array.isArray(value["biomarkers"]) ||
+    !value["biomarkers"].every(isGeneratedWebBiomarkerIndexEntry)
+  ) {
+    throw new Error("Health Commons generated web biomarker index is invalid.");
+  }
+}
+
+function assertGeneratedWebRouteBundle(
+  value: unknown,
+  bundlePath: string,
+): asserts value is HealthCommonsWebRouteBundle {
+  if (!isRecord(value)) {
+    throw new Error(`Health Commons generated web route bundle is invalid: ${bundlePath}.`);
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    typeof value["primaryKey"] !== "string" ||
+    !isRecord(value["route"]) ||
+    !isGeneratedWebRoute(value["route"]) ||
+    !isRecord(value["entitiesByKey"]) ||
+    !Array.isArray(value["evidenceAppraisals"]) ||
+    !Array.isArray(value["redirects"]) ||
+    !Array.isArray(value["reverseEdges"]) ||
+    !isRecord(value["revisionManifest"]) ||
+    !isRecord(value["sourceSnippets"])
+  ) {
+    throw new Error(`Health Commons generated web route bundle is invalid: ${bundlePath}.`);
+  }
+
+  const entities = Object.values(value["entitiesByKey"]);
+  if (!entities.every(isRecord) || !entities.every(isGeneratedWebBundleEntity)) {
+    throw new Error(`Health Commons generated web route bundle has unsafe entities: ${bundlePath}.`);
+  }
+}
+
+function isGeneratedWebRouteIndexEntry(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value["aliases"]) &&
+    value["aliases"].every(isString) &&
+    typeof value["bundlePath"] === "string" &&
+    typeof value["entityType"] === "string" &&
+    typeof value["key"] === "string" &&
+    typeof value["routeId"] === "string" &&
+    typeof value["slug"] === "string"
+  );
+}
+
+function isGeneratedWebExperimentIndexEntry(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value["aliases"]) &&
+    value["aliases"].every(isString) &&
+    typeof value["baselineDays"] === "number" &&
+    Array.isArray(value["categories"]) &&
+    value["categories"].every(isString) &&
+    typeof value["bundlePath"] === "string" &&
+    typeof value["category"] === "string" &&
+    typeof value["description"] === "string" &&
+    typeof value["durationDays"] === "number" &&
+    typeof value["evidenceLabel"] === "string" &&
+    typeof value["evidenceLevel"] === "number" &&
+    typeof value["hidden"] === "boolean" &&
+    (typeof value["image"] === "string" || value["image"] === null) &&
+    typeof value["key"] === "string" &&
+    (typeof value["quality"] === "string" || value["quality"] === null) &&
+    isRecord(value["revision"]) &&
+    typeof value["routeId"] === "string" &&
+    typeof value["slug"] === "string" &&
+    (typeof value["status"] === "string" || value["status"] === null) &&
+    typeof value["studyCount"] === "number" &&
+    (typeof value["summary"] === "string" || value["summary"] === null) &&
+    typeof value["title"] === "string"
+  );
+}
+
+function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value["aliases"]) &&
+    value["aliases"].every(isString) &&
+    typeof value["bundlePath"] === "string" &&
+    Array.isArray(value["categories"]) &&
+    value["categories"].every(isString) &&
+    typeof value["hidden"] === "boolean" &&
+    typeof value["key"] === "string" &&
+    typeof value["published"] === "boolean" &&
+    (typeof value["quality"] === "string" || value["quality"] === null) &&
+    isRecord(value["revision"]) &&
+    typeof value["routeId"] === "string" &&
+    typeof value["slug"] === "string" &&
+    (typeof value["status"] === "string" || value["status"] === null) &&
+    (typeof value["summary"] === "string" || value["summary"] === null) &&
+    typeof value["title"] === "string" &&
+    (typeof value["unit"] === "string" || value["unit"] === null)
+  );
+}
+
+function isGeneratedWebRoute(value: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(value["aliases"]) &&
+    value["aliases"].every(isString) &&
+    typeof value["entityType"] === "string" &&
+    typeof value["routeId"] === "string" &&
+    typeof value["slug"] === "string"
+  );
+}
+
+function isGeneratedWebBundleEntity(value: Record<string, unknown>): boolean {
+  if (
+    typeof value["entityType"] !== "string" ||
+    typeof value["body"] !== "string" ||
+    typeof value["key"] !== "string"
+  ) {
+    return false;
+  }
+
+  if (value["entityType"] !== "source_artifact") {
+    return true;
+  }
+
+  const body = value["body"];
+  const relations = value["relations"];
+  return (
+    (body === "" || body.startsWith("**Findings:** ")) &&
+    Array.isArray(relations) &&
+    relations.length === 0
+  );
+}
+
 function normalizeKeyInput(value: string): string {
   return value.trim();
 }
@@ -1229,6 +1641,10 @@ function appendSearchableUnknownValues(value: unknown, values: string[], depth: 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
 
 function isNonEmptyString(value: string | null | undefined): value is string {

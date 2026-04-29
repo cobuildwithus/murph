@@ -46,15 +46,15 @@ describe("ExperimentDetailPage onboarding projection", () => {
         askBeforeCreatingAutomations: true,
         missedLogFollowup: "opt_in_only",
         missedLogFollowupCopy:
-          "Did you end up wearing the glasses before bed last night? Totally fine either way, I just want the experiment record to be accurate.",
+          "Did you end up wearing the glasses before bed last night? Totally fine either way; I just want the experiment record to be accurate.",
       }),
       planDefaults: expect.objectContaining({
         baselineDays: 7,
         interventionDays: 14,
-        testPlanId: "sol-proxy-21d",
+        testPlanId: "sol-wiredness-21d",
       }),
       startIntent: expect.objectContaining({
-        intentSummary: "Explore Red-Light Glasses Before Bed",
+        intentSummary: "Explore Red Light Glasses Before Bed",
       }),
     }));
   });

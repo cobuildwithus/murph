@@ -11,7 +11,7 @@ import type {
   ExperimentResearchGroup,
   Study,
 } from "@/src/types/experiments";
-import type { HealthCommonsEntity } from "./catalog";
+import type { HealthCommonsEntity } from "@murphai/health-commons/runtime";
 
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";

@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   createHealthCommonsCatalogReader,
+  createHealthCommonsRouteBundleReader,
   getGeneratedHealthCommonsCatalogReader,
+  getGeneratedHealthCommonsWebBiomarkerIndex,
+  getGeneratedHealthCommonsWebRouteIndex,
   loadGeneratedHealthCommonsCatalog,
+  loadGeneratedHealthCommonsWebRouteBundle,
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
 
@@ -215,6 +219,123 @@ function createMeasurementMethodCatalogReader() {
 }
 
 describe("@murphai/health-commons runtime catalog reader", () => {
+  it("loads the compact generated biomarker browse index", () => {
+    const biomarkerIndex = getGeneratedHealthCommonsWebBiomarkerIndex();
+    const publishedRouteIds = biomarkerIndex.biomarkers
+      .filter((entry) => entry.published)
+      .map((entry) => entry.routeId);
+
+    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v1");
+    expect(publishedRouteIds).toEqual(expect.arrayContaining([
+      "estimated-vo2max",
+      "resting-heart-rate",
+    ]));
+    expect(
+      biomarkerIndex.biomarkers.find((entry) => entry.routeId === "estimated-vo2max"),
+    ).toEqual(expect.objectContaining({
+      bundlePath: "bundles/biomarker/estimated-vo2max.json",
+      key: "biomarker:estimated-vo2max",
+      published: true,
+    }));
+  });
+
+  it("loads route-scoped web bundles and preserves the route-bundle reader contract", () => {
+    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
+    const routeEntry = routeIndex.routes.find((entry) =>
+      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
+    );
+
+    expect(routeEntry).toMatchObject({
+      bundlePath: "bundles/protocol_variant/finnish-sauna.json",
+      entityType: "protocol_variant",
+      routeId: "finnish-sauna",
+    });
+
+    const bundle = loadGeneratedHealthCommonsWebRouteBundle({
+      entityType: "protocol_variant",
+      routeId: "murph-finnish-standard-3x-week",
+    });
+
+    expect(bundle).not.toBeNull();
+    if (!bundle) {
+      throw new Error("Expected a generated Finnish sauna route bundle.");
+    }
+    expect(bundle.route).toEqual(expect.objectContaining({
+      aliases: expect.arrayContaining(["murph-finnish-standard-3x-week"]),
+      entityType: "protocol_variant",
+      routeId: "finnish-sauna",
+      slug: "protocols/dry-sauna/murph-finnish-standard-3x-week",
+    }));
+    expect(bundle.entitiesByKey[bundle.primaryKey]?.entityType).toBe("protocol_variant");
+    expect(Object.keys(bundle.sourceSnippets)).not.toHaveLength(0);
+
+    expect(bundle.revisionManifest[bundle.primaryKey]).toEqual({
+      pageRevisionId: expect.stringMatching(/^sha256:/u),
+      recipeHash: expect.stringMatching(/^sha256:/u),
+      runSpecRevisionId: expect.stringMatching(/^sha256:/u),
+    });
+    const reader = createHealthCommonsRouteBundleReader(bundle);
+    expect(reader.route).toEqual(bundle.route);
+    expect(reader.revisionManifest).toEqual(bundle.revisionManifest);
+    expect(reader.findByKey(bundle.primaryKey)?.entityType).toBe("protocol_variant");
+    expect(reader.listEvidenceAppraisals({ targetKey: bundle.primaryKey }).length).toBeGreaterThan(0);
+    expect(
+      bundle.reverseEdges.every((edge) => bundle.entitiesByKey[edge.sourceKey] !== undefined),
+    ).toBe(true);
+
+    const [firstSourceKey, sourceSnippet] = Object.entries(bundle.sourceSnippets)[0] ?? [];
+    expect(firstSourceKey).toEqual(expect.stringMatching(/^source_artifact:/u));
+    expect(sourceSnippet).toEqual(expect.objectContaining({
+      key: firstSourceKey,
+      title: expect.any(String),
+    }));
+    expect(
+      Object.values(bundle.sourceSnippets).every((snippet) =>
+        (snippet.finding?.length ?? 0) <= 1_000
+      ),
+    ).toBe(true);
+    expect(reader.getSourceSnippet(`${firstSourceKey}@sha256:deadbeef`)).toEqual(sourceSnippet);
+
+    const sourceBodies = Object.values(bundle.entitiesByKey)
+      .filter((entity) => entity.entityType === "source_artifact")
+      .map((entity) => entity.body);
+    expect(sourceBodies.length).toBeGreaterThan(0);
+    expect(sourceBodies.every((body) => body.length < 1_500)).toBe(true);
+    expect(sourceBodies.every((body) => body === "" || body.startsWith("**Findings:**"))).toBe(
+      true,
+    );
+    expect(
+      Object.values(bundle.entitiesByKey)
+        .filter((entity) => entity.entityType === "source_artifact")
+        .every((entity) => entity.relations?.length === 0),
+    ).toBe(true);
+
+    const reverseProtocolEdges = reader.listReverseEdges({
+      relationTypes: ["related_protocol"],
+      targetKey: bundle.primaryKey,
+    });
+    expect(reverseProtocolEdges.length).toBeGreaterThan(0);
+    expect(reverseProtocolEdges.every((edge) => edge.relation.type === "related_protocol")).toBe(
+      true,
+    );
+    expect(
+      reverseProtocolEdges.every(
+        (edge) => edge.relation.target === bundle.primaryKey && edge.sourceKey.length > 0,
+      ),
+    ).toBe(true);
+    expect(reverseProtocolEdges).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        relation: expect.objectContaining({
+          target: bundle.primaryKey,
+          type: "related_protocol",
+        }),
+        sourceKey: "biomarker:resting-heart-rate",
+      }),
+    ]));
+
+    expect(bundle.reverseEdges.every((edge) => edge.relation.type !== "cites")).toBe(true);
+  });
+
   it("loads the generated catalog and resolves keys, slugs, and route ids", () => {
     const catalog = loadGeneratedHealthCommonsCatalog();
     const reader = createHealthCommonsCatalogReader(catalog);
