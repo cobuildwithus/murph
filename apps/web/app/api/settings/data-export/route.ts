@@ -3,7 +3,7 @@ import {
   readJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   buildHostedDataExport,
   parseHostedDataExportRequest,
@@ -38,7 +38,7 @@ export function GET() {
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
-  const auth = await requireActivePrivyMemberAuth(request, prisma);
+  const auth = await requirePrivyMemberAuth(request, prisma);
   parseHostedDataExportRequest(await readJsonObject(request));
 
   const exportBundle = await buildHostedDataExport({

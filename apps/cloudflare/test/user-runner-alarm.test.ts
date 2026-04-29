@@ -13,6 +13,14 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import {
+  hostedArtifactUserPrefix,
+  hostedBrowserVaultReplicaUserPrefix,
+  hostedBundleUserPrefix,
+  hostedRunnerSecretsObjectKey,
+  hostedUserRootKeyEnvelopeObjectKey,
+} from "../src/storage-paths.ts";
+import { createHostedUserKeyStoreFromEnvironment } from "../src/user-key-store.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -234,6 +242,150 @@ describe("HostedUserRunner alarm routing", () => {
     expect(alarms).toContain("deleted");
     expect(destroyInstance).toHaveBeenCalledTimes(1);
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
+  it("keeps the root-key envelope when user-scoped R2 prefixes cannot be derived", async () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
+      environment.platformEnvelopeKey,
+      "member_123",
+    );
+    const r2Deletes: string[] = [];
+    const { runner } = createRunnerHarness({
+      bucket: {
+        async delete(key: string) {
+          r2Deletes.push(key);
+        },
+        async get(key: string) {
+          if (key !== rootEnvelopeKey) {
+            return null;
+          }
+
+          return {
+            async arrayBuffer(): Promise<ArrayBuffer> {
+              const bytes = new TextEncoder().encode("not a valid root envelope");
+              return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            },
+          };
+        },
+        async put() {},
+      },
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      ok: true,
+      r2: {
+        deletedRootKeyEnvelope: false,
+        skippedUserScopedPrefixes: true,
+      },
+      userId: "member_123",
+    });
+
+    expect(r2Deletes).toEqual([]);
+  });
+
+  it("keeps the root-key envelope when R2 prefix listing is unavailable", async () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const bucket = new MemoryEncryptedR2Bucket();
+    await createHostedUserKeyStoreFromEnvironment({
+      bucket,
+      environment,
+    }).provisionManagedUserCryptoAtActivation("member_123", {
+      reason: "test-bootstrap",
+    });
+    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
+      environment.platformEnvelopeKey,
+      "member_123",
+    );
+    expect(bucket.objects.has(rootEnvelopeKey)).toBe(true);
+    const { runner } = createRunnerHarness({
+      bucket,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      ok: true,
+      r2: {
+        deletedRootKeyEnvelope: false,
+        skippedUserScopedPrefixes: true,
+        supported: false,
+        userScopedSkipReason: "R2PrefixDeletionUnsupported",
+      },
+      userId: "member_123",
+    });
+
+    expect(bucket.objects.has(rootEnvelopeKey)).toBe(true);
+    expect(bucket.deleted).toEqual([]);
+  });
+
+  it("deletes user-scoped R2 prefixes, runner secrets, and root-key envelope when cleanup is fully supported", async () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    await createHostedUserKeyStoreFromEnvironment({
+      bucket,
+      environment,
+    }).provisionManagedUserCryptoAtActivation("member_123", {
+      reason: "test-bootstrap",
+    });
+    const userCrypto = await createHostedUserKeyStoreFromEnvironment({
+      bucket,
+      environment,
+    }).requireUserCryptoContext("member_123", {
+      reason: "test-cleanup",
+    });
+    const bundlePrefix = await hostedBundleUserPrefix(userCrypto.rootKey, "member_123");
+    const artifactPrefix = await hostedArtifactUserPrefix(userCrypto.rootKey, "member_123");
+    const browserVaultPrefix = await hostedBrowserVaultReplicaUserPrefix({
+      rootKey: userCrypto.rootKey,
+      userId: "member_123",
+    });
+    const runnerSecretsKey = await hostedRunnerSecretsObjectKey(userCrypto.rootKey, "member_123");
+    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
+      environment.platformEnvelopeKey,
+      "member_123",
+    );
+    await bucket.put(`${bundlePrefix}bundle.bundle.json`, "bundle");
+    await bucket.put(`${artifactPrefix}artifact.artifact.bin`, "artifact");
+    await bucket.put(`${browserVaultPrefix}replica.json`, "replica");
+    await bucket.put(runnerSecretsKey, "runner secrets");
+    await bucket.put("users/bundles/unrelated/vault/object.bundle.json", "unrelated");
+    const { runner } = createRunnerHarness({
+      bucket,
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      ok: true,
+      r2: {
+        deletedObjectCount: 5,
+        deletedRootKeyEnvelope: true,
+        skippedUserScopedPrefixes: false,
+        supported: true,
+        userScopedSkipReason: null,
+      },
+      userId: "member_123",
+    });
+
+    expect(bucket.objects.has(`${bundlePrefix}bundle.bundle.json`)).toBe(false);
+    expect(bucket.objects.has(`${artifactPrefix}artifact.artifact.bin`)).toBe(false);
+    expect(bucket.objects.has(`${browserVaultPrefix}replica.json`)).toBe(false);
+    expect(bucket.objects.has(runnerSecretsKey)).toBe(false);
+    expect(bucket.objects.has(rootEnvelopeKey)).toBe(false);
+    expect(bucket.objects.get("users/bundles/unrelated/vault/object.bundle.json")).toBe("unrelated");
+    expect(new Set(bucket.deleted)).toEqual(new Set([
+      `${bundlePrefix}bundle.bundle.json`,
+      `${artifactPrefix}artifact.artifact.bin`,
+      `${browserVaultPrefix}replica.json`,
+      runnerSecretsKey,
+      rootEnvelopeKey,
+    ]));
   });
 });
 
@@ -867,6 +1019,33 @@ function createDeferred<T>() {
     reject,
     resolve,
   };
+}
+
+class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
+  async list(input: {
+    cursor?: string;
+    limit?: number;
+    prefix?: string;
+  }): Promise<{
+    cursor?: string;
+    objects: Array<{ key: string }>;
+    truncated: boolean;
+  }> {
+    const matchingKeys = [...this.objects.keys()]
+      .filter((key) => input.prefix ? key.startsWith(input.prefix) : true)
+      .sort();
+    const offset = input.cursor ? Number.parseInt(input.cursor, 10) : 0;
+    const limit = input.limit ?? 1_000;
+    const pageKeys = matchingKeys.slice(offset, offset + limit);
+    const nextOffset = offset + pageKeys.length;
+    const truncated = nextOffset < matchingKeys.length;
+
+    return {
+      ...(truncated ? { cursor: String(nextOffset) } : {}),
+      objects: pageKeys.map((key) => ({ key })),
+      truncated,
+    };
+  }
 }
 
 function createWorkspaceReadResponseBody(workspace: HostedWorkspaceState | null): Response {
