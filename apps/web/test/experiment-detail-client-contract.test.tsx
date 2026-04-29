@@ -19,9 +19,16 @@ const mocks = vi.hoisted(() => ({
   })),
   experimentHeader: vi.fn(() => createElement("div", null, "header")),
   experimentHero: vi.fn(() => createElement("div", null, "hero")),
+  getHostedPageAuthSnapshot: vi.fn(),
+  getPrisma: vi.fn(() => ({ prisma: true })),
+  notFound: vi.fn(() => {
+    throw new Error("not found");
+  }),
   protocolTab: vi.fn(() => createElement("div", null, "protocol tab")),
+  readHostedMemberRoutingState: vi.fn(),
   refresh: vi.fn(),
   resolveBrowserVaultExperimentRun: vi.fn(() => null),
+  resolveHealthCommonsExperimentProtocol: vi.fn(),
   resultsTab: vi.fn(() => createElement("div", null, "results tab")),
   useBrowserVault: vi.fn(() => ({
     client: null,
@@ -32,6 +39,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  notFound: mocks.notFound,
   useRouter: () => ({
     refresh: mocks.refresh,
   }),
@@ -74,6 +82,10 @@ vi.mock("@/src/components/experiments/experiment-detail/results-tab", () => ({
   ResultsTab: mocks.resultsTab,
 }));
 
+vi.mock("@/src/lib/health-commons/experiment-detail", () => ({
+  resolveHealthCommonsExperimentProtocol: mocks.resolveHealthCommonsExperimentProtocol,
+}));
+
 vi.mock("@/src/lib/browser-vault/context", () => ({
   BrowserVaultProvider({ children }: { children: ReactNode }) {
     return createElement("div", null, children);
@@ -83,6 +95,18 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
 
 vi.mock("@/src/lib/browser-vault/experiment-run", () => ({
   resolveBrowserVaultExperimentRun: mocks.resolveBrowserVaultExperimentRun,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/experiments/experiment-detail", async (importOriginal) => {
@@ -96,6 +120,7 @@ vi.mock("@/src/lib/experiments/experiment-detail", async (importOriginal) => {
 
 import { ExperimentDetailClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-detail-client";
 import { ExperimentLayoutClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-layout-client";
+import { ResultsTabClient } from "../app/(dashboard)/experiments/[experimentId]/results/results-tab-client";
 
 const activeCleanups = new Set<() => Promise<void> | void>();
 const requireFromExperimentDetailClientTest = createRequire(import.meta.url);
@@ -104,6 +129,15 @@ const { parseHTML } = loadLinkedom();
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    linkedAccounts: [],
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+  mocks.resolveHealthCommonsExperimentProtocol.mockImplementation((id: string) => (
+    id === "finnish-sauna" ? createProtocol() : null
+  ));
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     error: null,
@@ -125,12 +159,15 @@ test("pins the experiment protocol contract to greenfield v1", () => {
 
 test("refreshes instead of hydrating the new protocol UI against a stale contract payload", async () => {
   const view = await renderClient(
-    createElement(ExperimentLayoutClient, {
-      protocol: createProtocol({
-        protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION - 1,
-      }),
-      children: createElement("div", null, "child content"),
-    }),
+    createElement(
+      ExperimentLayoutClient,
+      {
+        protocol: createProtocol({
+          protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION - 1,
+        }),
+      },
+      createElement("div", null, "child content"),
+    ),
   );
 
   expect(mocks.refresh).toHaveBeenCalledTimes(1);
@@ -157,7 +194,124 @@ test("renders the protocol tab with a link to the research subroute", async () =
   await view.cleanup();
 });
 
-async function renderClient(element: ReturnType<typeof createElement>) {
+test("passes minimized hosted contact routing state into the experiment header", async () => {
+  const initialContactChannels = {
+    email: true,
+    telegram: false,
+    text: true,
+  };
+  const view = await renderClient(
+    createElement(
+      ExperimentLayoutClient,
+      {
+        initialContactChannels,
+        murphPhoneNumber: "+15550100001",
+        protocol: createProtocol(),
+      },
+      createElement("div", null, "child content"),
+    ),
+  );
+
+  expect(mocks.experimentHeader).toHaveBeenCalledTimes(1);
+  const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
+    | [{
+        initialContactChannels?: unknown;
+        murphPhoneNumber?: string | null;
+      }]
+    | undefined)?.[0];
+  expect(headerProps?.initialContactChannels).toBe(initialContactChannels);
+  expect(headerProps?.murphPhoneNumber).toBe("+15550100001");
+
+  await view.cleanup();
+});
+
+test("passes hosted start contact context into the results empty-state CTA", async () => {
+  const initialContactChannels = {
+    email: false,
+    telegram: true,
+    text: true,
+  };
+  const protocol = createProtocol();
+  const view = await renderClient(
+    createElement(
+      ExperimentLayoutClient,
+      {
+        initialContactChannels,
+        murphPhoneNumber: "+15550100001",
+        protocol,
+      },
+      createElement(ResultsTabClient, { protocol }),
+    ),
+  );
+
+  expect(mocks.resultsTab).toHaveBeenCalledTimes(1);
+  const resultsProps = (mocks.resultsTab.mock.calls.at(-1) as
+    | [{
+        initialContactChannels?: unknown;
+        murphPhoneNumber?: string | null;
+      }]
+    | undefined)?.[0];
+  expect(resultsProps?.initialContactChannels).toBe(initialContactChannels);
+  expect(resultsProps?.murphPhoneNumber).toBe("+15550100001");
+
+  await view.cleanup();
+});
+
+test("server layout passes contact-channel flags and routing phone to the client tree", async () => {
+  const linkedAccounts = [{
+    phone_number: "+14045550123",
+    latest_verified_at: 1771977600,
+    type: "phone",
+  }, {
+    address: "member@example.test",
+    latest_verified_at: 1771977600,
+    type: "email",
+  }];
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      id: "member_123",
+    },
+    linkedAccounts,
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqRecipientPhone: "+15550100001",
+  });
+  const { default: ExperimentDetailLayout } = await import(
+    "../app/(dashboard)/experiments/[experimentId]/layout"
+  );
+  const view = await renderClient(
+    await ExperimentDetailLayout({
+      children: createElement("div", null, "child content"),
+      params: Promise.resolve({ experimentId: "finnish-sauna" }),
+    }),
+  );
+
+  expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
+  expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: { prisma: true },
+  });
+  const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
+    | [{
+        initialContactChannels?: unknown;
+        murphPhoneNumber?: string | null;
+      }]
+    | undefined)?.[0];
+  expect(headerProps?.initialContactChannels).toEqual({
+    email: true,
+    telegram: false,
+    text: true,
+  });
+  expect(headerProps?.murphPhoneNumber).toBe("+15550100001");
+  expect(JSON.stringify(headerProps)).not.toContain("+14045550123");
+  expect(JSON.stringify(headerProps)).not.toContain("member@example.test");
+
+  await view.cleanup();
+});
+
+async function renderClient(element: ReactNode) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
   const cleanupGlobals = installGlobals(window, document);
   activeCleanups.add(cleanupGlobals);

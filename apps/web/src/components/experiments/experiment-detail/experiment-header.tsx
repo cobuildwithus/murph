@@ -1,4 +1,5 @@
-import { AuthButton } from "@/src/components/ui/auth-button";
+import { StartExperimentButton } from "@/src/components/experiments/experiment-detail/start-experiment-button";
+import type { ExperimentStartContactChannels } from "@/src/lib/experiments/start-experiment-contact";
 import type { ExperimentStatus } from "@/src/types/experiments";
 
 const UNWANTED_BRYAN_JOHNSON_DESCRIPTION_PHRASE =
@@ -17,6 +18,8 @@ interface ExperimentHeaderProps {
   baselineDays: number;
   completionPercent?: number;
   description?: string;
+  initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
+  murphPhoneNumber?: string | null;
 }
 
 export function ExperimentHeader({
@@ -32,6 +35,8 @@ export function ExperimentHeader({
   baselineDays,
   completionPercent,
   description,
+  initialContactChannels,
+  murphPhoneNumber,
 }: ExperimentHeaderProps) {
   const sanitizedDescription = sanitizeExperimentDescription(description);
   const isActive = status === "active";
@@ -129,17 +134,12 @@ export function ExperimentHeader({
         </div>
 
         {status === "upcoming" && (
-          <div className="flex flex-col items-stretch gap-2 md:shrink-0 md:items-center">
-            <AuthButton
-              size="lg"
-              className="rounded-[10px] bg-primary py-4 text-base font-semibold text-background hover:bg-primary/90 md:px-12"
-            >
-              Start Experiment →
-            </AuthButton>
-            <span className="text-center text-[11px]/3.5 text-muted-foreground/70">
-              {protocolDays}-day protocol
-            </span>
-          </div>
+          <StartExperimentButton
+            initialContactChannels={initialContactChannels}
+            murphPhoneNumber={murphPhoneNumber}
+            protocolDays={protocolDays}
+            protocolTitle={title}
+          />
         )}
 
         {isActive && completionPercent != null && (

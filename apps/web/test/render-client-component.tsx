@@ -13,6 +13,7 @@ export async function renderClientComponent(element: ReactElement): Promise<{
   button: HTMLButtonElement;
   cleanup: () => Promise<void>;
   container: HTMLElement;
+  open: ReturnType<typeof vi.fn>;
   window: Window & typeof globalThis;
 }> {
   const { document, window } = loadLinkedom().parseHTML(
@@ -20,11 +21,16 @@ export async function renderClientComponent(element: ReactElement): Promise<{
   );
   installGlobals(window, document);
   const assign = vi.fn();
+  const open = vi.fn();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
       assign,
     },
+  });
+  Object.defineProperty(window, "open", {
+    configurable: true,
+    value: open,
   });
 
   const container = document.getElementById("root");
@@ -47,6 +53,7 @@ export async function renderClientComponent(element: ReactElement): Promise<{
       });
     },
     container,
+    open,
     window,
   };
 }
