@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:norwegian-4x4/norwegian-4x4
 slug: protocols/norwegian-4x4/norwegian-4x4
-title: Norwegian 4x4 Intervals
+title: Norwegian 4x4
 summary: "Use a repeatable hard-aerobic 4x4 workout to test whether cardio fitness improves without pushing symptoms or recovery in the wrong direction."
 status: field-testing
 quality: usable
