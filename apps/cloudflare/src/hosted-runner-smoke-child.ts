@@ -440,7 +440,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "",
     "[shell_environment_policy]",
     'inherit = "all"',
-    'include_only = ["PATH", "VAULT", "WHISPER_COMMAND"]',
+    'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FFMPEG_COMMAND", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT", "WHISPER_COMMAND", "WHISPER_MODEL_PATH"]',
     "",
   ].join("\n");
 }
@@ -553,8 +553,10 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
           "/bin/sh",
           "-c",
           [
-            "command -v vault-cli",
-            "command -v murph",
+            "vault_cli_path=$(command -v vault-cli || true)",
+            "murph_path=$(command -v murph || true)",
+            "printf '%s\\n' \"$vault_cli_path\"",
+            "printf '%s\\n' \"$murph_path\"",
             "printf '%s\\n' \"${VAULT:-}\"",
             "printf '%s\\n' \"${WHISPER_COMMAND:-}\"",
             "printf '%s\\n' \"${VERCEL_AI_API_KEY:-}\"",
@@ -572,6 +574,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
 
 function readCodexCommandExecResult(value: unknown): {
   exitCode: number;
+  stderr: string;
   stdout: string;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -589,6 +592,7 @@ function readCodexCommandExecResult(value: unknown): {
 
   return {
     exitCode: record.exitCode,
+    stderr: typeof record.stderr === "string" ? record.stderr : "",
     stdout: record.stdout,
   };
 }
@@ -596,12 +600,15 @@ function readCodexCommandExecResult(value: unknown): {
 function assertCodexShellEnvironmentProbeResult(input: {
   result: {
     exitCode: number;
+    stderr: string;
     stdout: string;
   };
   vaultRoot: string;
 }): void {
   if (input.result.exitCode !== 0) {
-    throw new Error(`Codex app-server shell env probe exited ${input.result.exitCode}.`);
+    throw new Error(
+      `Codex app-server shell env probe exited ${input.result.exitCode}. stdout=${JSON.stringify(input.result.stdout)} stderr=${JSON.stringify(input.result.stderr)}`,
+    );
   }
 
   const [vaultCliPath, murphPath, vaultRoot, whisperCommand, providerCredential, ...extra] =
