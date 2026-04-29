@@ -5,7 +5,7 @@ const launchPricingSummary = formatHostedLandingPricingLongSummary();
 const FAQ_ITEMS = [
   [
     "Where do the experiments come from?",
-    "GPT-5.5 Pro analyzes published studies, clinical trials, and other research sources to build each protocol. Every experiment links to its sources so you can check the evidence yourself.",
+    "Murph uses AI-assisted review of published studies, clinical trials, and other research sources to draft protocols, then presents sources so you can check the evidence yourself. Research may be incomplete, mixed, or not applicable to your situation.",
   ],
   [
     "Do I need a computer?",

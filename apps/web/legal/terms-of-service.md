@@ -162,7 +162,7 @@ You grant us a non-exclusive, worldwide, limited license to host, store, reprodu
 - create de-identified or aggregated analytics or service-improvement materials as described in our Privacy Policy; and
 - otherwise process User Content with your consent or at your direction.
 
-**Model training.** Unless we clearly disclose otherwise and obtain any consent required by law, we do not use your identifiable private health logs, messages, chats, attachments, wearable data, imported records, or similar User Content to train foundation models or third-party AI models. We also contractually require third-party AI model providers that process your identifiable User Content for the Hosted Service not to use that content to train their models, except where you separately authorize that use after clear disclosure.
+**Model training.** Unless we present a separate, specific opt-in consent that clearly identifies the data involved and applicable law permits the use, we do not use health data, consumer health data, HealthKit data, wearable data, journal content, health files, health memories, health prompts, assistant outputs based on health data, imported records, or derived health insights to train, fine-tune, or improve Murph's or any third party's general-purpose AI models. We also require third-party AI model providers that process your User Content for the Hosted Service not to use that content to train their models, except where you separately authorize that use after clear disclosure.
 
 This license ends when your User Content is deleted from our active systems, except to the extent retention is reasonably necessary for backups, security, audit logs, legal compliance, dispute resolution, or legitimate internal operational purposes.
 
@@ -214,7 +214,7 @@ Hosted Murph is for personal, direct-to-consumer wellness use and is not intende
 
 Do not submit regulated PHI to the Hosted Service on behalf of a covered entity or business associate unless and until Murph expressly offers that service under a signed BAA. If you are using Murph as an individual consumer and you direct a provider, lab, app, or other third party to send your information to Murph, that does not by itself make Murph a HIPAA business associate.
 
-We do not sell your identifiable private health logs, messages, chats, wearable data, or imported health records to data brokers. If we ever ask to use consumer health data for advertising, sale, model training, research, or other secondary purposes that require separate consent, we will seek consent in the manner required by applicable law.
+We do not sell, rent, license, or otherwise disclose consumer health data, HealthKit data, wearable data, journal content, health files, health memories, health prompts, or derived health insights to data brokers, advertising networks, third-party advertising platforms, information resellers, or similar parties. We do not use such data for targeted advertising, cross-context behavioral advertising, retargeting, lookalike audience creation, ad attribution, ad measurement, insurance/employment/credit eligibility decisions, or general-purpose AI model training. If we ever ask to use consumer health data for a purpose that requires separate consent or authorization, we will seek that consent or authorization in the manner required by applicable law.
 
 ## 13. No Monitoring or Clinical Review
 
@@ -271,6 +271,8 @@ If applicable law gives you a cooling-off, withdrawal, or similar consumer right
 We may suspend, downgrade, or terminate access if a payment fails, is reversed, becomes delinquent, is disputed, or is subject to a chargeback, refund, fraud review, or similar payment reversal. Reactivation may require updated payment information, settlement of past-due amounts, or manual review.
 
 If you purchased through an app store, marketplace, or reseller, that third party's billing, renewal, refund, and cancellation terms may also apply.
+
+If you download a Murph app from the Apple App Store, these Terms are between you and Murph, not Apple. Apple is not responsible for the Hosted Service or Murph app, maintenance, support, warranty, claims, or compliance, except to the extent required by applicable law. Apple and its subsidiaries are third-party beneficiaries of this paragraph and may enforce it against you.
 
 ## 17. Availability, Support, Changes, and Beta Features
 
@@ -429,6 +431,8 @@ Except for the exceptions below, you and Murph agree that any dispute, claim, or
 
 The arbitrator has authority to resolve disputes about the interpretation, applicability, enforceability, formation, or validity of this arbitration agreement, except that a court will decide disputes about the class-action waiver.
 
+The arbitration will be conducted by telephone, videoconference, written submissions, or in person in the county where you reside, as determined by the arbitrator and consistent with the administrator's rules. If AAA is unavailable or unwilling to administer the arbitration under these Terms, the parties will select another nationally recognized arbitration administrator, or a court of competent jurisdiction will appoint one.
+
 ### Exceptions
 
 Either party may bring claims in small claims court if the claims qualify. Either party may seek temporary or preliminary injunctive relief in court to protect intellectual property, confidential information, security interests, privacy, or to stop unauthorized use or abuse of the Hosted Service. Nothing in this Section prevents you from filing a complaint with a government agency.
@@ -452,6 +456,10 @@ You may opt out of this arbitration agreement by emailing legal@justco.build wit
 ### Governing Law and Venue
 
 These Terms are governed by the laws of the State of Delaware, excluding its conflict-of-laws rules. For disputes not subject to arbitration, the parties consent to the exclusive jurisdiction and venue of the state and federal courts located in Delaware, except where applicable law requires a different forum or gives you a non-waivable right to bring a claim elsewhere.
+
+### Limitation on Claims
+
+To the maximum extent permitted by law, any claim or cause of action arising out of or relating to these Terms, the Hosted Service, your account, payments, Output, Actions, data, privacy, or communications must be filed within one year after the claim arose, or it will be permanently barred. This limitation does not apply where prohibited by applicable law or to claims that cannot legally be shortened by contract.
 
 ## 30. Notice for California Users
 
