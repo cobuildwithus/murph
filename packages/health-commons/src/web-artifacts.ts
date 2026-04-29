@@ -1117,13 +1117,16 @@ function toExpectedSignal(
   );
   const protocolProminence =
     protocolSignal?.protocolProminence ?? hint.protocolProminence;
+  const expected = normalizeExpectedSignalLabel(
+    protocolSignal?.expected ?? hint.expected,
+  );
 
   return omitUndefined({
     label: biomarker.title,
     value: "",
     delta: "",
     direction: hint.direction,
-    expected: protocolSignal?.expected ?? hint.expected,
+    expected,
     description:
       protocolSignal?.description
       ?? hint.description
@@ -1131,6 +1134,21 @@ function toExpectedSignal(
       ?? summarizeBody(biomarker.body),
     protocolProminence,
   });
+}
+
+function normalizeExpectedSignalLabel(expected: string): string {
+  switch (expected) {
+    case "mixed_or_contextual":
+      return "Possible change";
+    case "down_or_stable":
+      return "Could trend lower";
+    case "up_or_stable":
+      return "Could improve";
+    case "stable":
+      return "Should stay stable";
+    default:
+      return expected;
+  }
 }
 
 function resolveBiomarkerDisplayHint(
