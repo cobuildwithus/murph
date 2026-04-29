@@ -11,8 +11,6 @@ categories:
 - cold-water-immersion
 - cold-plunge
 relations:
-- type: duplicate_source_identity
-  target: source_artifact:wimhofmethod-breathing-water-fainting-2026-04-26
 - type: parent_family
   target: experiment_family:cold-water-immersion
 - type: related_protocol
@@ -33,6 +31,7 @@ sourceIdentity:
   canonicalUrl: https://www.wimhofmethod.com/faq
   identityAliases:
   - Frequently Asked Questions
+  - Wim Hof Method (Accessed April 27, 2026)
   - https://www.wimhofmethod.com/faq
 researchEvidence:
   designKind: expert_protocol
@@ -92,6 +91,7 @@ coldPlungeExtraction:
   identityResolutionStatus: new_source
 aliases:
 - Frequently Asked Questions
+- Wim Hof Method (Accessed April 27, 2026)
 - https://www.wimhofmethod.com/faq
 ---
 

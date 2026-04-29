@@ -9,6 +9,10 @@ status: field-testing
 quality: usable
 aliases:
 - cold plunge
+- cold-water immersion
+- cold water immersion
+- CWI
+- ice bath
 - cold tub
 - deliberate cold exposure
 categories:
@@ -39,7 +43,7 @@ attribution:
   ownerType: murph
   note: Drafted from the 2026-04-27 Cold Plunge research restart package, canonical source ledger, extracted source findings, and standalone source-protocol evidence appraisals.
 protocol:
-  doseSignature: 2–3x/week · measured 10–15 °C water · 1–3 min head-out immersion · 7-day baseline + 14-day intervention
+  doseSignature: 'Murph conservative field-test starting dose: 2–3x/week · measured 10–15 °C water · 1–3 min head-out immersion · 7-day baseline + 14-day intervention; not an evidence-proven optimal dose'
   target: A repeatable, uncomfortable-but-controlled head-out immersion that keeps breathing controllable and allows an immediate self-exit.
   frequency:
     sessionsPerWeek: 3
@@ -65,9 +69,14 @@ protocol:
   safetyNotes:
   - 'This is a high-caution protocol because cold-water immersion can trigger cold shock, gasping or hyperventilation, cardiovascular strain, arrhythmia-relevant contexts, hypothermia risk, and drowning/submersion hazards. Source basis: source_artifact:pmid-2010387, source_artifact:pmid-2691172, source_artifact:pmid-36396152, source_artifact:weather-gov-cold-water-safety-2026-04-27.'
   - 'The 1–3 minute 10–15 °C starting range is a conservative Murph field-test dose, not a claim that this exact dose is proven optimal. It is intentionally shorter than several direct studies and stronger than many public protocols on screening. Source basis: source_artifact:doi-10.1002-lim2.53, source_artifact:doi-10.1002-lim2.70048, source_artifact:pmid-37866096, source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26.'
+  - 'Default Cold Plunge is an adults-only ordinary-wellness protocol. Under-18 users, pregnancy/early postpartum, older adults with frailty, limited mobility, fall risk, or inability to exit/dress/rewarm independently require a separate clinician/professional-supervised variant rather than ordinary unsupervised setup. Source basis: source_artifact:pmid-41602813, source_artifact:pmid-40624837, source_artifact:pmid-37873787, source_artifact:pmid-38060596, source_artifact:lungorg-sauna-cold-plunges-health-impacts-2025-05-29, source_artifact:utahhealth-cold-plunging-health-2023-03-24, source_artifact:heart-org-cold-water-plunge-risks-2022-12-09, source_artifact:pmid-41185024.'
+  - 'Cardiovascular screening includes known cardiovascular disease, coronary disease, angina, arrhythmia, heart failure, prior heart attack/stroke, uncontrolled or medication-treated blood pressure when uncertain, channelopathy/Long QT, family sudden-cardiac-event history, significant palpitations, fainting/near-fainting, or clinician advice to avoid sudden cold/water stress. Source basis: source_artifact:pmid-36396152, source_artifact:pmid-19696059, source_artifact:pmid-26152773, source_artifact:pmid-29408217, source_artifact:pmid-22547634, source_artifact:harvardhealth-cold-plunges-heart-2025-06-01, source_artifact:heart-org-cold-water-plunge-risks-2022-12-09.'
+  - 'Circulation, neurologic, respiratory, kidney, diabetes, and cold-reaction cautions are screening boundaries: peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, diabetes with hypoglycemia risk or impaired sensation, cold agglutinin disease, prior frostbite/non-freezing cold injury, severe Raynaud-type reaction, cold urticaria/anaphylaxis, severe asthma/COPD symptoms, seizure disorder/epilepsy, and kidney failure/serious kidney disease require clinician guidance before unsupervised start. Source basis: source_artifact:clevelandclinic-cold-plunge-benefits-risks-2024-12-24, source_artifact:harvardhealth-cold-plunges-heart-2025-06-01, source_artifact:pmid-37443045, source_artifact:pmid-34862605, source_artifact:pmid-41044831, source_artifact:pmid-37873787, source_artifact:wimhofmethod-faq-safety-2026-04-27, source_artifact:pmid-26617380.'
+  - 'Recent self-harm/suicide risk, severe or unstable mental-health symptoms, or using cold plunging as treatment for depression/anxiety requires a clinician-guided mental-health variant or safer alternative; the default protocol only tracks acute subjective mood as a wellness signal. Source basis: source_artifact:pmid-37443045, source_artifact:doi-10.1192-bja.2023.60, source_artifact:pmid-37381680.'
+  - 'Pregnancy/postpartum, cold-urticaria/anaphylaxis, alcohol/sedative, and medication-related cautions are safety-screening boundaries rather than efficacy claims. Source basis: source_artifact:doi-10.1002-lim2.70009, source_artifact:pmid-34862605, source_artifact:pmid-37873787, source_artifact:pmid-41044831, source_artifact:pmid-497899, source_artifact:pmid-9088850, source_artifact:pmid-6129886.'
   tips:
   - 'Make the first session the easiest: warmer end of the range, shorter duration, and no attempt to prove toughness.'
-  - Keep time of day, caffeine, exercise timing, sleep, alcohol, illness, and stress as stable as reasonably possible during the baseline and intervention windows.
+  - 'General experiment-control guidance, not a safety-evidence claim: keep time of day, caffeine, exercise timing, sleep, alcohol, illness, and stress as stable as reasonably possible during the baseline and intervention windows.'
   - Prefer a simple same-scale mood rating before and 30–180 minutes after the session; wearable metrics are context, not the primary verdict.
   - Separate this from post-workout recovery experiments. If the goal is soreness after training, use a recovery-specific CWI protocol instead.
   - Use a lower-risk alternative, such as a cool shower or skipping the experiment, when supervision, exit, or medical context is uncertain.
@@ -77,36 +86,42 @@ protocol:
   - 'Do not treat external weekly-dose claims as Murph efficacy proof. Source basis: source_artifact:hubermanlab-cold-exposure-protocol-2026-04-27, source_artifact:hubermanlab-deliberate-cold-exposure-podcast-2022-04-04.'
   logFields:
   - water_temperature_c
-  - temperature_measurement_method
-  - adult_nearby_or_rescue_plan_confirmed
-  - first_session_or_changed_setup_yes_no
-  - prior_cold_exposure_tolerance
   - time_in_water_seconds
   - head_out_yes_no
   - mood_before_0_10
   - mood_after_0_10
-  - pre_session_anxiety_or_panic_0_10
   - cold_shock_intensity_0_10
   - breathing_controlled_yes_no
-  - breathing_control_recovered_within_30s_yes_no
   - symptoms_or_stop_condition
-  - post_exit_balance_or_clumsiness
-  - post_exit_shivering_or_unable_to_rewarm
   - rewarming_time_minutes
   - sleep_last_night
   - training_or_sauna_same_day
   - alcohol_or_sedative_context
+  - notes
+  - temperature_measurement_method
+  - adult_nearby_or_rescue_plan_confirmed
+  - first_session_or_changed_setup_yes_no
+  - prior_cold_exposure_tolerance
+  - pre_session_anxiety_or_panic_0_10
+  - breathing_control_recovered_within_30s_yes_no
+  - post_exit_balance_or_clumsiness
+  - post_exit_shivering_or_unable_to_rewarm
   - medication_context_today
   - clinical_intent_wellness_vs_treatment
   - recent_illness_fever_dehydration_or_heat_illness
-  - notes
+  - thermometer_available_yes_no
+  - hard_training_or_resistance_training_within_24h
+  - sauna_heat_or_hot_cold_contrast_same_day
+  - alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today
+  - time_of_day
   stopConditions:
-  - Chest pain, chest pressure, severe breathlessness, new wheeze, faintness, fainting, confusion, severe headache, or loss of coordination.
-  - Uncontrolled gasping, hyperventilation, panic, or inability to speak or control breathing.
-  - Palpitations, irregular heartbeat sensation, blue/gray lips, severe numbness, weakness, or inability to exit immediately.
-  - Hives, swelling, wheeze, throat tightness, or any suspected cold-triggered allergic reaction.
-  - Shivering, afterdrop feeling, or cold stress after exit that does not settle with gentle rewarming.
-  - 'Any setup problem: slippery footing, stuck lid/door, no safe exit, unsafe water, open-water conditions, alcohol/sedatives, or being alone when supervision is needed.'
+  - Do not start if water temperature is unmeasured, the thermometer is unavailable, water is below 10 °C for the first default Murph run, setup changed, no safe exit, no adult nearby for first exposure, or any safety screen is positive or uncertain.
+  - Controlled breathing is not restored within 15–30 seconds, inability to speak in short sentences, uncontrolled gasping, hyperventilation, panic, or loss of breathing control.
+  - Chest pain or pressure, severe shortness of breath, new wheeze, palpitations, irregular heartbeat sensation, faintness, fainting, confusion, severe headache, visual changes, or loss of coordination.
+  - Hives, swelling, wheeze, throat tightness, angioedema, or any suspected cold-triggered allergic/systemic reaction.
+  - Blue or gray lips, severe or worsening numbness, weakness, clumsiness, slurred speech, inability to grip/step out/dress, inability to rewarm, persistent or worsening shivering, or cold stress after exit that does not settle with gentle rewarming.
+  - Unsafe footing, stuck cover/door, open-water conditions, unsafe water, alcohol/sedatives/recreational drugs, or being alone when supervision is needed.
+  - 'Any stop condition occurs: exit immediately, end the session, do not repeat the next session until the cause is resolved; seek urgent/emergency help for chest symptoms, fainting, confusion, severe breathlessness, swelling/throat tightness/wheeze, suspected submersion/aspiration, or inability to rewarm.'
 testPlans:
 - planId: mood-safety-21d
   durationDays: 21
@@ -127,7 +142,7 @@ testPlans:
   - Exclude or annotate days with illness, alcohol/sedatives, sauna/heat exposure, unusual training load, travel, major sleep disruption, or protocol deviations.
 expectedSignalDescriptions:
 - biomarkerKey: biomarker:self-reported-mood
-  description: 'Use the same 0–10 or 1–5 scale before the session and again 30–180 minutes after. Acute mood is the most defensible first-run target, but it remains short-horizon and source-limited. Source basis: source_artifact:doi-10.1002-lim2.53, source_artifact:doi-10.1002-lim2.70048, source_artifact:pmid-37866096.'
+  description: 'Use the same 0–10 or 1–5 scale before the session and again 30–180 minutes after. Acute mood is the most defensible first-run target, but it remains short-horizon and source-limited. Source basis: source_artifact:doi-10.1002-lim2.53, source_artifact:doi-10.1002-lim2.70044, source_artifact:doi-10.1002-lim2.70048, source_artifact:pmid-37866096.'
   expected: possible acute improvement
   protocolProminence: focus
 - biomarkerKey: biomarker:hrv-rmssd
@@ -192,51 +207,57 @@ experimentOnboarding:
     mode: ask_each_item
     dispositionIfAnyPositive: clinician_guidance_before_unsupervised_start
     mustAsk:
-    - id: cardiovascular_red_flags
-      prompt: known cardiovascular disease, angina or chest pressure, unexplained shortness of breath, fainting or near-fainting, significant palpitations or arrhythmia, heart failure, recent heart attack or stroke, uncontrolled blood pressure, or a clinician telling you to avoid sudden cold exposure
-      ifPositive: clinician_guidance_before_unsupervised_start
-      why: Cold water can acutely change breathing, blood pressure, heart rate, sympathetic tone, and arrhythmia-relevant conditions.
-    - id: cold_allergy_or_vascular_reaction
-      prompt: cold urticaria, cold-triggered hives or swelling, past anaphylaxis, Raynaud-type severe cold reaction, severe numbness, or prior unsafe reaction to cold water
-      ifPositive: do_not_start_unsupervised
-      why: Cold-triggered allergic or vascular reactions can become systemic or impair safe exit.
-    - id: respiratory_neurologic_or_pregnancy_context
-      prompt: severe asthma or COPD symptoms, seizure disorder, pregnancy or early postpartum if relevant, diabetes medication that can cause lows, or another condition where cold stress could be unsafe
-      ifPositive: clinician_guidance_before_unsupervised_start
-    - id: unsafe_setup_or_exit
-      prompt: no reliable way to get out immediately, slippery footing, locked or covered tub risk, open-water setting, no one nearby when you need supervision, or no dry warm rewarming plan
-      ifPositive: do_not_start_unsupervised
-    - id: alcohol_sedatives_or_impairment
-      prompt: alcohol, sedatives, recreational drugs, major sleep deprivation, or anything that could impair judgment, balance, breathing control, or safe exit today
-      ifPositive: do_not_start_unsupervised
-    - id: breathwork_submersion_or_breath_hold_plan
-      prompt: planning to do breathwork, deliberate hyperventilation, breath-holding, face submersion, underwater challenges, or open-water swimming as part of the session
-      ifPositive: do_not_start_unsupervised
-      why: Those are excluded variants with different drowning and arrhythmia-relevant risks.
     - id: age_frailty_and_fall_risk
       prompt: under 18, older adult with frailty, limited mobility, fall risk, difficulty stepping out of a tub, or needing help to dress or rewarm
       ifPositive: clinician_guidance_before_unsupervised_start
       why: Minor, frailty, mobility, and post-immersion instability contexts require a different supervision and rescue model.
+    - id: cardiovascular_channelopathy_or_syncope
+      prompt: known cardiovascular disease, coronary artery disease, angina, arrhythmia, Long QT/channelopathy, family history of sudden cardiac death or serious water-triggered cardiac events, heart failure, recent heart attack or stroke, unexplained fainting/near-fainting, exertional chest symptoms, significant palpitations, uncontrolled blood pressure, medication-treated high blood pressure if uncertain, or a clinician telling you to avoid sudden cold or water stress
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Cold water can acutely change breathing, blood pressure, heart rate, sympathetic tone, and arrhythmia-relevant conditions.
     - id: circulation_neuropathy_cold_injury
-      prompt: peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, prior frostbite or non-freezing cold injury, cold agglutinin disease, severe Raynaud-type reaction, or severe numbness with cold
+      prompt: peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, prior frostbite or non-freezing cold injury, cold agglutinin disease, severe Raynaud-type reaction, severe numbness, or prior unsafe reaction to cold water
       ifPositive: clinician_guidance_before_unsupervised_start
-    - id: inherited_or_family_cardiac_risk
-      prompt: known or suspected Long QT syndrome, channelopathy, family history of sudden cardiac death, water-triggered fainting or arrhythmia, or clinician advice to avoid cold-water or sudden cold exposure
-      ifPositive: clinician_guidance_before_unsupervised_start
-    - id: current_illness_or_depleted_state
-      prompt: fever, acute infection, dehydration, recent heat illness, severe fatigue, major sleep deprivation, or feeling too unwell to safely exit and rewarm today
+      why: Circulation, sensation, and cold-injury history can change cold-exposure risk and safe-exit judgment.
+    - id: cold_allergy_or_systemic_reaction
+      prompt: cold urticaria, cold-triggered hives, swelling, wheeze, throat tightness, angioedema, anaphylaxis history, or any cold-triggered systemic reaction
       ifPositive: do_not_start_unsupervised
+      why: Cold-triggered allergic or vascular reactions can become systemic or impair safe exit.
+    - id: respiratory_neurologic_kidney_or_diabetes_context
+      prompt: severe asthma/COPD symptoms, cold-triggered respiratory symptoms, seizure disorder/epilepsy, kidney failure or serious kidney disease, diabetes with hypoglycemia risk or impaired sensation, or medication affecting heart rate, blood pressure, rhythm, alertness, thermoregulation, glucose, balance, or safe exit
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: Respiratory, neurologic, kidney, diabetes, and medication contexts can alter cold-stress and safe-exit risk.
+    - id: pregnancy_postpartum_or_clinical_variant_context
+      prompt: pregnancy, early postpartum, or another clinical situation where a clinician-guided or professionally supervised variant would be safer than an ordinary wellness run
+      ifPositive: clinician_guidance_before_unsupervised_start
+      why: The ordinary Cold Plunge page is not a pregnancy/postpartum or clinical-treatment clearance pathway.
     - id: clinical_mental_health_context
       prompt: recent self-harm or suicide risk, severe or unstable mental-health symptoms, or planning to use cold plunges as treatment for depression or anxiety
       ifPositive: clinician_guidance_before_unsupervised_start
       why: The default protocol tracks acute subjective mood in a wellness experiment; it is not a clinical mental-health treatment.
+    - id: current_illness_or_depleted_state
+      prompt: fever, acute infection, dehydration, recent heat illness, severe fatigue, major sleep deprivation, or feeling too unwell to safely exit and rewarm today
+      ifPositive: do_not_start_unsupervised
+      why: Acute illness or depletion can raise cold-stress risk and confound interpretation.
+    - id: unsafe_setup_or_exit
+      prompt: unmeasured water temperature, no thermometer, water below 10 °C for the first default Murph run, no reliable way to get out immediately, slippery footing, locked or covered tub risk, open-water setting, no adult nearby for the first session or changed/colder/uncertain setup, or no dry warm rewarming plan
+      ifPositive: do_not_start_unsupervised
+      why: Measured temperature, immediate exit, rescue planning, and rewarming are first-run safety gates.
+    - id: alcohol_sedatives_or_impairment
+      prompt: alcohol, sedatives, recreational drugs, major sleep deprivation, or anything that could impair judgment, balance, breathing control, or safe exit today
+      ifPositive: do_not_start_unsupervised
+    - id: breathwork_submersion_or_breath_hold_plan
+      prompt: planning to do breathwork, deliberate hyperventilation, breath-holding, face submersion, underwater challenges, open-water swimming, sauna-to-plunge contrast, or hot-cold stacking as part of the session
+      ifPositive: do_not_start_unsupervised
+      why: Those are excluded variants with different drowning, arrhythmia-relevant, heat-stress, and rescue risks.
     stopIf:
       inheritFromProtocolSafety: true
       additionalConditions:
-      - uncontrolled gasping or panic
-      - chest symptoms or palpitations
-      - dizziness, confusion, or loss of coordination
-      - cold-triggered hives, swelling, or wheeze
+      - water temperature is unmeasured, the thermometer is unavailable, the setup changed, no safe exit, or no adult nearby for first exposure
+      - controlled breathing is not restored within 15–30 seconds or the user cannot speak in short sentences
+      - chest symptoms, severe breathlessness, wheeze, palpitations, faintness, fainting, confusion, visual changes, severe headache, or loss of coordination
+      - cold-triggered hives, swelling, throat tightness, angioedema, or systemic reaction symptoms
+      - post-exit unsteadiness, severe numbness, weak legs, poor grip, clumsiness, or inability to dress/rewarm without help
       - unsafe exit or rewarming setup
     notes:
     - A positive or uncertain screen is not a diagnosis; it means Murph should not configure an unsupervised Cold Plunge run and should offer a safer alternative or clinician-guidance path.
@@ -247,11 +268,14 @@ experimentOnboarding:
     valueType: number
     askPolicy: always
     required: true
-    question: What water temperature in °C will you use for the first sessions?
+    question: What measured water temperature in °C will you use for the first sessions?
     constraints:
       unit: C
+      min: 10
+      max: 15
       recommendedMin: 10
       recommendedMax: 15
+      firstDefaultRunHardGate: measured_10_to_15_c; do_not_start_if_unmeasured_or_below_10_c
     target:
       object: protocol
       field: temperatureC
@@ -351,7 +375,7 @@ experimentOnboarding:
       - water_temperature_c
       requiredForRunSpec: true
       protocolReusable: true
-      guidance: Keep first-run sessions in the conservative 10–15 °C range unless clinician/supervised context supports otherwise.
+      guidance: Default first-run sessions require measured 10–15 °C water; do not start if unmeasured, below 10 °C, or changed setup unless this is a separate clinician-guided/professionally supervised variant.
     - id: duration_field
       label: Session duration
       target:
@@ -381,6 +405,7 @@ experimentOnboarding:
       - supervision_or_checkin
       requiredForRunSpec: true
       protocolReusable: false
+      guidance: Another adult nearby and able to help is required for the first session or any changed/colder/uncertain setup; a scheduled check-in is only for later uneventful sessions with unchanged measured setup and negative screen.
     - id: mood_scale_field
       label: Primary mood scale
       target:
@@ -421,34 +446,47 @@ experimentOnboarding:
     sessionsPerWeek: 3
     targetSessions: 6
     minimumUsefulSessions: 4
-    firstSessionGuidance: Use the warmer end of the planned range and the shortest duration; end immediately if breathing control or exit confidence changes.
+    firstSessionGuidance: Use the warmer end of the measured 10–15 °C range and the shortest duration; another adult should be nearby and able to help; end immediately if breathing control or exit confidence changes.
   logging:
     sessionFields:
     - water_temperature_c
-    - temperature_measurement_method
-    - adult_nearby_or_rescue_plan_confirmed
-    - first_session_or_changed_setup_yes_no
     - time_in_water_seconds
     - mood_before
     - mood_after
-    - pre_session_anxiety_or_panic_0_10
     - cold_shock_intensity
     - breathing_controlled
-    - breathing_control_recovered_within_30s_yes_no
     - symptoms_or_stop
+    - rewarming_time_minutes
+    - temperature_measurement_method
+    - adult_nearby_or_rescue_plan_confirmed
+    - first_session_or_changed_setup_yes_no
+    - prior_cold_exposure_tolerance
+    - pre_session_anxiety_or_panic_0_10
+    - breathing_control_recovered_within_30s_yes_no
     - post_exit_balance_or_clumsiness
     - post_exit_shivering_or_unable_to_rewarm
-    - rewarming_time_minutes
-    confounders:
     - medication_context_today
     - clinical_intent_wellness_vs_treatment
     - recent_illness_fever_dehydration_or_heat_illness
+    - thermometer_available_yes_no
+    - hard_training_or_resistance_training_within_24h
+    - sauna_heat_or_hot_cold_contrast_same_day
+    - alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today
+    - time_of_day
+    confounders:
     - sleep_last_night
     - hard_training_same_day
     - sauna_or_heat_same_day
     - alcohol_or_sedatives
     - illness_or_fever
     - unusual_stress
+    - medication_context_today
+    - clinical_intent_wellness_vs_treatment
+    - recent_illness_fever_dehydration_or_heat_illness
+    - hard_training_or_resistance_training_within_24h
+    - sauna_heat_or_hot_cold_contrast_same_day
+    - alcohol_sedatives_recreational_drugs_or_major_sleep_deprivation_today
+    - time_of_day
     notes:
     - Log before and after the session; never continue a session just to complete a log.
   assistantPolicy:
@@ -459,7 +497,7 @@ experimentOnboarding:
     - reminder_policy
     weeklyDigestDefault: true
     missedLogFollowupCopy: I can remind you to log temperature, duration, mood, symptoms, and rewarming after planned cold-plunge sessions.
-    confirmationPrompt: Confirm the safety screen, measured water temperature, first-session duration, exit and rewarming plan, supervision/check-in, mood scale, and stop rules before creating the Cold Plunge experiment.
+    confirmationPrompt: Confirm the safety screen, measured water temperature, first-session duration, exit/rescue and gentle rewarming plan, adult-nearby first-session supervision, mood scale, and stop rules before creating the Cold Plunge experiment.
 whyItWorks:
 - 'Cold water is a strong sensory and autonomic stressor; acute mood changes may reflect perceived challenge, arousal, stress-hormone timing, and post-exposure appraisal rather than a settled disease mechanism. Source basis: source_artifact:doi-10.1002-lim2.53, source_artifact:doi-10.1002-lim2.70048, source_artifact:pmid-37866096.'
 - 'Repeated exposures may reduce some cold-shock and discomfort responses, but habituation is specific and incomplete rather than proof that the protocol broadly improves health. Source basis: source_artifact:pmid-38211547, source_artifact:pmid-40815943, source_artifact:pmid-38301228.'
@@ -470,35 +508,39 @@ claims:
   text: Murph Cold Plunge is a brief, deliberate, usually head-out cold-water immersion in a controlled tub, tank, or plunge setting; cold showers, open-water swimming, cold-air cryotherapy, contrast therapy, breathwork bundles, and post-exercise-only recovery CWI are adjacent variants rather than interchangeable direct evidence.
   strength: high
   sourceKeys:
-  - source_artifact:clevelandclinic-cold-plunge-benefits-risks-2024-12-24
-  - source_artifact:pmid-36829490
   - source_artifact:pmid-37866096
+  - source_artifact:doi-10.1002-lim2.53
   - source_artifact:doi-10.1002-lim2.70044
+  - source_artifact:doi-10.1002-lim2.70048
+  - source_artifact:clevelandclinic-cold-plunge-benefits-risks-2024-12-24
   - source_artifact:hubermanlab-cold-exposure-protocol-2026-04-27
   caveats:
   - This is a protocol boundary, not an efficacy claim; external public dose sources are kept as context-only sources.
 - claimId: direct-evidence-short-term-and-mixed
   type: evidence_scope
-  text: 'The direct cold-plunge evidence base recovered here is mostly short-term and mixed: acute mood, stress, autonomic, catecholamine, immune, tissue-cooling, and habituation signals are present, but durable clinical, immune-protection, cardiometabolic, cognition, sleep, or performance benefits are not established.'
+  text: 'The direct and near-direct cold-plunge evidence base recovered here is mostly short-term and mixed: acute mood/stress and habituation findings are plausible, immune/leukocyte evidence is mixed or null, and tissue-cooling or catecholamine findings are mechanistic dose/safety context rather than benefits. Durable clinical, immune-protection, cardiometabolic, cognition, sleep, or performance benefits are not established.'
   strength: moderate
   sourceKeys:
   - source_artifact:doi-10.1002-lim2.53
+  - source_artifact:doi-10.1002-lim2.70044
   - source_artifact:doi-10.1002-lim2.70048
   - source_artifact:pmid-37866096
-  - source_artifact:pmid-39879231
   - source_artifact:pmid-37711459
   - source_artifact:pmid-40815943
+  - source_artifact:pmid-31203599
+  - source_artifact:pmid-39779795
+  - source_artifact:pmid-39879231
   caveats:
   - Many direct studies are small, short, young/healthy, male-heavy, acute, or mechanistic; adjacent variants must stay labeled.
 - claimId: acute-mood-signal-plausible-not-durable-proof
   type: mixed_evidence
-  text: Acute self-reported mood may improve after controlled cold-water immersion in some screened young or healthy samples, but the signal is immediate or short-horizon and should be tested as a personal subjective outcome, not promised as a durable mental-health treatment.
+  text: 'Acute self-reported mood is a plausible short-term target: several direct single-session cold-water immersion records in screened young, healthy, or self-reported-low-mood samples reported immediate mood improvement, while a separate 10 °C immersion study showed a delayed negative-mood/cortisol signal with mixed mood and cardiovascular interpretation. Treat mood as a personal subjective signal, not a durable mental-health treatment claim.'
   strength: moderate
   sourceKeys:
   - source_artifact:doi-10.1002-lim2.53
+  - source_artifact:doi-10.1002-lim2.70044
   - source_artifact:doi-10.1002-lim2.70048
   - source_artifact:pmid-37866096
-  - source_artifact:doi-10.1002-lim2.70044
   caveats:
   - The strongest mood-supportive records used single-session naturalistic or controlled settings; one direct study found mixed endpoint timing and cardiovascular interpretation.
 - claimId: cold-water-is-acute-stressor-safety-first
@@ -563,7 +605,7 @@ claims:
   - Use observational sources for hypothesis generation and expectation management only.
 - claimId: post-exercise-cwi-is-separate-recovery-variant
   type: mixed_evidence
-  text: 'Post-exercise cold-water immersion is a separate recovery/timing variant: it may help some soreness or short-term recovery endpoints, but effects are comparator-, timing-, sport-, and adaptation-dependent, with possible training-adaptation tradeoffs.'
+  text: 'Post-exercise cold-water immersion is a separate recovery/timing variant: it may help some soreness or selected short-term recovery endpoints, but evidence is comparator-, timing-, sport-, sex/population-, and adaptation-dependent, includes null recovery trials, and may conflict with some resistance-training adaptation goals.'
   strength: moderate
   sourceKeys:
   - source_artifact:pmid-22336838
@@ -573,6 +615,7 @@ claims:
   - source_artifact:pmid-25760154
   - source_artifact:pmid-25437181
   - source_artifact:pmid-39918163
+  - source_artifact:doi-10.1371-journal.pone.0322416
   caveats:
   - Do not use athlete recovery evidence to promise general wellness benefits or to recommend plunging after every strength session.
 - claimId: breathwork-submersion-and-breath-holding-excluded
@@ -581,7 +624,6 @@ claims:
   strength: high
   sourceKeys:
   - source_artifact:wimhofmethod-faq-safety-2026-04-27
-  - source_artifact:weather-gov-cold-water-safety-2026-04-27
   - source_artifact:pmid-7950804
   - source_artifact:pmid-17086766
   - source_artifact:pmid-20377144
@@ -591,7 +633,7 @@ claims:
   - A branded method or sports-recovery protocol should be represented as its own external or adjacent protocol, not folded into this canonical protocol.
 - claimId: onboarding-requires-high-caution-screen
   type: design_guardrail
-  text: 'Cold Plunge should power Murph experiment creation only through high-caution onboarding: screen for cardiovascular, respiratory, neurologic, cold-triggered allergic/vascular, pregnancy/postpartum, medication, alcohol/sedative, supervision, exit, and rewarming risks before configuring a run.'
+  text: 'Cold Plunge should power Murph experiment creation only through high-caution onboarding: screen for adult-only fit, cardiovascular/channelopathy/syncope, respiratory, neurologic, kidney, diabetes, cold-triggered allergic/vascular/circulation, pregnancy/postpartum, medication, alcohol/sedative, mental-health-treatment intent, supervision, measured-temperature, exit, and rewarming risks before configuring a run.'
   strength: high
   sourceKeys:
   - source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26
@@ -599,6 +641,13 @@ claims:
   - source_artifact:pmid-26617380
   - source_artifact:pmid-2010387
   - source_artifact:weather-gov-cold-water-safety-2026-04-27
+  - source_artifact:doi-10.1002-lim2.70009
+  - source_artifact:pmid-34862605
+  - source_artifact:pmid-37873787
+  - source_artifact:pmid-41044831
+  - source_artifact:pmid-497899
+  - source_artifact:pmid-9088850
+  - source_artifact:pmid-6129886
   caveats:
   - A positive or uncertain screen is not a diagnosis; it means Murph should not start an unsupervised cold-water experiment without clinician guidance or a safer alternative.
 researchLandscape:
@@ -614,6 +663,13 @@ researchLandscape:
     sourceKeys:
     - source_artifact:doi-10.1002-lim2.53
     defaultOpen: true
+  - id: environment-mood
+    label: Sea versus laboratory acute mood signal
+    stance: supports
+    summary: A small crossover study reported mood improvement after both sea and laboratory cold-water immersion, while suggesting the immersion environment may modify the psychological response.
+    sourceKeys:
+    - source_artifact:doi-10.1002-lim2.70044
+    defaultOpen: false
   - id: dose-mood
     label: Duration-dose mood signal
     stance: supports
@@ -621,13 +677,6 @@ researchLandscape:
     sourceKeys:
     - source_artifact:doi-10.1002-lim2.70048
     defaultOpen: true
-  - id: environment-mood
-    label: Immersion environment mood signal
-    stance: supports
-    summary: A direct immersion-environment mood record supports a narrow acute mood signal while preserving setting and dose limitations.
-    sourceKeys:
-    - source_artifact:doi-10.1002-lim2.70044
-    defaultOpen: false
   - id: acute-mood-stress
     label: Acute mixed mood and stress markers
     stance: mixed
@@ -635,6 +684,13 @@ researchLandscape:
     sourceKeys:
     - source_artifact:pmid-37866096
     defaultOpen: true
+  - id: brain-mood-context
+    label: Brain and affect measurement context
+    stance: context_only
+    summary: A warmer head-out immersion study reported increased positive affect and brain-network interaction, but the exposure temperature and acute pre-post neuroimaging design make it measurement/mechanistic context rather than standalone cold-plunge benefit evidence.
+    sourceKeys:
+    - source_artifact:pmid-36829490
+    defaultOpen: false
   - id: health-wellbeing-review
     label: Health and wellbeing review boundary
     stance: mixed
@@ -645,15 +701,38 @@ researchLandscape:
   - id: cold-shock-safety
     label: Cold shock and acute stress load
     stance: safety_boundary
-    summary: Foundational and modern physiology/safety sources treat cold shock, hyperventilation, sympathetic load, catecholamines, blood pressure, and arrhythmia-relevant contexts as primary boundaries.
+    summary: A direct cold-shock physiology source supports first-exposure breathing cautions and immediate exit if ventilation is not quickly controlled.
     sourceKeys:
     - source_artifact:pmid-2010387
-    - source_artifact:pmid-2691172
-    - source_artifact:pmid-10751106
-    - source_artifact:pmid-8891513
-    - source_artifact:pmid-39779795
-    - source_artifact:pmid-36396152
     defaultOpen: true
+  - id: safety-cold-shock-hypothermia
+    label: Cold-shock and hypothermia physiology
+    stance: safety_boundary
+    summary: Foundational CWI physiology anchors cold-shock and hypothermia risk as safety context, not benefit evidence.
+    sourceKeys:
+    - source_artifact:pmid-2691172
+    defaultOpen: false
+  - id: temperature-dose-physiology
+    label: Longer colder immersion dose physiology
+    stance: context_only
+    summary: One-hour cold-water immersion physiology shows catecholamine and temperature-load context; it is dose/safety context, not a Murph starting-dose benefit claim.
+    sourceKeys:
+    - source_artifact:pmid-10751106
+    defaultOpen: false
+  - id: sympathetic-cardiovascular
+    label: Sympathetic and cardiovascular physiology
+    stance: context_only
+    summary: Acute sympathetic and cardiovascular shifts are mechanistic safety context, and repeated-exposure results do not establish broad benefit.
+    sourceKeys:
+    - source_artifact:pmid-8891513
+    defaultOpen: false
+  - id: catecholamine-dose-context
+    label: Catecholamine and lipidome dose context
+    stance: context_only
+    summary: A direct ice-bath physiology study reported noradrenaline/lipidome responses, which should be treated as mechanistic dose context rather than clinical benefit evidence.
+    sourceKeys:
+    - source_artifact:pmid-39779795
+    defaultOpen: false
   - id: cold-shock-habituation-safety
     label: Habituation and anxiety boundary
     stance: safety_boundary
@@ -672,7 +751,6 @@ researchLandscape:
     summary: Repeated brief 12 °C head-out immersions habituated ventilation and perception but did not show cardiovascular, metabolic, core, or skin-temperature habituation.
     sourceKeys:
     - source_artifact:pmid-40815943
-    - source_artifact:pmid-38301228
     defaultOpen: false
   - id: cold-plunge-safety-guideline
     label: Safety screening and implementation guidance
@@ -682,8 +760,24 @@ researchLandscape:
     - source_artifact:pmid-26617380
     - source_artifact:pmid-36396152
     - source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26
+    defaultOpen: true
+  - id: cold-water-safety-boundary
+    label: Public cold-water safety boundary
+    stance: safety_boundary
+    summary: Public cold-water safety guidance supports treating cold shock, cold incapacitation, hypothermia, and rescue planning as safety boundaries.
+    sourceKeys:
     - source_artifact:weather-gov-cold-water-safety-2026-04-27
     defaultOpen: true
+  - id: cardiac-risk-clinical-boundary
+    label: Cardiac-risk clinical boundary
+    stance: safety_boundary
+    summary: Cardiac-disease, long-QT/channelopathy, and supervised cardiac-immersion sources support clinician guidance before any unsupervised cold-water exposure in cardiovascular-risk populations.
+    sourceKeys:
+    - source_artifact:pmid-39461093
+    - source_artifact:pmid-26152773
+    - source_artifact:pmid-38060596
+    - source_artifact:pmid-19696059
+    defaultOpen: false
   - id: cold-urticaria-anaphylaxis-screening
     label: Cold urticaria and allergic-reaction screening
     stance: safety_boundary
@@ -695,24 +789,81 @@ researchLandscape:
     - source_artifact:pmid-34437035
     - source_artifact:pmid-34862605
     defaultOpen: false
+  - id: pregnancy-safety-boundary
+    label: Pregnancy and postpartum boundary
+    stance: safety_boundary
+    summary: Pregnancy-specific cold-water evidence is sparse and not a clearance basis for this ordinary unsupervised wellness protocol.
+    sourceKeys:
+    - source_artifact:doi-10.1002-lim2.70009
+    defaultOpen: false
+  - id: alcohol-cold-water-safety-boundary
+    label: Alcohol and cold-water safety boundary
+    stance: safety_boundary
+    summary: Alcohol changes thermal balance and early cold-water responses, supporting an alcohol/sedative exclusion for sessions.
+    sourceKeys:
+    - source_artifact:pmid-497899
+    - source_artifact:pmid-9088850
+    defaultOpen: false
+  - id: drowning-rescue-boundary
+    label: Drowning and rescue-planning boundary
+    stance: safety_boundary
+    summary: Drowning and submersion rescue sources support adult-nearby first-session supervision, rescue planning, and emergency escalation after any suspected submersion or aspiration.
+    sourceKeys:
+    - source_artifact:pmid-26889019
+    - source_artifact:pmid-21458133
+    - source_artifact:pmid-39530204
+    - source_artifact:pmid-38379489
+    defaultOpen: false
+  - id: hypothermia-emergency-escalation
+    label: Hypothermia and emergency escalation
+    stance: safety_boundary
+    summary: Hypothermia, rescue, and afterdrop guidance support gentle rewarming, post-exit observation, and urgent escalation for persistent cold stress, confusion, inability to rewarm, or deterioration.
+    sourceKeys:
+    - source_artifact:pmid-16538942
+    - source_artifact:uscg-cold-water-survival-guide-2012-11-30
+    - source_artifact:pmid-33675869
+    - source_artifact:pmid-31740369
+    defaultOpen: false
   - id: immune-inflammation-illness-context
     label: Immune, inflammation, and illness boundary
     stance: mixed
-    summary: Immune and inflammation evidence includes acute biomarker shifts, repeated-CWI null or unclear findings, and adjacent cold-shower or voluntary-exposure data; it does not support a cold-plunge immune-protection promise.
+    summary: Adjacent illness and cold-shower evidence does not support a cold-plunge immune-protection promise.
     sourceKeys:
-    - source_artifact:pmid-39879231
-    - source_artifact:pmid-33910456
-    - source_artifact:pmid-37711459
-    - source_artifact:pmid-8925815
     - source_artifact:pmid-27631616
     defaultOpen: false
-  - id: sleep-hrv-recovery-context
-    label: Sleep, HRV, and recovery context
+  - id: immune-stress-acute
+    label: Acute immune and stress biomarkers
     stance: mixed
-    summary: Sleep/HRV/recovery records are useful for monitoring strain and adjacent post-exercise recovery, but direct sleep or wearable-benefit claims remain exploratory or mixed.
+    summary: Short whole-body CWI triggered stress hormones and mixed cytokine/WBC changes; use as biomarker context, not immune benefit proof.
+    sourceKeys:
+    - source_artifact:pmid-33910456
+    defaultOpen: false
+  - id: repeated-cwi-leukocytes
+    label: Repeated CWI leukocyte findings
+    stance: mixed
+    summary: Repeated 7 °C CWI had no clear relevant leukocyte effect and uncertain practical significance.
+    sourceKeys:
+    - source_artifact:pmid-37711459
+    defaultOpen: false
+  - id: immune-adaptation
+    label: Immune adaptation context
+    stance: mixed
+    summary: Repeated cold exposure shifted some immune markers, but the clinical meaning and direct cold-plunge benefit relevance are limited.
+    sourceKeys:
+    - source_artifact:pmid-8925815
+    defaultOpen: false
+  - id: sleep-cognition
+    label: Direct sleep and cognition signal
+    stance: mixed
+    summary: A small repeated therapeutic cooling/CWI study reported sleep/cognition signals but neutral well-being findings; use as preliminary context only.
     sourceKeys:
     - source_artifact:pmid-39515683
-    - source_artifact:pmid-39918163
+    defaultOpen: false
+  - id: cold-exposure-sleep-adjacent-variants
+    label: Adjacent cold-exposure sleep context
+    stance: context_only
+    summary: Cold-shower and cold-air cryotherapy sleep records are adjacent modality evidence; they can inform what to monitor, but should not be treated as direct Cold Plunge sleep-benefit proof.
+    sourceKeys:
     - source_artifact:pmid-33766020
     - source_artifact:pmid-30551730
     - source_artifact:pmid-30876470
@@ -721,15 +872,17 @@ researchLandscape:
   - id: sports-recovery-training-adaptation-boundary
     label: Post-exercise recovery and training-adaptation boundary
     stance: mixed
-    summary: Athlete/post-exercise CWI can be useful for soreness or selected recovery contexts, but it is its own timing variant and can conflict with some training-adaptation goals.
+    summary: Athlete/post-exercise CWI can be useful for soreness or selected recovery contexts, includes null recovery trials, and can conflict with some training-adaptation goals; it is a separate timing variant.
     sourceKeys:
     - source_artifact:pmid-22336838
-    - source_artifact:doi-10.1371-journal.pone.0322416
     - source_artifact:doi-10.1186-s12891-024-07315-2
     - source_artifact:doi-10.1002-ejsc.12074
     - source_artifact:pmid-24674975
     - source_artifact:pmid-25760154
     - source_artifact:pmid-25437181
+    - source_artifact:pmid-39918163
+    - source_artifact:pmid-38301228
+    - source_artifact:doi-10.1371-journal.pone.0322416
     defaultOpen: false
   - id: external-protocol-dose-claims
     label: External/public protocol dose claims
@@ -739,15 +892,13 @@ researchLandscape:
     - source_artifact:hubermanlab-cold-exposure-protocol-2026-04-27
     - source_artifact:hubermanlab-deliberate-cold-exposure-podcast-2022-04-04
     defaultOpen: false
-  - id: breathwork-water-safety-boundary
-    label: Breathwork, breath-hold, and submersion boundary
+  - id: breath-hold-submersion-arrhythmia
+    label: Breath-hold, face-submersion, and underwater boundary
     stance: safety_boundary
-    summary: Breathwork in water, hyperventilation, breath-hold challenges, face submersion, and open-water variants add drowning and arrhythmia-relevant hazards and are excluded from this controlled protocol.
+    summary: Breath-hold, face-submersion, diving, and underwater-training sources support keeping the default Cold Plunge protocol head-out, with no deliberate hyperventilation, breath-holding, underwater challenge, or face-submersion escalation.
     sourceKeys:
-    - source_artifact:wimhofmethod-faq-safety-2026-04-27
-    - source_artifact:weather-gov-cold-water-safety-2026-04-27
-    - source_artifact:pmid-7950804
     - source_artifact:pmid-17086766
+    - source_artifact:pmid-7950804
     - source_artifact:pmid-20377144
     - source_artifact:pmid-26754186
     - source_artifact:pmid-7337825
@@ -756,30 +907,29 @@ safety:
   cautionLevel: high
   avoidOrGetClinicianGuidance:
   - under 18, pregnancy or early postpartum, older adult with frailty, limited mobility, fall risk, or inability to exit/dress/rewarm independently
-  - heart disease, coronary disease, angina, arrhythmia, Long QT/channelopathy, heart failure, recent heart attack/stroke, fainting, chest symptoms, significant palpitations, uncontrolled blood pressure, or clinician advice to avoid sudden cold
-  - family history of sudden cardiac death, water-triggered fainting or arrhythmia, medication-treated high blood pressure if uncertain, or any cardiac-risk screen that is positive or unclear
-  - peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, diabetes with hypoglycemia risk or impaired sensation, or cold agglutinin disease
-  - prior frostbite, non-freezing cold injury, severe Raynaud-type reaction, or prior unsafe cold-water reaction
+  - known cardiovascular disease, coronary artery disease, angina, arrhythmia, Long QT/channelopathy, family sudden-cardiac-event history, heart failure, recent heart attack or stroke, unexplained fainting/near-fainting, exertional chest symptoms, significant palpitations, uncontrolled blood pressure, medication-treated high blood pressure if uncertain, or clinician advice to avoid sudden cold exposure
+  - peripheral artery disease, poor circulation, peripheral neuropathy, venous stasis, diabetes with hypoglycemia risk or impaired sensation, cold agglutinin disease, prior frostbite or non-freezing cold injury, severe Raynaud-type cold reaction, or prior unsafe cold-water reaction
   - cold urticaria, cold-triggered hives, swelling, wheeze, throat tightness, angioedema, anaphylaxis history, or any cold-triggered systemic reaction
-  - severe asthma/COPD symptoms, cold-triggered respiratory symptoms, seizure disorder/epilepsy, kidney failure or serious kidney disease
-  - medication affecting heart rate, blood pressure, rhythm, alertness, thermoregulation, glucose, balance, or safe exit
+  - severe asthma/COPD symptoms, cold-triggered respiratory symptoms, seizure disorder/epilepsy, kidney failure or serious kidney disease, or medication affecting heart rate, blood pressure, rhythm, alertness, thermoregulation, glucose, balance, or safe exit
   - recent self-harm/suicide risk, severe or unstable mental-health symptoms, or using cold plunging to treat depression/anxiety rather than as a wellness self-tracking experiment
   - fever, acute illness, dehydration, recent heat illness, major sleep deprivation, alcohol, sedatives, recreational drugs, or any impairment of judgment, balance, breathing control, or safe exit today
-  - open water, swimming challenge, breathwork in or near water, deliberate hyperventilation, breath-holding, face submersion, underwater challenge, or sauna-to-plunge contrast stack
-  - locked/covered tub, slippery setup, unmeasured water temperature, water below 10 °C for the first default Murph run, or inability to exit immediately
+  - open water, swimming challenge, breathwork in or near water, deliberate hyperventilation, breath-holding, face submersion, underwater challenge, sauna-to-plunge contrast stack, locked/covered tub, slippery setup, unmeasured water temperature, water below 10 °C for the first default Murph run, or inability to exit immediately
   stopIf:
   - water temperature is unmeasured, below the default first-run range, setup changed, no safe exit, no adult nearby for first exposure, or any safety screen is positive or uncertain
   - controlled breathing is not restored within 15–30 seconds, inability to speak in short sentences, uncontrolled gasping, hyperventilation, panic, or loss of breathing control
   - chest pain or pressure, severe shortness of breath, new wheeze, palpitations, irregular heartbeat sensation, faintness, fainting, confusion, severe headache, visual changes, or loss of coordination
   - hives, swelling, wheeze, throat tightness, angioedema, or any suspected cold-triggered allergic/systemic reaction
-  - blue or gray lips, severe or worsening numbness, weakness, clumsiness, slurred speech, inability to grip/step out/dress, inability to rewarm, persistent shivering, or cold stress after exit that does not settle
+  - blue or gray lips, severe or worsening numbness, weakness, clumsiness, slurred speech, inability to grip/step out/dress, inability to rewarm, persistent or worsening shivering, or cold stress after exit that does not settle with gentle rewarming
   - unsafe footing, stuck cover/door, open-water conditions, unsafe water, alcohol/sedatives/recreational drugs, or being alone when supervision is needed
-  - after any stop condition, exit immediately, end the session, and do not repeat until resolved
-  - seek urgent/emergency help for chest symptoms, fainting, confusion, severe breathlessness, swelling/throat tightness/wheeze, suspected submersion/aspiration, or inability to rewarm
+  - 'any stop condition occurs: exit immediately, end the session, do not repeat the next session until the cause is resolved; seek urgent/emergency help for chest symptoms, fainting, confusion, severe breathlessness, swelling/throat tightness/wheeze, suspected submersion/aspiration, or inability to rewarm'
   notes:
   - 'Safety basis: source_artifact:pmid-2010387, source_artifact:pmid-2691172, source_artifact:pmid-36396152, source_artifact:pmid-26617380, source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26, source_artifact:weather-gov-cold-water-safety-2026-04-27.'
   - 'Cold-urticaria/anaphylaxis screening basis: source_artifact:pmid-37873787, source_artifact:pmid-41044831, source_artifact:pmid-34862605.'
   - 'Breathwork/submersion exclusion basis: source_artifact:wimhofmethod-faq-safety-2026-04-27, source_artifact:pmid-7950804, source_artifact:pmid-17086766.'
+  - 'No-solo-first-plunge/rescue-planning basis: source_artifact:utahhealth-cold-plunging-health-2023-03-24, source_artifact:heart-org-cold-water-plunge-risks-2022-12-09, source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26, source_artifact:pmid-38379489, source_artifact:pmid-39530204.'
+  - 'Cardiovascular/channelopathy basis: source_artifact:harvardhealth-cold-plunges-heart-2025-06-01, source_artifact:heart-org-cold-water-plunge-risks-2022-12-09, source_artifact:pmid-19696059, source_artifact:pmid-26152773, source_artifact:pmid-29408217, source_artifact:pmid-38060596, source_artifact:pmid-22547634.'
+  - 'Older/frailty/fall-risk, circulation, diabetes/neuropathy, pregnancy/postpartum, alcohol/impairment, and mental-health-treatment boundaries are safety-screening boundaries, not efficacy claims. Source basis: source_artifact:utahhealth-cold-plunging-health-2023-03-24, source_artifact:lungorg-sauna-cold-plunges-health-impacts-2025-05-29, source_artifact:pmid-41185024, source_artifact:clevelandclinic-cold-plunge-benefits-risks-2024-12-24, source_artifact:doi-10.1002-lim2.70009, source_artifact:pmid-10223611, source_artifact:pmid-497899, source_artifact:pmid-9088850, source_artifact:pmid-37443045, source_artifact:doi-10.1192-bja.2023.60, source_artifact:pmid-37381680.'
+  - 'Hypothermia, rewarming, afterdrop/post-exit deterioration, and emergency-escalation basis: source_artifact:pmid-23150960, source_artifact:pmid-29162267, source_artifact:pmid-34383570, source_artifact:pmid-35010760, source_artifact:pmid-31740369, source_artifact:pmid-33675869, source_artifact:uscg-cold-water-survival-guide-2012-11-30, source_artifact:pmid-16538942.'
 researchCoverage:
   researchRun: output-packages/research/cold-plunge-research-restart-20260427
   canonicalLedgerSourceCount: 262
@@ -794,6 +944,7 @@ researchCoverage:
   notes:
   - Generated source index was absent from the supplied snapshot, so existing source-key reuse could not be checked beyond the snapshot content.
   - Batch 003 registry/current-trial records are not cited as outcome evidence until extracted.
+  - 'Work-log check: source-extraction prompts batch-001 through batch-012 each declared Maximum source count <=40; the largest listed batch was 40 sources (batch-005), preserving the no-more-than-40-source-records-per-extraction-run guarantee.'
 ---
 
 ## Question this experiment answers
@@ -808,19 +959,19 @@ Run a 21-day experiment:
 - **14 intervention days**
 - **2–3 cold-plunge sessions per week**
 - **6 target sessions**, with **4 sessions** as the minimum for a useful first read
-- water measured before each session, usually **10–15 °C**
-- **1–3 minutes** per session
+- a Murph conservative starting cap: measured **10–15 °C** water and **1–3 minutes** per session
+- treat that cap as a safety-first field-test configuration, not an evidence-proven optimal dose
 - head stays out, no breathwork, no breath-holding, no face submersion, no open water, no alcohol or sedatives
 
 The primary read is subjective: mood before the session and again after the session using the same scale. Wearable HRV, resting heart rate, sleep efficiency, and morning blood pressure are context and safety signals, not promised benefits.
 
 ## What this protocol is
 
-This protocol is a controlled cold-water immersion experiment in a tub, plunge, or tank where you can exit immediately. That boundary is deliberate: direct records include controlled cold-water immersion and head-out exposures, while cold showers, open-water swimming, cryotherapy, breathwork bundles, contrast therapy, and athlete post-exercise recovery protocols are adjacent variants rather than interchangeable proof. Source basis: `source_artifact:pmid-37866096`, `source_artifact:doi-10.1002-lim2.53`, `source_artifact:doi-10.1002-lim2.70048`, `source_artifact:pmid-36829490`, `source_artifact:hubermanlab-cold-exposure-protocol-2026-04-27`.
+This protocol is a controlled cold-water immersion experiment in a tub, plunge, or tank where you can exit immediately. Direct or near-direct immersion sources include controlled head-out or chest-deep cold-water immersion records, while cold showers, open-water swimming, cryotherapy, breathwork bundles, contrast therapy, and athlete post-exercise recovery protocols are adjacent variants rather than interchangeable proof. Source basis for direct or near-direct immersion: `source_artifact:pmid-37866096`, `source_artifact:doi-10.1002-lim2.53`, `source_artifact:doi-10.1002-lim2.70044`, `source_artifact:doi-10.1002-lim2.70048`. Public protocol/explainer sources are context only: `source_artifact:clevelandclinic-cold-plunge-benefits-risks-2024-12-24`, `source_artifact:hubermanlab-cold-exposure-protocol-2026-04-27`.
 
 ## What to watch
 
-The most defensible first-run signal is **acute subjective mood**, not a guaranteed health outcome. Direct or near-direct mood records are encouraging in some screened young or healthy samples, but they are short-horizon and mixed enough that Murph should test them personally rather than promise them. Source basis: `source_artifact:doi-10.1002-lim2.53`, `source_artifact:doi-10.1002-lim2.70048`, `source_artifact:pmid-37866096`.
+The most defensible first-run signal is **acute subjective mood**, not a guaranteed health outcome. Direct or near-direct mood records are encouraging in some screened young or healthy samples, but they are short-horizon and mixed enough that Murph should test them personally rather than promise them. Source basis: `source_artifact:doi-10.1002-lim2.53`, `source_artifact:doi-10.1002-lim2.70044`, `source_artifact:doi-10.1002-lim2.70048`, `source_artifact:pmid-37866096`.
 
 Watch safety and burden at least as strongly as mood:
 
@@ -835,10 +986,10 @@ Safety-first interpretation is evidence-backed because cold-water immersion can 
 ## How to run a session
 
 1. Confirm the safety screen is still negative.
-2. Measure and log water temperature.
-3. Confirm the exit and gentle rewarming plan.
+2. Measure and log water temperature with a thermometer; do not start if unmeasured, below 10 °C for the first default Murph run, or the setup changed since onboarding.
+3. Confirm the exit/rescue and gentle rewarming plan, including another adult nearby and able to help for the first session or any changed, colder, or uncertain setup.
 4. Start with the shortest planned time, especially for the first session.
-5. Enter slowly enough to keep breathing controlled.
+5. Enter slowly enough to keep breathing controlled; exit if controlled breathing is not restored within 15–30 seconds or you cannot speak in short sentences.
 6. Keep your head out of the water.
 7. Exit at the planned time or immediately at any stop condition.
 8. Dry off, dress warmly, and rewarm gently.
@@ -862,9 +1013,9 @@ Log before and after each session:
 
 ## Stop conditions
 
-Stop immediately for chest symptoms, severe breathlessness, uncontrolled gasping, panic, dizziness, faintness, confusion, palpitations, severe numbness, weakness, suspected cold-triggered allergic reaction, unsafe footing, inability to exit, or any doubt that you can rewarm safely.
+Stop immediately for unmeasured or below-range first-run water, changed setup, no safe exit, no adult nearby for first exposure, uncontrolled gasping, breathing not controlled within 15–30 seconds, inability to speak in short sentences, chest pain/pressure, severe breathlessness, new wheeze, palpitations, faintness/fainting, confusion, severe headache, visual changes, loss of coordination, hives/swelling/throat tightness, severe or worsening numbness, weakness, clumsiness, slurred speech, inability to grip/step out/dress, inability to rewarm, persistent or worsening shivering, unsafe footing, stuck cover/door, open-water conditions, alcohol/sedatives/recreational drugs, or any doubt that you can rewarm safely.
 
-Do not “push through” a stop condition. The protocol’s first job is to keep the user safe enough that any signal is interpretable.
+Do not “push through” a stop condition. Exit immediately, end the session, and do not repeat the next session until the cause is resolved. Seek urgent/emergency help for chest symptoms, fainting, confusion/non-responsiveness, severe or persistent shortness of breath, wheeze/throat tightness/swelling, suspected submersion/aspiration, inability to rewarm, worsening shivering, slurred speech, severe clumsiness, or persistent cold stress. The protocol’s first job is to keep the user safe enough that any signal is interpretable.
 
 ## What not to claim
 

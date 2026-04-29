@@ -8,10 +8,7 @@ summary: Cold-water exposure protocols that put part or all of the body in cold 
 status: field-testing
 quality: usable
 aliases:
-- cold-water immersion
-- CWI
 - cold exposure
-- ice bath
 - cold shower
 - winter swimming
 categories:
