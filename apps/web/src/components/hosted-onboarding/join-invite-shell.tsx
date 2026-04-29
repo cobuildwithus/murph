@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export function JoinInviteShell({ children }: { children: ReactNode }) {
   return (
-    <main className="flex min-h-screen flex-col text-[#2d3436] md:flex-row">
+    <main className="flex min-h-screen flex-col bg-background text-foreground md:flex-row">
       <aside className="relative flex items-center overflow-hidden bg-gradient-to-br from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-6 py-5 text-white md:w-[260px] md:flex-col md:items-stretch md:justify-between md:px-8 md:py-10 lg:w-[300px] lg:px-10">
         <div
           aria-hidden
@@ -24,8 +24,9 @@ export function JoinInviteShell({ children }: { children: ReactNode }) {
           </span>
         </div>
       </aside>
-      <section className="flex flex-1 items-center justify-center bg-[#f5f0e8] px-6 py-12 sm:px-10 sm:py-16 lg:px-16">
-        <div className="w-full max-w-xl">{children}</div>
+
+      <section className="relative flex flex-1 items-center justify-center overflow-hidden px-6 py-12 sm:px-10 sm:py-16 lg:px-16">
+        <div className="w-full max-w-2xl">{children}</div>
       </section>
     </main>
   );
