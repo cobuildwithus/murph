@@ -7,20 +7,23 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/src/components/ui/sidebar";
+import type { HostedSidebarAuthSnapshot } from "@/src/lib/hosted-onboarding/sidebar-auth";
 import { cn } from "@/src/lib/utils";
 
 export function DashboardShell({
   children,
   padded = true,
+  sidebarAuth,
 }: {
   children: ReactNode;
   padded?: boolean;
+  sidebarAuth?: HostedSidebarAuthSnapshot;
 }) {
   return (
     <>
       <style>{`#global-footer { display: none; }`}</style>
       <SidebarProvider>
-        <Sidebar />
+        <Sidebar initialAuth={sidebarAuth} />
         <SidebarInset className="bg-background">
           <header className="grid md:hidden grid-cols-[auto_1fr_auto] items-center bg-linear-to-b from-[#2d3436] via-[#3a2e24] to-[#2a1f16] px-4 py-3">
             <SidebarTrigger className="text-white/80 hover:bg-white/5 hover:text-white" />

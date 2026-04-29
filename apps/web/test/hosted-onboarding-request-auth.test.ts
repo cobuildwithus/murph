@@ -22,6 +22,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
 import {
   requirePrivyCompletionSession,
   requireActivePrivyMemberAuth,
+  resolvePrivyMemberAuthFromSession,
   requirePrivyMemberAuth,
   requirePrivySession,
   getPrivySession,
@@ -143,6 +144,43 @@ describe("hosted Privy request auth", () => {
       parallelizeReads: true,
       prisma,
     }));
+  });
+
+  it("starts the identity lookup and direct member read in parallel", async () => {
+    const member = createHostedMember();
+    const memberLookup = createHostedMemberLookup({
+      core: member,
+    });
+    const lookupDeferred = createDeferred<typeof memberLookup | null>();
+    const readDeferred = createDeferred<HostedMember | null>();
+
+    mocks.lookupHostedMemberForPrivyIdentity.mockReturnValue(lookupDeferred.promise);
+    mocks.readHostedMemberCoreState.mockReturnValue(readDeferred.promise);
+
+    const authPromise = resolvePrivyMemberAuthFromSession({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        telegram: null,
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      memberId: member.id,
+      prisma,
+    });
+
+    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberCoreState).toHaveBeenCalledTimes(1);
+
+    lookupDeferred.resolve(memberLookup);
+    readDeferred.resolve(member);
+
+    await expect(authPromise).resolves.toMatchObject({
+      member,
+      memberLookup: null,
+    });
   });
 
   it("requires identity lookup confirmation before trusting the session Murph member id", async () => {
@@ -481,5 +519,21 @@ function createHostedMemberLookup(overrides: Partial<{
       "phoneNumber",
     ],
     ...overrides,
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
   };
 }

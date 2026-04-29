@@ -140,6 +140,95 @@ describe("hosted page auth", () => {
   });
 });
 
+describe("hosted sidebar auth", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mocks.getHostedPrivySession.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.resolvePrivyMemberAuthFromSession.mockResolvedValue({
+      member: null,
+      memberLookup: null,
+    });
+  });
+
+  it("returns anonymous sidebar auth without resolving member state", async () => {
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      label: null,
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.resolvePrivyMemberAuthFromSession).not.toHaveBeenCalled();
+  });
+
+  it("returns only the browser-safe sidebar label for a verified session", async () => {
+    mocks.getHostedPrivySession.mockResolvedValue({
+      identity: {
+        email: {
+          address: "test@example.com",
+          verifiedAt: 1741194420,
+        },
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        telegram: null,
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [],
+      memberId: "member_123",
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      label: "test@example.com",
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.resolvePrivyMemberAuthFromSession).not.toHaveBeenCalled();
+  });
+
+  it("degrades Privy session-shape errors to anonymous sidebar auth", async () => {
+    const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+    mocks.getHostedPrivySession.mockRejectedValue(
+      hostedOnboardingError({
+        code: "PRIVY_ACCOUNT_REQUIRED",
+        message: "Finish email, phone, or Telegram verification before continuing.",
+        httpStatus: 400,
+      }),
+    );
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      label: null,
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.resolvePrivyMemberAuthFromSession).not.toHaveBeenCalled();
+  });
+
+  it("rethrows Privy configuration failures", async () => {
+    const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+    const error = hostedOnboardingError({
+      code: "PRIVY_CONFIG_REQUIRED",
+      message: "Privy config is required.",
+      httpStatus: 500,
+    });
+    mocks.getHostedPrivySession.mockRejectedValue(error);
+    const { getHostedSidebarAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedSidebarAuthSnapshot()).rejects.toBe(error);
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.resolvePrivyMemberAuthFromSession).not.toHaveBeenCalled();
+  });
+});
+
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
     billingStatus: HostedBillingStatus.active,

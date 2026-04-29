@@ -1,11 +1,18 @@
 import type { ReactNode } from "react";
 
 import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
+import { getHostedSidebarAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
-export default function MeasurementMethodsLayout({
+export default async function MeasurementMethodsLayout({
   children,
 }: {
   children: ReactNode;
 }) {
-  return <DashboardShell padded={false}>{children}</DashboardShell>;
+  const sidebarAuth = await getHostedSidebarAuthSnapshot();
+
+  return (
+    <DashboardShell padded={false} sidebarAuth={sidebarAuth}>
+      {children}
+    </DashboardShell>
+  );
 }
