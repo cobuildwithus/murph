@@ -4,105 +4,54 @@ entityType: experiment_family
 key: experiment_family:cold-water-immersion
 slug: families/cold-water-immersion
 title: Cold Water Immersion
-summary: Deliberate cold-water immersion in a tub, plunge tank, or bath-like setup, kept separate from winter swimming, cold showers, cryotherapy, contrast therapy, and breathwork stacks.
+summary: Cold-water exposure protocols that put part or all of the body in cold water, kept separated by setting, dose, body coverage, timing, and safety context.
 status: field-testing
 quality: usable
 aliases:
-  - cold water immersion
-  - CWI
-  - ice bath
-  - cold tub
-  - cold bath
+- cold-water immersion
+- CWI
+- cold exposure
+- ice bath
+- cold shower
+- winter swimming
 categories:
-  - cold-exposure
-  - recovery
-  - stress
-familyKind: intervention
-canonicalModality: controlled_cold_water_immersion
+- cold-water-immersion
+- recovery
+- mood
+- autonomic
+- safety-first
+familyKind: modality
+canonicalModality: cold_water_immersion
 relations:
-  -
-    type: related_protocol
-    target: protocol_variant:cold-water-immersion/cold-plunge
-  -
-    type: cites
-    target: source_artifact:cold-water-immersion-bibliography
-  -
-    type: cites
-    target: source_artifact:pmid-39879231
-  -
-    type: cites
-    target: source_artifact:pmid-37866096
-  -
-    type: cites
-    target: source_artifact:pmid-36829490
-  -
-    type: cites
-    target: source_artifact:pmid-37711459
-  -
-    type: cites
-    target: source_artifact:pmid-38211547
-  -
-    type: cites
-    target: source_artifact:pmid-2691172
-  -
-    type: cites
-    target: source_artifact:pmid-35157264
-  -
-    type: cites
-    target: source_artifact:pmid-33146851
-  -
-    type: cites
-    target: source_artifact:hubermanlab-cold-exposure-2022-05-01
+- type: related_protocol
+  target: protocol_variant:cold-water-immersion/cold-plunge
+- type: cites
+  target: source_artifact:pmid-39879231
+- type: cites
+  target: source_artifact:pmid-2010387
+- type: cites
+  target: source_artifact:pmid-22336838
+- type: cites
+  target: source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26
 researchCoverage:
-  bibliographyKey: source_artifact:cold-water-immersion-bibliography
-  corpusStats:
-    totalRecords: 55
-    directProtocolRecords: 13
-    adjacentVariantRecords: 30
-    safetyBoundaryRecords: 8
-    sameMechanismRecords: 2
-    clinicalSupervisedRecords: 1
-    backgroundRecords: 1
-    supportsProtocolRecords: 6
-    contextOnlyRecords: 36
-    safetyOnlyRecords: 12
-    doNotUseRecords: 1
-    reviewRecords: 20
-    journalArticleRecords: 34
-    webPageRecords: 1
-    earliestYear: 1989
-    latestYear: 2025
-    auditCutoff: 2026-04-22
-  variantBuckets:
-    - controlled tub or plunge immersion
-    - post-exercise CWI
-    - winter swimming or open water
-    - cold shower
-    - whole-body cryotherapy
-    - contrast water therapy
-    - external named protocols and public dose heuristics
+  canonicalLedgerSourceCount: 262
+  extractedSourcePageCount: 235
+  evidenceAppraisalCount: 235
+  scopeNote: Family spans direct cold plunges plus adjacent cold showers, winter/open-water swimming, post-exercise CWI, cryotherapy context, cold-shock physiology, safety guidance, and external public protocol claims. Protocol pages must keep those variants separate.
+  auditCutoff: '2026-04-27'
 ---
 
-Cold Water Immersion is the broad family for deliberate immersion in cold water when the exposure is intentional, bounded, and doseable.
+Cold Water Immersion is the family for protocols where cold water is the intervention medium. It includes tub or tank cold plunges, ice baths, cold showers, winter or open-water swimming, post-exercise CWI recovery, and contrast-therapy variants, but those are not interchangeable protocols.
 
-## What belongs here
+The first Murph canonical child is **Cold Plunge**, a controlled, usually head-out tub/plunge/tank experiment. It is intentionally separated from:
 
-This family covers controlled immersion in a tub, bath, plunge tank, or closely similar setup where a person can approximate water temperature, session length, and exit conditions.
+1. **Cold showers**, where water contact, dose, and control differ.
+2. **Winter or open-water swimming**, where drowning, weather, current, and rescue context dominate.
+3. **Post-exercise recovery CWI**, where soreness, training adaptation, and timing after exercise are the main questions.
+4. **Cold-air cryotherapy**, where the exposure medium is not water.
+5. **Breathwork or breath-hold cold practices**, where submersion and loss-of-consciousness risk create a different safety problem.
+6. **Hot-cold contrast stacks**, where heat exposure and sequencing change interpretation.
 
-## What stays separate
+The ordinary Cold Plunge child is not a clearance pathway for minors, pregnancy/postpartum, older/frail users, cardiovascular disease, arrhythmia/channelopathy, cold urticaria/anaphylaxis, cold injury/circulation disorders, clinical mental-health treatment, open-water swimming, breathwork/submersion practices, post-exercise recovery, or sauna-to-plunge contrast stacks. Those require separate variants, clinician/professional supervision, or exclusion from ordinary wellness experimentation. Source basis: `source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26`, `source_artifact:pmid-36396152`, `source_artifact:pmid-26617380`, `source_artifact:pmid-34862605`, `source_artifact:doi-10.1002-lim2.70009`, `source_artifact:pmid-41602813`, `source_artifact:pmid-38379489`, `source_artifact:wimhofmethod-faq-safety-2026-04-27`.
 
-This family should not collapse together:
-
-- stand-alone cold plunge,
-- post-exercise CWI,
-- winter swimming or open-water immersion,
-- cold showers,
-- whole-body cryotherapy,
-- contrast water therapy,
-- or breathwork-plus-cold stacks.
-
-Those buckets answer different questions, involve different safety profiles, and often use different endpoints. The strongest adjacent recovery studies are athlete and post-exercise papers, while the strongest safety literature is about entry-phase cold shock and cardiac or drowning risk rather than durable wellbeing gains.
-
-## How to read this family
-
-The current corpus is good enough to support one cautious Murph protocol, **Cold Plunge**, but not broad family-level promises. Direct healthy-adult plunge evidence is still a narrow subset inside a much larger cold-exposure literature. The family page therefore acts as the boundary-setting layer: useful for navigation, search, and future branching, not for flattening every cold modality into one recipe.
+Family-level interpretation should stay conservative. Cold-water immersion has plausible acute mood, stress, autonomic, tissue-cooling, and habituation signals, but the same family also contains strong cold-shock, cardiovascular, hypothermia, drowning, and population-screening boundaries. Source basis: `source_artifact:pmid-39879231`, `source_artifact:pmid-2010387`, `source_artifact:pmid-22336838`, `source_artifact:royallifesaving-cold-water-immersion-therapy-2024-02-26`.

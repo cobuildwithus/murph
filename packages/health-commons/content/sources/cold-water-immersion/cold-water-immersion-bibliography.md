@@ -15,6 +15,7 @@ categories:
   - cold-water-immersion
   - research-bibliography
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:cold-water-immersion/cold-plunge

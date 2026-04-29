@@ -12,6 +12,7 @@ aliases:
 categories:
   - cold-water-immersion
 relations:
+
   -
     type: related_protocol
     target: protocol_variant:cold-water-immersion/cold-plunge
