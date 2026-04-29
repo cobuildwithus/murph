@@ -1,4 +1,7 @@
 import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { gzipSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
@@ -446,6 +449,122 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(Object.keys(protocolTab ?? {})).not.toContain("studies");
     expect(Object.keys(resultsPublic ?? {})).not.toContain("expectedSignals");
     expect(Object.keys(resultsPublic ?? {})).not.toContain("safety");
+  });
+
+  it("rejects route-index projection paths that do not match the route bundle id", async () => {
+    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
+    const finnishRoute = routeIndex.routes.find((entry) =>
+      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
+    );
+    if (!finnishRoute?.projections) {
+      throw new Error("Expected a generated Finnish sauna route with projections.");
+    }
+
+    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
+    await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
+    await mkdir(path.join(generatedWebRoot, "tabs/experiments/norwegian-4x4"), { recursive: true });
+    await writeFile(
+      path.join(generatedWebRoot, "routes/index.json"),
+      JSON.stringify({
+        ...routeIndex,
+        routes: [
+          {
+            ...finnishRoute,
+            projections: {
+              ...finnishRoute.projections,
+              "experiment.research": "tabs/experiments/norwegian-4x4/research.json",
+            },
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(generatedWebRoot, "tabs/experiments/norwegian-4x4/research.json"),
+      readFileSync(
+        new URL("../generated/web/tabs/experiments/norwegian-4x4/research.json", import.meta.url),
+        "utf8",
+      ),
+      "utf8",
+    );
+
+    expect(() => loadGeneratedHealthCommonsWebExperimentResearchTab({
+      generatedWebRoot,
+      routeId: "finnish-sauna",
+    })).toThrow("projection path does not match route bundle id");
+  });
+
+  it("rejects unsafe projection paths in generated route indexes", async () => {
+    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
+    const finnishRoute = routeIndex.routes.find((entry) =>
+      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
+    );
+    if (!finnishRoute?.projections) {
+      throw new Error("Expected a generated Finnish sauna route with projections.");
+    }
+
+    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
+    await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
+    await writeFile(
+      path.join(generatedWebRoot, "routes/index.json"),
+      JSON.stringify({
+        ...routeIndex,
+        routes: [
+          {
+            ...finnishRoute,
+            projections: {
+              ...finnishRoute.projections,
+              "experiment.research": "../tabs/experiments/norwegian-4x4/research.json",
+            },
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    expect(() => getGeneratedHealthCommonsWebRouteIndex({ generatedWebRoot }))
+      .toThrow("Health Commons generated web route index is invalid.");
+  });
+
+  it("rejects projection artifacts whose top-level id no longer matches the route index", async () => {
+    const routeIndex = getGeneratedHealthCommonsWebRouteIndex();
+    const finnishRoute = routeIndex.routes.find((entry) =>
+      entry.entityType === "protocol_variant" && entry.routeId === "finnish-sauna"
+    );
+    if (!finnishRoute?.projections) {
+      throw new Error("Expected a generated Finnish sauna route with projections.");
+    }
+
+    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
+    await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
+    await mkdir(path.join(generatedWebRoot, "shell/experiments"), { recursive: true });
+    await writeFile(
+      path.join(generatedWebRoot, "routes/index.json"),
+      JSON.stringify({
+        ...routeIndex,
+        routes: [finnishRoute],
+      }),
+      "utf8",
+    );
+    const shell = JSON.parse(
+      readFileSync(
+        new URL("../generated/web/shell/experiments/finnish-sauna.json", import.meta.url),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    await writeFile(
+      path.join(generatedWebRoot, "shell/experiments/finnish-sauna.json"),
+      JSON.stringify({
+        ...shell,
+        id: "not-finnish-sauna",
+      }),
+      "utf8",
+    );
+
+    expect(() => loadGeneratedHealthCommonsWebExperimentShell({
+      generatedWebRoot,
+      routeId: "finnish-sauna",
+    })).toThrow("projection id does not match route index");
   });
 
   it("does not publish hidden protocol variants as research-tab projections", () => {

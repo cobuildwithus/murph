@@ -13,9 +13,7 @@ import type {
 } from "@/src/types/experiments";
 import { resolveExperimentRouteImage } from "./experiment-images";
 import {
-  loadGeneratedExperimentProtocolTab,
-  loadGeneratedExperimentResultsPublic,
-  loadGeneratedExperimentShell,
+  loadGeneratedExperimentProjection,
 } from "./generated-experiment-artifacts";
 
 export interface ExperimentShellProjection {
@@ -53,7 +51,7 @@ export type ExperimentProtocolTabProjection =
 export function resolveHealthCommonsExperimentShell(
   experimentId: string,
 ): ExperimentShellProjection | null {
-  const shell = loadGeneratedExperimentShell(experimentId);
+  const shell = loadGeneratedExperimentProjection(experimentId, "experiment.shell");
 
   return shell ? toExperimentShellProjection(shell) : null;
 }
@@ -61,7 +59,7 @@ export function resolveHealthCommonsExperimentShell(
 export function resolveHealthCommonsExperimentProtocolTab(
   experimentId: string,
 ): ExperimentProtocolTabProjection | null {
-  const protocolTab = loadGeneratedExperimentProtocolTab(experimentId);
+  const protocolTab = loadGeneratedExperimentProjection(experimentId, "experiment.protocol");
 
   return protocolTab
     ? {
@@ -74,7 +72,10 @@ export function resolveHealthCommonsExperimentProtocolTab(
 export function resolveHealthCommonsExperimentResultsPublic(
   experimentId: string,
 ): ExperimentResultsPublicProjection | null {
-  const resultsPublic = loadGeneratedExperimentResultsPublic(experimentId);
+  const resultsPublic = loadGeneratedExperimentProjection(
+    experimentId,
+    "experiment.results-public",
+  );
 
   return resultsPublic ? toExperimentResultsPublicProjection(resultsPublic) : null;
 }

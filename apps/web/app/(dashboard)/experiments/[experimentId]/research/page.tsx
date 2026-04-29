@@ -6,7 +6,7 @@ import {
   type ResearchTabExperiment,
 } from "@/src/components/experiments/experiment-detail/research-tab";
 import {
-  loadGeneratedExperimentResearchTab,
+  loadGeneratedExperimentProjection,
   type GeneratedExperimentResearchTab,
 } from "@/src/lib/health-commons/generated-experiment-artifacts";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -17,7 +17,7 @@ export async function generateMetadata({
   params: Promise<{ experimentId: string }>;
 }): Promise<Metadata> {
   const { experimentId } = await params;
-  const research = loadGeneratedExperimentResearchTab(experimentId);
+  const research = loadGeneratedExperimentProjection(experimentId, "experiment.research");
 
   if (!research) {
     return {};
@@ -38,7 +38,7 @@ export default async function ExperimentResearchPage({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  const research = loadGeneratedExperimentResearchTab(experimentId);
+  const research = loadGeneratedExperimentProjection(experimentId, "experiment.research");
 
   if (!research) {
     notFound();
