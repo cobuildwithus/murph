@@ -10,7 +10,7 @@ import { createAssistantModelTarget } from '@murphai/operator-config/assistant-b
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
-import type { ResolvedAssistantProviderRoute } from '../src/assistant/provider-route.ts'
+import type { CodexThreadIdentity } from '../src/assistant/provider-route.ts'
 import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
 import type {
   AssistantTurnSharedPlan,
@@ -45,7 +45,6 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/service-usage.js')
   vi.doUnmock('../src/assistant/turn-finalizer.js')
   vi.doUnmock('../src/assistant/service-turn-routes.js')
-  vi.doUnmock('../src/assistant/rich-content-routing.js')
   vi.doUnmock('../src/assistant/turns.js')
   vi.doUnmock('../src/assistant/channel-adapters.js')
   vi.doUnmock('../src/assistant/turn-lock.js')
@@ -167,7 +166,6 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       return savedSession
     }),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
-    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
@@ -175,7 +173,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       created: false,
       session: initialSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -212,11 +210,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
-    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
-  }))
-  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
-    prioritizeAssistantRoutesForRichUserMessageContent:
-      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification',
@@ -413,14 +407,13 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
-    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
     resolveAssistantSessionForMessage: vi.fn(async () => ({
       session: providerSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -457,11 +450,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
-    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
-  }))
-  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
-    prioritizeAssistantRoutesForRichUserMessageContent:
-      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification-local-visible',
@@ -549,14 +538,13 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
-    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
     resolveAssistantSessionForMessage: vi.fn(async () => ({
       session: providerSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -593,11 +581,7 @@ test('sendAssistantNotificationLocal returns skip decisions without persisting o
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
-    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
-  }))
-  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
-    prioritizeAssistantRoutesForRichUserMessageContent:
-      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification-skip',
@@ -690,14 +674,13 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
-    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
     resolveAssistantSessionForMessage: vi.fn(async () => ({
       session: providerSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [primaryRoute]),
+    resolveAssistantTurnRoute: vi.fn(() => primaryRoute),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -734,11 +717,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
-    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
-  }))
-  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
-    prioritizeAssistantRoutesForRichUserMessageContent:
-      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification-delivery-error',
@@ -817,14 +796,13 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
           }
         : (input.defaults ?? null),
     ),
-    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
     resolveAssistantSessionForMessage: vi.fn(async () => ({
       session: providerSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [primaryRoute, route]),
+    resolveAssistantTurnRoute: vi.fn(() => primaryRoute),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -852,11 +830,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
-    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
-  }))
-  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
-    prioritizeAssistantRoutesForRichUserMessageContent:
-      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification-provider-error',
@@ -950,14 +924,13 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     ),
     persistAssistantTurnAndSession: vi.fn(async () => providerSession),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
-    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
     resolveAssistantSessionForMessage: vi.fn(async () => ({
       session: providerSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -994,11 +967,7 @@ test('sendAssistantNotificationLocal rejects email thread subject overrides befo
     persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
-    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
-  }))
-  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
-    prioritizeAssistantRoutesForRichUserMessageContent:
-      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification-thread-subject',
@@ -1088,10 +1057,10 @@ function createProviderOptions(
 }
 
 function createRoute(input?: {
-  provider?: ResolvedAssistantProviderRoute['provider']
+  provider?: CodexThreadIdentity['provider']
   providerOptions?: Partial<AssistantProviderSessionOptions>
   routeId?: string
-}): ResolvedAssistantProviderRoute {
+}): CodexThreadIdentity {
   return {
     codexCommand: null,
     label: 'Primary',
@@ -1225,7 +1194,7 @@ function createProviderResult(input?: {
   providerOptions?: AssistantProviderSessionOptions
   providerSessionId?: string | null
   response?: string
-  route?: ResolvedAssistantProviderRoute
+  route?: CodexThreadIdentity
   session?: AssistantSession
   usage?: AssistantProviderUsage | null
 }): ExecutedAssistantProviderTurnResult {

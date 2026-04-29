@@ -62,11 +62,14 @@ export async function readHostedProviderCleanupCheckpoint(
 
 export async function drainHostedProviderCleanupAfterCommit(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
+  assertLiveness?: () => Promise<void>;
   env: NodeJS.ProcessEnv;
   checkpoint: HostedProviderCleanupCheckpoint;
+  signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): Promise<HostedProviderCleanupDrainResult> {
+  assertHostedProviderCleanupLiveness(input.signal);
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
   const messageIds = normalizeHostedProviderMessageIds([
     ...(existing?.linqMessageIds ?? []),
@@ -86,10 +89,13 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   }
 
   try {
+    await assertHostedProviderCleanupLiveNow(input);
     await deleteHostedLinqMessages({
       env: input.env,
       messageIds,
+      signal: input.signal ?? undefined,
     });
+    await assertHostedProviderCleanupLiveNow(input);
   } catch (error) {
     const nextWakeAt = new Date(Date.now() + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
     await writeHostedProviderCleanupState(input.vaultRoot, {
@@ -127,6 +133,27 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
     failedLinqMessageCount: 0,
     nextWakeAt: null,
   };
+}
+
+async function assertHostedProviderCleanupLiveNow(input: {
+  assertLiveness?: () => Promise<void>;
+  signal?: AbortSignal | null;
+}): Promise<void> {
+  assertHostedProviderCleanupLiveness(input.signal);
+  await input.assertLiveness?.();
+  assertHostedProviderCleanupLiveness(input.signal);
+}
+
+function assertHostedProviderCleanupLiveness(signal: AbortSignal | null | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  const reason = signal.reason;
+  if (reason instanceof Error) {
+    throw reason;
+  }
+  throw new Error("Hosted provider cleanup was aborted.");
 }
 
 function collectHostedLinqProviderMessageIds(

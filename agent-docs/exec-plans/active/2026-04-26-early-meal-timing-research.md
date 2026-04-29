@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-04-26
-Updated: 2026-04-26
+Updated: 2026-04-28
 
 ## Goal
 
@@ -94,6 +94,54 @@ Updated: 2026-04-26
 - CDP target readback verified the `05-discovery-gerd-and-reflux-boundary` conversation is loaded in `eragon` before retry. A single verified `eragon` retry harvest is running in detached screen session `early_meal_05_gerd_eragon_harvest`.
 - Browser-profile mismatch recorded for Bryan Johnson `04-discovery-early-time-restricted-eating`: it was sent on `hercules` (`http://127.0.0.1:9446`) with ChatGPT conversation `69ee286f-f874-839b-96d6-4e1ecfc74cbf`, but the prior harvest watcher tried `vonneumann` (`http://127.0.0.1:9444`). The `vonneumann` early-meal harvest queue was stopped and orphaned wrappers were killed; do not poll that conversation from `vonneumann`.
 - CDP target readback verified the Bryan Johnson `04-discovery-early-time-restricted-eating` conversation is loaded in `hercules` and not visible in `vonneumann` before retry. The verified `hercules` retry completed and produced `downloads/04-discovery-early-time-restricted-eating/source_candidates_v1.json`.
+- Restart attempt on 2026-04-28 found no pre-existing early-meal worker, then quarantined stale failed state for ordinary `04`/`08` and Bryan Johnson `02`/`06`.
+- Fresh ordinary `04-discovery-glucose-and-metabolism` send succeeded on `mountain` at conversation `69f05acb-3dd0-839b-bb8b-a86088985901`.
+- Fresh ordinary `09-discovery-safety-special-populations` send on `eragon` at conversation `69f05874-1d78-839d-9059-c886edd63b25` was stopped and quarantined because the live assistant text was for an unrelated walking/post-meal charter, not early-dinner safety.
+- Ordinary `04-discovery-glucose-and-metabolism` harvest completed successfully and produced `source_candidates_v1.json`.
+- Restart rule correction: do not treat a browser profile as globally occupied merely because another workflow has active tabs. For unrelated new sends, use profiles that are CDP-reachable, responsive, under the approximate 30 ChatGPT tab budget, and not overwriting another seam's saved conversation URL.
+- Fresh remaining discovery sends recorded clean URLs:
+  - ordinary `08-discovery-trial-registries-and-unpublished` on `vonneumann`, conversation `69f06642-606c-839f-bfd3-518c96cee283`
+  - ordinary `09-discovery-safety-special-populations` on `eragon`, conversation `69f06645-8494-839d-9703-db7ed3998a00`
+  - ordinary `10-discovery-adjacent-variants-and-disambiguation` on `vonneumann`, conversation `69f066a7-27a0-8399-86f5-b110173303f9`
+  - Bryan Johnson `02-discovery-external-protocol-bryan-blueprint` on `mountain`, conversation `69f0663e-0338-8399-8922-70eaeba4d3bf`
+  - Bryan Johnson `06-discovery-glucose-cgm-metabolic-endpoints` on `phlebas`, conversation `69f06641-f91c-839f-a02c-b1b3da64c66b`
+  - Bryan Johnson `09-discovery-safety-boundaries-clinical-nutrition` on `eragon`, conversation `69f066a5-cc7c-839a-8a9d-c965fec63e16`
+  - Bryan Johnson `10-discovery-measurement-and-n-of-1-implementation` on `mountain`, conversation `69f066a7-e37c-839b-93dc-bb7dc822a0b4`
+  - Bryan Johnson `11-discovery-sibling-ordinary-early-dinner` on `phlebas`, conversation `69f066a5-c7b8-83a1-849e-010067ae91d3`
+- Active early-meal harvest watchers:
+  - `early_meal_harvest_ordinary08_vonneumann_20260428T075104Z`
+  - `early_meal_harvest_ordinary09_eragon_20260428T075104Z`
+  - `early_meal_harvest_ordinary10_vonneumann_20260428T075227Z`
+  - `early_meal_harvest_bryan02_mountain_20260428T075104Z`
+  - `early_meal_harvest_bryan06_phlebas_20260428T075104Z`
+  - `early_meal_harvest_bryan09_eragon_20260428T075227Z`
+  - `early_meal_harvest_bryan10_mountain_20260428T075227Z`
+  - `early_meal_harvest_bryan11_phlebas_20260428T075227Z`
+- Duplicate ordinary `08`/`09` harvest watchers with timestamp `20260428T0753Z` were stopped to preserve one local watcher per seam.
+- Discovery harvest is complete for both workspaces:
+  - ordinary early dinner: 9/9 discovery artifacts, 449 parsed candidate records
+  - Bryan Johnson early dinner: 10/10 discovery artifacts, 412 parsed candidate records
+- Snowball/gap-fill:
+  - Bryan first send on `hercules` failed with no URL, then was quarantined and resent successfully on `phlebas` at conversation `69f07208-63b4-839f-a99a-5898edaafcac`.
+  - Ordinary first send on `mountain` stalled without a visible conversation target, then was stopped/quarantined and resent successfully on `vonneumann` at conversation `69f0725a-f964-83a1-913b-430d1f9e05af`.
+- Snowball harvest completed for both workspaces:
+  - ordinary response length: 29,442 characters
+  - Bryan response length: 28,711 characters
+- Source-ledger reducer:
+  - Concrete `11-source-ledger-reducer.md` prompts and send/harvest wrappers were materialized from templates for both workspaces.
+  - Ordinary source-ledger reducer was sent on `vonneumann` at conversation `69f07bff-01bc-839b-b865-042361ecd656`.
+  - Active ordinary source-ledger harvest watcher: `early_meal_ordinary_source_ledger_vonneumann_harvest_20260428T0923Z`.
+  - Ordinary source-ledger reducer completed with 304 canonical records and 11 extraction batches.
+  - Bryan source-ledger reducer first attempt happened before wrappers existed; the second attempt on `phlebas` was blocked by the send-lane visible-conversation guard.
+  - Bryan source-ledger reducer was later sent on `vonneumann` at conversation `69f083cb-7dcc-839c-9d79-d2ce6646fa7d`.
+  - Active Bryan source-ledger harvest watcher: `early_meal_bryan_source_ledger_vonneumann_harvest_20260428T095455Z`.
+  - Bryan source-ledger reducer completed with 285 canonical records and 14 extraction batches.
+- Source extraction:
+  - Materialized concrete `12-source-extraction-001..011` prompts and command wrappers for ordinary early dinner.
+  - Materialized concrete `12-source-extraction-001..014` prompts and command wrappers for Bryan Johnson early dinner.
+  - Ordinary `12-source-extraction-001` sent on `vonneumann` at conversation `69f08be3-2378-839b-9479-5bc1765fcd37`; harvest watcher `early_meal_ordinary_extract001_vonneumann_harvest_20260428T102929Z` is active.
+  - Bryan `12-source-extraction-001` sent on `eragon` at conversation `69f08be3-a3b4-8398-8a6f-7b4ff9b6e766`; harvest watcher `early_meal_bryan_extract001_eragon_harvest_20260428T102929Z` is active.
+  - Ordinary `12-source-extraction-002` sent on `mountain` at conversation `69f094d3-94a8-839e-8f1e-a1c2e5cfe61a`; harvest watcher `early_meal_ordinary_extract002_mountain_harvest_20260428T110734Z` is active.
 
 ## Verification
 
@@ -115,3 +163,7 @@ Updated: 2026-04-26
 - Seam-state readback confirmed Bryan Johnson `04-discovery-early-time-restricted-eating` completed harvest on `hercules`.
 - Later `screen -ls` / process readback confirmed no early-meal queues remain active.
 - Parsed 10 harvested `source_candidates_v1.json` files successfully, totaling 464 `records`.
+- Restart readback on 2026-04-28 confirmed no early-meal processes were active before restart.
+- After restart correction, all remaining discovery seams produced valid `source_candidates_v1.json`.
+- JSON parse/count validation passed for all discovery artifacts.
+- Snowball harvest completed for both workspaces; source-ledger reducer completed for both workspaces; source-extraction batch harvests active for ordinary `001`/`002` and Bryan `001`.

@@ -7,7 +7,7 @@ import {
   fraunces600FontPath,
 } from "../font-files";
 
-export const alt = "Murph Security. Your health data stays yours.";
+export const alt = "Murph Security. How Murph protects health data.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -68,12 +68,12 @@ export default async function SecurityOGImage() {
 
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div style={{ ...HEADLINE_STYLE, color: "#f5f0e8" }}>
-            Your health data
+            Protecting
           </div>
           <div style={{ display: "flex" }}>
-            <span style={{ ...HEADLINE_STYLE, color: "#c4a882" }}>stays</span>
+            <span style={{ ...HEADLINE_STYLE, color: "#c4a882" }}>health</span>
             <span style={{ ...HEADLINE_STYLE, color: "#f5f0e8" }}>
-              &nbsp;yours.
+              &nbsp;data.
             </span>
           </div>
         </div>

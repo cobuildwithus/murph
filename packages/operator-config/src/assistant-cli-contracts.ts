@@ -34,11 +34,7 @@ export const assistantSandboxValues = [
   'danger-full-access',
 ] as const
 
-export const assistantApprovalPolicyValues = [
-  'untrusted',
-  'on-request',
-  'never',
-] as const
+export const assistantApprovalPolicyValues = ['never'] as const
 export const assistantReasoningEffortValues = [
   'low',
   'medium',

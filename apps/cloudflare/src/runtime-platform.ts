@@ -3,6 +3,7 @@ import {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
+  type RuntimeLivenessTouchResult,
   type HostedRuntimeDeviceSyncMessagingReturnTarget,
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -34,6 +35,9 @@ import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "./runner-email-route.ts";
 import {
+  HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
+} from "./runner-outbound/heartbeat.ts";
+import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
@@ -44,6 +48,7 @@ import {
 
 import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import {
@@ -194,6 +199,15 @@ export function buildHostedExecutionRuntimePlatform(input: {
         }
       : {}),
     ...(hostedWebDeviceSyncPort ? { deviceSyncPort: hostedWebDeviceSyncPort } : {}),
+    ...(input.internalWorkerProxyToken && input.workspaceCheckpointBridge
+      ? {
+          runtimeLivenessPort: createCloudflareRuntimeLivenessPort({
+            fetchImpl,
+            timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
+        }
+      : {}),
     effectsPort: {
       async readRawEmailMessage(rawMessageKey) {
         const response = await fetchHostedResponse({
@@ -214,10 +228,18 @@ export function buildHostedExecutionRuntimePlatform(input: {
         return new Uint8Array(await response.arrayBuffer());
       },
       async sendEmail(request) {
+        const headers = new Headers();
+        const lease = await input.workspaceCheckpointBridge?.readCurrentLease() ?? null;
+        if (lease) {
+          headers.set("x-hosted-runtime-attempt-id", lease.attemptId);
+          headers.set("x-hosted-runtime-lease-generation", lease.leaseGeneration);
+          headers.set("x-hosted-runtime-workspace-version", lease.workspaceVersion);
+        }
         const payload = await fetchHostedJson({
           body: request,
           description: "Hosted email send",
           fetchImpl,
+          headers,
           method: "POST",
           timeoutMs,
           url: new URL(
@@ -287,6 +309,66 @@ function buildHostedExecutionRunnerEmailMessagePath(rawMessageKey: string): stri
   return `/messages/${encodeURIComponent(rawMessageKey)}`;
 }
 
+function createCloudflareRuntimeLivenessPort(input: {
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+  workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
+}) {
+  return {
+    async touch(touchInput: {
+      requestId: string;
+      signal?: AbortSignal | null;
+    }): Promise<RuntimeLivenessTouchResult> {
+      const lease = await input.workspaceCheckpointBridge.readCurrentLease();
+      if (!lease) {
+        return {
+          ok: false,
+          reason: "no_active_invocation",
+        };
+      }
+
+      const response = await fetchHostedResponse({
+        description: "Hosted runtime active invocation heartbeat",
+        fetchImpl: input.fetchImpl,
+        init: {
+          body: JSON.stringify({
+            attemptId: lease.attemptId,
+            leaseGeneration: lease.leaseGeneration,
+            requestId: touchInput.requestId,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        logFailures: false,
+        timeoutMs: input.timeoutMs,
+        url: new URL(
+          HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH,
+          `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.runnerControl}/`,
+        ),
+        ...(touchInput.signal ? { signal: touchInput.signal } : {}),
+      });
+
+      if (response.status === 401) {
+        return {
+          ok: false,
+          reason: "unauthorized",
+        };
+      }
+      if (response.status >= 400 && response.status < 500) {
+        return {
+          ok: false,
+          reason: "malformed_request",
+        };
+      }
+      assertHostedOk(response, "Hosted runtime active invocation heartbeat");
+      const payload = await response.json();
+      return parseRuntimeLivenessTouchResult(payload);
+    },
+  };
+}
+
 function resolveHostedWebControlTransport(input: {
   internalWorkerProxyToken: string | null;
   webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
@@ -339,6 +421,10 @@ function createCloudflareHostedRuntimeFetch(
       )
       : url;
     const proxiedRequest = createHostedInternalProxyRequest(proxiedUrl, request, headers);
+    const shouldLogInternalRequest = !(
+      url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl
+      && url.pathname === HOSTED_RUNTIME_ACTIVE_INVOCATION_HEARTBEAT_PATH
+    );
     const details = {
       effectsFingerprintPresent: url.searchParams.has("fingerprint"),
       host: url.hostname,
@@ -348,38 +434,44 @@ function createCloudflareHostedRuntimeFetch(
       userId: boundUserId,
     };
 
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details,
-      message: "Hosted runtime internal request started.",
-      phase: "outbox",
-      userId: boundUserId,
-    });
-
-    try {
-      const response = await fetchImpl(proxiedRequest);
-      emitHostedExecutionStructuredLog({
-        component: "assistant-delivery",
-        details: {
-          ...details,
-          ok: response.ok ? "true" : "false",
-          status: String(response.status),
-        },
-        message: "Hosted runtime internal request completed.",
-        phase: "outbox",
-        userId: boundUserId,
-      });
-      return response;
-    } catch (error) {
+    if (shouldLogInternalRequest) {
       emitHostedExecutionStructuredLog({
         component: "assistant-delivery",
         details,
-        error,
-        level: "warn",
-        message: "Hosted runtime internal request failed.",
+        message: "Hosted runtime internal request started.",
         phase: "outbox",
         userId: boundUserId,
       });
+    }
+
+    try {
+      const response = await fetchImpl(proxiedRequest);
+      if (shouldLogInternalRequest) {
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details: {
+            ...details,
+            ok: response.ok ? "true" : "false",
+            status: String(response.status),
+          },
+          message: "Hosted runtime internal request completed.",
+          phase: "outbox",
+          userId: boundUserId,
+        });
+      }
+      return response;
+    } catch (error) {
+      if (shouldLogInternalRequest) {
+        emitHostedExecutionStructuredLog({
+          component: "assistant-delivery",
+          details,
+          error,
+          level: "warn",
+          message: "Hosted runtime internal request failed.",
+          phase: "outbox",
+          userId: boundUserId,
+        });
+      }
       throw error;
     }
   }) as typeof fetch;
@@ -850,6 +942,7 @@ async function fetchHostedJson(input: {
   body?: unknown;
   description: string;
   fetchImpl: typeof fetch;
+  headers?: Headers;
   method: "DELETE" | "GET" | "POST" | "PUT";
   timeoutMs: number;
   url: URL;
@@ -862,10 +955,11 @@ async function fetchHostedJson(input: {
         ? {}
         : {
             body: JSON.stringify(input.body),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
+            headers: mergeHostedRuntimeJsonHeaders(input.headers),
           }),
+      ...(input.body === undefined && input.headers
+        ? { headers: input.headers }
+        : {}),
       method: input.method,
     },
     timeoutMs: input.timeoutMs,
@@ -918,39 +1012,75 @@ async function fetchHostedJson(input: {
   }
 }
 
+function mergeHostedRuntimeJsonHeaders(headers: Headers | undefined): Headers {
+  const merged = new Headers(headers);
+  merged.set("content-type", "application/json; charset=utf-8");
+  return merged;
+}
+
 async function fetchHostedResponse(input: {
   description: string;
   fetchImpl: typeof fetch;
   init?: RequestInit;
+  logFailures?: boolean;
   logPath?: string;
+  signal?: AbortSignal | null;
   timeoutMs: number;
   url: URL;
 }): Promise<Response> {
   try {
+    const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
     return await input.fetchImpl(input.url, {
       ...input.init,
-      signal: AbortSignal.timeout(input.timeoutMs),
+      signal: combineAbortSignals(input.signal ?? input.init?.signal ?? null, timeoutSignal),
     });
   } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: {
-        description: input.description,
-        method: input.init?.method ?? "GET",
-        path: input.logPath ?? input.url.pathname,
-        responseOrigin: input.url.origin,
-      },
-      error,
-      level: "warn",
-      message: "Hosted runtime upstream request failed.",
-      phase: "outbox",
-      userId: null,
-    });
+    if (input.logFailures !== false) {
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: {
+          description: input.description,
+          method: input.init?.method ?? "GET",
+          path: input.logPath ?? input.url.pathname,
+          responseOrigin: input.url.origin,
+        },
+        error,
+        level: "warn",
+        message: "Hosted runtime upstream request failed.",
+        phase: "outbox",
+        userId: null,
+      });
+    }
     throw new Error(
       `${input.description} request failed.${formatHostedResponseFetchCause(error)}`,
       { cause: error },
     );
   }
+}
+
+function combineAbortSignals(
+  first: AbortSignal | null,
+  second: AbortSignal,
+): AbortSignal {
+  if (!first) {
+    return second;
+  }
+
+  if (first.aborted) {
+    return first;
+  }
+
+  const controller = new AbortController();
+  const abort = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason);
+    }
+  };
+  const abortFirst = () => abort(first);
+  const abortSecond = () => abort(second);
+  first.addEventListener("abort", abortFirst, { once: true });
+  second.addEventListener("abort", abortSecond, { once: true });
+  return controller.signal;
 }
 
 function formatHostedResponseFetchCause(error: unknown): string {
@@ -1007,6 +1137,37 @@ function readOptionalStringField(value: unknown, field: string): string | null {
   }
 
   return entry;
+}
+
+function parseRuntimeLivenessTouchResult(value: unknown): RuntimeLivenessTouchResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Runtime liveness response must be an object.");
+  }
+
+  const ok = (value as { ok?: unknown }).ok;
+  if (ok === true) {
+    return { ok: true };
+  }
+  if (ok !== false) {
+    throw new TypeError("Runtime liveness response.ok must be a boolean.");
+  }
+
+  const reason = (value as { reason?: unknown }).reason;
+  if (
+    reason === "no_active_invocation"
+    || reason === "malformed_request"
+    || reason === "stale_attempt"
+    || reason === "stale_generation"
+    || reason === "unauthorized"
+    || reason === "wrong_user"
+  ) {
+    return {
+      ok: false,
+      reason,
+    };
+  }
+
+  throw new TypeError("Runtime liveness response.reason is unsupported.");
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

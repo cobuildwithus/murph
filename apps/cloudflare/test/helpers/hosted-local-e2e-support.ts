@@ -10,7 +10,6 @@ const hostedLocalE2eRunnerTimeoutMs = "240000";
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
   "parsers",
-  "web",
 ] as const;
 export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -40,7 +39,6 @@ export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "HOSTED_ASSISTANT_OSS",
   "HOSTED_ASSISTANT_PROFILE",
   "HOSTED_ASSISTANT_PROVIDER_NAME",
-  "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
 ] as const;
 
 export type HostedLocalAssistantProviderMode = "stub" | "live";

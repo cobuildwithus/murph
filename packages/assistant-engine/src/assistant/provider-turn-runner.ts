@@ -5,24 +5,22 @@ import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/runtime-state/node'
 import {
-  executeAssistantProviderTurnAttempt,
-  type AssistantProviderAttemptMetadata,
-} from '../assistant-provider.js'
+  executeCodexAssistantTurnAttemptFromInput,
+  resolveCodexAssistantTargetCapabilities,
+} from './provider-registry.js'
+import type { AssistantProviderAttemptMetadata } from './providers/types.js'
 import { errorMessage } from './shared.js'
 import {
   recordAssistantToolFailureRuntimeIssues,
 } from './issue-reporting.js'
 import {
-  type ResolvedAssistantProviderRoute,
+  type CodexThreadIdentity,
 } from './provider-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
   attachRecoveredAssistantSession,
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
-import {
-  resolveAssistantRouteUserMessageContent,
-} from './rich-content-routing.js'
 import { appendAssistantTranscriptEntries } from './store.js'
 import {
   buildAssistantProviderTranscriptAuditEntries,
@@ -46,6 +44,7 @@ import type {
 } from './turn-input.js'
 import type { AssistantProviderContinuation } from './active-turn-input-journal.js'
 import type { AssistantActiveTurnProviderHistory } from './active-turn-history.js'
+import type { AssistantUserMessageContentPart } from './content-types.js'
 import {
   recordProviderAttemptFailed,
   recordProviderAttemptStarted,
@@ -53,7 +52,7 @@ import {
 } from './provider-turn/attempt-observability.js'
 import {
   buildAssistantProviderTurnExecutionPlan,
-  resolveAssistantProviderAttemptPlan,
+  buildCodexProviderAttemptPlan,
 } from './provider-turn/planning.js'
 import type {
   AssistantProviderAttemptPlan,
@@ -95,7 +94,7 @@ export type AssistantProviderTurnRecoveryOutcome =
       kind: 'failed_terminal'
       error: unknown
       providerContinuation: AssistantProviderContinuation
-      route?: ResolvedAssistantProviderRoute | null
+      route: CodexThreadIdentity
       session: AssistantSession
     }
   | {
@@ -114,29 +113,16 @@ export async function executeProviderTurnWithRecovery(input: {
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
   resolvedSession: AssistantSession
-  routes: readonly ResolvedAssistantProviderRoute[]
+  route: CodexThreadIdentity
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantProviderTurnRecoveryOutcome> {
   const executionPlan = await buildAssistantProviderTurnExecutionPlan(input)
-  const attemptedRouteIds = new Set<string>()
-  const attemptPlan = await resolveAssistantProviderAttemptPlan({
+  const attemptPlan = await buildCodexProviderAttemptPlan({
     attemptCount: 1,
-    attemptedRouteIds,
     executionPlan,
     session: input.resolvedSession,
   })
-  if (!attemptPlan) {
-    return {
-      kind: 'failed_terminal',
-      error: new Error('Assistant provider route was not available. Reconfigure the assistant to use Codex.'),
-      providerContinuation: {
-        kind: 'explicit-structured-history',
-      },
-      route: null,
-      session: input.resolvedSession,
-    }
-  }
 
   await input.onProviderRequestPlanned?.({
     providerAttemptId: null,
@@ -254,7 +240,7 @@ async function executeAssistantProviderAttempt(input: {
       executionPlan,
       hostedMemberId: executionPlan.executionContext?.hosted?.memberId ?? null,
     })
-    const attemptResult = await executeAssistantProviderTurnAttempt({
+    const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       abortSignal: executionPlan.input.abortSignal,
       activeTurnId: executionPlan.turnId,
       activeTurnSteering: executionPlan.activeTurnSteering,
@@ -264,7 +250,7 @@ async function executeAssistantProviderAttempt(input: {
       env: attemptEnv,
       usageAttribution,
       userPrompt: executionPlan.input.prompt,
-      userMessageContent: resolveAssistantRouteUserMessageContent({
+      userMessageContent: resolveCodexRouteUserMessageContent({
         route: attemptPlan.route,
         userMessageContent: executionPlan.input.userMessageContent,
       }),
@@ -386,4 +372,43 @@ function readAssistantErrorCode(error: unknown): string | null {
 
   const code = (error as { code?: unknown }).code
   return typeof code === 'string' && code.trim().length > 0 ? code : null
+}
+
+function resolveCodexRouteUserMessageContent(input: {
+  route: CodexThreadIdentity
+  userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined
+}): AssistantUserMessageContentPart[] | null {
+  const normalized = normalizeAssistantUserMessageContent(input.userMessageContent)
+  if (normalized === null) {
+    return null
+  }
+
+  if (!hasAssistantRichUserMessageContent(normalized)) {
+    return normalized
+  }
+
+  const supportedTypes = new Set(
+    resolveCodexAssistantTargetCapabilities(
+      input.route.providerOptions,
+    ).supportedUserMessageContentTypes,
+  )
+  const supported = normalized.filter((part) => supportedTypes.has(part.type))
+
+  return hasAssistantRichUserMessageContent(supported) ? supported : null
+}
+
+function normalizeAssistantUserMessageContent(
+  userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
+): AssistantUserMessageContentPart[] | null {
+  if (!Array.isArray(userMessageContent) || userMessageContent.length === 0) {
+    return null
+  }
+
+  return [...userMessageContent]
+}
+
+function hasAssistantRichUserMessageContent(
+  userMessageContent: readonly AssistantUserMessageContentPart[],
+): boolean {
+  return userMessageContent.some((part) => part.type !== 'text')
 }

@@ -1,9 +1,19 @@
+export {
+  createCatalogModel,
+  executeCodexAssistantTurn,
+  executeCodexAssistantTurnAttempt,
+  executeCodexAssistantTurnAttemptFromInput,
+  executeCodexAssistantTurnFromInput,
+  resolveCodexAssistantCapabilities,
+  resolveCodexAssistantLabel,
+  resolveCodexAssistantTargetCapabilities,
+  resolveCodexStaticModels,
+} from './providers/registry.js'
 export type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
-  AssistantProviderDefinition,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
@@ -13,18 +23,3 @@ export type {
 export type {
   AssistantProviderProgressEvent,
 } from './provider-progress.js'
-export {
-  ASSISTANT_PROVIDER_DEFINITIONS,
-  createCatalogModel,
-  executeAssistantProviderTurnAttempt,
-  executeAssistantProviderTurnAttemptWithDefinition,
-  executeAssistantProviderTurn,
-  executeAssistantProviderTurnWithDefinition,
-  getAssistantProviderDefinition,
-  listAssistantProviderDefinitions,
-  listAssistantProviders,
-  resolveAssistantProviderCapabilities,
-  resolveAssistantProviderTargetCapabilities,
-  resolveAssistantProviderLabel,
-  resolveAssistantProviderStaticModels,
-} from './providers/registry.js'

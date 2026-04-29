@@ -19,7 +19,7 @@ const runtimeMocks = vi.hoisted(() => ({
   isAssistantProviderConnectionLostError: vi.fn(() => false),
   isAssistantProviderInterruptedError: vi.fn(() => false),
   isAssistantSessionNotFoundError: vi.fn(() => false),
-  resolveAssistantModelCatalog: vi.fn(),
+  resolveCodexModelCatalog: vi.fn(),
   resolveAssistantOperatorDefaults: vi.fn(),
   resolveAssistantProviderDefaults: vi.fn(),
   saveAssistantOperatorDefaultsPatch: vi.fn(),
@@ -47,7 +47,7 @@ vi.mock('@murphai/assistant-engine/assistant-provider', () => ({
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-provider-catalog', () => ({
-  resolveAssistantModelCatalog: runtimeMocks.resolveAssistantModelCatalog,
+  resolveCodexModelCatalog: runtimeMocks.resolveCodexModelCatalog,
 }))
 
 vi.mock('@murphai/operator-config/operator-config', async () => {
@@ -158,7 +158,7 @@ const TEST_CATALOG_CAPABILITIES = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  runtimeMocks.resolveAssistantModelCatalog.mockReturnValue({
+  runtimeMocks.resolveCodexModelCatalog.mockReturnValue({
     capabilities: TEST_CATALOG_CAPABILITIES,
     models: [],
     modelOptions: [],
@@ -474,7 +474,7 @@ test('model selection helpers resolve the initial choice, persist updates, and u
   assert.equal(runtimeMocks.saveAssistantOperatorDefaultsPatch.mock.calls.length, 1)
 
   let latestCatalog:
-    | ReturnType<typeof runtimeMocks.resolveAssistantModelCatalog>
+    | ReturnType<typeof runtimeMocks.resolveCodexModelCatalog>
     | undefined
   function Probe(): React.ReactElement {
     latestCatalog = useAssistantModelCatalogState({
@@ -497,7 +497,7 @@ test('model selection helpers resolve the initial choice, persist updates, and u
 })
 
 test('model catalog hook uses Codex catalog inputs, and initial selection falls back through defaults', async () => {
-  runtimeMocks.resolveAssistantModelCatalog.mockReturnValue({
+  runtimeMocks.resolveCodexModelCatalog.mockReturnValue({
     capabilities: TEST_CATALOG_CAPABILITIES,
     models: [],
     modelOptions: [],
@@ -585,7 +585,7 @@ test('model catalog hook uses Codex catalog inputs, and initial selection falls 
 
 test('model catalog hook updates when Codex model state changes', async () => {
   const catalogInputs: unknown[] = []
-  runtimeMocks.resolveAssistantModelCatalog.mockImplementation((input) => {
+  runtimeMocks.resolveCodexModelCatalog.mockImplementation((input) => {
     catalogInputs.push(input)
     return {
       capabilities: TEST_CATALOG_CAPABILITIES,

@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import {
-  type AssistantChatProvider,
   type AssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -9,20 +8,20 @@ import {
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
-import { resolveAssistantProviderLabel } from './provider-registry.js'
+import { resolveCodexAssistantLabel } from './provider-registry.js'
 import { normalizeNullableString } from './shared.js'
 
-export interface ResolvedAssistantProviderRoute {
+export interface CodexThreadIdentity {
   codexCommand: string | null
   label: string
-  provider: AssistantChatProvider
+  provider: 'codex-cli'
   providerOptions: AssistantProviderSessionOptions
   routeId: string
 }
 
-export function buildAssistantPrimaryProviderRoute(
+export function buildCodexThreadIdentity(
   providerConfig: AssistantProviderConfig,
-): ResolvedAssistantProviderRoute {
+): CodexThreadIdentity {
   const provider = resolveAssistantChatProviderFromConfig(providerConfig)
   const providerOptions = serializeAssistantProviderSessionOptions(providerConfig)
   const codexCommand = isAssistantCodexTargetConfig(providerConfig)
@@ -30,22 +29,22 @@ export function buildAssistantPrimaryProviderRoute(
     : null
 
   return {
-    routeId: hashAssistantProviderRoute({
+    routeId: hashCodexThreadIdentity({
       codexCommand,
       provider,
       providerOptions,
     }),
-    label: buildAssistantProviderRouteLabel(providerConfig),
+    label: buildCodexThreadIdentityLabel(providerConfig),
     provider,
     providerOptions,
     codexCommand,
   }
 }
 
-function buildAssistantProviderRouteLabel(
+function buildCodexThreadIdentityLabel(
   providerConfig: AssistantProviderConfig,
 ): string {
-  const providerLabel = resolveAssistantProviderLabel(providerConfig)
+  const providerLabel = resolveCodexAssistantLabel(providerConfig)
 
   const parts = [
     'primary',
@@ -61,22 +60,22 @@ function buildAssistantProviderRouteLabel(
   return parts.join(':') || resolveAssistantChatProviderFromConfig(providerConfig)
 }
 
-function hashAssistantProviderRoute(input: {
+function hashCodexThreadIdentity(input: {
   codexCommand: string | null
-  provider: AssistantChatProvider
+  provider: 'codex-cli'
   providerOptions: AssistantProviderSessionOptions
 }): string {
   return createHash('sha1')
     .update(
-      JSON.stringify(buildAssistantProviderRouteIdentity(input)),
+      JSON.stringify(buildCodexThreadIdentityFingerprint(input)),
     )
     .digest('hex')
     .slice(0, 16)
 }
 
-function buildAssistantProviderRouteIdentity(input: {
+function buildCodexThreadIdentityFingerprint(input: {
   codexCommand: string | null
-  provider: AssistantChatProvider
+  provider: 'codex-cli'
   providerOptions: AssistantProviderSessionOptions
 }) {
   return {

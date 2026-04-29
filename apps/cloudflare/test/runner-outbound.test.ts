@@ -19,6 +19,7 @@ import type {
 const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
+const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
@@ -173,6 +174,121 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Unauthorized",
     });
+  });
+
+  it("records active invocation heartbeats through the runner-control host", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn(async () => ({
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true as const,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        body: JSON.stringify({
+          attemptId: "workspace-invocation-1",
+          leaseGeneration: "1",
+          requestId: "hosted-workspace-invocation:workspace-invocation-1",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              async bindUser(userId: string) {
+                return { userId };
+              },
+              recordActiveInvocationHeartbeat,
+            };
+          },
+        },
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      nextAlarmAt: "2026-04-27T00:00:45.000Z",
+      ok: true,
+    });
+    expect(recordActiveInvocationHeartbeat).toHaveBeenCalledWith({
+      attemptId: "workspace-invocation-1",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+  });
+
+  it("rejects heartbeat proxy traffic when the invocation proxy token does not match", async () => {
+    const response = await handleRunnerOutboundRequest(
+      new Request(HEARTBEAT_URL, {
+        headers: createRunnerProxyHeaders({
+          [RUNNER_PROXY_TOKEN_HEADER]: "proxy-tokez",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv(),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+  });
+
+  it("returns non-retryable liveness rejection for malformed heartbeat payloads", async () => {
+    const recordActiveInvocationHeartbeat = vi.fn();
+    const env = createRunnerOutboundEnv({
+      USER_RUNNER: {
+        getByName() {
+          return {
+            async bindUser(userId: string) {
+              return { userId };
+            },
+            recordActiveInvocationHeartbeat,
+          };
+        },
+      },
+    });
+
+    for (const body of [
+      "{",
+      JSON.stringify({
+        attemptId: "workspace-invocation-1",
+        leaseGeneration: "1",
+        workspaceVersion: "0",
+      }),
+      JSON.stringify({
+        attemptId: "workspace-invocation-1",
+        leaseGeneration: "1",
+        requestId: null,
+      }),
+    ]) {
+      const response = await handleRunnerOutboundRequest(
+        new Request(HEARTBEAT_URL, {
+          body,
+          headers: createRunnerProxyHeaders({
+            "content-type": "application/json; charset=utf-8",
+          }),
+          method: "POST",
+        }),
+        env,
+        "member_123",
+        RUNNER_PROXY_TOKEN,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        reason: "malformed_request",
+      });
+    }
+
+    expect(recordActiveInvocationHeartbeat).not.toHaveBeenCalled();
   });
 
   it("returns 404 for removed Cloudflare-owned device-sync runtime hosts", async () => {
@@ -672,6 +788,12 @@ function createRunnerOutboundEnv(
         },
         async ownsActiveInvocationLease() {
           return true;
+        },
+        async recordActiveInvocationHeartbeat() {
+          return {
+            nextAlarmAt: null,
+            ok: true as const,
+          };
         },
         async recordActiveInvocationWorkspaceCheckpoint() {
           return { recorded: true };

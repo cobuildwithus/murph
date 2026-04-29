@@ -5,6 +5,7 @@ import { normalizeHostedLinqConversationCapture } from "@murphai/inboxd/connecto
 
 import {
   createHostedLinqAttachmentDownloadDriver,
+  HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
   normalizeHostedLinqAttachmentUrl,
 } from "../src/hosted-runtime/events/linq.ts";
@@ -92,6 +93,73 @@ describe("normalizeHostedLinqAttachmentUrl", () => {
     assert.equal(
       normalizeHostedLinqAttachmentUrl("https://cdn.linqapp.com/uploads/photo.jpg"),
       "https://cdn.linqapp.com/uploads/photo.jpg",
+    );
+  });
+});
+
+describe("createHostedLinqAttachmentDownloadDriver", () => {
+  it("rejects declared oversized hosted Linq attachment parts before fetching bytes", async () => {
+    const fetchMock = vi.fn();
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart({
+      attachmentId: "att_large_pdf",
+      mimeType: "application/pdf",
+      size: HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES + 1,
+      type: "media",
+      url: "https://cdn.linqapp.com/files/large.pdf",
+    })).rejects.toThrow(
+      `Hosted Linq attachment download exceeds ${HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES} bytes.`,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects hosted Linq attachment downloads whose content-length exceeds the cap", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response("too large", {
+        status: 200,
+        headers: {
+          "content-length": String(HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES + 1),
+        },
+      }));
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+
+    await expect(
+      driver.downloadUrl("https://cdn.linqapp.com/files/large.pdf"),
+    ).rejects.toThrow(
+      `Hosted Linq attachment download exceeds ${HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES} bytes.`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects streamed hosted Linq attachment downloads once the body exceeds the cap", async () => {
+    const chunk = new Uint8Array(HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES + 1);
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(chunk);
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ));
+    setFetch(fetchMock as typeof globalThis.fetch);
+
+    const driver = createHostedLinqAttachmentDownloadDriver();
+    assert.ok(driver);
+
+    await expect(
+      driver.downloadUrl("https://cdn.linqapp.com/files/large.pdf"),
+    ).rejects.toThrow(
+      `Hosted Linq attachment download exceeds ${HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES} bytes.`,
     );
   });
 });

@@ -762,6 +762,89 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
+  it("advances heartbeat lease payloads after a successful workspace checkpoint", async () => {
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
+        return new Response(JSON.stringify({
+          checkpointed: true,
+          workspace: {
+            checkpointedAt: "2026-04-26T00:00:04.000Z",
+            createdAt: "2026-04-26T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: {},
+            snapshotRef: null,
+            updatedAt: "2026-04-26T00:00:04.000Z",
+            userId: "member_123",
+            version: "5",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      internalWorkerProxyToken: "runner-proxy-token",
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint: ({ workspaceVersion }) => {
+          currentLease = {
+            ...currentLease,
+            workspaceVersion,
+          };
+        },
+      },
+    });
+
+    await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {},
+      snapshotRef: null,
+    });
+    await expect(platform.runtimeLivenessPort?.touch({
+      requestId: "hosted-workspace-invocation:attempt_1",
+    })).resolves.toEqual({ ok: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const heartbeatRequest = requireFetchRequest(fetchMock.mock.calls[1], "heartbeat");
+    expect(heartbeatRequest.url).toBe(
+      "http://runner-control.worker/internal/active-invocation/heartbeat",
+    );
+    expect(heartbeatRequest.method).toBe("POST");
+    expect(heartbeatRequest.headers.get("x-hosted-execution-runner-proxy-token")).toBe(
+      "runner-proxy-token",
+    );
+    await expect(heartbeatRequest.json()).resolves.toMatchObject({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      requestId: "hosted-workspace-invocation:attempt_1",
+    });
+  });
+
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       checkpointed: true,

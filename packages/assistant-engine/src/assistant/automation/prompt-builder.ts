@@ -332,8 +332,14 @@ function renderPreparedAttachmentPromptSection(
   )
   const richEvidenceCandidate =
     hasInboxMultimodalAttachmentEvidenceCandidate(attachment)
+  const storedPdfMetadata = hasStoredPdfAttachmentPath(attachment)
   const status = renderAttachmentParserStatus(attachment.parseState ?? null)
-  if (!hasTextFragments && !richEvidenceCandidate && status === null) {
+  if (
+    !hasTextFragments &&
+    !richEvidenceCandidate &&
+    !storedPdfMetadata &&
+    status === null
+  ) {
     return null
   }
 
@@ -346,9 +352,30 @@ function renderPreparedAttachmentPromptSection(
       'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
     )
   }
+  if (storedPdfMetadata && !hasTextFragments) {
+    sections.push(
+      'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
+    )
+  }
 
   const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${sections.join('\n\n')}`
+}
+
+function hasStoredPdfAttachmentPath(attachment: InboxModelAttachmentBundle): boolean {
+  const storedPath = normalizeNullableString(attachment.storedPath)
+  if (!storedPath) {
+    return false
+  }
+
+  const mime = normalizeNullableString(attachment.mime)?.toLowerCase() ?? null
+  if (mime === 'application/pdf' || mime === 'application/x-pdf') {
+    return true
+  }
+
+  return [attachment.fileName, storedPath].some((candidate) =>
+    normalizeNullableString(candidate)?.toLowerCase().endsWith('.pdf') ?? false,
+  )
 }
 
 function renderAttachmentParserStatus(parseState: string | null): string | null {

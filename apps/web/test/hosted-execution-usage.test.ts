@@ -80,14 +80,12 @@ describe("importHostedAiUsageRecords", () => {
     expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
     expect(hostedAiUsageUpsert).toHaveBeenCalledWith({
       where: {
-        turnId_attemptCount: {
-          attemptCount: 1,
-          turnId: "turn_123",
-        },
+        id: "turn_123.attempt-1",
       },
       create: expect.objectContaining({
         id: "turn_123.attempt-1",
         memberId: "member_123",
+        providerRequestOrdinal: 0,
         stripeMeterError:
           "Hosted AI usage billing is disabled until Stripe native LLM billing is enabled.",
         stripeMeterSource: "murph",
@@ -215,6 +213,80 @@ describe("importHostedAiUsageRecords", () => {
     expect(hostedAiUsageUpsert).toHaveBeenCalledTimes(1);
   });
 
+  it("dedupes omitted and explicit first provider request ordinals", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => null),
+      },
+    };
+
+    const result = await importHostedAiUsageRecords({
+      aiUsageBillingMode: "disabled",
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [
+        BASE_USAGE_RECORD,
+        {
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 0,
+        },
+      ],
+    });
+
+    expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
+    expect(hostedAiUsageUpsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists continuation provider requests as separate usage rows", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn(async () => null),
+      },
+    };
+    const continuationUsage = {
+      ...BASE_USAGE_RECORD,
+      providerRequestOrdinal: 1,
+      usageId: "turn_123.request-1.attempt-1",
+    };
+
+    const result = await importHostedAiUsageRecords({
+      aiUsageBillingMode: "disabled",
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD, continuationUsage],
+    });
+
+    expect(result.recordedIds).toEqual([
+      "turn_123.attempt-1",
+      "turn_123.request-1.attempt-1",
+    ]);
+    expect(hostedAiUsageUpsert).toHaveBeenCalledTimes(2);
+    expect(hostedAiUsageUpsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: {
+        id: "turn_123.attempt-1",
+      },
+      create: expect.objectContaining({
+        providerRequestOrdinal: 0,
+      }),
+    }));
+    expect(hostedAiUsageUpsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: {
+        id: "turn_123.request-1.attempt-1",
+      },
+      create: expect.objectContaining({
+        providerRequestOrdinal: 1,
+      }),
+    }));
+  });
+
   it("rejects conflicting duplicate usage ids in one import batch", async () => {
     const prisma = {
       hostedAiUsage: {
@@ -239,7 +311,7 @@ describe("importHostedAiUsageRecords", () => {
         ],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage import contains conflicting records for usage id turn_123.attempt-1.",
+      "Hosted AI usage import contains conflicting records for one usage id.",
     );
   });
 
@@ -267,7 +339,7 @@ describe("importHostedAiUsageRecords", () => {
         ],
       }),
     ).rejects.toThrow(
-      "usageId must match the canonical turnId/providerRequestOrdinal/attemptCount-derived value turn_123.attempt-1.",
+      "Hosted AI usage import contains an invalid usage record.",
     );
 
     expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
@@ -294,16 +366,16 @@ describe("importHostedAiUsageRecords", () => {
         usage: [BASE_USAGE_RECORD],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage id turn_123.attempt-1 already exists with different immutable fields: totalTokens.",
+      "Hosted AI usage already exists with different immutable fields: totalTokens.",
     );
   });
 
-  it("rejects an existing logical turn-attempt row when the stored usage id differs", async () => {
+  it("rejects an existing usage row when the stored provider request ordinal differs", async () => {
     const prisma = {
       hostedAiUsage: {
         upsert: vi.fn(async (args: { create: Record<string, unknown> }) => ({
           ...args.create,
-          id: "turn_123.unexpected-1",
+          providerRequestOrdinal: 1,
         })),
       },
       hostedMemberBillingRef: {
@@ -319,7 +391,7 @@ describe("importHostedAiUsageRecords", () => {
         usage: [BASE_USAGE_RECORD],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage id turn_123.attempt-1 already exists with different immutable fields: id.",
+      "Hosted AI usage already exists with different immutable fields: providerRequestOrdinal.",
     );
   });
 
@@ -380,7 +452,7 @@ describe("importHostedAiUsageRecords", () => {
         ],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage turn_123.attempt-1 memberId member_other does not match the authenticated hosted execution user member_123.",
+      "Hosted AI usage memberId does not match the authenticated hosted execution user.",
     );
   });
 

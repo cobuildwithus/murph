@@ -10,8 +10,10 @@ import {
 describe("runner bundle package closure", () => {
   it("keeps the install closure limited to the runtime workspace closure plus the murph shell", () => {
     expect(hostedRunnerWorkspacePackageNames).toEqual([
+      "@murphai/assistant-cli",
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
+      "@murphai/assistantd",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
       "@murphai/core",
@@ -29,6 +31,7 @@ describe("runner bundle package closure", () => {
       "@murphai/parsers",
       "@murphai/query",
       "@murphai/runtime-state",
+      "@murphai/setup-cli",
       "@murphai/vault-usecases",
     ]);
   });

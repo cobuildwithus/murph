@@ -3,11 +3,11 @@ import type {
   AssistantTranscriptEntry,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  findAssistantCatalogModelOptionIndex,
-  findAssistantCatalogReasoningOptionIndex,
-  resolveAssistantTargetCapabilities,
-  type AssistantModelOption,
-  type AssistantReasoningOption,
+  findCodexCatalogModelOptionIndex,
+  findCodexCatalogReasoningOptionIndex,
+  resolveCodexTargetCapabilities,
+  type CodexModelOption,
+  type CodexReasoningOption,
 } from '@murphai/assistant-engine/assistant-provider-catalog'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
@@ -50,8 +50,8 @@ export interface InkChatTraceUpdate {
 }
 
 export type {
-  AssistantModelOption,
-  AssistantReasoningOption,
+  CodexModelOption,
+  CodexReasoningOption,
 } from '@murphai/assistant-engine/assistant-provider-catalog'
 
 export interface AssistantSlashCommand {
@@ -283,18 +283,18 @@ function resolveInkTraceKind(
   }
 }
 
-export function findAssistantModelOptionIndex(
+export function findCodexModelOptionIndex(
   model: string | null,
-  options: readonly AssistantModelOption[],
+  options: readonly CodexModelOption[],
 ): number {
-  return findAssistantCatalogModelOptionIndex(model, options)
+  return findCodexCatalogModelOptionIndex(model, options)
 }
 
-export function findAssistantReasoningOptionIndex(
+export function findCodexReasoningOptionIndex(
   reasoningEffort: string | null,
-  options: readonly AssistantReasoningOption[],
+  options: readonly CodexReasoningOption[],
 ): number {
-  return findAssistantCatalogReasoningOptionIndex(reasoningEffort, options)
+  return findCodexCatalogReasoningOptionIndex(reasoningEffort, options)
 }
 
 export function getMatchingSlashCommands(
@@ -422,7 +422,7 @@ export function resolveChatMetadataBadges(
 ): ChatMetadataBadge[] {
   const normalizedModel = normalizeNullableString(input.model) ?? input.provider
   const normalizedReasoningEffort = normalizeNullableString(input.reasoningEffort)
-  const capabilities = resolveAssistantTargetCapabilities({
+  const capabilities = resolveCodexTargetCapabilities({
     provider: input.provider,
     model: input.model,
   })
@@ -491,7 +491,7 @@ function formatModelSummary(input: {
   reasoningEffort: string | null
 }): string {
   const model = input.model?.trim()
-  const capabilities = resolveAssistantTargetCapabilities({
+  const capabilities = resolveCodexTargetCapabilities({
     provider: input.provider,
     model: input.model,
   })

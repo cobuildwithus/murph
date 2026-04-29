@@ -74,6 +74,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
+  signal?: AbortSignal | null;
 }
 
 export type HostedWorkspaceRuntimeAssistantPhase = (
@@ -184,6 +185,7 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(shouldRunPostSystemCheckpoint
           ? {
               afterCheckpoint: async () => {
+                assertHostedAssistantPhaseLiveness(input.signal);
                 if ("item" in systemMailboxPreparation) {
                   const statusCallback = await recordHostedSystemMailboxItemAfterCheckpoint({
                     item: systemMailboxPreparation.item,
@@ -271,6 +273,7 @@ export async function runHostedWorkspaceAssistantPhase(
         platform: input.platform,
         platformEnv: input.runtime.platformEnv,
       },
+      signal: input.signal ?? undefined,
       vaultRoot: input.restored.vaultRoot,
       wake,
     });
@@ -337,6 +340,7 @@ export async function runHostedWorkspaceAssistantPhase(
       ...(hasPostCommitProviderCleanup
         ? {
             afterCheckpoint: async () => {
+              assertHostedAssistantPhaseLiveness(input.signal);
               return await drainHostedPostCheckpointDeliveryCleanup({
                 assistantDeliveryEffects: deliveryEffects,
                 baseNextWakeAt: assistantMetrics.nextWakeAt,
@@ -385,19 +389,23 @@ async function drainHostedPostCheckpointDeliveryCleanup(input: {
     ? await drainHostedCommittedAssistantDeliveriesAfterCommit({
         allowPreparedSending: true,
         assistantDeliveryEffects: input.assistantDeliveryEffects,
+        assertLiveness: () => assertHostedAssistantPhaseRuntimeLiveness(input.input),
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
         platformEnv: input.input.runtime.platformEnv,
+        signal: input.input.signal ?? null,
         vaultRoot: input.input.restored.vaultRoot,
         wake: input.wake,
       })
     : [];
   const providerCleanup = await drainHostedProviderCleanupAfterCommit({
     assistantDeliveryOutcomes: outcomes,
+    assertLiveness: () => assertHostedAssistantPhaseRuntimeLiveness(input.input),
     checkpoint: input.providerCleanupCheckpoint ?? {
       nextWakeAt: null,
     },
     env: input.input.runtimeEnv,
+    signal: input.input.signal ?? null,
     vaultRoot: input.input.restored.vaultRoot,
     wake: input.wake,
   });
@@ -439,6 +447,37 @@ async function drainHostedPostCheckpointDeliveryCleanup(input: {
       nextWakeAt: postNextWakeAt,
     },
   };
+}
+
+function assertHostedAssistantPhaseLiveness(signal: AbortSignal | null | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  const reason = signal.reason;
+  if (reason instanceof Error) {
+    throw reason;
+  }
+  throw new Error("Hosted workspace assistant phase was aborted.");
+}
+
+async function assertHostedAssistantPhaseRuntimeLiveness(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<void> {
+  assertHostedAssistantPhaseLiveness(input.signal);
+  const port = input.runtime.platform.runtimeLivenessPort ?? null;
+  if (!port) {
+    return;
+  }
+
+  const result = await port.touch({
+    requestId: `hosted-workspace-invocation:${input.request.attemptId}:post-checkpoint`,
+    signal: input.signal ?? undefined,
+  });
+  if (!result.ok) {
+    throw new Error(`Hosted workspace runtime liveness proof was rejected: ${result.reason}.`);
+  }
+  assertHostedAssistantPhaseLiveness(input.signal);
 }
 
 function isHostedProviderCleanupCheckpointDue(

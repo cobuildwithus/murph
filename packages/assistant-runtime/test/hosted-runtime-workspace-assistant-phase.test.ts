@@ -554,6 +554,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("drains delivery effects created by system mailbox notifications after checkpoint", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const livenessTouches: string[] = [];
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_notification",
@@ -593,7 +594,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     ]);
 
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      runtimeLivenessPort: {
+        async touch(input) {
+          livenessTouches.push(input.requestId);
+          return { ok: true };
+        },
+      },
+    }));
 
     expect(result.checkpointReason).toBe("outbox_sending");
     expect(result.nextWakeAt).toBe("2026-04-27T00:20:00.000Z");
@@ -634,6 +643,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot: "/tmp/murph-vault",
       }),
     );
+    const deliveryDrainInput = mocks.drainHostedCommittedAssistantDeliveriesAfterCommit
+      .mock.calls[0]?.[0];
+    const cleanupDrainInput = mocks.drainHostedProviderCleanupAfterCommit.mock.calls[0]?.[0];
+    await deliveryDrainInput.assertLiveness();
+    await cleanupDrainInput.assertLiveness();
+    expect(livenessTouches).toEqual([
+      "hosted-workspace-invocation:attempt_synthetic_phase:post-checkpoint",
+      "hosted-workspace-invocation:attempt_synthetic_phase:post-checkpoint",
+    ]);
   });
 
   it("runs pending provider cleanup after a maintenance checkpoint even without delivery effects", async () => {
@@ -794,6 +812,7 @@ function createPhaseInput(input: {
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
+  runtimeLivenessPort?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["runtimeLivenessPort"];
   runtimeUserEnv?: Record<string, string>;
 }): HostedWorkspaceRuntimeAssistantPhaseInput {
   const billingPort =
@@ -886,6 +905,7 @@ function createPhaseInput(input: {
         },
         ...(billingPort ? { billingPort } : {}),
         ...(input.runtimeDeviceSyncPort ? { deviceSyncPort: input.runtimeDeviceSyncPort } : {}),
+        ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
       },
       platformEnv: {},
       resolvedConfig: {

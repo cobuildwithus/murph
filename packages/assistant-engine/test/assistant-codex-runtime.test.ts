@@ -701,13 +701,14 @@ describe('assistant codex runtime', () => {
 
   it('fails closed on unsupported interactive approval policies before spawning Codex', async () => {
     const workingDirectory = await createTempDir('assistant-codex-approval-policy-')
+    const staleTurnInput: Record<string, unknown> = {
+      approvalPolicy: 'on-request',
+      prompt: 'require approval',
+      workingDirectory,
+    }
 
     await expect(
-      executeCodexAppServerTurn({
-        approvalPolicy: 'on-request',
-        prompt: 'require approval',
-        workingDirectory,
-      }),
+      Reflect.apply(executeCodexAppServerTurn, undefined, [staleTurnInput]),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED',
       context: {

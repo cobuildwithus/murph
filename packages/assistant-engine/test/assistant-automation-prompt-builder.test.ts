@@ -426,7 +426,11 @@ describe('prepareAssistantAutoReplyInput', () => {
 
   it('skips when neither text nor rich evidence can be prepared', async () => {
     promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
-      createAttachmentBundle(),
+      createAttachmentBundle({
+        fileName: null,
+        mime: null,
+        storedPath: null,
+      }),
     ])
     promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: 'rich evidence unavailable',
@@ -511,21 +515,14 @@ describe('prepareAssistantAutoReplyInput', () => {
     })
   })
 
-  it('keeps PDF-only input metadata-only when raw file evidence is disabled', async () => {
+  it('keeps PDF-only input as stored-path metadata without routed file evidence', async () => {
     promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'document',
         mime: 'application/pdf',
         fileName: 'scan.pdf',
         storedPath: 'inbox/attachments/scan.pdf',
-        parseState: 'failed',
-        routingPdf: {
-          byteSize: 128,
-          eligible: false,
-          maxBytes: 20 * 1024 * 1024,
-          path: 'inbox/attachments/scan.pdf',
-          reason: 'raw-pdf-disabled',
-        },
+        parseState: 'succeeded',
         fragments: [
           {
             kind: 'attachment_metadata',
@@ -533,14 +530,13 @@ describe('prepareAssistantAutoReplyInput', () => {
             path: null,
             text: [
               'mime: application/pdf',
-              'routingPdfEligible: false',
-              'routingPdfReason: raw-pdf-disabled',
+              'storedPath: inbox/attachments/scan.pdf',
             ].join('\n'),
             truncated: false,
           },
         ],
         combinedText:
-          '[metadata]\nmime: application/pdf\nroutingPdfEligible: false\nroutingPdfReason: raw-pdf-disabled',
+          '[metadata]\nmime: application/pdf\nstoredPath: inbox/attachments/scan.pdf',
       }),
     ])
     promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(
@@ -564,15 +560,14 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'Attachment parser status: parser failed; parsed attachment text or transcript is unavailable.',
+        'No parsed PDF text is available. The storedPath above is local attachment metadata; inspect that PDF with local tools only if needed.',
       ),
       userMessageContent: null,
     })
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt.')
     }
-    expect(result.prompt).not.toContain('Use the local PDF file evidence')
-    expect(result.prompt).not.toContain('pdfEvidencePath:')
+    expect(result.prompt).toContain('storedPath: inbox/attachments/scan.pdf')
   })
 
   it('keeps multimodal evidence alongside capture text when rich input is available', async () => {

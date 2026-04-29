@@ -11,11 +11,11 @@ import {
 
 describe("mergeRequiredEnvProfile", () => {
   it("preserves the default hosted runner profiles when adding a required channel profile", () => {
-    expect(mergeRequiredEnvProfile(undefined, "linq")).toBe("assistant,parsers,web,linq");
+    expect(mergeRequiredEnvProfile(undefined, "linq")).toBe("assistant,parsers,linq");
   });
 
   it("adds the required profile without duplicating existing entries", () => {
-    expect(mergeRequiredEnvProfile("assistant,linq,web", "linq")).toBe("assistant,linq,web");
+    expect(mergeRequiredEnvProfile("assistant,linq", "linq")).toBe("assistant,linq");
   });
 });
 

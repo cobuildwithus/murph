@@ -71,6 +71,8 @@ function initializeSchema(database: DatabaseSync): void {
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
       active_invocation_id TEXT,
+      active_invocation_last_heartbeat_at TEXT,
+      active_invocation_orphan_observed_at TEXT,
       active_invocation_reason TEXT,
       active_invocation_started_at TEXT,
       active_workspace_version TEXT,

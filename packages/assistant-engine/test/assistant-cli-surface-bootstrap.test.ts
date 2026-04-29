@@ -133,7 +133,6 @@ test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free'
 
   const env = buildAssistantCliProcessEnv({
     ambientEnv: {
-      BRAVE_API_KEY: 'secret-api-key',
       HOME: '/tmp/murph-home',
       LINQ_API_TOKEN: 'secret-token',
       MAPBOX_ACCESS_TOKEN: 'secret-map-token',
@@ -150,7 +149,6 @@ test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free'
   assert.equal(env.HOME, '/tmp/murph-home')
   assert.ok((env.PATH ?? '').length > 0)
   assert.equal(env.NO_COLOR, '1')
-  assert.equal(env.BRAVE_API_KEY, undefined)
   assert.equal(env.DEVICE_SYNC_SECRET, undefined)
   assert.equal(env.LINQ_API_TOKEN, undefined)
   assert.equal(env.LINQ_WEBHOOK_SECRET, undefined)
@@ -473,7 +471,7 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
   }) => ({
     commands: [
       {
-        description: `Command for ${input.cliEnv?.MURPH_WEB_SEARCH_PROVIDER ?? 'none'}`,
+        description: `Command for ${input.cliEnv?.MURPH_TEST_SURFACE_KEY ?? 'none'}`,
         name: 'status',
       },
     ],
@@ -490,14 +488,14 @@ test('resolveAssistantCliSurfaceBootstrapContext keys the in-memory cache by man
 
   const firstContract = await resolveAssistantCliSurfaceBootstrapContext({
     cliEnv: {
-      MURPH_WEB_SEARCH_PROVIDER: 'one',
+      MURPH_TEST_SURFACE_KEY: 'one',
     },
     sessionId: 'session-keyed-cache-one',
     vault: vaultRoot,
   })
   const secondContract = await resolveAssistantCliSurfaceBootstrapContext({
     cliEnv: {
-      MURPH_WEB_SEARCH_PROVIDER: 'two',
+      MURPH_TEST_SURFACE_KEY: 'two',
     },
     sessionId: 'session-keyed-cache-two',
     vault: vaultRoot,

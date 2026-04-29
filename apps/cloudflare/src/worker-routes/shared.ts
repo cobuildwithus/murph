@@ -6,6 +6,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
+import type { HostedRunnerUserDataDeletionResult } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import {
   requireHostedUserCryptoContextFromEnvironment,
@@ -17,6 +18,7 @@ import type {
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bindUser(userId: string): Promise<{ userId: string }>;
+  deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult>;
   nudgeHostedRunner(): Promise<HostedRunnerNudgeResult>;
   ownsActiveInvocationLease(input: {
     attemptId: string;

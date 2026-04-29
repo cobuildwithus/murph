@@ -9,6 +9,11 @@
   --color-cream-dark: #F9F5E8;
   --color-olive: #4A5D3A;
   --color-olive-light: #6B7F5A;
+  --color-sage: #B5C4A1;
+  --color-dark: #1A1F16;
+  --color-dark-warm: #2d3436;
+  --color-dark-mid: #3a2e24;
+  --color-dark-deep: #2a1f16;
 }
 
 @layer base {

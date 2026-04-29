@@ -61,7 +61,6 @@ describe("prepareAssistantDirectCliEnv", () => {
       ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT: "hello",
       ASSISTANT_MEMORY_BOUND_TURN_ID: "turn_123",
       ASSISTANT_MEMORY_BOUND_VAULT: "/tmp/murph-vault",
-      BRAVE_API_KEY: "brave-secret",
       CODEX_HOME: "/tmp/murph-home/.codex-hosted",
       HOME: "/tmp/murph-home",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-secret",
@@ -91,7 +90,6 @@ describe("prepareAssistantDirectCliEnv", () => {
     ).toBe(true);
     expect(env.AGENTMAIL_API_KEY).toBeUndefined();
     expect(env.AMBIENT_SECRET).toBeUndefined();
-    expect(env.BRAVE_API_KEY).toBeUndefined();
     expect(env.HOSTED_EXECUTION_CONTROL_TOKEN).toBeUndefined();
     expect(env.LINQ_API_TOKEN).toBeUndefined();
     expect(env.NODE_OPTIONS).toBeUndefined();

@@ -29,4 +29,5 @@ Rules:
 - Safety boundaries should not depend only on efficacy studies.
 - Case reports, guidelines, and clinical reviews can support safety boundaries.
 - Keep clinician-guided variants separate from ordinary wellness experiments.
+- Replacement safety wording must not include raw `source_artifact:*` keys, `sourceKeys`, or `Source keys:` labels in user-facing prose. Keep citation keys in structured fields only.
 - Do not reintroduce source-local `protocolEvidence`.

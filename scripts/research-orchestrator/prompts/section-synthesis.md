@@ -59,6 +59,8 @@ Draft concise copy for the protocol page:
 - what to watch
 - what not to conclude
 
+Do not append bracketed, parenthetical, or labeled raw source-key dumps to this copy. Keep raw source keys only in `SECTION_CLAIMS_V1` and structured researchLandscape group drafts.
+
 ## Conflicts and caveats
 List conflicting evidence and how the final protocol should phrase it.
 
@@ -66,7 +68,7 @@ List conflicting evidence and how the final protocol should phrase it.
 List missing sources or missing extraction details that block confident synthesis.
 
 Rules:
-- Every claim must cite source keys.
+- Every claim must carry machine-readable `sourceKeys` in structured outputs, but the human-readable copy must not expose raw `source_artifact:*` keys or `Source keys:` labels.
 - Prefer source-owned finding IDs plus appraisal keys for traceability when proposing claims.
 - Do not introduce new claims from memory.
 - Do not overrule extraction classifications unless you explain exactly why.

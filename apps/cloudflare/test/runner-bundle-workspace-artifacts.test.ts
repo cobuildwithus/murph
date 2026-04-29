@@ -167,8 +167,24 @@ describe("runner bundle runtime artifact staging", () => {
     };
 
     expect(stagedPackageJson.dependencies).toEqual({
-      "@murphai/runtime-state": "workspace:*",
+      "@murphai/assistant-cli": "workspace:*",
+      "@murphai/assistant-engine": "workspace:*",
+      "@murphai/assistantd": "workspace:*",
+      "@murphai/core": "workspace:*",
+      "@murphai/device-syncd": "workspace:*",
+      "@murphai/gateway-local": "workspace:*",
+      "@murphai/health-commons": "workspace:*",
+      "@murphai/importers": "workspace:*",
+      "@murphai/inbox-services": "workspace:*",
+      "@murphai/inboxd": "workspace:*",
+      "@murphai/messaging-ingress": "workspace:*",
       "@murphai/murph": "workspace:*",
+      "@murphai/operator-config": "workspace:*",
+      "@murphai/parsers": "workspace:*",
+      "@murphai/query": "workspace:*",
+      "@murphai/runtime-state": "workspace:*",
+      "@murphai/setup-cli": "workspace:*",
+      "@murphai/vault-usecases": "workspace:*",
       jose: "^6.2.2",
     });
     expect(stagedPackageJson.optionalDependencies).toEqual({

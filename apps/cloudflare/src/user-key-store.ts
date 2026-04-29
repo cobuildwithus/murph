@@ -15,9 +15,10 @@ import {
 } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.js";
-import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "./crypto-context.js";
+import { buildHostedStorageAad } from "./crypto-context.js";
 import { readEncryptedR2Payload, writeEncryptedR2Json } from "./crypto.js";
 import type { HostedExecutionEnvironment } from "./env.ts";
+import { hostedUserRootKeyEnvelopeObjectKey } from "./storage-paths.js";
 
 export interface HostedUserCryptoContext {
   envelope: HostedUserRootKeyEnvelope;
@@ -460,20 +461,6 @@ async function unwrapHostedAutomationRootKey(input: {
     userId: input.envelope.userId,
   });
   return rootKey;
-}
-
-async function hostedUserRootKeyEnvelopeObjectKey(
-  envelopeEncryptionKey: Uint8Array,
-  userId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey: envelopeEncryptionKey,
-    scope: "user-key-envelope-path",
-    value: `user:${userId}`,
-  });
-
-  return `users/keys/${userSegment}.json`;
 }
 
 function buildDesiredManagedRecipients(input: {

@@ -45,7 +45,7 @@ describe("hosted local device connect e2e", () => {
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-device-connect-",
-      requiredRunnerEnvProfile: "web",
+      requiredRunnerEnvProfile: "assistant",
       scenarioLabel: "Local hosted device connect e2e",
       streamLogs: streamDevLogs,
     });

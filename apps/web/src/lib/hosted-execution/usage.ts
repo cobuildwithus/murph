@@ -81,6 +81,7 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   outputTokens: true,
   provider: true,
   providerName: true,
+  providerRequestOrdinal: true,
   reasoningTokens: true,
   reportingUserId: true,
   requestedModel: true,
@@ -537,9 +538,7 @@ export async function importHostedAiUsageRecords(input: {
 }): Promise<ImportHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
   const aiUsageBillingMode = input.aiUsageBillingMode ?? readHostedAiUsageBillingMode();
-  const records = dedupeHostedAiUsageRecords(
-    input.usage.map((entry) => parseAssistantUsageRecord(entry)),
-  );
+  const records = dedupeHostedAiUsageRecords(parseHostedAiUsageImportRecords(input.usage));
   const recordedIds: string[] = [];
   const memberStripeCustomerIdCache = new Map<string, Promise<string | null>>();
 
@@ -554,10 +553,7 @@ export async function importHostedAiUsageRecords(input: {
     });
     const storedRecord = await prisma.hostedAiUsage.upsert({
       where: {
-        turnId_attemptCount: {
-          attemptCount: record.attemptCount,
-          turnId: record.turnId,
-        },
+        id: record.usageId,
       },
       create: buildHostedAiUsageCreateData(
         record,
@@ -646,7 +642,7 @@ function dedupeHostedAiUsageRecords(
 
     if (existing && !sameAssistantUsageRecord(existing, record)) {
       throw new TypeError(
-        `Hosted AI usage import contains conflicting records for usage id ${record.usageId}.`,
+        "Hosted AI usage import contains conflicting records for one usage id.",
       );
     }
 
@@ -656,11 +652,40 @@ function dedupeHostedAiUsageRecords(
   return [...recordsByUsageId.values()];
 }
 
+function parseHostedAiUsageImportRecords(
+  usage: readonly unknown[],
+): AssistantUsageRecord[] {
+  try {
+    return usage.map((entry) => parseAssistantUsageRecord(entry));
+  } catch {
+    throw new TypeError("Hosted AI usage import contains an invalid usage record.");
+  }
+}
+
 function sameAssistantUsageRecord(
   left: AssistantUsageRecord,
   right: AssistantUsageRecord,
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return stringifyHostedAiUsageRecordForComparison(left)
+    === stringifyHostedAiUsageRecordForComparison(right);
+}
+
+function stringifyHostedAiUsageRecordForComparison(
+  record: AssistantUsageRecord,
+): string {
+  const normalized = {
+    ...record,
+    providerRequestOrdinal: record.providerRequestOrdinal ?? 0,
+  };
+
+  return JSON.stringify(
+    Object.keys(normalized)
+      .sort()
+      .reduce<Record<string, unknown>>((result, key) => {
+        result[key] = normalized[key as keyof typeof normalized];
+        return result;
+      }, {}),
+  );
 }
 
 function buildHostedAiUsageCreateData(
@@ -675,6 +700,7 @@ function buildHostedAiUsageCreateData(
     sessionId: record.sessionId,
     turnId: record.turnId,
     attemptCount: record.attemptCount,
+    providerRequestOrdinal: record.providerRequestOrdinal ?? 0,
     occurredAt: normalizeHostedAiUsageDate(record.occurredAt, "occurredAt"),
     provider: record.provider,
     routeId: record.routeId,
@@ -729,6 +755,11 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
     compareHostedAiUsageField("sessionId", input.storedRecord.sessionId, expected.sessionId),
     compareHostedAiUsageField("turnId", input.storedRecord.turnId, expected.turnId),
     compareHostedAiUsageField("attemptCount", input.storedRecord.attemptCount, expected.attemptCount),
+    compareHostedAiUsageField(
+      "providerRequestOrdinal",
+      input.storedRecord.providerRequestOrdinal,
+      expected.providerRequestOrdinal ?? 0,
+    ),
     compareHostedAiUsageField("occurredAt", input.storedRecord.occurredAt.toISOString(), expected.occurredAt),
     compareHostedAiUsageField("provider", input.storedRecord.provider, expected.provider),
     compareHostedAiUsageField("routeId", input.storedRecord.routeId, expected.routeId),
@@ -753,7 +784,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
 
   if (mismatchedFields.length > 0) {
     throw new TypeError(
-      `Hosted AI usage id ${input.record.usageId} already exists with different immutable fields: ${mismatchedFields.join(", ")}.`,
+      `Hosted AI usage already exists with different immutable fields: ${mismatchedFields.join(", ")}.`,
     );
   }
 }
@@ -898,13 +929,13 @@ function requireHostedAiUsageMemberId(
 ): string {
   if (!record.memberId) {
     throw new TypeError(
-      `Hosted AI usage ${record.usageId} is missing memberId and cannot be imported into the hosted usage ledger.`,
+      "Hosted AI usage is missing memberId and cannot be imported into the hosted usage ledger.",
     );
   }
 
   if (trustedUserId && record.memberId !== trustedUserId) {
     throw new TypeError(
-      `Hosted AI usage ${record.usageId} memberId ${record.memberId} does not match the authenticated hosted execution user ${trustedUserId}.`,
+      "Hosted AI usage memberId does not match the authenticated hosted execution user.",
     );
   }
 

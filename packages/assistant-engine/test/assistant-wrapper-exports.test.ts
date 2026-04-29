@@ -65,17 +65,18 @@ const wrapperCases = [
     'assistant-provider-catalog',
     assistantProviderCatalog,
     [
-      'DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS',
-      'resolveAssistantModelCatalog',
+      'DEFAULT_CODEX_CHAT_MODEL_OPTIONS',
+      'DEFAULT_CODEX_REASONING_OPTIONS',
+      'resolveCodexModelCatalog',
+      'resolveCodexTargetCapabilities',
     ],
   ],
   [
     'assistant-provider',
     assistantProvider,
     [
-      'ASSISTANT_PROVIDER_DEFINITIONS',
-      'listAssistantProviders',
       'recoverAssistantSessionAfterProviderFailure',
+      'isAssistantProviderConnectionLostError',
     ],
   ],
   [
@@ -182,6 +183,27 @@ describe('assistant-engine wrapper exports', () => {
     ).filter((exportKey) => exportKey.startsWith('./assistant/'))
 
     expect(implementationShapedAssistantExports).toEqual([])
+  })
+
+  it('keeps raw provider execution and catalog internals off the public facades', async () => {
+    const assistantProviderSource = await readFile(
+      new URL('../src/assistant-provider.ts', import.meta.url),
+      'utf8',
+    )
+    const assistantProviderCatalogSource = await readFile(
+      new URL('../src/assistant/provider-catalog.ts', import.meta.url),
+      'utf8',
+    )
+
+    expect(assistantProviderSource).not.toContain(
+      'AssistantProviderTurnExecutionResult',
+    )
+    expect(assistantProviderSource).not.toContain('AssistantProviderUsage')
+    expect(assistantProviderSource).not.toContain('provider-traces.js')
+    expect(assistantProviderSource).not.toContain('provider-progress.js')
+    expect(assistantProviderCatalogSource).not.toContain(
+      'export type {\n  AssistantCatalogModel',
+    )
   })
 
   for (const [moduleName, moduleExports, expectedExports] of wrapperCases) {

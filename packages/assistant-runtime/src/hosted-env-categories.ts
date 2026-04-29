@@ -54,12 +54,6 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
     "TELEGRAM_BOT_USERNAME",
     "TELEGRAM_FILE_BASE_URL",
   ],
-  webSearchConfigured: [
-    "BRAVE_API_KEY",
-    "MURPH_WEB_FETCH_ENABLED",
-    "MURPH_WEB_SEARCH_MAX_RESULTS",
-    "MURPH_WEB_SEARCH_PROVIDER",
-  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export const HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES = [

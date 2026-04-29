@@ -110,7 +110,6 @@ describe("hosted runner log categories", () => {
   it("preserves the forwarded env category summaries used by runner logging", () => {
     expect(summarizeHostedRunnerForwardedEnvLogCategories({
       TELEGRAM_BOT_USERNAME: "murph_bot",
-      MURPH_WEB_SEARCH_TIMEOUT_MS: "5000",
       VERCEL_AI_API_KEY: "vercel-secret",
     })).toEqual({
       assistantConfigured: true,
@@ -118,7 +117,6 @@ describe("hosted runner log categories", () => {
       linqConfigured: false,
       parserToolingConfigured: false,
       telegramConfigured: true,
-      webSearchConfigured: false,
     });
   });
 

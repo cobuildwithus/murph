@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserRunnerNudgePath,
   buildCloudflareHostedControlUserStatusPath,
   matchCloudflareHostedControlUserRoutePath,
@@ -23,11 +24,15 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlUserRunnerNudgePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/nudge",
     );
+    expect(buildCloudflareHostedControlUserDataDeletionPath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/delete",
+    );
   });
 
   it("rejects blank user identifiers before building routes", () => {
     for (const buildPath of [
       buildCloudflareHostedControlBrowserVaultSessionPath,
+      buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlUserRunnerNudgePath,
       buildCloudflareHostedControlUserStatusPath,
     ]) {
@@ -53,6 +58,12 @@ describe("cloudflare hosted control routes", () => {
     ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
+        "userDataDelete",
+        buildCloudflareHostedControlUserDataDeletionPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
         "status",
         buildCloudflareHostedControlUserStatusPath(userId),
       ),
@@ -67,6 +78,7 @@ describe("cloudflare hosted control routes", () => {
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
       runnerNudge: { method: "POST", suffix: "nudge" },
       status: { method: "GET", suffix: "status" },
+      userDataDelete: { method: "POST", suffix: "delete" },
     });
     expect(Object.values(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS)).not.toContainEqual(
       expect.objectContaining({ suffix: "run" }),
@@ -111,12 +123,14 @@ describe("cloudflare hosted control routes", () => {
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
+      "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserRunnerNudgePath",
       "buildCloudflareHostedControlUserStatusPath",
       "matchCloudflareHostedControlUserRoutePath",
     ]);
     expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
+      buildCloudflareHostedControlUserDataDeletionPath: expect.any(Function),
       buildCloudflareHostedControlUserRunnerNudgePath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
       matchCloudflareHostedControlUserRoutePath: expect.any(Function),

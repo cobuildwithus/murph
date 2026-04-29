@@ -421,6 +421,7 @@ CREATE TABLE "hosted_ai_usage" (
     "session_id" TEXT NOT NULL,
     "turn_id" TEXT NOT NULL,
     "attempt_count" INTEGER NOT NULL,
+    "provider_request_ordinal" INTEGER NOT NULL DEFAULT 0,
     "occurred_at" TIMESTAMP(3) NOT NULL,
     "provider" TEXT NOT NULL,
     "route_id" TEXT,
@@ -758,7 +759,7 @@ CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe
 CREATE INDEX "hosted_ai_usage_surface_created_at_idx" ON "hosted_ai_usage"("surface", "created_at");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count");
+CREATE UNIQUE INDEX "hosted_ai_usage_turn_attempt_provider_request_idx" ON "hosted_ai_usage"("turn_id", "attempt_count", "provider_request_ordinal");
 
 -- CreateIndex
 CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx" ON "hosted_assistant_runtime_issue"("fingerprint", "occurred_at");

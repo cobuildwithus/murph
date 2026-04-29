@@ -21,6 +21,7 @@ describe("createCloudflareHostedControlClient", () => {
 
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
+      "deleteUserData",
       "getRunnerStatus",
       "nudgeUserRunner",
     ]);
@@ -78,6 +79,9 @@ describe("createCloudflareHostedControlClient", () => {
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() => client.nudgeUserRunner("")).toThrow(
+      "Cloudflare hosted control userId must not be blank.",
+    );
+    expect(() => client.deleteUserData("")).toThrow(
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
@@ -505,6 +509,65 @@ describe("createCloudflareHostedControlClient", () => {
     expectNoRunContractFields(result);
   });
 
+  it("posts user data deletion requests and validates the bound user in the response", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const result = createUserDataDeletionResult({ userId: "user_123" });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(result);
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.deleteUserData("user_123")).resolves.toEqual(result);
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/delete");
+    expect(request.init?.method).toBe("POST");
+    expect(request.init?.body).toBe("{}");
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expectNoRunContractFields(result);
+  });
+
+  it("rejects user data deletion responses for another user", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse(createUserDataDeletionResult({ userId: "user_other" }))) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.deleteUserData("user_123")).rejects.toThrow(
+      "Cloudflare user-data deletion result userId must match the requested userId.",
+    );
+  });
+
+  it("rejects malformed user data deletion counts", async () => {
+    const result = createUserDataDeletionResult({ userId: "user_123" });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          ...result,
+          r2: {
+            ...result.r2,
+            deletedObjectCount: -1,
+          },
+        })) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.deleteUserData("user_123")).rejects.toThrow(
+      "Cloudflare user-data deletion result r2.deletedObjectCount must be a non-negative integer.",
+    );
+  });
+
 });
 
 function createJsonResponse(value: unknown, init: ResponseInit = {}): Response {
@@ -616,6 +679,25 @@ function createRunnerNudgeResult(
     alreadyRunning: input.alreadyRunning ?? false,
     inFlight: input.inFlight ?? false,
     nextAlarmAt: input.nextAlarmAt ?? null,
+  };
+}
+
+function createUserDataDeletionResult(input: { userId: string }) {
+  return {
+    deletedAt: "2026-04-29T00:00:00.000Z",
+    durableObject: {
+      alarmCleared: true,
+      stateDeleted: true,
+    },
+    ok: true,
+    r2: {
+      deletedObjectCount: 4,
+      deletedRootKeyEnvelope: true,
+      skippedUserScopedPrefixes: false,
+      supported: true,
+      userScopedSkipReason: null,
+    },
+    userId: input.userId,
   };
 }
 

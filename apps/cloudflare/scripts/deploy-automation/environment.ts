@@ -262,10 +262,6 @@ function resolveHostedWorkerVar(
     return value;
   }
 
-  if (key === "MURPH_WEB_FETCH_ENABLED") {
-    return "true";
-  }
-
   if (key === "HOSTED_EXECUTION_RUNNER_ENV_PROFILES") {
     return DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
   }

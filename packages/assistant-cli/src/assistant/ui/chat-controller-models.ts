@@ -10,7 +10,7 @@ import {
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import {
-  resolveAssistantModelCatalog,
+  resolveCodexModelCatalog,
 } from '@murphai/assistant-engine/assistant-provider-catalog'
 import { updateAssistantSessionOptions, type AssistantChatInput } from '../service.js'
 
@@ -21,7 +21,7 @@ export function useAssistantModelCatalogState(input: {
 }) {
   return React.useMemo(
     () =>
-      resolveAssistantModelCatalog({
+      resolveCodexModelCatalog({
         provider: input.session.provider,
         currentModel: input.activeModel,
         currentReasoningEffort: input.activeReasoningEffort,

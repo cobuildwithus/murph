@@ -4,6 +4,7 @@ type HostedLinqAttachmentDownloadPart = {
   attachmentId?: string | null;
   fileName?: string | null;
   mimeType?: string | null;
+  size?: number | null;
   type: "media" | "voice_memo";
   url?: string | null;
 };
@@ -19,6 +20,7 @@ type HostedLinqAttachmentDownloadDriver =
 // Hosted voice memo fetches routinely take longer than image/document fetches,
 // especially once the wake has crossed the web -> worker boundary.
 export const HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 15_000;
+export const HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 const DEFAULT_HOSTED_LINQ_ATTACHMENT_CDN_BASE_URL = "https://cdn.linqapp.com";
 const DEFAULT_HOSTED_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const HOSTED_LINQ_ATTACHMENT_METADATA_TIMEOUT_MS = 5_000;
@@ -44,7 +46,7 @@ export function createHostedLinqAttachmentDownloadDriver(): HostedLinqAttachment
         return null;
       }
 
-      return downloadHostedLinqAttachmentBytes(normalizedUrl, signal);
+      return downloadHostedLinqAttachmentBytes(normalizedUrl, { signal });
     },
     downloadPart: async (part: HostedLinqAttachmentDownloadPart, signal?: AbortSignal) =>
       downloadHostedLinqAttachmentPart({
@@ -83,12 +85,18 @@ async function downloadHostedLinqAttachmentPart(input: {
   part: HostedLinqAttachmentDownloadPart;
   signal?: AbortSignal;
 }): Promise<Uint8Array | null> {
+  const declaredSize = normalizeHostedLinqAttachmentDeclaredSize(input.part.size);
+  assertHostedLinqAttachmentWithinByteLimit(declaredSize);
+
   const directUrl = normalizeHostedLinqAttachmentUrl(input.part.url);
   let directError: unknown = null;
 
   if (directUrl) {
     try {
-      return await downloadHostedLinqAttachmentBytes(directUrl, input.signal);
+      return await downloadHostedLinqAttachmentBytes(directUrl, {
+        declaredSize,
+        signal: input.signal,
+      });
     } catch (error) {
       directError = error;
     }
@@ -120,16 +128,24 @@ async function downloadHostedLinqAttachmentPart(input: {
     return null;
   }
 
-  return downloadHostedLinqAttachmentBytes(normalizedRefreshedUrl, input.signal);
+  return downloadHostedLinqAttachmentBytes(normalizedRefreshedUrl, {
+    declaredSize,
+    signal: input.signal,
+  });
 }
 
 async function downloadHostedLinqAttachmentBytes(
   url: string,
-  signal?: AbortSignal,
+  input: {
+    declaredSize?: number | null;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<Uint8Array> {
+  assertHostedLinqAttachmentWithinByteLimit(input.declaredSize ?? null);
+
   const response = await globalThis.fetch(url, {
     method: "GET",
-    signal,
+    signal: input.signal,
   });
 
   if (!response.ok) {
@@ -138,7 +154,82 @@ async function downloadHostedLinqAttachmentBytes(
     );
   }
 
-  return new Uint8Array(await response.arrayBuffer());
+  assertHostedLinqAttachmentWithinByteLimit(
+    parseHostedLinqAttachmentContentLength(response.headers.get("content-length")),
+  );
+
+  const reader = response.body?.getReader();
+  if (reader) {
+    return readHostedLinqAttachmentBodyWithLimit(reader);
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  assertHostedLinqAttachmentWithinByteLimit(bytes.byteLength);
+  return bytes;
+}
+
+async function readHostedLinqAttachmentBodyWithLimit(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value) {
+        continue;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        assertHostedLinqAttachmentWithinByteLimit(totalBytes);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
+
+function normalizeHostedLinqAttachmentDeclaredSize(
+  value: number | null | undefined,
+): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : null;
+}
+
+function parseHostedLinqAttachmentContentLength(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+}
+
+function assertHostedLinqAttachmentWithinByteLimit(byteSize: number | null): void {
+  if (
+    byteSize !== null
+    && byteSize > HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES
+  ) {
+    throw new Error(
+      `Hosted Linq attachment download exceeds ${HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES} bytes.`,
+    );
+  }
 }
 
 interface HostedLinqAttachmentApiConfig {

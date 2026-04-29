@@ -41,6 +41,8 @@ There is also a prompt assembly problem. Attachment parser state is treated as a
 
 Accepted user input is the product-critical lane. Parsing, preservation, projection rebuild, and canonical import are enrichment lanes.
 
+Conversation import is not conversation handling. A capture remains pending until durable terminal auto-reply evidence exists for that capture. Mailbox watermarks, inbox projections, and scan hints prove discovery/import only; they never prove assistant handling.
+
 The assistant should operate from:
 
 1. Message text.
@@ -63,6 +65,16 @@ No parser, preservation, projection rebuild, raw artifact materialization, or ca
 - Treat local paths, raw attachments, transcripts, contact identifiers, and provider payloads as sensitive. Do not render local paths into model text or diagnostics.
 
 ## Final Shape
+
+### Current Implementation Slice
+
+This plan is now being implemented for the hosted conversation loss window:
+
+- Delete the `afterCheckpointBeforeAssistant` phase from mailbox imports and runner orchestration. Read acknowledgements, parser drain, and provider cleanup cannot sit between import checkpoint and assistant admission.
+- Make auto-reply selection evidence-based. A capture is excluded from pending work only when it has per-capture terminal handling evidence: reply intent committed, replied/deferred artifacts, or explicit suppression.
+- Treat `autoReply.cursor` as a legacy enablement boundary only while migrating the state shape. It must not advance after processing and must not hide unhandled captures behind it.
+- Add explicit suppression evidence for intentional no-reply outcomes. Failed reply artifacts stay observability/retry evidence, not terminal handling proof.
+- Keep eventual Linq provider cleanup by queueing inbound Linq message deletion after terminal handling evidence exists, then draining the existing hosted provider cleanup retry state after commit.
 
 ### 0. Close Hosted Mailbox Lane Gaps
 

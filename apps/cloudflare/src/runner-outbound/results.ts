@@ -4,7 +4,7 @@ import {
 } from "../runner-email-route.ts";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import { json, jsonError, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
+import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "../json.ts";
 import {
   HostedEmailSendValidationError,
   readHostedEmailConfig,
@@ -14,7 +14,9 @@ import {
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   decodeRouteParam,
+  requireRunnerOutboundUserStubMethod,
   resolveRunnerOutboundUserCryptoContext,
+  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 
@@ -100,6 +102,15 @@ async function handleRunnerEmailSendRequest(input: {
   userId: string;
 }): Promise<Response> {
   try {
+    const ownsActiveLease = await requestOwnsActiveInvocationLease({
+      env: input.env,
+      request: input.request,
+      userId: input.userId,
+    });
+    if (!ownsActiveLease) {
+      return unauthorized();
+    }
+
     const payload = await sendHostedEmailMessage({
       config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
       emailBinding: input.env.HOSTED_EMAIL,
@@ -125,6 +136,31 @@ async function handleRunnerEmailSendRequest(input: {
 
     throw error;
   }
+}
+
+async function requestOwnsActiveInvocationLease(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<boolean> {
+  const attemptId = input.request.headers.get("x-hosted-runtime-attempt-id");
+  const leaseGeneration = input.request.headers.get("x-hosted-runtime-lease-generation");
+  const workspaceVersion = input.request.headers.get("x-hosted-runtime-workspace-version");
+  if (!attemptId || !leaseGeneration || !workspaceVersion) {
+    return false;
+  }
+
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  const ownsActiveInvocationLease = requireRunnerOutboundUserStubMethod(
+    stub,
+    "ownsActiveInvocationLease",
+  );
+  return await ownsActiveInvocationLease({
+    attemptId,
+    leaseGeneration,
+    userId: input.userId,
+    workspaceVersion,
+  });
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

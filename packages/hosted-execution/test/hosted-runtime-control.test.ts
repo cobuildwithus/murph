@@ -89,6 +89,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("mailbox.dedupe_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("checkpoint.cas_conflict");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("outbox.intent_checkpointed");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("runtime.usage_export_finished");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).not.toContain("run.acquired");
     expect(HOSTED_WORKSPACE_INVOCATION_REASONS).toEqual(["nudge", "alarm", "retry", "manual"]);
     expect(HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
@@ -533,6 +534,10 @@ describe("hosted runtime control contracts", () => {
       recorded: -1,
       usageIds: [usage.usageId],
     })).toThrow(/non-negative integer/u);
+    expect(() => parseHostedRuntimeUsageExportResponse({
+      recorded: 2,
+      usageIds: [usage.usageId],
+    })).toThrow(/recorded must equal usageIds\.length/u);
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {

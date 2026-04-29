@@ -590,9 +590,11 @@ describe("hosted runtime callbacks", () => {
         status: "sent",
       });
     });
+    const assertLiveness = vi.fn(async () => undefined);
 
     const outcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
       assistantDeliveryEffects: [effect],
+      assertLiveness,
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
         VERCEL_AI_API_KEY: "sk-runtime",
@@ -607,6 +609,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
     expect(mocks.sendTelegramMessage).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",

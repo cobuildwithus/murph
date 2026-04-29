@@ -91,7 +91,6 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
-    "@mozilla/readability": "0.6.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
@@ -102,8 +101,6 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "linkedom": "0.18.12",
-    "pdfjs-dist": "5.6.205",
     "zod": "^4.1.8"
   },
   "engines": {

@@ -485,6 +485,7 @@ test("normalizeHostedLinqConversationMessage hydrates metadata-only voice memos 
     attachmentId?: string | null;
     fileName?: string | null;
     mimeType?: string | null;
+    size?: number | null;
     type: "media" | "voice_memo";
     url?: string | null;
   }) => {
@@ -492,6 +493,7 @@ test("normalizeHostedLinqConversationMessage hydrates metadata-only voice memos 
       attachmentId: "voice_att_download_part",
       fileName: "voice-note.m4a",
       mimeType: "audio/m4a",
+      size: 4096,
       type: "voice_memo",
       url: null,
     });
@@ -597,6 +599,7 @@ test("normalizeHostedLinqConversationMessage falls back to downloadPart after ur
     attachmentId?: string | null;
     fileName?: string | null;
     mimeType?: string | null;
+    size?: number | null;
     type: "media" | "voice_memo";
     url?: string | null;
   }) => {
@@ -604,6 +607,7 @@ test("normalizeHostedLinqConversationMessage falls back to downloadPart after ur
       attachmentId: "voice_att_download_fallback",
       fileName: "voice-note.m4a",
       mimeType: "audio/m4a",
+      size: 4096,
       type: "voice_memo",
       url: "https://cdn.example.test/voice-note.m4a",
     });

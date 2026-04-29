@@ -10,8 +10,8 @@ import type { AssistantOperatorDefaults } from '@murphai/operator-config/operato
 import { resolveAssistantBackendTarget } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  buildAssistantPrimaryProviderRoute,
-  type ResolvedAssistantProviderRoute,
+  buildCodexThreadIdentity,
+  type CodexThreadIdentity,
 } from './provider-route.js'
 import {
   compactAssistantProviderConfigInput,
@@ -21,10 +21,10 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 
 export interface AssistantExecutionPlan {
+  codexRoute: CodexThreadIdentity
   primaryProviderConfig: AssistantProviderConfig
   primaryTarget: AssistantModelTarget
   resumeState: AssistantSessionResumeState | null
-  routes: ResolvedAssistantProviderRoute[]
 }
 
 export function resolveAssistantExecutionPlan(input: {
@@ -75,12 +75,12 @@ export function resolveAssistantExecutionPlan(input: {
     )
   }
 
-  const routes = [buildAssistantPrimaryProviderRoute(primaryProviderConfig)]
+  const codexRoute = buildCodexThreadIdentity(primaryProviderConfig)
 
   return {
+    codexRoute,
     primaryProviderConfig,
     primaryTarget,
     resumeState: input.resumeState ?? null,
-    routes,
   }
 }

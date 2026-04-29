@@ -63,22 +63,22 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     expect(parseHostedAssistantConfig(hostedConfig)).toEqual(hostedConfig);
   });
 
-  it("rejects legacy OpenAI-compatible hosted profiles", () => {
+  it("rejects unsupported hosted profiles", () => {
     const legacyTargetConfig = {
       activeProfileId: "platform-default",
       profiles: [
         {
           id: "platform-default",
-          label: "OpenAI",
+          label: "Legacy",
           managedBy: "platform",
           target: {
-            adapter: "openai-compatible",
-            apiKeyEnv: "OPENAI_API_KEY",
-            endpoint: "https://api.openai.com/v1",
+            adapter: "unsupported-provider",
+            apiKeyEnv: "PROVIDER_API_KEY",
+            endpoint: "https://api.example.test/v1",
             headers: null,
             model: "gpt-5.4",
-            presetId: "openai",
-            providerName: "openai",
+            presetId: "legacy",
+            providerName: "legacy",
             reasoningEffort: "medium",
             webSearch: null,
           },
@@ -91,18 +91,18 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       activeProfileId: "platform-default",
       profiles: [
         {
-          apiKeyEnv: "OPENAI_API_KEY",
+          apiKeyEnv: "PROVIDER_API_KEY",
           approvalPolicy: null,
-          baseUrl: "https://api.openai.com/v1",
+          baseUrl: "https://api.example.test/v1",
           codexCommand: null,
           id: "platform-default",
-          label: "OpenAI",
+          label: "Legacy",
           managedBy: "platform",
           model: "gpt-5.4",
           oss: false,
           profile: null,
-          provider: "openai-compatible",
-          providerName: "openai",
+          provider: "unsupported-provider",
+          providerName: "legacy",
           reasoningEffort: "medium",
           sandbox: null,
         },
@@ -168,10 +168,10 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
     await expect(resolveHostedAssistantConfig(homeDirectory)).resolves.toBeNull();
   });
 
-  it("fails closed for old hosted OpenAI-compatible provider env", async () => {
+  it("fails closed for unsupported hosted provider env", async () => {
     const homeDirectory = await createTemporaryHomeDirectory();
 
-    for (const provider of ["openai", "openrouter", "venice", "custom", "openai-compatible"]) {
+    for (const provider of ["legacy", "openrouter", "venice", "custom", "unsupported-provider"]) {
       await expect(
         ensureHostedAssistantOperatorDefaults({
           allowMissing: false,
@@ -197,7 +197,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
         env: {
           HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
           HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-          HOSTED_ASSISTANT_PROVIDER: "openai",
+          HOSTED_ASSISTANT_PROVIDER: "legacy",
           HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
           HOSTED_ASSISTANT_SANDBOX: "danger-full-access",
         },
@@ -259,11 +259,11 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
       `${JSON.stringify({
         assistant: {
           defaults: {
-            apiKeyEnv: "OPENAI_API_KEY",
-            baseUrl: "https://api.openai.com/v1",
+            apiKeyEnv: "PROVIDER_API_KEY",
+            baseUrl: "https://api.example.test/v1",
             model: "gpt-4.1-mini",
-            provider: "openai-compatible",
-            providerName: "openai",
+            provider: "unsupported-provider",
+            providerName: "legacy",
           },
         },
         defaultVault: null,

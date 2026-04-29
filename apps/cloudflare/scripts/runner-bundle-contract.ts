@@ -7,10 +7,6 @@ export const runnerBundleDirectoryName = "runner-bundle";
 export const hostedRunnerRuntimePackageName = "@murphai/cloudflare-runner";
 export const hostedRunnerRuntimeDistDirectoryName = "dist";
 
-export const hostedRunnerBundleOnlyDependencyNames = [
-  "@murphai/murph",
-] as const;
-
 export interface HostedRunnerBundleContractOptions {
   includeBundleOnlyDependencies?: boolean;
 }
@@ -37,6 +33,10 @@ const hostedRunnerRuntimePackageManifest = readRequiredWorkspacePackageManifest(
 );
 export const publishedMurphBundledWorkspacePackageNames =
   readWorkspaceBundleDependencyNames("@murphai/murph");
+export const hostedRunnerBundleOnlyDependencyNames = [
+  "@murphai/murph",
+  ...publishedMurphBundledWorkspacePackageNames,
+] as const;
 const murphNonBundledWorkspaceDependencyNames = listNonBundledWorkspaceDependencyNames(
   "@murphai/murph",
   publishedMurphBundledWorkspacePackageNames,

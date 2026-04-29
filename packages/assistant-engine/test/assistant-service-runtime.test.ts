@@ -9,7 +9,7 @@ import type {
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import { serializeAssistantProviderSessionOptions } from "@murphai/operator-config/assistant/provider-config";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
-import type { ResolvedAssistantProviderRoute } from "../src/assistant/provider-route.ts";
+import type { CodexThreadIdentity } from "../src/assistant/provider-route.ts";
 import type { AssistantProviderUsage } from "../src/assistant/providers/types.ts";
 import type {
   AssistantTurnSharedPlan,
@@ -124,8 +124,8 @@ import {
   resolveAssistantExecutionOperatorDefaults,
 } from "../src/assistant/execution-context.ts";
 import {
-  resolveAssistantTurnRoutes,
-  resolveAssistantTurnRoutesForMessage,
+  resolveAssistantTurnRoute,
+  resolveAssistantTurnRouteForMessage,
 } from "../src/assistant/service-turn-routes.ts";
 import { persistPendingAssistantUsageEvent } from "../src/assistant/service-usage.ts";
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
@@ -193,7 +193,7 @@ beforeEach(() => {
     })
   );
   seamMocks.resolveAssistantExecutionPlan.mockReset().mockReturnValue({
-    routes: [createRoute()],
+    codexRoute: createRoute(),
   });
   seamMocks.resolveAssistantSession.mockReset();
   seamMocks.resolveAssistantUsageCredentialSource
@@ -310,8 +310,8 @@ describe("assistant service wrapper seam", () => {
   });
 });
 
-describe("assistant service turn routes", () => {
-  it("builds routes from the resolved session execution plan", () => {
+describe("assistant service turn route", () => {
+  it("builds the Codex route from the resolved session execution plan", () => {
     const defaults = {
       backend: null,
       identityId: null,
@@ -333,14 +333,14 @@ describe("assistant service turn routes", () => {
       provider: "codex-cli" as const,
       vault: "/vault",
     };
-    const routes = [createRoute({ routeId: "route-primary" })];
+    const route = createRoute({ routeId: "route-primary" });
     seamMocks.resolveAssistantExecutionPlan.mockReturnValue({
-      routes,
+      codexRoute: route,
     });
 
-    const result = resolveAssistantTurnRoutes(input, defaults, resolved);
+    const result = resolveAssistantTurnRoute(input, defaults, resolved);
 
-    expect(result).toBe(routes);
+    expect(result).toBe(route);
     expect(seamMocks.resolveAssistantExecutionPlan).toHaveBeenCalledWith({
       defaults,
       override: expect.objectContaining({
@@ -352,7 +352,7 @@ describe("assistant service turn routes", () => {
     });
   });
 
-  it("resolves message routes from an existing session when present", async () => {
+  it("resolves the message route from an existing session when present", async () => {
     const builtInput = {
       createIfMissing: true,
       sessionId: "session-1",
@@ -364,10 +364,10 @@ describe("assistant service turn routes", () => {
     seamMocks.buildResolveAssistantSessionInput.mockReturnValue(builtInput);
     seamMocks.resolveAssistantSession.mockResolvedValue(resolved);
     seamMocks.resolveAssistantExecutionPlan.mockReturnValue({
-      routes: [createRoute({ routeId: "route-session" })],
+      codexRoute: createRoute({ routeId: "route-session" }),
     });
 
-    const result = await resolveAssistantTurnRoutesForMessage(
+    const result = await resolveAssistantTurnRouteForMessage(
       {
         prompt: "hello",
         vault: "/vault",
@@ -376,7 +376,7 @@ describe("assistant service turn routes", () => {
       null
     );
 
-    expect(result).toEqual([createRoute({ routeId: "route-session" })]);
+    expect(result).toEqual(createRoute({ routeId: "route-session" }));
     expect(seamMocks.resolveAssistantSession).toHaveBeenCalledWith({
       ...builtInput,
       createIfMissing: false,
@@ -394,11 +394,11 @@ describe("assistant service turn routes", () => {
       code: "ASSISTANT_SESSION_NOT_FOUND",
     });
     seamMocks.resolveAssistantExecutionPlan.mockReturnValueOnce({
-      routes: [createRoute({ routeId: "route-fallback" })],
+      codexRoute: createRoute({ routeId: "route-fallback" }),
     });
 
     await expect(
-      resolveAssistantTurnRoutesForMessage(
+      resolveAssistantTurnRouteForMessage(
         {
           prompt: "hello",
           vault: "/vault",
@@ -406,14 +406,14 @@ describe("assistant service turn routes", () => {
         null,
         createAssistantSession().target
       )
-    ).resolves.toEqual([createRoute({ routeId: "route-fallback" })]);
+    ).resolves.toEqual(createRoute({ routeId: "route-fallback" }));
 
     seamMocks.resolveAssistantSession.mockRejectedValueOnce(
       new Error("session store exploded")
     );
 
     await expect(
-      resolveAssistantTurnRoutesForMessage(
+      resolveAssistantTurnRouteForMessage(
         {
           prompt: "hello",
           vault: "/vault",
@@ -1667,10 +1667,10 @@ function createProviderOptions(
 }
 
 function createRoute(input?: {
-  provider?: ResolvedAssistantProviderRoute["provider"];
+  provider?: CodexThreadIdentity["provider"];
   providerOptions?: Partial<AssistantProviderSessionOptions>;
   routeId?: string;
-}): ResolvedAssistantProviderRoute {
+}): CodexThreadIdentity {
   return {
     codexCommand: null,
     label: "Primary",
@@ -1800,7 +1800,7 @@ function createProviderResult(input?: {
   providerSessionId?: string | null;
   rawEvents?: unknown[];
   response?: string;
-  route?: ResolvedAssistantProviderRoute;
+  route?: CodexThreadIdentity;
   session?: AssistantSession;
   usage?: AssistantProviderUsage | null;
 }): ExecutedAssistantProviderTurnResult {

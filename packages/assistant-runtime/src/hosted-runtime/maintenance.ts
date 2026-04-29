@@ -106,6 +106,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
   executionContext: AssistantExecutionContext;
   requestId: string;
   runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
+  signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
@@ -127,6 +128,7 @@ export async function runHostedAssistantRuntimeTimerLane(input: {
         input.executionContext,
         input.wake,
         input.runtime,
+        input.signal,
       )
     : {
         nextWakeAt: null,
@@ -152,6 +154,7 @@ export async function runHostedAssistantAutomation(
   executionContext: AssistantExecutionContext,
   wake: HostedRuntimeEvent,
   runtime?: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">,
+  signal?: AbortSignal,
 ): Promise<{
   nextWakeAt: string | null;
   progressed: boolean;
@@ -234,6 +237,7 @@ export async function runHostedAssistantAutomation(
       },
       vaultServices,
       requestId,
+      signal,
       ...(turnInputPort ? { turnInputPort } : {}),
       vault: vaultRoot,
     });

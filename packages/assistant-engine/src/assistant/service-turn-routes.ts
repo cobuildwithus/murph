@@ -2,7 +2,7 @@ import {
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import type { ResolvedAssistantProviderRoute } from './provider-route.js'
+import type { CodexThreadIdentity } from './provider-route.js'
 import {
   compactAssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -19,24 +19,24 @@ import {
 } from './store.js'
 import { resolveAssistantExecutionPlan } from './execution-plan.js'
 
-export function resolveAssistantTurnRoutes(
+export function resolveAssistantTurnRoute(
   input: AssistantMessageInput,
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
-): ResolvedAssistantProviderRoute[] {
+): CodexThreadIdentity {
   return resolveAssistantExecutionPlan({
     defaults,
     override: compactAssistantProviderConfigInput(input),
     resumeState: resolved.session.resumeState,
     sessionTarget: resolved.session.target,
-  }).routes
+  }).codexRoute
 }
 
-export async function resolveAssistantTurnRoutesForMessage(
+export async function resolveAssistantTurnRouteForMessage(
   input: AssistantMessageInput,
   defaults: AssistantOperatorDefaults | null,
   boundaryDefaultTarget: AssistantModelTarget | null = null,
-): Promise<ResolvedAssistantProviderRoute[]> {
+): Promise<CodexThreadIdentity> {
   const sessionInput = buildResolveAssistantSessionInput(
     input,
     defaults,
@@ -48,7 +48,7 @@ export async function resolveAssistantTurnRoutesForMessage(
       ...sessionInput,
       createIfMissing: false,
     })
-    return resolveAssistantTurnRoutes(input, defaults, resolved)
+    return resolveAssistantTurnRoute(input, defaults, resolved)
   } catch (error) {
     if (!isAssistantSessionNotFoundError(error)) {
       throw error
@@ -58,6 +58,6 @@ export async function resolveAssistantTurnRoutesForMessage(
       boundaryDefaultTarget,
       defaults,
       override: compactAssistantProviderConfigInput(input),
-    }).routes
+    }).codexRoute
   }
 }

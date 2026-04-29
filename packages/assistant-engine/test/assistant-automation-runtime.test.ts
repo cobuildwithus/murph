@@ -16,6 +16,7 @@ import {
   AssistantActiveTurnInputBudgetExceededError,
   AssistantActiveTurnInputCheckpointRejectedError,
   AssistantActiveTurnInputUnavailableError,
+  type AssistantActiveTurnInputCheckpointInput,
   type AssistantTurnConversationCaptureQuery,
 } from '../src/assistant/turn-input.ts'
 
@@ -2502,6 +2503,7 @@ describe('assistant auto-reply runtime', () => {
       throw new Error('expected reply context')
     }
 
+    let listNewCallCount = 0
     const turnInputPort = {
       async refresh() {
         return {
@@ -2510,7 +2512,12 @@ describe('assistant auto-reply runtime', () => {
         }
       },
       async listNewConversationCaptures(input: AssistantTurnConversationCaptureQuery) {
-        expect(input.knownCaptureIds).toEqual(['capture-1'])
+        listNewCallCount += 1
+        expect(input.knownCaptureIds).toEqual(
+          listNewCallCount === 1
+            ? ['capture-1']
+            : ['capture-1', 'capture-late'],
+        )
         expect(input.conversation).toEqual(
           expect.objectContaining({
             accountId: null,
@@ -2521,6 +2528,12 @@ describe('assistant auto-reply runtime', () => {
             threadIsDirect: true,
           }),
         )
+        if (input.knownCaptureIds?.includes('capture-late')) {
+          return {
+            captures: [],
+            nextCursor: input.afterCursor,
+          }
+        }
         return {
           captures: [lateCapture],
           nextCursor: {
@@ -2536,9 +2549,7 @@ describe('assistant auto-reply runtime', () => {
       async (input: {
         activeTurnInput?: (
           value: {
-            phase: 'request_boundary' | 'commit_barrier'
-            providerRequestOrdinal: number
-            response: string
+            phase: 'input_available' | 'request_boundary' | 'commit_barrier'
             sessionId: string
             turnId: string
             vault: string
@@ -2554,13 +2565,12 @@ describe('assistant auto-reply runtime', () => {
               userMessageContent?: readonly unknown[] | null
             }
         >
+        activeTurnCheckpoint?: (value: AssistantActiveTurnInputCheckpointInput) => Promise<void>
         receiptMetadata?: { autoReplyCaptureIds?: string }
         response?: string
       }) => {
         const admitted = await input.activeTurnInput?.({
           phase: 'request_boundary',
-          providerRequestOrdinal: 0,
-          response: 'draft response',
           sessionId: 'session-1',
           turnId: 'turn-1',
           vault: '/tmp/assistant-automation-vault',
@@ -2601,6 +2611,22 @@ describe('assistant auto-reply runtime', () => {
           }),
         ])
         expect(admitted.transcriptText).toBe('User sent an attachment.')
+        const duplicateAdmission = await input.activeTurnInput?.({
+          phase: 'input_available',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          vault: '/tmp/assistant-automation-vault',
+        })
+        expect(duplicateAdmission).toEqual({
+          kind: 'no-new-input',
+        })
+        await input.activeTurnCheckpoint?.({
+          acceptedInputIds: ['inbox:capture-late'],
+          providerRequestOrdinal: 0,
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          vault: '/tmp/assistant-automation-vault',
+        })
 
         return Promise.resolve({
           delivery: {
@@ -2663,7 +2689,14 @@ describe('assistant auto-reply runtime', () => {
     expect(events).toContainEqual({
       type: 'capture.reply-progress',
       captureId: 'capture-1',
-      details: 'new input accepted into active turn with 1 additional capture(s)',
+      details: 'new input queued for active turn with 1 additional capture(s)',
+      providerKind: 'status',
+      providerState: 'running',
+    })
+    expect(events).toContainEqual({
+      type: 'capture.reply-progress',
+      captureId: 'capture-1',
+      details: 'new input committed to active turn with 1 additional capture(s)',
       providerKind: 'status',
       providerState: 'running',
     })
@@ -2827,9 +2860,7 @@ describe('assistant auto-reply runtime', () => {
 
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        phase: 'request_boundary' | 'commit_barrier'
-        providerRequestOrdinal: number
-        response: string
+        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
         sessionId: string
         turnId: string
         vault: string
@@ -2837,8 +2868,6 @@ describe('assistant auto-reply runtime', () => {
     }) => {
       await input.activeTurnInput?.({
         phase: 'commit_barrier',
-        providerRequestOrdinal: 0,
-        response: 'draft response',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',
@@ -2912,9 +2941,7 @@ describe('assistant auto-reply runtime', () => {
 
     replyMocks.sendAssistantMessage.mockImplementation(async (input: {
       activeTurnInput?: (admission: {
-        phase: 'request_boundary' | 'commit_barrier'
-        providerRequestOrdinal: number
-        response: string
+        phase: 'input_available' | 'request_boundary' | 'commit_barrier'
         sessionId: string
         turnId: string
         vault: string
@@ -2922,8 +2949,6 @@ describe('assistant auto-reply runtime', () => {
     }) => {
       await input.activeTurnInput?.({
         phase: 'request_boundary',
-        providerRequestOrdinal: 0,
-        response: 'draft response',
         sessionId: 'session-1',
         turnId: 'turn-1',
         vault: '/tmp/assistant-automation-vault',

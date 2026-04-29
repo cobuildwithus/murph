@@ -93,7 +93,6 @@ const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
   "HOSTED_ASSISTANT_OSS",
   "HOSTED_ASSISTANT_PROFILE",
   "HOSTED_ASSISTANT_PROVIDER_NAME",
-  "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
 ] as const;
 
 describe("hosted deploy automation helpers", () => {
@@ -123,9 +122,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v2",
-      MURPH_WEB_SEARCH_MAX_RESULTS: "8",
-      MURPH_WEB_SEARCH_PROVIDER: "brave",
-      MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
@@ -281,7 +277,6 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_ASSISTANT_REASONING_EFFORT).toBe("medium");
     expect(config.vars.HOSTED_ASSISTANT_SANDBOX).toBe("danger-full-access");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
-    expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
     expect(config.vars.HOSTED_EMAIL_DEFAULT_SUBJECT).toBe("Murph note");
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
@@ -294,9 +289,6 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
-    expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
-    expect(config.vars.MURPH_WEB_SEARCH_PROVIDER).toBe("brave");
-    expect(config.vars.MURPH_WEB_SEARCH_TIMEOUT_MS).toBe("10000");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
@@ -516,19 +508,7 @@ describe("hosted deploy automation helpers", () => {
 
     expect(environment.workerVars).toEqual({
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
-      MURPH_WEB_FETCH_ENABLED: "true",
     });
-  });
-
-  it("lets operators explicitly disable hosted web reads", () => {
-    const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      MURPH_WEB_FETCH_ENABLED: "false",
-    });
-
-    expect(environment.workerVars.MURPH_WEB_FETCH_ENABLED).toBe("false");
   });
 
   it("passes explicit runner env profiles through to worker vars", () => {
@@ -590,7 +570,6 @@ describe("hosted deploy automation helpers", () => {
 
     expect(buildHostedWorkerSecretsPayload({
       AGENTMAIL_API_KEY: "agentmail-secret",
-      BRAVE_API_KEY: "brave-key",
       ...legacyHostedAssistantProviderSecrets,
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
@@ -613,7 +592,6 @@ describe("hosted deploy automation helpers", () => {
       TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
       VERCEL_AI_API_KEY: "vercel-ai-gateway-key",
     })).toEqual({
-      BRAVE_API_KEY: "brave-key",
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_AI_USAGE_STRIPE_RESTRICTED_ACCESS_KEY: "stripe-restricted-key",
@@ -642,7 +620,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_MODEL: "gpt-5.5",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
@@ -658,12 +635,10 @@ describe("hosted deploy automation helpers", () => {
     expect(providerSecretsPayload.HOSTED_ASSISTANT_MODEL).toBeUndefined();
     expect(providerSecretsPayload.HOSTED_ASSISTANT_PROVIDER).toBeUndefined();
     expect(providerSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
-    expect(providerSecretsPayload.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBeUndefined();
 
     const platformSecretsPayload = buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
@@ -677,7 +652,6 @@ describe("hosted deploy automation helpers", () => {
     });
     expect(platformSecretsPayload.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();
     expect(platformSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
-    expect(platformSecretsPayload.HOSTED_ASSISTANT_ZERO_DATA_RETENTION).toBeUndefined();
 
     expect(buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",

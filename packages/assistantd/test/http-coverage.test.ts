@@ -10,6 +10,7 @@ import {
   parseAssistantOutboxDrainRequestBody,
   parseAssistantSessionRoute,
   parseAssistantSessionOptionsRequestBody,
+  parseOpenConversationRequestBody,
   resolveAssistantHttpErrorStatus,
 } from '../src/http-protocol.js'
 import type { AssistantLocalService } from '../src/service.js'
@@ -163,7 +164,6 @@ function createAssistantServiceMock(): AssistantLocalService {
           outboxDrains: 0,
           outboxRetries: 0,
           providerAttempts: 0,
-          providerFailovers: 0,
           providerFailures: 0,
           turnsCompleted: 0,
           turnsDeferred: 0,
@@ -177,12 +177,6 @@ function createAssistantServiceMock(): AssistantLocalService {
         updatedAt: '2026-04-09T00:00:00.000Z',
       },
       diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
-      failover: {
-        routes: [],
-        schema: 'murph.assistant-failover-state.v1',
-        updatedAt: '2026-04-09T00:00:00.000Z',
-      },
-      failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
       generatedAt: '2026-04-09T00:00:00.000Z',
       outbox: {
         abandoned: 0,
@@ -366,14 +360,16 @@ test('assistantd http protocol helpers map malformed routes and explicit error b
   })
 })
 
-test('assistantd http protocol validates optional object and finite-number fields', () => {
+test('assistantd http protocol rejects legacy model specs and validates finite-number fields', () => {
   assert.throws(
     () =>
       parseAssistantMessageRequestBody({
-        modelSpec: 'gpt-5.4',
+        modelSpec: {
+          model: 'gpt-5.4',
+        },
         prompt: 'hello',
       }),
-    /request field modelSpec must be a JSON object/u,
+    /field modelSpec is no longer supported/u,
   )
 
   assert.throws(
@@ -448,6 +444,44 @@ test('assistantd http protocol validates optional nullable-string and boolean fi
     () =>
       parseAssistantMessageRequestBody({
         prompt: 'hello',
+        provider: 'codex-cli',
+      }),
+    /field provider is no longer supported/u,
+  )
+
+  assert.throws(
+    () =>
+      parseOpenConversationRequestBody({
+        modelSpec: {
+          model: 'gpt-5.4',
+        },
+        vault: '/tmp/vault',
+      }),
+    /field modelSpec is no longer supported/u,
+  )
+
+  assert.throws(
+    () =>
+      parseOpenConversationRequestBody({
+        codexProfile: 'ops',
+        vault: '/tmp/vault',
+      }),
+    /field codexProfile is no longer supported/u,
+  )
+
+  assert.throws(
+    () =>
+      parseOpenConversationRequestBody({
+        oss: true,
+        vault: '/tmp/vault',
+      }),
+    /field oss is no longer supported/u,
+  )
+
+  assert.throws(
+    () =>
+      parseAssistantMessageRequestBody({
+        prompt: 'hello',
         sourceThreadId: 'legacy-thread',
       }),
     /sourceThreadId is no longer supported/u,
@@ -479,7 +513,7 @@ test('assistantd http protocol validates optional nullable-string and boolean fi
     () =>
       parseAssistantSessionOptionsRequestBody({
         providerOptions: {
-          provider: 'openai-compatible',
+          provider: 'unsupported-provider',
           model: 'gpt-5.4',
         },
         sessionId: 'session_http_test',

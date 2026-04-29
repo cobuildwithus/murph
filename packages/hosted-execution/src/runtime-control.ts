@@ -330,6 +330,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.idle",
   "runner.lease_superseded",
   "runner.started",
+  "runtime.usage_export_finished",
 ] as const;
 
 export type HostedRuntimeLogEventCode =

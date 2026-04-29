@@ -30,6 +30,9 @@ import type {
 import type {
   HostedEmailSendRequest,
 } from "../hosted-email.ts";
+import type {
+  RuntimeLivenessPort,
+} from "./liveness.ts";
 
 export interface HostedRuntimeArtifactStore {
   get(sha256: string): Promise<Uint8Array | null>;
@@ -138,6 +141,8 @@ export interface HostedRuntimePlatform {
   mailboxPort?: HostedRuntimeMailboxPort | null;
   checkpointActiveTurnInput?: HostedRuntimeActiveTurnInputCheckpoint | null;
   refreshMailboxForActiveTurnInput?: HostedRuntimeActiveTurnInputMailboxRefresh | null;
+  runtimeLivenessIntervalMs?: number | null;
+  runtimeLivenessPort?: RuntimeLivenessPort | null;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
   vaultSyncPort?: HostedRuntimeVaultSyncPort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
@@ -234,6 +239,12 @@ function parseHostedRuntimeRecordResponse(
       throw new TypeError(`Hosted runtime record response.${idsFieldName} must be a string array of non-empty values.`);
     }
     normalizedIds.push(trimmedEntry)
+  }
+
+  if (recorded !== normalizedIds.length) {
+    throw new TypeError(
+      `Hosted runtime record response.recorded must equal ${idsFieldName}.length.`,
+    );
   }
 
   return {

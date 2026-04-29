@@ -18,7 +18,10 @@ vi.mock("@/src/lib/hosted-execution/logging", () => ({
 }));
 
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { nudgeHostedRunnerBestEffort } from "@/src/lib/hosted-runner/control";
+import {
+  deleteHostedRunnerUserDataBestEffort,
+  nudgeHostedRunnerBestEffort,
+} from "@/src/lib/hosted-runner/control";
 import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
 
 describe("nudgeHostedRunnerBestEffort", () => {
@@ -34,6 +37,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     const nudgeUserRunner = vi.fn().mockRejectedValue(new Error("nudge failed"));
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
@@ -61,6 +65,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
@@ -84,6 +89,7 @@ describe("nudgeHostedRunnerBestEffort", () => {
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
+      deleteUserData: vi.fn(),
       getRunnerStatus: vi.fn(),
       nudgeUserRunner,
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
@@ -110,5 +116,57 @@ describe("nudgeHostedRunnerBestEffort", () => {
 
     expect(nudgeUserRunner).toHaveBeenCalledTimes(1);
     expect(nudgeUserRunner).toHaveBeenCalledWith("user-123");
+  });
+});
+
+describe("deleteHostedRunnerUserDataBestEffort", () => {
+  beforeEach(() => {
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("preserves partial Cloudflare cleanup details instead of marking skipped R2 deletion complete", async () => {
+    const deleteUserData = vi.fn().mockResolvedValue({
+      deletedAt: "2026-04-29T00:00:00.000Z",
+      durableObject: {
+        alarmCleared: true,
+        stateDeleted: true,
+      },
+      ok: true,
+      r2: {
+        deletedObjectCount: 1,
+        deletedRootKeyEnvelope: true,
+        skippedUserScopedPrefixes: true,
+        supported: false,
+        userScopedSkipReason: "HostedUserCryptoRepairNeededError",
+      },
+      userId: "user-123",
+    });
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+      deleteUserData,
+      getRunnerStatus: vi.fn(),
+      nudgeUserRunner: vi.fn(),
+    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
+
+    await expect(deleteHostedRunnerUserDataBestEffort({
+      userId: "user-123",
+    })).resolves.toEqual({
+      alarmCleared: true,
+      configured: true,
+      deleted: false,
+      deletedRootKeyEnvelope: true,
+      errorCode: null,
+      r2DeletedObjectCount: 1,
+      r2SkippedUserScopedPrefixes: true,
+      r2Supported: false,
+      r2UserScopedSkipReason: "HostedUserCryptoRepairNeededError",
+      runnerStateDeleted: true,
+    });
+
+    expect(deleteUserData).toHaveBeenCalledWith("user-123");
   });
 });
