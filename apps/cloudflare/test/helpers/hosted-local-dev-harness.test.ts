@@ -3,11 +3,14 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { HostedLocalDevConfig } from "../../../../scripts/dev-hosted-local/types.ts";
 
 const hostedLocalDevConfig: HostedLocalDevConfig = {
+  databaseUrlOverride: null,
   forceResetLocalDatabase: false,
   skipPrismaMigrate: true,
+  skipRunnerSmoke: false,
   skipStripeListen: true,
   skipWeb: false,
   skipVercelPull: true,
+  useVercelDatabaseUrl: false,
   webHost: "127.0.0.1",
   webPort: 3000,
   workerHost: "127.0.0.1",

@@ -217,12 +217,13 @@ pnpm verify:acceptance
 pnpm --dir apps/cloudflare verify
 ```
 
-`pnpm dev` is the repo-root local hosted lane. It pulls the linked Vercel development env for `apps/web`, runs hosted-web Prisma generate plus migrate, and starts both `apps/web` and the local Cloudflare worker together. One-time local prerequisites:
+`pnpm dev` is the repo-root local hosted lane. It pulls the linked Vercel development env for `apps/web`, runs hosted-web Prisma generate plus local schema sync, and starts both `apps/web` and the local Cloudflare worker together. One-time local prerequisites:
 
 - either `cd apps/web && vercel link` or run `vercel link --repo` from the repo root
 - log into Vercel CLI and enable project OIDC for the linked web project
 - optional: copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` when you want to pin local Worker secrets or add provider-specific Worker vars; otherwise `pnpm dev` uses Wrangler's documented local process-env path for required Worker secrets and CLI `--var` overrides for local non-secret vars
-- either keep `DATABASE_URL` in the linked Vercel development env or run local Postgres on `127.0.0.1:5432` so the default local database URL works
+- run local Postgres on `127.0.0.1:5432`; by default `pnpm dev` ignores a pulled Vercel `DATABASE_URL` and uses `postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync`
+- optional: set `MURPH_DEV_DATABASE_URL` or shell `DATABASE_URL` for a different local database; set `MURPH_DEV_USE_VERCEL_DATABASE_URL=1` only when you intentionally want the pulled Vercel development database
 - keep the linked Vercel development env populated with the real hosted signup secrets you need locally, such as Privy and Stripe test credentials
 - optional: install the [Stripe CLI](https://docs.stripe.com/stripe-cli) (`brew install stripe/stripe-cli/stripe`) and run `stripe login` once. `pnpm dev` then auto-launches `stripe listen` for hosted onboarding webhooks and captures the per-developer `whsec_...` signing secret from the listener's startup output into the web child's env. Set `MURPH_DEV_SKIP_STRIPE_LISTEN=1` to opt out; see `apps/web/README.md` for the full contract.
 
@@ -233,6 +234,8 @@ NEXT_DIST_DIR_MODE=smoke MURPH_DEV_WEB_PORT=3013 MURPH_DEV_WORKER_PORT=8793 pnpm
 ```
 
 That variant keeps the check off the default `apps/web/.next-dev` lock and default localhost ports while still exercising the same root launcher, Vercel env pull, Prisma setup, and Wrangler/Containers startup path.
+
+Startup readiness also POSTs the internal deploy-smoke route with `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, so `pnpm dev` proves the local Worker can boot the runner container and observe the prepared runner bundle before printing ready. Set `MURPH_DEV_SKIP_RUNNER_SMOKE=1` for a focused Worker-only debugging loop.
 
 The repo verification baseline for docs/process-only and ordinary repo work remains:
 

@@ -147,6 +147,11 @@ function normalizeOptionalEnvOverrides(
   return values;
 }
 
+function normalizeOptionalString(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
+}
+
 function normalizeHostedLocalBaseEnvironment(
   input: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
@@ -240,6 +245,43 @@ export function normalizeLocalDatabaseUrl(
 
   parsed.pathname = fallback.pathname;
   return parsed.toString();
+}
+
+export function resolveHostedLocalDatabaseUrl(input: {
+  databaseUrlOverride?: string | null;
+  fallbackUrl?: string;
+  pulledDatabaseUrl?: string;
+  repoDatabaseUrl?: string;
+  shellDatabaseUrl?: string;
+  useVercelDatabaseUrl?: boolean;
+}): string {
+  const fallbackUrl = input.fallbackUrl ?? DEFAULT_DATABASE_URL;
+  const explicitOverride = normalizeOptionalString(input.databaseUrlOverride);
+  if (explicitOverride) {
+    return normalizeLocalDatabaseUrl(explicitOverride, fallbackUrl);
+  }
+
+  const shellDatabaseUrl = normalizeOptionalString(input.shellDatabaseUrl);
+  if (shellDatabaseUrl) {
+    return normalizeLocalDatabaseUrl(shellDatabaseUrl, fallbackUrl);
+  }
+
+  if (input.useVercelDatabaseUrl === true) {
+    const vercelDatabaseUrl = normalizeOptionalString(input.pulledDatabaseUrl)
+      ?? normalizeOptionalString(input.repoDatabaseUrl)
+      ?? undefined;
+    return normalizeLocalDatabaseUrl(
+      vercelDatabaseUrl,
+      fallbackUrl,
+    );
+  }
+
+  const repoDatabaseUrl = normalizeOptionalString(input.repoDatabaseUrl);
+  if (repoDatabaseUrl && shouldSyncLocalDatabaseSchema(repoDatabaseUrl)) {
+    return normalizeLocalDatabaseUrl(repoDatabaseUrl, fallbackUrl);
+  }
+
+  return normalizeLocalDatabaseUrl(undefined, fallbackUrl);
 }
 
 export function shouldSyncLocalDatabaseSchema(value: string | undefined): boolean {

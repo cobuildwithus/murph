@@ -1,9 +1,12 @@
 export interface HostedLocalDevConfig {
+  databaseUrlOverride: string | null;
   forceResetLocalDatabase: boolean;
+  skipRunnerSmoke: boolean;
   skipPrismaMigrate: boolean;
   skipStripeListen: boolean;
   skipWeb: boolean;
   skipVercelPull: boolean;
+  useVercelDatabaseUrl: boolean;
   webHost: string;
   webPort: number;
   workerHost: string;

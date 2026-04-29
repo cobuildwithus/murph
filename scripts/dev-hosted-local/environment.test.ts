@@ -10,6 +10,7 @@ import {
   mergeCloudflareLocalEnv,
   normalizeLocalDatabaseUrl,
   parseEnvText,
+  resolveHostedLocalDatabaseUrl,
   shouldSyncLocalDatabaseSchema,
 } from "./environment.ts";
 import type {
@@ -18,11 +19,14 @@ import type {
 } from "./types.ts";
 
 const localConfig: HostedLocalDevConfig = {
+  databaseUrlOverride: null,
   forceResetLocalDatabase: false,
   skipWeb: false,
   skipPrismaMigrate: false,
+  skipRunnerSmoke: false,
   skipStripeListen: false,
   skipVercelPull: false,
+  useVercelDatabaseUrl: false,
   webHost: "127.0.0.1",
   webPort: 3000,
   workerHost: "127.0.0.1",
@@ -256,6 +260,51 @@ describe("normalizeLocalDatabaseUrl", () => {
   });
 });
 
+describe("resolveHostedLocalDatabaseUrl", () => {
+  it("defaults to the local database even when Vercel has a remote database", () => {
+    expect(
+      resolveHostedLocalDatabaseUrl({
+        pulledDatabaseUrl: "postgresql://remote.example.test:5432/murph",
+      }),
+    ).toBe("postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync");
+  });
+
+  it("uses an explicit dev database override before shell or pulled values", () => {
+    expect(
+      resolveHostedLocalDatabaseUrl({
+        databaseUrlOverride: "postgresql://127.0.0.1:5432/override",
+        pulledDatabaseUrl: "postgresql://remote.example.test:5432/murph",
+        shellDatabaseUrl: "postgresql://127.0.0.1:5432/shell",
+      }),
+    ).toBe("postgresql://127.0.0.1:5432/override");
+  });
+
+  it("uses the shell database url before the default local target", () => {
+    expect(
+      resolveHostedLocalDatabaseUrl({
+        shellDatabaseUrl: "postgresql://127.0.0.1:5432/shell",
+      }),
+    ).toBe("postgresql://127.0.0.1:5432/shell");
+  });
+
+  it("uses a local repo env database url when no explicit override is set", () => {
+    expect(
+      resolveHostedLocalDatabaseUrl({
+        repoDatabaseUrl: "postgresql://127.0.0.1:5433/repo_local",
+      }),
+    ).toBe("postgresql://127.0.0.1:5433/repo_local");
+  });
+
+  it("uses the pulled database only when explicitly requested", () => {
+    expect(
+      resolveHostedLocalDatabaseUrl({
+        pulledDatabaseUrl: "postgresql://remote.example.test:5432/murph",
+        useVercelDatabaseUrl: true,
+      }),
+    ).toBe("postgresql://remote.example.test:5432/murph");
+  });
+});
+
 describe("shouldSyncLocalDatabaseSchema", () => {
   it("returns true for the local loopback postgres target", () => {
     expect(
@@ -312,7 +361,9 @@ describe("buildWranglerVarArgs", () => {
         HOSTED_EXECUTION_VERCEL_OIDC_JWKS_URL: "http://127.0.0.1:4010/.well-known/jwks",
         HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
         HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "callback:v1",
+        LINQ_ATTACHMENT_CDN_BASE_URL: "http://127.0.0.1:4011/attachment-downloads",
         MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL: "http://127.0.0.1:4111/v1",
+        NODE_ENV: "test",
         HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "60000",
         IGNORED_SECRET: "secret",
       }),
@@ -324,7 +375,11 @@ describe("buildWranglerVarArgs", () => {
       "--var",
       "ALLOW_LOCAL_INTERNAL_PROXY:true",
       "--var",
+      "LINQ_ATTACHMENT_CDN_BASE_URL:http://127.0.0.1:4011/attachment-downloads",
+      "--var",
       "MURPH_E2E_CODEX_APP_SERVER_STUB_BASE_URL:http://127.0.0.1:4111/v1",
+      "--var",
+      "NODE_ENV:test",
       "--var",
       "HOSTED_EXECUTION_LOCAL_INTERNAL_PROXY_BASE_URL:http://127.0.0.1:8787",
       "--var",
@@ -422,5 +477,15 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(buildHostedRunnerLocalBuildId("sha256-0123456789abcdef01234567")).toBe(
       "sha256-0123456789abcdef01234567",
     );
+  });
+
+  it("passes NODE_ENV through local worker vars when provided", () => {
+    const config = buildWranglerLocalDevConfig({
+      NODE_ENV: "test",
+    });
+
+    expect(config.vars).toMatchObject({
+      NODE_ENV: "test",
+    });
   });
 });
