@@ -1,4 +1,7 @@
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
+import { promisify } from "node:util";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -47,6 +50,8 @@ import {
   seedHostedActiveMember,
   type HostedMailboxAppendForTestResponse,
 } from "#hosted-web-testing";
+
+const execFileAsync = promisify(execFile);
 
 interface HostedActiveMemberSeedArgs {
   environment?: NodeJS.ProcessEnv;
@@ -117,7 +122,11 @@ export async function startHostedLocalFullStackScenario(input: {
   const assistantProviderStubState: HostedLocalAssistantProviderStubState = {
     queuedResponseTexts: [...(input.assistantProviderResponses ?? [])],
   };
-  const localDatabaseUrl = input.localDatabaseUrl?.trim() || DEFAULT_DATABASE_URL;
+  const localDatabase = await resolveHostedLocalScenarioDatabase({
+    databaseUrl: input.localDatabaseUrl,
+    scenarioPrefix: input.persistDirPrefix,
+  });
+  const localDatabaseUrl = localDatabase.url;
   const baseEnvironment = await loadHostedLocalBaseEnvironment();
   const seedEnvironment = input.seedEnvironment ?? baseEnvironment;
   const assistantProviderMode =
@@ -289,6 +298,7 @@ export async function startHostedLocalFullStackScenario(input: {
         oidcFixture = null;
         await stopHttpStubServer(assistantProviderServer);
         assistantProviderServer = null;
+        await localDatabase.cleanup();
       },
       waitForHostedCompletion: async (userId, waitInput) =>
         await scenarioHarness.waitForHostedCompletion(userId, waitInput),
@@ -304,6 +314,92 @@ export async function startHostedLocalFullStackScenario(input: {
     await harness?.stop().catch(() => {});
     await oidcFixture?.stop().catch(() => {});
     await stopHttpStubServer(assistantProviderServer).catch(() => {});
+    await localDatabase.cleanup().catch(() => {});
     throw error;
   }
+}
+
+interface HostedLocalScenarioDatabaseLease {
+  cleanup(): Promise<void>;
+  url: string;
+}
+
+async function resolveHostedLocalScenarioDatabase(input: {
+  databaseUrl?: string;
+  scenarioPrefix: string;
+}): Promise<HostedLocalScenarioDatabaseLease> {
+  const explicitDatabaseUrl = input.databaseUrl?.trim();
+  if (explicitDatabaseUrl) {
+    return {
+      cleanup: async () => {},
+      url: explicitDatabaseUrl,
+    };
+  }
+
+  return await createEphemeralHostedLocalDatabase(input.scenarioPrefix);
+}
+
+async function createEphemeralHostedLocalDatabase(
+  scenarioPrefix: string,
+): Promise<HostedLocalScenarioDatabaseLease> {
+  const adminUrl = new URL(DEFAULT_DATABASE_URL);
+  const databaseName = buildEphemeralHostedLocalDatabaseName(scenarioPrefix);
+  const commandArgs = buildPostgresDatabaseCommandArgs(adminUrl, databaseName);
+  const commandEnv = buildPostgresDatabaseCommandEnv(adminUrl);
+
+  await execFileAsync("createdb", commandArgs, { env: commandEnv });
+
+  const targetUrl = new URL(DEFAULT_DATABASE_URL);
+  targetUrl.pathname = `/${databaseName}`;
+
+  return {
+    cleanup: async () => {
+      await execFileAsync("dropdb", ["--if-exists", "--force", ...commandArgs], {
+        env: commandEnv,
+      });
+    },
+    url: targetUrl.toString(),
+  };
+}
+
+function buildEphemeralHostedLocalDatabaseName(scenarioPrefix: string): string {
+  const scenarioSlug = scenarioPrefix
+    .replace(/^murph-hosted-local-/u, "")
+    .replace(/[^a-zA-Z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .toLowerCase()
+    .slice(0, 24);
+  const randomSuffix = randomUUID().replace(/-/gu, "").slice(0, 12);
+  const databaseName = `murph_e2e_${scenarioSlug || "hosted"}_${randomSuffix}`;
+
+  return databaseName.slice(0, 63);
+}
+
+function buildPostgresDatabaseCommandArgs(url: URL, databaseName: string): string[] {
+  const args: string[] = [];
+
+  if (url.hostname) {
+    args.push("--host", url.hostname);
+  }
+
+  if (url.port) {
+    args.push("--port", url.port);
+  }
+
+  if (url.username) {
+    args.push("--username", decodeURIComponent(url.username));
+  }
+
+  args.push(databaseName);
+  return args;
+}
+
+function buildPostgresDatabaseCommandEnv(url: URL): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+
+  if (url.password) {
+    env.PGPASSWORD = decodeURIComponent(url.password);
+  }
+
+  return env;
 }

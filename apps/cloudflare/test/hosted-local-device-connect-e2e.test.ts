@@ -1,9 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  DEFAULT_DATABASE_URL,
-} from "../../../scripts/dev-hosted-local/constants.ts";
-import {
   buildHostedExecutionRuntimePlatform,
 } from "../src/runtime-platform.ts";
 import {
@@ -21,7 +18,7 @@ import {
 const userId = `member_local_device_connect_${Date.now()}`;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
-const localDatabaseUrl = process.env.DATABASE_URL?.trim() || DEFAULT_DATABASE_URL;
+const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-sync";
 const whoopBaseUrl = "https://whoop-oauth.example.test";
 const whoopClientId = "synthetic-whoop-client";
