@@ -12,9 +12,6 @@ import type {
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
-const MAX_CODEX_INJECTED_FILE_BYTES = 50 * 1024 * 1024
-const CODEX_INJECTED_FILE_DATA_URL_PATTERN = /^data:([^,]*?),(.*)$/su
-const CODEX_INJECTED_FILE_BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/u
 
 type CodexAppServerSandboxMode =
   | 'danger-full-access'
@@ -30,23 +27,6 @@ export type CodexAppServerInputItem =
       type: 'localImage'
       path: string
     }
-
-export type CodexAppServerInjectedContentPart =
-  | {
-      type: 'input_text'
-      text: string
-    }
-  | {
-      type: 'input_file'
-      filename?: string
-      file_data: string
-    }
-
-export interface CodexAppServerInjectedMessageItem {
-  type: 'message'
-  role: 'user'
-  content: readonly CodexAppServerInjectedContentPart[]
-}
 
 export type CodexAppServerSteerRequestInput = Omit<
   CodexAppServerSteerInput,
@@ -112,19 +92,6 @@ export function buildCodexTurnStartParams(input: {
     }),
     threadId: input.providerSessionId,
   })
-}
-
-export function buildCodexThreadInjectItemsParams(input: {
-  items: readonly CodexAppServerInjectedMessageItem[]
-  providerSessionId: string
-}): Record<string, unknown> {
-  return {
-    items: validateCodexInjectedMessageItems(input.items),
-    threadId: assertCodexRpcIdentifier({
-      field: 'threadId',
-      value: input.providerSessionId,
-    }),
-  }
 }
 
 export function buildCodexTurnSteerParams(
@@ -220,188 +187,6 @@ export function resolveSupportedCodexAppServerApprovalPolicy(
     `Codex app-server approval policy "${approvalPolicy}" is not supported in noninteractive assistant turns. Use approvalPolicy=never.`,
     {
       approvalPolicy,
-      retryable: false,
-    },
-  )
-}
-
-function validateCodexInjectedMessageItems(
-  items: readonly CodexAppServerInjectedMessageItem[],
-): CodexAppServerInjectedMessageItem[] {
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Codex app-server thread/inject_items requires at least one injected message item.',
-      {
-        retryable: false,
-      },
-    )
-  }
-
-  return items.map((item, index) => {
-    if (!item || item.type !== 'message' || item.role !== 'user') {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-        `Codex app-server injected item ${index + 1} must be a user message item.`,
-        {
-          retryable: false,
-        },
-      )
-    }
-
-    if (!Array.isArray(item.content) || item.content.length === 0) {
-      throw new VaultCliError(
-        'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-        `Codex app-server injected message ${index + 1} must include content.`,
-        {
-          retryable: false,
-        },
-      )
-    }
-
-    let fileIndex = 0
-    const content = item.content.map((
-      part: CodexAppServerInjectedContentPart,
-      partIndex: number,
-    ) => {
-      const currentFileIndex = fileIndex
-      if (part?.type === 'input_file') {
-        fileIndex += 1
-      }
-      return validateCodexInjectedContentPart(
-        part,
-        index,
-        partIndex,
-        currentFileIndex,
-      )
-    })
-
-    return {
-      type: 'message',
-      role: 'user',
-      content,
-    }
-  })
-}
-
-function validateCodexInjectedContentPart(
-  part: CodexAppServerInjectedContentPart,
-  itemIndex: number,
-  partIndex: number,
-  fileIndex: number,
-): CodexAppServerInjectedContentPart {
-  if (!part || typeof part !== 'object') {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      `Codex app-server injected content ${itemIndex + 1}.${partIndex + 1} must be an object.`,
-      {
-        retryable: false,
-      },
-    )
-  }
-
-  if (part.type === 'input_text') {
-    if (typeof part.text === 'string' && part.text.trim().length > 0) {
-      return {
-        type: 'input_text',
-        text: part.text,
-      }
-    }
-  }
-
-  if (part.type === 'input_file') {
-    const fileData =
-      typeof part.file_data === 'string' ? part.file_data.trim() : ''
-    if (fileData.length > 0) {
-      return {
-        type: 'input_file',
-        filename: buildSyntheticCodexInjectedFilename(fileIndex),
-        file_data: validateCodexInjectedFileData(fileData),
-      }
-    }
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-    `Codex app-server injected content ${itemIndex + 1}.${partIndex + 1} is malformed.`,
-    {
-      retryable: false,
-    },
-  )
-}
-
-function validateCodexInjectedFileData(fileData: string): string {
-  const match = CODEX_INJECTED_FILE_DATA_URL_PATTERN.exec(fileData)
-  if (!match) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Codex app-server injected file data must be a base64 data URL.',
-      {
-        retryable: false,
-      },
-    )
-  }
-
-  const metadata = match[1] ?? ''
-  const metadataParts = metadata
-    .split(';')
-    .map((part) => part.trim().toLowerCase())
-    .filter((part) => part.length > 0)
-  const mediaType = metadataParts[0] ?? ''
-  if (mediaType !== 'application/pdf' && mediaType !== 'application/x-pdf') {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Codex app-server injected file data currently supports PDF data URLs only.',
-      {
-        retryable: false,
-      },
-    )
-  }
-  if (!metadataParts.includes('base64')) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Codex app-server injected file data URLs must use base64 encoding.',
-      {
-        retryable: false,
-      },
-    )
-  }
-
-  const payload = match[2] ?? ''
-  if (
-    !CODEX_INJECTED_FILE_BASE64_PATTERN.test(payload) ||
-    payload.length % 4 !== 0
-  ) {
-    throw invalidCodexInjectedFileBase64()
-  }
-
-  const decoded = Buffer.from(payload, 'base64')
-  if (decoded.byteLength === 0 || decoded.toString('base64') !== payload) {
-    throw invalidCodexInjectedFileBase64()
-  }
-  if (decoded.byteLength > MAX_CODEX_INJECTED_FILE_BYTES) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Codex app-server injected file data exceeds the per-file size limit.',
-      {
-        maxBytes: MAX_CODEX_INJECTED_FILE_BYTES,
-        retryable: false,
-      },
-    )
-  }
-
-  return `data:${mediaType};base64,${payload}`
-}
-
-function buildSyntheticCodexInjectedFilename(partIndex: number): string {
-  return `attachment-${String(partIndex + 1).padStart(2, '0')}.pdf`
-}
-
-function invalidCodexInjectedFileBase64(): VaultCliError {
-  return new VaultCliError(
-    'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-    'Codex app-server injected file data URL contains invalid base64.',
-    {
       retryable: false,
     },
   )

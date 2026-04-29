@@ -184,21 +184,6 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
     const requestBody = JSON.parse(requests[0]!);
     assert.deepEqual(requestBody.input, [
       {
-        type: "message",
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: "Attached PDF evidence.",
-          },
-          {
-            type: "input_file",
-            filename: "attachment-01.pdf",
-            file_data: "data:application/pdf;base64,JVBERi0xLjcK",
-          },
-        ],
-      },
-      {
         role: "user",
         content: [
           {
@@ -487,30 +472,6 @@ async function runHostedLocalCodexStubTurn(
     })}\n`);
     childStdin.write(`${JSON.stringify({
       id: 3,
-      method: "thread/inject_items",
-      params: {
-        threadId: "thread_test",
-        items: [
-          {
-            type: "message",
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: "Attached PDF evidence.",
-              },
-              {
-                type: "input_file",
-                filename: "attachment-01.pdf",
-                file_data: "data:application/pdf;base64,JVBERi0xLjcK",
-              },
-            ],
-          },
-        ],
-      },
-    })}\n`);
-    childStdin.write(`${JSON.stringify({
-      id: 4,
       method: "turn/start",
       params: {
         input: [

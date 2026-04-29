@@ -312,7 +312,7 @@ describe('assistant provider registry helpers', () => {
     expect(listAssistantProviderDefinitions()).toHaveLength(1)
 
     expect(resolveAssistantProviderCapabilities('codex-cli')).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
@@ -324,7 +324,7 @@ describe('assistant provider registry helpers', () => {
         provider: 'codex-cli',
       }),
     ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,

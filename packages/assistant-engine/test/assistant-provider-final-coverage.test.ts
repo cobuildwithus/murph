@@ -77,7 +77,7 @@ describe('assistant provider catalog', () => {
       supportsReasoningEffort: true,
     })
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValueOnce({
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: false,
     })
 
@@ -90,7 +90,7 @@ describe('assistant provider catalog', () => {
         provider: 'codex-cli',
       }),
     ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image', 'file'],
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: false,
     })
   })

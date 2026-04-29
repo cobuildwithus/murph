@@ -264,7 +264,6 @@ const turnDelayMs = 25;
 let threadCounter = 0;
 let turnCounter = 0;
 let activeTurn = null;
-const injectedItemsByThreadId = new Map();
 
 function writeRpc(payload) {
   process.stdout.write(JSON.stringify(payload) + "\\n");
@@ -341,9 +340,7 @@ async function completeTurn(turn) {
   turn.completed = true;
 
   try {
-    const injected = injectedItemsByThreadId.get(turn.threadId) ?? [];
-    const input = [...injected, ...turn.inputItems];
-    const text = await fetchAssistantResponse(input);
+    const text = await fetchAssistantResponse(turn.inputItems);
     writeRpc({
       type: "item.completed",
       item: {
@@ -410,9 +407,6 @@ async function handleRpc(message) {
       ? params.threadId.trim()
       : null;
     const threadId = requestedThreadId ?? "thread_hosted_local_" + (++threadCounter);
-    if (!injectedItemsByThreadId.has(threadId)) {
-      injectedItemsByThreadId.set(threadId, []);
-    }
     writeRpc({
       id,
       result: {
@@ -420,24 +414,6 @@ async function handleRpc(message) {
           id: threadId,
         },
       },
-    });
-    return;
-  }
-
-  if (method === "thread/inject_items" && id !== null) {
-    const threadId = typeof params.threadId === "string" && params.threadId.trim()
-      ? params.threadId.trim()
-      : null;
-    const items = Array.isArray(params.items) ? params.items : null;
-    if (!threadId || !items) {
-      writeRpcError(id, "thread/inject_items requires threadId and items");
-      return;
-    }
-    const existing = injectedItemsByThreadId.get(threadId) ?? [];
-    injectedItemsByThreadId.set(threadId, [...existing, ...items]);
-    writeRpc({
-      id,
-      result: {},
     });
     return;
   }
