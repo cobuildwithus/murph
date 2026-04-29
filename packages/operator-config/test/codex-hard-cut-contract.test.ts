@@ -42,24 +42,24 @@ describe('operator config Codex-only hard-cut contracts', () => {
     })
   })
 
-  it('fails closed for removed OpenAI-compatible config inputs', () => {
+  it('fails closed for removed provider config inputs', () => {
     expect(() =>
       normalizeAssistantProviderConfig({
-        provider: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        baseUrl: 'https://api.openai.com/v1',
+        provider: 'unsupported-provider',
         model: 'gpt-5',
       }),
-    ).toThrow(/Reconfigure the assistant for Codex App Server/u)
+    ).toThrow(/Assistant runtime targets must use Codex App Server/u)
   })
 
-  it('does not publish legacy OpenAI-compatible provider presets', async () => {
+  it('does not publish legacy provider presets', async () => {
     const packageJson = JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { exports?: Record<string, unknown> }
 
     expect(
-      packageJson.exports?.['./assistant/openai-compatible-provider-presets'],
-    ).toBeUndefined()
+      Object.keys(packageJson.exports ?? {}).filter((key) =>
+        key.includes('provider-presets'),
+      ),
+    ).toEqual([])
   })
 })

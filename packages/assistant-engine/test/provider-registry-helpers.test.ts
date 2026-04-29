@@ -293,7 +293,7 @@ describe('assistant provider registry helpers', () => {
       capabilities,
       description: 'Test model',
       id: 'test-model',
-      source: 'manual',
+      source: 'current',
     })
 
     capabilities.tools = false
@@ -303,7 +303,7 @@ describe('assistant provider registry helpers', () => {
       description: 'Test model',
       id: 'test-model',
       label: 'test-model',
-      source: 'manual',
+      source: 'current',
     })
   })
 
@@ -316,7 +316,6 @@ describe('assistant provider registry helpers', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
-      supportsZeroDataRetention: false,
     })
 
     expect(
@@ -328,7 +327,6 @@ describe('assistant provider registry helpers', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
-      supportsZeroDataRetention: false,
     })
 
     expect(resolveAssistantProviderStaticModels({ provider: 'codex-cli' })).toEqual(

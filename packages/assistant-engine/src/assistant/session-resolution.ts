@@ -73,12 +73,8 @@ export function buildResolveAssistantSessionInput(
           : undefined
   const deliveryKind = input.deliveryKind ?? undefined
 
-  const defaultSandbox = isAssistantCodexTargetConfig(providerConfig)
-    ? (providerConfig.policy.sandbox ?? 'danger-full-access')
-    : providerConfig.policy.sandbox
-  const defaultApprovalPolicy = isAssistantCodexTargetConfig(providerConfig)
-    ? (providerConfig.policy.approvalPolicy ?? 'never')
-    : providerConfig.policy.approvalPolicy
+  const defaultSandbox = providerConfig.policy.sandbox ?? 'danger-full-access'
+  const defaultApprovalPolicy = providerConfig.policy.approvalPolicy ?? 'never'
 
   return {
     vault: input.vault,

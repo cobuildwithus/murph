@@ -13,7 +13,6 @@ import type { InkChatEntry } from '../src/assistant/ui/view-model.js'
 const runtimeMocks = vi.hoisted(() => ({
   appendAssistantTranscriptEntries: vi.fn(),
   buildAssistantProviderDefaultsPatch: vi.fn((input) => input),
-  discoverAssistantProviderModels: vi.fn(),
   extractRecoveredAssistantSession: vi.fn<(error: unknown) => AssistantSession | null>(
     () => null,
   ),
@@ -48,7 +47,6 @@ vi.mock('@murphai/assistant-engine/assistant-provider', () => ({
 }))
 
 vi.mock('@murphai/assistant-engine/assistant-provider-catalog', () => ({
-  discoverAssistantProviderModels: runtimeMocks.discoverAssistantProviderModels,
   resolveAssistantModelCatalog: runtimeMocks.resolveAssistantModelCatalog,
 }))
 
@@ -151,23 +149,19 @@ const TEST_DEFAULTS: AssistantOperatorDefaults = {
   selfDeliveryTargets: null,
 }
 
+const TEST_CATALOG_CAPABILITIES = {
+  supportedUserMessageContentTypes: ['text'],
+  supportsNativeResume: true,
+  supportsReasoningEffort: true,
+  supportsRichUserMessageContent: false,
+} as const
+
 beforeEach(() => {
   vi.clearAllMocks()
   runtimeMocks.resolveAssistantModelCatalog.mockReturnValue({
-    capabilities: {
-      supportsModelDiscovery: true,
-    },
+    capabilities: TEST_CATALOG_CAPABILITIES,
     models: [],
     modelOptions: [],
-  })
-  runtimeMocks.discoverAssistantProviderModels.mockResolvedValue({
-    message: null,
-    models: [
-      {
-        id: 'gpt-5.4',
-      },
-    ],
-    status: 'ready',
   })
 })
 
@@ -496,20 +490,15 @@ test('model selection helpers resolve the initial choice, persist updates, and u
   await flushAsyncWork()
 
   assert.deepEqual(latestCatalog, {
-    capabilities: {
-      supportsModelDiscovery: true,
-    },
+    capabilities: TEST_CATALOG_CAPABILITIES,
     models: [],
     modelOptions: [],
   })
-  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length, 0)
 })
 
 test('model catalog hook uses Codex catalog inputs, and initial selection falls back through defaults', async () => {
   runtimeMocks.resolveAssistantModelCatalog.mockReturnValue({
-    capabilities: {
-      supportsModelDiscovery: false,
-    },
+    capabilities: TEST_CATALOG_CAPABILITIES,
     models: [],
     modelOptions: [],
   })
@@ -533,7 +522,6 @@ test('model catalog hook uses Codex catalog inputs, and initial selection falls 
   renderToString(React.createElement(Probe))
   await flushAsyncWork()
 
-  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length, 0)
   assert.deepEqual(
     resolveInitialAssistantSelection({
       codexDisplay: TEST_CODEX_DISPLAY,
@@ -600,9 +588,7 @@ test('model catalog hook updates when Codex model state changes', async () => {
   runtimeMocks.resolveAssistantModelCatalog.mockImplementation((input) => {
     catalogInputs.push(input)
     return {
-      capabilities: {
-        supportsModelDiscovery: false,
-      },
+      capabilities: TEST_CATALOG_CAPABILITIES,
       models: [],
       modelOptions: [],
     }
@@ -660,7 +646,6 @@ test('model catalog hook updates when Codex model state changes', async () => {
       provider: 'codex-cli',
     },
   ])
-  assert.equal(runtimeMocks.discoverAssistantProviderModels.mock.calls.length, 0)
 
   stdin.destroy()
   stdout.destroy()

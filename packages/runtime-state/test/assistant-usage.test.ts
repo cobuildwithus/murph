@@ -51,9 +51,9 @@ test("assistant usage records round-trip through pending storage and sort by occ
 
   try {
     const laterRecord: AssistantUsageRecord = {
-      apiKeyEnv: "OPENAI_API_KEY",
+      apiKeyEnv: "VERCEL_AI_API_KEY",
       attemptCount: 2,
-      baseUrl: "https://api.example.test/v1",
+      baseUrl: "https://ai-gateway.vercel.sh/v1",
       cacheWriteTokens: 3,
       cachedInputTokens: 5,
       credentialSource: "platform" as const,
@@ -63,8 +63,8 @@ test("assistant usage records round-trip through pending storage and sort by occ
       memberId: "member_123",
       occurredAt: "2026-03-29T12:00:01.000Z",
       outputTokens: 45,
-      provider: "openai-compatible",
-      providerName: "example",
+      provider: "codex-cli",
+      providerName: "vercel-ai-gateway",
       reasoningTokens: 8,
       reportingUserId: "musr_example",
       requestedModel: "gpt-5.4-mini",
@@ -479,28 +479,28 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
 test("assistant usage credential source resolves against the hosted user env snapshot", () => {
   assert.equal(
     resolveAssistantUsageCredentialSource({
-      apiKeyEnv: "OPENAI_API_KEY",
+      apiKeyEnv: "VERCEL_AI_API_KEY",
       effectiveEnv: {
-        OPENAI_API_KEY: "sk-user",
+        VERCEL_AI_API_KEY: "sk-user",
       },
-      provider: "openai-compatible",
-      userEnvKeys: ["OPENAI_API_KEY"],
+      provider: "codex-cli",
+      userEnvKeys: ["VERCEL_AI_API_KEY"],
     }),
     "member",
   );
   assert.equal(
     resolveAssistantUsageCredentialSource({
-      apiKeyEnv: "OPENAI_API_KEY",
-      provider: "openai-compatible",
+      apiKeyEnv: "VERCEL_AI_API_KEY",
+      provider: "codex-cli",
       userEnvKeys: [],
     }),
     "platform",
   );
   assert.equal(
     resolveAssistantUsageCredentialSource({
-      apiKeyEnv: "HF_TOKEN",
-      provider: "openai-compatible",
-      userEnvKeys: ["HF_TOKEN"],
+      apiKeyEnv: "CUSTOM_MODEL_API_KEY",
+      provider: "codex-cli",
+      userEnvKeys: ["CUSTOM_MODEL_API_KEY"],
     }),
     "member",
   );
@@ -508,9 +508,9 @@ test("assistant usage credential source resolves against the hosted user env sna
     resolveAssistantUsageCredentialSource({
       apiKeyEnv: null,
       provider: "codex-cli",
-      userEnvKeys: ["VENICE_API_KEY"],
+      userEnvKeys: ["CUSTOM_MODEL_API_KEY"],
     }),
-    "unknown",
+    "platform",
   );
   assert.equal(
     resolveAssistantUsageCredentialSource({
@@ -526,8 +526,8 @@ test("assistant usage credential source resolves against the hosted user env sna
   assert.equal(
     resolveAssistantUsageCredentialSource({
       apiKeyEnv: null,
-      provider: "openai-compatible",
-      userEnvKeys: ["VENICE_API_KEY"],
+      provider: "codex-cli",
+      userEnvKeys: ["CUSTOM_MODEL_API_KEY"],
     }),
     "platform",
   );
@@ -537,7 +537,7 @@ test("assistant usage credential source resolves against the hosted user env sna
       headers: {
         "X-Api-Key": "member-header-secret",
       },
-      provider: "openai-compatible",
+      provider: "codex-cli",
       userEnvKeys: [],
     }),
     "member",
@@ -548,7 +548,7 @@ test("assistant usage credential source resolves against the hosted user env sna
       headers: {
         "X-Trace-Id": "Bearer member-header-secret-1234",
       },
-      provider: "openai-compatible",
+      provider: "codex-cli",
       userEnvKeys: [],
     }),
     "member",
@@ -559,24 +559,24 @@ test("assistant usage credential source resolves against the hosted user env sna
       headers: {
         "X-Trace-Id": "trace-123",
       },
-      provider: "openai-compatible",
+      provider: "codex-cli",
       userEnvKeys: [],
     }),
     "platform",
   );
   assert.equal(
     resolveAssistantUsageCredentialSource({
-      apiKeyEnv: " OPENAI_API_KEY ",
-      provider: "openai-compatible",
-      userEnvKeys: ["OPENAI_API_KEY"],
+      apiKeyEnv: " VERCEL_AI_API_KEY ",
+      provider: "codex-cli",
+      userEnvKeys: ["VERCEL_AI_API_KEY"],
     }),
     "platform",
   );
   assert.throws(
     () =>
       Reflect.apply(resolveAssistantUsageCredentialSource, undefined, [{
-        apiKeyEnv: "OPENAI_API_KEY",
-        provider: "openai-compatible",
+        apiKeyEnv: "VERCEL_AI_API_KEY",
+        provider: "codex-cli",
         userEnvKeys: [123],
       }]),
     /userEnvKey must be a string when provided/u,
@@ -586,12 +586,12 @@ test("assistant usage credential source resolves against the hosted user env sna
 test("assistant usage credential source treats blank effective env overrides as non-member keys", () => {
   assert.equal(
     resolveAssistantUsageCredentialSource({
-      apiKeyEnv: "OPENAI_API_KEY",
+      apiKeyEnv: "VERCEL_AI_API_KEY",
       effectiveEnv: {
-        OPENAI_API_KEY: "   ",
+        VERCEL_AI_API_KEY: "   ",
       },
-      provider: "openai-compatible",
-      userEnvKeys: ["OPENAI_API_KEY"],
+      provider: "codex-cli",
+      userEnvKeys: ["VERCEL_AI_API_KEY"],
     }),
     "platform",
   );
@@ -599,10 +599,10 @@ test("assistant usage credential source treats blank effective env overrides as 
     resolveAssistantUsageCredentialSource({
       apiKeyEnv: null,
       effectiveEnv: {
-        OPENAI_API_KEY: " ",
+        CUSTOM_MODEL_API_KEY: " ",
       },
       provider: "codex-cli",
-      userEnvKeys: ["OPENAI_API_KEY"],
+      userEnvKeys: ["CUSTOM_MODEL_API_KEY"],
     }),
     "platform",
   );
@@ -619,9 +619,9 @@ test("assistant usage credential source treats blank effective env overrides as 
   );
   assert.equal(
     resolveAssistantUsageCredentialSource({
-      apiKeyEnv: "OPENAI_API_KEY",
-      provider: "openai-compatible",
-      userEnvKeys: ["OPENAI_API_KEY"],
+      apiKeyEnv: "VERCEL_AI_API_KEY",
+      provider: "codex-cli",
+      userEnvKeys: ["VERCEL_AI_API_KEY"],
     }),
     "member",
   );

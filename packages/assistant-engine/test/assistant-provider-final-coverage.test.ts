@@ -8,7 +8,6 @@ const providerMocks = vi.hoisted(() => ({
     label: id,
     source,
   })),
-  discoverAssistantProviderModelsWithRegistry: vi.fn(),
   resolveAssistantProviderRegistryCapabilities: vi.fn(),
   resolveAssistantProviderRegistryTargetCapabilities: vi.fn(),
   resolveAssistantProviderLabel: vi.fn((profile) =>
@@ -39,8 +38,6 @@ const providerMocks = vi.hoisted(() => ({
 
 vi.mock('../src/assistant-provider.js', () => ({
   createCatalogModel: providerMocks.createCatalogModel,
-  discoverAssistantProviderModels:
-    providerMocks.discoverAssistantProviderModelsWithRegistry,
   resolveAssistantProviderTargetCapabilities:
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities,
   resolveAssistantProviderCapabilities:
@@ -95,7 +92,7 @@ describe('assistant provider catalog', () => {
     })
   })
 
-  it('normalizes provider profiles and builds model catalogs with current, static, and discovered models', () => {
+  it('normalizes provider profiles and builds model catalogs with current and static models', () => {
     providerMocks.resolveAssistantProviderLabel.mockImplementation((profile) =>
       (profile.target?.kind ?? profile.provider) === 'codex-cli'
         ? 'Codex CLI'
@@ -138,7 +135,6 @@ describe('assistant provider catalog', () => {
     const catalog = resolveAssistantModelCatalog({
       currentModel: ' custom-current ',
       currentReasoningEffort: 'high',
-      discoveredModels: ['gpt-5.4', 'gpt-5.4-mini'],
       provider: 'codex-cli',
     })
 
@@ -146,7 +142,6 @@ describe('assistant provider catalog', () => {
     expect(catalog.models.map((model) => model.id)).toEqual([
       'custom-current',
       'gpt-5.4',
-      'gpt-5.4-mini',
     ])
     expect(catalog.selectedModel?.id).toBe('custom-current')
     expect(catalog.reasoningOptions).toEqual(DEFAULT_ASSISTANT_REASONING_OPTIONS)
@@ -158,10 +153,6 @@ describe('assistant provider catalog', () => {
       {
         value: 'gpt-5.4',
         description: 'Frontier model',
-      },
-      {
-        value: 'gpt-5.4-mini',
-        description: 'Discovered from Codex CLI.',
       },
     ])
   })

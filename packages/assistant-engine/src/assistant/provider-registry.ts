@@ -1,7 +1,6 @@
 export type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
-  AssistantModelDiscoveryResult,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
@@ -17,7 +16,6 @@ export type {
 export {
   ASSISTANT_PROVIDER_DEFINITIONS,
   createCatalogModel,
-  discoverAssistantProviderModels,
   executeAssistantProviderTurnAttempt,
   executeAssistantProviderTurnAttemptWithDefinition,
   executeAssistantProviderTurn,
@@ -26,9 +24,7 @@ export {
   listAssistantProviderDefinitions,
   listAssistantProviders,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderExecutionCapabilities,
   resolveAssistantProviderTargetCapabilities,
-  resolveAssistantProviderTargetExecutionCapabilities,
   resolveAssistantProviderLabel,
   resolveAssistantProviderStaticModels,
 } from './providers/registry.js'

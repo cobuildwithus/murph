@@ -7,7 +7,6 @@ import {
   assistantBackendTargetsEqual,
   createAssistantBackendTarget,
   normalizeAssistantBackendTarget,
-  sanitizeAssistantBackendTargetForPersistence,
 } from '../src/assistant-backend.ts'
 import {
   assistantSessionIdSchema,
@@ -15,12 +14,10 @@ import {
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
-  apiKeyEnvNameSchema,
   emptyArgsSchema,
   firstString,
   httpBaseUrlSchema,
   normalizeHttpBaseUrlOption,
-  parseHeadersJsonOption,
   requestIdFromOptions,
   resolveEffectiveTopLevelToken,
   withBaseOptions,
@@ -54,7 +51,6 @@ import {
   timeZoneSchema,
   workoutFormatListResultSchema,
 } from '../src/vault-cli-contracts.ts'
-import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 async function withTemporaryProcessEnv(
   entries: Record<string, string | undefined>,
@@ -203,7 +199,7 @@ test('setup command options prefer explicit vault, then VAULT env, then ./vault'
   )
 })
 
-test('command helpers normalize top-level tokens, request ids, and JSON headers', () => {
+test('command helpers normalize top-level tokens and request ids', () => {
   assert.deepEqual(emptyArgsSchema.parse({}), {})
   assert.deepEqual(
     withBaseOptions({
@@ -216,80 +212,6 @@ test('command helpers normalize top-level tokens, request ids, and JSON headers'
       extra: 'value',
       vault: '/vault',
     },
-  )
-  assert.equal(parseHeadersJsonOption(), undefined)
-
-  const headers = parseHeadersJsonOption(
-    '{"X-Client":"murph","X-Trace":" trace-id "}',
-  )
-
-  assert.deepEqual(headers, {
-    'X-Client': 'murph',
-    'X-Trace': ' trace-id ',
-  })
-  assert.throws(
-    () => parseHeadersJsonOption('{"Authorization":"credential"}'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      /credential headers/u.test(error.message),
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('{"X-Api-Key":"credential"}'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      /credential headers/u.test(error.message),
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('{"X-Trace":"Bearer secret-token-1234"}'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      /credential headers/u.test(error.message),
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('{"Bad Header":"value"}'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      /invalid HTTP header name/u.test(error.message),
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('{"X-Trace":"one","x-trace":"two"}'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      /duplicate header name/u.test(error.message),
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('{"X-Trace":"bad\\nvalue"}'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      /invalid value/u.test(error.message),
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('{'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      error.message === 'headersJson must be a valid JSON object.' &&
-      typeof error.context?.cause === 'string',
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('[]'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      error.message === 'headersJson must be a JSON object with string values.',
-  )
-  assert.throws(
-    () => parseHeadersJsonOption('{"X-Trace":1}'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'invalid_payload' &&
-      error.message === 'headersJson must be a JSON object with string values.',
   )
   assert.equal(
     resolveEffectiveTopLevelToken([
@@ -336,7 +258,6 @@ test('command helper option schemas reject unsafe base URLs and env names', () =
     normalizeHttpBaseUrlOption(' http://127.0.0.1:11434/v1/ '),
     'http://127.0.0.1:11434/v1',
   )
-  assert.equal(apiKeyEnvNameSchema.parse('OPENAI_API_KEY'), 'OPENAI_API_KEY')
   assert.throws(
     () => httpBaseUrlSchema.parse('https://user:secret@example.test/v1'),
     /embedded credentials/u,
@@ -344,10 +265,6 @@ test('command helper option schemas reject unsafe base URLs and env names', () =
   assert.throws(
     () => httpBaseUrlSchema.parse('https://example.test/v1?token=secret'),
     /query parameters/u,
-  )
-  assert.throws(
-    () => apiKeyEnvNameSchema.parse('1_BAD_KEY'),
-    /environment variable name/u,
   )
 })
 
@@ -376,24 +293,6 @@ test('assistant backend targets trim config input and strip sensitive headers be
     sandbox: 'workspace-write',
   })
 
-  assert.throws(
-    () =>
-      sanitizeAssistantBackendTargetForPersistence({
-        adapter: 'openai-compatible',
-        apiKeyEnv: '  OPENAI_API_KEY  ',
-        endpoint: '  https://api.example.com/v1  ',
-        headers: {
-          Authorization: 'Bearer abcdefghijklmnop',
-          'X-Trace': ' trace-id ',
-        },
-        model: '  gpt-4o  ',
-        presetId: null,
-        providerName: '  Example Provider  ',
-        reasoningEffort: 'high',
-        webSearch: null,
-      }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
-  )
   assert.equal(
     assistantBackendTargetsEqual(
       normalizedCodexTarget,
@@ -444,12 +343,10 @@ test('representative contract schemas stay wired to the owned setup/operator sea
   assert.throws(
     () =>
       resolveAssistantRuntimeTarget({
-        provider: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        baseUrl: 'https://api.example.test/v1',
+        provider: 'unsupported-provider',
         model: 'gpt-5.4',
       }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
+    /Assistant runtime targets must use Codex App Server/u,
   )
   const parsedAssistantSession = parseAssistantSessionRecord({
       alias: 'daily',
@@ -597,7 +494,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         schema: 'murph.assistant-session.v1',
         sessionId: 'session_route_only',
         target: {
-          adapter: 'openai-compatible',
+          adapter: 'unsupported-provider',
           apiKeyEnv: null,
           endpoint: null,
           headers: null,
@@ -610,7 +507,6 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         turnCount: 1,
         updatedAt: '2026-04-08T12:05:00.000Z',
       }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
 })
 

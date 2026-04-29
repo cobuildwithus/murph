@@ -200,7 +200,6 @@ const TEST_STATUS_RESULT = {
   statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
   outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
   diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.json',
-  failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover-state.json',
   turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
   generatedAt: '2026-04-08T00:00:00.000Z',
   runLock: {
@@ -239,7 +238,6 @@ const TEST_STATUS_RESULT = {
       turnsFailed: 0,
       providerAttempts: 0,
       providerFailures: 0,
-      providerFailovers: 0,
       deliveriesQueued: 0,
       deliveriesSent: 0,
       deliveriesFailed: 0,
@@ -249,11 +247,6 @@ const TEST_STATUS_RESULT = {
       automationScans: 0,
     },
     recentWarnings: [],
-  },
-  failover: {
-    schema: 'murph.assistant-failover-state.v1',
-    updatedAt: '2026-04-08T00:00:00.000Z',
-    routes: [],
   },
   quarantine: {
     total: 0,

@@ -174,8 +174,6 @@ function mapAssistantQuarantineRuntimeEventKind(
       return 'status.snapshot.quarantined' as const
     case 'diagnostics-snapshot':
       return 'diagnostics.snapshot.quarantined' as const
-    case 'failover':
-      return 'failover.state.quarantined' as const
     case 'runtime-budget':
       return 'runtime-budget.quarantined' as const
     case 'cron-store':
@@ -187,6 +185,8 @@ function mapAssistantQuarantineRuntimeEventKind(
     case 'outbox-intent':
       return 'outbox.intent.quarantined' as const
   }
+  const exhaustive: never = artifactKind
+  return exhaustive
 }
 
 async function collectQuarantineMetadataPaths(directory: string): Promise<string[]> {

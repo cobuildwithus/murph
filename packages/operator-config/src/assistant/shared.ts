@@ -18,22 +18,6 @@ export function parseAssistantBaseUrl(
   }
 }
 
-export function assistantBaseUrlsShareOrigin(
-  left: URL | string | null | undefined,
-  right: URL | string | null | undefined,
-): boolean {
-  const parsedLeft = normalizeAssistantBaseUrl(left)
-  const parsedRight = normalizeAssistantBaseUrl(right)
-
-  return (
-    parsedLeft !== null &&
-    parsedRight !== null &&
-    parsedLeft.protocol === parsedRight.protocol &&
-    parsedLeft.hostname.toLowerCase() === parsedRight.hostname.toLowerCase() &&
-    parsedLeft.port === parsedRight.port
-  )
-}
-
 export function readAssistantEnvString(
   env: NodeJS.ProcessEnv | null | undefined,
   key: string | null | undefined,
@@ -45,12 +29,6 @@ export function readAssistantEnvString(
 
   const value = env?.[normalizedKey]
   return typeof value === 'string' ? normalizeNullableText(value) : null
-}
-
-export function isAssistantOpenAIBaseUrl(
-  value: string | null | undefined,
-): boolean {
-  return matchesAssistantHttpsHost(value, 'api.openai.com')
 }
 
 export function isAssistantVercelAIGatewayBaseUrl(
@@ -90,14 +68,4 @@ function matchesAssistantHttpsHost(
     parsed.hostname.toLowerCase() === expectedHostname &&
     parsed.port === ''
   )
-}
-
-function normalizeAssistantBaseUrl(
-  value: URL | string | null | undefined,
-): URL | null {
-  if (value instanceof URL) {
-    return value.username || value.password ? null : value
-  }
-
-  return parseAssistantBaseUrl(value)
 }

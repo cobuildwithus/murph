@@ -57,7 +57,7 @@ function createCandidate(overrides: Record<string, unknown> = {}) {
     memberId: "member_123",
     occurredAt: new Date("2026-03-29T12:00:00.000Z"),
     outputTokens: 5,
-    provider: "openai-compatible",
+    provider: "codex-cli",
     requestedModel: "gpt-5.4-mini",
     servedModel: null,
     stripeCustomerId: "cus_123",

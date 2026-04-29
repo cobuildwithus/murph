@@ -99,7 +99,6 @@ describe("assistant usage attribution", () => {
       stripeCustomerId: " cus_123 ",
       stripeMeterSource: "vercel-ai-gateway",
       triggerKind: " Manual Ask ",
-      zeroDataRetention: true,
     });
     const expectedReportingUserId = `musr_${createHmac("sha256", "reporting-secret")
       .update("murph.assistant-usage.reporting-user.v1")
@@ -124,7 +123,6 @@ describe("assistant usage attribution", () => {
         "surface:hosted_web",
         "trigger:manual_ask",
         "credential:platform",
-        "zdr:on",
       ],
       reportingUserId: expectedReportingUserId,
       stripeCustomerId: "cus_123",

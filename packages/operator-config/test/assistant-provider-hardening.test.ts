@@ -3,9 +3,6 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
-  sanitizeAssistantBackendTargetForPersistence,
-} from '../src/assistant-backend.ts'
-import {
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
@@ -18,18 +15,14 @@ import {
   resolveAssistantRuntimeTarget,
 } from '../src/assistant/target-runtime.ts'
 
-test('legacy OpenAI-compatible assistant config paths fail closed with a Codex reconfigure error', () => {
-  const message = /OpenAI-compatible assistant runtimes are no longer supported/u
+test('unsupported assistant config paths fail closed with a Codex runtime error', () => {
+  const message = /Assistant runtime targets must use Codex App Server/u
 
   assert.throws(
     () =>
       normalizeAssistantProviderConfig({
-        provider: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        baseUrl: 'https://proxy.example.test/v1',
+        provider: 'unsupported-provider',
         model: 'gpt-5.4',
-        presetId: 'openai',
-        providerName: 'OpenAI',
       }),
     message,
   )
@@ -37,34 +30,37 @@ test('legacy OpenAI-compatible assistant config paths fail closed with a Codex r
   assert.throws(
     () =>
       resolveAssistantRuntimeTarget({
-        provider: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        baseUrl: 'https://proxy.example.test/v1',
+        provider: 'unsupported-provider',
         model: 'gpt-5.4',
-        presetId: 'openai',
-        providerName: 'OpenAI',
       }),
     message,
   )
 
   assert.throws(
     () =>
-      sanitizeAssistantBackendTargetForPersistence({
-        adapter: 'openai-compatible',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        endpoint: 'https://proxy.example.test/v1',
-        headers: null,
-        model: 'gpt-5.4',
-        presetId: 'openai',
-        providerName: 'OpenAI',
-        reasoningEffort: 'high',
-        webSearch: null,
-      }),
+      normalizeAssistantProviderConfig(
+        JSON.parse(
+          JSON.stringify({
+            policy: {
+              approvalPolicy: null,
+              reasoningEffort: 'medium',
+              sandbox: null,
+            },
+            target: {
+              kind: 'unsupported-provider',
+              baseUrl: 'https://proxy.example.test/v1',
+              model: 'gpt-5.4',
+              providerName: 'Proxy',
+            },
+          }),
+        ),
+      ),
     message,
   )
+
 })
 
-test('legacy OpenAI-compatible persisted sessions fail closed during parsing', () => {
+test('unsupported persisted sessions fail closed during parsing', () => {
   assert.throws(
     () =>
       parseAssistantSessionRecord({
@@ -84,53 +80,40 @@ test('legacy OpenAI-compatible persisted sessions fail closed during parsing', (
         schema: 'murph.assistant-session.v1',
         sessionId: 'session_custom_precedence',
         target: {
-          adapter: 'openai-compatible',
+          adapter: 'unsupported-provider',
           apiKeyEnv: 'OPENAI_API_KEY',
           endpoint: 'https://proxy.example.test/v1',
           headers: null,
           model: 'gpt-5.4',
-          presetId: 'openai',
-          providerName: 'OpenAI',
+          presetId: 'legacy',
+          providerName: 'Legacy',
           reasoningEffort: 'high',
           webSearch: null,
         },
         turnCount: 1,
         updatedAt: '2026-04-23T10:05:00.000Z',
       }),
-    /Reconfigure the assistant for Codex App Server/u,
   )
 })
 
-test('explicit Codex provider inputs ignore legacy request-shaping fields', () => {
-  const legacyCodexInput = {
+test('explicit Codex provider inputs serialize only Codex request-shaping fields', () => {
+  const codexInput = {
     provider: 'codex-cli',
     approvalPolicy: 'never',
-    apiKeyEnv: 'VERCEL_AI_API_KEY',
-    baseUrl: 'https://gateway.example.test/v1',
     codexCommand: 'codex',
-    gatewayOnlyProviders: ['openai'],
-    headers: {
-      Authorization: '<REDACTED_TOKEN>',
-      'X-Test': 'value',
-    },
     model: 'gpt-5.5',
     modelProvider: ' vercel-ai-gateway ',
     oss: true,
     profile: 'hosted',
-    providerName: 'Example Gateway',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
-    webSearch: 'gateway',
-    zeroDataRetention: true,
   } as const
 
-  assert.deepEqual(normalizeAssistantProviderConfig(legacyCodexInput), {
+  assert.deepEqual(normalizeAssistantProviderConfig(codexInput), {
     policy: {
       approvalPolicy: 'never',
       reasoningEffort: 'medium',
       sandbox: 'danger-full-access',
-      webSearch: null,
-      zeroDataRetention: null,
     },
     target: {
       kind: 'codex-cli',
@@ -144,7 +127,7 @@ test('explicit Codex provider inputs ignore legacy request-shaping fields', () =
     },
   })
 
-  assert.deepEqual(serializeAssistantProviderSessionOptions(legacyCodexInput), {
+  assert.deepEqual(serializeAssistantProviderSessionOptions(codexInput), {
     approvalPolicy: 'never',
     continuityFingerprint: serializeAssistantProviderSessionOptions({
       provider: 'codex-cli',
@@ -168,23 +151,16 @@ test('explicit Codex provider inputs ignore legacy request-shaping fields', () =
     sandbox: 'danger-full-access',
   })
 
-  assert.deepEqual(serializeAssistantProviderOperatorDefaults(legacyCodexInput), {
+  assert.deepEqual(serializeAssistantProviderOperatorDefaults(codexInput), {
     approvalPolicy: 'never',
-    apiKeyEnv: null,
-    baseUrl: null,
     codexCommand: 'codex',
     codexHome: null,
-    headers: null,
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
     modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: true,
-    presetId: null,
     profile: 'hosted',
-    providerName: null,
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
-    webSearch: null,
-    zeroDataRetention: null,
   })
 })

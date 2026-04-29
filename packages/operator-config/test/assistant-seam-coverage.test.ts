@@ -34,15 +34,12 @@ import {
   resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
-  shouldUseAssistantOpenAIResponsesApi,
   supportsAssistantReasoningEffort,
-  supportsAssistantZeroDataRetention,
 } from '../src/assistant/provider-config.ts'
 import {
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
 import {
-  isAssistantOpenAIBaseUrl,
   isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '../src/assistant/shared.ts'
@@ -63,15 +60,14 @@ test('assistant shared and state-id helpers handle empty, invalid, and valid inp
   assert.equal(readAssistantEnvString({ OPENAI_API_KEY: 'key' }, '  '), null)
   assert.equal(readAssistantEnvString(nonStringEnv, 'OPENAI_API_KEY'), null)
 
-  assert.equal(isAssistantOpenAIBaseUrl(' https://api.openai.com/v1 '), true)
   assert.equal(
     isAssistantVercelAIGatewayBaseUrl(' https://ai-gateway.vercel.sh/v1 '),
     true,
   )
-  assert.equal(isAssistantOpenAIBaseUrl('   '), false)
-  assert.equal(isAssistantOpenAIBaseUrl('http://api.openai.com/v1'), false)
-  assert.equal(isAssistantOpenAIBaseUrl('https://example.test/v1'), false)
-  assert.equal(isAssistantOpenAIBaseUrl('not a url'), false)
+  assert.equal(isAssistantVercelAIGatewayBaseUrl('   '), false)
+  assert.equal(isAssistantVercelAIGatewayBaseUrl('http://ai-gateway.vercel.sh/v1'), false)
+  assert.equal(isAssistantVercelAIGatewayBaseUrl('https://example.test/v1'), false)
+  assert.equal(isAssistantVercelAIGatewayBaseUrl('not a url'), false)
 
   assert.equal(isValidAssistantOpaqueId('opaque_id-123'), true)
   assert.equal(isValidAssistantOpaqueId(' bad id '), false)
@@ -95,7 +91,19 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
 
   assert.equal(createAssistantModelTarget(null), null)
   assert.equal(normalizeAssistantModelTarget(null), null)
-  assert.equal(normalizeAssistantModelTarget({ adapter: 'missing' }), null)
+  assert.throws(
+    () => normalizeAssistantModelTarget({ adapter: 'missing' }),
+    /Assistant runtime targets must use Codex App Server/u,
+  )
+  assert.throws(
+    () =>
+      normalizeAssistantModelTarget({
+        adapter: 'unsupported-provider',
+        apiKeyEnv: 'PROVIDER_API_KEY',
+        model: 'gpt-5',
+      }),
+    /Assistant runtime targets must use Codex App Server/u,
+  )
 
   const codexTarget = createAssistantModelTarget({
     provider: 'codex-cli',
@@ -146,11 +154,10 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
   assert.throws(
     () =>
       createAssistantModelTarget({
-        provider: 'openai-compatible',
-        baseUrl: 'https://api.openai.com/v1',
+        provider: 'unsupported-provider',
         model: 'gpt-5',
       }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
+    /Assistant runtime targets must use Codex App Server/u,
   )
 })
 
@@ -178,8 +185,6 @@ test('assistant provider helpers cover Codex inference and serialization branche
       approvalPolicy: null,
       reasoningEffort: 'medium',
       sandbox: null,
-      webSearch: null,
-      zeroDataRetention: null,
     },
     target: {
       kind: 'codex-cli',
@@ -225,37 +230,27 @@ test('assistant provider helpers cover Codex inference and serialization branche
   })
   assert.deepEqual(serializeAssistantProviderOperatorDefaults(mergedCodex), {
     approvalPolicy: null,
-    apiKeyEnv: null,
-    baseUrl: null,
     codexCommand: null,
     codexHome: null,
-    headers: null,
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
     modelProviderConfig: VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
     oss: false,
-    presetId: null,
     profile: null,
-    providerName: null,
     reasoningEffort: 'medium',
     sandbox: null,
-    webSearch: null,
-    zeroDataRetention: null,
   })
   assert.equal(
     assistantProviderConfigsEqual({ provider: 'codex-cli', model: 'gpt-5' }, null),
     false,
   )
-  assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedCodex), false)
   assert.equal(supportsAssistantReasoningEffort(mergedCodex), true)
-  assert.equal(supportsAssistantZeroDataRetention(mergedCodex), false)
   assert.throws(
     () =>
       normalizeAssistantProviderConfig({
-        provider: 'openai-compatible',
-        baseUrl: 'https://api.openai.com/v1',
+        provider: 'unsupported-provider',
       }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
+    /Assistant runtime targets must use Codex App Server/u,
   )
 })
 
@@ -265,11 +260,11 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
       createHostedAssistantProfile({
         id: 'bad-profile',
         providerConfig: {
-          provider: 'openai-compatible',
+          provider: 'unsupported-provider',
           model: 'gpt-5',
         },
       }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
+    /Assistant runtime targets must use Codex App Server/u,
   )
 
   const codexProfile = createHostedAssistantProfile({

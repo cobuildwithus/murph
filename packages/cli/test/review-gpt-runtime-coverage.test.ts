@@ -25,7 +25,6 @@ const plusPlanDefaults: AssistantOperatorDefaults = {
   identityId: null,
   selfDeliveryTargets: null,
   backend: null,
-  failoverRoutes: null,
   account: {
     source: 'codex-auth-json',
     kind: 'account',

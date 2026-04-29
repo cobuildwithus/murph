@@ -1,5 +1,4 @@
 import type {
-  AssistantProviderFailoverRoute,
   AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -11,13 +10,12 @@ import type { AssistantOperatorDefaults } from '@murphai/operator-config/operato
 import { resolveAssistantBackendTarget } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
-  buildAssistantFailoverRoutes,
-  type ResolvedAssistantFailoverRoute,
-} from './failover.js'
+  buildAssistantPrimaryProviderRoute,
+  type ResolvedAssistantProviderRoute,
+} from './provider-route.js'
 import {
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigsForProvider,
-  serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -26,11 +24,10 @@ export interface AssistantExecutionPlan {
   primaryProviderConfig: AssistantProviderConfig
   primaryTarget: AssistantModelTarget
   resumeState: AssistantSessionResumeState | null
-  routes: ResolvedAssistantFailoverRoute[]
+  routes: ResolvedAssistantProviderRoute[]
 }
 
 export function resolveAssistantExecutionPlan(input: {
-  backups?: readonly AssistantProviderFailoverRoute[] | null
   boundaryDefaultTarget?: AssistantModelTarget | null
   defaults: AssistantOperatorDefaults | null
   override?: AssistantProviderConfigInput | null
@@ -78,18 +75,7 @@ export function resolveAssistantExecutionPlan(input: {
     )
   }
 
-  const routes = buildAssistantFailoverRoutes({
-    backups: null,
-    codexCommand:
-      primaryTarget.adapter === 'codex-cli'
-        ? primaryTarget.codexCommand ?? null
-        : null,
-    defaults: input.defaults,
-    provider: primaryTarget.adapter,
-    providerOptions: serializeAssistantProviderSessionOptions(
-      primaryProviderConfig,
-    ),
-  })
+  const routes = [buildAssistantPrimaryProviderRoute(primaryProviderConfig)]
 
   return {
     primaryProviderConfig,

@@ -262,13 +262,6 @@ export function redactAssistantSessionForDisplay(
 function redactAssistantSessionTargetForDisplay(
   target: AssistantSession['target'],
 ): AssistantSession['target'] {
-  if (target.adapter === 'openai-compatible') {
-    return {
-      ...target,
-      headers: redactAssistantHeadersForDisplay(target.headers),
-    }
-  }
-
   return {
     ...target,
     codexCommand: target.codexCommand

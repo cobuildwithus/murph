@@ -1,7 +1,6 @@
 import path from 'node:path'
 import { z } from 'zod'
 import {
-  assistantProviderFailoverRouteSchema,
   type AssistantChatProvider,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
@@ -68,7 +67,6 @@ export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
 const assistantOperatorSharedFields = {
   identityId: z.string().min(1).nullable().default(null),
-  failoverRoutes: z.array(assistantProviderFailoverRouteSchema).nullable().optional(),
   account: z
     .object({
       source: z.string().min(1),
@@ -521,10 +519,6 @@ function mergeAssistantOperatorDefaults(
         : normalizeAssistantBackendTargetForPersistence(existing?.backend ?? null),
     identityId:
       'identityId' in patch ? patch.identityId : existing?.identityId ?? null,
-    failoverRoutes:
-      'failoverRoutes' in patch
-        ? patch.failoverRoutes
-        : existing?.failoverRoutes ?? null,
     account: 'account' in patch ? patch.account : existing?.account ?? null,
     selfDeliveryTargets:
       'selfDeliveryTargets' in patch
@@ -557,7 +551,6 @@ function normalizeAssistantOperatorDefaults(
   return compactAssistantOperatorDefaults({
     backend: normalizeUnknownAssistantBackendTarget(record.backend),
     identityId: normalizeUnknownAssistantIdentityId(record.identityId),
-    failoverRoutes: normalizeUnknownAssistantFailoverRoutes(record.failoverRoutes),
     account: normalizeUnknownAssistantAccount(record.account),
     selfDeliveryTargets: normalizeUnknownAssistantSelfDeliveryTargetsFromModule(
       record.selfDeliveryTargets,
@@ -576,7 +569,6 @@ function serializeAssistantOperatorDefaultsForWrite(
   return {
     backend: normalizeAssistantBackendTargetForPersistence(defaults.backend ?? null),
     identityId: defaults.identityId,
-    failoverRoutes: defaults.failoverRoutes ?? null,
     account: defaults.account ?? null,
     selfDeliveryTargets: defaults.selfDeliveryTargets ?? null,
   }
@@ -593,7 +585,6 @@ function compactAssistantOperatorDefaults(
   const normalized = assistantOperatorDefaultsSchema.parse({
     backend: normalizeAssistantBackendTarget(defaults.backend ?? null),
     identityId: defaults.identityId ?? null,
-    failoverRoutes: defaults.failoverRoutes ?? null,
     account: defaults.account ?? null,
     selfDeliveryTargets: normalizeAssistantSelfDeliveryTargetMap(
       defaults.selfDeliveryTargets ?? null,
@@ -610,7 +601,6 @@ function hasAssistantOperatorDefaultsValues(
   return Boolean(
     defaults.backend ??
       defaults.identityId ??
-      defaults.failoverRoutes?.length ??
       defaults.account ??
       (defaults.selfDeliveryTargets &&
       Object.keys(defaults.selfDeliveryTargets).length > 0
@@ -627,14 +617,6 @@ function normalizeUnknownAssistantBackendTarget(
 
 function normalizeUnknownAssistantIdentityId(value: unknown): string | null {
   return normalizeOperatorConfigString(typeof value === 'string' ? value : null)
-}
-
-function normalizeUnknownAssistantFailoverRoutes(
-  value: unknown,
-): AssistantOperatorDefaults['failoverRoutes'] {
-  const schema = z.array(assistantProviderFailoverRouteSchema).nullable()
-  const parsed = schema.safeParse(value)
-  return parsed.success ? parsed.data : null
 }
 
 function normalizeUnknownAssistantAccount(

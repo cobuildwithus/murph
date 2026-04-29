@@ -5,13 +5,11 @@ import {
 } from '@murphai/runtime-state/node'
 import {
   assistantStatusResultSchema,
-  type AssistantFailoverState,
   type AssistantStatusResult,
   type AssistantTurnReceipt,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { buildAssistantOutboxSummary } from './outbox.js'
 import { readAssistantDiagnosticsSnapshot } from './diagnostics.js'
-import { readAssistantFailoverState } from './failover.js'
 import { inspectAssistantAutomationRunLock } from './automation/runtime-lock.js'
 import { summarizeAssistantQuarantines, quarantineAssistantStateFile } from './quarantine.js'
 import { readAssistantRuntimeBudgetStatus } from './runtime-budgets.js'
@@ -66,7 +64,6 @@ export async function getAssistantStatusLocal(
     runLock,
     outbox,
     diagnostics,
-    failover,
     runtimeBudget,
     recentTurns,
   ] = await Promise.all([
@@ -74,14 +71,12 @@ export async function getAssistantStatusLocal(
     inspectAssistantAutomationRunLock(paths),
     buildAssistantOutboxSummary(vault),
     readAssistantDiagnosticsSnapshot(vault),
-    readAssistantFailoverState(vault),
     readAssistantRuntimeBudgetStatus(vault),
     resolveRecentTurns(vault, typeof input === 'string' ? undefined : input),
   ])
   const quarantine = await summarizeAssistantQuarantines({ paths })
   const warnings = buildAssistantStatusWarnings({
     diagnostics,
-    failover,
     outbox,
     quarantine,
     runLock,
@@ -93,7 +88,6 @@ export async function getAssistantStatusLocal(
     statusPath: redactAssistantDisplayPath(paths.statusPath),
     outboxRoot: redactAssistantDisplayPath(paths.outboxDirectory),
     diagnosticsPath: redactAssistantDisplayPath(paths.diagnosticSnapshotPath),
-    failoverStatePath: redactAssistantDisplayPath(paths.failoverStatePath),
     turnsRoot: redactAssistantDisplayPath(paths.turnsDirectory),
     generatedAt: new Date().toISOString(),
     runLock,
@@ -104,7 +98,6 @@ export async function getAssistantStatusLocal(
     },
     outbox,
     diagnostics,
-    failover,
     quarantine,
     runtimeBudget,
     recentTurns,
@@ -181,7 +174,6 @@ export async function readAssistantStatusSnapshot(
 
 function buildAssistantStatusWarnings(input: {
   diagnostics: AssistantStatusResult['diagnostics']
-  failover: AssistantFailoverState
   outbox: AssistantStatusResult['outbox']
   quarantine: AssistantStatusResult['quarantine']
   runLock: AssistantStatusResult['runLock']
@@ -200,15 +192,6 @@ function buildAssistantStatusWarnings(input: {
   if (input.quarantine.total > 0) {
     warnings.push(`${input.quarantine.total} assistant runtime artifact(s) were quarantined for repair`)
   }
-  const coolingDown = input.failover.routes.filter(
-    (route) => route.cooldownUntil && Date.parse(route.cooldownUntil) > Date.now(),
-  )
-  if (coolingDown.length > 0) {
-    warnings.push(
-      `${coolingDown.length} provider failover route(s) are cooling down`,
-    )
-  }
-
   return warnings.slice(-12)
 }
 

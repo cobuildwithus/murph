@@ -2,7 +2,7 @@ import type {
   AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
-import type { ResolvedAssistantFailoverRoute } from './failover.js'
+import type { ResolvedAssistantProviderRoute } from './provider-route.js'
 
 export function resolveAssistantProviderResumeKey(input: {
   resumeState: AssistantSessionResumeState | null
@@ -15,7 +15,7 @@ export function resolveAssistantProviderResumeKey(input: {
 }
 
 export function resolveAssistantRouteResumeBinding(input: {
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   sessionResumeState: AssistantSessionResumeState | null
 }): AssistantSessionResumeState | null {
   if (
@@ -32,7 +32,7 @@ export function resolveAssistantRouteResumeBinding(input: {
 
 export function doesAssistantResumeBindingMatchRoute(input: {
   resumeState: AssistantSessionResumeState | null
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
 }): boolean {
   const storedRouteId = normalizeNullableString(
     input.resumeState?.resumeRouteId,
@@ -42,8 +42,8 @@ export function doesAssistantResumeBindingMatchRoute(input: {
   }
 
   // Minimal resume state stores only the provider session id plus the exact
-  // failover route id that minted it. Cross-route compatibility guesses can
-  // resume the wrong upstream session after failover, so exact matches are the
+  // provider route id that minted it. Cross-route compatibility guesses can
+  // resume the wrong upstream session across route changes, so exact matches are the
   // only safe contract.
   return storedRouteId === input.route.routeId
 }

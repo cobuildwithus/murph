@@ -733,17 +733,20 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(assistantRuntimeRoot, ".runtime-write.lock.cleanup.test"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, ".runtime-write.lock.pending.test"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "outbox", ".quarantine"), { recursive: true });
-    await mkdir(path.join(assistantRuntimeRoot, "provider-route-recovery"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "quarantine", "secrets"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "receipts"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "secrets", "sessions"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "sessions"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "state", "secrets"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "state", ".quarantine"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "state", ".locks"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "state", "onboarding", "first-contact"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "transcripts"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "usage", "pending"), { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "device-sync"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "inbox"), { recursive: true });
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "inbox", "secrets"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "operations", "parsers"), { recursive: true });
     await mkdir(path.join(vaultRoot, ".runtime", "cache"), { recursive: true });
@@ -757,7 +760,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "inbox", "config.json"), "{\"version\":1,\"connectors\":[]}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "inbox", "state.json"), "{\"running\":false}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "inbox", "promotions.json"), "{\"version\":1,\"entries\":[]}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "inbox", "secrets", "token.json"), "{\"secret\":true}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "{\"version\":1}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "operations", "parsers", "worker.pid"), "1234\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test.json"), "{\"status\":\"committed\"}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "operations", "op_test", "payloads", "staged.md"), "staged payload\n");
     await writeFile(path.join(vaultRoot, ".runtime", "cache", "assistant-cache.json"), "{\"cache\":true}\n");
@@ -786,7 +791,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, "cron", "runs", "cronrun_1.jsonl"), "{\"status\":\"ok\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "diagnostics", "events.jsonl"), "{\"kind\":\"assistant.scan\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "diagnostics", "snapshot.json"), "{\"status\":\"healthy\"}\n");
-    await writeFile(path.join(assistantRuntimeRoot, "failover.json"), "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "future-continuity", "next.json"), "{\"survivesWithoutDescriptor\":true}\n");
     await writeFile(
       path.join(assistantRuntimeRoot, "indexes.json"),
@@ -807,11 +811,13 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     );
     await writeFile(path.join(assistantRuntimeRoot, "outbox", "intent_1.json"), "{\"intent\":\"deliver\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "outbox", ".quarantine", "ignored.json"), "{\"ignored\":true}\n");
-    await writeFile(path.join(assistantRuntimeRoot, "provider-route-recovery", "state.json"), "{\"recover\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "quarantine", "secrets", "session_1.json"), "{\"secret\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "receipts", "turn_1.json"), "{\"receipt\":\"saved\"}\n");
     await writeFile(path.join(assistantRuntimeRoot, "runtime-budgets.json"), "{\"remainingMs\":1000}\n");
     await writeFile(path.join(assistantRuntimeRoot, "sessions", "session_1.json"), "{\"session\":\"saved\"}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", "secrets", "token.json"), "{\"secret\":true}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", ".quarantine", "payload.json"), "{\"repair\":true}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", ".locks", "owner.json"), "{\"pid\":1234}\n");
     await writeFile(
       path.join(assistantRuntimeRoot, "state", "onboarding", "conversation.json"),
       "{\"schemaVersion\":\"murph.assistant-onboarding.v1\",\"createdAt\":\"2026-04-23T00:00:00.000Z\",\"updatedAt\":\"2026-04-23T00:05:00.000Z\",\"completedAt\":\"2026-04-23T00:05:00.000Z\",\"completedReason\":\"user_answered\"}\n",
@@ -824,6 +830,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, ".runtime-write.lock"), "locked\n");
     await writeFile(path.join(assistantRuntimeRoot, "socket.sock"), "socket\n");
     await writeFile(path.join(assistantRuntimeRoot, "worker.pid"), "1234\n");
+    await writeFile(path.join(assistantRuntimeRoot, ".secrets"), "{\"secret\":true}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "tmp"), "tmp\n");
+    await writeFile(path.join(assistantRuntimeRoot, ".tmp"), "tmp\n");
     await writeFile(path.join(assistantRuntimeRoot, "secrets", "sessions", "session_1.json"), "{\"secret\":true}\n");
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
     await writeFile(
@@ -893,11 +902,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "vault",
       },
       {
-        expected: "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
-        path: ".runtime/operations/assistant/failover.json",
-        root: "vault",
-      },
-      {
         expected:
           "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
         path: ".runtime/operations/assistant/indexes.json",
@@ -925,11 +929,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         path: ".runtime/operations/assistant/future-continuity/next.json",
         root: "vault",
       },
-      {
-        expected: "{\"recover\":true}\n",
-        path: ".runtime/operations/assistant/provider-route-recovery/state.json",
-        root: "vault",
-      },
       { expected: "{\"remainingMs\":1000}\n", path: ".runtime/operations/assistant/runtime-budgets.json", root: "vault" },
       {
         expected:
@@ -951,6 +950,16 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "vault",
       },
       {
+        expected: "{\"version\":1,\"connectors\":[]}\n",
+        path: ".runtime/operations/inbox/config.json",
+        root: "vault",
+      },
+      {
+        expected: "{\"running\":false}\n",
+        path: ".runtime/operations/inbox/state.json",
+        root: "vault",
+      },
+      {
         expected: "{\"status\":\"committed\"}\n",
         path: ".runtime/operations/op_test.json",
         root: "vault",
@@ -967,11 +976,17 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/assistant/.runtime-write.lock", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/.runtime-write.lock.cleanup.test/owner.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/.runtime-write.lock.pending.test/owner.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/.secrets", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/tmp", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/.tmp", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/outbox/.quarantine/ignored.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/quarantine/secrets/session_1.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/state/secrets/token.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/state/.quarantine/payload.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/state/.locks/owner.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/socket.sock", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/worker.pid", root: "vault" },
-      { expected: null, path: ".runtime/operations/inbox/config.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/inbox/secrets/token.json", root: "vault" },
       { expected: null, path: ".runtime/operations/device-sync/state.sqlite", root: "vault" },
       { expected: null, path: ".runtime/cache/assistant-cache.json", root: "vault" },
       { expected: null, path: ".runtime/projections/gateway.sqlite", root: "vault" },
@@ -979,6 +994,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/search.sqlite", root: "vault" },
       { expected: null, path: ".runtime/tmp/scratch.txt", root: "vault" },
       { expected: null, path: ".runtime/operations/parsers/toolchain.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/parsers/worker.pid", root: "vault" },
       { expected: null, path: ".git/objects/skip", root: "vault" },
     ]);
 
@@ -1066,10 +1082,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "{\"state\":\"scratch\"}\n",
     );
     assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "failover.json"), "utf8"),
-      "{\"cooldownUntil\":\"2026-04-06T00:00:00Z\"}\n",
-    );
-    assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "indexes.json"), "utf8"),
       "{\"version\":1,\"aliases\":{\"Rocket Man\":\"session_1\"},\"conversationKeys\":{\"channel:linq|identity:user_1|thread:chat_1\":\"session_1\"}}\n",
     );
@@ -1100,10 +1112,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "journals", "runtime-events.jsonl"), "utf8"),
       "{\"event\":\"assistant.runtime\"}\n",
-    );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "provider-route-recovery", "state.json"), "utf8"),
-      "{\"recover\":true}\n",
     );
     assert.equal(
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "runtime-budgets.json"), "utf8"),
@@ -1162,14 +1170,31 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "device-sync", "stdout.log"), "utf8"),
     );
-    await assert.rejects(
-      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "config.json"), "utf8"),
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "config.json"), "utf8"),
+      "{\"version\":1,\"connectors\":[]}\n",
+    );
+    assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "state.json"), "utf8"),
+      "{\"running\":false}\n",
     );
     await assert.rejects(
-      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "state.json"), "utf8"),
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "secrets", "token.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "state", "secrets", "token.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "state", ".quarantine", "payload.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "state", ".locks", "owner.json"), "utf8"),
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "parsers", "toolchain.json"), "utf8"),
+    );
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "parsers", "worker.pid"), "utf8"),
     );
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "cache", "assistant-cache.json"), "utf8"));
     await assert.rejects(

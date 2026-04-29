@@ -731,10 +731,10 @@ describe('assistant store persistence seams', () => {
     )
   })
 
-  it('fails closed and quarantines legacy OpenAI-compatible session records', async () => {
+  it('fails closed and quarantines unsupported session records', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-legacy-session-')
     await ensureAssistantState(paths)
-    const sessionId = 'session-legacy-openai'
+    const sessionId = 'session-legacy-provider'
     const sessionPath = resolveAssistantSessionPath(paths, sessionId)
     await writeFile(
       sessionPath,
@@ -742,13 +742,13 @@ describe('assistant store persistence seams', () => {
         schema: 'murph.assistant-session.v1',
         sessionId,
         target: {
-          adapter: 'openai-compatible',
+          adapter: 'unsupported-provider',
           apiKeyEnv: 'OPENAI_API_KEY',
           endpoint: 'https://api.example.com/v1',
           headers: null,
           model: 'gpt-5.4',
           presetId: null,
-          providerName: 'legacy-openai',
+          providerName: 'legacy-provider',
           reasoningEffort: 'medium',
           webSearch: null,
         },
@@ -787,7 +787,7 @@ describe('assistant store persistence seams', () => {
     })
     expect(quarantines).toHaveLength(1)
     await expect(readFile(quarantines[0]!.quarantinedPath, 'utf8')).resolves.toContain(
-      '"adapter":"openai-compatible"',
+      '"adapter":"unsupported-provider"',
     )
   })
 })

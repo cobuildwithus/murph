@@ -1,6 +1,6 @@
 import type {
-  ResolvedAssistantFailoverRoute,
-} from '../failover.js'
+  ResolvedAssistantProviderRoute,
+} from '../provider-route.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import {
   appendAssistantTurnReceiptEvent,
@@ -9,7 +9,7 @@ import {
 export async function recordProviderAttemptStarted(input: {
   attemptCount: number
   at: string
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   sessionId: string
   turnId: string
   vault: string
@@ -50,7 +50,7 @@ export async function recordProviderAttemptStarted(input: {
 export async function recordProviderAttemptSucceeded(input: {
   activityLabels?: readonly string[]
   attemptCount: number
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   turnId: string
   vault: string
 }): Promise<void> {
@@ -78,10 +78,9 @@ export async function recordProviderAttemptSucceeded(input: {
 export async function recordProviderAttemptFailed(input: {
   activityLabels?: readonly string[]
   attemptCount: number
-  cooldownUntil: string | null
   detail: string
   errorCode: string | null
-  route: ResolvedAssistantFailoverRoute
+  route: ResolvedAssistantProviderRoute
   sessionId: string
   turnId: string
   vault: string
@@ -106,18 +105,6 @@ export async function recordProviderAttemptFailed(input: {
     detail: input.detail,
     metadata,
   })
-  if (input.cooldownUntil) {
-    await appendAssistantTurnReceiptEvent({
-      vault: input.vault,
-      turnId: input.turnId,
-      kind: 'provider.cooldown.started',
-      detail: `${input.route.label} cooling down until ${input.cooldownUntil}`,
-      metadata: {
-        routeId: input.route.routeId,
-        cooldownUntil: input.cooldownUntil,
-      },
-    })
-  }
   await recordAssistantDiagnosticEvent({
     vault: input.vault,
     component: 'provider',
@@ -132,7 +119,6 @@ export async function recordProviderAttemptFailed(input: {
       routeId: input.route.routeId,
       provider: input.route.provider,
       model: input.route.providerOptions.model,
-      cooldownUntil: input.cooldownUntil,
     },
     counterDeltas: {
       providerFailures: 1,

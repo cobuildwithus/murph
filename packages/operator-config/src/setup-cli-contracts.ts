@@ -12,9 +12,6 @@ import {
 } from './assistant-cli-contracts.js'
 import { inboxBootstrapResultSchema } from './inbox-cli-contracts.js'
 import {
-  setupAssistantProviderPresetValues,
-} from './assistant/openai-compatible-provider-presets.js'
-import {
   isoTimestampSchema,
   pathSchema,
   requestIdSchema,
@@ -50,9 +47,6 @@ export const setupAssistantPresetValues = [
   'skip',
 ] as const
 export const setupAssistantPresetSchema = z.enum(setupAssistantPresetValues)
-export const setupAssistantProviderPresetSchema = z.enum(
-  setupAssistantProviderPresetValues,
-)
 export const setupAssistantAccountKindValues = [
   'account',
   'api-key',
@@ -137,10 +131,6 @@ export const setupConfiguredAssistantSchema = z.object({
   provider: z.enum(assistantChatProviderValues).nullable(),
   model: z.string().min(1).nullable(),
   modelProvider: z.string().min(1).nullable().optional(),
-  baseUrl: z.string().min(1).nullable(),
-  apiKeyEnv: z.string().min(1).nullable(),
-  presetId: setupAssistantProviderPresetSchema.nullable().optional(),
-  providerName: z.string().min(1).nullable(),
   codexCommand: z.string().min(1).nullable(),
   codexHome: z.string().min(1).nullable().optional(),
   profile: z.string().min(1).nullable(),
@@ -148,7 +138,6 @@ export const setupConfiguredAssistantSchema = z.object({
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   oss: z.boolean().nullable(),
-  zeroDataRetention: z.boolean().optional(),
   account: setupAssistantAccountSchema.nullable().optional(),
   detail: z.string().min(1),
 })
@@ -256,9 +245,6 @@ export type WhisperModel = z.infer<typeof whisperModelSchema>
 export type SetupChannel = z.infer<typeof setupChannelSchema>
 export type SetupWearable = WearablePreferenceProvider
 export type SetupAssistantPreset = z.infer<typeof setupAssistantPresetSchema>
-export type SetupAssistantProviderPreset = z.infer<
-  typeof setupAssistantProviderPresetSchema
->
 export type SetupAssistantAccountKind = z.infer<
   typeof setupAssistantAccountKindSchema
 >

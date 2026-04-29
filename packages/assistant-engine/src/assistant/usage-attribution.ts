@@ -38,7 +38,6 @@ export function createAssistantUsageAttribution(input: {
   stripeCustomerId?: string | null
   stripeMeterSource?: AssistantUsageStripeMeterSource | null
   triggerKind: string
-  zeroDataRetention?: boolean | null
 }): AssistantUsageAttribution {
   const environment = normalizeUsageAttributionPart(input.environment) ?? 'development'
   const featureKey = normalizeUsageAttributionPart(input.featureKey) ?? 'assistant_reply'
@@ -56,7 +55,6 @@ export function createAssistantUsageAttribution(input: {
     featureKey,
     surface,
     triggerKind,
-    zeroDataRetention: input.zeroDataRetention ?? null,
   })
 
   return {
@@ -168,7 +166,6 @@ function createAssistantUsageGatewayTags(input: {
   featureKey: string
   surface: string
   triggerKind: string
-  zeroDataRetention: boolean | null
 }): string[] {
   return normalizeAssistantUsageGatewayTags([
     `env:${input.environment}`,
@@ -176,7 +173,6 @@ function createAssistantUsageGatewayTags(input: {
     `surface:${input.surface}`,
     `trigger:${input.triggerKind}`,
     `credential:${input.credentialSource}`,
-    input.zeroDataRetention === true ? 'zdr:on' : 'zdr:off',
   ])
 }
 

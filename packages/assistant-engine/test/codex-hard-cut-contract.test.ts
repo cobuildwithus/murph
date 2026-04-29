@@ -30,12 +30,12 @@ describe('Codex-only assistant hard-cut contracts', () => {
     expect(matches).toEqual([])
   })
 
-  it('removes obsolete OpenAI-compatible provider and model-harness execution modules', () => {
+  it('removes obsolete provider and model-harness execution modules', () => {
     expect([
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'automation', 'routing.ts'),
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'legacy-model-spec.ts'),
       path.join('packages', 'assistant-engine', 'src', 'assistant', 'provider-config.ts'),
-      path.join('packages', 'assistant-engine', 'src', 'assistant', 'providers', 'openai-compatible.ts'),
+      path.join('packages', 'assistant-engine', 'src', 'assistant', 'providers', 'legacy-provider.ts'),
       path.join('packages', 'assistant-engine', 'src', 'inbox-model-harness.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'model-spec.ts'),
       path.join('packages', 'assistant-engine', 'src', 'model-harness', 'responses-policy.ts'),
@@ -64,7 +64,7 @@ describe('Codex-only assistant hard-cut contracts', () => {
     }
   })
 
-  it('removes inbox model route contracts and OpenAI-compatible model-route residue', async () => {
+  it('removes inbox model route contracts and model-route residue', async () => {
     const contractPaths = [
       path.join('packages', 'assistant-engine', 'src', 'inbox-model-contracts.ts'),
       path.join('packages', 'cli', 'src', 'inbox-model-contracts.ts'),
@@ -77,7 +77,6 @@ describe('Codex-only assistant hard-cut contracts', () => {
       'AssistantExecutionPlan',
       'InboxModelRouteResult',
       'providerMode',
-      'openai-compatible',
     ]
 
     for (const contractPath of contractPaths) {

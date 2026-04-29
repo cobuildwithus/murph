@@ -41,10 +41,7 @@ function hasAssistantProviderUsableNativeResume(
     return false
   }
 
-  if (
-    input.providerConfig.policy.zeroDataRetention === true ||
-    !supportsAssistantNativeResume(input.providerConfig)
-  ) {
+  if (!supportsAssistantNativeResume(input.providerConfig)) {
     return false
   }
 

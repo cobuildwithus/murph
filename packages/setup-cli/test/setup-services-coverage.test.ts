@@ -2001,9 +2001,6 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
     enabled: false,
     provider: null,
     model: null,
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
     codexCommand: null,
     codexHome: undefined,
     profile: null,
@@ -2188,9 +2185,6 @@ test('createSetupServices saves canonical wearable preferences, including explic
     enabled: false,
     provider: null,
     model: null,
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
     codexCommand: null,
     codexHome: undefined,
     profile: null,
@@ -2297,9 +2291,6 @@ test('createSetupServices dry-run on macOS plans toolchain and assistant default
     provider: 'codex-cli',
     model: 'gpt-5.5',
     modelProvider: 'vercel-ai-gateway',
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
     codexCommand: 'codex',
     codexHome: null,
     profile: null,
@@ -2386,9 +2377,7 @@ test('createSetupServices on linux records apt provisioning failures and saves a
 
   const assistant: SetupConfiguredAssistant = {
     account: null,
-    apiKeyEnv: null,
     approvalPolicy: 'never',
-    baseUrl: null,
     codexCommand: 'codex',
     codexHome: null,
     detail: 'Configured Codex.',
@@ -2399,7 +2388,6 @@ test('createSetupServices on linux records apt provisioning failures and saves a
     preset: 'codex',
     profile: null,
     provider: 'codex-cli',
-    providerName: null,
     reasoningEffort: 'high',
     sandbox: 'danger-full-access',
   }
@@ -2475,7 +2463,7 @@ test('createSetupServices on linux records apt provisioning failures and saves a
       assistant,
       dryRun: false,
       envOverrides: {
-        OPENROUTER_API_KEY: 'test-openrouter-key',
+        MURPH_SETUP_TEST_KEY: 'test-local-env-value',
       },
       strict: false,
       toolchainRoot,
@@ -2495,13 +2483,9 @@ test('createSetupServices on linux records apt provisioning failures and saves a
       'completed',
     )
     assert.match(result.notes.join('\n'), /apt update denied/u)
-    assert.doesNotMatch(
-      result.notes.join('\n'),
-      /Export OPENROUTER_API_KEY before using the saved OpenAI-compatible assistant backend\./u,
-    )
     assert.match(
       await readFile(path.join(cwd, '.env.local'), 'utf8'),
-      /OPENROUTER_API_KEY="test-openrouter-key"/u,
+      /MURPH_SETUP_TEST_KEY="test-local-env-value"/u,
     )
     assert.equal((await stat(path.join(cwd, '.env.local'))).mode & 0o777, 0o600)
     assert.equal(
@@ -2636,7 +2620,7 @@ test('createSetupServices refuses to write setup keys through a symlinked local 
       services.setupHost({
         dryRun: false,
         envOverrides: {
-          OPENROUTER_API_KEY: 'test-openrouter-key',
+          CUSTOM_API_KEY: 'test-api-key',
         },
         strict: false,
         toolchainRoot: path.join(homeDirectory, '.murph', 'toolchain'),

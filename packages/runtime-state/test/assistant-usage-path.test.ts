@@ -23,7 +23,7 @@ function createUsageRecord(usageId: string): AssistantUsageRecord {
   }
 
   return {
-    apiKeyEnv: "OPENAI_API_KEY",
+    apiKeyEnv: "VERCEL_AI_API_KEY",
     attemptCount: Number(match.groups.attemptCount),
     baseUrl: null,
     cacheWriteTokens: null,
@@ -35,8 +35,8 @@ function createUsageRecord(usageId: string): AssistantUsageRecord {
     memberId: "member-usage-path",
     occurredAt: "2026-04-21T00:00:00.000Z",
     outputTokens: 20,
-    provider: "openai-compatible",
-    providerName: "OpenAI",
+    provider: "codex-cli",
+    providerName: "Vercel AI Gateway",
     ...(match.groups.providerRequestOrdinal === undefined
       ? {}
       : { providerRequestOrdinal: Number(match.groups.providerRequestOrdinal) }),

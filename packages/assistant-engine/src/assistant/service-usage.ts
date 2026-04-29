@@ -17,9 +17,7 @@ export async function persistPendingAssistantUsageEvent(input: {
 }): Promise<void> {
   const usage = input.providerResult.usage
   const hostedMemberId = normalizeNullableString(input.executionContext.hosted?.memberId)
-  const apiKeyEnv = normalizeNullableString(
-    usage?.apiKeyEnv ?? input.providerResult.providerOptions.apiKeyEnv,
-  )
+  const apiKeyEnv = normalizeNullableString(usage?.apiKeyEnv)
   const usageAttribution = input.providerResult.usageAttribution ?? null
 
   if (!usage || !hostedMemberId) {
@@ -45,12 +43,8 @@ export async function persistPendingAssistantUsageEvent(input: {
       routeId: input.providerResult.route.routeId,
       requestedModel: usage.requestedModel ?? input.providerResult.providerOptions.model,
       servedModel: usage.servedModel ?? null,
-      providerName: normalizeNullableString(
-        usage.providerName ?? input.providerResult.providerOptions.providerName,
-      ),
-      baseUrl: normalizeNullableString(
-        usage.baseUrl ?? input.providerResult.providerOptions.baseUrl,
-      ),
+      providerName: normalizeNullableString(usage.providerName),
+      baseUrl: normalizeNullableString(usage.baseUrl),
       apiKeyEnv,
       credentialSource: usageAttribution?.credentialSource ?? resolveAssistantUsageCredentialSource({
         apiKeyEnv,

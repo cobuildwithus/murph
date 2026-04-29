@@ -457,7 +457,7 @@ function throwModelCommandError(error: unknown): never {
       'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED',
       error instanceof Error
         ? error.message
-        : 'OpenAI-compatible assistant runtimes are no longer supported. Reconfigure the assistant for Codex App Server.',
+        : 'Assistant runtimes must use Codex App Server. Reconfigure the assistant for Codex App Server.',
     )
   }
 
@@ -499,12 +499,6 @@ function buildAssistantBackendNotes(
     return ['A saved Codex home is configured; path redacted in CLI output.']
   }
 
-  if (backend?.adapter === 'openai-compatible') {
-    return [
-      'Saved OpenAI-compatible assistant backend is no longer supported. Re-run `murph model --preset codex` to save a Codex backend.',
-    ]
-  }
-
   return []
 }
 
@@ -512,10 +506,6 @@ function sanitizeAssistantBackendForOutput(
   backend: AssistantOperatorDefaults['backend'] | null | undefined,
 ): ModelCommandBackend | null {
   if (!backend) {
-    return null
-  }
-
-  if (backend.adapter === 'openai-compatible') {
     return null
   }
 
@@ -542,14 +532,10 @@ function buildSetupAssistantWizardInputFromDefaults(
 
   switch (backend.adapter) {
     case 'codex-cli':
-      return {
-        initialAssistantPreset: 'codex',
-        initialAssistantOss: backend.oss === true ? true : undefined,
-      }
-    case 'openai-compatible':
     default:
       return {
         initialAssistantPreset: 'codex',
+        initialAssistantOss: backend.oss === true ? true : undefined,
       }
   }
 }

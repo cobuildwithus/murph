@@ -42,32 +42,14 @@ export interface AssistantCatalogModel {
   description: string
   id: string
   label: string
-  source: 'current' | 'discovered' | 'manual' | 'static'
-}
-
-export interface AssistantModelDiscoveryResult {
-  message?: string | null
-  models: readonly AssistantCatalogModel[]
-  status: 'ok' | 'unauthorized' | 'unreachable' | 'unsupported'
+  source: 'current' | 'static'
 }
 
 export interface AssistantProviderCapabilities {
   supportedUserMessageContentTypes: readonly AssistantUserMessageContentType[]
-  supportsModelDiscovery: boolean
   supportsNativeResume: boolean
   supportsReasoningEffort: boolean
   supportsRichUserMessageContent: boolean
-  supportsZeroDataRetention: boolean
-}
-
-export type AssistantMurphCommandSurface = 'direct-cli'
-
-export type AssistantMurphCommandAccessMode = AssistantMurphCommandSurface | 'none'
-
-export interface AssistantProviderExecutionCapabilities
-  extends AssistantProviderCapabilities {
-  murphCommandSurface: AssistantMurphCommandSurface
-  requestFormat: 'flat-prompt' | 'messages'
 }
 
 export interface AssistantProviderTurnInput {
@@ -190,11 +172,7 @@ export type AssistantProviderTurnAttemptResult =
     }
 
 export interface AssistantProviderDefinition {
-  capabilities: AssistantProviderExecutionCapabilities
-  discoverModels(input: {
-    config: AssistantProviderConfig
-    env?: NodeJS.ProcessEnv
-  }): Promise<AssistantModelDiscoveryResult>
+  capabilities: AssistantProviderCapabilities
   executeTurn(
     input: AssistantProviderTurnExecutionInput,
   ): Promise<AssistantProviderTurnAttemptResult>

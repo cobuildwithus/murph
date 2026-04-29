@@ -13,15 +13,12 @@ export interface AssistantStatePaths {
   diagnosticsDirectory: string;
   diagnosticEventsPath: string;
   diagnosticSnapshotPath: string;
-  failoverStatePath: string;
   indexesPath: string;
   journalsDirectory: string;
   issuesDirectory: string;
   issuesPendingDirectory: string;
   outboxDirectory: string;
   outboxQuarantineDirectory: string;
-  providerRouteRecoveryDirectory: string;
-  providerRouteRecoverySecretsDirectory: string;
   quarantineDirectory: string;
   secretsDirectory: string;
   sessionSecretsDirectory: string;
@@ -47,10 +44,6 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   const turnsDirectory = path.join(rootPath, "receipts");
   const secretsDirectory = path.join(rootPath, "secrets");
   const sessionSecretsDirectory = path.join(secretsDirectory, "sessions");
-  const providerRouteRecoverySecretsDirectory = path.join(
-    secretsDirectory,
-    "provider-route-recovery",
-  );
   const usageDirectory = path.join(rootPath, "usage");
 
   return {
@@ -64,15 +57,12 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     diagnosticsDirectory,
     diagnosticEventsPath: path.join(diagnosticsDirectory, "events.jsonl"),
     diagnosticSnapshotPath: path.join(diagnosticsDirectory, "snapshot.json"),
-    failoverStatePath: path.join(rootPath, "failover.json"),
     indexesPath: path.join(rootPath, "indexes.json"),
     journalsDirectory,
     issuesDirectory,
     issuesPendingDirectory: path.join(issuesDirectory, "pending"),
     outboxDirectory,
     outboxQuarantineDirectory: path.join(outboxDirectory, ".quarantine"),
-    providerRouteRecoveryDirectory: path.join(rootPath, "provider-route-recovery"),
-    providerRouteRecoverySecretsDirectory,
     quarantineDirectory: path.join(rootPath, "quarantine"),
     secretsDirectory,
     sessionSecretsDirectory,

@@ -10,12 +10,7 @@ import {
   VERCEL_AI_GATEWAY_CODEX_MODEL_PROVIDER_CONFIG,
   normalizeAssistantExecutionDriver,
   normalizeAssistantResumeKind,
-  normalizeAssistantWebSearchMode,
   resolveAssistantRuntimeTarget,
-  resolveAssistantTargetPresetId,
-  shouldAssistantTargetUseGatewayWebSearch,
-  shouldAssistantTargetUseMurphWebSearch,
-  shouldAssistantTargetUseProviderWebSearch,
 } from '../src/assistant/target-runtime.ts'
 
 test('assistant target runtime exposes only Codex app-server execution and resume values', () => {
@@ -23,10 +18,6 @@ test('assistant target runtime exposes only Codex app-server execution and resum
   assert.equal(normalizeAssistantExecutionDriver('responses'), null)
   assert.equal(normalizeAssistantResumeKind(' codex-thread '), 'codex-thread')
   assert.equal(normalizeAssistantResumeKind('openai-response-id'), null)
-  assert.equal(normalizeAssistantWebSearchMode(' provider '), 'provider')
-  assert.equal(normalizeAssistantWebSearchMode('invalid'), null)
-
-  assert.equal(resolveAssistantTargetPresetId({ presetId: 'openrouter' }), null)
 
   const codexTarget = resolveAssistantRuntimeTarget({
     provider: 'codex-cli',
@@ -35,7 +26,6 @@ test('assistant target runtime exposes only Codex app-server execution and resum
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
-    webSearch: 'murph',
   })
   assert.equal(codexTarget.executionDriver, 'codex-app-server')
   assert.equal(codexTarget.resumeKind, 'codex-thread')
@@ -46,21 +36,14 @@ test('assistant target runtime exposes only Codex app-server execution and resum
   )
   assert.equal(codexTarget.supportsNativeResume, true)
   assert.equal(codexTarget.supportsReasoningEffort, true)
-  assert.equal(codexTarget.supportsZeroDataRetention, false)
-  assert.equal(shouldAssistantTargetUseProviderWebSearch({ provider: 'codex-cli' }), false)
-  assert.equal(shouldAssistantTargetUseGatewayWebSearch({ provider: 'codex-cli' }), false)
-  assert.equal(shouldAssistantTargetUseMurphWebSearch({ provider: 'codex-cli' }), false)
 
   assert.throws(
     () =>
       resolveAssistantRuntimeTarget({
-        provider: 'openai-compatible',
-        presetId: 'openai',
-        apiKeyEnv: 'OPENAI_API_KEY',
-        baseUrl: 'https://api.example.test/v1',
+        provider: 'unsupported-provider',
         model: 'gpt-5.4',
       }),
-    /Reconfigure the assistant for Codex App Server/u,
+    /Assistant runtime targets must use Codex App Server/u,
   )
 })
 
@@ -147,7 +130,7 @@ test('assistant session parsing resolves Codex modelProvider and status automati
   assert.equal(statusAutomation.autoReply[1]?.cursor?.captureId, 'capture-2')
 })
 
-test('assistant session parsing fails closed for persisted OpenAI-compatible sessions', () => {
+test('assistant session parsing fails closed for unsupported persisted sessions', () => {
   assert.throws(
     () =>
       parseAssistantSessionRecord({
@@ -170,19 +153,18 @@ test('assistant session parsing fails closed for persisted OpenAI-compatible ses
         schema: 'murph.assistant-session.v1',
         sessionId: 'session_legacy_resume_contract',
         target: {
-          adapter: 'openai-compatible',
+          adapter: 'unsupported-provider',
           apiKeyEnv: 'OPENAI_API_KEY',
-          endpoint: 'https://api.openai.com/v1',
+          endpoint: 'https://api.example.test/v1',
           headers: null,
           model: 'gpt-5.4',
-          presetId: 'openai',
-          providerName: 'OpenAI',
+          presetId: 'legacy',
+          providerName: 'Legacy',
           reasoningEffort: 'high',
           webSearch: null,
         },
         turnCount: 1,
         updatedAt: '2026-04-08T12:05:00.000Z',
       }),
-    /OpenAI-compatible assistant runtimes are no longer supported/u,
   )
 })

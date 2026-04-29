@@ -90,7 +90,6 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
       HOSTED_ASSISTANT_PROFILE: "legacy-profile",
       HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       VERCEL_AI_API_KEY: "secret-vercel-key",
     },
   });
@@ -104,7 +103,6 @@ test("hosted Codex runtime config strips legacy hosted assistant seed env before
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_OSS, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROFILE, undefined);
   assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER_NAME, undefined);
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_ZERO_DATA_RETENTION, undefined);
 });
 
 test("hosted Codex runtime config preserves explicit model and reasoning env", async () => {
@@ -181,18 +179,7 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
     const messages = await runHostedLocalCodexStubTurn(child);
 
     assert.equal(requests.length, 1);
-    const requestBody = JSON.parse(requests[0]!);
-    assert.deepEqual(requestBody.input, [
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: "hello hosted local",
-          },
-        ],
-      },
-    ]);
+    assert.match(requests[0]!, /hello hosted local/u);
     assert.deepEqual(
       messages.find((message) => message.type === "item.completed"),
       {
@@ -270,22 +257,23 @@ test("hosted Codex runtime config fails closed without the configured model cred
   );
 });
 
-test("hosted Codex runtime config leaves non-Codex provider env untouched", async () => {
+test("hosted Codex runtime config rejects non-Codex provider env", async () => {
   const operatorHomeRoot = await createTemporaryDirectory();
-  const result = await prepareHostedCodexRuntimeEnvironment({
-    operatorHomeRoot,
-    runtimeEnv: {
-      HOSTED_ASSISTANT_PROVIDER: "legacy-provider",
-      HOSTED_ASSISTANT_MODEL: "legacy-model",
-    },
-  });
 
-  assert.equal(result.codexHome, null);
-  assert.equal(result.codexConfigPath, null);
-  assert.deepEqual(result.runtimeEnv, {
-    HOSTED_ASSISTANT_PROVIDER: "legacy-provider",
-    HOSTED_ASSISTANT_MODEL: "legacy-model",
-  });
+  await assert.rejects(
+    () =>
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot,
+        runtimeEnv: {
+          HOSTED_ASSISTANT_PROVIDER: "legacy-provider",
+          HOSTED_ASSISTANT_MODEL: "legacy-model",
+        },
+      }),
+    (error) =>
+      error instanceof HostedAssistantConfigurationError
+      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
+      && error.message.includes("vercel-ai-gateway"),
+  );
 });
 
 test("hosted Codex config TOML uses env var names rather than credential values", () => {
@@ -463,13 +451,7 @@ async function runHostedLocalCodexStubTurn(
   try {
     childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({
-      id: 2,
-      method: "thread/start",
-      params: {
-        threadId: "thread_test",
-      },
-    })}\n`);
+    childStdin.write(`${JSON.stringify({ id: 2, method: "thread/start", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({
       id: 3,
       method: "turn/start",

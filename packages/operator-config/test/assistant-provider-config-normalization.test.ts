@@ -26,8 +26,6 @@ describe('assistant provider config normalization', () => {
         approvalPolicy: null,
         reasoningEffort: null,
         sandbox: null,
-        webSearch: null,
-        zeroDataRetention: null,
       },
     }
 
@@ -51,29 +49,11 @@ describe('assistant provider config normalization', () => {
     })
   })
 
-  it('fails closed when a persisted normalized target is still OpenAI-compatible', () => {
-    const legacyNormalizedConfig: AssistantProviderConfig = {
-      target: {
-        kind: 'openai-compatible',
-        apiKeyEnv: 'VERCEL_AI_API_KEY',
-        baseUrl: 'https://ai-gateway.vercel.sh/v1',
-        gatewayOnlyProviders: null,
-        headers: null,
-        model: 'openai/gpt-5',
-        presetId: 'vercel-ai-gateway',
-        providerName: null,
-      },
-      policy: {
-        approvalPolicy: null,
-        reasoningEffort: null,
-        sandbox: null,
-        webSearch: null,
-        zeroDataRetention: true,
-      },
-    }
-
-    expect(() => normalizeAssistantProviderConfig(legacyNormalizedConfig)).toThrow(
-      /OpenAI-compatible assistant runtimes are no longer supported/u,
-    )
+  it('fails closed when a caller explicitly selects an unsupported provider', () => {
+    expect(() =>
+      normalizeAssistantProviderConfig({
+        provider: 'unsupported-provider',
+      }),
+    ).toThrow(/Assistant runtime targets must use Codex App Server/u)
   })
 })

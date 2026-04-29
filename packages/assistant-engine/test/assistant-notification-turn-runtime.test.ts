@@ -10,7 +10,7 @@ import { createAssistantModelTarget } from '@murphai/operator-config/assistant-b
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.ts'
-import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.ts'
+import type { ResolvedAssistantProviderRoute } from '../src/assistant/provider-route.ts'
 import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
 import type {
   AssistantTurnSharedPlan,
@@ -244,7 +244,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     '../src/assistant/notification-turn.ts'
   )
 
-  const result = await sendAssistantNotificationLocal({
+  const notificationInput = {
     deliveryDedupeToken: 'cron-slot-token',
     executionContext: {
       hosted: {
@@ -261,7 +261,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       traceEvents.push(event)
     },
     vault: '/vaults/test',
-  })
+  } satisfies Parameters<typeof sendAssistantNotificationLocal>[0] & Record<string, unknown>
+
+  const result = await sendAssistantNotificationLocal(notificationInput)
 
   assert.deepEqual(persistedBeforeOutbound, ['persist', 'deliver'])
   assert.equal(mocks.persistAssistantTurnAndSession.mock.calls.length, 1)
@@ -296,7 +298,11 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   )[0]
   const firstResolvedNotificationSessionInput =
     firstResolvedNotificationSessionCall?.[0] as
-      | { boundaryDefaultTarget?: unknown; defaults?: unknown }
+      | {
+          boundaryDefaultTarget?: unknown
+          defaults?: unknown
+          message?: Record<string, unknown>
+        }
       | undefined
   assert.deepEqual(
     firstResolvedNotificationSessionInput?.boundaryDefaultTarget,
@@ -309,6 +315,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       timezone: 'Australia/Sydney',
     },
   )
+  assert.ok(firstResolvedNotificationSessionInput?.message)
   assert.deepEqual(result.decision, {
     kind: 'send_message',
     privateSummary: 'summary',
@@ -633,19 +640,13 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     },
     routeId: 'route-primary',
   })
-  const backupRoute = createRoute({
-    providerOptions: {
-      model: 'gpt-5.5-backup',
-    },
-    routeId: 'route-backup',
-  })
   const providerResult = createProviderResult({
     response: JSON.stringify({
       kind: 'send_message',
       text: 'Needs delivery',
       privateSummary: 'deliver',
     }),
-    route: backupRoute,
+    route: primaryRoute,
     session: providerSession,
   })
   const deliveryError = new Error('delivery exploded')
@@ -696,7 +697,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     resolveAssistantSessionForMessage: vi.fn(async () => ({
       session: providerSession,
     })),
-    resolveAssistantTurnRoutes: vi.fn(() => [primaryRoute, backupRoute]),
+    resolveAssistantTurnRoutes: vi.fn(() => [primaryRoute]),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
@@ -764,7 +765,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   expect(mocks.createAssistantRuntimeStateService.mock.results[0]?.value.turns.createReceipt)
     .toHaveBeenCalledWith(expect.objectContaining({
       provider: 'codex-cli',
-      providerModel: 'gpt-5.5-backup',
+      providerModel: 'gpt-5.5-primary',
     }))
   expect((deliveryError as Error & {
     details?: Record<string, unknown>
@@ -776,8 +777,8 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-5.5-backup',
-    assistantNotificationRouteId: 'route-backup',
+    assistantNotificationProviderModel: 'gpt-5.5-primary',
+    assistantNotificationRouteId: 'route-primary',
     assistantNotificationStage: 'delivery',
   })
 })
@@ -1087,13 +1088,12 @@ function createProviderOptions(
 }
 
 function createRoute(input?: {
-  provider?: ResolvedAssistantFailoverRoute['provider']
+  provider?: ResolvedAssistantProviderRoute['provider']
   providerOptions?: Partial<AssistantProviderSessionOptions>
   routeId?: string
-}): ResolvedAssistantFailoverRoute {
+}): ResolvedAssistantProviderRoute {
   return {
     codexCommand: null,
-    cooldownMs: 60_000,
     label: 'Primary',
     provider: input?.provider ?? 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),
@@ -1225,7 +1225,7 @@ function createProviderResult(input?: {
   providerOptions?: AssistantProviderSessionOptions
   providerSessionId?: string | null
   response?: string
-  route?: ResolvedAssistantFailoverRoute
+  route?: ResolvedAssistantProviderRoute
   session?: AssistantSession
   usage?: AssistantProviderUsage | null
 }): ExecutedAssistantProviderTurnResult {

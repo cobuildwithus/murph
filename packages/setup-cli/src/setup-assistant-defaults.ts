@@ -85,11 +85,6 @@ export function formatSavedAssistantDefaultsSummary(
   }
 
   switch (backend.adapter) {
-    case 'openai-compatible':
-      return appendAssistantAccountSummary(
-        'saved OpenAI-compatible assistant backend is no longer supported; run `murph model --preset codex` to save a Codex backend',
-        defaults?.account ?? null,
-      )
     case 'codex-cli':
     default:
       return appendAssistantAccountSummary(
@@ -110,11 +105,6 @@ export function buildSetupAssistantOptionsFromDefaults(
   }
 
   switch (backend.adapter) {
-    case 'openai-compatible':
-      return {
-        assistantPreset: 'codex',
-      }
-
     case 'codex-cli':
     default: {
       const savedDefaults = resolveAssistantProviderDefaults(

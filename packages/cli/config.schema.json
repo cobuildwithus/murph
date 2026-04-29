@@ -228,13 +228,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "provider": {
-                          "description": "Codex provider adapter for the local assistant surface.",
-                          "type": "string",
-                          "enum": [
-                            "codex-cli"
-                          ]
-                        },
                         "codexCommand": {
                           "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
                           "type": "string",
@@ -283,10 +276,6 @@
                           "description": "Optional Codex config profile name.",
                           "type": "string",
                           "minLength": 1
-                        },
-                        "oss": {
-                          "description": "Use Codex OSS mode, which expects a local Ollama-backed open-source provider.",
-                          "type": "boolean"
                         },
                         "deliverResponse": {
                           "description": "After generating a response, deliver it over the mapped outbound channel session when available.",
@@ -350,13 +339,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "provider": {
-                          "description": "Codex provider adapter for the local assistant surface.",
-                          "type": "string",
-                          "enum": [
-                            "codex-cli"
-                          ]
-                        },
                         "codexCommand": {
                           "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
                           "type": "string",
@@ -405,10 +387,6 @@
                           "description": "Optional Codex config profile name.",
                           "type": "string",
                           "minLength": 1
-                        },
-                        "oss": {
-                          "description": "Use Codex OSS mode, which expects a local Ollama-backed open-source provider.",
-                          "type": "boolean"
                         }
                       }
                     }
@@ -908,13 +886,6 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "provider": {
-                  "description": "Codex provider adapter for the local assistant surface.",
-                  "type": "string",
-                  "enum": [
-                    "codex-cli"
-                  ]
-                },
                 "codexCommand": {
                   "description": "Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.",
                   "type": "string",
@@ -963,10 +934,6 @@
                   "description": "Optional Codex config profile name.",
                   "type": "string",
                   "minLength": 1
-                },
-                "oss": {
-                  "description": "Use Codex OSS mode, which expects a local Ollama-backed open-source provider.",
-                  "type": "boolean"
                 }
               }
             }
@@ -9525,10 +9492,32 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "schedule": {
-                          "description": "Plain-language schedule string for the run plan.",
+                        "scheduleKind": {
+                          "description": "Run-plan schedule discriminator for structured schedule flags.",
+                          "type": "string",
+                          "enum": [
+                            "dailyLocal",
+                            "cron"
+                          ]
+                        },
+                        "scheduleCron": {
+                          "description": "Five-field cron expression when --schedule-kind=cron.",
                           "type": "string",
                           "minLength": 1
+                        },
+                        "scheduleLocalTime": {
+                          "description": "HH:MM local time when --schedule-kind=dailyLocal.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "scheduleTimeZone": {
+                          "description": "IANA time zone for the run-plan schedule.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "scheduleJson": {
+                          "description": "ExperimentRunScheduleIntent JSON object in @file.json form or - for stdin.",
+                          "type": "string"
                         },
                         "dose": {
                           "description": "Plain-language dose string for the run plan.",
@@ -9636,7 +9625,8 @@
                           "enum": [
                             "continue_with_caution",
                             "clinician_guidance_before_unsupervised_start",
-                            "do_not_start_unsupervised"
+                            "do_not_start_unsupervised",
+                            "do_not_start_unsupervised_explicit_clinician_clearance_required"
                           ]
                         },
                         "positiveQuestionId": {

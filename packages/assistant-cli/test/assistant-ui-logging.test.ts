@@ -361,22 +361,22 @@ test('assistant CLI foreground logging summarizes provider progress for each top
   assert.equal(
     formatAssistantRunEventForTerminal({
       captureId: 'cap_status_revision',
-      details: 'new input accepted into active turn with 1 additional capture(s)',
+      details: 'new input queued for active turn with 1 additional capture(s)',
       providerKind: 'status',
       providerState: 'running',
       type: 'capture.reply-progress',
     }),
-    'reply-progress cap_status_revision: new input accepted into active turn with 1 additional capture(s)',
+    'reply-progress cap_status_revision: new input queued for active turn with 1 additional capture(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
       captureId: 'cap_status_revision_group',
-      details: 'new input accepted into active turn with 3 additional capture(s)',
+      details: 'new input committed to active turn with 3 additional capture(s)',
       providerKind: 'status',
       providerState: 'running',
       type: 'capture.reply-progress',
     }),
-    'reply-progress cap_status_revision_group: new input accepted into active turn with 3 additional capture(s)',
+    'reply-progress cap_status_revision_group: new input committed to active turn with 3 additional capture(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({

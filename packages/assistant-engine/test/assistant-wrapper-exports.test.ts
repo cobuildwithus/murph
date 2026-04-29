@@ -67,7 +67,6 @@ const wrapperCases = [
     [
       'DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS',
       'resolveAssistantModelCatalog',
-      'discoverAssistantProviderModels',
     ],
   ],
   [

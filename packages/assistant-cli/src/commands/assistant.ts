@@ -3,7 +3,6 @@ import { access } from 'node:fs/promises'
 import { Cli, z } from 'incur'
 import {
   assistantAskResultSchema,
-  assistantChatProviderValues,
   assistantChannelNameSchema,
   assistantChatResultSchema,
   assistantDeliverResultSchema,
@@ -165,12 +164,6 @@ const assistantSessionOptionFields = {
 }
 
 const assistantProviderOptionFields = {
-  provider: z
-    .enum(assistantChatProviderValues)
-    .optional()
-    .describe(
-      'Codex provider adapter for the local assistant surface.',
-    ),
   codexCommand: optionalNonEmptyStringOption(
     'Optional Codex executable path used to launch `codex app-server`. Defaults to `codex`.',
   ),
@@ -199,12 +192,6 @@ const assistantProviderOptionFields = {
     'Codex approval policy for local assistant chat. Murph noninteractive assistant turns accept only never; interactive approval modes are rejected before provider launch.',
   ),
   profile: optionalNonEmptyStringOption('Optional Codex config profile name.'),
-  oss: z
-    .boolean()
-    .optional()
-    .describe(
-      'Use Codex OSS mode, which expects a local Ollama-backed open-source provider.',
-    ),
 }
 
 const assistantDeliveryOptionFields = {
@@ -364,9 +351,7 @@ type AssistantProviderCliOptions = {
   codexHome?: string
   model?: string
   modelProvider?: string
-  oss?: boolean
   profile?: string
-  provider?: AssistantChatOptions['provider']
   reasoningEffort?: AssistantChatOptions['reasoningEffort']
   sandbox?: AssistantChatOptions['sandbox']
 }
@@ -535,7 +520,6 @@ function assistantProviderOverridesFromCli<T extends AssistantProviderCliOptions
   options: T,
 ) {
   return {
-    provider: options.provider,
     codexCommand: options.codexCommand,
     codexHome: options.codexHome,
     model: options.model,
@@ -544,7 +528,6 @@ function assistantProviderOverridesFromCli<T extends AssistantProviderCliOptions
     sandbox: options.sandbox,
     approvalPolicy: options.approvalPolicy,
     profile: options.profile,
-    oss: options.oss,
   }
 }
 

@@ -13,8 +13,8 @@ import {
   recordAssistantToolFailureRuntimeIssues,
 } from './issue-reporting.js'
 import {
-  type ResolvedAssistantFailoverRoute,
-} from './failover.js'
+  type ResolvedAssistantProviderRoute,
+} from './provider-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
   attachRecoveredAssistantSession,
@@ -75,9 +75,6 @@ export type {
   AssistantProviderTurnPromptProfile,
   AssistantProviderTurnToolProfile,
 } from './provider-turn/planning.js'
-export {
-  resolveAssistantOnboardingCompletionFallbackReason,
-} from './provider-turn/onboarding-fallback.js'
 
 type AssistantProviderAttemptOutcome =
   | {
@@ -98,7 +95,7 @@ export type AssistantProviderTurnRecoveryOutcome =
       kind: 'failed_terminal'
       error: unknown
       providerContinuation: AssistantProviderContinuation
-      route?: ResolvedAssistantFailoverRoute | null
+      route?: ResolvedAssistantProviderRoute | null
       session: AssistantSession
     }
   | {
@@ -117,7 +114,7 @@ export async function executeProviderTurnWithRecovery(input: {
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
   resolvedSession: AssistantSession
-  routes: readonly ResolvedAssistantFailoverRoute[]
+  routes: readonly ResolvedAssistantProviderRoute[]
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantProviderTurnRecoveryOutcome> {
@@ -215,7 +212,6 @@ function createAssistantProviderUsageAttribution(input: {
     triggerKind: resolveAssistantUsageTriggerKind(
       input.executionPlan.input.turnTrigger ?? 'manual-ask',
     ),
-    zeroDataRetention: null,
   })
 }
 
@@ -366,7 +362,6 @@ async function executeAssistantProviderAttempt(input: {
     await recordProviderAttemptFailed({
       activityLabels: attemptMetadata.activityLabels,
       attemptCount: attemptPlan.attemptCount,
-      cooldownUntil: null,
       detail: errorMessage(error),
       errorCode,
       route: attemptPlan.route,
