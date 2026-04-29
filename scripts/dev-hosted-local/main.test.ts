@@ -47,4 +47,59 @@ describe("hosted local dev main", () => {
     expect(stop).toHaveBeenCalledWith("SIGTERM");
     stdoutWrite.mockRestore();
   });
+
+  it("waits for signal-triggered cleanup when startup readiness aborts", async () => {
+    let rejectReady!: (error: Error) => void;
+    let resolveStop!: () => void;
+    const readyPromise = new Promise<void>((_resolve, reject) => {
+      rejectReady = reject;
+    });
+    const stopPromise = new Promise<void>((resolve) => {
+      resolveStop = resolve;
+    });
+    const signalHandlers = new Map<string, () => void>();
+    const originalProcessOnce = process.once.bind(process);
+    const onceSpy = vi.spyOn(process, "once").mockImplementation((
+      (event: string | symbol, listener: (...args: unknown[]) => void) => {
+        if (event === "SIGINT" || event === "SIGTERM") {
+          signalHandlers.set(event, () => listener(event));
+          return process;
+        }
+
+        return originalProcessOnce(event, listener);
+      }
+    ) as typeof process.once);
+    const offSpy = vi.spyOn(process, "off").mockImplementation((
+      (_event: string | symbol, _listener: (...args: unknown[]) => void) => process
+    ) as typeof process.off);
+    ready.mockImplementationOnce(async () => await readyPromise);
+    stop.mockImplementationOnce(async () => await stopPromise);
+    waitForExit.mockImplementationOnce(async () => new Promise(() => {}));
+
+    try {
+      const { main } = await import("./main.ts");
+
+      let settled = false;
+      const mainPromise = main().then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      signalHandlers.get("SIGINT")?.();
+      rejectReady(new Error("startup aborted after signal"));
+      await Promise.resolve();
+
+      expect(stop).toHaveBeenCalledWith("SIGINT");
+      expect(settled).toBe(false);
+
+      resolveStop();
+      await mainPromise;
+
+      expect(settled).toBe(true);
+      expect(offSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
+      expect(offSpy).toHaveBeenCalledWith("SIGTERM", expect.any(Function));
+    } finally {
+      onceSpy.mockRestore();
+      offSpy.mockRestore();
+    }
+  });
 });
