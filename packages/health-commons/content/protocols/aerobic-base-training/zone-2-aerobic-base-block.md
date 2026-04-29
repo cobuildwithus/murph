@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:aerobic-base-training/zone-2-aerobic-base-block
 slug: protocols/aerobic-base-training/zone-2-aerobic-base-block
 title: Zone 2 Cardio
-summary: Do easy conversational cardio using Zone 2 as a practical alias rather than a lab or wearable mandate.
+summary: Easy conversational cardio, where steady effort keeps oxygen demand high enough for heart, blood vessels, and muscles to practice moving and using oxygen for fuel.
 status: draft
 quality: usable
 aliases:

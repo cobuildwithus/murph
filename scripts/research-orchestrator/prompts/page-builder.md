@@ -26,7 +26,7 @@ Files to draft:
 8. experimentOnboarding block if this protocol is intended to power Murph experiment creation
 
 Protocol page requirements:
-- one-sentence summary
+- one-sentence frontmatter `summary:` directly below `title:`
 - aliases
 - categories
 - parent family relation
@@ -61,7 +61,7 @@ User-facing prose hygiene:
 - Preserve source keys in structured frontmatter/JSONL fields only: relations, `claims.sourceKeys`, `researchLandscape.groups.sourceKeys`, source findings, evidence appraisals, and artifact manifests.
 - If prose needs attribution, use readable source-card/study references rather than internal keys.
 - Before returning the draft, scan every generated Markdown prose field and rewrite any source-key spillover into plain user-facing wording while keeping provenance in structured fields.
-- Protocol frontmatter `summary` is shown as the `/experiments` card description. Keep it short and behavior/outcome-focused; do not repeat duration, session count, frequency, dose windows, or other timing already represented by test plans, metadata, `doseSignature`, or protocol fields.
+- Protocol frontmatter `summary:` is the field immediately below `title:` and is shown as the `/experiments` card description. Generate it using `agent-docs/product-specs/protocol-summary-copy.md` as the source of truth.
 
 Output:
 
@@ -96,5 +96,5 @@ Rules:
 - Keep external named protocols separate from Murph canonical protocols.
 - Keep adjacent variants separate or clearly labeled.
 - Make the steps human-actionable, not metadata repeated in prose.
-- Do not make the protocol `summary` duplicate card metadata such as experiment length, session frequency, or dose timing.
+- Do not make the protocol frontmatter `summary:` below `title:` duplicate card metadata such as experiment length, session frequency, or dose timing.
 - Keep safety stronger than efficacy when evidence is uncertain.

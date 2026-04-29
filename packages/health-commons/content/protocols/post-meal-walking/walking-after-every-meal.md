@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:post-meal-walking/walking-after-every-meal
 slug: protocols/post-meal-walking/walking-after-every-meal
 title: Walking After Every Meal
-summary: Take a gentle walk after each main meal to test whether your meal-level glucose response improves, while logging meal timing, walk fidelity, and safety symptoms.
+summary: Gentle walking after each main meal, where working leg muscles take up glucose just as digestion sends sugar into the blood, blunting the post-meal rise.
 status: field-testing
 quality: usable
 aliases:

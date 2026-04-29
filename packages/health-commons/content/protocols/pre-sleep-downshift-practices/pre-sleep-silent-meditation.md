@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:pre-sleep-downshift-practices/pre-sleep-silent-meditation
 slug: protocols/pre-sleep-downshift-practices/pre-sleep-silent-meditation
 title: Silent Meditation Before Bed
-summary: "Sit quietly for a brief unguided meditation near bedtime and test whether it lowers perceived pre-sleep wiredness or sleep-onset latency, while treating wearable changes as exploratory."
+summary: Quiet unguided sitting near bedtime, where returning attention to breath, body, or room sounds pulls the mind out of planning and worry and lowers sleep effort.
 status: draft
 quality: usable
 aliases:

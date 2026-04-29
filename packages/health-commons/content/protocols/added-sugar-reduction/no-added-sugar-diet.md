@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:added-sugar-reduction/no-added-sugar-diet
 slug: protocols/added-sugar-reduction/no-added-sugar-diet
 title: No Added Sugar
-summary: Remove added sugars by label while preserving adequate food, carbohydrates, hydration, and non-moralizing flexibility.
+summary: No added sugars from labels, drinks, or obvious sources, where removing fast-absorbing sugar that carries little fullness cuts calorie load and gives insulin less to clear.
 status: field-testing
 quality: usable
 aliases:

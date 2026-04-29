@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
 slug: protocols/whole-body-photobiomodulation/whole-body-red-and-near-infrared-light-exposure
 title: Red Light Therapy
-summary: "High-caution field-testing protocol for a nonthermal whole-body red and near-infrared light-bed self-experiment with explicit dose logging and sleep or recovery readouts; direct evidence remains thin, adjacent, and device-specific."
+summary: "Whole-body red/NIR light-bed exposure, where light reaches cells, changes how mitochondria handle energy and stress signals, and can release nitric oxide that relaxes blood vessels."
 status: field-testing
 quality: usable
 aliases:

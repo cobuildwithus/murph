@@ -4,7 +4,7 @@ entityType: experiment_family
 key: experiment_family:daily-step-floor
 slug: families/daily-step-floor
 title: Daily Step Floor
-summary: 
+summary: A daily minimum step count, where a visible floor ensures enough steady low-grade cardiovascular and weight-bearing load for the body to adapt to rather than lose.
 status: field-testing
 quality: usable
 aliases:

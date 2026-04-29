@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:tabata-interval-training/tabata-20-10-interval-training
 slug: protocols/tabata-interval-training/tabata-20-10-interval-training
 title: Tabata 20/10 Interval Training
-summary: Run a conservative, fidelity-logged interval block to test whether cardiorespiratory-fitness signals improve without excessive recovery or safety burden.
+summary: Hard 20/10 intervals with true 10-second rests, where each rest is too short for full recovery, so heart, lungs, and muscles chase a fast-rising oxygen demand.
 status: field-testing
 quality: usable
 aliases:

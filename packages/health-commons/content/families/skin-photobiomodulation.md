@@ -60,7 +60,7 @@ This family is separate from acne blue-light protocols, lasers, IPL, PDT or phot
 
 ## Current canonical protocol
 
-- **Red And Near Infrared Light For Skin Texture And Photoaging** — a constrained adult facial/periocular red+NIR LED/IRED mask starter focused on standardized photos, region-specific texture/wrinkle outcomes, adherence, and tolerability.
+- **Red Light For Skin** — a constrained adult facial/periocular red+NIR LED/IRED mask starter focused on standardized photos, region-specific texture/wrinkle outcomes, adherence, and tolerability.
 
 ## Review posture
 

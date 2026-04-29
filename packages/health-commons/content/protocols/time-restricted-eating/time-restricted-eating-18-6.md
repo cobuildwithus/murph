@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:time-restricted-eating/time-restricted-eating-18-6
 slug: protocols/time-restricted-eating/time-restricted-eating-18-6
 title: Intermittent Fasting
-summary: Narrow eating to a 6-hour daily window after easing into it, to see how weight, waist, hunger, energy, or glucose respond.
+summary: All calories inside a 6-hour window each day, where a longer overnight fast lets insulin and blood sugar drop and aligns eating with the hours when the body handles fuel most efficiently.
 status: field-testing
 quality: usable
 aliases:

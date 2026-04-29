@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
 slug: protocols/iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
 title: IT Band Rehab
-summary: A conservative, symptom-guided ITBS rehab tracker that reduces provocative running, builds hip/glute control, and returns to run-walk exposure only when lateral knee pain stays mild and does not rebound.
+summary: Hip and glute strengthening with graded run/walk re-entry, where stronger lateral-hip control reduces the load the iliotibial band puts on the outer knee at each stride.
 status: draft
 quality: usable
 aliases:

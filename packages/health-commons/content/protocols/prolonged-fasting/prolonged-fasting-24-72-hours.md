@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:prolonged-fasting/prolonged-fasting-24-72-hours
 slug: protocols/prolonged-fasting/prolonged-fasting-24-72-hours
 title: Prolonged Fasting (24–72 Hours)
-summary: Run one carefully screened, hydrated 24–72 hour water-only fast by default as an acute metabolic-and-safety experiment, with explicit stop rules, symptom logging, and a planned refeed rather than durable benefit promises.
+summary: One continuous water-only fast, where the liver uses up stored sugar, insulin falls, ketones rise, and stress hormones help keep blood sugar available.
 status: draft
 quality: usable
 aliases:

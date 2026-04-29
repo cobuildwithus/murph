@@ -25,7 +25,8 @@ Output:
 7. Findings whose claimUse classification should change
 8. Evidence appraisals whose groupId or sourceKey does not match the protocol researchLandscape
 9. Raw source-key leaks in user-facing Health Commons prose, including protocol, family, and biomarker pages, with exact replacement wording that preserves the claim but removes internal keys. Block visible labels or footnotes such as `Source keys:`, `Source key:`, `Citation key:`, `Citation keys:`, `Source artifact:`, and backticked `source_artifact:*` references.
-10. Required edits, with exact replacement wording
+10. Protocol frontmatter `summary:` problems when the field directly below `title:` does not follow `agent-docs/product-specs/protocol-summary-copy.md`.
+11. Required edits, with exact replacement wording
 
 Rules:
 - Be skeptical.
