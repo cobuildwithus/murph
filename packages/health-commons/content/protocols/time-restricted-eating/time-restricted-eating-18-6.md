@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:time-restricted-eating/time-restricted-eating-18-6
 slug: protocols/time-restricted-eating/time-restricted-eating-18-6
 title: Intermittent Fasting
-summary: Use a gradually narrowed eating window to test whether a consistent 18-hour fast and 6-hour eating window produces a personal signal in weight, waist, glucose, blood pressure, hunger, energy, or adherence without worsening sleep, symptoms, recovery, or safety.
+summary: Narrow eating to a 6-hour daily window after easing into it, to see how weight, waist, hunger, energy, or glucose respond.
 status: field-testing
 quality: usable
 aliases:

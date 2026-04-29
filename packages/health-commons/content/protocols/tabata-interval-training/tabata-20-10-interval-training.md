@@ -397,7 +397,7 @@ protocol:
     - Leave at least 48 hours between Tabata sessions during the first experiment.
     - Start with one block only; do not stack multi-block WODs, strength circuits, or extra finishers in the first Murph experiment unless you label them as a different variant.
     - A low-impact machine is usually easier to dose and safer to stop than jumping or loaded functional-fitness movements.
-    - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.
+    - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule stable.
     - Use the same wearable or heart-rate setup across baseline and intervention; a chest strap is preferable if heart-rate fidelity matters.
   keepInMind:
     - The strongest direct evidence is small, supervised, and cycle-ergometer-based; this protocol is not a generic guarantee for every workout labeled Tabata.

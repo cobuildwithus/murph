@@ -4,7 +4,7 @@ entityType: "protocol_variant"
 key: "protocol_variant:consistent-wake-time/consistent-wake-time"
 slug: "protocols/consistent-wake-time/consistent-wake-time"
 title: "Consistent Wake Time"
-summary: "Choose a realistic wake/rise window and keep it stable while protecting enough sleep, then test whether regularity, sleepiness, or alertness signals improve."
+summary: Same wake time every day within a narrow window, where a steady morning anchor keeps the body clock from drifting so sleep pressure and circadian timing line up more predictably each night.
 status: "field-testing"
 quality: "usable"
 aliases:

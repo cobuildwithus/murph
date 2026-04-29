@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:cold-water-immersion/cold-plunge
 slug: protocols/cold-water-immersion/cold-plunge
 title: Cold Plunge
-summary: Test whether a short, controlled cold plunge improves acute mood or tolerance without creating unsafe cold-shock, cardiovascular, recovery, or adherence burden.
+summary: Brief head-out immersion in measured cold water, where sudden cold forces a noradrenaline surge and drives blood inward to defend core temperature.
 status: field-testing
 quality: usable
 aliases:

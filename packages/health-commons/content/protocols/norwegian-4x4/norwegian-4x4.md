@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:norwegian-4x4/norwegian-4x4
 slug: protocols/norwegian-4x4/norwegian-4x4
 title: Norwegian 4x4
-summary: "Four hard 4-minute rounds of exercise, with easy movement between each round, to see if your cardio fitness improves."
+summary: "Four 4-minute hard intervals near top aerobic capacity, with easy recoveries between, where sustained high oxygen demand pushes heart to pump more blood per beat and muscles to extract more oxygen."
 status: field-testing
 quality: usable
 aliases:
@@ -202,18 +202,51 @@ expectedSignalDescriptions:
 
   -
     biomarkerKey: biomarker:estimated-vo2max
+    expected: up_or_stable
+    estimatedChange:
+      kind: relative_percent
+      low: 0
+      high: 10
+      unit: "%"
+      window: 4-8 weeks
+      confidence: moderate
+      basis: "Direct 4x4 sources include a 6-week overweight/obese adult trial reporting about a 10% VO2max gain, while broader HIIT evidence and wearable proxy limits make individual change uncertain."
     description: "Four-minute hard intervals keep oxygen demand high for repeated stretches. Across weeks, that can improve how much oxygen the heart and muscles deliver and use."
   -
     biomarkerKey: biomarker:resting-heart-rate
+    expected: down_or_stable
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: low
+      basis: "Resting pulse is a plausible adaptation signal, but the Norwegian 4x4 research package does not provide a source-backed personal range for a home wearable experiment."
     description: "If the heart pumps more blood per beat after training, it may need fewer beats at rest. Resting heart rate can drift lower as that adaptation builds."
   -
     biomarkerKey: biomarker:hrv-rmssd
+    expected: mixed_or_contextual
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: mixed
+      basis: "Exercise-training syntheses support HRV as an adjacent autonomic signal, but hard intervals can also suppress HRV when recovery is not keeping up."
     description: "Hard intervals tax the nervous system at first. If fitness improves and recovery keeps up, overnight HRV may rise or stabilize."
   -
     biomarkerKey: biomarker:sleep-efficiency
+    expected: mixed_or_contextual
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: low
+      basis: "Sleep efficiency is recovery context for this protocol, not a direct 4x4 outcome with a source-backed expected range."
     description: "Hard aerobic work can increase sleep pressure and recovery need. Sleep efficiency may improve when the dose is well matched, or stall if the sessions are too taxing."
   -
     biomarkerKey: biomarker:morning-blood-pressure
+    expected: down_or_stable
+    estimatedChange:
+      kind: mixed_or_contextual
+      window: 4-8 weeks
+      confidence: low
+      basis: "Aerobic interval training can affect blood pressure in clinical or hypertensive contexts, but this page should not promise a home blood-pressure treatment effect."
     description: "Repeated aerobic intervals may help blood vessels relax and control pressure. Morning blood pressure can move lower if that adaptation appears."
 experimentOnboarding:
   schemaVersion: murph.commons.experiment-onboarding.v1

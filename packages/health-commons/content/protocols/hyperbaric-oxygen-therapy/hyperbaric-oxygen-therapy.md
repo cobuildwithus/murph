@@ -4,7 +4,7 @@ entityType: "protocol_variant"
 key: "protocol_variant:hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
 slug: "protocols/hyperbaric-oxygen-therapy/hyperbaric-oxygen-therapy"
 title: "Hyperbaric Oxygen Therapy"
-summary: "Track clinician-prescribed systemic chamber HBOT as a high-caution medical intervention, keeping supervised clinical indications separate from mild chambers, topical oxygen, normobaric oxygen, EWOT, and wellness claims."
+summary: "Breathing pure oxygen in a pressurized chamber, where the pressure dissolves extra oxygen directly into blood plasma to reach tissue that normal circulation may not supply enough."
 status: "field-testing"
 quality: "usable"
 aliases:
@@ -33,9 +33,6 @@ relations:
     target: "experiment_family:hyperbaric-oxygen-therapy"
   -
     type: "primary_biomarker"
-    target: "biomarker:hbot-session-tolerability"
-  -
-    type: "secondary_biomarker"
     target: "biomarker:sleep-efficiency"
   -
     type: "secondary_biomarker"
@@ -578,13 +575,12 @@ protocol:
 testPlans:
 
   -
-    planId: "clinician-supervised-hbot-tolerance-49d"
+    planId: "clinician-supervised-hbot-recovery-49d"
     durationDays: 49
     baselineDays: 7
     interventionDays: 42
-    primaryBiomarkerKey: "biomarker:hbot-session-tolerability"
+    primaryBiomarkerKey: "biomarker:sleep-efficiency"
     secondaryBiomarkerKeys:
-      - "biomarker:sleep-efficiency"
       - "biomarker:resting-heart-rate"
       - "biomarker:hrv-rmssd"
     minimumAdherenceSessions: 1
@@ -592,13 +588,9 @@ testPlans:
     notes:
       - "Use this only to track a clinician-prescribed HBOT course; Murph should not recommend or initiate HBOT as a self-experiment."
       - "Replace the default intervention window and target sessions with the actual care plan when the prescription is known."
-      - "The primary Murph outcome is session tolerability/adverse-event burden. Disease-specific benefit should be judged by clinician-defined outcomes, not by wearable proxies."
-      - "Sleep efficiency, resting heart rate, and HRV are recovery context and confounders, not promised HBOT benefits."
+      - "Sleep efficiency is the primary Murph signal; resting heart rate and HRV are supporting recovery context, not promised HBOT benefits."
+      - "Disease-specific benefit should be judged by clinician-defined outcomes, not by wearable proxies."
 expectedSignalDescriptions:
-
-  -
-    biomarkerKey: "biomarker:hbot-session-tolerability"
-    description: "Higher pressure can stress the ears and sinuses. High oxygen and chamber stress can also affect vision, glucose, blood pressure, anxiety, or session completion."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
     description: "A prescribed HBOT course adds travel, time in the chamber, and possible symptoms. That load can break up sleep, while symptom relief may let sleep settle."
@@ -753,7 +745,7 @@ experimentOnboarding:
         object: assistantSupport
         field: reminderPolicy
   planDefaults:
-    testPlanId: "clinician-supervised-hbot-tolerance-49d"
+    testPlanId: "clinician-supervised-hbot-recovery-49d"
     baselineDays: 7
     interventionDays: 42
     sessionsPerWeek: 5

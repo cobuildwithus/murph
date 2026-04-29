@@ -3,8 +3,8 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:caffeine-timing/caffeine-curfew-dose-reset
 slug: protocols/caffeine-timing/caffeine-curfew-dose-reset
-title: Caffeine Curfew + Dose Reset
-summary: For 14 days, move all caffeine before the earlier of 10–11am or 8 hours before intended bedtime, while logging dose, source, sleep, and withdrawal symptoms.
+title: Caffeine Curfew
+summary: All caffeine before late morning or 8 hours before bed, where less residual caffeine near bedtime lets adenosine — the brain's built-up sleep-pressure signal — work without interference.
 status: draft
 quality: usable
 aliases:

@@ -422,7 +422,9 @@ When writing or editing research prompts, keep claims conservative and evidence-
 - preserve null, mixed, negative, safety, and mismatch findings
 - keep adjacent variants separate unless extraction proves a merge
 - keep safety language stronger than efficacy where evidence is thin
-- write protocol frontmatter `summary` for `/experiments` cards as action/outcome/safety copy, not as a repeat of duration, session count, frequency, or dose timing already shown in metadata or protocol fields
+- choose protocol signal markers that are not just the protocol exposure or adherence metric. Daily step count is assumed to be logged for Daily Step Floor, and daily protein intake is assumed to be logged for Protein Floor; primary/secondary markers should usually be downstream responses unless the protocol is explicitly an adherence experiment
+- prefer primary UI markers that are objective and easy to measure from ordinary Murph data when a credible downstream signal exists; subjective or process-adjacent markers like sedentary time, walking-bout minutes, or musculoskeletal pain belong lower in the stack as `also worth watching` unless they are the protocol's actual reason to run
+- write the protocol frontmatter `summary:` field directly below `title:` using `agent-docs/product-specs/protocol-summary-copy.md` as the source of truth
 - keep internal source keys out of user-facing Health Commons prose; preserve them only in structured source-key fields, ledgers, source pages, evidence appraisals, and manifests
 - never put `Source basis:`, `Sources: source_artifact:...`, `Safety basis: source_artifact:...`, or similar internal source-key footnotes inside user-facing protocol, family, or biomarker copy/descriptions
 - use readable source-card/study references in prose when attribution is needed

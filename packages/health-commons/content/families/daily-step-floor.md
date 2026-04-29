@@ -4,7 +4,7 @@ entityType: experiment_family
 key: experiment_family:daily-step-floor
 slug: families/daily-step-floor
 title: Daily Step Floor
-summary: Daily total-step minimum experiments measured by phone, wearable, or pedometer, kept separate from cadence prescriptions, structured exercise, social-incentive programs, rehabilitation, and disease-treatment protocols.
+summary: 
 status: field-testing
 quality: usable
 aliases:

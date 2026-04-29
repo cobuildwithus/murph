@@ -1,6 +1,6 @@
 # Health Commons
 
-Last verified: 2026-04-22
+Last verified: 2026-04-30
 
 ## Current State
 
@@ -34,6 +34,10 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
 Protocol pages may also include an optional `experimentOnboarding` block that describes how assistants should safely review context, screen for red flags, gather setup slots, and summarize the plan before creating a private run.
 Protocol and source pages may also include an optional `media` array for small public presentation assets such as header imagery. Keep those assets lightweight and repo-local, and do not use `media` as a substitute for research artifact manifests, PDFs, or other large external files.
+
+## Protocol Summary Copy
+
+Protocol frontmatter `summary:` copy is governed by `agent-docs/product-specs/protocol-summary-copy.md`. Use that file as the source of truth when generating or reviewing the `/experiments` card description below a protocol title.
 
 ## Literature And Community Evidence
 
