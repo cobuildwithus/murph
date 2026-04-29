@@ -477,7 +477,8 @@ export function resolveAssistantPromptCapabilityAvailability(input: {
   const assistantHostedDeviceConnectProviders =
     input.executionContext?.hosted?.deviceConnectProviders ?? []
   const assistantHostedDeviceConnectAvailable =
-    assistantHostedDeviceConnectProviders.length > 0
+    assistantHostedDeviceConnectProviders.length > 0 &&
+    typeof input.executionContext?.hosted?.issueDeviceConnectLink === 'function'
 
   return {
     assistantHostedDeviceConnectAvailable,

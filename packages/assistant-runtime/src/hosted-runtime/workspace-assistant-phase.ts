@@ -755,7 +755,10 @@ function resolveHostedWorkspaceIssueDeviceConnectLink(input: {
     return undefined;
   }
 
-  return ({ provider }) => deviceSyncPort.createConnectLink({ provider });
+  return ({ messagingReturnTarget, provider }) => deviceSyncPort.createConnectLink({
+    ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+    provider,
+  });
 }
 
 function assistantMetricsProgressed(

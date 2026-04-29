@@ -244,7 +244,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     });
     await expect(
-      hydratedContext?.hosted?.issueDeviceConnectLink?.({ provider: "whoop" }),
+      hydratedContext?.hosted?.issueDeviceConnectLink?.({
+        messagingReturnTarget: "telegram",
+        provider: "whoop",
+      }),
     ).resolves.toEqual({
       authorizationUrl: "https://connect.example.test/whoop",
       expiresAt: "2026-04-29T00:05:00.000Z",
@@ -252,7 +255,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       providerLabel: "WHOOP",
     });
     expect(connectLinkRequests).toEqual([
-      { provider: "whoop" },
+      { messagingReturnTarget: "telegram", provider: "whoop" },
     ]);
   });
 

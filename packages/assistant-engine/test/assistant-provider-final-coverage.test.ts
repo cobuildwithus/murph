@@ -79,6 +79,9 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import type { AssistantProviderContinuation } from '../src/assistant/active-turn-input-journal.ts'
+import type {
+  AssistantHostedDeviceConnectRequest,
+} from '../src/assistant/execution-context.ts'
 import {
   DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
   DEFAULT_CODEX_REASONING_OPTIONS,
@@ -494,5 +497,112 @@ describe('Codex model catalog', () => {
         type: 'image',
       },
     ])
+  })
+
+  it('handles hosted device-connect requests before invoking the Codex provider', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      sessionId: 'session-hosted-device-connect',
+    })
+    const issueDeviceConnectLink = vi.fn(
+      async (request: AssistantHostedDeviceConnectRequest) => ({
+        authorizationUrl: `https://connect.example.test/${request.provider}`,
+        expiresAt: '2026-04-30T00:05:00.000Z',
+        provider: request.provider,
+        providerLabel: 'WHOOP',
+      }),
+    )
+    const input = {
+      channel: 'linq',
+      executionContext: {
+        hosted: {
+          deviceConnectProviders: [
+            { label: 'WHOOP', provider: 'whoop' },
+          ],
+          issueDeviceConnectLink,
+          memberId: 'member_synthetic',
+          userEnvKeys: [],
+        },
+      },
+      prompt: 'Please connect my WHOOP',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeProviderTurnWithRecovery>[0]['input']
+
+    providerTurnRunnerMocks.buildAssistantProviderTurnExecutionPlan.mockResolvedValue({
+      activeTurnHistory: null,
+      activeTurnSteering: null,
+      executionContext: input.executionContext,
+      input,
+      memoryTurnEnv: {},
+      profile: {
+        promptProfile: 'conversation',
+        toolProfile: 'provider-turn',
+        turnContinuityPolicy: 'continuous-provider-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-04-30',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-hosted-device-connect',
+    } satisfies AssistantProviderTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexProviderAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        activeTurnMessages: undefined,
+        assistantCliContract: null,
+        cliEnv: {},
+        continuityContext: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        onboardingCompletionFallbackReason: null,
+        onboardingGuidanceInjected: false,
+        providerContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantProviderContinuation,
+        promptCacheMetadata: null,
+        resumeProviderSessionId: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantProviderAttemptPlan)
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-04-30T00:00:00.000Z',
+      turnId: 'turn-hosted-device-connect',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    if (outcome.kind !== 'succeeded') {
+      throw new Error('Expected hosted device connect handling to succeed.')
+    }
+    expect(outcome.providerTurn.response).toContain(
+      'Here is your WHOOP connection link:',
+    )
+    expect(outcome.providerTurn.response).toContain(
+      'https://connect.example.test/whoop',
+    )
+    expect(outcome.providerTurn.nonReplayableProviderWork).toBe(true)
+    expect(issueDeviceConnectLink).toHaveBeenCalledWith({
+      messagingReturnTarget: 'imessage',
+      provider: 'whoop',
+    })
+    expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).not.toHaveBeenCalled()
+    expect(
+      providerTurnRunnerMocks.recordProviderAttemptSucceeded,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      activityLabels: ['hosted-device-connect'],
+    }))
   })
 })

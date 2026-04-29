@@ -14,6 +14,12 @@ describe('assistant prompt capability availability', () => {
         deviceConnectProviders: [
           { label: 'WHOOP', provider: 'whoop' },
         ],
+        issueDeviceConnectLink: async ({ provider }) => ({
+          authorizationUrl: `https://connect.example.test/${provider}`,
+          expiresAt: '2026-04-30T00:05:00.000Z',
+          provider,
+          providerLabel: 'WHOOP',
+        }),
         memberId: 'member_synthetic',
         userEnvKeys: [],
       },
@@ -26,6 +32,26 @@ describe('assistant prompt capability availability', () => {
       assistantHostedDeviceConnectProviders: [
         { label: 'WHOOP', provider: 'whoop' },
       ],
+      assistantKnowledgeToolsAvailable: false,
+    })
+  })
+
+  it('keeps hosted device-connect unavailable when providers are listed without a callable helper', () => {
+    const executionContext = normalizeAssistantExecutionContext({
+      hosted: {
+        deviceConnectProviders: [
+          { label: 'WHOOP', provider: 'whoop' },
+        ],
+        memberId: 'member_synthetic',
+        userEnvKeys: [],
+      },
+    })
+
+    expect(
+      resolveAssistantPromptCapabilityAvailability({ executionContext }),
+    ).toEqual({
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
       assistantKnowledgeToolsAvailable: false,
     })
   })

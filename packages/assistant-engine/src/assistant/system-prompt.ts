@@ -393,7 +393,7 @@ function buildAssistantVaultNavigationText(input: {
   const hostedDeviceConnectGuidance =
     buildAssistantHostedDeviceConnectGuidanceText(input);
   const hostedDeviceConnectLine = hostedDeviceConnectGuidance
-    ? `${hostedDeviceConnectGuidance} Do not route supported hosted connect flows through local \`device connect\` CLI commands.\n`
+    ? `${hostedDeviceConnectGuidance} Do not route supported hosted connect flows through local \`device connect\` CLI commands or assistant runtime files.\n`
     : "";
 
   return `Vault and tool usage:
@@ -422,7 +422,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection is currently supported only for ${providerList}, but the hosted connect helper is not exposed in this route. Say automatic connection links are temporarily unavailable instead of trying to create one through local files or assistant runtime state.`;
+  return `- Hosted wearable connection links are available for ${providerList}. Supported connect-link requests are handled by the hosted runtime before the model turn when possible.`;
 }
 
 function buildAssistantExperimentOnboardingGuidanceText(): string {
@@ -606,7 +606,7 @@ function buildAssistantOnboardingHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `5. Wearables: if a supported hosted wearable connection is already visible in context, acknowledge that Murph can use it and do not ask the user to reconnect. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, say connection links are temporarily unavailable in this route and keep it optional.`;
+  return `5. Wearables: if a supported hosted wearable connection is already visible in context, acknowledge that Murph can use it and do not ask the user to reconnect. If the user mentions during onboarding that they use one of the supported wearable providers (${providerList}) and it is not already connected, keep it optional and offer to send a connection link.`;
 }
 
 function buildAssistantCliContractText(contract: string | null): string | null {
