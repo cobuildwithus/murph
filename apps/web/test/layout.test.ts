@@ -76,6 +76,12 @@ test("RootLayout renders the Apache footer with support and GitHub links", () =>
   assert.match(markup, /<html lang="en" class="[^"]*--font-sans[^"]*"/u);
   assert.match(markup, /<html lang="en" class="[^"]*--font-mono[^"]*"/u);
   assert.match(markup, /Murph is open source and licensed under Apache 2\.0\./);
+  assert.match(markup, /Privacy Policy/);
+  assert.match(markup, /\/legal\/privacy\.pdf/u);
+  assert.match(markup, /Terms/);
+  assert.match(markup, /\/legal\/terms\.pdf/u);
+  assert.match(markup, /Subprocessors/);
+  assert.match(markup, /\/subprocessors/u);
   assert.match(markup, /Contact support/);
   assert.match(markup, /mailto:support@withmurph\.ai/u);
   assert.match(markup, /text-\[11px\].*uppercase.*text-stone-600/u);
