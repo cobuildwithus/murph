@@ -13,6 +13,7 @@ import {
 import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
 import {
   AssistantActiveTurnInputCheckpointRejectedError,
+  AssistantActiveTurnInputUnavailableError,
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.js'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
@@ -1605,7 +1606,7 @@ test('active-turn controller only steers exact conversations while open', async 
   }
 })
 
-test('active-turn controller composes hook and manual pending input at one boundary', async () => {
+test('active-turn controller drains queued manual input before boundary hook input', async () => {
   const {
     createAssistantActiveTurnInputController,
     steerAssistantActiveTurnInput,
@@ -1667,6 +1668,26 @@ test('active-turn controller composes hook and manual pending input at one bound
           promptFallbackText: 'Manual input',
           source: 'manual',
         },
+      ],
+      deliveryReplyToMessageId: 'reply-manual',
+      kind: 'accepted',
+      prompt: 'Manual input',
+      transcriptText: null,
+      userMessageContent: [
+        {
+          text: 'Manual input',
+          type: 'text',
+        },
+      ],
+    })
+
+    assert.deepEqual(await controller.admit({
+      phase: 'request_boundary',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
         {
           id: 'hook-1',
           promptFallbackReason: 'missing-content-ref',
@@ -1676,16 +1697,12 @@ test('active-turn controller composes hook and manual pending input at one bound
       ],
       deliveryReplyToMessageId: 'reply-hook',
       kind: 'accepted',
-      prompt: 'Manual input\n\nHook input',
+      prompt: 'Hook input',
       receiptMetadata: {
         hook: 'yes',
       },
       transcriptText: 'Hook transcript',
       userMessageContent: [
-        {
-          text: 'Manual input',
-          type: 'text',
-        },
         {
           text: 'Hook input',
           type: 'text',
@@ -1903,6 +1920,25 @@ test('active-turn controller keeps boundary input behind in-flight live steer in
           promptFallbackText: 'In-flight live steer input',
           source: 'manual',
         },
+      ],
+      deliveryReplyToMessageId: undefined,
+      kind: 'accepted',
+      prompt: 'In-flight live steer input',
+      transcriptText: null,
+      userMessageContent: [
+        {
+          text: 'In-flight live steer input',
+          type: 'text',
+        },
+      ],
+    })
+    assert.deepEqual(await controller.admit({
+      phase: 'request_boundary',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
         {
           id: 'hook-1',
           promptFallbackReason: 'missing-content-ref',
@@ -1910,16 +1946,10 @@ test('active-turn controller keeps boundary input behind in-flight live steer in
           source: 'inbox',
         },
       ],
-      deliveryReplyToMessageId: undefined,
       kind: 'accepted',
-      prompt: 'In-flight live steer input\n\nBoundary hook input',
-      receiptMetadata: undefined,
+      prompt: 'Boundary hook input',
       transcriptText: 'Boundary hook transcript',
       userMessageContent: [
-        {
-          text: 'In-flight live steer input',
-          type: 'text',
-        },
         {
           text: 'Boundary hook input',
           type: 'text',
@@ -2001,6 +2031,78 @@ test('active-turn controller interrupts live provider when input-available check
       }),
       null,
     )
+  } finally {
+    controller.close()
+  }
+})
+
+test('active-turn controller retries boundary admission after non-fatal input-available failure', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const unavailable = new AssistantActiveTurnInputUnavailableError(
+    'Active turn input source is temporarily unavailable.',
+  )
+  let boundaryAdmissions = 0
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async (input) => {
+      if (input.phase === 'input_available') {
+        throw unavailable
+      }
+      boundaryAdmissions += 1
+      return {
+        acceptedInputs: [
+          {
+            id: 'hook-1',
+            promptFallbackReason: 'missing-content-ref',
+            promptFallbackText: 'Boundary hook input',
+            source: 'inbox',
+          },
+        ],
+        kind: 'accepted',
+        prompt: 'Boundary hook input',
+        transcriptText: 'Boundary hook transcript',
+        userMessageContent: [
+          {
+            text: 'Boundary hook input',
+            type: 'text',
+          },
+        ],
+      }
+    },
+    conversationKeys: ['channel:telegram|identity:identity-1|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  try {
+    const notification = controller.notifyInputAvailable().catch(() => undefined)
+    assert.deepEqual(await controller.admit({
+      phase: 'request_boundary',
+      sessionId: 'session-test',
+      turnId: 'turn-active',
+      vault: '/vaults/test',
+    }), {
+      acceptedInputs: [
+        {
+          id: 'hook-1',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Boundary hook input',
+          source: 'inbox',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Boundary hook input',
+      transcriptText: 'Boundary hook transcript',
+      userMessageContent: [
+        {
+          text: 'Boundary hook input',
+          type: 'text',
+        },
+      ],
+    })
+    await notification
+    assert.equal(boundaryAdmissions, 1)
   } finally {
     controller.close()
   }
