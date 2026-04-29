@@ -514,6 +514,10 @@ describe("hosted runner container image contract", () => {
       "pnpm runner:bundle:hosted-local &&",
     );
     expect(packageJson.scripts?.["test:e2e:telegram:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
+    expect(packageJson.scripts?.["test:e2e:device-connect:local"]).toContain(
+      "pnpm runner:bundle:hosted-local &&",
+    );
+    expect(packageJson.scripts?.["test:e2e:device-connect:local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.instance_type).toEqual({

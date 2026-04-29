@@ -30,6 +30,7 @@
     "test:e2e:workers:local": "pnpm test:workers",
     "test:e2e:full-stack:local": "pnpm test:e2e:hosted-local",
     "test:e2e:smoke:local": "pnpm test:e2e:workers:local",
+    "test:e2e:device-connect:local": "pnpm runner:bundle:hosted-local && env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL MURPH_DEV_SKIP_RUNNER_BUNDLE=1 pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts --no-coverage",
     "test:e2e:telegram:local": "pnpm runner:bundle:hosted-local && env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL MURPH_DEV_SKIP_RUNNER_BUNDLE=1 pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-telegram-first-contact-e2e.test.ts --no-coverage",
     "test:e2e:linq-delivery:local": "pnpm runner:bundle:hosted-local && env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL MURPH_DEV_SKIP_RUNNER_BUNDLE=1 pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts --no-coverage",
     "test:e2e:linq-webhook:local": "pnpm runner:bundle:hosted-local && env -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL MURPH_DEV_SKIP_RUNNER_BUNDLE=1 pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts --no-coverage",
