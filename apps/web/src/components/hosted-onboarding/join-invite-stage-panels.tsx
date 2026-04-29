@@ -221,100 +221,106 @@ export function JoinInviteCheckoutPanel({
     billingPlans.find((plan) => plan.code === billingPlanCode) ?? null;
 
   return (
-    <Card className="rounded-3xl shadow-[0_24px_60px_-30px_rgba(26,31,22,0.18)] backdrop-blur-sm">
-      <CardContent className="px-7 pt-3 pb-2 sm:px-10 sm:pt-5">
-        <div className="space-y-2">
-          <p className="font-serif text-2xl font-normal tracking-tight text-foreground">
-            Choose your plan
-          </p>
-          <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-            Private vault, every experiment, full before/after analysis.
-          </p>
-        </div>
+    <div className="space-y-4">
+      <Card className="gap-3 rounded-xl py-3 shadow-[0_24px_60px_-30px_rgba(26,31,22,0.18)] backdrop-blur-sm">
+        <CardContent className="px-6 pt-2 pb-1 sm:px-8 sm:pt-4">
+          <div className="space-y-2">
+            <p className="font-serif text-2xl font-normal tracking-tight text-foreground">
+              Choose your plan
+            </p>
+            <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
+              Private vault, every experiment, full before/after analysis.
+            </p>
+          </div>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          {billingPlans.map((plan) => {
-            const selected = plan.code === billingPlanCode;
-            const [priceAmount, priceUnit] = splitRecurringSummary(
-              plan.recurringSummary,
-            );
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {billingPlans.map((plan) => {
+              const selected = plan.code === billingPlanCode;
+              const [priceAmount, priceUnit] = splitRecurringSummary(
+                plan.recurringSummary,
+              );
 
-            return (
-              <button
-                key={plan.code}
-                type="button"
-                onClick={() => onSelectBillingPlan(plan.code)}
-                className={[
-                  "rounded-2xl border px-5 py-5 text-left transition-all",
-                  selected
-                    ? "border-foreground/15 bg-olive-light/15 shadow-[0_2px_4px_rgba(26,31,22,0.05)]"
-                    : "border-border bg-card hover:border-olive-light/40",
-                ].join(" ")}
-                aria-pressed={selected}
-              >
-                <div className="flex h-7 items-center justify-between gap-3">
-                  <p className="text-sm font-semibold leading-none text-foreground">
-                    {plan.displayName}
-                  </p>
-                  {selected ? (
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-                      <CheckIcon className="size-3.5" strokeWidth={2.5} />
+              return (
+                <button
+                  key={plan.code}
+                  type="button"
+                  onClick={() => onSelectBillingPlan(plan.code)}
+                  className={[
+                    "rounded-2xl border px-5 py-5 text-left transition-all",
+                    selected
+                      ? "border-foreground/15 bg-olive-light/15 shadow-[0_2px_4px_rgba(26,31,22,0.05)]"
+                      : "border-border bg-card hover:border-olive-light/40",
+                  ].join(" ")}
+                  aria-pressed={selected}
+                >
+                  <div className="flex h-7 items-center justify-between gap-3">
+                    <p className="text-sm font-semibold leading-none text-foreground">
+                      {plan.displayName}
+                    </p>
+                    {selected ? (
+                      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                        <CheckIcon className="size-3.5" strokeWidth={2.5} />
+                      </span>
+                    ) : plan.badge ? (
+                      <Badge
+                        variant="secondary"
+                        className="h-7 rounded-full bg-olive-light/20 px-2.5 font-mono text-[0.625rem] font-medium uppercase tracking-[0.14em] text-olive"
+                      >
+                        {plan.badge}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 flex items-baseline gap-0.5">
+                    <span className="font-serif text-4xl font-normal leading-none tracking-tight text-foreground">
+                      {priceAmount}
                     </span>
-                  ) : plan.badge ? (
-                    <Badge
-                      variant="secondary"
-                      className="h-7 rounded-full bg-olive-light/20 px-2.5 font-mono text-[0.625rem] font-medium uppercase tracking-[0.14em] text-olive"
-                    >
-                      {plan.badge}
-                    </Badge>
-                  ) : null}
-                </div>
-                <div className="mt-3 flex items-baseline gap-0.5">
-                  <span className="font-serif text-4xl font-normal leading-none tracking-tight text-foreground">
-                    {priceAmount}
-                  </span>
-                  {priceUnit ? (
-                    <span className="font-serif text-lg font-normal text-muted-foreground">
-                      {priceUnit}
-                    </span>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                    {priceUnit ? (
+                      <span className="font-serif text-lg font-normal text-muted-foreground">
+                        {priceUnit}
+                      </span>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
 
-        <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="flex size-7 items-center justify-center rounded-full border border-border bg-card">
-            <CalendarIcon className="size-3.5" />
-          </span>
-          <span className="leading-relaxed">
-            {selectedBillingPlan
-              ? `You’ll start on the ${selectedBillingPlan.displayName.toLowerCase()} plan.`
-              : "Choose a plan to continue."}
-          </span>
-        </div>
+          <div className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="flex size-7 items-center justify-center rounded-full border border-border bg-card">
+              <CalendarIcon className="size-3.5" />
+            </span>
+            <span className="leading-relaxed">
+              {selectedBillingPlan
+                ? `You’ll start on the ${selectedBillingPlan.displayName.toLowerCase()} plan.`
+                : "Choose a plan to continue."}
+            </span>
+          </div>
 
-        <CheckoutButton
-          onCheckout={onCheckout}
-          onSuccess={onCheckoutSuccess}
-          onError={onCheckoutError}
-          disabled={!billingReady || !billingPlanCode}
-          size="lg"
-          className="mt-5 h-16 w-full justify-between rounded-2xl bg-foreground px-7 text-[1.0625rem] font-semibold text-background hover:bg-foreground/90"
-          idleLabel={billingReady ? "Continue to checkout" : "Billing is not configured yet"}
-          idleAdornment={<ArrowRightIcon className="size-5" />}
-        />
-      </CardContent>
+          <CheckoutButton
+            onCheckout={onCheckout}
+            onSuccess={onCheckoutSuccess}
+            onError={onCheckoutError}
+            disabled={!billingReady || !billingPlanCode}
+            size="lg"
+            className="mt-4 h-16 w-full justify-between rounded-2xl bg-foreground px-7 text-[1.0625rem] font-semibold text-background hover:bg-foreground/90"
+            idleLabel={billingReady ? "Continue to checkout" : "Billing is not configured yet"}
+            idleAdornment={<ArrowRightIcon className="size-5" />}
+          />
+        </CardContent>
 
-      <CardFooter className="border-t border-border bg-muted/40 px-7 py-5 sm:px-10">
-        <ul className="flex w-full flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <CheckoutTrustItem icon={LockIcon} label="Private by default" />
-          <CheckoutTrustItem icon={ShieldCheckIcon} label="No data sold, ever" />
-          <CheckoutTrustItem icon={RefreshCwIcon} label="Cancel anytime" />
-        </ul>
-      </CardFooter>
-    </Card>
+        <CardFooter className="border-t border-border bg-muted/40 px-6 py-4 sm:px-8">
+          <ul className="flex w-full flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <CheckoutTrustItem icon={LockIcon} label="Private by default" />
+            <CheckoutTrustItem icon={ShieldCheckIcon} label="No data sold, ever" />
+            <CheckoutTrustItem icon={RefreshCwIcon} label="Cancel anytime" />
+          </ul>
+        </CardFooter>
+      </Card>
+      <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <LockIcon className="size-3.5" aria-hidden />
+        <span>Secure checkout powered by Stripe</span>
+      </div>
+    </div>
   );
 }
 
