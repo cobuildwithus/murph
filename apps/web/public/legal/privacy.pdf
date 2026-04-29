@@ -59,7 +59,7 @@ BT /F1 10 Tf 1 0 0 1 72.00 104.00 Tm (similar parties.) Tj ET
 endstream
 endobj
 4 0 obj
-<< /Length 5923 >>
+<< /Length 6005 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (No targeted advertising from health data. We do not use health data for cross-context behavioral) Tj ET
@@ -86,8 +86,8 @@ BT /F1 10 Tf 1 0 0 1 72.00 506.00 Tm (integrations only when you enable the inte
 BT /F1 10 Tf 1 0 0 1 72.00 492.00 Tm (consent. You can withdraw consent by disconnecting the integration or contacting us.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 476.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 476.00 Tm (Need-to-know access. We limit access to personal information and hosted health data to authorized) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 462.00 Tm (personnel and service providers who need it to operate, secure, support, troubleshoot, or improve) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 448.00 Tm (Murph.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 462.00 Tm (personnel and service providers who need it to operate, secure, support, or troubleshoot Murph. We) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 448.00 Tm (use aggregated or de-identified information for service improvement as described below.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 432.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 432.00 Tm (No hidden ad-tech on health surfaces. We do not intentionally place third-party advertising pixels,) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 418.00 Tm (retargeting tags, behavioral advertising SDKs, or similar technologies on pages, screens, APIs, or) Tj ET
@@ -880,39 +880,39 @@ xref
 0000000079 00000 n 
 0000000154 00000 n 
 0000005220 00000 n 
-0000011195 00000 n 
-0000016394 00000 n 
-0000021408 00000 n 
-0000026131 00000 n 
-0000031610 00000 n 
-0000036833 00000 n 
-0000042422 00000 n 
-0000047341 00000 n 
-0000050778 00000 n 
-0000057028 00000 n 
-0000062438 00000 n 
-0000067905 00000 n 
-0000073067 00000 n 
-0000076755 00000 n 
-0000076893 00000 n 
-0000077031 00000 n 
-0000077169 00000 n 
-0000077307 00000 n 
-0000077445 00000 n 
-0000077583 00000 n 
-0000077721 00000 n 
-0000077860 00000 n 
-0000077999 00000 n 
-0000078138 00000 n 
-0000078277 00000 n 
-0000078416 00000 n 
-0000078555 00000 n 
-0000078694 00000 n 
-0000078833 00000 n 
-0000078991 00000 n 
-0000079132 00000 n 
+0000011277 00000 n 
+0000016476 00000 n 
+0000021490 00000 n 
+0000026213 00000 n 
+0000031692 00000 n 
+0000036915 00000 n 
+0000042504 00000 n 
+0000047423 00000 n 
+0000050860 00000 n 
+0000057110 00000 n 
+0000062520 00000 n 
+0000067987 00000 n 
+0000073149 00000 n 
+0000076837 00000 n 
+0000076975 00000 n 
+0000077113 00000 n 
+0000077251 00000 n 
+0000077389 00000 n 
+0000077527 00000 n 
+0000077665 00000 n 
+0000077803 00000 n 
+0000077942 00000 n 
+0000078081 00000 n 
+0000078220 00000 n 
+0000078359 00000 n 
+0000078498 00000 n 
+0000078637 00000 n 
+0000078776 00000 n 
+0000078915 00000 n 
+0000079073 00000 n 
+0000079214 00000 n 
 trailer
 << /Size 36 /Root 35 0 R /Info 34 0 R >>
 startxref
-79183
+79265
 %%EOF
