@@ -124,6 +124,32 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-caffeine-curfew.jpeg");
   });
 
+  it("uses the simplified IT band rehab title and dedicated artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol(
+      "it-band-syndrome-rehab-and-return-to-run",
+    );
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.title).toBe("IT Band Rehab");
+    expect(protocol?.image).toBe("/design-assets/hero-it-band-rehab.jpeg");
+  });
+
+  it("uses the dedicated red and near infrared skin artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol(
+      "red-near-infrared-skin-texture-photoaging",
+    );
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-red-light-for-skin.jpeg");
+  });
+
+  it("uses the dedicated prolonged fasting artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("prolonged-fasting-24-72-hours");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-prolonged-fasting.jpeg");
+  });
+
   it("omits protocols hidden by Health Commons frontmatter from the public experiments library", () => {
     const catalog = createFixtureCatalog();
 

@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
 slug: protocols/iliotibial-band-syndrome-rehabilitation/it-band-syndrome-rehab-and-return-to-run
-title: Iliotibial Band Syndrome Rehab And Return To Run
+title: IT Band Rehab
 summary: A conservative, symptom-guided ITBS rehab tracker that reduces provocative running, builds hip/glute control, and returns to run-walk exposure only when lateral knee pain stays mild and does not rebound.
 status: draft
 quality: usable
@@ -158,6 +158,10 @@ lineage:
 attribution:
   ownerType: murph
   note: Drafted from the ITBS Health Commons research run using the canonical source ledger and normalized local fallback source drafts. Full-text sample sizes, effect sizes, adverse-event rates, and exact source-level results were not added unless present in the supplied inputs.
+media:
+- kind: image
+  relativePath: design-assets/hero-it-band-rehab.jpeg
+  mediaType: image/jpeg
 protocol:
   doseSignature: 6 weeks · 3 strength/control sessions per week · 2–3 run/walk re-entry sessions when symptoms allow · progress only with mild lateral-knee pain and no next-day rebound
   target: symptom-guided return to running after suspected or clinician-diagnosed ITBS
