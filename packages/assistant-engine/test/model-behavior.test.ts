@@ -304,7 +304,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Do not ask detailed ROI, color, texture, photo, or imaging fields by default')
     expect(prompt).toContain('Do not read raw revision hashes, field names, or test-plan ids aloud')
     expect(prompt).toContain('Start by asking what the user wants to get out of the experiment')
-    expect(prompt).toContain('Ask at most two questions in any response')
+    expect(prompt).toContain('Ask at most one question in any response')
     expect(prompt).toContain('continue the onboarding loop in later replies')
     expect(prompt).not.toContain('scaffold and update the experiment record')
     expect(prompt).not.toContain('summarize the exact plan: Health Commons protocol reference')
