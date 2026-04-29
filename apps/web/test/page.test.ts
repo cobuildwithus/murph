@@ -143,6 +143,9 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /murph chat/);
   assert.match(markup, /Do I need a wearable\?/);
   assert.match(markup, /No\. A wearable can add useful signals/);
+  assert.match(markup, /Murph uses AI-assisted review of published studies/);
+  assert.match(markup, /Research may be incomplete, mixed, or not applicable to your situation/);
+  assert.doesNotMatch(markup, /GPT-5\.5 Pro/);
   assert.match(markup, /Wearable apps show status/);
   assert.match(markup, /Murph provides educational health information/);
   assert.match(markup, /not a substitute for professional medical advice/);

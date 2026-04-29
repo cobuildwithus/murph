@@ -72,7 +72,7 @@ Murph may collect, use, and process Consumer Health Data for the following purpo
 - to maintain, test, develop, and improve Murph using aggregated, de-identified, pseudonymized, or otherwise minimized information where feasible; and
 - for other purposes disclosed to you with any consent required by law.
 
-Murph does not use Consumer Health Data you submit through Murph to train Murph’s or a third party’s general-purpose models unless Murph clearly tells you otherwise and obtains any consent required by law.
+Unless we present a separate, specific opt-in consent that clearly identifies the Consumer Health Data involved and applicable law permits the use, Murph does not use Consumer Health Data you submit through Murph to train, fine-tune, or improve Murph’s or any third party’s general-purpose AI models. We also require third-party AI model providers that process Consumer Health Data for the Hosted Service not to use that data to train their models, except where you separately authorize that use after clear disclosure.
 
 ## 6. Categories of Consumer Health Data we may share
 
