@@ -62,6 +62,10 @@ function buildGeneratedFiles(
     files.set(`web/${fileName}`, stablePrettyJson(bundle));
   }
 
+  for (const [fileName, researchTab] of webArtifacts.experimentResearchTabs.entries()) {
+    files.set(`web/${fileName}`, stablePrettyJson(researchTab));
+  }
+
   return files;
 }
 

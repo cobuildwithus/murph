@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -16,11 +16,13 @@ import {
 } from "@murphai/contracts";
 import {
   HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
+  HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
   type HealthCommonsWebBiomarkerIndex,
   type HealthCommonsWebExperimentIndex,
+  type HealthCommonsWebExperimentResearchTab,
   type HealthCommonsWebRouteBundle,
   type HealthCommonsWebRouteIndex,
 } from "./web-artifacts.ts";
@@ -271,6 +273,10 @@ let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = nu
 let cachedGeneratedWebExperimentIndex: HealthCommonsWebExperimentIndex | null = null;
 let cachedGeneratedWebRouteIndex: HealthCommonsWebRouteIndex | null = null;
 const cachedGeneratedWebRouteBundles = new Map<string, HealthCommonsWebRouteBundle>();
+const cachedGeneratedWebExperimentResearchTabs = new Map<
+  string,
+  HealthCommonsWebExperimentResearchTab | null
+>();
 
 export function loadGeneratedHealthCommonsCatalog(
   options: LoadGeneratedHealthCommonsCatalogOptions = {},
@@ -389,6 +395,47 @@ export function loadGeneratedHealthCommonsWebRouteBundle(input: {
   }
 
   return bundle;
+}
+
+export function loadGeneratedHealthCommonsWebExperimentResearchTab(input: {
+  generatedWebRoot?: string | URL;
+  routeId: string;
+}): HealthCommonsWebExperimentResearchTab | null {
+  const routeIndex = getGeneratedHealthCommonsWebRouteIndex({
+    generatedWebRoot: input.generatedWebRoot,
+  });
+  const normalizedRouteId = normalizeRouteId(input.routeId);
+  const route = routeIndex.routes.find((entry) =>
+    entry.entityType === "protocol_variant" && entry.routeId === normalizedRouteId
+  );
+
+  if (!route) {
+    return null;
+  }
+
+  const tabPath = experimentResearchTabPathForRouteBundlePath(route.bundlePath);
+  const cacheKey = `${routeIndex.catalogHash}:${tabPath}`;
+  if (!input.generatedWebRoot && cachedGeneratedWebExperimentResearchTabs.has(cacheKey)) {
+    return cachedGeneratedWebExperimentResearchTabs.get(cacheKey) ?? null;
+  }
+
+  const artifactUrl = new URL(tabPath, normalizeGeneratedWebRoot(input.generatedWebRoot));
+  if (artifactUrl.protocol === "file:" && !existsSync(artifactUrl)) {
+    if (!input.generatedWebRoot) {
+      cachedGeneratedWebExperimentResearchTabs.set(cacheKey, null);
+    }
+    return null;
+  }
+
+  const raw = readFileSync(artifactUrl, "utf8");
+  const researchTab = parseJsonObject(raw);
+  assertGeneratedWebExperimentResearchTab(researchTab, tabPath);
+
+  if (!input.generatedWebRoot) {
+    cachedGeneratedWebExperimentResearchTabs.set(cacheKey, researchTab);
+  }
+
+  return researchTab;
 }
 
 export function createHealthCommonsRouteBundleReader(
@@ -1404,6 +1451,52 @@ function assertGeneratedWebBiomarkerIndex(
   }
 }
 
+function assertGeneratedWebExperimentResearchTab(
+  value: unknown,
+  tabPath: string,
+): asserts value is HealthCommonsWebExperimentResearchTab {
+  if (!isRecord(value)) {
+    throw new Error(`Health Commons generated experiment research tab is invalid: ${tabPath}.`);
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION ||
+    typeof value["catalogHash"] !== "string" ||
+    typeof value["key"] !== "string" ||
+    typeof value["title"] !== "string" ||
+    typeof value["description"] !== "string" ||
+    !Array.isArray(value["protocolKeepInMind"]) ||
+    !value["protocolKeepInMind"].every(isString) ||
+    !Array.isArray(value["researchStats"]) ||
+    !value["researchStats"].every(isGeneratedWebResearchStat) ||
+    !isRecord(value["revision"]) ||
+    !isRecord(value["route"]) ||
+    !isGeneratedWebRoute(value["route"]) ||
+    value["route"]["entityType"] !== "protocol_variant" ||
+    !Array.isArray(value["studies"]) ||
+    !value["studies"].every(isGeneratedWebResearchStudy)
+  ) {
+    throw new Error(`Health Commons generated experiment research tab is invalid: ${tabPath}.`);
+  }
+
+  if (
+    value["researchGroups"] !== undefined &&
+    (
+      !Array.isArray(value["researchGroups"]) ||
+      !value["researchGroups"].every(isGeneratedWebResearchGroup)
+    )
+  ) {
+    throw new Error(`Health Commons generated experiment research groups are invalid: ${tabPath}.`);
+  }
+
+  if (
+    value["researchLandscape"] !== undefined &&
+    !isGeneratedWebResearchLandscape(value["researchLandscape"])
+  ) {
+    throw new Error(`Health Commons generated experiment research landscape is invalid: ${tabPath}.`);
+  }
+}
+
 function assertGeneratedWebRouteBundle(
   value: unknown,
   bundlePath: string,
@@ -1516,6 +1609,198 @@ function isGeneratedWebRoute(value: Record<string, unknown>): boolean {
   );
 }
 
+function isGeneratedWebResearchStat(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value["label"] === "string" &&
+    (typeof value["value"] === "string" || typeof value["value"] === "number")
+  );
+}
+
+function isGeneratedWebResearchLandscape(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value["bottomLine"] === "string" &&
+    isGeneratedWebResearchConfidenceLabel(value["confidenceLabel"]) &&
+    typeof value["mainCaveat"] === "string" &&
+    typeof value["primaryClaim"] === "string"
+  );
+}
+
+function isGeneratedWebResearchGroup(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value["defaultOpen"] === undefined || typeof value["defaultOpen"] === "boolean") &&
+    typeof value["id"] === "string" &&
+    typeof value["label"] === "string" &&
+    isGeneratedWebResearchStance(value["stance"]) &&
+    Array.isArray(value["studies"]) &&
+    value["studies"].every(isGeneratedWebResearchStudy) &&
+    typeof value["summary"] === "string"
+  );
+}
+
+function isGeneratedWebResearchStudy(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Object.keys(value).every((key) => GENERATED_WEB_RESEARCH_STUDY_KEYS.has(key)) &&
+    typeof value["authors"] === "string" &&
+    (value["caveat"] === undefined || typeof value["caveat"] === "string") &&
+    (value["designLabel"] === undefined || typeof value["designLabel"] === "string") &&
+    (value["displayPriority"] === undefined || typeof value["displayPriority"] === "number") &&
+    (value["duration"] === undefined || typeof value["duration"] === "string") &&
+    (value["finding"] === undefined || typeof value["finding"] === "string") &&
+    (
+      value["findingKind"] === undefined ||
+      isGeneratedWebResearchFindingKind(value["findingKind"])
+    ) &&
+    (value["groupId"] === undefined || typeof value["groupId"] === "string") &&
+    (value["headline"] === undefined || typeof value["headline"] === "string") &&
+    (value["implication"] === undefined || typeof value["implication"] === "string") &&
+    typeof value["journal"] === "string" &&
+    (
+      value["participantCountKind"] === undefined ||
+      isGeneratedWebResearchParticipantCountKind(value["participantCountKind"])
+    ) &&
+    (value["population"] === undefined || typeof value["population"] === "string") &&
+    (
+      value["result"] === undefined ||
+      isGeneratedWebResearchResult(value["result"])
+    ) &&
+    (
+      value["scope"] === undefined ||
+      isGeneratedWebResearchScope(value["scope"])
+    ) &&
+    (
+      value["stance"] === undefined ||
+      isGeneratedWebResearchStance(value["stance"])
+    ) &&
+    typeof value["title"] === "string" &&
+    isGeneratedWebResearchStudyType(value["type"]) &&
+    (value["year"] === undefined || typeof value["year"] === "number") &&
+    (value["participants"] === undefined || typeof value["participants"] === "number") &&
+    (value["includedStudyCount"] === undefined || typeof value["includedStudyCount"] === "number") &&
+    (value["url"] === undefined || typeof value["url"] === "string")
+  );
+}
+
+function isGeneratedWebResearchConfidenceLabel(value: unknown): boolean {
+  return typeof value === "string" && GENERATED_WEB_RESEARCH_CONFIDENCE_LABELS.has(value);
+}
+
+function isGeneratedWebResearchFindingKind(value: unknown): boolean {
+  return typeof value === "string" && GENERATED_WEB_RESEARCH_FINDING_KINDS.has(value);
+}
+
+function isGeneratedWebResearchParticipantCountKind(value: unknown): boolean {
+  return typeof value === "string" && GENERATED_WEB_RESEARCH_PARTICIPANT_COUNT_KINDS.has(value);
+}
+
+function isGeneratedWebResearchResult(value: unknown): boolean {
+  return typeof value === "string" && GENERATED_WEB_RESEARCH_RESULTS.has(value);
+}
+
+function isGeneratedWebResearchScope(value: unknown): boolean {
+  return typeof value === "string" && GENERATED_WEB_RESEARCH_SCOPES.has(value);
+}
+
+function isGeneratedWebResearchStance(value: unknown): boolean {
+  return typeof value === "string" && GENERATED_WEB_RESEARCH_STANCES.has(value);
+}
+
+function isGeneratedWebResearchStudyType(value: unknown): boolean {
+  return typeof value === "string" && GENERATED_WEB_RESEARCH_STUDY_TYPES.has(value);
+}
+
+const GENERATED_WEB_RESEARCH_STUDY_KEYS = new Set<string>([
+  "authors",
+  "caveat",
+  "designLabel",
+  "displayPriority",
+  "duration",
+  "finding",
+  "findingKind",
+  "groupId",
+  "headline",
+  "implication",
+  "includedStudyCount",
+  "journal",
+  "participantCountKind",
+  "participants",
+  "population",
+  "result",
+  "scope",
+  "stance",
+  "title",
+  "type",
+  "url",
+  "year",
+]);
+
+const GENERATED_WEB_RESEARCH_CONFIDENCE_LABELS = new Set<string>([
+  "early",
+  "limited",
+  "mixed",
+  "moderate",
+  "strong",
+]);
+const GENERATED_WEB_RESEARCH_FINDING_KINDS = new Set<string>([
+  "finding",
+  "protocol_takeaway",
+  "why_it_matters",
+]);
+const GENERATED_WEB_RESEARCH_PARTICIPANT_COUNT_KINDS = new Set<string>([
+  "approximate",
+  "range",
+  "reported",
+]);
+const GENERATED_WEB_RESEARCH_RESULTS = new Set<string>([
+  "mixed",
+  "negative",
+  "no_clear_advantage",
+  "not_efficacy_evidence",
+  "positive",
+]);
+const GENERATED_WEB_RESEARCH_SCOPES = new Set<string>([
+  "adjacent_variant",
+  "clinical_supervised",
+  "direct_protocol",
+  "general_guideline",
+  "measurement_context",
+  "same_mechanism",
+]);
+const GENERATED_WEB_RESEARCH_STANCES = new Set<string>([
+  "context_only",
+  "contradicts",
+  "does_not_confirm",
+  "mixed",
+  "safety_boundary",
+  "supports",
+]);
+const GENERATED_WEB_RESEARCH_STUDY_TYPES = new Set<string>([
+  "GUIDE",
+  "INT",
+  "MA",
+  "MECH",
+  "N1",
+  "OBS",
+  "RCT",
+  "REV",
+  "SRC",
+]);
+
 function isGeneratedWebBundleEntity(value: Record<string, unknown>): boolean {
   if (
     typeof value["entityType"] !== "string" ||
@@ -1536,6 +1821,12 @@ function isGeneratedWebBundleEntity(value: Record<string, unknown>): boolean {
     Array.isArray(relations) &&
     relations.length === 0
   );
+}
+
+function experimentResearchTabPathForRouteBundlePath(bundlePath: string): string {
+  const fileName = bundlePath.split("/").at(-1) ?? "";
+  const routeId = fileName.replace(/\.json$/u, "");
+  return `tabs/experiments/${routeId}/research.json`;
 }
 
 function normalizeKeyInput(value: string): string {

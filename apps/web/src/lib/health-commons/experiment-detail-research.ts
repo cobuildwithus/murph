@@ -15,6 +15,7 @@ import type { HealthCommonsEntity } from "@murphai/health-commons/runtime";
 
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";
+const STUDY_FINDING_MAX_LENGTH = 1_000;
 
 interface BuiltResearchGroups {
   coveredSourceCount: number;
@@ -113,7 +114,7 @@ export function toStudy(
 ): Study {
   const source = entity.source;
   const evidence = entity.researchEvidence;
-  const extractedFinding = extractStudyFinding(entity.body);
+  const extractedFinding = extractPublicStudyFinding(entity.body);
   const fallbackFinding = extractedFinding
     ? undefined
     : buildStudyFindingFallback(entity, appraisal);
@@ -232,7 +233,7 @@ function orderGroupStudySources(
   evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
 ): HealthCommonsEntity[] {
   const fromLandscapeOrder = group.sourceKeys.flatMap((sourceKey) => {
-    const source = sourcesByKey.get(sourceKey);
+    const source = sourcesByKey.get(stripRevision(sourceKey));
     return source ? [source] : [];
   });
 
@@ -243,8 +244,13 @@ function orderGroupStudySources(
       return leftPriority - rightPriority;
     }
 
-    return group.sourceKeys.indexOf(left.key) - group.sourceKeys.indexOf(right.key);
+    return findLandscapeSourceIndex(group.sourceKeys, left.key)
+      - findLandscapeSourceIndex(group.sourceKeys, right.key);
   });
+}
+
+function findLandscapeSourceIndex(sourceKeys: readonly string[], key: string): number {
+  return sourceKeys.findIndex((sourceKey) => stripRevision(sourceKey) === key);
 }
 
 function findStudyDisplayPriority(
@@ -709,6 +715,19 @@ function extractStudyFinding(body: string): string | undefined {
 
   const finding = findingLines.join(" ").replace(/\s+/gu, " ").trim();
   return finding || undefined;
+}
+
+function extractPublicStudyFinding(body: string): string | undefined {
+  const finding = extractStudyFinding(body);
+  if (!finding) {
+    return undefined;
+  }
+
+  if (finding.length <= STUDY_FINDING_MAX_LENGTH) {
+    return finding;
+  }
+
+  return `${finding.slice(0, STUDY_FINDING_MAX_LENGTH - 3).trimEnd()}...`;
 }
 
 function formatCategory(value: string): string {
