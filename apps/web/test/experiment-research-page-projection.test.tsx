@@ -181,6 +181,69 @@ describe("ExperimentResearchPage", () => {
     }
   });
 
+  it("rereads generated protocol projections outside production cache", async () => {
+    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
+    const generatedWebArtifactsRoot = path.join(
+      generatedWebRoot,
+      "packages/health-commons/generated/web",
+    );
+    const protocolArtifactPath = path.join(
+      generatedWebArtifactsRoot,
+      "tabs/experiments/norwegian-4x4/protocol.json",
+    );
+
+    await mkdir(path.join(generatedWebArtifactsRoot, "routes"), { recursive: true });
+    await mkdir(path.dirname(protocolArtifactPath), { recursive: true });
+
+    await writeFile(
+      path.join(generatedWebArtifactsRoot, "routes/index.json"),
+      JSON.stringify(getGeneratedHealthCommonsWebRouteIndex()),
+      "utf8",
+    );
+
+    const protocol = JSON.parse(
+      readFileSync(
+        new URL("../../../packages/health-commons/generated/web/tabs/experiments/norwegian-4x4/protocol.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      protocolTips: string[];
+    };
+
+    await writeFile(protocolArtifactPath, JSON.stringify(protocol), "utf8");
+
+    vi.resetModules();
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(generatedWebRoot);
+    try {
+      const { loadGeneratedExperimentProjection } = await import(
+        "@/src/lib/health-commons/generated-experiment-artifacts"
+      );
+
+      const firstRead = loadGeneratedExperimentProjection("norwegian-4x4", "experiment.protocol");
+      expect(firstRead?.protocolTips).toContain(
+        "Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule stable.",
+      );
+
+      await writeFile(
+        protocolArtifactPath,
+        JSON.stringify({
+          ...protocol,
+          protocolTips: [
+            "Fresh protocol tip from regenerated markdown.",
+          ],
+        }),
+        "utf8",
+      );
+
+      const secondRead = loadGeneratedExperimentProjection("norwegian-4x4", "experiment.protocol");
+      expect(secondRead?.protocolTips).toEqual([
+        "Fresh protocol tip from regenerated markdown.",
+      ]);
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
   it("renders the same Finnish sauna research fields as the full detail model", async () => {
     const fullProtocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
     if (!fullProtocol) {
