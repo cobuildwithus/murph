@@ -55,6 +55,7 @@ import type {
 } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthControllerInput {
+  disableSignup?: boolean;
   inviteCode?: string | null;
   intent?: HostedPhoneAuthIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
@@ -66,6 +67,7 @@ interface HostedPhoneAuthControllerInput {
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
 export function useHostedPhoneAuthController({
+  disableSignup = false,
   inviteCode,
   intent = "auth",
   onCompleted,
@@ -168,6 +170,7 @@ export function useHostedPhoneAuthController({
   const sharedFlowProps = {
     activeAttempt: phoneVerificationAttempt,
     code,
+    disableSignup,
     disabled: flowDisabled,
     intent,
     phoneFieldDescription: null,
@@ -269,7 +272,17 @@ export function useHostedPhoneAuthController({
   }
 
   async function sendVerificationCode(nextPhoneNumber: string) {
-    await sendCode({ phoneNumber: nextPhoneNumber });
+    try {
+      await sendCode({
+        phoneNumber: nextPhoneNumber,
+        ...(disableSignup ? { disableSignup: true } : {}),
+      });
+    } catch (error) {
+      if (!disableSignup) {
+        throw error;
+      }
+    }
+
     setCode("");
     setPhoneVerificationAttempt(
       createHostedPhoneVerificationAttempt(nextPhoneNumber),
@@ -322,6 +335,11 @@ export function useHostedPhoneAuthController({
       await loginWithCode({ code: submittedCode });
       await runHostedPrivyFinalization(intent === "link" ? "continue" : "verify-code");
     } catch (error) {
+      if (disableSignup) {
+        setErrorMessage("We could not verify that code.");
+        return;
+      }
+
       if (isHostedPrivyAccountConflictError(error)) {
         transitionToAuthenticatedSessionRestart();
         setCode("");

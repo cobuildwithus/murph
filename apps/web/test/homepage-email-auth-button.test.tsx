@@ -80,6 +80,18 @@ function HomepageEmailAuthButtonHarness() {
   );
 }
 
+function HomepageEmailLoginButtonHarness() {
+  const [active, setActive] = useState(false);
+
+  return (
+    <HostedEmailAuthButton
+      active={active}
+      disableSignup
+      onActivate={() => setActive(true)}
+    />
+  );
+}
+
 test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects through the shared homepage completion flow", async () => {
   const { assign, button, cleanup, container, window } = await renderClientComponent(
     createElement(HomepageEmailAuthButtonHarness),
@@ -139,6 +151,125 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
     user: null,
   });
   expect(assign).toHaveBeenCalledWith("/settings");
+});
+
+test("HomepageEmailAuthButton uses no-signup mode for login code sends and resends", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(HomepageEmailLoginButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = container.querySelector("form");
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, " user@example.com ");
+    }
+    emailForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  expect(mocks.sendCode).toHaveBeenCalledWith({
+    email: "user@example.com",
+    disableSignup: true,
+  });
+
+  const resendButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Resend code"),
+  );
+  expect(resendButton).toBeTruthy();
+
+  await act(async () => {
+    resendButton?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.sendCode).toHaveBeenLastCalledWith({
+    email: "user@example.com",
+    disableSignup: true,
+  });
+});
+
+test("HomepageEmailAuthButton does not expose no-account send-code errors in login mode", async () => {
+  mocks.sendCode.mockRejectedValueOnce(new Error("No account for this email"));
+
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(HomepageEmailLoginButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = container.querySelector("form");
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, " missing@example.com ");
+    }
+    emailForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  expect(mocks.sendCode).toHaveBeenCalledWith({
+    email: "missing@example.com",
+    disableSignup: true,
+  });
+  expect(container.textContent).toContain("Verify email");
+  expect(container.textContent).toContain(
+    "If an account exists for missing@example.com",
+  );
+  expect(container.textContent).not.toContain("No account for this email");
+});
+
+test("HomepageEmailAuthButton does not expose no-account verify errors in login mode", async () => {
+  mocks.loginWithCode.mockRejectedValueOnce(new Error("No account for this email"));
+
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(HomepageEmailLoginButtonHarness),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  const emailInput = container.querySelector(
+    'input[id="homepage-email-address"]',
+  ) as HTMLInputElement | null;
+  const emailForm = container.querySelector("form");
+
+  await act(async () => {
+    if (emailInput) {
+      setInputValue(window, emailInput, "missing@example.com");
+    }
+    emailForm?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+
+  const codeInput = container.querySelector(
+    "input[data-input-otp]",
+  ) as HTMLInputElement | null;
+  const verifyButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Verify email"),
+  );
+
+  await act(async () => {
+    if (codeInput) {
+      setInputValue(window, codeInput, "000000");
+    }
+    verifyButton?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(container.textContent).toContain("We could not verify that code.");
+  expect(container.textContent).not.toContain("No account for this email");
 });
 
 test("HomepageEmailAuthButton validates the email address before sending a code", async () => {

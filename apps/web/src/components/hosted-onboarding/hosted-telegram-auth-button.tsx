@@ -20,9 +20,11 @@ import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 
 export function HostedTelegramAuthButton({
   active = false,
+  disableSignup = false,
   onActivate,
 }: {
   active?: boolean;
+  disableSignup?: boolean;
   onActivate: () => void;
 }) {
   const { createWallet } = useCreateWallet();
@@ -45,7 +47,7 @@ export function HostedTelegramAuthButton({
     setRedirectPending(true);
 
     try {
-      await login();
+      await login(disableSignup ? { disableSignup: true } : undefined);
       const result = await completeHostedPrivyAuth({
         ...authSession,
       });

@@ -14,19 +14,23 @@ import { HostedTelegramAuthButton } from "./hosted-telegram-auth-button";
 
 type HostedAuthMethod = "phone" | "telegram" | "email";
 type HostedAlternateMethod = Exclude<HostedAuthMethod, "phone"> | null;
+type HostedAuthMode = "login" | "signup";
 
 export function HostedAuthPanel({
+  authMode = "signup",
   methods,
   onCompleted,
   onSignOut,
   showLegalNotice = false,
 }: {
+  authMode?: HostedAuthMode;
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   showLegalNotice?: boolean;
 }) {
   const [activeMethod, setActiveMethod] = useState<HostedAlternateMethod>(null);
+  const disableSignup = authMode === "login";
   const includesPhone = methods.includes("phone");
   const includesTelegram = methods.includes("telegram");
   const includesEmail = methods.includes("email");
@@ -37,6 +41,7 @@ export function HostedAuthPanel({
       <HostedPrivyCaptcha />
       {includesPhone ? (
         <HostedPhoneAuth
+          disableSignup={disableSignup}
           onCompleted={onCompleted}
           onSignOut={onSignOut}
           renderCaptcha={false}
@@ -56,12 +61,14 @@ export function HostedAuthPanel({
             {includesTelegram ? (
               <HostedTelegramAuthButton
                 active={activeMethod === "telegram"}
+                disableSignup={disableSignup}
                 onActivate={() => setActiveMethod("telegram")}
               />
             ) : null}
             {includesEmail ? (
               <HostedEmailAuthButton
                 active={activeMethod === "email"}
+                disableSignup={disableSignup}
                 onActivate={() => setActiveMethod("email")}
               />
             ) : null}

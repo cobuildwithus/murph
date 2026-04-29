@@ -13,10 +13,14 @@ import { LandingAuthActions } from "@/app/auth-controls";
 import { renderClientComponent } from "./render-client-component";
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => ({
-  HostedAuthPanel(props: { showLegalNotice?: boolean }) {
+  HostedAuthPanel(props: {
+    authMode?: "login" | "signup";
+    showLegalNotice?: boolean;
+  }) {
     return createElement(
       "div",
       {
+        "data-hosted-auth-mode": props.authMode ?? "signup",
         "data-hosted-auth-legal-notice":
           props.showLegalNotice ? "shown" : "hidden",
       },
@@ -85,12 +89,15 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   expect(window.document.body.textContent).toContain("Log in or sign up");
 });
 
-test("LandingAuthActions does not render a separate sign-in action", async () => {
+test.each([
+  ["nav", "Log in or sign up"],
+  ["hero", "See what works for your body"],
+] as const)("LandingAuthActions keeps the %s CTA as one auth button", async (context, authLabel) => {
   const { cleanup, container } = await renderClientComponent(
     createElement(LandingAuthActions, {
       authenticated: false,
-      context: "nav",
-      authLabel: "Log in or sign up",
+      context,
+      authLabel,
     }),
   );
   cleanupRender = cleanup;
@@ -99,7 +106,52 @@ test("LandingAuthActions does not render a separate sign-in action", async () =>
     container.querySelectorAll("button"),
   ) as HTMLButtonElement[];
   expect(buttons).toHaveLength(1);
-  expect(buttons[0]?.textContent).toContain("Log in or sign up");
+  expect(buttons[0]?.textContent).toContain(authLabel);
+});
+
+test("LandingAuthActions splits the lower homepage CTA into login and signup actions", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "footer",
+      authLabel: "Signup",
+      signupLabel: "Signup",
+      splitUnauthenticated: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const buttons = Array.from(
+    container.querySelectorAll("button"),
+  ) as HTMLButtonElement[];
+  expect(buttons).toHaveLength(2);
+  expect(buttons[0]?.textContent).toBe("Log in");
+  expect(buttons[1]?.textContent).toBe("Signup");
+
+  await act(async () => {
+    buttons[0]?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(container.textContent).toContain("Log in to Murph");
+  expect(
+    container.querySelector('[data-hosted-auth-mode="login"]'),
+  ).toBeTruthy();
+  expect(
+    container.querySelector(
+      '[data-hosted-auth-mode="login"][data-hosted-auth-legal-notice="hidden"]',
+    ),
+  ).toBeTruthy();
+
+  await act(async () => {
+    buttons[1]?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(container.textContent).toContain("Create your Murph account");
+  expect(
+    container.querySelector(
+      '[data-hosted-auth-mode="signup"][data-hosted-auth-legal-notice="shown"]',
+    ),
+  ).toBeTruthy();
 });
 
 test("LandingAuthActions shows only an Open settings link for authenticated users", async () => {
