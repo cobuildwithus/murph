@@ -53,8 +53,10 @@ function createCatalog(catalogHash: string) {
 }
 
 function createProtocolEntity(input: {
+  hidden?: boolean;
   key: string;
   slug: string;
+  status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community";
   title: string;
   relations?: { target: string; type: string }[];
 }) {
@@ -66,6 +68,8 @@ function createProtocolEntity(input: {
     title: input.title,
     summary: `${input.title} summary.`,
     categories: ["recovery"],
+    hidden: input.hidden,
+    status: input.status,
     lineage: { relationship: "root" as const },
     attribution: { ownerType: "murph" as const },
     protocol: {
@@ -179,6 +183,35 @@ describe("@murphai/health-commons build determinism", () => {
         ],
       }),
     ).toThrow("Duplicate Health Commons web route id generated for protocol_variant:shared");
+  });
+
+  it("does not generate experiment research-tab projections for hidden or deprecated protocols", () => {
+    const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
+      ...createCatalog("sha256:first"),
+      entities: [
+        createProtocolEntity({
+          key: "protocol_variant:family/public",
+          slug: "protocols/family/public",
+          title: "Public Protocol",
+        }),
+        createProtocolEntity({
+          hidden: true,
+          key: "protocol_variant:family/hidden",
+          slug: "protocols/family/hidden",
+          title: "Hidden Protocol",
+        }),
+        createProtocolEntity({
+          key: "protocol_variant:family/deprecated",
+          slug: "protocols/family/deprecated",
+          status: "deprecated",
+          title: "Deprecated Protocol",
+        }),
+      ],
+    });
+
+    expect([...webArtifacts.experimentResearchTabs.keys()]).toEqual([
+      "tabs/experiments/public/research.json",
+    ]);
   });
 });
 

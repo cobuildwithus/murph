@@ -1,11 +1,31 @@
 import type { ReactNode } from "react";
 
-import type { Experiment } from "@/src/types/experiments";
+import type {
+  ExperimentResearchGroup,
+  ExperimentResearchStat,
+  Study,
+} from "@/src/types/experiments";
 import { StudyCard } from "./study-card";
 import { splitBulletLead } from "./format";
 
+export interface ResearchTabExperiment {
+  id: string;
+  protocolKeepInMind: string[];
+  researchGroups?: ExperimentResearchGroup[];
+  researchLandscape?: ResearchTabLandscape;
+  researchStats: ExperimentResearchStat[];
+  studies: Study[];
+}
+
+export interface ResearchTabLandscape {
+  bottomLine: string;
+  confidenceLabel: "early" | "moderate" | "strong" | "mixed" | "limited";
+  mainCaveat: string;
+  primaryClaim: string;
+}
+
 interface ResearchTabProps {
-  experiment: Experiment;
+  experiment: ResearchTabExperiment;
 }
 
 export function ResearchTab({ experiment }: ResearchTabProps) {
@@ -152,7 +172,7 @@ function ReadingResultsNotes({ items }: { items: ReadonlyArray<string> }) {
 function ResearchLandscapeReadout({
   landscape,
 }: {
-  landscape: NonNullable<Experiment["researchLandscape"]>;
+  landscape: NonNullable<ResearchTabExperiment["researchLandscape"]>;
 }) {
   return (
     <section className="flex flex-col gap-5 rounded-xl border border-secondary/25 bg-card/90 p-7">
@@ -186,7 +206,7 @@ function ResearchLandscapeReadout({
 function ConfidenceBadge({
   level,
 }: {
-  level: NonNullable<Experiment["researchLandscape"]>["confidenceLabel"];
+  level: NonNullable<ResearchTabExperiment["researchLandscape"]>["confidenceLabel"];
 }) {
   const tone: Record<typeof level, { label: string; className: string }> = {
     early: { label: "Early", className: "border-chart-4/40 bg-chart-4/10 text-chart-4" },
@@ -214,7 +234,7 @@ function ConfidenceBadge({
 function ResearchGroupCard({
   group,
 }: {
-  group: NonNullable<Experiment["researchGroups"]>[number];
+  group: NonNullable<ResearchTabExperiment["researchGroups"]>[number];
 }) {
   const sourceMixSummary = formatResearchGroupSourceMix(group.studies);
 
@@ -276,7 +296,7 @@ function formatResearchGroupLabel(id: string, fallbackLabel: string): string {
 }
 
 function formatResearchGroupSourceMix(
-  studies: NonNullable<Experiment["researchGroups"]>[number]["studies"],
+  studies: NonNullable<ResearchTabExperiment["researchGroups"]>[number]["studies"],
 ): string {
   const sourceCount = studies.length;
   const categoryCounts = [
@@ -305,14 +325,14 @@ function formatResearchGroupSourceMix(
 }
 
 function countStudiesByType(
-  studies: NonNullable<Experiment["researchGroups"]>[number]["studies"],
-  includedTypes: readonly Experiment["studies"][number]["type"][],
+  studies: NonNullable<ResearchTabExperiment["researchGroups"]>[number]["studies"],
+  includedTypes: readonly ResearchTabExperiment["studies"][number]["type"][],
 ): number {
   return studies.filter((study) => includedTypes.includes(study.type)).length;
 }
 
 function formatEvidenceStance(
-  stance: NonNullable<Experiment["researchGroups"]>[number]["stance"],
+  stance: NonNullable<ResearchTabExperiment["researchGroups"]>[number]["stance"],
 ): string {
   switch (stance) {
     case "supports": return "Supports";

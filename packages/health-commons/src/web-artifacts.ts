@@ -5,6 +5,9 @@ import type {
   HealthCommonsEvidenceAppraisal,
   HealthCommonsRedirect,
   HealthCommonsRelation,
+  HealthCommonsResearchEvidence,
+  HealthCommonsResearchLandscapeGroup,
+  HealthCommonsSource,
 } from "@murphai/contracts";
 
 export const HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION =
@@ -15,8 +18,12 @@ export const HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION =
   "murph.commons.web.experiment-index.v1" as const;
 export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
   "murph.commons.web.biomarker-index.v1" as const;
+export const HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION =
+  "murph.commons.web.experiment-research-tab.v1" as const;
 
 const SOURCE_SNIPPET_FINDING_MAX_LENGTH = 1_000;
+const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
+const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";
 const ROUTE_BUNDLE_REVERSE_RELATION_TYPES = new Set<string>([
   "alias_of",
   "child_family",
@@ -137,9 +144,110 @@ export interface HealthCommonsWebBiomarkerIndex {
   schemaVersion: typeof HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION;
 }
 
+export type HealthCommonsWebExperimentResearchStudyType =
+  | "OBS"
+  | "RCT"
+  | "INT"
+  | "N1"
+  | "MECH"
+  | "MA"
+  | "REV"
+  | "GUIDE"
+  | "SRC";
+
+export type HealthCommonsWebExperimentResearchStance =
+  | "supports"
+  | "mixed"
+  | "does_not_confirm"
+  | "contradicts"
+  | "safety_boundary"
+  | "context_only";
+
+export type HealthCommonsWebExperimentResearchScope =
+  | "direct_protocol"
+  | "same_mechanism"
+  | "clinical_supervised"
+  | "adjacent_variant"
+  | "measurement_context"
+  | "general_guideline";
+
+export type HealthCommonsWebExperimentResearchResult =
+  | "positive"
+  | "mixed"
+  | "no_clear_advantage"
+  | "negative"
+  | "not_efficacy_evidence";
+
+export interface HealthCommonsWebExperimentResearchStudy {
+  authors: string;
+  caveat?: string;
+  designLabel?: string;
+  displayPriority?: number;
+  duration?: string;
+  finding?: string;
+  findingKind?: "finding" | "why_it_matters" | "protocol_takeaway";
+  groupId?: string;
+  headline?: string;
+  implication?: string;
+  includedStudyCount?: number;
+  journal: string;
+  participantCountKind?: "reported" | "approximate" | "range";
+  participants?: number;
+  population?: string;
+  result?: HealthCommonsWebExperimentResearchResult;
+  scope?: HealthCommonsWebExperimentResearchScope;
+  stance?: HealthCommonsWebExperimentResearchStance;
+  title: string;
+  type: HealthCommonsWebExperimentResearchStudyType;
+  url?: string;
+  year?: number;
+}
+
+export interface HealthCommonsWebExperimentResearchGroup {
+  defaultOpen?: boolean;
+  id: string;
+  label: string;
+  stance: HealthCommonsWebExperimentResearchStance;
+  studies: HealthCommonsWebExperimentResearchStudy[];
+  summary: string;
+}
+
+export interface HealthCommonsWebExperimentResearchStat {
+  label: string;
+  value: number | string;
+}
+
+export interface HealthCommonsWebExperimentResearchLandscape {
+  bottomLine: string;
+  confidenceLabel: "early" | "moderate" | "strong" | "mixed" | "limited";
+  mainCaveat: string;
+  primaryClaim: string;
+}
+
+export interface HealthCommonsWebExperimentResearchTab {
+  catalogHash: string;
+  description: string;
+  key: string;
+  protocolKeepInMind: string[];
+  researchGroups?: HealthCommonsWebExperimentResearchGroup[];
+  researchLandscape?: HealthCommonsWebExperimentResearchLandscape;
+  researchStats: HealthCommonsWebExperimentResearchStat[];
+  revision: HealthCommonsWebRevisionRef;
+  route: {
+    aliases: string[];
+    entityType: "protocol_variant";
+    routeId: string;
+    slug: string;
+  };
+  schemaVersion: typeof HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION;
+  studies: HealthCommonsWebExperimentResearchStudy[];
+  title: string;
+}
+
 export interface HealthCommonsWebGeneratedArtifacts {
   biomarkerIndex: HealthCommonsWebBiomarkerIndex;
   experimentIndex: HealthCommonsWebExperimentIndex;
+  experimentResearchTabs: Map<string, HealthCommonsWebExperimentResearchTab>;
   routeBundles: Map<string, HealthCommonsWebRouteBundle>;
   routeIndex: HealthCommonsWebRouteIndex;
 }
@@ -212,6 +320,26 @@ export function buildHealthCommonsWebGeneratedArtifacts(
   }
 
   routeEntries.sort(compareRouteEntries);
+  const experimentResearchTabs = new Map<string, HealthCommonsWebExperimentResearchTab>();
+
+  for (const bundle of routeBundles.values()) {
+    if (bundle.route.entityType !== "protocol_variant") {
+      continue;
+    }
+    const protocol = entitiesByKey.get(bundle.primaryKey);
+    if (!isPublicProtocolVariant(protocol)) {
+      continue;
+    }
+
+    experimentResearchTabs.set(
+      experimentResearchTabPathForRouteId(bundle.route.routeId),
+      buildExperimentResearchTab({
+        bundle,
+        entitiesByKey,
+        protocol,
+      }),
+    );
+  }
 
   return {
     biomarkerIndex: {
@@ -278,6 +406,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
         .sort((left, right) => left.title.localeCompare(right.title)),
       schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
     },
+    experimentResearchTabs,
     routeBundles,
     routeIndex: {
       catalogHash: catalog.catalogHash,
@@ -355,6 +484,639 @@ function buildRouteBundle(input: {
         .map((entity) => [entity.key, sourceSnippetForEntity(entity)]),
     ),
   };
+}
+
+function buildExperimentResearchTab(input: {
+  bundle: HealthCommonsWebRouteBundle;
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>;
+  protocol: HealthCommonsCatalogEntity;
+}): HealthCommonsWebExperimentResearchTab {
+  const evidenceAppraisals = input.bundle.evidenceAppraisals.filter((appraisal) =>
+    stripRevision(appraisal.targetKey) === input.protocol.key
+  );
+  const directlyCitedSources = (input.protocol.relations ?? [])
+    .filter((relation) => relation.type === "cites")
+    .flatMap((relation) => {
+      const source = input.entitiesByKey.get(stripRevision(relation.target));
+      return source?.entityType === "source_artifact" ? [source] : [];
+    });
+  const appraisalSources = evidenceAppraisals.flatMap((appraisal) => {
+    const source = input.entitiesByKey.get(stripRevision(appraisal.sourceKey));
+    return source?.entityType === "source_artifact" ? [source] : [];
+  });
+  const landscapeSources = (input.protocol.researchLandscape?.groups ?? []).flatMap((group) =>
+    group.sourceKeys.flatMap((sourceKey) => {
+      const source = input.entitiesByKey.get(stripRevision(sourceKey));
+      return source?.entityType === "source_artifact" ? [source] : [];
+    })
+  );
+  const citedSources = uniqueEntities([
+    ...directlyCitedSources,
+    ...appraisalSources,
+    ...landscapeSources,
+  ]);
+  const displaySources = citedSources.filter(isDisplaySource);
+  const countedResearchSources = displaySources.filter(isCountedResearchSource);
+  const studies = sortStudySourcesForDisplay(displaySources)
+    .map((source) => toResearchStudy(
+      source,
+      findProtocolEvidenceAppraisal(evidenceAppraisals, source.key, input.protocol.key),
+    ));
+  const researchGroupBuild = toResearchGroups({
+    citedStudySources: displaySources,
+    evidenceAppraisals,
+    protocol: input.protocol,
+  });
+  const hasCompleteResearchGroupCoverage =
+    researchGroupBuild.groups.length > 0
+    && researchGroupBuild.coveredSourceCount === researchGroupBuild.totalSourceCount;
+
+  return {
+    catalogHash: input.bundle.catalogHash,
+    description: input.protocol.summary ?? summarizeBody(input.protocol.body),
+    key: input.protocol.key,
+    protocolKeepInMind: input.protocol.protocol?.keepInMind ?? [],
+    ...(input.protocol.researchLandscape
+      ? {
+          researchLandscape: {
+            bottomLine: input.protocol.researchLandscape.bottomLine
+              ?? "The evidence base is mixed enough to read by category.",
+            confidenceLabel: input.protocol.researchLandscape.confidenceLabel ?? "limited",
+            mainCaveat: input.protocol.researchLandscape.mainCaveat
+              ?? "Adjacent and safety sources should calibrate the claim rather than become direct proof.",
+            primaryClaim: input.protocol.researchLandscape.primaryClaim
+              ?? "Use the highest-quality direct sources to set the main claim.",
+          },
+          ...(hasCompleteResearchGroupCoverage
+            ? { researchGroups: researchGroupBuild.groups }
+            : {}),
+        }
+      : {}),
+    researchStats: toResearchStats({
+      countedResearchSources,
+      displaySources,
+      evidenceAppraisals,
+      protocolKey: input.protocol.key,
+      routeId: input.bundle.route.routeId,
+    }),
+    revision: revisionRefForEntity(input.protocol),
+    route: {
+      aliases: input.bundle.route.aliases,
+      entityType: "protocol_variant",
+      routeId: input.bundle.route.routeId,
+      slug: input.protocol.slug,
+    },
+    schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION,
+    studies,
+    title: input.protocol.title,
+  };
+}
+
+interface BuiltResearchGroups {
+  coveredSourceCount: number;
+  groups: HealthCommonsWebExperimentResearchGroup[];
+  totalSourceCount: number;
+}
+
+function toResearchGroups({
+  citedStudySources,
+  evidenceAppraisals,
+  protocol,
+}: {
+  citedStudySources: readonly HealthCommonsCatalogEntity[];
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
+  protocol: HealthCommonsCatalogEntity;
+}): BuiltResearchGroups {
+  const landscapeGroups = protocol.researchLandscape?.groups ?? [];
+
+  if (landscapeGroups.length === 0) {
+    return {
+      coveredSourceCount: 0,
+      groups: [],
+      totalSourceCount: citedStudySources.length,
+    };
+  }
+
+  const sourcesByKey = new Map(citedStudySources.map((source) => [source.key, source]));
+  const coveredSourceKeys = new Set<string>();
+  const groups = landscapeGroups.flatMap((group) => {
+    const studies = orderGroupStudySources(group, sourcesByKey, protocol.key, evidenceAppraisals)
+      .flatMap((source) => {
+        const appraisal = findGroupProtocolEvidenceAppraisal(
+          evidenceAppraisals,
+          source,
+          protocol.key,
+          group.id,
+        );
+        return appraisal ? [[source, appraisal] as const] : [];
+      })
+      .map(([source, appraisal]) => {
+        coveredSourceKeys.add(source.key);
+        return toResearchStudy(source, appraisal);
+      });
+
+    if (studies.length === 0) {
+      return [];
+    }
+
+    return [{
+      ...(group.defaultOpen === undefined ? {} : { defaultOpen: group.defaultOpen }),
+      id: group.id,
+      label: group.label,
+      stance: group.stance,
+      studies,
+      summary: group.summary,
+    }];
+  });
+
+  return {
+    coveredSourceCount: coveredSourceKeys.size,
+    groups,
+    totalSourceCount: citedStudySources.length,
+  };
+}
+
+function orderGroupStudySources(
+  group: HealthCommonsResearchLandscapeGroup,
+  sourcesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+  protocolKey: string,
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
+): HealthCommonsCatalogEntity[] {
+  const fromLandscapeOrder = group.sourceKeys.flatMap((sourceKey) => {
+    const source = sourcesByKey.get(stripRevision(sourceKey));
+    return source ? [source] : [];
+  });
+
+  return fromLandscapeOrder.sort((left, right) => {
+    const leftPriority = findStudyDisplayPriority(left, group.id, protocolKey, evidenceAppraisals);
+    const rightPriority = findStudyDisplayPriority(right, group.id, protocolKey, evidenceAppraisals);
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return findLandscapeSourceIndex(group.sourceKeys, left.key)
+      - findLandscapeSourceIndex(group.sourceKeys, right.key);
+  });
+}
+
+function findLandscapeSourceIndex(sourceKeys: readonly string[], key: string): number {
+  return sourceKeys.findIndex((sourceKey) => stripRevision(sourceKey) === key);
+}
+
+function findStudyDisplayPriority(
+  entity: HealthCommonsCatalogEntity,
+  groupId: string,
+  protocolKey: string,
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
+): number {
+  return findGroupProtocolEvidenceAppraisal(evidenceAppraisals, entity, protocolKey, groupId)
+    ?.displayPriority ?? Number.MAX_SAFE_INTEGER;
+}
+
+function findGroupProtocolEvidenceAppraisal(
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
+  entity: HealthCommonsCatalogEntity,
+  protocolKey: string,
+  groupId: string,
+): HealthCommonsEvidenceAppraisal | undefined {
+  const normalizedSourceKey = stripRevision(entity.key);
+  const normalizedProtocolKey = stripRevision(protocolKey);
+  return evidenceAppraisals.find((appraisal) =>
+    stripRevision(appraisal.sourceKey) === normalizedSourceKey
+    && stripRevision(appraisal.targetKey) === normalizedProtocolKey
+    && appraisal.groupId === groupId
+  );
+}
+
+function findProtocolEvidenceAppraisal(
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
+  sourceKey: string,
+  protocolKey: string,
+): HealthCommonsEvidenceAppraisal | undefined {
+  const normalizedSourceKey = stripRevision(sourceKey);
+  const normalizedProtocolKey = stripRevision(protocolKey);
+  const matchingAppraisals = evidenceAppraisals.filter((appraisal) =>
+    stripRevision(appraisal.sourceKey) === normalizedSourceKey
+    && stripRevision(appraisal.targetKey) === normalizedProtocolKey
+  );
+
+  return matchingAppraisals.length === 1 ? matchingAppraisals[0] : undefined;
+}
+
+function toResearchStudy(
+  entity: HealthCommonsCatalogEntity,
+  appraisal?: HealthCommonsEvidenceAppraisal,
+): HealthCommonsWebExperimentResearchStudy {
+  const source = entity.source;
+  const evidence = entity.researchEvidence;
+  const extractedFinding = extractPublicStudyFinding(entity.body);
+  const fallbackFinding = extractedFinding
+    ? undefined
+    : buildStudyFindingFallback(entity, appraisal);
+
+  return omitUndefined({
+    authors: source?.authors ?? "Health Commons",
+    caveat: appraisal?.caveat,
+    designLabel: evidence?.designLabel ?? (evidence
+      ? formatResearchDesignLabel(evidence.designKind)
+      : undefined),
+    displayPriority: appraisal?.displayPriority,
+    duration: evidence?.durationLabel,
+    finding: extractedFinding ?? fallbackFinding?.text,
+    findingKind: extractedFinding ? "finding" : fallbackFinding?.kind,
+    groupId: appraisal?.groupId,
+    headline: appraisal?.headline,
+    implication: appraisal?.implication,
+    includedStudyCount: evidence?.includedStudyCount,
+    journal: source?.journal ?? formatSourceSurfaceLabel(entity, source),
+    participantCountKind: evidence?.participantCountKind,
+    participants: evidence?.participantCount,
+    population: evidence?.populationLabel,
+    result: appraisal?.result,
+    scope: appraisal?.scope,
+    stance: appraisal?.stance,
+    title: source?.title ?? entity.title,
+    type: researchEvidenceToStudyType(evidence, source),
+    url: source?.url,
+    year: source?.year,
+  });
+}
+
+function sortStudySourcesForDisplay(
+  sources: readonly HealthCommonsCatalogEntity[],
+): HealthCommonsCatalogEntity[] {
+  return [...sources].sort((left, right) => {
+    const participantDelta =
+      studyParticipantSortValue(right) - studyParticipantSortValue(left);
+    if (participantDelta !== 0) {
+      return participantDelta;
+    }
+
+    const yearDelta = studyYearSortValue(right) - studyYearSortValue(left);
+    if (yearDelta !== 0) {
+      return yearDelta;
+    }
+
+    const includedStudyDelta =
+      studyIncludedStudySortValue(right) - studyIncludedStudySortValue(left);
+    if (includedStudyDelta !== 0) {
+      return includedStudyDelta;
+    }
+
+    const rankDelta = studyDisplayRank(left) - studyDisplayRank(right);
+    if (rankDelta !== 0) {
+      return rankDelta;
+    }
+
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function studyParticipantSortValue(entity: HealthCommonsCatalogEntity): number {
+  return entity.researchEvidence?.participantCount ?? -1;
+}
+
+function studyYearSortValue(entity: HealthCommonsCatalogEntity): number {
+  return entity.source?.year ?? -1;
+}
+
+function studyIncludedStudySortValue(entity: HealthCommonsCatalogEntity): number {
+  return entity.researchEvidence?.includedStudyCount ?? -1;
+}
+
+function studyDisplayRank(entity: HealthCommonsCatalogEntity): number {
+  const bucket = readPassthroughString(entity, "evidenceBucket")?.toLowerCase() ?? "";
+  const priority = readPassthroughString(entity, "murphV1Priority")?.toLowerCase() ?? "";
+
+  if (bucket.includes("evidence backbone")) {
+    return 0;
+  }
+
+  if (priority === "high") {
+    return 1;
+  }
+
+  if (bucket.includes("long-term finnish cohort")) {
+    return 2;
+  }
+
+  if (bucket.includes("acute") || bucket.includes("mechanistic")) {
+    return 3;
+  }
+
+  if (bucket.includes("intervention") || bucket.includes("reality")) {
+    return 4;
+  }
+
+  if (priority === "medium") {
+    return 5;
+  }
+
+  return 6;
+}
+
+function isDisplaySource(entity: HealthCommonsCatalogEntity): boolean {
+  return entity.source?.kind !== undefined && entity.source.kind !== "other";
+}
+
+function isCountedResearchSource(entity: HealthCommonsCatalogEntity): boolean {
+  return entity.source?.kind === "journal_article" || entity.source?.kind === "review";
+}
+
+function researchEvidenceToStudyType(
+  evidence: HealthCommonsResearchEvidence | undefined,
+  source: HealthCommonsSource | undefined,
+): HealthCommonsWebExperimentResearchStudyType {
+  switch (evidence?.designKind) {
+    case "randomized_controlled_trial":
+      return "RCT";
+    case "single_person_report":
+      return "N1";
+    case "controlled_trial":
+    case "crossover_trial":
+    case "single_arm_trial":
+    case "pilot_intervention":
+      return "INT";
+    case "prospective_cohort":
+    case "retrospective_registry":
+    case "cross_sectional":
+    case "case_control":
+      return "OBS";
+    case "acute_mechanistic":
+      return "MECH";
+    case "meta_analysis":
+      return "MA";
+    case "systematic_review":
+    case "narrative_review":
+      return "REV";
+    case "guideline":
+    case "expert_protocol":
+      return "GUIDE";
+    case "bibliography":
+    case "other":
+      return "SRC";
+    case undefined:
+      break;
+  }
+
+  return sourceKindToStudyType(source);
+}
+
+function sourceKindToStudyType(
+  source: HealthCommonsSource | undefined,
+): HealthCommonsWebExperimentResearchStudyType {
+  if (!source) {
+    return "SRC";
+  }
+
+  if (source.kind === "guideline" || source.kind === "external_protocol") {
+    return "GUIDE";
+  }
+
+  if (source.kind === "review") {
+    const title = source.title?.toLowerCase() ?? "";
+    return title.includes("meta-analysis") || title.includes("meta analysis") ? "MA" : "REV";
+  }
+
+  if (source.kind === "journal_article") {
+    const studyText = [source.title, source.journal]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join(" ")
+      .toLowerCase();
+
+    if (
+      studyText.includes("randomized") ||
+      studyText.includes("randomised") ||
+      studyText.includes("controlled trial")
+    ) {
+      return "RCT";
+    }
+
+    if (
+      studyText.includes("cohort") ||
+      studyText.includes("association") ||
+      studyText.includes("observational")
+    ) {
+      return "OBS";
+    }
+  }
+
+  return "SRC";
+}
+
+function formatSourceSurfaceLabel(
+  entity: HealthCommonsCatalogEntity,
+  source: HealthCommonsSource | undefined,
+): string {
+  if (!source) {
+    return formatCategory(entity.entityType);
+  }
+
+  if (source.kind !== "web_page") {
+    return formatCategory(source.kind);
+  }
+
+  const categories = new Set((entity.categories ?? []).map((category) => category.toLowerCase()));
+  const url = source.url?.toLowerCase() ?? "";
+
+  if (
+    categories.has("x-post") ||
+    url.includes("://x.com/") ||
+    url.includes("://twitter.com/")
+  ) {
+    return "X Post";
+  }
+
+  if (
+    categories.has("linkedin") ||
+    url.includes("://www.linkedin.com/") ||
+    url.includes("://linkedin.com/")
+  ) {
+    return "LinkedIn Post";
+  }
+
+  if (categories.has("substack") || url.includes(".substack.com/")) {
+    return "Substack Post";
+  }
+
+  if (categories.has("blueprint") || url.includes("://blueprint.bryanjohnson.com/")) {
+    return "Blueprint Page";
+  }
+
+  return "Web Page";
+}
+
+function toResearchStats({
+  countedResearchSources,
+  displaySources,
+  evidenceAppraisals,
+  protocolKey,
+  routeId,
+}: {
+  countedResearchSources: readonly HealthCommonsCatalogEntity[];
+  displaySources: readonly HealthCommonsCatalogEntity[];
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[];
+  protocolKey: string;
+  routeId: string;
+}): HealthCommonsWebExperimentResearchStat[] {
+  const participantCountSources = routeId === NORWEGIAN_4X4_ROUTE_ID
+    ? countedResearchSources.filter((entity) =>
+        !isExcludedNorwegianParticipantCountSource(entity, protocolKey, evidenceAppraisals)
+      )
+    : countedResearchSources;
+  const mixedResearchAndProvenance =
+    countedResearchSources.length > 0 && countedResearchSources.length < displaySources.length;
+  const statsSources = mixedResearchAndProvenance ? countedResearchSources : displaySources;
+  const reviewCount = statsSources.filter((entity) => entity.source?.kind === "review").length;
+  const journalArticleCount = statsSources.filter(
+    (entity) => entity.source?.kind === "journal_article",
+  ).length;
+  const codedParticipantCount = sumPrimaryParticipantCount(participantCountSources);
+  const codedParticipantStats = codedParticipantCount > 0
+    ? [{
+        label: PARTICIPANT_STAT_LABEL,
+        value: codedParticipantCount === 1 ? "1" : `${codedParticipantCount.toLocaleString()}+`,
+      }]
+    : [];
+  const years = statsSources
+    .map((entity) => entity.source?.year)
+    .filter((year): year is number => typeof year === "number")
+    .sort((left, right) => left - right);
+  const researchYears =
+    years.length === 0
+      ? "\u2014"
+      : years[0] === years[years.length - 1]
+        ? `${years[0]}`
+        : `${years[0]}\u2013${years[years.length - 1]}`;
+
+  return [
+    { label: "SOURCES CHECKED", value: displaySources.length },
+    ...codedParticipantStats,
+    { label: "REVIEW PAPERS", value: reviewCount },
+    { label: "RESEARCH PAPERS", value: journalArticleCount },
+    { label: "YEARS COVERED", value: researchYears },
+  ];
+}
+
+function sumPrimaryParticipantCount(
+  citedSources: readonly HealthCommonsCatalogEntity[],
+): number {
+  const countsByCohort = new Map<string, number>();
+
+  for (const entity of citedSources) {
+    const evidence = entity.researchEvidence;
+    if (
+      evidence?.aggregateRole !== "primary" ||
+      typeof evidence.participantCount !== "number"
+    ) {
+      continue;
+    }
+
+    const cohortKey = evidence.cohortKey ?? entity.key;
+    const existingCount = countsByCohort.get(cohortKey) ?? 0;
+    countsByCohort.set(cohortKey, Math.max(existingCount, evidence.participantCount));
+  }
+
+  return [...countsByCohort.values()].reduce((sum, count) => sum + count, 0);
+}
+
+function isExcludedNorwegianParticipantCountSource(
+  entity: HealthCommonsCatalogEntity,
+  protocolKey: string,
+  evidenceAppraisals: readonly HealthCommonsEvidenceAppraisal[],
+): boolean {
+  const evidence = entity.researchEvidence;
+
+  if (
+    evidence?.aggregateRole !== "primary" ||
+    evidence.designKind !== "retrospective_registry"
+  ) {
+    return false;
+  }
+
+  const normalizedSourceKey = stripRevision(entity.key);
+  const normalizedProtocolKey = stripRevision(protocolKey);
+  return evidenceAppraisals.some((appraisal) =>
+    stripRevision(appraisal.sourceKey) === normalizedSourceKey
+    && stripRevision(appraisal.targetKey) === normalizedProtocolKey
+    && appraisal.stance === "safety_boundary"
+  );
+}
+
+function buildStudyFindingFallback(
+  entity: HealthCommonsCatalogEntity,
+  appraisal: HealthCommonsEvidenceAppraisal | undefined,
+): {
+  kind: HealthCommonsWebExperimentResearchStudy["findingKind"];
+  text: string;
+} | undefined {
+  const headline = normalizeStudyCardText(appraisal?.headline);
+  const whyItMatters = normalizeStudyCardText(readPassthroughString(entity, "whyItMatters"));
+  if (whyItMatters && whyItMatters !== headline) {
+    return {
+      kind: "why_it_matters",
+      text: whyItMatters,
+    };
+  }
+
+  const protocolTakeaway = normalizeStudyCardText(readPassthroughString(entity, "protocolTakeaway"));
+  if (protocolTakeaway && protocolTakeaway !== headline && protocolTakeaway !== whyItMatters) {
+    return {
+      kind: "protocol_takeaway",
+      text: protocolTakeaway,
+    };
+  }
+
+  return undefined;
+}
+
+function normalizeStudyCardText(value: string | undefined): string | undefined {
+  const normalized = value?.replace(/\s+/gu, " ").trim();
+  return normalized ? normalized : undefined;
+}
+
+function formatResearchDesignLabel(
+  designKind: HealthCommonsResearchEvidence["designKind"],
+): string {
+  return designKind
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function omitUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter((entry) => entry[1] !== undefined),
+  ) as T;
+}
+
+function uniqueEntities(entities: readonly HealthCommonsCatalogEntity[]): HealthCommonsCatalogEntity[] {
+  const seen = new Set<string>();
+  const result: HealthCommonsCatalogEntity[] = [];
+
+  for (const entity of entities) {
+    if (seen.has(entity.key)) {
+      continue;
+    }
+
+    seen.add(entity.key);
+    result.push(entity);
+  }
+
+  return result;
+}
+
+function isPublicProtocolVariant(
+  entity: HealthCommonsCatalogEntity | undefined,
+): entity is HealthCommonsCatalogEntity & { entityType: "protocol_variant" } {
+  return entity?.entityType === "protocol_variant"
+    && entity.status !== "deprecated"
+    && entity.hidden !== true;
+}
+
+function experimentResearchTabPathForRouteId(routeId: string): string {
+  return `tabs/experiments/${routeId}/research.json`;
 }
 
 function collectRouteReverseEdges(

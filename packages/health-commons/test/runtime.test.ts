@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,6 +10,7 @@ import {
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebRouteIndex,
   loadGeneratedHealthCommonsCatalog,
+  loadGeneratedHealthCommonsWebExperimentResearchTab,
   loadGeneratedHealthCommonsWebRouteBundle,
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
@@ -334,6 +338,83 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     ]));
 
     expect(bundle.reverseEdges.every((edge) => edge.relation.type !== "cites")).toBe(true);
+  });
+
+  it("loads the minimal experiment research-tab projection by primary id and aliases", () => {
+    const researchTab = loadGeneratedHealthCommonsWebExperimentResearchTab({
+      routeId: "finnish-sauna",
+    });
+    const aliasResearchTab = loadGeneratedHealthCommonsWebExperimentResearchTab({
+      routeId: "murph-finnish-standard-3x-week",
+    });
+
+    expect(researchTab).not.toBeNull();
+    expect(aliasResearchTab).toEqual(researchTab);
+    if (!researchTab) {
+      throw new Error("Expected the generated Finnish sauna research tab.");
+    }
+
+    expect(researchTab).toEqual(expect.objectContaining({
+      key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      route: expect.objectContaining({
+        entityType: "protocol_variant",
+        routeId: "finnish-sauna",
+      }),
+      schemaVersion: "murph.commons.web.experiment-research-tab.v1",
+      title: "Finnish Dry Sauna",
+    }));
+    expect(researchTab.researchStats).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "SOURCES CHECKED", value: 178 }),
+      expect.objectContaining({ label: "DIRECT HUMAN PARTICIPANTS", value: "11,584+" }),
+      expect.objectContaining({ label: "REVIEW PAPERS", value: 51 }),
+      expect.objectContaining({ label: "RESEARCH PAPERS", value: 98 }),
+      expect.objectContaining({ label: "YEARS COVERED", value: "1979–2026" }),
+    ]));
+    expect(researchTab.protocolKeepInMind).toEqual(expect.arrayContaining([
+      expect.stringContaining("short self-experiment"),
+    ]));
+    expect(Object.keys(researchTab.researchLandscape ?? {})).not.toContain("groups");
+    expect(researchTab.studies.length).toBeGreaterThan(100);
+    expect(researchTab.studies[0]).toEqual(expect.objectContaining({
+      authors: expect.any(String),
+      journal: expect.any(String),
+      title: expect.any(String),
+      type: expect.any(String),
+    }));
+    expect(researchTab.studies.every((study) => (study.finding?.length ?? 0) <= 1_000))
+      .toBe(true);
+    expect(researchTab.studies.every((study) =>
+      Object.keys(study).every((key) => RESEARCH_STUDY_PROJECTION_KEYS.has(key))
+    )).toBe(true);
+    expect(
+      researchTab.researchGroups?.every((group) =>
+        group.studies.every((study) =>
+          Object.keys(study).every((key) => RESEARCH_STUDY_PROJECTION_KEYS.has(key))
+        )
+      ) ?? true,
+    ).toBe(true);
+    expect(Object.keys(researchTab)).not.toContain("entitiesByKey");
+    expect(Object.keys(researchTab)).not.toContain("evidenceAppraisals");
+    expect(Object.keys(researchTab)).not.toContain("sourceSnippets");
+  });
+
+  it("does not publish hidden protocol variants as research-tab projections", () => {
+    expect(loadGeneratedHealthCommonsWebExperimentResearchTab({
+      routeId: "hydrolyzed-collagen-peptides",
+    })).toBeNull();
+  });
+
+  it("keeps the Finnish sauna research projection materially smaller than the route bundle", () => {
+    const bundle = readFileSync(
+      new URL("../generated/web/bundles/protocol_variant/finnish-sauna.json", import.meta.url),
+    );
+    const researchTab = readFileSync(
+      new URL("../generated/web/tabs/experiments/finnish-sauna/research.json", import.meta.url),
+    );
+
+    expect(researchTab.byteLength).toBeLessThan(250_000);
+    expect(gzipSync(researchTab).byteLength).toBeLessThan(60_000);
+    expect(bundle.byteLength / researchTab.byteLength).toBeGreaterThan(5);
   });
 
   it("loads the generated catalog and resolves keys, slugs, and route ids", () => {
@@ -680,3 +761,28 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     ).toEqual(["source_artifact:pmid-25705824"]);
   });
 });
+
+const RESEARCH_STUDY_PROJECTION_KEYS = new Set<string>([
+  "authors",
+  "caveat",
+  "designLabel",
+  "displayPriority",
+  "duration",
+  "finding",
+  "findingKind",
+  "groupId",
+  "headline",
+  "implication",
+  "includedStudyCount",
+  "journal",
+  "participantCountKind",
+  "participants",
+  "population",
+  "result",
+  "scope",
+  "stance",
+  "title",
+  "type",
+  "url",
+  "year",
+]);
