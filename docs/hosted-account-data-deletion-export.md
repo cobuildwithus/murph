@@ -1,6 +1,6 @@
 # Hosted account data deletion and export
 
-Last verified: 2026-04-29
+Last verified: 2026-04-30
 
 ## Purpose
 
@@ -16,14 +16,15 @@ Murph hosted users need a real, backend-backed way to export account data and de
 
 The export and delete endpoints are intentionally stricter than normal settings reads.
 
-1. `POST /api/settings/data-export` and `POST /api/settings/privacy/delete` require an active Privy-backed hosted member session via `requireActivePrivyMemberAuth`.
+1. `POST /api/settings/data-export` and `POST /api/settings/privacy/delete` require an authenticated Privy-backed hosted member session via `requirePrivyMemberAuth`, including members who need privacy access after losing active billing state.
 2. Both routes enforce same-origin mutation protection with `assertHostedOnboardingMutationOrigin`.
-3. Both routes parse JSON through the hosted onboarding JSON helper instead of accepting form-encoded or ambiguous bodies.
+3. Both routes parse JSON through the hosted onboarding JSON helper with a 4 KiB body limit instead of accepting form-encoded, ambiguous, or oversized bodies.
 4. `parseHostedDataExportRequest` requires the exact `EXPORT MY DATA` phrase plus sensitive-download acknowledgement. Lowercase, extra spaces, or omitted acknowledgement fail with structured 400 errors.
 5. `parseHostedAccountDeletionRequest` requires the exact deletion confirmation phrase. Lowercase, extra spaces, or omitted acknowledgements fail with structured 400 errors.
 6. The data export response is a JSON attachment with `private, no-store, no-cache` caching headers, same-origin resource policy, no referrer policy, and content-type sniffing disabled.
-7. Provider revocation and Cloudflare cleanup run before local database rows are deleted, so the workflow can still read the provider and runner identifiers needed for cleanup.
+7. Provider revocation runs before local database deletion while local token references are still readable.
 8. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row.
+9. Cloudflare runner/R2 cleanup runs only after the Prisma transaction commits, so a database failure does not leave a still-present account with already-destroyed runner state.
 
 ## Export contract
 
@@ -32,12 +33,14 @@ The user-facing export route calls `buildHostedDataExport`, which returns schema
 The export includes:
 
 - Hosted member core fields plus decrypted user-facing identity, routing, billing reference, and email authorization fields when available.
-- Mailbox items with redacted decrypted payload values when the hosted mailbox key can decode them, plus lane counters and Linq daily state.
+- Mailbox items with envelope metadata, payload byte counts, and payload presence flags, plus lane counters and Linq daily state.
 - Hosted invites without active invite codes.
-- Device connection, token audit, sync signal, and agent session metadata.
-- Hosted workspace metadata and vault sync session metadata.
-- AI usage rows with `apiKeyEnvConfigured` instead of raw environment variable names.
-- Redacted hosted runtime diagnostics.
+- Consent events and grants.
+- Device connection, token audit, sync signal, and agent session metadata with internal identifiers and provider metadata replaced by presence flags.
+- Hosted workspace metadata and vault sync session metadata with object keys, manifest hashes, and source vault IDs replaced by presence flags.
+- AI usage rows with environment, gateway, session, turn, and Stripe metering internals replaced by presence flags.
+- Hosted runtime diagnostics with diagnostic JSON and outbox intent refs omitted.
+- Per-store row limits and truncation metadata. Each multi-row export query returns at most 250 rows for this MVP.
 
 The export explicitly omits:
 
@@ -47,11 +50,11 @@ The export explicitly omits:
 - CSRF, browser assertion, internal request, and OAuth state nonce tables.
 - Active invite codes.
 - Active signup phone-code attempt IDs.
+- Internal row, correlation, session, trace, and route identifiers when a presence flag is sufficient.
+- Arbitrary decoded mailbox payload bodies.
 - Vault sync pairing codes, agent tokens, and encrypted vault payload blobs.
 - Hosted workspace snapshot/browser-replica object keys and bundle hashes.
-- API key environment variable names.
-
-`buildHostedAccountDataExport` still returns the narrower `murph.hosted-account-data-export.v1` metadata/counts shape for the deletion coverage test surface, but it is no longer the user-facing settings download.
+- API key environment variable names, gateway tag JSON, AI base URLs, session IDs, turn IDs, and Stripe metering identifiers/errors.
 
 ## Deletion workflow
 
@@ -59,8 +62,8 @@ The export explicitly omits:
 
 1. Load the hosted member and device connection identities.
 2. Best-effort revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook, currently covering configured Oura, WHOOP, Garmin, and Strava connectors.
-3. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
-4. Delete Prisma-hosted account rows in a transaction.
+3. Delete Prisma-hosted account rows in a transaction.
+4. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
 5. Return schema `murph.hosted-account-data-deletion-result.v1` with deletion counts, provider revocation outcomes, Cloudflare cleanup status, and retention notes.
 
 ## Store coverage
@@ -72,8 +75,8 @@ The export explicitly omits:
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
 | `prisma.hosted_member_email_authorization` | Live delete | Confirmed data export | Deletes verified-email and direct-public-sender authorization records. Confirmed export includes addresses when available while omitting lookup keys. |
 | `prisma.hosted_member_billing_ref` | Local reference delete | Confirmed data export | Deletes local encrypted Stripe references. Confirmed export includes local Stripe customer/subscription references. Stripe retention remains separate. |
-| `prisma.hosted_mailbox_item` | Live delete | Redacted data export | Deletes mailbox envelopes, inline ciphertext refs, dedupe keys, and sequence data. Export includes redacted decoded payloads when available, without dedupe keys or payload refs. |
-| `prisma.hosted_mailbox_payload` | Live delete | Redacted data export | Deletes encrypted mailbox payload ciphertext. Export includes redacted decoded payloads when available, not raw ciphertext, lookup keys, raw message keys, media URLs, or idempotency tokens. |
+| `prisma.hosted_mailbox_item` | Live delete | Metadata/counts | Deletes mailbox envelopes, inline ciphertext refs, dedupe keys, and sequence data. Export includes envelope metadata and payload presence/byte counts while omitting dedupe keys and payload refs. |
+| `prisma.hosted_mailbox_payload` | Live delete | Not exported secret | Deletes encrypted mailbox payload ciphertext. Export reports payload presence and bytes while omitting ciphertext and arbitrary decoded payload JSON. |
 | `prisma.hosted_mailbox_lane_counter` | Live delete | Metadata/counts | Deletes per-lane counters so deleted users cannot resume old lanes. |
 | `prisma.hosted_vault_sync_session` | Live delete | Metadata/counts | Deletes sync sessions, pairing-code hashes, and agent-token hashes. |
 | `prisma.hosted_vault_sync_payload` | Live delete | Not exported secret | Deletes encrypted local-vault import payloads. Export reports counts only. |
@@ -82,6 +85,8 @@ The export explicitly omits:
 | `prisma.hosted_ai_usage` | Live delete | Metadata/counts | Deletes local AI usage rows. Already-submitted vendor metering may remain externally. |
 | `prisma.hosted_linq_daily_state` | Live delete | Metadata/counts | Deletes Linq daily inbound/outbound quota counters. |
 | `prisma.hosted_invite` | Live delete | Metadata/counts | Deletes invite codes and channel metadata owned by the member. |
+| `prisma.hosted_consent_event` | Live delete | Confirmed data export | Deletes member-scoped consent event history. Confirmed export includes event scope/source/action and document metadata. |
+| `prisma.hosted_consent_grant` | Live delete | Confirmed data export | Deletes member-scoped consent grant state. Confirmed export includes grant scope/source/status and document metadata. |
 | `prisma.device_connection` | Live delete | Metadata/counts | Revokes providers where possible, then deletes connection rows and encrypted token bundles. |
 | `prisma.device_token_audit` | Live delete | Metadata/counts | Deletes token audit history. |
 | `prisma.device_sync_signal` | Live delete | Metadata/counts | Deletes pre-existing wake/sync signals. Deletion-time provider revocation does not enqueue new disconnect or wake work. |
@@ -89,7 +94,7 @@ The export explicitly omits:
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |
 | `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces. |
-| `prisma.device_webhook_trace` | Live delete | Metadata/counts | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows until the minimized webhook trace model has a safe user linkage. |
+| `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
 | `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and root-key-envelope objects when derivation keys are available. |
 | `providers.oura_whoop_garmin_strava` | Best-effort delete | Metadata/counts | Existing provider revocation hooks run before local token deletion. Provider-side retention remains provider-controlled. |
@@ -99,13 +104,15 @@ The export explicitly omits:
 
 ## Cloudflare runner and R2 cleanup
 
-The Cloudflare hosted-control package now exposes `POST /internal/users/:userId/delete`. The worker route requires the same Vercel OIDC authorization and bound-user header checks as the existing hosted runner control routes.
+The Cloudflare hosted-control package now exposes `POST /internal/users/:userId/account-data/delete`. The worker route requires the same Vercel OIDC authorization and bound-user header checks as the existing hosted runner control routes and enforces a 4 KiB JSON body limit.
 
 The Durable Object deletion method:
 
 - clears cached runner crypto state for the target user;
-- reads the user root key before deleting its root-key envelope so opaque per-user prefixes can still be derived;
-- attempts deletion for user-scoped bundle, artifact, browser vault replica, runner secrets, and root-key-envelope R2 keys when the R2 binding supports deletion/listing;
+- preflights the Durable Object bound user before deleting R2 objects;
+- reads the user root key before deleting any root-key envelope so opaque per-user prefixes can still be derived;
+- attempts deletion for user-scoped bundle, artifact, browser vault replica, and runner-secret R2 keys when the R2 binding supports deletion/listing;
+- deletes the root-key envelope only after user-scoped R2 cleanup has been attempted with a usable crypto context;
 - deletes runner SQL state for that user only and rejects deletion if the Durable Object is bound to a different user;
 - clears the Durable Object alarm.
 - best-effort destroys the warm runner container for the deleted user so live container state does not linger until normal container expiry.
@@ -133,6 +140,7 @@ The MVP deletes Murph live stores and local references. Provider/vendor erasure 
 - rejection of lowercase, whitespace-mutated, or incomplete confirmation payloads;
 - uniqueness and completeness of the store-coverage matrix for every high-value store listed above;
 - non-empty notes plus valid deletion/export modes for each store.
-- high-value data export contents, decoded mailbox payloads, and redaction of lookup keys, token hashes, invite codes, API key environment names, and encrypted vault payloads.
+- high-value data export contents, bounded/truncated export metadata, omitted mailbox payload bodies, and redaction of lookup keys, token hashes, invite codes, API key environment names, and encrypted vault payloads.
+- deletion ordering that keeps Cloudflare cleanup after Prisma commit and skips Cloudflare cleanup when the transaction fails.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.

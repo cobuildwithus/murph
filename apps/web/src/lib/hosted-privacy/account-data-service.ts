@@ -1,7 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
-import { decodeHostedMailboxStoredPayload } from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   readHostedMemberSnapshot,
@@ -15,7 +14,6 @@ import {
 import { normalizeHostedVaultSyncSessionStatus } from "../vault-sync/shared";
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
-  HOSTED_ACCOUNT_DATA_EXPORT_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
   HOSTED_DATA_EXPORT_SCHEMA,
@@ -81,15 +79,15 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_mailbox_item",
     label: "Hosted mailbox envelopes",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
-    note: "Deletes lane items, inline ciphertext, payload refs, dedupe keys, and sequence counters. Export includes redacted decoded payloads when available.",
+    export: "metadata-and-counts",
+    note: "Deletes lane items, inline ciphertext, payload refs, dedupe keys, and sequence counters. Export includes mailbox envelope metadata and omits decoded payload bodies.",
   },
   {
     slug: "prisma.hosted_mailbox_payload",
     label: "Hosted mailbox payload ciphertext",
     deletion: "live-delete",
-    export: "decoded-redacted-data",
-    note: "Deletes encrypted payload blobs. Export includes redacted decoded payloads when available, never raw ciphertext.",
+    export: "not-exported-secret",
+    note: "Deletes encrypted payload blobs. Export reports payload presence and bytes while omitting ciphertext and decoded arbitrary payload JSON.",
   },
   {
     slug: "prisma.hosted_mailbox_lane_counter",
@@ -214,8 +212,8 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.device_webhook_trace",
     label: "Provider webhook trace rows",
     deletion: "live-delete",
-    export: "metadata-and-counts",
-    note: "Deletes webhook trace rows for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows until the minimized webhook trace model has a safe user linkage.",
+    export: "documented-only",
+    note: "Deletes webhook trace rows for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage.",
   },
   {
     slug: "cloudflare.runner_durable_object",
@@ -270,90 +268,8 @@ export interface HostedAccountDeletionRequest {
   secondConfirmationAccepted: true;
 }
 
-export interface HostedAccountDataExport {
-  coverage: readonly HostedAccountDataStoreCoverageEntry[];
-  generatedAt: string;
-  member: {
-    id: string;
-    billingStatus: string;
-    createdAt: string;
-    pendingActivationTimeZone: string | null;
-    suspendedAt: string | null;
-    updatedAt: string;
-  };
-  counts: HostedAccountDataCounts;
-  deviceConnections: HostedAccountExportDeviceConnection[];
-  emailAuthorization: HostedAccountExportEmailAuthorization | null;
-  identity: HostedAccountExportIdentity | null;
-  retentionNotes: readonly string[];
-  routing: HostedAccountExportRouting | null;
-  schema: typeof HOSTED_ACCOUNT_DATA_EXPORT_SCHEMA;
-  vaultSyncSessions: HostedAccountExportVaultSyncSession[];
-  workspace: HostedAccountExportWorkspace | null;
-}
-
 export interface HostedAccountDataCounts {
   [key: string]: number;
-}
-
-export interface HostedAccountExportIdentity {
-  maskedPhoneNumberHint: string | null;
-  phoneNumberVerifiedAt: string | null;
-  privyUserLinked: boolean;
-  walletAddressLinked: boolean;
-  walletChainType: string | null;
-  walletCreatedAt: string | null;
-  walletProvider: string | null;
-}
-
-export interface HostedAccountExportRouting {
-  linqHomeThreadLinked: boolean;
-  linqRecipientLinked: boolean;
-  pendingLinqThreadLinked: boolean;
-  replyAliasLinked: boolean;
-  telegramLinked: boolean;
-}
-
-export interface HostedAccountExportEmailAuthorization {
-  directPublicSenderAuthorizedAt: string | null;
-  directPublicSenderLinked: boolean;
-  verifiedEmailLinked: boolean;
-  verifiedEmailVerifiedAt: string | null;
-}
-
-export interface HostedAccountExportDeviceConnection {
-  connectedAt: string;
-  createdAt: string;
-  displayName: string | null;
-  id: string;
-  lastSyncCompletedAt: string | null;
-  provider: string;
-  status: string;
-  updatedAt: string;
-}
-
-export interface HostedAccountExportVaultSyncSession {
-  createdAt: string;
-  direction: string;
-  expiresAt: string;
-  id: string;
-  payloadPresent: boolean;
-  sourceSchemaVersion: string | null;
-  sourceVaultIdPresent: boolean;
-  sourceVaultTitle: string | null;
-  status: string;
-  updatedAt: string;
-}
-
-export interface HostedAccountExportWorkspace {
-  browserVaultReplicaRefPresent: boolean;
-  checkpointedAt: string | null;
-  nextWakeAt: string | null;
-  nextWakeReason: string | null;
-  redactedStatusPresent: boolean;
-  snapshotRefPresent: boolean;
-  updatedAt: string;
-  version: string;
 }
 
 export type HostedAccountProviderRevocationStatus =
@@ -407,6 +323,7 @@ const HOSTED_DATA_EXPORT_REDACTIONS = [
   "Privy, Stripe, contact, Telegram, and device blind-index lookup keys",
   "CSRF, browser assertion, internal request, and OAuth state nonces",
   "active invite codes and recovery-style codes",
+  "arbitrary decoded mailbox payload bodies",
   "vault sync pairing codes, agent tokens, and encrypted payload blobs",
   "hosted workspace snapshot and browser-replica object keys and bundle hashes",
   "encrypted private columns already represented as decrypted user-facing fields",
@@ -420,48 +337,7 @@ const HOSTED_DATA_EXPORT_OMITTED_INTERNAL_TABLES = [
   "HostedStripeEvent",
   "HostedAssistantRuntimeIssue",
 ] as const;
-const HOSTED_DATA_EXPORT_MAILBOX_OMITTED_PAYLOAD_KEYS = new Set([
-  "apikey",
-  "authorization",
-  "dedupekey",
-  "deliverydedupetoken",
-  "deliveryidempotencykey",
-  "identityid",
-  "idempotencykey",
-  "objectkey",
-  "password",
-  "payloadref",
-  "phonelookupkey",
-  "rawmessagekey",
-  "secret",
-  "token",
-  "url",
-]);
-const HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_SUFFIXES = [
-  "blindindex",
-  "dedupekey",
-  "hash",
-  "idempotencykey",
-  "lookupkey",
-  "nonce",
-  "objectkey",
-  "payloadref",
-  "rawmessagekey",
-  "secret",
-  "token",
-  "url",
-] as const;
-const HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_MARKERS = [
-  "apikey",
-  "authorization",
-  "blindindex",
-  "credential",
-  "lookupkey",
-  "password",
-  "rawmessagekey",
-  "secret",
-  "token",
-] as const;
+const HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE = 250;
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Live Prisma, hosted mailbox, vault sync, device, runtime, and workspace rows are deleted immediately by this workflow.",
@@ -541,141 +417,6 @@ export function parseHostedDataExportRequest(
   };
 }
 
-export async function buildHostedAccountDataExport(input: {
-  memberId: string;
-  prisma: HostedAccountDataPrisma;
-}): Promise<HostedAccountDataExport> {
-  const member = await input.prisma.hostedMember.findUnique({
-    where: { id: input.memberId },
-    include: {
-      emailAuthorization: true,
-      hostedWorkspace: true,
-      identity: true,
-      routing: true,
-    },
-  });
-
-  if (!member) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_NOT_FOUND",
-      httpStatus: 404,
-      message: "Your hosted member record was not found.",
-    });
-  }
-
-  const [counts, deviceConnections, vaultSyncSessions] = await Promise.all([
-    countHostedAccountData({ memberId: input.memberId, prisma: input.prisma }),
-    input.prisma.deviceConnection.findMany({
-      orderBy: [{ provider: "asc" }, { createdAt: "asc" }],
-      select: {
-        connectedAt: true,
-        createdAt: true,
-        displayName: true,
-        id: true,
-        lastSyncCompletedAt: true,
-        provider: true,
-        status: true,
-        updatedAt: true,
-      },
-      where: { userId: input.memberId },
-    }),
-    input.prisma.hostedVaultSyncSession.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        createdAt: true,
-        direction: true,
-        expiresAt: true,
-        id: true,
-        payload: { select: { sessionId: true } },
-        sourceSchemaVersion: true,
-        sourceVaultId: true,
-        sourceVaultTitle: true,
-        status: true,
-        updatedAt: true,
-      },
-      where: { memberId: input.memberId },
-    }),
-  ]);
-
-  return {
-    coverage: HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
-    generatedAt: new Date().toISOString(),
-    member: {
-      id: member.id,
-      billingStatus: member.billingStatus,
-      createdAt: toIso(member.createdAt),
-      pendingActivationTimeZone: member.pendingActivationTimeZone,
-      suspendedAt: toIsoNullable(member.suspendedAt),
-      updatedAt: toIso(member.updatedAt),
-    },
-    counts,
-    deviceConnections: deviceConnections.map((connection) => ({
-      connectedAt: toIso(connection.connectedAt),
-      createdAt: toIso(connection.createdAt),
-      displayName: connection.displayName,
-      id: connection.id,
-      lastSyncCompletedAt: toIsoNullable(connection.lastSyncCompletedAt),
-      provider: connection.provider,
-      status: connection.status,
-      updatedAt: toIso(connection.updatedAt),
-    })),
-    emailAuthorization: member.emailAuthorization
-      ? {
-        directPublicSenderAuthorizedAt: toIsoNullable(member.emailAuthorization.directPublicSenderAuthorizedAt),
-        directPublicSenderLinked: Boolean(member.emailAuthorization.directPublicSenderLookupKey),
-        verifiedEmailLinked: Boolean(member.emailAuthorization.verifiedEmailLookupKey),
-        verifiedEmailVerifiedAt: toIsoNullable(member.emailAuthorization.verifiedEmailVerifiedAt),
-      }
-      : null,
-    identity: member.identity
-      ? {
-        maskedPhoneNumberHint: member.identity.maskedPhoneNumberHint,
-        phoneNumberVerifiedAt: toIsoNullable(member.identity.phoneNumberVerifiedAt),
-        privyUserLinked: Boolean(member.identity.privyUserLookupKey),
-        walletAddressLinked: Boolean(member.identity.walletAddressLookupKey),
-        walletChainType: member.identity.walletChainType,
-        walletCreatedAt: toIsoNullable(member.identity.walletCreatedAt),
-        walletProvider: member.identity.walletProvider,
-      }
-      : null,
-    retentionNotes: HOSTED_ACCOUNT_RETENTION_NOTES,
-    routing: member.routing
-      ? {
-        linqHomeThreadLinked: Boolean(member.routing.linqChatLookupKey),
-        linqRecipientLinked: Boolean(member.routing.linqRecipientPhoneLookupKey),
-        pendingLinqThreadLinked: Boolean(member.routing.pendingLinqChatLookupKey),
-        replyAliasLinked: Boolean(member.routing.replyAliasLookupKey),
-        telegramLinked: Boolean(member.routing.telegramUserLookupKey),
-      }
-      : null,
-    schema: HOSTED_ACCOUNT_DATA_EXPORT_SCHEMA,
-    vaultSyncSessions: vaultSyncSessions.map((session) => ({
-      createdAt: toIso(session.createdAt),
-      direction: session.direction,
-      expiresAt: toIso(session.expiresAt),
-      id: session.id,
-      payloadPresent: session.payload !== null,
-      sourceSchemaVersion: session.sourceSchemaVersion,
-      sourceVaultIdPresent: Boolean(session.sourceVaultId),
-      sourceVaultTitle: session.sourceVaultTitle,
-      status: session.status,
-      updatedAt: toIso(session.updatedAt),
-    })),
-    workspace: member.hostedWorkspace
-      ? {
-        browserVaultReplicaRefPresent: member.hostedWorkspace.browserVaultReplicaRef !== null,
-        checkpointedAt: toIsoNullable(member.hostedWorkspace.checkpointedAt),
-        nextWakeAt: toIsoNullable(member.hostedWorkspace.nextWakeAt),
-        nextWakeReason: member.hostedWorkspace.nextWakeReason,
-        redactedStatusPresent: member.hostedWorkspace.redactedStatusJson !== null,
-        snapshotRefPresent: member.hostedWorkspace.snapshotRef !== null,
-        updatedAt: toIso(member.hostedWorkspace.updatedAt),
-        version: member.hostedWorkspace.version.toString(),
-      }
-      : null,
-  };
-}
-
 export async function buildHostedDataExport(input: {
   memberId: string;
   prisma: HostedAccountDataPrisma;
@@ -686,6 +427,7 @@ export async function buildHostedDataExport(input: {
 
   const [
     memberSnapshot,
+    counts,
     deviceConnections,
     deviceAgentSessions,
     deviceTokenAudits,
@@ -702,6 +444,7 @@ export async function buildHostedDataExport(input: {
     linqDailyStates,
   ] = await Promise.all([
     readHostedMemberSnapshot({ memberId, prisma }),
+    countHostedAccountData({ memberId, prisma }),
     prisma.deviceConnection.findMany({
       orderBy: { connectedAt: "desc" },
       select: {
@@ -709,7 +452,6 @@ export async function buildHostedDataExport(input: {
         connectedAt: true,
         createdAt: true,
         displayName: true,
-        id: true,
         keyVersion: true,
         lastErrorCode: true,
         lastErrorMessage: true,
@@ -727,6 +469,7 @@ export async function buildHostedDataExport(input: {
         updatedAt: true,
         userId: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { userId: memberId },
     }),
     prisma.deviceAgentSession.findMany({
@@ -734,7 +477,6 @@ export async function buildHostedDataExport(input: {
       select: {
         createdAt: true,
         expiresAt: true,
-        id: true,
         label: true,
         lastSeenAt: true,
         replacedBySessionId: true,
@@ -743,6 +485,7 @@ export async function buildHostedDataExport(input: {
         updatedAt: true,
         userId: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { userId: memberId },
     }),
     prisma.deviceTokenAudit.findMany({
@@ -750,11 +493,9 @@ export async function buildHostedDataExport(input: {
       select: {
         action: true,
         channel: true,
-        connectionId: true,
         createdAt: true,
         expectedTokenVersion: true,
         forceRefresh: true,
-        id: true,
         keyVersion: true,
         provider: true,
         refreshOutcome: true,
@@ -763,6 +504,7 @@ export async function buildHostedDataExport(input: {
         tokenVersionChanged: true,
         userId: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { userId: memberId },
     }),
     prisma.deviceSyncSignal.findMany({
@@ -771,7 +513,6 @@ export async function buildHostedDataExport(input: {
         connectionId: true,
         createdAt: true,
         eventType: true,
-        id: true,
         kind: true,
         nextReconcileAt: true,
         occurredAt: true,
@@ -783,33 +524,29 @@ export async function buildHostedDataExport(input: {
         traceId: true,
         userId: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { userId: memberId },
     }),
     prisma.hostedMailboxItem.findMany({
       orderBy: [{ lane: "asc" }, { laneSeq: "asc" }],
       select: {
         createdAt: true,
-        dedupeKey: true,
         expiresAt: true,
-        id: true,
         kind: true,
         lane: true,
         laneSeq: true,
         occurredAt: true,
         payload: {
           select: {
-            createdAt: true,
-            payloadCiphertext: true,
             payloadSchema: true,
           },
         },
         payloadBytes: true,
-        payloadInlineCiphertext: true,
-        payloadRef: true,
         payloadSchema: true,
         updatedAt: true,
         userId: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { userId: memberId },
     }),
     prisma.hostedMailboxLaneCounter.findMany({
@@ -820,6 +557,7 @@ export async function buildHostedDataExport(input: {
         updatedAt: true,
         userId: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { userId: memberId },
     }),
     prisma.hostedWorkspace.findUnique({
@@ -847,18 +585,16 @@ export async function buildHostedDataExport(input: {
         createdAt: true,
         errorCode: true,
         eventCode: true,
-        id: true,
         leaseGeneration: true,
         level: true,
         mailboxLane: true,
         mailboxSeqEnd: true,
         mailboxSeqStart: true,
-        outboxIntentRef: true,
         phase: true,
-        redactedJson: true,
         userId: true,
         workspaceVersion: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { userId: memberId },
     }),
     prisma.hostedInvite.findMany({
@@ -867,11 +603,11 @@ export async function buildHostedDataExport(input: {
         channel: true,
         createdAt: true,
         expiresAt: true,
-        id: true,
         memberId: true,
         sentAt: true,
         updatedAt: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
     prisma.hostedConsentEvent.findMany({
@@ -880,12 +616,12 @@ export async function buildHostedDataExport(input: {
         action: true,
         createdAt: true,
         documentVersionsJson: true,
-        id: true,
         memberId: true,
         metadataJson: true,
         scope: true,
         source: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
     prisma.hostedConsentGrant.findMany({
@@ -902,6 +638,7 @@ export async function buildHostedDataExport(input: {
         status: true,
         updatedAt: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
     prisma.hostedVaultSyncSession.findMany({
@@ -910,7 +647,6 @@ export async function buildHostedDataExport(input: {
         createdAt: true,
         direction: true,
         expiresAt: true,
-        id: true,
         localManifestHash: true,
         memberId: true,
         payload: {
@@ -929,6 +665,7 @@ export async function buildHostedDataExport(input: {
         updatedAt: true,
         uploadedAt: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
     prisma.hostedAiUsage.findMany({
@@ -943,7 +680,6 @@ export async function buildHostedDataExport(input: {
         credentialSource: true,
         featureKey: true,
         gatewayTagsJson: true,
-        id: true,
         inputTokens: true,
         memberId: true,
         occurredAt: true,
@@ -970,6 +706,7 @@ export async function buildHostedDataExport(input: {
         turnId: true,
         updatedAt: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
     prisma.hostedLinqDailyState.findMany({
@@ -986,6 +723,7 @@ export async function buildHostedDataExport(input: {
         quotaReplySentAt: true,
         updatedAt: true,
       },
+      take: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE + 1,
       where: { memberId },
     }),
   ]);
@@ -998,10 +736,43 @@ export async function buildHostedDataExport(input: {
     });
   }
 
+  const limitedDeviceConnections = limitRowsForExport(deviceConnections);
+  const limitedDeviceAgentSessions = limitRowsForExport(deviceAgentSessions);
+  const limitedDeviceTokenAudits = limitRowsForExport(deviceTokenAudits);
+  const limitedDeviceSyncSignals = limitRowsForExport(deviceSyncSignals);
+  const limitedMailboxItems = limitRowsForExport(mailboxItems);
+  const limitedMailboxLaneCounters = limitRowsForExport(mailboxLaneCounters);
+  const limitedRuntimeLogs = limitRowsForExport(runtimeLogs);
+  const limitedInvites = limitRowsForExport(invites);
+  const limitedConsentEvents = limitRowsForExport(consentEvents);
+  const limitedConsentGrants = limitRowsForExport(consentGrants);
+  const limitedVaultSyncSessions = limitRowsForExport(vaultSyncSessions);
+  const limitedAiUsage = limitRowsForExport(aiUsage);
+  const limitedLinqDailyStates = limitRowsForExport(linqDailyStates);
+
   return toExportRecord({
     schema: HOSTED_DATA_EXPORT_SCHEMA,
     generatedAt,
     memberId,
+    counts,
+    limits: {
+      maxRowsPerStore: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE,
+      stores: {
+        consentEvents: limitedConsentEvents.meta,
+        consentGrants: limitedConsentGrants.meta,
+        deviceAgentSessions: limitedDeviceAgentSessions.meta,
+        deviceConnections: limitedDeviceConnections.meta,
+        deviceSyncSignals: limitedDeviceSyncSignals.meta,
+        deviceTokenAudits: limitedDeviceTokenAudits.meta,
+        invites: limitedInvites.meta,
+        linqDailyStates: limitedLinqDailyStates.meta,
+        mailboxItems: limitedMailboxItems.meta,
+        mailboxLaneCounters: limitedMailboxLaneCounters.meta,
+        runtimeLogs: limitedRuntimeLogs.meta,
+        vaultSyncSessions: limitedVaultSyncSessions.meta,
+        aiUsage: limitedAiUsage.meta,
+      },
+    },
     security: {
       confirmation: "server-verified typed confirmation phrase",
       delivery: "same-origin POST response as a no-store JSON attachment",
@@ -1010,48 +781,71 @@ export async function buildHostedDataExport(input: {
     },
     account: projectAccountSnapshotForExport(memberSnapshot),
     consent: {
-      events: consentEvents,
-      grants: consentGrants,
+      events: limitedConsentEvents.rows.map((event) => ({
+        action: event.action,
+        createdAt: event.createdAt,
+        documentVersionsJson: event.documentVersionsJson,
+        idPresent: true,
+        memberId: event.memberId,
+        metadataJson: event.metadataJson,
+        scope: event.scope,
+        source: event.source,
+      })),
+      grants: limitedConsentGrants.rows.map((grant) => ({
+        createdAt: grant.createdAt,
+        documentVersionsJson: grant.documentVersionsJson,
+        grantedAt: grant.grantedAt,
+        lastEventIdPresent: Boolean(grant.lastEventId),
+        memberId: grant.memberId,
+        revokedAt: grant.revokedAt,
+        scope: grant.scope,
+        source: grant.source,
+        status: grant.status,
+        updatedAt: grant.updatedAt,
+      })),
     },
     messaging: {
-      invites: invites.map((invite) => ({
+      invites: limitedInvites.rows.map((invite) => ({
         channel: invite.channel,
         createdAt: invite.createdAt,
         expiresAt: invite.expiresAt,
-        id: invite.id,
-        inviteCodePresent: true,
+        idPresent: true,
+        inviteCodeOmitted: true,
         memberId: invite.memberId,
         sentAt: invite.sentAt,
         updatedAt: invite.updatedAt,
       })),
-      linqDailyStates,
-      mailboxItems: mailboxItems.map((item) => ({
+      linqDailyStates: limitedLinqDailyStates.rows,
+      mailboxItems: limitedMailboxItems.rows.map((item) => ({
         createdAt: item.createdAt,
-        dedupeKeyPresent: item.dedupeKey.length > 0,
+        dedupeKeyPresent: true,
         expiresAt: item.expiresAt,
-        id: item.id,
+        idPresent: true,
         kind: item.kind,
         lane: item.lane,
         laneSeq: item.laneSeq,
         occurredAt: item.occurredAt,
-        payload: readMailboxPayloadForExport({
-          payloadCiphertext: item.payload?.payloadCiphertext ?? null,
-          payloadInlineCiphertext: item.payloadInlineCiphertext,
-          userId: item.userId,
+        payload: summarizeMailboxPayloadForExport({
+          payloadBytes: item.payloadBytes,
         }),
         payloadBytes: item.payloadBytes,
-        payloadRefPresent: item.payloadRef !== null,
-        payloadSchema: item.payloadSchema,
-        payloadStorage: item.payloadRef ? "ref" : "inline",
+        payloadRefPresent: item.payload !== null,
+        payloadSchema: item.payload?.payloadSchema ?? item.payloadSchema,
+        payloadStorage: item.payload !== null ? "ref" : item.payloadBytes !== null ? "inline" : "missing",
         updatedAt: item.updatedAt,
         userId: item.userId,
       })),
-      mailboxLaneCounters,
+      mailboxLaneCounters: limitedMailboxLaneCounters.rows,
     },
     vault: {
       workspace: projectHostedWorkspaceForExport(workspace),
-      vaultSyncSessions: vaultSyncSessions.map((session) => ({
-        ...session,
+      vaultSyncSessions: limitedVaultSyncSessions.rows.map((session) => ({
+        createdAt: session.createdAt,
+        direction: session.direction,
+        expiresAt: session.expiresAt,
+        idPresent: true,
+        localManifestHashPresent: Boolean(session.localManifestHash),
+        memberId: session.memberId,
         normalizedStatus: normalizeHostedVaultSyncSessionStatus(session),
         payload: session.payload
           ? {
@@ -1061,55 +855,142 @@ export async function buildHostedDataExport(input: {
               updatedAt: session.payload.updatedAt,
             }
           : null,
+        queuedAt: session.queuedAt,
+        revokedAt: session.revokedAt,
+        sourceSchemaVersion: session.sourceSchemaVersion,
+        sourceVaultIdPresent: Boolean(session.sourceVaultId),
+        sourceVaultTitle: session.sourceVaultTitle,
+        status: session.status,
+        updatedAt: session.updatedAt,
+        uploadedAt: session.uploadedAt,
       })),
     },
     wearables: {
-      deviceAgentSessions: deviceAgentSessions.map((session) => ({
+      deviceAgentSessions: limitedDeviceAgentSessions.rows.map((session) => ({
         createdAt: session.createdAt,
         expiresAt: session.expiresAt,
-        id: session.id,
+        idPresent: true,
         label: session.label,
         lastSeenAt: session.lastSeenAt,
-        replacedBySessionId: session.replacedBySessionId,
+        replacedBySessionIdPresent: Boolean(session.replacedBySessionId),
         revokedAt: session.revokedAt,
         revokeReason: session.revokeReason,
         updatedAt: session.updatedAt,
         userId: session.userId,
       })),
-      deviceConnections: deviceConnections.map((connection) => ({
+      deviceConnections: limitedDeviceConnections.rows.map((connection) => ({
         accessTokenExpiresAt: connection.accessTokenExpiresAt,
         connectedAt: connection.connectedAt,
         createdAt: connection.createdAt,
         displayName: connection.displayName,
-        id: connection.id,
-        keyVersion: connection.keyVersion,
+        idPresent: true,
         lastErrorCode: connection.lastErrorCode,
-        lastErrorMessage: connection.lastErrorMessage,
+        lastErrorMessagePresent: Boolean(connection.lastErrorMessage),
         lastSyncCompletedAt: connection.lastSyncCompletedAt,
         lastSyncErrorAt: connection.lastSyncErrorAt,
         lastSyncStartedAt: connection.lastSyncStartedAt,
         lastWebhookAt: connection.lastWebhookAt,
-        metadataJson: connection.metadataJson,
+        metadataPresent: connection.metadataJson !== null,
         nextReconcileAt: connection.nextReconcileAt,
         provider: connection.provider,
-        scopesJson: connection.scopesJson,
+        providerAccountLinked: connection.providerAccountBlindIndex.length > 0,
+        scopesPresent: connection.scopesJson !== null,
         status: connection.status,
-        tokenVersion: connection.tokenVersion,
+        keyVersionPresent: Boolean(connection.keyVersion),
+        tokenVersionPresent: connection.tokenVersion !== null,
         updatedAt: connection.updatedAt,
         userId: connection.userId,
       })),
-      deviceSyncSignals,
-      deviceTokenAudits,
+      deviceSyncSignals: limitedDeviceSyncSignals.rows.map((signal) => ({
+        connectionIdPresent: Boolean(signal.connectionId),
+        createdAt: signal.createdAt,
+        eventType: signal.eventType,
+        idPresent: true,
+        kind: signal.kind,
+        nextReconcileAt: signal.nextReconcileAt,
+        occurredAt: signal.occurredAt,
+        provider: signal.provider,
+        reason: signal.reason,
+        resourceCategory: signal.resourceCategory,
+        revokeWarningCode: signal.revokeWarningCode,
+        revokeWarningMessagePresent: Boolean(signal.revokeWarningMessage),
+        traceIdPresent: Boolean(signal.traceId),
+        userId: signal.userId,
+      })),
+      deviceTokenAudits: limitedDeviceTokenAudits.rows.map((audit) => ({
+        action: audit.action,
+        channel: audit.channel,
+        connectionIdPresent: true,
+        createdAt: audit.createdAt,
+        expectedTokenVersionPresent: audit.expectedTokenVersion !== null,
+        forceRefresh: audit.forceRefresh,
+        idPresent: true,
+        keyVersionPresent: Boolean(audit.keyVersion),
+        provider: audit.provider,
+        refreshOutcome: audit.refreshOutcome,
+        sessionIdPresent: Boolean(audit.sessionId),
+        tokenVersionChanged: audit.tokenVersionChanged,
+        tokenVersionPresent: audit.tokenVersion !== null,
+        userId: audit.userId,
+      })),
     },
     usage: {
-      aiUsage: aiUsage.map((entry) => ({
-        ...entry,
-        apiKeyEnv: undefined,
+      aiUsage: limitedAiUsage.rows.map((entry) => ({
+        attemptCount: entry.attemptCount,
         apiKeyEnvConfigured: Boolean(entry.apiKeyEnv),
+        baseUrlConfigured: Boolean(entry.baseUrl),
+        cacheWriteTokens: entry.cacheWriteTokens,
+        cachedInputTokens: entry.cachedInputTokens,
+        createdAt: entry.createdAt,
+        credentialSource: entry.credentialSource,
+        featureKey: entry.featureKey,
+        gatewayTagsOmitted: entry.gatewayTagsJson !== null,
+        idPresent: true,
+        inputTokens: entry.inputTokens,
+        memberId: entry.memberId,
+        occurredAt: entry.occurredAt,
+        outputTokens: entry.outputTokens,
+        provider: entry.provider,
+        providerName: entry.providerName,
+        reasoningTokens: entry.reasoningTokens,
+        requestedModel: entry.requestedModel,
+        routeIdPresent: Boolean(entry.routeId),
+        servedModel: entry.servedModel,
+        sessionIdPresent: Boolean(entry.sessionId),
+        stripeMeterAttemptCount: entry.stripeMeterAttemptCount,
+        stripeMeteredAt: entry.stripeMeteredAt,
+        stripeMeterErrorPresent: Boolean(entry.stripeMeterError),
+        stripeMeterIdentifierPresent: Boolean(entry.stripeMeterIdentifier),
+        stripeMeterLastAttemptedAt: entry.stripeMeterLastAttemptedAt,
+        stripeMeterNextAttemptAt: entry.stripeMeterNextAttemptAt,
+        stripeMeterSource: entry.stripeMeterSource,
+        stripeMeterStatus: entry.stripeMeterStatus,
+        surface: entry.surface,
+        totalTokens: entry.totalTokens,
+        triggerKind: entry.triggerKind,
+        turnIdPresent: Boolean(entry.turnId),
+        updatedAt: entry.updatedAt,
       })),
     },
     diagnostics: {
-      runtimeLogs,
+      runtimeLogs: limitedRuntimeLogs.rows.map((log) => ({
+        at: log.at,
+        attemptIdPresent: Boolean(log.attemptId),
+        checkpointVersionPresent: log.checkpointVersion !== null,
+        component: log.component,
+        createdAt: log.createdAt,
+        errorCode: log.errorCode,
+        eventCode: log.eventCode,
+        idPresent: true,
+        leaseGenerationPresent: log.leaseGeneration !== null,
+        level: log.level,
+        mailboxLane: log.mailboxLane,
+        mailboxSeqEndPresent: log.mailboxSeqEnd !== null,
+        mailboxSeqStartPresent: log.mailboxSeqStart !== null,
+        phase: log.phase,
+        userId: log.userId,
+        workspaceVersionPresent: log.workspaceVersion !== null,
+      })),
     },
   });
 }
@@ -1136,7 +1017,7 @@ function projectHostedWorkspaceForExport(workspace: {
     createdAt: workspace.createdAt,
     nextWakeAt: workspace.nextWakeAt,
     nextWakeReason: workspace.nextWakeReason,
-    redactedStatusJson: workspace.redactedStatusJson,
+    redactedStatusPresent: workspace.redactedStatusJson !== null,
     snapshotRefPresent: workspace.snapshotRef !== null,
     updatedAt: workspace.updatedAt,
     userId: workspace.userId,
@@ -1202,71 +1083,35 @@ function projectAccountSnapshotForExport(
   });
 }
 
-function readMailboxPayloadForExport(input: {
-  payloadCiphertext: string | null;
-  payloadInlineCiphertext: string | null;
-  userId: string;
+function summarizeMailboxPayloadForExport(input: {
+  payloadBytes: number | null;
 }): HostedDataExportJsonRecord {
-  try {
-    const decoded = decodeHostedMailboxStoredPayload(input);
-
-    if (decoded === null) {
-      return {
-        status: "missing",
-      };
-    }
-
+  if (input.payloadBytes !== null) {
     return {
-      status: "decoded",
-      value: projectHostedMailboxPayloadValueForExport(decoded),
-    };
-  } catch {
-    return {
-      status: "unavailable",
+      decodedPayloadOmitted: true,
+      status: "present-omitted",
     };
   }
+
+  return {
+    decodedPayloadOmitted: false,
+    status: "missing",
+  };
 }
 
-function projectHostedMailboxPayloadValueForExport(value: unknown): HostedDataExportJsonValue {
-  return toExportJsonValue(redactHostedMailboxPayloadValue(value));
-}
-
-function redactHostedMailboxPayloadValue(value: unknown): unknown {
-  if (value === null || value === undefined) {
-    return value;
-  }
-
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((entry) => redactHostedMailboxPayloadValue(entry));
-  }
-
-  if (typeof value !== "object") {
-    return value;
-  }
-
-  const result: Record<string, unknown> = {};
-  for (const [key, entryValue] of Object.entries(value)) {
-    if (shouldOmitHostedMailboxPayloadKey(key)) {
-      result[`${key}Omitted`] = true;
-      continue;
-    }
-
-    result[key] = redactHostedMailboxPayloadValue(entryValue);
-  }
-
-  return result;
-}
-
-function shouldOmitHostedMailboxPayloadKey(key: string): boolean {
-  const normalized = key.replace(/[-_\s]/gu, "").toLowerCase();
-
-  return HOSTED_DATA_EXPORT_MAILBOX_OMITTED_PAYLOAD_KEYS.has(normalized)
-    || HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
-    || HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_MARKERS.some((marker) => normalized.includes(marker));
+function limitRowsForExport<T>(rows: readonly T[]): {
+  meta: HostedDataExportJsonRecord;
+  rows: T[];
+} {
+  const exportedRows = rows.slice(0, HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE);
+  return {
+    meta: {
+      exportedRows: exportedRows.length,
+      maxRows: HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE,
+      truncated: rows.length > HOSTED_DATA_EXPORT_MAX_ROWS_PER_STORE,
+    },
+    rows: exportedRows,
+  };
 }
 
 function toExportRecord(value: object): HostedDataExportJsonRecord {
@@ -1350,10 +1195,6 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     request: input.request,
   });
-  const cloudflare = await deleteHostedRunnerUserDataBestEffort({
-    context: "settings.account-data.delete",
-    userId: input.memberId,
-  });
   const deletedCounts = await input.prisma.$transaction(async (tx) => {
     return deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
@@ -1361,6 +1202,10 @@ export async function deleteHostedAccountData(input: {
       prisma: tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const cloudflare = await deleteHostedRunnerUserDataBestEffort({
+    context: "settings.account-data.delete",
+    userId: input.memberId,
+  });
 
   return {
     cloudflare,
@@ -1378,8 +1223,6 @@ async function countHostedAccountData(input: {
   prisma: HostedAccountDataPrisma;
 }): Promise<HostedAccountDataCounts> {
   const memberId = input.memberId;
-  const connectionIdentities = await listDeviceConnectionIdentities({ memberId, prisma: input.prisma });
-  const webhookTraceWhere = buildDeviceWebhookTraceWhere(connectionIdentities);
   const [
     hostedMember,
     hostedMemberIdentity,
@@ -1401,7 +1244,6 @@ async function countHostedAccountData(input: {
     deviceConnection,
     deviceTokenAudit,
     deviceOauthSession,
-    deviceWebhookTrace,
     deviceSyncSignal,
     deviceAgentSession,
     deviceBrowserAssertionNonce,
@@ -1427,7 +1269,6 @@ async function countHostedAccountData(input: {
     input.prisma.deviceConnection.count({ where: { userId: memberId } }),
     input.prisma.deviceTokenAudit.count({ where: { userId: memberId } }),
     input.prisma.deviceOauthSession.count({ where: { userId: memberId } }),
-    webhookTraceWhere ? input.prisma.deviceWebhookTrace.count({ where: webhookTraceWhere }) : 0,
     input.prisma.deviceSyncSignal.count({ where: { userId: memberId } }),
     input.prisma.deviceAgentSession.count({ where: { userId: memberId } }),
     input.prisma.deviceBrowserAssertionNonce.count({ where: { userId: memberId } }),
@@ -1441,7 +1282,6 @@ async function countHostedAccountData(input: {
     "prisma.device_oauth_session": deviceOauthSession,
     "prisma.device_sync_signal": deviceSyncSignal,
     "prisma.device_token_audit": deviceTokenAudit,
-    "prisma.device_webhook_trace": deviceWebhookTrace,
     "prisma.hosted_ai_usage": hostedAiUsage,
     "prisma.hosted_consent_event": hostedConsentEvent,
     "prisma.hosted_consent_grant": hostedConsentGrant,
@@ -1612,12 +1452,4 @@ function buildDeviceWebhookTraceWhere(
 
 function safeErrorCode(error: unknown): string {
   return error instanceof Error && error.name ? error.name : "UnknownError";
-}
-
-function toIso(value: Date): string {
-  return value.toISOString();
-}
-
-function toIsoNullable(value: Date | null): string | null {
-  return value ? value.toISOString() : null;
 }

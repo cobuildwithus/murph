@@ -177,7 +177,6 @@ function mockHostedDataPrivacyDeleteFlowState() {
     null,
     null,
     null,
-    null,
   ];
 }
 

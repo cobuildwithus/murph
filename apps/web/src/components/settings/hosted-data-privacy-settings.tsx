@@ -62,6 +62,7 @@ type ProviderRevocationSummary = HostedAccountDeleteResponse["result"]["provider
 const DATA_EXPORT_ENDPOINT = "/api/settings/data-export";
 const DEFAULT_EXPORT_FILENAME = "murph-data-export.json";
 const DATA_EXPORT_CONFIRMATION_HELP_ID = "hosted-data-export-phrase-help";
+const ACCOUNT_DELETION_CONFIRMATION_HELP_ID = "hosted-account-delete-phrase-help";
 
 export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [exportPending, setExportPending] = useState(false);
@@ -76,7 +77,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [acknowledgedIrreversibleDeletion, setAcknowledgedIrreversibleDeletion] = useState(false);
   const [acknowledgedProviderAndBackupLimits, setAcknowledgedProviderAndBackupLimits] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [deletionSummary, setDeletionSummary] = useState<HostedAccountDeleteResponse["result"] | null>(null);
 
@@ -100,7 +100,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     }
 
     setExportPending(true);
-    setError(null);
     setExportDialogError(null);
     setSuccess(null);
 
@@ -175,7 +174,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     setExportConfirmationText("");
     setAcknowledgedSensitiveDownload(false);
     setExportDialogError(null);
-    setError(null);
     setSuccess(null);
     setExportDialogOpen(true);
   }
@@ -197,7 +195,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     setAcknowledgedIrreversibleDeletion(false);
     setAcknowledgedProviderAndBackupLimits(false);
     setDialogError(null);
-    setError(null);
     setDialogOpen(true);
   }
 
@@ -232,13 +229,6 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
         </Alert>
       ) : null}
 
-      {error ? (
-        <Alert variant="destructive">
-          <AlertTitle>Data privacy request failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-
       <ConnectedAccountCard
         label="Export data"
         value="Download your Murph data"
@@ -265,7 +255,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       />
 
       {deletionSummary ? (
-        <Alert>
+        <Alert role="status" aria-live="polite">
           <AlertTitle>Deletion summary</AlertTitle>
           <AlertDescription className="flex flex-col gap-2">
             <p>Deleted {deletedStoreCount} live database rows at {formatDeletionTimestamp(deletionSummary.deletedAt)}.</p>
@@ -300,8 +290,9 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
           <DialogHeader>
             <DialogTitle>Confirm data export</DialogTitle>
             <DialogDescription>
-              This download can contain decrypted account details and mailbox payloads. Murph will omit tokens,
-              lookup keys, nonces, invite codes, API key environment names, and encrypted vault payload blobs.
+              This download can contain decrypted account details and account metadata. Murph will omit mailbox payload
+              bodies, tokens, lookup keys, nonces, invite codes, API key environment names, and encrypted vault payload
+              blobs.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (
@@ -358,7 +349,11 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
       </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent
+          aria-busy={deletePending}
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+          showCloseButton={!deletePending}
+        >
           {dialogStep === "review" ? (
             <>
               <DialogHeader>
@@ -415,8 +410,17 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
                     value={confirmationPhrase}
                     onChange={(event) => setConfirmationPhrase(event.target.value)}
                     aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
+                    aria-describedby={ACCOUNT_DELETION_CONFIRMATION_HELP_ID}
                     placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
                   />
+                  <p
+                    className={confirmationPhrase.length > 0 && !phraseMatches
+                      ? "text-xs text-destructive"
+                      : "text-xs text-muted-foreground"}
+                    id={ACCOUNT_DELETION_CONFIRMATION_HELP_ID}
+                  >
+                    Type {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE} exactly, with no extra spaces.
+                  </p>
                 </div>
                 <label className="flex gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
                   <input

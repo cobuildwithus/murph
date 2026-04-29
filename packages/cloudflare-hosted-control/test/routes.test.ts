@@ -25,7 +25,7 @@ describe("cloudflare hosted control routes", () => {
       "/internal/users/user%2Fa%20b/nudge",
     );
     expect(buildCloudflareHostedControlUserDataDeletionPath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/delete",
+      "/internal/users/user%2Fa%20b/account-data/delete",
     );
   });
 
@@ -78,7 +78,7 @@ describe("cloudflare hosted control routes", () => {
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
       runnerNudge: { method: "POST", suffix: "nudge" },
       status: { method: "GET", suffix: "status" },
-      userDataDelete: { method: "POST", suffix: "delete" },
+      userDataDelete: { method: "POST", suffix: "account-data/delete" },
     });
     expect(Object.values(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS)).not.toContainEqual(
       expect.objectContaining({ suffix: "run" }),

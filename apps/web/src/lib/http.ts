@@ -97,18 +97,41 @@ export class InvalidRouteParamEncodingError extends TypeError {
   }
 }
 
-export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  return requireJsonObject(await request.json());
+export interface JsonBodyReadOptions {
+  limitBytes?: number;
 }
 
-export async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
-  const text = await request.text();
+export async function readJsonObject(
+  request: Request,
+  options: JsonBodyReadOptions = {},
+): Promise<Record<string, unknown>> {
+  return requireJsonObject(JSON.parse(await readRequestBodyText(request, options)));
+}
+
+export async function readOptionalJsonObject(
+  request: Request,
+  options: JsonBodyReadOptions = {},
+): Promise<Record<string, unknown>> {
+  const text = await readRequestBodyText(request, options);
 
   if (!text.trim()) {
     return {};
   }
 
   return requireJsonObject(JSON.parse(text));
+}
+
+async function readRequestBodyText(
+  request: Request,
+  options: JsonBodyReadOptions,
+): Promise<string> {
+  if (options.limitBytes === undefined) {
+    return request.text();
+  }
+
+  return (await readRawBodyBuffer(request, {
+    limitBytes: options.limitBytes,
+  })).toString("utf8");
 }
 
 export async function readRawBodyBuffer(

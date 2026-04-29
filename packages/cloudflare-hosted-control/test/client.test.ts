@@ -525,7 +525,7 @@ describe("createCloudflareHostedControlClient", () => {
     await expect(client.deleteUserData("user_123")).resolves.toEqual(result);
 
     const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/delete");
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/account-data/delete");
     expect(request.init?.method).toBe("POST");
     expect(request.init?.body).toBe("{}");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
