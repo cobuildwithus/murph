@@ -5,8 +5,6 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
-import { BiomarkerHeader } from "@/src/components/biomarkers/biomarker-detail/biomarker-header";
-import { BiomarkerPrivateTrendCard } from "@/src/components/biomarkers/biomarker-detail/biomarker-private-trend-card";
 import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import type { BiomarkerPageModel } from "@/src/lib/health-commons/biomarker-detail";
@@ -42,11 +40,19 @@ export function BiomarkerLayoutClient({
 
   return (
     <BrowserVaultProvider>
-      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-8 md:px-12 lg:px-16 lg:py-10">
-        <BiomarkerHeader
-          biomarker={biomarker}
-          trendSlot={<BiomarkerPrivateTrendCard biomarker={biomarker} />}
-        />
+      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 pt-8 pb-10 md:px-12 lg:px-16 lg:pt-10">
+        <nav className="flex items-center gap-2 text-sm" aria-label="Breadcrumb">
+          <Link
+            href="/experiments"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Murph
+          </Link>
+          <span className="text-muted-foreground/60">→</span>
+          <span className="text-muted-foreground">Biomarkers</span>
+          <span className="text-muted-foreground/60">→</span>
+          <span className="font-medium text-foreground">{biomarker.shortName}</span>
+        </nav>
 
         <Tabs value={currentTab} className="w-full">
           <div ref={sentinelRef} aria-hidden="true" className="h-px" />
@@ -80,7 +86,7 @@ export function BiomarkerLayoutClient({
               {biomarker.title}
             </span>
           </div>
-          <div className="pt-6">{children}</div>
+          <div className="pt-8">{children}</div>
         </Tabs>
       </div>
     </BrowserVaultProvider>

@@ -28,10 +28,21 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel
   const memoSections = selectResearchNotesSections(parseBiomarkerBodySections(biomarker.body));
   const hasMemo = memoSections.length > 0;
 
+  const header = (
+    <div className="flex max-w-3xl flex-col gap-3.5">
+      <h1 className="max-w-[24ch] font-serif text-3xl font-semibold tracking-tight text-foreground text-balance sm:text-[38px]">
+        {biomarker.title}
+      </h1>
+      <p className="max-w-[56ch] text-[16px] text-muted-foreground text-pretty">
+        Evidence and source notes for {biomarker.shortName}.
+      </p>
+    </div>
+  );
+
   if (!hasClaims && !hasSourceHighlights && !hasMemo) {
     return (
-      <div className="flex flex-col gap-4 pb-12">
-        <SectionLabel>Research</SectionLabel>
+      <div className="flex flex-col gap-8 pb-12">
+        {header}
         <p className="text-sm text-muted-foreground">
           No research notes published for {biomarker.shortName} yet.
         </p>
@@ -41,6 +52,7 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerPageModel
 
   return (
     <div className="flex flex-col gap-12 pb-12">
+      {header}
       {(hasClaims || hasSourceHighlights) && (
         <section className="flex flex-col gap-5">
           <div className="flex max-w-3xl flex-col gap-1.5">
