@@ -7,16 +7,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION } from "@/src/lib/experiments/experiment-detail";
+import type {
+  ExperimentResultsPublicProjection,
+  ExperimentShellProjection,
+} from "@/src/lib/health-commons/experiment-projections";
 import type { ExperimentProtocol } from "@/src/types/experiments";
 
 const mocks = vi.hoisted(() => ({
-  composeExperimentDetail: vi.fn(({ protocol }: { protocol: ExperimentProtocol }) => ({
-    ...protocol,
-    status: "upcoming" as const,
-    signals: [],
-    timeline: [],
-    trends: [],
-  })),
   experimentHeader: vi.fn(() => createElement("div", null, "header")),
   experimentHero: vi.fn(() => createElement("div", null, "hero")),
   getHostedPageAuthSnapshot: vi.fn(),
@@ -28,7 +25,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberRoutingState: vi.fn(),
   refresh: vi.fn(),
   resolveBrowserVaultExperimentRun: vi.fn(() => null),
-  resolveHealthCommonsExperimentProtocol: vi.fn(),
   resultsTab: vi.fn(() => createElement("div", null, "results tab")),
   useBrowserVault: vi.fn(() => ({
     client: null,
@@ -82,10 +78,6 @@ vi.mock("@/src/components/experiments/experiment-detail/results-tab", () => ({
   ResultsTab: mocks.resultsTab,
 }));
 
-vi.mock("@/src/lib/health-commons/experiment-detail", () => ({
-  resolveHealthCommonsExperimentProtocol: mocks.resolveHealthCommonsExperimentProtocol,
-}));
-
 vi.mock("@/src/lib/browser-vault/context", () => ({
   BrowserVaultProvider({ children }: { children: ReactNode }) {
     return createElement("div", null, children);
@@ -109,16 +101,6 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/experiments/experiment-detail", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/src/lib/experiments/experiment-detail")>();
-
-  return {
-    ...actual,
-    composeExperimentDetail: mocks.composeExperimentDetail,
-  };
-});
-
-import { ExperimentDetailClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-detail-client";
 import { ExperimentLayoutClient } from "../app/(dashboard)/experiments/[experimentId]/experiment-layout-client";
 import { ResultsTabClient } from "../app/(dashboard)/experiments/[experimentId]/results/results-tab-client";
 
@@ -135,9 +117,6 @@ beforeEach(() => {
     linkedAccounts: [],
   });
   mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-  mocks.resolveHealthCommonsExperimentProtocol.mockImplementation((id: string) => (
-    id === "finnish-sauna" ? createProtocol() : null
-  ));
   mocks.useBrowserVault.mockReturnValue({
     client: null,
     error: null,
@@ -162,9 +141,9 @@ test("refreshes instead of hydrating the new protocol UI against a stale contrac
     createElement(
       ExperimentLayoutClient,
       {
-        protocol: createProtocol({
+        shell: createShell(createProtocol({
           protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION - 1,
-        }),
+        })),
       },
       createElement("div", null, "child content"),
     ),
@@ -173,23 +152,6 @@ test("refreshes instead of hydrating the new protocol UI against a stale contrac
   expect(mocks.refresh).toHaveBeenCalledTimes(1);
   expect(mocks.protocolTab).not.toHaveBeenCalled();
   assert.match(view.container.textContent ?? "", /Refreshing experiment/);
-
-  await view.cleanup();
-});
-
-test("renders the protocol tab with a link to the research subroute", async () => {
-  const view = await renderClient(
-    createElement(ExperimentDetailClient, {
-      protocol: createProtocol(),
-    }),
-  );
-
-  expect(mocks.protocolTab).toHaveBeenCalledTimes(1);
-  const protocolTabProps = (mocks.protocolTab.mock.calls.at(-1) as
-    | [{ researchHref?: string }]
-    | undefined)?.[0];
-  expect(protocolTabProps?.researchHref).toBe("/experiments/finnish-sauna/research");
-  assert.match(view.container.textContent ?? "", /protocol tab/);
 
   await view.cleanup();
 });
@@ -205,8 +167,8 @@ test("passes minimized hosted contact routing state into the experiment header",
       ExperimentLayoutClient,
       {
         initialContactChannels,
-        murphPhoneNumber: "+15550100001",
-        protocol: createProtocol(),
+        murphPhoneNumber: "routing-phone-test-value",
+        shell: createShell(),
       },
       createElement("div", null, "child content"),
     ),
@@ -220,7 +182,7 @@ test("passes minimized hosted contact routing state into the experiment header",
       }]
     | undefined)?.[0];
   expect(headerProps?.initialContactChannels).toBe(initialContactChannels);
-  expect(headerProps?.murphPhoneNumber).toBe("+15550100001");
+  expect(headerProps?.murphPhoneNumber).toBe("routing-phone-test-value");
 
   await view.cleanup();
 });
@@ -231,14 +193,14 @@ test("passes hosted start contact context into the results empty-state CTA", asy
     telegram: true,
     text: true,
   };
-  const protocol = createProtocol();
+  const protocol = createResultsPublicProjection();
   const view = await renderClient(
     createElement(
       ExperimentLayoutClient,
       {
         initialContactChannels,
-        murphPhoneNumber: "+15550100001",
-        protocol,
+        murphPhoneNumber: "routing-phone-test-value",
+        shell: createShell(),
       },
       createElement(ResultsTabClient, { protocol }),
     ),
@@ -252,31 +214,12 @@ test("passes hosted start contact context into the results empty-state CTA", asy
       }]
     | undefined)?.[0];
   expect(resultsProps?.initialContactChannels).toBe(initialContactChannels);
-  expect(resultsProps?.murphPhoneNumber).toBe("+15550100001");
+  expect(resultsProps?.murphPhoneNumber).toBe("routing-phone-test-value");
 
   await view.cleanup();
 });
 
-test("server layout passes contact-channel flags and routing phone to the client tree", async () => {
-  const linkedAccounts = [{
-    phone_number: "+14045550123",
-    latest_verified_at: 1771977600,
-    type: "phone",
-  }, {
-    address: "member@example.test",
-    latest_verified_at: 1771977600,
-    type: "email",
-  }];
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      id: "member_123",
-    },
-    linkedAccounts,
-  });
-  mocks.readHostedMemberRoutingState.mockResolvedValue({
-    linqRecipientPhone: "+15550100001",
-  });
+test("server layout stays static-first and avoids contact routing reads", async () => {
   const { default: ExperimentDetailLayout } = await import(
     "../app/(dashboard)/experiments/[experimentId]/layout"
   );
@@ -287,12 +230,9 @@ test("server layout passes contact-channel flags and routing phone to the client
     }),
   );
 
-  expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
-  expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
-    memberId: "member_123",
-    prisma: { prisma: true },
-  });
+  expect(mocks.getHostedPageAuthSnapshot).not.toHaveBeenCalled();
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
   const headerProps = (mocks.experimentHeader.mock.calls.at(-1) as
     | [{
         initialContactChannels?: unknown;
@@ -300,13 +240,11 @@ test("server layout passes contact-channel flags and routing phone to the client
       }]
     | undefined)?.[0];
   expect(headerProps?.initialContactChannels).toEqual({
-    email: true,
+    email: false,
     telegram: false,
-    text: true,
+    text: false,
   });
-  expect(headerProps?.murphPhoneNumber).toBe("+15550100001");
-  expect(JSON.stringify(headerProps)).not.toContain("+14045550123");
-  expect(JSON.stringify(headerProps)).not.toContain("member@example.test");
+  expect(headerProps?.murphPhoneNumber).toBeNull();
 
   await view.cleanup();
 });
@@ -448,5 +386,57 @@ function createProtocol(
       whoShouldAvoid: [],
     },
     ...overrides,
+  };
+}
+
+function createShell(
+  protocol: ExperimentProtocol = createProtocol(),
+): ExperimentShellProjection {
+  return {
+    protocolContractVersion: protocol.protocolContractVersion,
+    baselineDays: protocol.baselineDays,
+    category: protocol.category,
+    description: protocol.description,
+    durationDays: protocol.durationDays,
+    evidenceLabel: protocol.evidenceLabel,
+    evidenceLevel: protocol.evidenceLevel,
+    id: protocol.id,
+    image: protocol.image,
+    key: protocol.commons?.key ?? "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    revision: {
+      pageRevisionId: protocol.commons?.pageRevisionId ?? "sha256:test-page",
+      recipeHash: protocol.commons?.recipeHash ?? null,
+      runSpecRevisionId: protocol.commons?.runSpecRevisionId ?? null,
+    },
+    title: protocol.title,
+  };
+}
+
+function createResultsPublicProjection(
+  protocol: ExperimentProtocol = createProtocol(),
+): ExperimentResultsPublicProjection {
+  return {
+    protocolContractVersion: protocol.protocolContractVersion,
+    baselineDays: protocol.baselineDays,
+    commons: protocol.commons ?? {
+      aliases: [protocol.id],
+      catalogHash: "sha256:test-catalog",
+      key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+      pageRevisionId: "sha256:test-page",
+      recipeHash: null,
+      routeId: protocol.id,
+      runSpecRevisionId: null,
+      slug: protocol.id,
+    },
+    durationDays: protocol.durationDays,
+    id: protocol.id,
+    key: protocol.commons?.key ?? "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+    protocol: protocol.protocol,
+    revision: {
+      pageRevisionId: protocol.commons?.pageRevisionId ?? "sha256:test-page",
+      recipeHash: protocol.commons?.recipeHash ?? null,
+      runSpecRevisionId: protocol.commons?.runSpecRevisionId ?? null,
+    },
+    title: protocol.title,
   };
 }

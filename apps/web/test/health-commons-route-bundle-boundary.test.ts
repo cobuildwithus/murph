@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const sourceFiles: readonly string[] = [
   "apps/web/src/lib/health-commons/experiment-detail.ts",
+  "apps/web/src/lib/health-commons/experiment-browse.ts",
+  "apps/web/src/lib/health-commons/generated-experiment-artifacts.ts",
+  "apps/web/src/lib/health-commons/experiment-projections.ts",
   "apps/web/src/lib/health-commons/biomarker-detail.ts",
+  "apps/web/app/(dashboard)/experiments/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/layout.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/page.tsx",
   "apps/web/app/(dashboard)/experiments/[experimentId]/research/page.tsx",
@@ -87,7 +91,7 @@ function collectPublicHealthCommonsSourceFiles(): string[] {
     visited.add(relativePath);
     const source = readFileSync(path.join(repoRoot, relativePath), "utf8");
     for (const specifier of extractRelativeImportSpecifiers(source)) {
-      const resolved = resolveRelativeSourceFile(relativePath, specifier);
+      const resolved = resolveSourceFile(relativePath, specifier);
       if (resolved && isPublicHealthCommonsSourceFile(resolved)) {
         stack.push(resolved);
       }
@@ -100,7 +104,7 @@ function collectPublicHealthCommonsSourceFiles(): string[] {
 function extractRelativeImportSpecifiers(source: string): string[] {
   const specifiers: string[] = [];
   const importPattern =
-    /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["'](\.[^"']+)["']/gu;
+    /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']((?:\.|@\/src\/lib\/health-commons\/)[^"']+)["']/gu;
 
   for (const match of source.matchAll(importPattern)) {
     if (match[1]) {
@@ -109,6 +113,17 @@ function extractRelativeImportSpecifiers(source: string): string[] {
   }
 
   return specifiers;
+}
+
+function resolveSourceFile(fromRelativePath: string, specifier: string): string | null {
+  if (specifier.startsWith("@/src/lib/health-commons/")) {
+    return resolveRelativeSourceFile(
+      "apps/web/src/lib/health-commons/__alias__.ts",
+      `./${specifier.slice("@/src/lib/health-commons/".length)}`,
+    );
+  }
+
+  return resolveRelativeSourceFile(fromRelativePath, specifier);
 }
 
 function resolveRelativeSourceFile(fromRelativePath: string, specifier: string): string | null {
@@ -133,7 +148,12 @@ function resolveRelativeSourceFile(fromRelativePath: string, specifier: string):
 
 function isPublicHealthCommonsSourceFile(relativePath: string): boolean {
   return sourceFiles.includes(relativePath)
+    || relativePath.startsWith("apps/web/app/(dashboard)/experiments")
+    || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-browse")
     || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-detail")
+    || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-images")
+    || relativePath.startsWith("apps/web/src/lib/health-commons/experiment-projections")
+    || relativePath.startsWith("apps/web/src/lib/health-commons/generated-experiment-artifacts")
     || relativePath.startsWith("apps/web/src/lib/health-commons/biomarker-detail");
 }
 

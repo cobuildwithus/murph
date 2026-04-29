@@ -10,7 +10,10 @@ import {
   getGeneratedHealthCommonsWebBiomarkerIndex,
   getGeneratedHealthCommonsWebRouteIndex,
   loadGeneratedHealthCommonsCatalog,
+  loadGeneratedHealthCommonsWebExperimentProtocolTab,
   loadGeneratedHealthCommonsWebExperimentResearchTab,
+  loadGeneratedHealthCommonsWebExperimentResultsPublic,
+  loadGeneratedHealthCommonsWebExperimentShell,
   loadGeneratedHealthCommonsWebRouteBundle,
 } from "@murphai/health-commons";
 import { healthCommonsCatalogSchema } from "@murphai/contracts";
@@ -398,23 +401,96 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     expect(Object.keys(researchTab)).not.toContain("sourceSnippets");
   });
 
+  it("loads minimal experiment shell, protocol-tab, and results projections by aliases", () => {
+    const shell = loadGeneratedHealthCommonsWebExperimentShell({
+      routeId: "murph-finnish-standard-3x-week",
+    });
+    const protocolTab = loadGeneratedHealthCommonsWebExperimentProtocolTab({
+      routeId: "murph-finnish-standard-3x-week",
+    });
+    const resultsPublic = loadGeneratedHealthCommonsWebExperimentResultsPublic({
+      routeId: "murph-finnish-standard-3x-week",
+    });
+
+    expect(shell).toEqual(expect.objectContaining({
+      baselineDays: 7,
+      durationDays: 21,
+      id: "finnish-sauna",
+      schemaVersion: "murph.commons.web.experiment-shell.v1",
+      title: "Finnish Dry Sauna",
+    }));
+    expect(protocolTab).toEqual(expect.objectContaining({
+      baselineDays: 7,
+      durationDays: 21,
+      id: "finnish-sauna",
+      schemaVersion: "murph.commons.web.experiment-protocol-tab.v1",
+    }));
+    expect(resultsPublic).toEqual(expect.objectContaining({
+      commons: expect.objectContaining({
+        aliases: expect.arrayContaining([
+          "finnish-sauna",
+          "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+          "murph-finnish-standard-3x-week",
+        ]),
+        key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
+        routeId: "finnish-sauna",
+      }),
+      id: "finnish-sauna",
+      schemaVersion: "murph.commons.web.experiment-results-public.v1",
+    }));
+    expect(protocolTab?.expectedSignals.length).toBeGreaterThan(0);
+    expect(protocolTab?.protocol.length).toBeGreaterThan(0);
+    expect(protocolTab?.safety.precautions.length).toBeGreaterThan(0);
+    expect(resultsPublic?.protocol).toEqual(protocolTab?.protocol);
+    expect(Object.keys(shell ?? {})).not.toContain("entitiesByKey");
+    expect(Object.keys(protocolTab ?? {})).not.toContain("studies");
+    expect(Object.keys(resultsPublic ?? {})).not.toContain("expectedSignals");
+    expect(Object.keys(resultsPublic ?? {})).not.toContain("safety");
+  });
+
   it("does not publish hidden protocol variants as research-tab projections", () => {
     expect(loadGeneratedHealthCommonsWebExperimentResearchTab({
       routeId: "hydrolyzed-collagen-peptides",
     })).toBeNull();
+    expect(loadGeneratedHealthCommonsWebExperimentShell({
+      routeId: "hydrolyzed-collagen-peptides",
+    })).toBeNull();
+    expect(loadGeneratedHealthCommonsWebExperimentProtocolTab({
+      routeId: "hydrolyzed-collagen-peptides",
+    })).toBeNull();
+    expect(loadGeneratedHealthCommonsWebExperimentResultsPublic({
+      routeId: "hydrolyzed-collagen-peptides",
+    })).toBeNull();
   });
 
-  it("keeps the Finnish sauna research projection materially smaller than the route bundle", () => {
+  it("keeps the Finnish sauna tab projections materially smaller than the route bundle", () => {
     const bundle = readFileSync(
       new URL("../generated/web/bundles/protocol_variant/finnish-sauna.json", import.meta.url),
+    );
+    const shell = readFileSync(
+      new URL("../generated/web/shell/experiments/finnish-sauna.json", import.meta.url),
+    );
+    const protocolTab = readFileSync(
+      new URL("../generated/web/tabs/experiments/finnish-sauna/protocol.json", import.meta.url),
+    );
+    const resultsPublic = readFileSync(
+      new URL("../generated/web/tabs/experiments/finnish-sauna/results-public.json", import.meta.url),
     );
     const researchTab = readFileSync(
       new URL("../generated/web/tabs/experiments/finnish-sauna/research.json", import.meta.url),
     );
 
+    expect(shell.byteLength).toBeLessThan(5_000);
+    expect(protocolTab.byteLength).toBeLessThan(30_000);
+    expect(resultsPublic.byteLength).toBeLessThan(10_000);
     expect(researchTab.byteLength).toBeLessThan(250_000);
+    expect(gzipSync(shell).byteLength).toBeLessThan(2_000);
+    expect(gzipSync(protocolTab).byteLength).toBeLessThan(8_000);
+    expect(gzipSync(resultsPublic).byteLength).toBeLessThan(4_000);
     expect(gzipSync(researchTab).byteLength).toBeLessThan(60_000);
     expect(bundle.byteLength / researchTab.byteLength).toBeGreaterThan(5);
+    expect(bundle.byteLength / protocolTab.byteLength).toBeGreaterThan(100);
+    expect(bundle.byteLength / resultsPublic.byteLength).toBeGreaterThan(250);
   });
 
   it("loads the generated catalog and resolves keys, slugs, and route ids", () => {

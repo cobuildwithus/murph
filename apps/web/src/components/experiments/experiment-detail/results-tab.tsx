@@ -3,7 +3,15 @@ import type { ReactNode } from "react";
 import type { BrowserVaultStatus } from "@/src/lib/browser-vault/context";
 import { formatIsoDate } from "@/src/lib/browser-vault/display";
 import type { ExperimentStartContactChannels } from "@/src/lib/experiments/start-experiment-contact";
-import type { Experiment } from "@/src/types/experiments";
+import type {
+  ExperimentConclusionSection,
+  ExperimentRunProjection,
+  ExperimentSchedule as ExperimentScheduleModel,
+  ExperimentSignal,
+  ExperimentStatus,
+  TimelineEvent,
+  TrendData,
+} from "@/src/types/experiments";
 import { Button } from "@/src/components/ui/button";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -14,12 +22,31 @@ import { TrendChart } from "./trend-chart";
 import { ExperimentTimeline } from "./experiment-timeline";
 
 interface ResultsTabProps {
-  experiment: Experiment;
+  experiment: ResultsTabExperiment;
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphPhoneNumber?: string | null;
   onPrivateRunRetry?: () => Promise<void>;
   privateRunError: string | null;
   privateRunStatus: BrowserVaultStatus;
+}
+
+export interface ResultsTabExperiment {
+  analysisAvailableOn?: string;
+  baselineDays: number;
+  conclusions?: ExperimentConclusionSection[];
+  dateRange?: string;
+  day?: number;
+  durationDays: number;
+  nextStep?: ExperimentRunProjection["nextStep"];
+  privateRun?: ExperimentRunProjection;
+  schedule?: ExperimentScheduleModel;
+  signals: ExperimentSignal[];
+  status: ExperimentStatus;
+  summary?: string;
+  summaryDetail?: string;
+  timeline: TimelineEvent[];
+  title: string;
+  trends: TrendData[];
 }
 
 export function ResultsTab({

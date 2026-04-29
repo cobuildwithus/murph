@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import {
+  resolveHealthCommonsExperimentResultsPublic,
+  resolveHealthCommonsExperimentShell,
+} from "@/src/lib/health-commons/experiment-projections";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { ResultsTabClient } from "./results-tab-client";
 
@@ -11,15 +14,15 @@ export async function generateMetadata({
   params: Promise<{ experimentId: string }>;
 }): Promise<Metadata> {
   const { experimentId } = await params;
-  const protocol = resolveHealthCommonsExperimentProtocol(experimentId);
+  const shell = resolveHealthCommonsExperimentShell(experimentId);
 
-  if (!protocol) {
+  if (!shell) {
     return {};
   }
 
   return createMurphPageMetadata({
-    title: `${protocol.title} results — Murph Experiments`,
-    description: protocol.description,
+    title: `${shell.title} results — Murph Experiments`,
+    description: shell.description,
     openGraph: {
       type: "article",
     },
@@ -32,7 +35,7 @@ export default async function ExperimentResultsPage({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  const protocol = resolveHealthCommonsExperimentProtocol(experimentId);
+  const protocol = resolveHealthCommonsExperimentResultsPublic(experimentId);
 
   if (!protocol) {
     notFound();

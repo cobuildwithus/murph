@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -9,17 +9,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
 import { ExperimentHero } from "@/src/components/experiments/experiment-detail/experiment-hero";
 import { ExperimentHeader } from "@/src/components/experiments/experiment-detail/experiment-header";
 import { ExperimentStartContactProvider } from "@/src/components/experiments/experiment-detail/start-experiment-contact-context";
-import { BrowserVaultProvider, useBrowserVault } from "@/src/lib/browser-vault/context";
-import { resolveBrowserVaultExperimentRun } from "@/src/lib/browser-vault/experiment-run";
-import {
-  composeExperimentDetail,
-  hasCurrentExperimentProtocolContract,
-} from "@/src/lib/experiments/experiment-detail";
+import { hasCurrentExperimentProtocolContract } from "@/src/lib/experiments/experiment-detail";
 import {
   DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS,
   type ExperimentStartContactChannels,
 } from "@/src/lib/experiments/start-experiment-contact";
-import type { ExperimentProtocol } from "@/src/types/experiments";
+import type { ExperimentShellProjection } from "@/src/lib/health-commons/experiment-projections";
 
 type ExperimentDetailTab = "protocol" | "research" | "results";
 
@@ -27,28 +22,26 @@ export function ExperimentLayoutClient({
   children,
   initialContactChannels = DEFAULT_EXPERIMENT_START_CONTACT_CHANNELS,
   murphPhoneNumber = null,
-  protocol,
+  shell,
 }: {
   children?: ReactNode;
   initialContactChannels?: ExperimentStartContactChannels;
   murphPhoneNumber?: string | null;
-  protocol: ExperimentProtocol;
+  shell: ExperimentShellProjection;
 }) {
   return (
-    <BrowserVaultProvider>
-      <ExperimentStartContactProvider
+    <ExperimentStartContactProvider
+      initialContactChannels={initialContactChannels}
+      murphPhoneNumber={murphPhoneNumber}
+    >
+      <ExperimentLayoutInner
         initialContactChannels={initialContactChannels}
         murphPhoneNumber={murphPhoneNumber}
+        shell={shell}
       >
-        <ExperimentLayoutInner
-          initialContactChannels={initialContactChannels}
-          murphPhoneNumber={murphPhoneNumber}
-          protocol={protocol}
-        >
-          {children}
-        </ExperimentLayoutInner>
-      </ExperimentStartContactProvider>
-    </BrowserVaultProvider>
+        {children}
+      </ExperimentLayoutInner>
+    </ExperimentStartContactProvider>
   );
 }
 
@@ -56,17 +49,16 @@ function ExperimentLayoutInner({
   children,
   initialContactChannels,
   murphPhoneNumber,
-  protocol,
+  shell,
 }: {
   children?: ReactNode;
   initialContactChannels: ExperimentStartContactChannels;
   murphPhoneNumber: string | null;
-  protocol: ExperimentProtocol;
+  shell: ExperimentShellProjection;
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const browserVault = useBrowserVault();
-  const hasCurrentProtocolContract = hasCurrentExperimentProtocolContract(protocol);
+  const hasCurrentProtocolContract = hasCurrentExperimentProtocolContract(shell);
 
   useEffect(() => {
     if (!hasCurrentProtocolContract) {
@@ -75,18 +67,6 @@ function ExperimentLayoutInner({
       });
     }
   }, [hasCurrentProtocolContract, router]);
-
-  const privateRun = useMemo(
-    () => resolveBrowserVaultExperimentRun({
-      client: browserVault.client,
-      protocol,
-    }),
-    [browserVault.client, protocol],
-  );
-  const experiment = useMemo(
-    () => composeExperimentDetail({ protocol, privateRun }),
-    [privateRun, protocol],
-  );
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [isTabsSticky, setIsTabsSticky] = useState(false);
@@ -109,20 +89,23 @@ function ExperimentLayoutInner({
     );
   }
 
-  const basePath = `/experiments/${protocol.id}`;
+  const experiment = {
+    ...shell,
+    status: "upcoming" as const,
+  };
+  const basePath = `/experiments/${shell.id}`;
   const currentTab: ExperimentDetailTab = pathname === `${basePath}/research`
     ? "research"
     : pathname === `${basePath}/results`
       ? "results"
       : "protocol";
+  const showHeaderStartAction = currentTab !== "results";
 
   return (
     <div className="flex flex-col gap-8">
-      {experiment.status !== "finished" && (
-        <div className="-mt-4 md:-mt-6">
-          <ExperimentHero image={experiment.image} />
-        </div>
-      )}
+      <div className="-mt-4 md:-mt-6">
+        <ExperimentHero image={experiment.image} />
+      </div>
 
       <ExperimentHeader
         title={experiment.title}
@@ -130,15 +113,16 @@ function ExperimentLayoutInner({
         durationDays={experiment.durationDays}
         evidenceLevel={experiment.evidenceLevel}
         evidenceLabel={experiment.evidenceLabel}
-        matchPercent={experiment.matchPercent}
+        matchPercent={undefined}
         status={experiment.status}
-        day={experiment.day}
-        dateRange={experiment.dateRange}
+        day={undefined}
+        dateRange={undefined}
         baselineDays={experiment.baselineDays}
-        completionPercent={experiment.completionPercent}
+        completionPercent={undefined}
         description={experiment.description}
         initialContactChannels={initialContactChannels}
         murphPhoneNumber={murphPhoneNumber}
+        showStartAction={showHeaderStartAction}
       />
 
       <Tabs value={currentTab} className="w-full">

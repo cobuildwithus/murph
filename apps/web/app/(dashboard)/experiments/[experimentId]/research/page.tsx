@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { loadGeneratedHealthCommonsWebExperimentResearchTab } from "@murphai/health-commons/runtime";
 
 import {
   ResearchTab,
   type ResearchTabExperiment,
 } from "@/src/components/experiments/experiment-detail/research-tab";
+import {
+  loadGeneratedExperimentResearchTab,
+  type GeneratedExperimentResearchTab,
+} from "@/src/lib/health-commons/generated-experiment-artifacts";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
@@ -14,9 +17,7 @@ export async function generateMetadata({
   params: Promise<{ experimentId: string }>;
 }): Promise<Metadata> {
   const { experimentId } = await params;
-  const research = loadGeneratedHealthCommonsWebExperimentResearchTab({
-    routeId: experimentId,
-  });
+  const research = loadGeneratedExperimentResearchTab(experimentId);
 
   if (!research) {
     return {};
@@ -37,9 +38,7 @@ export default async function ExperimentResearchPage({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  const research = loadGeneratedHealthCommonsWebExperimentResearchTab({
-    routeId: experimentId,
-  });
+  const research = loadGeneratedExperimentResearchTab(experimentId);
 
   if (!research) {
     notFound();
@@ -49,7 +48,7 @@ export default async function ExperimentResearchPage({
 }
 
 function toResearchTabExperiment(
-  research: NonNullable<ReturnType<typeof loadGeneratedHealthCommonsWebExperimentResearchTab>>,
+  research: GeneratedExperimentResearchTab,
 ): ResearchTabExperiment {
   return {
     id: research.route.routeId,

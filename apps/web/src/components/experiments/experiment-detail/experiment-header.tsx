@@ -20,6 +20,7 @@ interface ExperimentHeaderProps {
   description?: string;
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
   murphPhoneNumber?: string | null;
+  showStartAction?: boolean;
 }
 
 export function ExperimentHeader({
@@ -37,6 +38,7 @@ export function ExperimentHeader({
   description,
   initialContactChannels,
   murphPhoneNumber,
+  showStartAction = true,
 }: ExperimentHeaderProps) {
   const sanitizedDescription = sanitizeExperimentDescription(description);
   const isActive = status === "active";
@@ -133,7 +135,7 @@ export function ExperimentHeader({
           )}
         </div>
 
-        {status === "upcoming" && (
+        {status === "upcoming" && showStartAction && (
           <StartExperimentButton
             initialContactChannels={initialContactChannels}
             murphPhoneNumber={murphPhoneNumber}

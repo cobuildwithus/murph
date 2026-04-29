@@ -1,7 +1,6 @@
 import type {
   HealthCommonsBiomarkerCommunityOutcomeSummary,
   HealthCommonsBiomarkerExplainerCard,
-  HealthCommonsBiomarkerMetricDomain,
   HealthCommonsBiomarkerPrivateMetricBinding,
   HealthCommonsBiomarkerProtocolCandidate,
   HealthCommonsBiomarkerProtocolExpectedDirection,
@@ -20,6 +19,7 @@ import {
   type HealthCommonsEntity,
   type HealthCommonsRouteBundleReader,
 } from "@murphai/health-commons/runtime";
+import { isBrowserVaultMetricBinding } from "./biomarker-bindings";
 
 const FINNISH_SAUNA_PROTOCOL_KEY = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
@@ -194,18 +194,6 @@ export function resolveHealthCommonsBiomarkerDetail(
   }
 
   return toBiomarkerPageModel(biomarker, catalog);
-}
-
-export function isBrowserVaultMetricBinding(
-  binding: HealthCommonsBiomarkerPrivateMetricBinding,
-): binding is HealthCommonsBiomarkerPrivateMetricBinding & {
-  domain: HealthCommonsBiomarkerMetricDomain;
-  metric: string;
-  source: "browser_vault_metric";
-} {
-  return binding.source === "browser_vault_metric"
-    && typeof binding.domain === "string"
-    && typeof binding.metric === "string";
 }
 
 function toBiomarkerPageModel(

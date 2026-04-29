@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   healthCommonsCatalogSchema,
@@ -16,15 +16,27 @@ import {
 } from "@murphai/contracts";
 import {
   HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION,
+  HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION,
+  HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION,
+  HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION,
   HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
   type HealthCommonsWebBiomarkerIndex,
   type HealthCommonsWebExperimentIndex,
+  type HealthCommonsWebExperimentProtocolTab,
   type HealthCommonsWebExperimentResearchTab,
+  type HealthCommonsWebExperimentResultsPublic,
+  type HealthCommonsWebExperimentShell,
   type HealthCommonsWebRouteBundle,
   type HealthCommonsWebRouteIndex,
+} from "./web-artifacts.ts";
+
+export type {
+  HealthCommonsWebExperimentProtocolTab,
+  HealthCommonsWebExperimentResultsPublic,
+  HealthCommonsWebExperimentShell,
 } from "./web-artifacts.ts";
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
@@ -261,7 +273,6 @@ export interface HealthCommonsRouteBundleReader extends HealthCommonsCatalogRead
 }
 
 const DEFAULT_GENERATED_CATALOG_URL = new URL("../generated/catalog.json", import.meta.url);
-const DEFAULT_GENERATED_WEB_ROOT_URL = new URL("../generated/web/", import.meta.url);
 const DEFAULT_LIST_LIMIT = 25;
 const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -276,6 +287,18 @@ const cachedGeneratedWebRouteBundles = new Map<string, HealthCommonsWebRouteBund
 const cachedGeneratedWebExperimentResearchTabs = new Map<
   string,
   HealthCommonsWebExperimentResearchTab | null
+>();
+const cachedGeneratedWebExperimentShells = new Map<
+  string,
+  HealthCommonsWebExperimentShell | null
+>();
+const cachedGeneratedWebExperimentProtocolTabs = new Map<
+  string,
+  HealthCommonsWebExperimentProtocolTab | null
+>();
+const cachedGeneratedWebExperimentResultsPublic = new Map<
+  string,
+  HealthCommonsWebExperimentResultsPublic | null
 >();
 
 export function loadGeneratedHealthCommonsCatalog(
@@ -401,6 +424,64 @@ export function loadGeneratedHealthCommonsWebExperimentResearchTab(input: {
   generatedWebRoot?: string | URL;
   routeId: string;
 }): HealthCommonsWebExperimentResearchTab | null {
+  return loadGeneratedHealthCommonsWebExperimentArtifact({
+    assertArtifact: assertGeneratedWebExperimentResearchTab,
+    cache: cachedGeneratedWebExperimentResearchTabs,
+    generatedWebRoot: input.generatedWebRoot,
+    pathForBundlePath: (bundlePath) =>
+      experimentArtifactPathForRouteBundlePath(bundlePath, "research.json"),
+    routeId: input.routeId,
+  });
+}
+
+export function loadGeneratedHealthCommonsWebExperimentShell(input: {
+  generatedWebRoot?: string | URL;
+  routeId: string;
+}): HealthCommonsWebExperimentShell | null {
+  return loadGeneratedHealthCommonsWebExperimentArtifact({
+    assertArtifact: assertGeneratedWebExperimentShell,
+    cache: cachedGeneratedWebExperimentShells,
+    generatedWebRoot: input.generatedWebRoot,
+    pathForBundlePath: experimentShellPathForRouteBundlePath,
+    routeId: input.routeId,
+  });
+}
+
+export function loadGeneratedHealthCommonsWebExperimentProtocolTab(input: {
+  generatedWebRoot?: string | URL;
+  routeId: string;
+}): HealthCommonsWebExperimentProtocolTab | null {
+  return loadGeneratedHealthCommonsWebExperimentArtifact({
+    assertArtifact: assertGeneratedWebExperimentProtocolTab,
+    cache: cachedGeneratedWebExperimentProtocolTabs,
+    generatedWebRoot: input.generatedWebRoot,
+    pathForBundlePath: (bundlePath) =>
+      experimentArtifactPathForRouteBundlePath(bundlePath, "protocol.json"),
+    routeId: input.routeId,
+  });
+}
+
+export function loadGeneratedHealthCommonsWebExperimentResultsPublic(input: {
+  generatedWebRoot?: string | URL;
+  routeId: string;
+}): HealthCommonsWebExperimentResultsPublic | null {
+  return loadGeneratedHealthCommonsWebExperimentArtifact({
+    assertArtifact: assertGeneratedWebExperimentResultsPublic,
+    cache: cachedGeneratedWebExperimentResultsPublic,
+    generatedWebRoot: input.generatedWebRoot,
+    pathForBundlePath: (bundlePath) =>
+      experimentArtifactPathForRouteBundlePath(bundlePath, "results-public.json"),
+    routeId: input.routeId,
+  });
+}
+
+function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
+  assertArtifact: (value: unknown, artifactPath: string) => asserts value is T;
+  cache: Map<string, T | null>;
+  generatedWebRoot?: string | URL;
+  pathForBundlePath: (bundlePath: string) => string;
+  routeId: string;
+}): T | null {
   const routeIndex = getGeneratedHealthCommonsWebRouteIndex({
     generatedWebRoot: input.generatedWebRoot,
   });
@@ -413,29 +494,29 @@ export function loadGeneratedHealthCommonsWebExperimentResearchTab(input: {
     return null;
   }
 
-  const tabPath = experimentResearchTabPathForRouteBundlePath(route.bundlePath);
-  const cacheKey = `${routeIndex.catalogHash}:${tabPath}`;
-  if (!input.generatedWebRoot && cachedGeneratedWebExperimentResearchTabs.has(cacheKey)) {
-    return cachedGeneratedWebExperimentResearchTabs.get(cacheKey) ?? null;
+  const artifactPath = input.pathForBundlePath(route.bundlePath);
+  const cacheKey = `${routeIndex.catalogHash}:${artifactPath}`;
+  if (!input.generatedWebRoot && input.cache.has(cacheKey)) {
+    return input.cache.get(cacheKey) ?? null;
   }
 
-  const artifactUrl = new URL(tabPath, normalizeGeneratedWebRoot(input.generatedWebRoot));
+  const artifactUrl = new URL(artifactPath, normalizeGeneratedWebRoot(input.generatedWebRoot));
   if (artifactUrl.protocol === "file:" && !existsSync(artifactUrl)) {
     if (!input.generatedWebRoot) {
-      cachedGeneratedWebExperimentResearchTabs.set(cacheKey, null);
+      input.cache.set(cacheKey, null);
     }
     return null;
   }
 
   const raw = readFileSync(artifactUrl, "utf8");
-  const researchTab = parseJsonObject(raw);
-  assertGeneratedWebExperimentResearchTab(researchTab, tabPath);
+  const artifact = parseJsonObject(raw);
+  input.assertArtifact(artifact, artifactPath);
 
   if (!input.generatedWebRoot) {
-    cachedGeneratedWebExperimentResearchTabs.set(cacheKey, researchTab);
+    input.cache.set(cacheKey, artifact);
   }
 
-  return researchTab;
+  return artifact;
 }
 
 export function createHealthCommonsRouteBundleReader(
@@ -1373,13 +1454,35 @@ function safeDecodeURIComponent(value: string): string {
 
 function normalizeGeneratedWebRoot(value: string | URL | undefined): URL {
   if (!value) {
-    return DEFAULT_GENERATED_WEB_ROOT_URL;
+    return ensureTrailingSlashUrl(defaultGeneratedWebRootUrl());
   }
 
   const url = typeof value === "string"
     ? stringToGeneratedWebRootUrl(value)
     : value;
-  return url.href.endsWith("/") ? url : new URL(`${url.href}/`);
+  return ensureTrailingSlashUrl(url);
+}
+
+function ensureTrailingSlashUrl(value: URL): URL {
+  return value.href.endsWith("/") ? value : new URL(`${value.href}/`);
+}
+
+function defaultGeneratedWebRootUrl(): URL {
+  const runtimeSourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const candidateRoots = [
+    resolve(process.cwd(), "packages/health-commons/generated/web"),
+    resolve(process.cwd(), "../packages/health-commons/generated/web"),
+    resolve(process.cwd(), "../../packages/health-commons/generated/web"),
+    resolve(runtimeSourceRoot, "generated/web"),
+  ];
+
+  for (const candidateRoot of candidateRoots) {
+    if (existsSync(resolve(candidateRoot, "routes/index.json"))) {
+      return pathToFileURL(candidateRoot);
+    }
+  }
+
+  return pathToFileURL(candidateRoots[0]);
 }
 
 function stringToGeneratedWebRootUrl(value: string): URL {
@@ -1494,6 +1597,103 @@ function assertGeneratedWebExperimentResearchTab(
     !isGeneratedWebResearchLandscape(value["researchLandscape"])
   ) {
     throw new Error(`Health Commons generated experiment research landscape is invalid: ${tabPath}.`);
+  }
+}
+
+function assertGeneratedWebExperimentShell(
+  value: unknown,
+  artifactPath: string,
+): asserts value is HealthCommonsWebExperimentShell {
+  if (!isRecord(value)) {
+    throw new Error(`Health Commons generated experiment shell is invalid: ${artifactPath}.`);
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION ||
+    typeof value["baselineDays"] !== "number" ||
+    typeof value["catalogHash"] !== "string" ||
+    typeof value["category"] !== "string" ||
+    typeof value["description"] !== "string" ||
+    typeof value["durationDays"] !== "number" ||
+    typeof value["evidenceLabel"] !== "string" ||
+    typeof value["evidenceLevel"] !== "number" ||
+    typeof value["id"] !== "string" ||
+    (typeof value["image"] !== "string" && value["image"] !== null) ||
+    typeof value["key"] !== "string" ||
+    !isRecord(value["revision"]) ||
+    !isRecord(value["route"]) ||
+    !isGeneratedWebRoute(value["route"]) ||
+    value["route"]["entityType"] !== "protocol_variant" ||
+    typeof value["title"] !== "string"
+  ) {
+    throw new Error(`Health Commons generated experiment shell is invalid: ${artifactPath}.`);
+  }
+}
+
+function assertGeneratedWebExperimentProtocolTab(
+  value: unknown,
+  artifactPath: string,
+): asserts value is HealthCommonsWebExperimentProtocolTab {
+  if (!isRecord(value)) {
+    throw new Error(`Health Commons generated experiment protocol tab is invalid: ${artifactPath}.`);
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION ||
+    typeof value["baselineDays"] !== "number" ||
+    typeof value["catalogHash"] !== "string" ||
+    typeof value["durationDays"] !== "number" ||
+    !Array.isArray(value["expectedSignals"]) ||
+    !value["expectedSignals"].every(isGeneratedWebExperimentSignal) ||
+    !Array.isArray(value["experts"]) ||
+    !value["experts"].every(isGeneratedWebExperimentExpert) ||
+    typeof value["id"] !== "string" ||
+    typeof value["key"] !== "string" ||
+    !Array.isArray(value["measurementPaths"]) ||
+    !value["measurementPaths"].every(isGeneratedWebMeasurementPath) ||
+    !Array.isArray(value["protocol"]) ||
+    !value["protocol"].every(isGeneratedWebProtocolStep) ||
+    !Array.isArray(value["protocolFacts"]) ||
+    !value["protocolFacts"].every(isGeneratedWebProtocolFact) ||
+    !Array.isArray(value["protocolTips"]) ||
+    !value["protocolTips"].every(isString) ||
+    !isRecord(value["revision"]) ||
+    !isRecord(value["route"]) ||
+    !isGeneratedWebRoute(value["route"]) ||
+    value["route"]["entityType"] !== "protocol_variant" ||
+    !isGeneratedWebSafety(value["safety"]) ||
+    typeof value["title"] !== "string" ||
+    typeof value["whyItWorks"] !== "string"
+  ) {
+    throw new Error(`Health Commons generated experiment protocol tab is invalid: ${artifactPath}.`);
+  }
+}
+
+function assertGeneratedWebExperimentResultsPublic(
+  value: unknown,
+  artifactPath: string,
+): asserts value is HealthCommonsWebExperimentResultsPublic {
+  if (!isRecord(value)) {
+    throw new Error(`Health Commons generated experiment results public is invalid: ${artifactPath}.`);
+  }
+
+  if (
+    value["schemaVersion"] !== HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION ||
+    typeof value["baselineDays"] !== "number" ||
+    typeof value["catalogHash"] !== "string" ||
+    !isGeneratedWebExperimentCommons(value["commons"]) ||
+    typeof value["durationDays"] !== "number" ||
+    typeof value["id"] !== "string" ||
+    typeof value["key"] !== "string" ||
+    !Array.isArray(value["protocol"]) ||
+    !value["protocol"].every(isGeneratedWebProtocolStep) ||
+    !isRecord(value["revision"]) ||
+    !isRecord(value["route"]) ||
+    !isGeneratedWebRoute(value["route"]) ||
+    value["route"]["entityType"] !== "protocol_variant" ||
+    typeof value["title"] !== "string"
+  ) {
+    throw new Error(`Health Commons generated experiment results public is invalid: ${artifactPath}.`);
   }
 }
 
@@ -1696,8 +1896,162 @@ function isGeneratedWebResearchStudy(value: unknown): boolean {
   );
 }
 
+function isGeneratedWebExperimentSignal(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value["baseline"] === undefined || typeof value["baseline"] === "string") &&
+    typeof value["delta"] === "string" &&
+    (value["description"] === undefined || typeof value["description"] === "string") &&
+    isGeneratedWebSignalDirection(value["direction"]) &&
+    typeof value["expected"] === "string" &&
+    typeof value["label"] === "string" &&
+    (
+      value["protocolProminence"] === undefined ||
+      value["protocolProminence"] === "focus" ||
+      value["protocolProminence"] === "context"
+    ) &&
+    (value["unit"] === undefined || typeof value["unit"] === "string") &&
+    typeof value["value"] === "string"
+  );
+}
+
+function isGeneratedWebMeasurementPath(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value["isDefault"] === "boolean" &&
+    typeof value["label"] === "string" &&
+    Array.isArray(value["methodKeys"]) &&
+    value["methodKeys"].every(isString) &&
+    Array.isArray(value["methods"]) &&
+    value["methods"].every(isGeneratedWebMeasurementMethodReference) &&
+    Array.isArray(value["notes"]) &&
+    value["notes"].every(isString) &&
+    Array.isArray(value["outcomeLabels"]) &&
+    value["outcomeLabels"].every(isString) &&
+    typeof value["pathId"] === "string" &&
+    typeof value["required"] === "boolean" &&
+    Array.isArray(value["safetyOutcomeLabels"]) &&
+    value["safetyOutcomeLabels"].every(isString) &&
+    typeof value["tier"] === "string"
+  );
+}
+
+function isGeneratedWebMeasurementMethodReference(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value["href"] === undefined || typeof value["href"] === "string") &&
+    typeof value["key"] === "string" &&
+    Array.isArray(value["modalities"]) &&
+    value["modalities"].every(isString) &&
+    (value["privacy"] === undefined || isGeneratedWebMeasurementMethodPrivacy(value["privacy"])) &&
+    (value["routeId"] === undefined || typeof value["routeId"] === "string") &&
+    typeof value["shortName"] === "string" &&
+    (value["summary"] === undefined || typeof value["summary"] === "string") &&
+    typeof value["tier"] === "string" &&
+    typeof value["title"] === "string"
+  );
+}
+
+function isGeneratedWebMeasurementMethodPrivacy(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value["containsIdentifiableImages"] === undefined ||
+      typeof value["containsIdentifiableImages"] === "boolean") &&
+    (value["localOnlyRecommended"] === undefined ||
+      typeof value["localOnlyRecommended"] === "boolean") &&
+    Array.isArray(value["notes"]) &&
+    value["notes"].every(isString)
+  );
+}
+
+function isGeneratedWebProtocolStep(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value["detail"] === "string" &&
+    typeof value["number"] === "number" &&
+    typeof value["title"] === "string"
+  );
+}
+
+function isGeneratedWebProtocolFact(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value["detail"] === undefined || typeof value["detail"] === "string") &&
+    typeof value["label"] === "string" &&
+    typeof value["value"] === "string"
+  );
+}
+
+function isGeneratedWebExperimentExpert(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value["field"] === "string" &&
+    typeof value["initials"] === "string" &&
+    typeof value["name"] === "string" &&
+    (value["profileImageUrl"] === undefined || typeof value["profileImageUrl"] === "string") &&
+    typeof value["quote"] === "string"
+  );
+}
+
+function isGeneratedWebSafety(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value["cautionLevel"] === "number" &&
+    Array.isArray(value["precautions"]) &&
+    value["precautions"].every(isString) &&
+    Array.isArray(value["whoShouldAvoid"]) &&
+    value["whoShouldAvoid"].every(isString)
+  );
+}
+
+function isGeneratedWebExperimentCommons(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value["aliases"]) &&
+    value["aliases"].every(isString) &&
+    typeof value["catalogHash"] === "string" &&
+    typeof value["key"] === "string" &&
+    typeof value["pageRevisionId"] === "string" &&
+    (typeof value["recipeHash"] === "string" || value["recipeHash"] === null) &&
+    typeof value["routeId"] === "string" &&
+    (typeof value["runSpecRevisionId"] === "string" || value["runSpecRevisionId"] === null) &&
+    typeof value["slug"] === "string"
+  );
+}
+
 function isGeneratedWebResearchConfidenceLabel(value: unknown): boolean {
   return typeof value === "string" && GENERATED_WEB_RESEARCH_CONFIDENCE_LABELS.has(value);
+}
+
+function isGeneratedWebSignalDirection(value: unknown): boolean {
+  return value === "up" || value === "down" || value === "neutral";
 }
 
 function isGeneratedWebResearchFindingKind(value: unknown): boolean {
@@ -1823,10 +2177,16 @@ function isGeneratedWebBundleEntity(value: Record<string, unknown>): boolean {
   );
 }
 
-function experimentResearchTabPathForRouteBundlePath(bundlePath: string): string {
+function experimentArtifactPathForRouteBundlePath(bundlePath: string, artifactFileName: string): string {
   const fileName = bundlePath.split("/").at(-1) ?? "";
   const routeId = fileName.replace(/\.json$/u, "");
-  return `tabs/experiments/${routeId}/research.json`;
+  return `tabs/experiments/${routeId}/${artifactFileName}`;
+}
+
+function experimentShellPathForRouteBundlePath(bundlePath: string): string {
+  const fileName = bundlePath.split("/").at(-1) ?? "";
+  const routeId = fileName.replace(/\.json$/u, "");
+  return `shell/experiments/${routeId}.json`;
 }
 
 function normalizeKeyInput(value: string): string {

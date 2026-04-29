@@ -9,8 +9,9 @@
   "scripts": {
     "dev": "vercel env run -- pnpm dev:local-env",
     "dev:local-env": "bash -c 'pnpm health-commons:generate && { trap \"rm -rf .next-dev/.dev-server.lock\" INT TERM EXIT; pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"; }' --",
-    "build": "pnpm health-commons:generate && pnpm prisma:generate && next build",
+    "build": "pnpm health-commons:generate && pnpm prisma:generate && next build && pnpm health-commons:trace-check",
     "health-commons:generate": "pnpm --dir ../.. health-commons:generate",
+    "health-commons:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-health-commons-traces.ts",
     "lint": "eslint .",
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
@@ -62,6 +63,7 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.4",
+    "linkedom": "0.18.12",
     "prisma": "^7.5.0",
     "tailwindcss": "^4.2.1"
   }

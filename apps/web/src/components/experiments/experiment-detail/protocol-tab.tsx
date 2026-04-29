@@ -11,8 +11,11 @@ import {
 } from "lucide-react";
 
 import type {
-  Experiment,
+  Expert,
   ExperimentMeasurementPath,
+  ExperimentProtocolFact,
+  ExperimentProtocolStep,
+  ExperimentSafety,
   ExperimentSignal,
 } from "@/src/types/experiments";
 import { ExpertCard } from "./expert-card";
@@ -20,8 +23,23 @@ import { SafetySection } from "./safety-section";
 import { splitBulletLead } from "./format";
 
 interface ProtocolTabProps {
-  experiment: Experiment;
+  experiment: ProtocolTabExperiment;
   researchHref?: string;
+}
+
+export interface ProtocolTabExperiment {
+  baselineDays: number;
+  durationDays: number;
+  expectedSignals: ExperimentSignal[];
+  experts: Expert[];
+  id: string;
+  measurementPaths: ExperimentMeasurementPath[];
+  podcastLinks?: { label: string; url: string }[];
+  protocol: ExperimentProtocolStep[];
+  protocolFacts: ExperimentProtocolFact[];
+  protocolTips: string[];
+  safety: ExperimentSafety;
+  whyItWorks: string;
 }
 
 interface SignalEstimate {
@@ -634,7 +652,7 @@ function ExpectedSignalContextPills({
 }
 
 function findProtocolFact(
-  facts: Experiment["protocolFacts"],
+  facts: ProtocolTabExperiment["protocolFacts"],
   label: string,
 ) {
   return facts.find((fact) => normalizeFactLabel(fact.label) === label);
@@ -644,7 +662,7 @@ function normalizeFactLabel(label: string): string {
   return label.trim().toLowerCase();
 }
 
-function hasSpecificStepTitle(step: Experiment["protocol"][number]): boolean {
+function hasSpecificStepTitle(step: ProtocolTabExperiment["protocol"][number]): boolean {
   return step.title.trim() !== `Step ${step.number}`;
 }
 

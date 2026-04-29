@@ -3,8 +3,8 @@ import { notFound } from "next/navigation";
 
 import {
   listHealthCommonsExperimentRouteParams,
-  resolveHealthCommonsExperimentProtocol,
-} from "@/src/lib/health-commons/experiment-detail";
+} from "@/src/lib/health-commons/experiment-browse";
+import { resolveHealthCommonsExperimentShell } from "@/src/lib/health-commons/experiment-projections";
 import { ExperimentLayoutClient } from "./experiment-layout-client";
 
 export function generateStaticParams() {
@@ -19,16 +19,16 @@ export default async function ExperimentDetailLayout({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  const protocol = resolveHealthCommonsExperimentProtocol(experimentId);
+  const shell = resolveHealthCommonsExperimentShell(experimentId);
 
-  if (!protocol) {
+  if (!shell) {
     notFound();
   }
 
   return (
     <ExperimentLayoutClient
-      key={protocol.commons?.pageRevisionId ?? protocol.id}
-      protocol={protocol}
+      key={shell.revision.pageRevisionId ?? shell.id}
+      shell={shell}
     >
       {children}
     </ExperimentLayoutClient>

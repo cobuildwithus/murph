@@ -209,8 +209,17 @@ describe("@murphai/health-commons build determinism", () => {
       ],
     });
 
+    expect([...webArtifacts.experimentShells.keys()]).toEqual([
+      "shell/experiments/public.json",
+    ]);
+    expect([...webArtifacts.experimentProtocolTabs.keys()]).toEqual([
+      "tabs/experiments/public/protocol.json",
+    ]);
     expect([...webArtifacts.experimentResearchTabs.keys()]).toEqual([
       "tabs/experiments/public/research.json",
+    ]);
+    expect([...webArtifacts.experimentResultsPublic.keys()]).toEqual([
+      "tabs/experiments/public/results-public.json",
     ]);
   });
 });
