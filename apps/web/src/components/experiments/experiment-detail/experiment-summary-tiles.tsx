@@ -1,10 +1,22 @@
 import type { ReactNode } from "react";
 import { Check } from "lucide-react";
 
-import type { Experiment } from "@/src/types/experiments";
+import type {
+  ExperimentNextStep,
+  ExperimentSchedule,
+} from "@/src/types/experiments";
 
 interface ExperimentSummaryTilesProps {
-  experiment: Experiment;
+  experiment: ExperimentSummaryTilesExperiment;
+}
+
+interface ExperimentSummaryTilesExperiment {
+  baselineDays: number;
+  dateRange?: string;
+  day?: number;
+  durationDays: number;
+  nextStep?: ExperimentNextStep;
+  schedule?: ExperimentSchedule;
 }
 
 interface SummaryDatum {
@@ -37,7 +49,7 @@ export function ExperimentSummaryTiles({ experiment }: ExperimentSummaryTilesPro
   );
 }
 
-function getSummaryData(experiment: Experiment): SummaryDatum[] {
+function getSummaryData(experiment: ExperimentSummaryTilesExperiment): SummaryDatum[] {
   const { baselineDays, durationDays, day, dateRange, nextStep, schedule } = experiment;
   const inBaseline = baselineDays > 0 && day != null && day <= baselineDays;
   const tallies = tallySchedule(schedule);
@@ -162,7 +174,7 @@ interface ScheduleTallies {
   total: number;
 }
 
-function tallySchedule(schedule: Experiment["schedule"]): ScheduleTallies | null {
+function tallySchedule(schedule: ExperimentSchedule | undefined): ScheduleTallies | null {
   if (!schedule) return null;
 
   const counts = schedule.weeks

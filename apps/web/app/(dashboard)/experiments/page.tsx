@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { listHealthCommonsExperimentProtocols } from "@/src/lib/health-commons/experiment-detail";
+import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { ExperimentsPageClient } from "./experiments-page-client";
 
@@ -11,7 +11,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 export default function ExperimentsPage() {
-  const protocols = listHealthCommonsExperimentProtocols();
+  const protocols = listHealthCommonsExperimentBrowseProtocols();
 
   return <ExperimentsPageClient protocols={protocols} />;
 }

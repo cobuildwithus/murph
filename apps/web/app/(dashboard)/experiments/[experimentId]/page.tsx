@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { ProtocolTab } from "@/src/components/experiments/experiment-detail/protocol-tab";
+import {
+  resolveHealthCommonsExperimentProtocolTab,
+  resolveHealthCommonsExperimentShell,
+} from "@/src/lib/health-commons/experiment-projections";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
-import { ExperimentDetailClient } from "./experiment-detail-client";
 
 export async function generateMetadata({
   params,
@@ -11,15 +14,15 @@ export async function generateMetadata({
   params: Promise<{ experimentId: string }>;
 }): Promise<Metadata> {
   const { experimentId } = await params;
-  const protocol = resolveHealthCommonsExperimentProtocol(experimentId);
+  const shell = resolveHealthCommonsExperimentShell(experimentId);
 
-  if (!protocol) {
+  if (!shell) {
     return {};
   }
 
   return createMurphPageMetadata({
-    title: `${protocol.title} — Murph Experiments`,
-    description: protocol.description,
+    title: `${shell.title} — Murph Experiments`,
+    description: shell.description,
     openGraph: {
       type: "article",
     },
@@ -32,16 +35,17 @@ export default async function ExperimentDetailPage({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  const protocol = resolveHealthCommonsExperimentProtocol(experimentId);
+  const protocolTab = resolveHealthCommonsExperimentProtocolTab(experimentId);
 
-  if (!protocol) {
+  if (!protocolTab) {
     notFound();
   }
 
   return (
-    <ExperimentDetailClient
-      key={protocol.commons?.pageRevisionId ?? protocol.id}
-      protocol={protocol}
+    <ProtocolTab
+      key={protocolTab.revision.pageRevisionId ?? protocolTab.id}
+      experiment={protocolTab}
+      researchHref={`/experiments/${protocolTab.id}/research`}
     />
   );
 }

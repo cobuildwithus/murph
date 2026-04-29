@@ -1,13 +1,19 @@
 import type {
   HealthCommonsCatalog,
   HealthCommonsCatalogEntity,
+  HealthCommonsClaim,
   HealthCommonsEntityType,
   HealthCommonsEvidenceAppraisal,
+  HealthCommonsMeasurementMethod,
+  HealthCommonsMeasurementPlanPath,
   HealthCommonsRedirect,
   HealthCommonsRelation,
+  HealthCommonsProtocolSpec,
   HealthCommonsResearchEvidence,
   HealthCommonsResearchLandscapeGroup,
+  HealthCommonsSafety,
   HealthCommonsSource,
+  HealthCommonsTestPlan,
 } from "@murphai/contracts";
 
 export const HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION =
@@ -20,6 +26,12 @@ export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
   "murph.commons.web.biomarker-index.v1" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION =
   "murph.commons.web.experiment-research-tab.v1" as const;
+export const HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION =
+  "murph.commons.web.experiment-shell.v1" as const;
+export const HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION =
+  "murph.commons.web.experiment-protocol-tab.v1" as const;
+export const HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION =
+  "murph.commons.web.experiment-results-public.v1" as const;
 
 const SOURCE_SNIPPET_FINDING_MAX_LENGTH = 1_000;
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
@@ -244,10 +256,157 @@ export interface HealthCommonsWebExperimentResearchTab {
   title: string;
 }
 
+export interface HealthCommonsWebExperimentCommonsReference {
+  aliases: string[];
+  catalogHash: string;
+  key: string;
+  pageRevisionId: string;
+  recipeHash: string | null;
+  routeId: string;
+  runSpecRevisionId: string | null;
+  slug: string;
+}
+
+export interface HealthCommonsWebExperimentShell {
+  baselineDays: number;
+  catalogHash: string;
+  category: string;
+  description: string;
+  durationDays: number;
+  evidenceLabel: string;
+  evidenceLevel: number;
+  id: string;
+  image: string | null;
+  key: string;
+  revision: HealthCommonsWebRevisionRef;
+  route: {
+    aliases: string[];
+    entityType: "protocol_variant";
+    routeId: string;
+    slug: string;
+  };
+  schemaVersion: typeof HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION;
+  title: string;
+}
+
+export interface HealthCommonsWebExperimentSignal {
+  baseline?: string;
+  delta: string;
+  description?: string;
+  direction: "up" | "down" | "neutral";
+  expected: string;
+  label: string;
+  protocolProminence?: "focus" | "context";
+  unit?: string;
+  value: string;
+}
+
+export interface HealthCommonsWebExperimentMeasurementMethodReference {
+  href?: string;
+  key: string;
+  modalities: string[];
+  privacy?: {
+    containsIdentifiableImages?: boolean;
+    localOnlyRecommended?: boolean;
+    notes: string[];
+  };
+  routeId?: string;
+  shortName: string;
+  summary?: string;
+  tier: HealthCommonsMeasurementMethod["tier"];
+  title: string;
+}
+
+export interface HealthCommonsWebExperimentMeasurementPath {
+  isDefault: boolean;
+  label: string;
+  methodKeys: string[];
+  methods: HealthCommonsWebExperimentMeasurementMethodReference[];
+  notes: string[];
+  outcomeLabels: string[];
+  pathId: string;
+  required: boolean;
+  safetyOutcomeLabels: string[];
+  tier: HealthCommonsMeasurementMethod["tier"];
+}
+
+export interface HealthCommonsWebExperimentProtocolFact {
+  detail?: string;
+  label: string;
+  value: string;
+}
+
+export interface HealthCommonsWebExperimentProtocolStep {
+  detail: string;
+  number: number;
+  title: string;
+}
+
+export interface HealthCommonsWebExperimentExpert {
+  field: string;
+  initials: string;
+  name: string;
+  profileImageUrl?: string;
+  quote: string;
+}
+
+export interface HealthCommonsWebExperimentSafety {
+  cautionLevel: number;
+  precautions: string[];
+  whoShouldAvoid: string[];
+}
+
+export interface HealthCommonsWebExperimentProtocolTab {
+  baselineDays: number;
+  catalogHash: string;
+  durationDays: number;
+  expectedSignals: HealthCommonsWebExperimentSignal[];
+  experts: HealthCommonsWebExperimentExpert[];
+  id: string;
+  key: string;
+  measurementPaths: HealthCommonsWebExperimentMeasurementPath[];
+  protocol: HealthCommonsWebExperimentProtocolStep[];
+  protocolFacts: HealthCommonsWebExperimentProtocolFact[];
+  protocolTips: string[];
+  revision: HealthCommonsWebRevisionRef;
+  route: {
+    aliases: string[];
+    entityType: "protocol_variant";
+    routeId: string;
+    slug: string;
+  };
+  safety: HealthCommonsWebExperimentSafety;
+  schemaVersion: typeof HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION;
+  title: string;
+  whyItWorks: string;
+}
+
+export interface HealthCommonsWebExperimentResultsPublic {
+  baselineDays: number;
+  catalogHash: string;
+  commons: HealthCommonsWebExperimentCommonsReference;
+  durationDays: number;
+  id: string;
+  key: string;
+  protocol: HealthCommonsWebExperimentProtocolStep[];
+  revision: HealthCommonsWebRevisionRef;
+  route: {
+    aliases: string[];
+    entityType: "protocol_variant";
+    routeId: string;
+    slug: string;
+  };
+  schemaVersion: typeof HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION;
+  title: string;
+}
+
 export interface HealthCommonsWebGeneratedArtifacts {
   biomarkerIndex: HealthCommonsWebBiomarkerIndex;
   experimentIndex: HealthCommonsWebExperimentIndex;
+  experimentProtocolTabs: Map<string, HealthCommonsWebExperimentProtocolTab>;
   experimentResearchTabs: Map<string, HealthCommonsWebExperimentResearchTab>;
+  experimentResultsPublic: Map<string, HealthCommonsWebExperimentResultsPublic>;
+  experimentShells: Map<string, HealthCommonsWebExperimentShell>;
   routeBundles: Map<string, HealthCommonsWebRouteBundle>;
   routeIndex: HealthCommonsWebRouteIndex;
 }
@@ -320,7 +479,10 @@ export function buildHealthCommonsWebGeneratedArtifacts(
   }
 
   routeEntries.sort(compareRouteEntries);
+  const experimentProtocolTabs = new Map<string, HealthCommonsWebExperimentProtocolTab>();
   const experimentResearchTabs = new Map<string, HealthCommonsWebExperimentResearchTab>();
+  const experimentResultsPublic = new Map<string, HealthCommonsWebExperimentResultsPublic>();
+  const experimentShells = new Map<string, HealthCommonsWebExperimentShell>();
 
   for (const bundle of routeBundles.values()) {
     if (bundle.route.entityType !== "protocol_variant") {
@@ -331,11 +493,33 @@ export function buildHealthCommonsWebGeneratedArtifacts(
       continue;
     }
 
+    experimentShells.set(
+      experimentShellPathForRouteId(bundle.route.routeId),
+      buildExperimentShell({
+        bundle,
+        protocol,
+      }),
+    );
+    experimentProtocolTabs.set(
+      experimentProtocolTabPathForRouteId(bundle.route.routeId),
+      buildExperimentProtocolTab({
+        bundle,
+        entitiesByKey,
+        protocol,
+      }),
+    );
     experimentResearchTabs.set(
       experimentResearchTabPathForRouteId(bundle.route.routeId),
       buildExperimentResearchTab({
         bundle,
         entitiesByKey,
+        protocol,
+      }),
+    );
+    experimentResultsPublic.set(
+      experimentResultsPublicPathForRouteId(bundle.route.routeId),
+      buildExperimentResultsPublic({
+        bundle,
         protocol,
       }),
     );
@@ -406,7 +590,10 @@ export function buildHealthCommonsWebGeneratedArtifacts(
         .sort((left, right) => left.title.localeCompare(right.title)),
       schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
     },
+    experimentProtocolTabs,
     experimentResearchTabs,
+    experimentResultsPublic,
+    experimentShells,
     routeBundles,
     routeIndex: {
       catalogHash: catalog.catalogHash,
@@ -483,6 +670,132 @@ function buildRouteBundle(input: {
         .filter((entity) => entity.entityType === "source_artifact")
         .map((entity) => [entity.key, sourceSnippetForEntity(entity)]),
     ),
+  };
+}
+
+function buildExperimentShell(input: {
+  bundle: HealthCommonsWebRouteBundle;
+  protocol: HealthCommonsCatalogEntity;
+}): HealthCommonsWebExperimentShell {
+  const testPlan = input.protocol.testPlans?.[0] ?? null;
+
+  return {
+    baselineDays: testPlan?.baselineDays ?? 0,
+    catalogHash: input.bundle.catalogHash,
+    category: formatProtocolCategory(input.protocol),
+    description: input.protocol.summary ?? summarizeBody(input.protocol.body),
+    durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(input.protocol),
+    evidenceLabel: formatDetailEvidenceLabel(input.protocol),
+    evidenceLevel: qualityToEvidenceLevel(input.protocol.quality ?? null),
+    id: input.bundle.route.routeId,
+    image: resolveProtocolPageImage(input.protocol),
+    key: input.protocol.key,
+    revision: revisionRefForEntity(input.protocol),
+    route: {
+      aliases: input.bundle.route.aliases,
+      entityType: "protocol_variant",
+      routeId: input.bundle.route.routeId,
+      slug: input.protocol.slug,
+    },
+    schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION,
+    title: input.protocol.title,
+  };
+}
+
+function buildExperimentProtocolTab(input: {
+  bundle: HealthCommonsWebRouteBundle;
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>;
+  protocol: HealthCommonsCatalogEntity;
+}): HealthCommonsWebExperimentProtocolTab {
+  const testPlan = input.protocol.testPlans?.[0] ?? null;
+  const biomarkerEntities = listProtocolBiomarkers(input.protocol, input.entitiesByKey);
+  const sourcePeople = listRelatedEntities({
+    entitiesByKey: input.entitiesByKey,
+    entity: input.protocol,
+    entityTypes: ["source_person"],
+    relationTypes: ["source_person"],
+  });
+
+  return {
+    baselineDays: testPlan?.baselineDays ?? 0,
+    catalogHash: input.bundle.catalogHash,
+    durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(input.protocol),
+    expectedSignals: biomarkerEntities.map((biomarker) =>
+      toExpectedSignal(input.protocol, biomarker)
+    ),
+    experts: sourcePeople.map(toExpert),
+    id: input.bundle.route.routeId,
+    key: input.protocol.key,
+    measurementPaths: toMeasurementPaths(input.protocol, input.entitiesByKey),
+    protocol: toProtocolSteps(input.protocol.protocol),
+    protocolFacts: toProtocolFacts(input.protocol.protocol, testPlan),
+    protocolTips: input.protocol.protocol?.tips ?? [],
+    revision: revisionRefForEntity(input.protocol),
+    route: {
+      aliases: input.bundle.route.aliases,
+      entityType: "protocol_variant",
+      routeId: input.bundle.route.routeId,
+      slug: input.protocol.slug,
+    },
+    safety: toSafety(input.protocol.safety),
+    schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION,
+    title: input.protocol.title,
+    whyItWorks: toWhyItWorks(input.protocol, input.protocol.claims ?? []),
+  };
+}
+
+function buildExperimentResultsPublic(input: {
+  bundle: HealthCommonsWebRouteBundle;
+  protocol: HealthCommonsCatalogEntity;
+}): HealthCommonsWebExperimentResultsPublic {
+  const testPlan = input.protocol.testPlans?.[0] ?? null;
+  const revision = revisionRefForEntity(input.protocol);
+
+  return {
+    baselineDays: testPlan?.baselineDays ?? 0,
+    catalogHash: input.bundle.catalogHash,
+    commons: buildExperimentCommonsReference({
+      bundle: input.bundle,
+      protocol: input.protocol,
+      revision,
+    }),
+    durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(input.protocol),
+    id: input.bundle.route.routeId,
+    key: input.protocol.key,
+    protocol: toProtocolSteps(input.protocol.protocol),
+    revision,
+    route: {
+      aliases: input.bundle.route.aliases,
+      entityType: "protocol_variant",
+      routeId: input.bundle.route.routeId,
+      slug: input.protocol.slug,
+    },
+    schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION,
+    title: input.protocol.title,
+  };
+}
+
+function buildExperimentCommonsReference(input: {
+  bundle: HealthCommonsWebRouteBundle;
+  protocol: HealthCommonsCatalogEntity;
+  revision: HealthCommonsWebRevisionRef;
+}): HealthCommonsWebExperimentCommonsReference {
+  return {
+    aliases: uniqueStrings([
+      input.bundle.route.routeId,
+      input.protocol.key,
+      input.protocol.key.replace(/^protocol_variant:/u, ""),
+      input.protocol.slug,
+      input.protocol.slug.split("/").at(-1) ?? null,
+      ...input.bundle.route.aliases,
+    ]),
+    catalogHash: input.bundle.catalogHash,
+    key: input.protocol.key,
+    pageRevisionId: input.revision.pageRevisionId,
+    recipeHash: input.revision.recipeHash ?? null,
+    routeId: input.bundle.route.routeId,
+    runSpecRevisionId: input.revision.runSpecRevisionId ?? null,
+    slug: input.protocol.slug,
   };
 }
 
@@ -570,6 +883,662 @@ function buildExperimentResearchTab(input: {
     studies,
     title: input.protocol.title,
   };
+}
+
+type ExperimentSignalDirection = HealthCommonsWebExperimentSignal["direction"];
+type ExperimentSignalProminence = NonNullable<
+  HealthCommonsWebExperimentSignal["protocolProminence"]
+>;
+
+interface BiomarkerDisplayHint {
+  description?: string;
+  direction: ExperimentSignalDirection;
+  expected: string;
+  protocolProminence?: ExperimentSignalProminence;
+}
+
+const DEFAULT_BIOMARKER_DISPLAY_HINTS: Record<string, BiomarkerDisplayHint> = {
+  "biomarker:deep-sleep-minutes": {
+    direction: "neutral",
+    expected: "Worth watching",
+  },
+  "biomarker:estimated-vo2max": {
+    direction: "up",
+    expected: "Could improve",
+  },
+  "biomarker:hrv-rmssd": {
+    direction: "neutral",
+    expected: "Worth watching",
+  },
+  "biomarker:morning-blood-pressure": {
+    direction: "down",
+    expected: "Could trend lower",
+  },
+  "biomarker:resting-heart-rate": {
+    direction: "down",
+    expected: "Could trend lower",
+  },
+  "biomarker:sleep-efficiency": {
+    direction: "up",
+    expected: "Could improve",
+  },
+  "biomarker:sleep-onset-latency": {
+    direction: "down",
+    expected: "May fall asleep sooner",
+  },
+};
+
+const PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES: Record<
+  string,
+  Record<string, Partial<BiomarkerDisplayHint>>
+> = {
+  "protocol_variant:dry-sauna/bryan-johnson-blueprint": {
+    "biomarker:hrv-rmssd": {
+      description:
+        "Because this routine is both hot and frequent, HRV is a tolerability check: recovery may improve, but overload can suppress it.",
+      protocolProminence: "focus",
+    },
+    "biomarker:resting-heart-rate": {
+      description:
+        "This daily, very hot post-workout dose piles heat on top of training; resting pulse helps show whether your body adapts or stays strained.",
+      protocolProminence: "focus",
+    },
+  },
+  "protocol_variant:dry-sauna/murph-finnish-standard-3x-week": {
+    "biomarker:deep-sleep-minutes": {
+      description:
+        "Heat exposure may deepen perceived recovery on some nights, but wearable sleep-stage estimates are noisy enough to keep this as background.",
+      protocolProminence: "context",
+    },
+    "biomarker:hrv-rmssd": {
+      description:
+        "Sauna is a recovery stressor: the cooldown may support relaxation, but dehydration or too much heat can push HRV the other way.",
+      protocolProminence: "focus",
+    },
+    "biomarker:morning-blood-pressure": {
+      description:
+        "Heat widens blood vessels during the session; repeated exposure may ease vascular tone, making consistent morning cuff readings worth watching.",
+      protocolProminence: "focus",
+    },
+    "biomarker:resting-heart-rate": {
+      description:
+        "Repeated heat sessions make the heart work harder while you cool down; over weeks, adaptation may show as a lower resting pulse.",
+      protocolProminence: "focus",
+    },
+    "biomarker:sleep-efficiency": {
+      description:
+        "A warm-to-cool evening pattern can feel sedating for some people, but timing and room temperature decide whether sleep actually consolidates.",
+      protocolProminence: "context",
+    },
+  },
+  "protocol_variant:norwegian-4x4/norwegian-4x4": {
+    "biomarker:estimated-vo2max": {
+      description:
+        "Hard four-minute intervals repeatedly stress oxygen delivery and use, which is the training stimulus most likely to nudge VO2 max or same-device wearable cardio-fitness upward.",
+      protocolProminence: "focus",
+    },
+    "biomarker:hrv-rmssd": {
+      description:
+        "Intervals can improve fitness but also add nervous-system stress, so HRV is useful for spotting whether the dose is recoverable.",
+      protocolProminence: "focus",
+    },
+    "biomarker:morning-blood-pressure": {
+      description:
+        "Better aerobic fitness can help vascular function, but home blood pressure moves slowly and depends heavily on timing, salt, stress, and caffeine.",
+      protocolProminence: "context",
+    },
+    "biomarker:resting-heart-rate": {
+      description:
+        "If the aerobic system adapts, your heart may need slightly less work at rest; fatigue, illness, or under-recovery can hide that.",
+      protocolProminence: "focus",
+    },
+    "biomarker:sleep-efficiency": {
+      description:
+        "Poor sleep can blunt interval recovery and make the fitness signal harder to read, so treat sleep efficiency as context.",
+      protocolProminence: "context",
+    },
+  },
+  "protocol_variant:red-light-glasses-before-bed/red-light-glasses-before-bed": {
+    "biomarker:deep-sleep-minutes": {
+      description:
+        "Better-timed light may support a steadier night, but wearables can misread sleep stages; treat deep sleep only as background context.",
+      expected: "Can be noisy",
+      protocolProminence: "context",
+    },
+    "biomarker:hrv-rmssd": {
+      description:
+        "A calmer pre-bed window can support overnight recovery, but HRV is also sensitive to stress, alcohol, illness, and short sleep.",
+      expected: "Can be noisy",
+      protocolProminence: "context",
+    },
+    "biomarker:resting-heart-rate": {
+      description:
+        "Less evening alerting may reduce overnight strain for some people, but resting pulse is exploratory because many factors move it.",
+      expected: "Can be noisy",
+      protocolProminence: "context",
+    },
+    "biomarker:sleep-efficiency": {
+      description:
+        "If evenings feel less wired, more of your time in bed may become actual sleep rather than quiet wakefulness or clock-watching.",
+      expected: "Could improve",
+      protocolProminence: "focus",
+    },
+    "biomarker:sleep-onset-latency": {
+      description:
+        "Blocking evening blue-rich light may lower the brain's daytime signal, making it easier to feel sleepy near your intended bedtime.",
+      expected: "May fall asleep sooner",
+      protocolProminence: "focus",
+    },
+  },
+};
+
+const SOURCE_PERSON_EXPERT_QUOTES: Partial<Record<string, string>> = {
+  "source_person:bryan-johnson":
+    "Founder of Blueprint and Don't Die. Trying to live forever.",
+};
+
+function listProtocolBiomarkers(
+  protocol: HealthCommonsCatalogEntity,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+): HealthCommonsCatalogEntity[] {
+  const testPlan = protocol.testPlans?.[0];
+  const orderedKeys = [
+    testPlan?.primaryBiomarkerKey,
+    ...(testPlan?.secondaryBiomarkerKeys ?? []),
+  ].filter((key): key is string => typeof key === "string");
+  const fromTestPlan = orderedKeys.flatMap((key) => {
+    const entity = entitiesByKey.get(stripRevision(key));
+    return entity?.entityType === "biomarker" ? [entity] : [];
+  });
+
+  if (fromTestPlan.length > 0) {
+    return fromTestPlan;
+  }
+
+  return listRelatedEntities({
+    entitiesByKey,
+    entity: protocol,
+    entityTypes: ["biomarker"],
+    relationTypes: ["primary_biomarker", "secondary_biomarker"],
+  });
+}
+
+function listRelatedEntities(input: {
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>;
+  entity: HealthCommonsCatalogEntity;
+  entityTypes?: readonly HealthCommonsEntityType[];
+  relationTypes?: readonly string[];
+}): HealthCommonsCatalogEntity[] {
+  const entityTypes = input.entityTypes ? new Set(input.entityTypes) : null;
+  const relationTypes = input.relationTypes ? new Set(input.relationTypes) : null;
+
+  return (input.entity.relations ?? []).flatMap((relation) => {
+    if (relationTypes && !relationTypes.has(relation.type)) {
+      return [];
+    }
+    const target = input.entitiesByKey.get(stripRevision(relation.target));
+    if (!target) {
+      return [];
+    }
+    if (entityTypes && !entityTypes.has(target.entityType)) {
+      return [];
+    }
+    return [target];
+  });
+}
+
+function toExpectedSignal(
+  protocol: HealthCommonsCatalogEntity,
+  biomarker: HealthCommonsCatalogEntity,
+): HealthCommonsWebExperimentSignal {
+  const hint = resolveBiomarkerDisplayHint(protocol.key, biomarker.key);
+  const protocolSignal = protocol.expectedSignalDescriptions?.find(
+    (signal) => signal.biomarkerKey === biomarker.key,
+  );
+  const protocolProminence =
+    protocolSignal?.protocolProminence ?? hint.protocolProminence;
+
+  return omitUndefined({
+    label: biomarker.title,
+    value: "",
+    delta: "",
+    direction: hint.direction,
+    expected: protocolSignal?.expected ?? hint.expected,
+    description:
+      protocolSignal?.description
+      ?? hint.description
+      ?? biomarker.summary
+      ?? summarizeBody(biomarker.body),
+    protocolProminence,
+  });
+}
+
+function resolveBiomarkerDisplayHint(
+  protocolKey: string,
+  biomarkerKey: string,
+): BiomarkerDisplayHint {
+  const baseHint = DEFAULT_BIOMARKER_DISPLAY_HINTS[biomarkerKey] ?? {
+    direction: "neutral" as const,
+    expected: "Worth watching",
+  };
+  const override =
+    PROTOCOL_BIOMARKER_DISPLAY_HINT_OVERRIDES[protocolKey]?.[biomarkerKey];
+
+  return override ? { ...baseHint, ...override } : baseHint;
+}
+
+function toMeasurementPaths(
+  protocol: HealthCommonsCatalogEntity,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+): HealthCommonsWebExperimentMeasurementPath[] {
+  const plan = protocol.measurementPlan;
+
+  if (!plan) {
+    return [];
+  }
+
+  return plan.paths
+    .map((path, index) => ({
+      index,
+      path,
+    }))
+    .sort((left, right) => {
+      if (left.path.pathId === plan.defaultPathId) {
+        return -1;
+      }
+
+      if (right.path.pathId === plan.defaultPathId) {
+        return 1;
+      }
+
+      return left.index - right.index;
+    })
+    .map(({ path }) => toMeasurementPath({
+      entitiesByKey,
+      isDefault: path.pathId === plan.defaultPathId,
+      path,
+    }));
+}
+
+function toMeasurementPath(input: {
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>;
+  isDefault: boolean;
+  path: HealthCommonsMeasurementPlanPath;
+}): HealthCommonsWebExperimentMeasurementPath {
+  return {
+    isDefault: input.isDefault,
+    label: input.path.label,
+    methodKeys: input.path.methodKeys,
+    methods: input.path.methodKeys.map((methodKey) =>
+      toMeasurementMethodReference({
+        entitiesByKey: input.entitiesByKey,
+        methodKey,
+      })
+    ),
+    notes: input.path.notes ?? [],
+    outcomeLabels: toMeasurementOutcomeLabels(input.entitiesByKey, input.path.outcomeKeys ?? []),
+    pathId: input.path.pathId,
+    required: input.path.required,
+    safetyOutcomeLabels: toMeasurementOutcomeLabels(
+      input.entitiesByKey,
+      input.path.safetyOutcomeKeys ?? [],
+    ),
+    tier: input.path.tier,
+  };
+}
+
+function toMeasurementMethodReference(input: {
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>;
+  methodKey: string;
+}): HealthCommonsWebExperimentMeasurementMethodReference {
+  const entity = input.entitiesByKey.get(stripRevision(input.methodKey));
+
+  if (!isMeasurementMethodEntity(entity)) {
+    throw new Error(
+      `Measurement plan method key ${input.methodKey} did not resolve to a measurement_method.`,
+    );
+  }
+
+  const method = entity.measurementMethod;
+  const routeId = toTrailingRouteId(entity.slug);
+
+  return omitUndefined({
+    href: `/measurement-methods/${routeId}`,
+    key: entity.key,
+    modalities: method.modalities.map(formatCategory),
+    privacy: method.privacy
+      ? omitUndefined({
+          containsIdentifiableImages: method.privacy.containsIdentifiableImages,
+          localOnlyRecommended: method.privacy.localOnlyRecommended,
+          notes: method.privacy.notes ?? [],
+        })
+      : undefined,
+    routeId,
+    shortName: method.shortName ?? method.displayName ?? entity.title,
+    summary: entity.summary ?? summarizeBody(entity.body),
+    tier: method.tier,
+    title: method.displayName ?? entity.title,
+  });
+}
+
+function toMeasurementOutcomeLabels(
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+  keys: readonly string[],
+): string[] {
+  return keys.map((key) => {
+    const entity = entitiesByKey.get(stripRevision(key));
+
+    if (entity?.entityType !== "biomarker") {
+      throw new Error(
+        `Measurement plan outcome key ${key} did not resolve to a biomarker.`,
+      );
+    }
+
+    return entity.title;
+  });
+}
+
+function isMeasurementMethodEntity(
+  entity: HealthCommonsCatalogEntity | undefined,
+): entity is HealthCommonsCatalogEntity & {
+  entityType: "measurement_method";
+  measurementMethod: HealthCommonsMeasurementMethod;
+} {
+  return entity?.entityType === "measurement_method" && entity.measurementMethod !== undefined;
+}
+
+function toProtocolFacts(
+  protocol: HealthCommonsProtocolSpec | undefined,
+  testPlan: HealthCommonsTestPlan | null,
+): HealthCommonsWebExperimentProtocolFact[] {
+  if (!protocol) {
+    return [];
+  }
+
+  return [
+    testPlan
+      ? {
+          label: "Baseline",
+          value: formatDays(testPlan.baselineDays),
+          detail: "Keep the usual routine stable before the change.",
+        }
+      : null,
+    testPlan
+      ? {
+          label: "Intervention",
+          value: formatDays(testPlan.interventionDays),
+          detail: formatAdherenceTarget(testPlan, protocol),
+        }
+      : null,
+    formatProtocolFrequencyFact(protocol),
+    formatProtocolDurationFact(protocol),
+    formatProtocolTargetFact(protocol),
+  ].filter((fact): fact is HealthCommonsWebExperimentProtocolFact => fact !== null);
+}
+
+function toProtocolSteps(
+  protocol: HealthCommonsProtocolSpec | undefined,
+): HealthCommonsWebExperimentProtocolStep[] {
+  const steps = protocol?.steps ?? [];
+
+  return steps.map((step, index) => ({
+    detail: step,
+    number: index + 1,
+    title: `Step ${index + 1}`,
+  }));
+}
+
+function toWhyItWorks(
+  protocol: HealthCommonsCatalogEntity,
+  claims: readonly HealthCommonsClaim[],
+): string {
+  if (protocol.whyItWorks && protocol.whyItWorks.length > 0) {
+    return protocol.whyItWorks.join("\n\n");
+  }
+
+  const selectedClaims = claims
+    .filter((claim) => claim.type !== "safety")
+    .map((claim, index) => ({ claim, index }))
+    .sort((left, right) => {
+      const rankDelta = claimWhyItWorksRank(left.claim) - claimWhyItWorksRank(right.claim);
+      return rankDelta !== 0 ? rankDelta : left.index - right.index;
+    })
+    .slice(0, 4)
+    .map(({ claim }) => claim.text);
+
+  if (selectedClaims.length > 0) {
+    return selectedClaims.join("\n\n");
+  }
+
+  return summarizeBody(protocol.body);
+}
+
+function claimWhyItWorksRank(claim: HealthCommonsClaim): number {
+  switch (claim.type) {
+    case "mechanistic":
+      return 0;
+    case "intervention_result":
+      return 1;
+    case "mixed_evidence":
+      return 2;
+    case "design_guardrail":
+      return 3;
+    case "evidence_scope":
+      return 4;
+    case "association_not_causation":
+      return 5;
+    case "community_outcome":
+      return 6;
+    case "safety":
+      return 7;
+  }
+}
+
+function formatProtocolFrequencyFact(
+  protocol: HealthCommonsProtocolSpec,
+): HealthCommonsWebExperimentProtocolFact | null {
+  const value = formatFrequency(protocol);
+
+  return value
+    ? {
+        label: "Frequency",
+        value: stripTrailingPeriod(value),
+      }
+    : null;
+}
+
+function formatProtocolDurationFact(
+  protocol: HealthCommonsProtocolSpec,
+): HealthCommonsWebExperimentProtocolFact | null {
+  const value = formatDuration(protocol);
+
+  return value
+    ? {
+        label: "Session",
+        value: stripTrailingPeriod(value),
+      }
+    : null;
+}
+
+function formatProtocolTargetFact(
+  protocol: HealthCommonsProtocolSpec,
+): HealthCommonsWebExperimentProtocolFact {
+  const target = protocol.target ?? formatTemperature(protocol);
+
+  return target
+    ? {
+        label: protocol.temperatureC ? "Target" : "Dose",
+        value: stripTrailingPeriod(target),
+      }
+    : {
+        label: "Dose",
+        value: protocol.doseSignature,
+      };
+}
+
+function formatAdherenceTarget(
+  testPlan: HealthCommonsTestPlan,
+  protocol: HealthCommonsProtocolSpec,
+): string | undefined {
+  const target = testPlan.targetAdherenceSessions ?? protocol.interventionSessionsTarget;
+  const minimum = testPlan.minimumAdherenceSessions ?? protocol.interventionSessionsMinimum;
+
+  if (typeof target === "number" && typeof minimum === "number" && target !== minimum) {
+    return `${minimum} session minimum; ${target} session target.`;
+  }
+
+  if (typeof target === "number") {
+    return `${target} session target.`;
+  }
+
+  if (typeof minimum === "number") {
+    return `${minimum} session minimum.`;
+  }
+
+  return undefined;
+}
+
+function formatDays(days: number): string {
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
+function stripTrailingPeriod(value: string): string {
+  return value.replace(/\.$/u, "");
+}
+
+function toSafety(safety: HealthCommonsSafety | undefined): HealthCommonsWebExperimentSafety {
+  if (!safety) {
+    return {
+      cautionLevel: 3,
+      precautions: ["Stop if symptoms feel concerning."],
+      whoShouldAvoid: ["Use appropriate clinician guidance for heat exposure risks."],
+    };
+  }
+
+  return {
+    cautionLevel: safetyCautionLevel(safety.cautionLevel),
+    precautions: [
+      ...(safety.notes ?? []),
+      ...(safety.stopIf && safety.stopIf.length > 0
+        ? [`Stop if: ${safety.stopIf.map(humanizeToken).join(", ")}.`]
+        : []),
+    ],
+    whoShouldAvoid: (safety.avoidOrGetClinicianGuidance ?? []).map(humanizeToken),
+  };
+}
+
+function safetyCautionLevel(cautionLevel: HealthCommonsSafety["cautionLevel"]): number {
+  switch (cautionLevel) {
+    case "low":
+      return 2;
+    case "moderate":
+      return 3;
+    case "high":
+      return 4;
+    case "unknown":
+      return 3;
+  }
+}
+
+function formatFrequency(protocol: HealthCommonsProtocolSpec): string | null {
+  if (protocol.frequency?.sessionsPerWeek) {
+    return `${protocol.frequency.sessionsPerWeek} sessions per week.`;
+  }
+
+  if (protocol.frequency?.sessionsPerDay) {
+    return `${protocol.frequency.sessionsPerDay} sessions per day.`;
+  }
+
+  return null;
+}
+
+function formatDuration(protocol: HealthCommonsProtocolSpec): string | null {
+  const min = protocol.durationMinutes?.min;
+  const max = protocol.durationMinutes?.max;
+
+  if (typeof min === "number" && typeof max === "number") {
+    return min === max ? `${min} minutes per session.` : `${min}\u2013${max} minutes per session.`;
+  }
+
+  if (typeof min === "number") {
+    return `At least ${min} minutes per session.`;
+  }
+
+  if (typeof max === "number") {
+    return `Up to ${max} minutes per session.`;
+  }
+
+  return null;
+}
+
+function formatTemperature(protocol: HealthCommonsProtocolSpec): string | null {
+  const min = protocol.temperatureC?.min;
+  const max = protocol.temperatureC?.max;
+
+  if (typeof min === "number" && typeof max === "number") {
+    return min === max
+      ? `${min} \u00b0C target temperature.`
+      : `${min}\u2013${max} \u00b0C target temperature.`;
+  }
+
+  return null;
+}
+
+function toExpert(entity: HealthCommonsCatalogEntity): HealthCommonsWebExperimentExpert {
+  const initials = entity.title
+    .split(/\s+/u)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "HC";
+
+  return omitUndefined({
+    field: entity.entityType === "source_person"
+      ? ""
+      : formatCategory(entity.categories?.[0] ?? "source"),
+    initials,
+    name: entity.title,
+    profileImageUrl: readOptionalProfileImageUrl(entity),
+    quote:
+      SOURCE_PERSON_EXPERT_QUOTES[entity.key]
+      ?? entity.summary
+      ?? summarizeBody(entity.body),
+  });
+}
+
+function readOptionalProfileImageUrl(
+  entity: HealthCommonsCatalogEntity,
+): string | undefined {
+  const rawValue = readPassthroughString(entity, "profileImageUrl");
+  const normalized = rawValue?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (
+    (normalized.startsWith("/") && !normalized.startsWith("//"))
+    || /^https?:\/\//u.test(normalized)
+  ) {
+    return normalized;
+  }
+
+  return undefined;
+}
+
+function formatDetailEvidenceLabel(entity: HealthCommonsCatalogEntity): string {
+  const status = STATUS_LABELS[entity.status ?? ""] ?? (entity.status ? humanizeToken(entity.status) : "Draft");
+  const quality = QUALITY_LABELS[entity.quality ?? ""] ?? (entity.quality ? humanizeToken(entity.quality) : "Unreviewed");
+
+  return status === quality ? quality : `${status} · ${quality}`;
+}
+
+function humanizeToken(value: string): string {
+  return value
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/^./u, (match) => match.toUpperCase());
 }
 
 interface BuiltResearchGroups {
@@ -1117,6 +2086,18 @@ function isPublicProtocolVariant(
 
 function experimentResearchTabPathForRouteId(routeId: string): string {
   return `tabs/experiments/${routeId}/research.json`;
+}
+
+function experimentShellPathForRouteId(routeId: string): string {
+  return `shell/experiments/${routeId}.json`;
+}
+
+function experimentProtocolTabPathForRouteId(routeId: string): string {
+  return `tabs/experiments/${routeId}/protocol.json`;
+}
+
+function experimentResultsPublicPathForRouteId(routeId: string): string {
+  return `tabs/experiments/${routeId}/results-public.json`;
 }
 
 function collectRouteReverseEdges(

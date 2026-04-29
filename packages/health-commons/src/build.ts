@@ -66,6 +66,18 @@ function buildGeneratedFiles(
     files.set(`web/${fileName}`, stablePrettyJson(researchTab));
   }
 
+  for (const [fileName, shell] of webArtifacts.experimentShells.entries()) {
+    files.set(`web/${fileName}`, stablePrettyJson(shell));
+  }
+
+  for (const [fileName, protocolTab] of webArtifacts.experimentProtocolTabs.entries()) {
+    files.set(`web/${fileName}`, stablePrettyJson(protocolTab));
+  }
+
+  for (const [fileName, resultsPublic] of webArtifacts.experimentResultsPublic.entries()) {
+    files.set(`web/${fileName}`, stablePrettyJson(resultsPublic));
+  }
+
   return files;
 }
 

@@ -28,11 +28,11 @@ import {
   useBrowserVault,
   type BrowserVaultStatus,
 } from "@/src/lib/browser-vault/context";
-import {
-  isBrowserVaultMetricBinding,
-  type BiomarkerPageModel,
-  type BiomarkerProtocolRankingModel,
+import type {
+  BiomarkerPageModel,
+  BiomarkerProtocolRankingModel,
 } from "@/src/lib/health-commons/biomarker-detail";
+import { isBrowserVaultMetricBinding } from "@/src/lib/health-commons/biomarker-bindings";
 import { cn } from "@/src/lib/utils";
 
 interface BiomarkerPageClientProps {

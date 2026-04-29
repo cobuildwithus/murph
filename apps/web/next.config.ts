@@ -219,6 +219,26 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     experimental: {
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
     },
+    outputFileTracingIncludes: {
+      "/experiments": [
+        "../../packages/health-commons/generated/web/browse/experiments.json",
+      ],
+      "/experiments/[experimentId]": [
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
+        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
+      ],
+      "/experiments/[experimentId]/research": [
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
+        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
+      ],
+      "/experiments/[experimentId]/results": [
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
+        "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
+      ],
+    },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),

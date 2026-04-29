@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 
-import { createElement } from "react";
+import type { ReactNode } from "react";
+import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
 import type { BrowserVaultContextValue } from "@/src/lib/browser-vault/context";
-import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveHealthCommonsExperimentResultsPublic } from "@/src/lib/health-commons/experiment-projections";
 
 type ResultsTabMockProps = {
   experiment: { privateRun?: unknown };
@@ -47,6 +48,7 @@ vi.mock("@/src/components/experiments/experiment-detail/results-tab", () => ({
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
+  BrowserVaultProvider: ({ children }: { children: ReactNode }) => createElement(Fragment, null, children),
   useBrowserVault: mocks.useBrowserVault,
 }));
 
@@ -69,7 +71,7 @@ beforeEach(() => {
 });
 
 test("production Results ignores mock query params and preserves browser-vault state", () => {
-  const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+  const protocol = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
 
   assert.ok(protocol);
 

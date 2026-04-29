@@ -10,7 +10,8 @@ import {
 } from "@murphai/query/browser";
 
 import type {
-  ExperimentProtocol,
+  ExperimentCommonsReference,
+  ExperimentProtocolStep,
   ExperimentRunProjection,
   ExperimentStatus,
   ScheduleCell,
@@ -35,7 +36,15 @@ const STOPPED_EXPERIMENT_STATUSES = new Set([
 
 export interface ResolveBrowserVaultExperimentRunInput {
   client: BrowserVaultQueryClient | null;
-  protocol: ExperimentProtocol;
+  protocol: BrowserVaultExperimentProtocol;
+}
+
+export interface BrowserVaultExperimentProtocol {
+  baselineDays: number;
+  commons?: ExperimentCommonsReference;
+  durationDays: number;
+  id: string;
+  protocol: ExperimentProtocolStep[];
 }
 
 export function resolveBrowserVaultExperimentRun({
@@ -56,7 +65,7 @@ export function resolveBrowserVaultExperimentRun({
 
 function selectExperimentResultsForProtocol(
   client: BrowserVaultQueryClient,
-  protocol: ExperimentProtocol,
+  protocol: BrowserVaultExperimentProtocol,
 ): BrowserVaultExperimentResultsView | null {
   for (const lookup of buildExperimentResultLookups(protocol)) {
     const result = selectBrowserVaultExperimentResults(client, lookup, {
@@ -73,7 +82,7 @@ function selectExperimentResultsForProtocol(
 
 function mapExperimentResultsProjection(
   client: BrowserVaultQueryClient,
-  protocol: ExperimentProtocol,
+  protocol: BrowserVaultExperimentProtocol,
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection {
   const { experiment } = results;
@@ -145,7 +154,7 @@ function mapExperimentResultsProjection(
 }
 
 function buildExperimentResultLookups(
-  protocol: ExperimentProtocol,
+  protocol: BrowserVaultExperimentProtocol,
 ): BrowserVaultExperimentResultsLookup[] {
   const protocolKeys = buildProtocolLookupKeys(protocol);
   const slugCandidates = uniqueStrings([
@@ -170,7 +179,7 @@ function buildExperimentResultLookups(
   return dedupeLookups(lookups);
 }
 
-function buildProtocolLookupKeys(protocol: ExperimentProtocol): string[] {
+function buildProtocolLookupKeys(protocol: BrowserVaultExperimentProtocol): string[] {
   const values = uniqueStrings([
     protocol.id,
     protocol.commons?.key,
@@ -707,7 +716,7 @@ function buildRunNextStep(input: {
   baselineDays: number;
   day: number | undefined;
   progress: BrowserVaultExperimentResultsView["progress"];
-  protocol: ExperimentProtocol;
+  protocol: BrowserVaultExperimentProtocol;
   status: "active" | "paused";
 }): ExperimentRunProjection["nextStep"] {
   const day = input.day ?? 1;
@@ -756,7 +765,7 @@ function buildRunNextStep(input: {
 
 function resolveResultBaselineDays(
   results: BrowserVaultExperimentResultsView,
-  protocol: ExperimentProtocol,
+  protocol: BrowserVaultExperimentProtocol,
 ): number {
   const baselineStart = results.experiment.windows.baselineStart;
   const baselineEnd = results.experiment.windows.baselineEnd;
