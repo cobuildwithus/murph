@@ -477,6 +477,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
@@ -497,6 +498,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           expectedUserId: TEST_USER_ID,
           async importItem(item) {
             importedSeqs.push(item.item.laneSeq);
+            if (item.item.laneSeq === "2") {
+              return {
+                afterCheckpointBeforeAssistant: async () => {
+                  events.push("mailbox:beforeAssistant:2");
+                },
+                status: "imported",
+              };
+            }
             return { status: "imported" };
           },
           limitPerLane: 10,
@@ -520,16 +529,20 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
             const turnInputPort: AssistantTurnInputPort = {
               async refresh(refreshInput) {
-                assert.equal(refreshInput.phase, "request_boundary");
+                assert.equal(refreshInput.phase, "input_available");
+                events.push("refresh:start");
                 const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
                 if (typeof refreshMailbox !== "function") {
                   throw new Error("Expected hosted mailbox refresh to be installed.");
                 }
-                return refreshMailbox({
+                const refresh = await refreshMailbox({
                   requestId: "request_synthetic_runner_active_turn_input",
                 });
+                events.push("refresh:done");
+                return refresh;
               },
               async listNewConversationCaptures(query) {
+                events.push("list");
                 return {
                   captures: importedSeqs.includes("2")
                     ? [
@@ -566,7 +579,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               },
             };
             await turnInputPort.refresh({
-              phase: "request_boundary",
+              phase: "input_available",
             });
             const checkpointActiveTurnInput = input.platform.checkpointActiveTurnInput;
             if (typeof checkpointActiveTurnInput !== "function") {
@@ -610,6 +623,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }
 
       assert.equal(caught, undefined);
+      assert.deepEqual(events, [
+        "refresh:start",
+        "mailbox:beforeAssistant:2",
+        "refresh:done",
+        "list",
+      ]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "import",
@@ -678,6 +697,92 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           systemSeqStart: "0",
         },
         workspaceVersion: "0",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("suppresses runtime logs for idle active-turn mailbox refresh polls", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_idle_active_turn_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests,
+    });
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_idle_active_turn",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          logRequests,
+          mailboxPort,
+          workspacePort,
+        }),
+        requestId: "request_synthetic_runner_idle_active_turn",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_idle_active_turn",
+          leaseGeneration: "4",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase(input) {
+          const refreshMailbox = input.platform.refreshMailboxForActiveTurnInput;
+          if (typeof refreshMailbox !== "function") {
+            throw new Error("Expected hosted mailbox refresh to be installed.");
+          }
+          const refresh = await refreshMailbox({
+            requestId: "request_synthetic_runner_idle_active_turn_input",
+          });
+          assert.deepEqual(refresh, {
+            progressed: false,
+            reason: "no_new_input",
+          });
+          return {
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(
+        logRequests.map((request) => request.entries[0]?.phase),
+        ["import"],
+      );
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "import",
+        "maintenance",
+      ]);
+      assert.deepEqual(checkpointRequests[1]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
       });
     } finally {
       await rm(vaultRoot, {

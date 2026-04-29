@@ -369,7 +369,7 @@ describe("createHostedAssistantTurnInputPort", () => {
     ).rejects.toBeInstanceOf(AssistantActiveTurnInputCheckpointRejectedError);
   });
 
-  it("runs the hosted mailbox refresh during active turn input admission before listing captures", async () => {
+  it("runs the hosted mailbox refresh during input-available admission before listing captures", async () => {
     const events: string[] = [];
     const lateCapture = createCaptureSummary();
     const baseRefresh = vi.fn<AssistantTurnInputPort["refresh"]>(async (input) => {
@@ -414,7 +414,7 @@ describe("createHostedAssistantTurnInputPort", () => {
     });
     expect(port).toBeDefined();
 
-    await expect(port?.refresh({ phase: "after_provider" })).resolves.toEqual({
+    await expect(port?.refresh({ phase: "input_available" })).resolves.toEqual({
       progressed: true,
       reason: "ingested_input",
     });
@@ -443,7 +443,7 @@ describe("createHostedAssistantTurnInputPort", () => {
         occurredAt: lateCapture.occurredAt,
       },
     });
-    expect(events).toEqual(["mailbox", "base:after_provider", "list"]);
+    expect(events).toEqual(["mailbox", "base:input_available", "list"]);
     expect(activeTurnInputRefresh).toHaveBeenCalledWith({
       requestId: "req_turn_input",
     });
@@ -509,7 +509,7 @@ describe("createHostedAssistantTurnInputPort", () => {
       activeTurnInputRefresh,
     });
 
-    await expect(port?.refresh({ phase: "after_provider" })).resolves.toEqual(
+    await expect(port?.refresh({ phase: "request_boundary" })).resolves.toEqual(
       activeTurnInputResult,
     );
     expect(activeTurnInputRefresh).toHaveBeenCalledWith({
@@ -540,7 +540,7 @@ describe("createHostedAssistantTurnInputPort", () => {
     });
     expect(port).toBeDefined();
 
-    await expect(port?.refresh({ phase: "after_provider" })).rejects.toThrow(
+    await expect(port?.refresh({ phase: "request_boundary" })).rejects.toThrow(
       "hosted mailbox refresh failed",
     );
 
