@@ -92,7 +92,7 @@ describe("ProtocolTab", () => {
     expect(countOccurrences(markup, summaryParagraph!)).toBe(1);
   });
 
-  it("caps focus cards at three and moves overflow signals into context pills", () => {
+  it("uses the page-authored Finnish focus signal and moves context signals into pills", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
     expect(protocol).not.toBeNull();
@@ -106,12 +106,14 @@ describe("ProtocolTab", () => {
 
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
-    expect(countOccurrences(markup, "data-card=")).toBe(3);
+    expect(countOccurrences(markup, "data-card=")).toBe(1);
     expect(markup).toContain('data-card="Resting Heart Rate"');
-    expect(markup).toContain('data-card="Morning Blood Pressure"');
-    expect(markup).toContain('data-card="HRV / RMSSD"');
+    expect(markup).not.toContain('data-card="Morning Blood Pressure"');
+    expect(markup).not.toContain('data-card="HRV / RMSSD"');
     expect(markup).not.toContain('data-card="Sleep Efficiency"');
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
+    expect(markup).toContain("Morning Blood Pressure");
+    expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("Sleep Efficiency");
     expect(markup).toContain("Deep Sleep Minutes");
     expect(researchMarkup).toContain("Bottom line");
@@ -183,7 +185,7 @@ describe("ProtocolTab", () => {
     });
     const markup = renderToStaticMarkup(createElement(ResearchTab, { experiment }));
 
-    expect(countOccurrences(markup, "group overflow-hidden rounded-xl")).toBe(6);
+    expect(countOccurrences(markup, "group overflow-hidden rounded-xl")).toBe(9);
     expect(countOccurrences(markup, 'open=""')).toBe(2);
     expect(markup).toContain("2 sources · 2 trials");
     expect(markup).toContain("3 sources · 1 physiology study · 1 trial · 1 guidance source");
@@ -247,7 +249,7 @@ describe("ProtocolTab", () => {
     expect(countOccurrences(markup, 'open=""')).toBe(1);
   });
 
-  it("prioritizes the clearest red-light-glasses signals and moves the noisier ones into context pills", () => {
+  it("uses the page-authored red-light-glasses focus signal and moves the noisier ones into context pills", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("red-light-glasses-before-bed");
 
     expect(protocol).not.toBeNull();
@@ -257,17 +259,12 @@ describe("ProtocolTab", () => {
       privateRun: null,
     });
     const markup = renderToStaticMarkup(createElement(ProtocolTab, { experiment }));
-    const sleepEfficiencyExpected = experiment.expectedSignals.find(
-      (signal) => signal.label === "Sleep Efficiency",
-    )?.expected;
 
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
-    expect(countOccurrences(markup, "data-card=")).toBe(2);
-    expect(markup).toContain('data-card="Sleep Efficiency"');
+    expect(countOccurrences(markup, "data-card=")).toBe(1);
+    expect(markup).not.toContain('data-card="Sleep Efficiency"');
     expect(markup).toContain('data-card="Sleep Onset Latency"');
-    expect(sleepEfficiencyExpected).toBeTruthy();
-    expect(markup).toContain(sleepEfficiencyExpected!);
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
     expect(markup).not.toContain('data-card="HRV / RMSSD"');
     expect(markup).not.toContain('data-card="Resting Heart Rate"');
@@ -277,8 +274,8 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Deep Sleep Minutes");
     expect(markup).toContain("HRV / RMSSD");
     expect(markup).toContain("Resting Heart Rate");
+    expect(markup).toContain("Sleep Efficiency");
     expect(markup).toContain("Sleep Onset Latency");
-    expect(countOccurrences(markup, "Can be noisy")).toBe(3);
   });
 
   it("keeps expected signals outcome-only while rendering measurement paths separately", () => {
@@ -334,7 +331,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("/measurement-methods/home-image-analysis");
     expect(markup).toContain("/measurement-methods/clinic-imaging");
     expect(countOccurrences(markup, ">Optional</span>")).toBe(2);
-    expect(countOccurrences(markup, "data-card=")).toBe(3);
+    expect(countOccurrences(markup, "data-card=")).toBe(1);
   });
 
 });

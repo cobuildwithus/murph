@@ -150,7 +150,7 @@ describe("BiomarkerPage", () => {
     ).toEqual([
       {
         href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4 Intervals",
+        title: "Norwegian 4x4",
       },
       {
         href: "/experiments/finnish-sauna",
@@ -235,7 +235,7 @@ describe("BiomarkerPage", () => {
       },
       {
         href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4 Intervals",
+        title: "Norwegian 4x4",
       },
     ]);
     expect(markup).toContain('data-biomarker-id="blood-oxygen-spo2"');
@@ -312,7 +312,7 @@ describe("BiomarkerPage", () => {
       }),
       expect.objectContaining({
         href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4 Intervals",
+        title: "Norwegian 4x4",
       }),
     ]));
     expect(markup).toContain('data-biomarker-id="rem-sleep-minutes"');
@@ -385,7 +385,7 @@ describe("BiomarkerPage", () => {
       }),
       expect.objectContaining({
         href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4 Intervals",
+        title: "Norwegian 4x4",
       }),
     ]));
     expect(markup).toContain('data-biomarker-id="deep-sleep-minutes"');
@@ -455,7 +455,7 @@ describe("BiomarkerPage", () => {
     ).toEqual([
       {
         href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4 Intervals",
+        title: "Norwegian 4x4",
       },
       {
         href: "/experiments/finnish-sauna",
@@ -501,7 +501,7 @@ describe("BiomarkerPage", () => {
     ).toEqual([
       {
         href: "/experiments/norwegian-4x4",
-        title: "Norwegian 4x4 Intervals",
+        title: "Norwegian 4x4",
       },
       {
         href: "/experiments/finnish-sauna",
@@ -591,7 +591,7 @@ describe("BiomarkerPage", () => {
 
     expect(detail?.protocolRankings.slice(0, 3).map((protocol) => protocol.title)).toEqual([
       "Red Light Glasses Before Bed",
-      "Norwegian 4x4 Intervals",
+      "Norwegian 4x4",
       "Finnish Dry Sauna",
     ]);
   });
