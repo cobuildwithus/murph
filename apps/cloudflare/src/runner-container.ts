@@ -378,9 +378,11 @@ export class RunnerContainer extends Container {
     } finally {
       try {
         const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
-        await this.stopWarmContainer({
-          failClosed: !completedSuccessfully || !outboundProxyExpired,
-        });
+        if (!completedSuccessfully || !outboundProxyExpired) {
+          await this.stopWarmContainer({
+            failClosed: !completedSuccessfully || !outboundProxyExpired,
+          });
+        }
       } finally {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;

@@ -85,6 +85,7 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID=v1`
 - `HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID=recovery:v1`
 - `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS=3`
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=300000`
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=600000`
@@ -107,6 +108,17 @@ When hosted email sender identity is configured, deploy automation renders an en
 The runtime always includes the minimal `assistant`, `parsers`, and `web` env profiles. Deploy automation layers `hosted-email`, `linq`, `mapbox`, and `telegram` on top by default. Cloudflare owns the configured profile string, runner-secret allowlisting, and container transport rewrites such as local loopback host adaptation. The profile key sets and canonical hosted runtime launch spec are built by `@murphai/assistant-runtime`, so local and Cloudflare execution pass the same semantic runtime manifest shape. Hosted device-sync runtime config is derived into `runtime.resolvedConfig`, so it stays outside the child-env profile surface.
 
 Cloudflare keeps only the wake-payload decryption lane plus the worker-owned callback-signing key. Broad web-private-field encryption stays in `apps/web`, and the child process reaches the web control plane through the worker proxy instead of holding callback-signing material directly.
+
+## Runner Container Lifecycle
+
+The native Cloudflare container is a warm per-user shell. Successful workspace
+invocations leave that shell running until the configured idle lifecycle expiry
+fires. Each invocation still runs through an isolated child process with fresh
+invocation-local cache/temp roots and a fresh outbound worker-proxy token.
+
+The warm shell is destroyed when an invocation fails, outbound proxy cleanup
+fails, warm health is stale, deploy smoke finishes, explicit cleanup is called,
+or Cloudflare reports idle activity expiry.
 
 ## Deploy Artifacts
 
