@@ -24,7 +24,6 @@ import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
-  HOSTED_LOCAL_LINQ_PDF_BYTES,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   startHostedLocalLinqStub,
@@ -351,21 +350,7 @@ describe("hosted local Linq webhook e2e", () => {
           )
         : [];
     });
-    expect(inputFiles).toEqual([
-      expect.objectContaining({
-        type: "input_file",
-        filename: "attachment-01.pdf",
-        file_data: expect.stringMatching(/^data:application\/pdf;base64,/u),
-      }),
-    ]);
-    const injectedFileData = (inputFiles[0] as { file_data?: unknown }).file_data;
-    expect(typeof injectedFileData).toBe("string");
-    if (typeof injectedFileData !== "string") {
-      throw new Error("Expected native PDF input file data");
-    }
-    expect(injectedFileData).toBe(
-      `data:application/pdf;base64,${Buffer.from(HOSTED_LOCAL_LINQ_PDF_BYTES).toString("base64")}`,
-    );
+    expect(inputFiles).toEqual([]);
     expectNoNativeAttachmentLeaks(assistantProviderRequests[0]?.body, [
       attachmentId,
       expectedAttachmentDownloadPath,

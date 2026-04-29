@@ -25,14 +25,12 @@ import {
   normalizeStreamingText,
 } from './assistant-codex-events.js'
 import {
-  buildCodexThreadInjectItemsParams,
   buildCodexTurnInterruptParams,
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
   resolveSupportedCodexAppServerApprovalPolicy,
-  type CodexAppServerInjectedMessageItem,
 } from './assistant-codex/app-server-requests.js'
 import {
   attachCodexAbortListener,
@@ -80,7 +78,6 @@ export { extractCodexTraceUpdates } from './assistant-codex-events.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexProgressEvent } from './assistant-codex-events.js'
 export type { CodexDisplayOptions } from './assistant-codex/config.js'
-export type { CodexAppServerInjectedMessageItem } from './assistant-codex/app-server-requests.js'
 export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
@@ -97,7 +94,6 @@ export interface CodexAppServerTurnInput {
   codexCommand?: string
   codexHome?: string | null
   env?: NodeJS.ProcessEnv
-  injectedResponsesItems?: readonly CodexAppServerInjectedMessageItem[] | null
   model?: string | null
   modelProvider?: string | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
@@ -692,20 +688,6 @@ async function runCodexAppServerTurn(
       throw new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_FAILED',
         'Codex app-server did not return a thread id.',
-      )
-    }
-
-    if (input.injectedResponsesItems && input.injectedResponsesItems.length > 0) {
-      await withCodexRpcTimeout(
-        sendRequest(
-          'thread/inject_items',
-          buildCodexThreadInjectItemsParams({
-            items: input.injectedResponsesItems,
-            providerSessionId,
-          }),
-        ),
-        CODEX_RPC_DEFAULT_TIMEOUT_MS,
-        'thread/inject_items',
       )
     }
 
