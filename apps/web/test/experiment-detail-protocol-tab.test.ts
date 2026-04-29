@@ -13,6 +13,7 @@ import healthCommonsCatalogJson from "@murphai/health-commons/generated/catalog.
 import { composeExperimentDetail } from "@/src/lib/experiments/experiment-detail";
 import { createHealthCommonsCatalogReader } from "@/src/lib/health-commons/catalog";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
+import { resolveHealthCommonsExperimentProtocolTab } from "@/src/lib/health-commons/experiment-projections";
 import type { ExperimentResearchGroup } from "@/src/types/experiments";
 
 vi.mock("@/src/components/experiments/experiment-detail/expected-signal-card", () => ({
@@ -92,10 +93,12 @@ describe("ProtocolTab", () => {
     expect(countOccurrences(markup, summaryParagraph!)).toBe(1);
   });
 
-  it("uses the page-authored Finnish focus signal and moves context signals into pills", () => {
+  it("uses the page-authored Finnish focus signals and moves context signals into pills", () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+    const protocolTab = resolveHealthCommonsExperimentProtocolTab("finnish-sauna");
 
     expect(protocol).not.toBeNull();
+    expect(protocolTab).not.toBeNull();
 
     const experiment = composeExperimentDetail({
       protocol: protocol!,
@@ -106,11 +109,17 @@ describe("ProtocolTab", () => {
 
     expect(markup).toContain("What could change");
     expect(markup).toContain("Also worth watching");
-    expect(countOccurrences(markup, "data-card=")).toBe(1);
+    expect(protocolTab!.expectedSignals.map((signal) => signal.expected)).toContain(
+      "Possible change",
+    );
+    expect(protocolTab!.expectedSignals.map((signal) => signal.expected)).not.toContain(
+      "mixed_or_contextual",
+    );
+    expect(countOccurrences(markup, "data-card=")).toBe(3);
     expect(markup).toContain('data-card="Resting Heart Rate"');
     expect(markup).not.toContain('data-card="Morning Blood Pressure"');
-    expect(markup).not.toContain('data-card="HRV / RMSSD"');
-    expect(markup).not.toContain('data-card="Sleep Efficiency"');
+    expect(markup).toContain('data-card="HRV / RMSSD"');
+    expect(markup).toContain('data-card="Sleep Efficiency"');
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
     expect(markup).toContain("Morning Blood Pressure");
     expect(markup).toContain("HRV / RMSSD");
@@ -331,7 +340,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("/measurement-methods/home-image-analysis");
     expect(markup).toContain("/measurement-methods/clinic-imaging");
     expect(countOccurrences(markup, ">Optional</span>")).toBe(2);
-    expect(countOccurrences(markup, "data-card=")).toBe(1);
+    expect(countOccurrences(markup, "data-card=")).toBe(3);
   });
 
 });

@@ -4,7 +4,7 @@ entityType: protocol_variant
 key: protocol_variant:norwegian-4x4/norwegian-4x4
 slug: protocols/norwegian-4x4/norwegian-4x4
 title: Norwegian 4x4
-summary: "Use a repeatable hard-aerobic 4x4 workout to test whether cardio fitness improves without pushing symptoms or recovery in the wrong direction."
+summary: "Four hard 4-minute rounds of exercise, with easy movement between each round, to see if your cardio fitness improves."
 status: field-testing
 quality: usable
 aliases:
@@ -161,7 +161,7 @@ protocol:
   tips:
     - Leave at least 48 hours between hard interval sessions when possible.
     - Use heart rate, perceived exertion, and symptoms together instead of sprinting from the start to chase a number.
-    - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule as stable as reasonably possible.
+    - Keep other training, caffeine timing, alcohol, new supplements, diet changes, and sleep schedule stable.
     - Make the first session conservative; repeatable hard aerobic work matters more than maximal suffering.
   keepInMind:
     - Wearable VO2max is a proxy, not lab gas-exchange testing, and may update slowly or not at all during the experiment.
