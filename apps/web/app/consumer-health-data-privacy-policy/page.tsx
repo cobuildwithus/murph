@@ -10,20 +10,20 @@ export const metadata: Metadata = createMurphPageMetadata({
     canonical: "/consumer-health-data-privacy-policy",
   },
   description:
-    "Murph's separate Consumer Health Data Privacy Policy covering consumer health data categories, sources, purposes, sharing, rights, deletion, appeals, and sale/no-sale.",
+    "Murph's Consumer Health Data Notice covering consumer health data categories, sources, purposes, sharing, rights, deletion, appeals, and sale/no-sale.",
   openGraph: {
     type: "article",
   },
-  title: "Murph Consumer Health Data Privacy Policy",
+  title: "Murph Consumer Health Data Notice",
   twitter: {
     description:
-      "Murph's separate Consumer Health Data Privacy Policy for health-related personal information.",
+      "Murph's Consumer Health Data Notice for health-related personal information.",
   },
 });
 
 export default async function ConsumerHealthDataPrivacyPolicyAliasPage() {
   return await LegalPolicyPage({
-    markdownFileName: "consumer-health-data-privacy-policy.md",
-    pdfHref: "/legal/consumer-health-data-privacy.pdf",
+    markdownFileName: "consumer-health-data-notice.md",
+    pdfHref: "/legal/consumer-health-data-notice.pdf",
   });
 }

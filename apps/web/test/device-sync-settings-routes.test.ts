@@ -3,12 +3,20 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
+vi.mock("server-only", () => ({}));
+
 const mocks = vi.hoisted(() => ({
+  assertHostedConsentScopeGranted: vi.fn(),
+  assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   disconnectConnection: vi.fn(),
+  getPrisma: vi.fn(),
   getConnectionStatus: vi.fn(),
   listConnections: vi.fn(),
+  prismaClient: {
+    label: "test-prisma",
+  },
   requireActivePrivyMemberAuth: vi.fn(),
   startConnection: vi.fn(),
 }));
@@ -23,6 +31,15 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedConsentScopeGranted: mocks.assertHostedConsentScopeGranted,
+  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 type SettingsDeviceSyncRouteModule = typeof import("../app/api/settings/device-sync/route");
@@ -50,7 +67,10 @@ describe("device sync settings routes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-03T12:00:00.000Z"));
     vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
+    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.assertHostedConsentScopeGranted.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
@@ -193,6 +213,16 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request), mocks.prismaClient);
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+    expect(mocks.assertHostedConsentScopeGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      scope: "feature.connected-health-source",
+    });
     expect(mocks.startConnection).toHaveBeenCalledWith("member_123", "oura", "/settings?tab=wearables");
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
@@ -286,6 +316,39 @@ describe("device sync settings routes", () => {
       error: {
         code: "AUTH_REQUIRED",
         message: "Verify your phone to continue.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("requires connected-health-source consent before starting a connect flow", async () => {
+    mocks.assertHostedConsentScopeGranted.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Accept the current Murph legal consent before continuing.",
+    }));
+
+    const response = await settingsDeviceSyncConnectRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/settings/device-sync/providers/oura/connect",
+        {
+          returnTo: "/settings",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ provider: "oura" }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_CONSENT_REQUIRED",
+        message: "Accept the current Murph legal consent before continuing.",
         retryable: false,
       },
     });

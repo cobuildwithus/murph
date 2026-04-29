@@ -102,11 +102,11 @@ test("Privacy Policy keeps tightened health-data commitments and consumer-health
   );
   assert.match(
     privacyPolicy,
-    /## 17\. Consumer Health Data Privacy Policy/u,
+    /## 17\. Consumer Health Data Notice/u,
   );
   assert.match(
     privacyPolicy,
-    /You can access the Consumer Health Data Privacy Policy at \[withmurph\.ai\/consumer-health-data-privacy-policy\]/u,
+    /You can access the Consumer Health Data Notice at \[withmurph\.ai\/consumer-health-data-privacy-policy\]/u,
   );
   assert.doesNotMatch(
     privacyPolicy,
@@ -116,14 +116,14 @@ test("Privacy Policy keeps tightened health-data commitments and consumer-health
   assert.doesNotMatch(privacyPolicy, /model-improvement consent/u);
 });
 
-test("Consumer Health Data Privacy Policy keeps the stronger model-training promise", () => {
+test("Consumer Health Data Notice keeps the stronger model-training promise", () => {
   const consumerHealthPolicy = readLegalMarkdown(
-    "consumer-health-data-privacy-policy.md",
+    "consumer-health-data-notice.md",
   );
 
   assert.match(
     consumerHealthPolicy,
-    /Murph does not use Consumer Health Data you submit through Murph to train, fine-tune, or improve Murph’s or any third party’s general-purpose AI models/u,
+    /Murph does not use Consumer Health Data you submit through Murph to train, fine-tune, or improve Murph's or any third party's general-purpose AI models/u,
   );
   assert.match(
     consumerHealthPolicy,

@@ -330,6 +330,8 @@ Murph may improve the service using aggregated, de-identified, pseudonymized, or
 
 **Research notices.** If Murph offers a research feature, the applicable consent or study notice will describe the research sponsor, data categories, purpose, retention period, withdrawal process, whether results may be published, and who controls the research data.
 
+**Health Commons contributions.** Private experiment runs and notes are private by default. If you choose to contribute an outcome card, protocol note, aggregate result, or similar material to Health Commons, Murph will show the contribution boundary before submission and will process the contribution according to the consent or product notice for that feature. Contributions may be tied to protocol revisions, confidence labels, source-quality labels, and de-identified or aggregate outcome summaries. Do not contribute another person's personal or health information unless you have the required authority and consent.
+
 **De-identified data.** If Murph maintains de-identified data, Murph will maintain and use it in de-identified form and will not attempt to reidentify it except as permitted by law. We will use reasonable technical and organizational measures to prevent reidentification and require recipients of de-identified data to make similar commitments where required by law.
 
 ## 13. Data retention
@@ -417,13 +419,13 @@ If we deny a request that is appealable under applicable law, you may appeal by 
 
 Murph will not discriminate against you for exercising privacy rights provided by law.
 
-## 17. Consumer Health Data Privacy Policy
+## 17. Consumer Health Data Notice
 
-Murph maintains a separate Consumer Health Data Privacy Policy for disclosures required by U.S. consumer health privacy laws, including the Washington My Health My Data Act and similar laws.
+Murph maintains a separate Consumer Health Data Notice for disclosures required by U.S. consumer health privacy laws, including the Washington My Health My Data Act and similar laws.
 
-Where that separate notice applies and conflicts with this Privacy Policy, the separate Consumer Health Data Privacy Policy controls for consumer health data to the extent required by law.
+Where that separate notice applies and conflicts with this Privacy Policy, the separate Consumer Health Data Notice controls for consumer health data to the extent required by law.
 
-You can access the Consumer Health Data Privacy Policy at [withmurph.ai/consumer-health-data-privacy-policy](https://withmurph.ai/consumer-health-data-privacy-policy) or another clearly labeled link we make available on our homepage, in-app settings, and relevant onboarding or data-collection flows.
+You can access the Consumer Health Data Notice at [withmurph.ai/consumer-health-data-privacy-policy](https://withmurph.ai/consumer-health-data-privacy-policy) or another clearly labeled link we make available on our homepage, in-app settings, and relevant onboarding or data-collection flows.
 
 ## 18. Region-specific disclosures
 

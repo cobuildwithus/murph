@@ -2,9 +2,17 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createJsonPostRequest } from "./route-test-helpers";
 
+vi.mock("server-only", () => ({}));
+
 const mocks = vi.hoisted(() => ({
+  assertHostedLaunchRequiredConsentGranted: vi.fn(),
+  getPrisma: vi.fn(),
+  prismaClient: {
+    label: "test-prisma",
+  },
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
@@ -17,6 +25,14 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
+}));
+
+vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -34,6 +50,8 @@ describe("browser vault session route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
@@ -65,7 +83,14 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledTimes(1);
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(
+      expect.any(Request),
+      mocks.prismaClient,
+    );
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       encryptedReplica: null,
@@ -73,6 +98,31 @@ describe("browser vault session route", () => {
       replicaKeyEnvelope: null,
       replicaRef: null,
       state: "empty",
+    });
+  });
+
+  it("requires launch legal consent before reading browser vault state", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Accept the current Murph legal consent before continuing.",
+    }));
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_CONSENT_REQUIRED",
+        message: "Accept the current Murph legal consent before continuing.",
+        retryable: false,
+      },
     });
   });
 

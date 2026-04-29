@@ -15,7 +15,7 @@ By accessing or using the Hosted Service, you agree to these Terms. If you do no
 - **General wellness only.** Murph is a personal wellness and self-experimentation tool. Murph is not a doctor, clinician, medical device, hospital, pharmacy, therapist, dietitian, trainer, emergency service, or remote patient monitoring service.
 - **No medical care.** Murph does not provide diagnosis, treatment, prescriptions, medication or supplement dosing, clinical monitoring, emergency triage, or medical, nutritional, therapeutic, or other licensed professional advice.
 - **AI and data limitations.** Murph may use AI-generated responses, automations, third-party model providers, third-party wearable data, imported records, lab data, and user-submitted information. These may be incomplete, delayed, biased, misleading, unsafe, or wrong.
-- **Health-data sensitivity.** Your use of Murph may involve sensitive consumer health data. Our Privacy Policy and any applicable Consumer Health Data Privacy Policy explain our data practices and your choices.
+- **Health-data sensitivity.** Your use of Murph may involve sensitive consumer health data. Our Privacy Policy and Consumer Health Data Notice explain our data practices and your choices.
 - **Disputes.** These Terms include important rules about dispute handling, governing law, venue, arbitration, and class-action waiver provisions.
 
 ## 1. Eligibility and Authority
@@ -195,9 +195,11 @@ Invite and import links may be single-use, time-limited, automatically expiring,
 
 We may refuse, revoke, expire, or invalidate invite links or import flows at any time for security, abuse, legal, policy, or operational reasons.
 
+**Health Commons contributions.** Murph may allow you to contribute outcome cards, protocol notes, aggregate results, or similar materials to public Health Commons surfaces. Public contribution is opt-in and separate from private experiment tracking. You are responsible for reviewing what will be contributed before submission, removing information you do not want published, and confirming that you have the right to contribute any third-party information included in the contribution. Murph may reject, moderate, de-identify, aggregate, remove, or decline to publish contributions for safety, privacy, quality, legal, product, or operational reasons. Health Commons contributions are for education and protocol learning; they are not clinical research, medical advice, professional care, or proof that a protocol caused an outcome.
+
 ## 12. Privacy, Sensitive Information, Consumer Health Data, and HIPAA
 
-Our Privacy Policy, available at https://withmurph.ai/legal/privacy, explains how we collect, use, disclose, and process personal information through the Hosted Service and is incorporated into these Terms by reference. Where required or appropriate, we may also provide a Consumer Health Data Privacy Policy, platform-specific notices, app-store notices, or consent flows that supplement our Privacy Policy.
+Our Privacy Policy, available at https://withmurph.ai/legal/privacy, explains how we collect, use, disclose, and process personal information through the Hosted Service and is incorporated into these Terms by reference. Where required or appropriate, we may also provide a Consumer Health Data Notice, Health AI Safety Disclosure, platform-specific notices, app-store notices, or consent flows that supplement our Privacy Policy.
 
 Because Murph is health-oriented, information you provide or authorize us to access may be sensitive and may include consumer health data, biometric data, health measurements, health conditions, symptoms, medications, supplements, lab data, wearable data, nutrition data, exercise data, sleep data, precise-location-related health information, or information that could be used to infer health status.
 
@@ -215,6 +217,8 @@ Hosted Murph is for personal, direct-to-consumer wellness use and is not intende
 Do not submit regulated PHI to the Hosted Service on behalf of a covered entity or business associate unless and until Murph expressly offers that service under a signed BAA. If you are using Murph as an individual consumer and you direct a provider, lab, app, or other third party to send your information to Murph, that does not by itself make Murph a HIPAA business associate.
 
 We do not sell, rent, license, or otherwise disclose consumer health data, HealthKit data, wearable data, journal content, health files, health memories, health prompts, or derived health insights to data brokers, advertising networks, third-party advertising platforms, information resellers, or similar parties. We do not use such data for targeted advertising, cross-context behavioral advertising, retargeting, lookalike audience creation, ad attribution, ad measurement, insurance/employment/credit eligibility decisions, or general-purpose AI model training. We do not use consumer health data for advertising, sale, data brokerage, or general-purpose model training. Any identifiable-health-data research use requires separate opt-in consent or another lawful basis described in the applicable research notice.
+
+Hosted Murph may require you to accept the then-current Terms, Privacy Policy, Consumer Health Data Notice, and Health AI Safety Disclosure before using hosted features that process health data. Optional feature consents, such as connected health sources or Health Commons contribution, are separate and may be withdrawn for future processing where supported by the feature or required by law. Murph may record consent events with the document versions accepted, consent scope, source, and timestamps so it can prove the applicable legal boundary for hosted processing.
 
 ## 13. No Monitoring or Clinical Review
 

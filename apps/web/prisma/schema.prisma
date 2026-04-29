@@ -197,6 +197,8 @@ model HostedMember {
   hostedMailboxLaneCounters  HostedMailboxLaneCounter[]
   hostedWorkspace            HostedWorkspace?
   hostedRuntimeLogs          HostedRuntimeLog[]
+  consentEvents              HostedConsentEvent[]
+  consentGrants              HostedConsentGrant[]
   vaultSyncSessions  HostedVaultSyncSession[]
   vaultSyncPayloads  HostedVaultSyncPayload[]
 
@@ -450,6 +452,41 @@ model HostedVaultSyncPayload {
 
   @@index([memberId, createdAt])
   @@map("hosted_vault_sync_payload")
+}
+
+model HostedConsentEvent {
+  id                   String       @id
+  memberId             String       @map("member_id")
+  scope                String
+  action               String
+  documentVersionsJson Json         @map("document_versions_json")
+  source               String
+  metadataJson         Json?        @map("metadata_json")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, createdAt])
+  @@index([memberId, scope, createdAt])
+  @@map("hosted_consent_event")
+}
+
+model HostedConsentGrant {
+  memberId             String       @map("member_id")
+  scope                String
+  status               String       @default("granted")
+  documentVersionsJson Json         @map("document_versions_json")
+  source               String
+  grantedAt            DateTime     @map("granted_at")
+  revokedAt            DateTime?    @map("revoked_at")
+  lastEventId          String?      @map("last_event_id")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  member               HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, scope])
+  @@index([memberId, status])
+  @@index([scope, status])
+  @@map("hosted_consent_grant")
 }
 
 model HostedAiUsage {

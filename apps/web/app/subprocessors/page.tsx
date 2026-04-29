@@ -186,6 +186,12 @@ export default function SubprocessorsPage() {
             process health data will be reflected here and, where required by
             law or contract, notified to users.
           </p>
+          <a
+            href="/legal/subprocessors.pdf"
+            className="mt-4 inline-flex text-sm font-semibold text-[#5a6e32] underline-offset-4 transition-colors hover:text-[#2d3436] hover:underline"
+          >
+            Download PDF
+          </a>
         </header>
 
         <div
