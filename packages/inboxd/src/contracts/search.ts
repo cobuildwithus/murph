@@ -12,6 +12,7 @@ export interface InboxListFilters {
   afterCaptureId?: string | null;
   afterCreatedAt?: string | null;
   afterOccurredAt?: string | null;
+  includeRuntimeOnly?: boolean;
   source?: string;
   accountId?: string | null;
   limit?: number;

@@ -218,6 +218,7 @@ function createRuntimeStore(input: {
   captures: RuntimeCaptureRecord[]
   jobs?: RuntimeAttachmentParseJobRecord[]
   requeueCount?: number
+  runtimeOnlyCaptures?: RuntimeCaptureRecord[]
 }) {
   const close = vi.fn()
   const cursorStore = new Map<string, Record<string, unknown> | null>()
@@ -261,8 +262,16 @@ function createRuntimeStore(input: {
     findByExternalId() {
       return null
     },
-    getCapture(captureId) {
-      return input.captures.find((capture) => capture.captureId === captureId) ?? null
+    getCapture(captureId: string, options?: { includeRuntimeOnly?: boolean }) {
+      return (
+        input.captures.find((capture) => capture.captureId === captureId)
+        ?? (
+          options?.includeRuntimeOnly
+            ? input.runtimeOnlyCaptures?.find((capture) => capture.captureId === captureId)
+            : null
+        )
+        ?? null
+      )
     },
     getCursor(source, accountId) {
       return cursorStore.get(getKey(source, accountId)) ?? null
@@ -281,7 +290,10 @@ function createRuntimeStore(input: {
         .slice(0, limit)
     },
     listCaptures(filters) {
-      const captures = input.captures.filter((capture) =>
+      const sourceCaptures = filters?.includeRuntimeOnly
+        ? input.captures.concat(input.runtimeOnlyCaptures ?? [])
+        : input.captures
+      const captures = sourceCaptures.filter((capture) =>
         filters?.source ? capture.source === filters.source : true,
       )
       const limit = filters?.limit ?? captures.length
@@ -686,6 +698,72 @@ test('read ops report empty parse-status state when no parse jobs exist yet', as
       vault: paths.absoluteVaultRoot,
     },
   )
+})
+
+test('read ops expose runtime-only captures only through the explicit hosted read option', async () => {
+  const paths = await createTempPaths()
+  const runtimeOnlyCapture = createCapture({
+    captureId: 'capture-runtime-only',
+    source: 'linq',
+    text: 'runtime-only hosted input',
+  })
+  const { runtime } = createRuntimeStore({
+    captures: [],
+    runtimeOnlyCaptures: [runtimeOnlyCapture],
+  })
+
+  stateMocks.withInitializedInboxRuntime.mockImplementation(
+    async (_loadInbox, _vault, fn) =>
+      fn({
+        paths,
+        runtime,
+      }),
+  )
+  stateMocks.readConfig.mockResolvedValue(createConfig([]))
+  promotionMocks.readPromotionsByCapture.mockResolvedValue(new Map())
+
+  const ops = createInboxReadOps(createEnv())
+
+  const durableList = await ops.list({
+    requestId: null,
+    vault: paths.absoluteVaultRoot,
+  })
+  assert.equal(durableList.items.length, 0)
+
+  await assert.rejects(
+    () =>
+      ops.show({
+        captureId: runtimeOnlyCapture.captureId,
+        requestId: null,
+        vault: paths.absoluteVaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'INBOX_CAPTURE_NOT_FOUND',
+  )
+
+  const hostedList = await ops.list({
+    includeRuntimeOnly: true,
+    requestId: null,
+    vault: paths.absoluteVaultRoot,
+  })
+  assert.equal(hostedList.items[0]?.captureId, runtimeOnlyCapture.captureId)
+
+  const hostedShow = await ops.show({
+    captureId: runtimeOnlyCapture.captureId,
+    includeRuntimeOnly: true,
+    requestId: null,
+    vault: paths.absoluteVaultRoot,
+  })
+  assert.equal(hostedShow.capture.text, 'runtime-only hosted input')
+
+  const searched = await ops.search({
+    includeRuntimeOnly: true,
+    requestId: null,
+    text: '',
+    vault: paths.absoluteVaultRoot,
+  })
+  assert.equal(searched.hits.length, 0)
 })
 
 test('read ops cover missing source filters, empty promotions, and missing reparse jobs', async () => {

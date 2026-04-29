@@ -8,6 +8,7 @@ import { test } from "vitest";
 import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
 import { initializeVault, isVaultError, readJsonlRecords } from "@murphai/core";
+import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 
 import {
   createConnectorRegistry,
@@ -17,6 +18,7 @@ import {
   readInboxCaptureMutationHead,
   rebuildRuntimeFromVault,
   runPollConnector,
+  stageRuntimeOnlyCapture,
 } from "../src/index.ts";
 import {
   sanitizeRawMetadata,
@@ -283,6 +285,172 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
   );
 
   pipeline.close();
+});
+
+test("processCapture caps canonical inbox-capture text while preserving full local runtime input", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-long-text-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const fullText = "a".repeat(INBOX_CAPTURE_TEXT_MAX_LENGTH + 512);
+
+  try {
+    const persisted = await pipeline.processCapture({
+      source: "linq",
+      externalId: "msg-long-text-1",
+      accountId: "self",
+      thread: {
+        id: "chat-long-text",
+        isDirect: true,
+      },
+      actor: {
+        id: "contact-long-text",
+        isSelf: false,
+      },
+      occurredAt: "2026-03-13T09:00:00.000Z",
+      receivedAt: "2026-03-13T09:00:01.000Z",
+      text: fullText,
+      attachments: [],
+      raw: {
+        source: "synthetic-long-text",
+      },
+    });
+
+    const runtimeCapture = runtime.getCapture(persisted.captureId);
+    assert.ok(runtimeCapture);
+    assert.equal(runtimeCapture.text, fullText);
+
+    const envelope = JSON.parse(
+      await fs.readFile(path.join(vaultRoot, runtimeCapture.envelopePath), "utf8"),
+    ) as {
+      input: {
+        text: string | null;
+      };
+    };
+    assert.equal(envelope.input.text, fullText);
+
+    const captureRecords = await readJsonlRecords({
+      vaultRoot,
+      relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+    });
+    assert.equal(captureRecords.length, 1);
+    const captureRecord = captureRecords[0] as { text?: unknown };
+    const captureRecordText = captureRecord.text;
+    assert.equal(typeof captureRecordText, "string");
+    if (typeof captureRecordText !== "string") {
+      throw new TypeError("Expected long inbox-capture text projection in test record.");
+    }
+    assert.equal(captureRecordText.length, INBOX_CAPTURE_TEXT_MAX_LENGTH);
+    assert.equal(captureRecordText, fullText.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH));
+  } finally {
+    pipeline.close();
+  }
+});
+
+test("stageRuntimeOnlyCapture indexes decoded input without writing durable inbox evidence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-runtime-only-vault");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const runtime = await openInboxRuntime({ vaultRoot });
+
+  try {
+    const staged = stageRuntimeOnlyCapture({
+      capture: {
+        source: "linq",
+        externalId: "linq:msg-runtime-only",
+        accountId: "self",
+        thread: {
+          id: "chat-runtime-only",
+          isDirect: true,
+        },
+        actor: {
+          id: "contact-runtime-only",
+          isSelf: false,
+        },
+        occurredAt: "2026-03-13T10:00:00.000Z",
+        receivedAt: "2026-03-13T10:00:01.000Z",
+        text: "runtime-only decoded input",
+        attachments: [],
+        raw: {
+          source: "synthetic-runtime-only",
+        },
+      },
+      eventId: "evt_runtime_only_capture",
+      runtime,
+      storedAt: "2026-03-13T10:00:02.000Z",
+    });
+
+    const runtimeCapture = runtime.findByExternalId(
+      "linq",
+      "self",
+      "linq:msg-runtime-only",
+    );
+    assert.ok(runtimeCapture);
+    assert.equal(runtimeCapture.eventId, "evt_runtime_only_capture");
+    assert.equal(
+      runtimeCapture.envelopePath.endsWith(`/${staged.captureId}/envelope.json`),
+      true,
+    );
+    assert.equal(runtime.getCapture(staged.captureId), null);
+    assert.deepEqual(runtime.listCaptures(), []);
+    assert.deepEqual(runtime.searchCaptures({ text: "decoded" }), []);
+    assert.equal(
+      runtime.getCapture(staged.captureId, { includeRuntimeOnly: true })?.text,
+      "runtime-only decoded input",
+    );
+    assert.deepEqual(
+      runtime
+        .listCaptures({ includeRuntimeOnly: true })
+        .map((capture) => capture.captureId),
+      [staged.captureId],
+    );
+    assert.deepEqual(
+      runtime.searchCaptures({ includeRuntimeOnly: true, text: "" }),
+      [],
+    );
+    assert.equal(await readInboxCaptureMutationHead(vaultRoot), 0);
+    assert.deepEqual(await listInboxCaptureMutations({ vaultRoot }), []);
+
+    const ledgerRecords = await readJsonlRecordsIfPresent(
+      vaultRoot,
+      "ledger/inbox-captures/2026/2026-03.jsonl",
+    );
+    assert.equal(ledgerRecords.length, 0);
+    await assert.rejects(
+      () => fs.access(path.join(vaultRoot, runtimeCapture.envelopePath)),
+      (error) => (error as NodeJS.ErrnoException).code === "ENOENT",
+    );
+
+    const stagedAgain = stageRuntimeOnlyCapture({
+      capture: {
+        source: "linq",
+        externalId: "linq:msg-runtime-only",
+        accountId: "self",
+        thread: {
+          id: "chat-runtime-only",
+          isDirect: true,
+        },
+        actor: {
+          id: "contact-runtime-only",
+          isSelf: false,
+        },
+        occurredAt: "2026-03-13T10:00:00.000Z",
+        receivedAt: "2026-03-13T10:00:01.000Z",
+        text: "runtime-only decoded input",
+        attachments: [],
+        raw: {
+          source: "synthetic-runtime-only",
+        },
+      },
+      eventId: "evt_runtime_only_capture_2",
+      runtime,
+      storedAt: "2026-03-13T10:00:03.000Z",
+    });
+    assert.equal(stagedAgain.captureId, staged.captureId);
+    assert.equal(stagedAgain.deduped, true);
+  } finally {
+    runtime.close();
+  }
 });
 
 
@@ -620,6 +788,70 @@ test("capture mutation cursors advance for new captures, attachment parse update
     {
       captureId: capture.captureId,
       cursor: thirdHead,
+    },
+  ]);
+
+  const promotedRuntimeOnlyCaptureId = "cap_runtime_only_promoted";
+  const promotedRuntimeOnlyEventId = "evt_runtime_only_promoted";
+  const promotedRuntimeOnlyInput = {
+    source: "email",
+    externalId: "cursor-runtime-only-promoted",
+    thread: { id: "chat-cursor" },
+    actor: { isSelf: false },
+    occurredAt: "2026-03-13T11:02:00.000Z",
+    text: "Runtime-only text",
+    attachments: [],
+    raw: {},
+  };
+  const promotedRuntimeOnlyStored = {
+    captureId: promotedRuntimeOnlyCaptureId,
+    eventId: promotedRuntimeOnlyEventId,
+    storedAt: "2026-03-13T11:02:01.000Z",
+    sourceDirectory: "raw/inbox/email/default/2026/03/cap_runtime_only_promoted",
+    envelopePath: "raw/inbox/email/default/2026/03/cap_runtime_only_promoted/envelope.json",
+    attachments: [],
+  };
+  runtime.upsertCaptureIndex({
+    captureId: promotedRuntimeOnlyCaptureId,
+    eventId: promotedRuntimeOnlyEventId,
+    input: promotedRuntimeOnlyInput,
+    persistence: "runtime_only",
+    stored: promotedRuntimeOnlyStored,
+  });
+  assert.equal(await readInboxCaptureMutationHead(vaultRoot), thirdHead);
+
+  const laterCanonicalCapture = await pipeline.processCapture({
+    source: "email",
+    externalId: "cursor-2",
+    thread: { id: "chat-cursor" },
+    actor: { isSelf: false },
+    occurredAt: "2026-03-13T11:01:00.000Z",
+    text: "Later canonical text",
+    attachments: [],
+    raw: {},
+  });
+  const fourthHead = await readInboxCaptureMutationHead(vaultRoot);
+  assert.ok(fourthHead > thirdHead);
+  assert.deepEqual(await listInboxCaptureMutations({ vaultRoot, afterCursor: thirdHead, limit: 10 }), [
+    {
+      captureId: laterCanonicalCapture.captureId,
+      cursor: fourthHead,
+    },
+  ]);
+
+  runtime.upsertCaptureIndex({
+    captureId: promotedRuntimeOnlyCaptureId,
+    eventId: promotedRuntimeOnlyEventId,
+    input: promotedRuntimeOnlyInput,
+    persistence: "canonical",
+    stored: promotedRuntimeOnlyStored,
+  });
+  const fifthHead = await readInboxCaptureMutationHead(vaultRoot);
+  assert.ok(fifthHead > fourthHead);
+  assert.deepEqual(await listInboxCaptureMutations({ vaultRoot, afterCursor: fourthHead, limit: 10 }), [
+    {
+      captureId: promotedRuntimeOnlyCaptureId,
+      cursor: fifthHead,
     },
   ]);
 

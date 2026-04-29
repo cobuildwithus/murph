@@ -30,7 +30,10 @@ import {
 import type {
   HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
-import { createHostedAssistantTurnInputPort } from "./turn-input.ts";
+import {
+  createHostedAssistantTurnInputPort,
+  createHostedAutomationInboxServices,
+} from "./turn-input.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
 import { emitHostedAssistantProviderTraceLog } from "./events.ts";
 import {
@@ -161,13 +164,16 @@ export async function runHostedAssistantAutomation(
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
 }> {
   const inboxServices = createIntegratedInboxServices();
+  const automationInboxServices = runtime
+    ? createHostedAutomationInboxServices(inboxServices)
+    : inboxServices;
   const vaultServices = createIntegratedVaultServices();
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
   const automationEventCounts = new Map<string, number>();
   let redactedAutomationEventLogCount = 0;
   const turnInputPort = runtime
     ? createHostedAssistantTurnInputPort({
-        inboxServices,
+        inboxServices: automationInboxServices,
         requestId,
         runtime,
         vaultRoot,
@@ -200,7 +206,7 @@ export async function runHostedAssistantAutomation(
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
-      inboxServices,
+      inboxServices: automationInboxServices,
       onEvent: (event) => {
         automationEventCounts.set(
           event.type,

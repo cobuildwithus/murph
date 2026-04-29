@@ -18,8 +18,41 @@ import {
   HostedMailboxImportCheckpointUserMismatchError,
 } from "./mailbox-checkpoint.ts";
 
+type HostedTurnInputInboxServices =
+  Parameters<typeof createInboxBackedAssistantTurnInputPort>[0]["inboxServices"];
+
+export function createHostedTurnInputInboxServices(
+  inboxServices: HostedTurnInputInboxServices,
+): HostedTurnInputInboxServices {
+  const showRuntimeOnlyInboxServices = createHostedAutomationInboxServices(inboxServices);
+
+  return {
+    ...showRuntimeOnlyInboxServices,
+    list(input) {
+      return inboxServices.list({
+        ...input,
+        includeRuntimeOnly: true,
+      });
+    },
+  };
+}
+
+export function createHostedAutomationInboxServices(
+  inboxServices: HostedTurnInputInboxServices,
+): HostedTurnInputInboxServices {
+  return {
+    ...inboxServices,
+    show(input) {
+      return inboxServices.show({
+        ...input,
+        includeRuntimeOnly: true,
+      });
+    },
+  };
+}
+
 export function createHostedAssistantTurnInputPort(input: {
-  inboxServices: Parameters<typeof createInboxBackedAssistantTurnInputPort>[0]["inboxServices"];
+  inboxServices: HostedTurnInputInboxServices;
   requestId: string;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv">;
   vaultRoot: string;
@@ -39,7 +72,7 @@ export function createHostedAssistantTurnInputPort(input: {
   }
 
   const basePort = createInboxBackedAssistantTurnInputPort({
-    inboxServices: input.inboxServices,
+    inboxServices: createHostedTurnInputInboxServices(input.inboxServices),
     requestId: input.requestId,
     vault: input.vaultRoot,
   });

@@ -16,6 +16,7 @@ import {
   createInboxPipeline,
   type PersistedCapture,
   openInboxRuntime,
+  stageRuntimeOnlyCapture,
 } from "@murphai/inboxd";
 import {
   createConfiguredParserRegistry,
@@ -47,6 +48,7 @@ export async function ingestHostedConversationMessageWake(input: {
 
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture;
+  capturePersistence: "canonical" | "runtime_only";
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -66,7 +68,23 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       runtime,
       vaultRoot: input.vaultRoot,
     });
-    const persistedCapture = await pipeline.processCapture(capture);
+    let persistedCapture: PersistedCapture;
+    let capturePersistence: HostedConversationWakeLocalImportResult["capturePersistence"] =
+      "canonical";
+
+    try {
+      persistedCapture = await pipeline.processCapture(capture);
+    } catch (error) {
+      try {
+        persistedCapture = stageRuntimeOnlyCapture({
+          capture,
+          runtime,
+        });
+        capturePersistence = "runtime_only";
+      } catch {
+        throw error;
+      }
+    }
     const parserProcessed = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
       runtime,
@@ -79,6 +97,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
     };
     return {
       capture: persistedCapture,
+      capturePersistence,
       metrics,
     };
   } finally {

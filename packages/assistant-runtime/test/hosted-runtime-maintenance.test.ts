@@ -83,6 +83,11 @@ import {
   runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
 
+type InboxServices = import("@murphai/inbox-services").InboxServices;
+type RunAssistantAutomationPassInput = Parameters<
+  typeof import("@murphai/assistant-engine").runAssistantAutomationPass
+>[0];
+
 const DEVICE_SYNC_CONFIG = {
   providerConfigs: {
     oura: {
@@ -281,6 +286,123 @@ describe("runHostedAssistantAutomation", () => {
       vault: "/tmp/vault-root",
     });
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses transient-aware hosted show reads without exposing runtime-only rows to automation scans", async () => {
+    const list = vi.fn<InboxServices["list"]>(async (input) => ({
+      vault: input.vault,
+      filters: {
+        sourceId: null,
+        limit: input.limit ?? 50,
+        afterCreatedAt: input.afterCreatedAt ?? null,
+        afterOccurredAt: input.afterOccurredAt ?? null,
+        afterCaptureId: input.afterCaptureId ?? null,
+        oldestFirst: input.oldestFirst ?? false,
+      },
+      items: [],
+    }));
+    const show = vi.fn<InboxServices["show"]>(async (input) => ({
+      vault: input.vault,
+      capture: {
+        accountId: "acct_1",
+        actorId: "actor_1",
+        actorIsSelf: false,
+        actorName: null,
+        attachmentCount: 0,
+        attachments: [],
+        captureId: input.captureId,
+        createdAt: "2026-04-29T00:00:03.000Z",
+        envelopePath: "raw/inbox/linq/acct_1/2026/04/cap_runtime_only/envelope.json",
+        eventId: "evt_runtime_only",
+        externalId: "linq:msg_runtime_only",
+        occurredAt: "2026-04-29T00:00:02.000Z",
+        promotions: [],
+        receivedAt: "2026-04-29T00:00:02.500Z",
+        source: "linq",
+        text: "runtime-only hosted input",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        threadTitle: null,
+      },
+    }));
+    const inboxServices = {
+      init: mocks.initInboxRuntime,
+      list,
+      show,
+    } satisfies Pick<InboxServices, "init" | "list" | "show">;
+    mocks.createIntegratedInboxServices.mockReturnValueOnce(inboxServices);
+    mocks.runAssistantAutomationPass.mockImplementationOnce(
+      async (input: RunAssistantAutomationPassInput) => {
+        const passInboxServices = input.inboxServices;
+        if (!passInboxServices) {
+          throw new Error("Expected hosted automation inbox services.");
+        }
+
+        await passInboxServices.list({
+          limit: 1,
+          requestId: "req_runtime_only_show",
+          sourceId: null,
+          vault: "/tmp/vault-root",
+        });
+        await passInboxServices.show({
+          captureId: "cap_runtime_only",
+          requestId: "req_runtime_only_show",
+          vault: "/tmp/vault-root",
+        });
+
+        return {
+          nextWakeAt: null,
+          progressed: true,
+        };
+      },
+    );
+
+    await expect(
+      runHostedAssistantAutomation(
+        "/tmp/vault-root",
+        "req_runtime_only_show",
+        {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        {
+          eventId: "evt_runtime_only_show",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-29T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        {
+          forwardedEnv: {},
+          platform: {
+            artifactStore: {
+              get: vi.fn(async () => null),
+              put: vi.fn(async () => undefined),
+            },
+            effectsPort: {
+              readRawEmailMessage: vi.fn(async () => null),
+              sendEmail: vi.fn(async () => undefined),
+            },
+          },
+          platformEnv: {},
+        },
+      ),
+    ).resolves.toEqual({
+      nextWakeAt: null,
+      progressed: true,
+      redactedLogEntries: expect.any(Array),
+    });
+
+    expect(list.mock.calls[0]?.[0]).not.toHaveProperty("includeRuntimeOnly");
+    expect(show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureId: "cap_runtime_only",
+        includeRuntimeOnly: true,
+      }),
+    );
   });
 
   it("logs automation events emitted during the hosted pass", async () => {

@@ -10,7 +10,7 @@ Current responsibilities:
 - own the canonical hosted runtime launch spec: semantic env split,
   forwarded env profiles, platform-only runtime config, typed resolved config,
   commit timeout, and child-env projection helpers
-- keep `conversation.message` ingestion capture-scoped, including inline parser draining and same-run local maintenance without materializing web-owned follow-up wakes
+- keep `conversation.message` ingestion capture-scoped, including inline parser draining and same-run local maintenance without materializing web-owned follow-up wakes; hosted agent handling reads same-run runtime/raw-envelope input, uses a hidden transient runtime projection if canonical inbox persistence fails, exposes that transient row only to hosted active-turn input for the same execution, and leaves the hosted mailbox item retryable until durable capture evidence lands
 - collect due hosted side effects before the durable commit, then resume their post-commit delivery from committed state
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime

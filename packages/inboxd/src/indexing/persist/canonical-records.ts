@@ -1,5 +1,6 @@
 import {
   assertContract,
+  INBOX_CAPTURE_TEXT_MAX_LENGTH,
   inboxCaptureRecordSchema,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
 } from "@murphai/contracts";
@@ -48,7 +49,7 @@ export function buildInboxCaptureRecord(input: {
     occurredAt: input.inbound.occurredAt,
     recordedAt: input.stored.storedAt,
     receivedAt: input.inbound.receivedAt ?? null,
-    text: input.inbound.text ?? null,
+    text: toInboxCaptureRecordText(input.inbound.text),
     raw: input.inbound.raw,
     sourceDirectory: input.stored.sourceDirectory,
     envelopePath: input.stored.envelopePath,
@@ -70,6 +71,16 @@ export function buildInboxCaptureRecord(input: {
       sha256: attachment.sha256 ?? null,
     })),
   }, "inbox capture record");
+}
+
+function toInboxCaptureRecordText(text: string | null | undefined): string | null {
+  if (text === null || text === undefined) {
+    return null;
+  }
+
+  return text.length > INBOX_CAPTURE_TEXT_MAX_LENGTH
+    ? text.slice(0, INBOX_CAPTURE_TEXT_MAX_LENGTH)
+    : text;
 }
 
 export function buildInboxCaptureLedgerPathForOccurredAt(occurredAt: string): string {

@@ -853,6 +853,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    let assistantPhaseCalled = false;
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
@@ -881,6 +882,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspaceVersion: "0",
         },
         async runAssistantPhase() {
+          assistantPhaseCalled = true;
           return {};
         },
         vaultRoot,
@@ -904,6 +906,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         systemSeqEnd: "0",
         systemSeqStart: "0",
       });
+      assert.equal(assistantPhaseCalled, true);
     } finally {
       await rm(vaultRoot, {
         force: true,
