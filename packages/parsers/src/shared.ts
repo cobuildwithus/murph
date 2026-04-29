@@ -42,6 +42,7 @@ const SAFE_CHILD_PROCESS_ENV_KEYS = new Set([
   "XDG_RUNTIME_DIR",
 ]);
 const SAFE_CHILD_PROCESS_ENV_PREFIXES = ["LC_"];
+const COMMAND_TERMINATION_GRACE_MS = 1_000;
 
 function resolvePreservedChildProcessEnvKey(key: string): string | null {
   const normalizedKey = key.toUpperCase();
@@ -162,7 +163,7 @@ export interface CommandResult {
 export async function runCommand(
   command: string,
   args: string[],
-  options: { cwd?: string } = {},
+  options: { cwd?: string; maxStderrBytes?: number; maxStdoutBytes?: number; timeoutMs?: number } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -173,19 +174,99 @@ export async function runCommand(
     });
     let stdout = "";
     let stderr = "";
+    let failureError: Error | null = null;
+    let settled = false;
+    let termination: NodeJS.Timeout | null = null;
+    let timeout: NodeJS.Timeout | null = null;
+
+    const clearTimers = (): void => {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      if (termination) {
+        clearTimeout(termination);
+        termination = null;
+      }
+    };
+
+    const finishReject = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimers();
+      reject(error);
+    };
+
+    const finishResolve = (value: CommandResult): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimers();
+      resolve(value);
+    };
+
+    const terminateWithError = (error: Error): void => {
+      if (failureError) {
+        return;
+      }
+
+      failureError = error;
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.kill("SIGTERM");
+      termination = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, COMMAND_TERMINATION_GRACE_MS);
+    };
+
+    if (typeof options.timeoutMs === "number" && options.timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        terminateWithError(
+          new Error(`Command failed (${path.basename(command)}): timed out after ${options.timeoutMs}ms`),
+        );
+      }, options.timeoutMs);
+    }
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      if (
+        typeof options.maxStdoutBytes === "number" &&
+        Buffer.byteLength(stdout, "utf8") > options.maxStdoutBytes
+      ) {
+        terminateWithError(
+          new Error(`Command failed (${path.basename(command)}): stdout exceeded ${options.maxStdoutBytes} bytes`),
+        );
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
+      if (
+        typeof options.maxStderrBytes === "number" &&
+        Buffer.byteLength(stderr, "utf8") > options.maxStderrBytes
+      ) {
+        terminateWithError(
+          new Error(`Command failed (${path.basename(command)}): stderr exceeded ${options.maxStderrBytes} bytes`),
+        );
+      }
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      finishReject(error);
+    });
     child.on("close", (code, signal) => {
+      if (failureError) {
+        finishReject(failureError);
+        return;
+      }
+
       if (signal) {
-        reject(
+        finishReject(
           new Error(
             `Command failed (${path.basename(command)}): signal ${signal}`,
           ),
@@ -194,7 +275,7 @@ export async function runCommand(
       }
 
       if (code === null) {
-        reject(
+        finishReject(
           new Error(
             `Command failed (${path.basename(command)}): exit unknown`,
           ),
@@ -204,11 +285,13 @@ export async function runCommand(
 
       const exitCode = code;
       if (exitCode !== 0) {
-        reject(new Error(`Command failed (${path.basename(command)}): ${redactSensitiveText(stderr.trim() || stdout.trim() || `exit ${exitCode}`)}`));
+        finishReject(
+          new Error(`Command failed (${path.basename(command)}): ${redactSensitiveText(stderr.trim() || stdout.trim() || `exit ${exitCode}`)}`),
+        );
         return;
       }
 
-      resolve({ stdout, stderr, exitCode });
+      finishResolve({ stdout, stderr, exitCode });
     });
   });
 }

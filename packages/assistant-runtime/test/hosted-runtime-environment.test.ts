@@ -420,6 +420,7 @@ test("hosted runtime config strips hosted control-plane secrets from forwarded a
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
         NODE_OPTIONS: "--require /tmp/user-injected.js",
         PATH: "/tmp/user-bin",
+        PDFTOTEXT_COMMAND: "/tmp/user-pdftotext",
         HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_KEYRING_JSON: "{}",
         HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: "{}",
         HOSTED_WAKE_ENCRYPTION_KEYRING_JSON: "{}",

@@ -202,6 +202,12 @@ test("parser toolchain config writes, reads, and drives local discovery", async 
       ffmpeg: {
         command: fakeToolPath,
       },
+      pdfinfo: {
+        command: fakeToolPath,
+      },
+      pdftotext: {
+        command: fakeToolPath,
+      },
       whisper: {
         command: fakeToolPath,
         modelPath: "models/fake.bin",
@@ -215,6 +221,8 @@ test("parser toolchain config writes, reads, and drives local discovery", async 
   const loaded = await readParserToolchainConfig(vaultRoot);
   assert.ok(loaded);
   assert.equal(loaded.config.tools.ffmpeg?.command, fakeToolPath);
+  assert.equal(loaded.config.tools.pdfinfo?.command, fakeToolPath);
+  assert.equal(loaded.config.tools.pdftotext?.command, fakeToolPath);
   assert.equal(loaded.config.tools.whisper?.modelPath, "models/fake.bin");
 
   const doctor = await discoverParserToolchain({ vaultRoot });
@@ -224,6 +232,18 @@ test("parser toolchain config writes, reads, and drives local discovery", async 
     command: fakeToolPath,
     source: "config",
     reason: "ffmpeg CLI available.",
+  });
+  assert.deepEqual(doctor.tools.pdfinfo, {
+    available: true,
+    command: fakeToolPath,
+    source: "config",
+    reason: "pdfinfo CLI available.",
+  });
+  assert.deepEqual(doctor.tools.pdftotext, {
+    available: true,
+    command: fakeToolPath,
+    source: "config",
+    reason: "pdftotext CLI available.",
   });
   assert.deepEqual(doctor.tools.whisper, {
     available: true,

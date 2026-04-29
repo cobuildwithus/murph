@@ -1,6 +1,15 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -27,6 +36,8 @@ const execFileAsync = promisify(execFile);
 const FINNISH_DRY_SAUNA_KEY =
   "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
+const PDF_SMOKE_EXPECTED_TEXT = "Murph hosted PDF smoke fixture";
+const PDF_SMOKE_RELATIVE_PATH = "raw/smoke/hosted-runner.pdf";
 
 async function main(): Promise<void> {
   const input = parseHostedRunnerSmokeInput(parseJsonValue(await readStandardInput()));
@@ -117,7 +128,17 @@ async function runSmokeChecks(input: {
   await assertPathExists(wavPath);
 
   const parserScratchRoot = path.join(input.workspaceRoot, "parser-scratch");
+  const pdfPath = path.join(input.vaultRoot, PDF_SMOKE_RELATIVE_PATH);
+  await runPdfToolchainSmoke({
+    pdfPath,
+    scratchRoot: path.join(parserScratchRoot, "pdf"),
+  });
   const parserRegistry = await createSmokeParserRegistry();
+  const pdfParse = await parsePdfDocument({
+    pdfPath,
+    registry: parserRegistry,
+    scratchRoot: path.join(parserScratchRoot, "pdf-parser"),
+  });
   const wavParse = await transcribeWave({
     expectedSnippet: input.expectedTranscriptSnippet,
     registry: parserRegistry,
@@ -154,6 +175,8 @@ async function runSmokeChecks(input: {
     normalizedTranscriptProviderId: normalizedParse.providerId,
     normalizedTranscriptSha256: sha256Hex(normalizedParse.text),
     operatorHomeRebound: true,
+    pdfParserProviderId: pdfParse.providerId,
+    pdfTextSha256: sha256Hex(pdfParse.text),
     reportedVaultId,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliCommandDiscovered: true,
@@ -166,6 +189,34 @@ async function runSmokeChecks(input: {
     wavTranscriptProviderId: wavParse.providerId,
     wavTranscriptSha256: sha256Hex(wavParse.text),
   };
+}
+
+async function parsePdfDocument(input: {
+  pdfPath: string;
+  registry: ParserRegistry;
+  scratchRoot: string;
+}): Promise<SmokeParseResult> {
+  const result = await parseSmokeAttachment({
+    artifact: createSmokeArtifact({
+      absolutePath: input.pdfPath,
+      attachmentId: "att_hosted_runner_pdf",
+      captureId: "cap_hosted_runner_pdf",
+      kind: "document",
+      mime: "application/pdf",
+      storedPath: PDF_SMOKE_RELATIVE_PATH,
+    }),
+    expectedProviderId: "poppler.pdf",
+    registry: input.registry,
+    scratchRoot: input.scratchRoot,
+  });
+
+  if (!result.text.includes(PDF_SMOKE_EXPECTED_TEXT)) {
+    throw new Error(
+      "Hosted runner smoke parser PDF output did not include the expected fixture text.",
+    );
+  }
+
+  return result;
 }
 
 async function transcribeWave(input: {
@@ -232,6 +283,84 @@ async function transcribeNormalizedAudio(input: {
 
 async function ensureScratchDirectory(directoryPath: string): Promise<void> {
   await mkdir(directoryPath, { recursive: true });
+}
+
+async function runPdfToolchainSmoke(input: {
+  pdfPath: string;
+  scratchRoot: string;
+}): Promise<void> {
+  await assertPathExists(input.pdfPath);
+  await resolveCommandPath("file");
+  await resolveCommandPath("mutool");
+  await resolveCommandPath("pdfinfo");
+  await resolveCommandPath("pdftotext");
+  await resolveCommandPath("pdftoppm");
+  await resolveCommandPath("qpdf");
+
+  const pdfMime = await runTextCommand("file", [
+    "--mime-type",
+    "-b",
+    input.pdfPath,
+  ]);
+  if (pdfMime.trim() !== "application/pdf") {
+    throw new Error(
+      `Hosted runner smoke expected PDF fixture MIME application/pdf, got ${pdfMime}.`,
+    );
+  }
+
+  const pdfInfo = await runTextCommand("pdfinfo", [input.pdfPath]);
+  if (!/^Pages:\s+1$/mu.test(pdfInfo)) {
+    throw new Error("Hosted runner smoke PDF fixture did not report exactly one page.");
+  }
+
+  const qpdfCheck = await runTextCommand("qpdf", ["--check", input.pdfPath]);
+  if (!/no syntax or stream encoding errors found/imu.test(qpdfCheck)) {
+    throw new Error("Hosted runner smoke qpdf check did not validate the PDF fixture.");
+  }
+
+  const mutoolInfo = await runTextCommand("mutool", ["info", input.pdfPath]);
+  if (!/^Pages:\s+1$/mu.test(mutoolInfo)) {
+    throw new Error("Hosted runner smoke mutool info did not report exactly one page.");
+  }
+
+  await ensureScratchDirectory(input.scratchRoot);
+  const textPath = path.join(input.scratchRoot, "hosted-runner.txt");
+  await runCommand(
+    "pdftotext",
+    ["-enc", "UTF-8", "-nopgbrk", input.pdfPath, textPath],
+    { allowEmptyStdout: true },
+  );
+
+  const extractedText = await readFile(textPath, "utf8");
+  if (!extractedText.includes(PDF_SMOKE_EXPECTED_TEXT)) {
+    throw new Error(
+      "Hosted runner smoke pdftotext output did not include the expected fixture text.",
+    );
+  }
+
+  const pageRoot = path.join(input.scratchRoot, "page");
+  await runCommand(
+    "pdftoppm",
+    ["-png", "-r", "150", "-f", "1", "-l", "1", input.pdfPath, pageRoot],
+    { allowEmptyStdout: true },
+  );
+
+  const renderedPagePath = `${pageRoot}-1.png`;
+  const renderedPage = await stat(renderedPagePath);
+  if (renderedPage.size <= 0) {
+    throw new Error("Hosted runner smoke pdftoppm output page was empty.");
+  }
+
+  const renderedPageMime = await runTextCommand("file", [
+    "--mime-type",
+    "-b",
+    renderedPagePath,
+  ]);
+  if (renderedPageMime.trim() !== "image/png") {
+    throw new Error(
+      `Hosted runner smoke expected rendered PDF page MIME image/png, got ${renderedPageMime}.`,
+    );
+  }
 }
 
 function assertTranscriptSnippet(
@@ -403,12 +532,13 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
   if (
     !/^include_only\s*=\s*\[/mu.test(config)
     || !/"PATH"/u.test(config)
+    || !/"PDFTOTEXT_COMMAND"/u.test(config)
     || !/"VAULT"/u.test(config)
     || !/"WHISPER_COMMAND"/u.test(config)
     || /include_only\s*=\s*\[[^\]]*"VERCEL_AI_API_KEY"/mu.test(config)
   ) {
     throw new Error(
-      "Hosted runner smoke Codex config must allowlist PATH, VAULT, and WHISPER_COMMAND without provider credentials.",
+      "Hosted runner smoke Codex config must allowlist PATH, VAULT, parser tool env, and WHISPER_COMMAND without provider credentials.",
     );
   }
 
@@ -420,6 +550,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
     codexHome,
     runtimeEnv: {
       PATH: process.env.PATH ?? "",
+      PDFTOTEXT_COMMAND: process.env.PDFTOTEXT_COMMAND ?? "hosted-runner-smoke-pdftotext",
       VAULT: process.env.VAULT ?? "",
       VERCEL_AI_API_KEY: "hosted-runner-smoke-secret",
       WHISPER_COMMAND: process.env.WHISPER_COMMAND ?? "hosted-runner-smoke-whisper",
@@ -450,7 +581,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "",
     "[shell_environment_policy]",
     'inherit = "all"',
-    'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FFMPEG_COMMAND", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT", "WHISPER_COMMAND", "WHISPER_MODEL_PATH"]',
+    'include_only = ["CI", "CODEX_HOME", "COLORTERM", "CURL_CA_BUNDLE", "FFMPEG_COMMAND", "FILE_COMMAND", "FORCE_COLOR", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "MUTOOL_COMMAND", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "PDFINFO_COMMAND", "PDFTOPPM_COMMAND", "PDFTOTEXT_COMMAND", "QPDF_COMMAND", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT", "WHISPER_COMMAND", "WHISPER_MODEL_PATH"]',
     "",
   ].join("\n");
 }
@@ -593,6 +724,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
             "printf '%s\\n' \"${#vault_cli_manifest}\"",
             "printf '%s\\n' \"${#murph_help}\"",
             "printf '%s\\n' \"${VAULT:-}\"",
+            "printf '%s\\n' \"${PDFTOTEXT_COMMAND:-}\"",
             "printf '%s\\n' \"${WHISPER_COMMAND:-}\"",
             "printf '%s\\n' \"${VERCEL_AI_API_KEY:-}\"",
           ].join("; "),
@@ -657,6 +789,7 @@ function assertCodexShellEnvironmentProbeResult(input: {
     vaultCliLlmsBytesText,
     murphHelpBytesText,
     vaultRoot,
+    pdfToTextCommand,
     whisperCommand,
     providerCredential,
     ...extra
@@ -674,6 +807,10 @@ function assertCodexShellEnvironmentProbeResult(input: {
 
   if (vaultRoot !== input.vaultRoot) {
     throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
+  }
+
+  if (pdfToTextCommand !== (process.env.PDFTOTEXT_COMMAND ?? "hosted-runner-smoke-pdftotext")) {
+    throw new Error("Codex app-server shell env probe did not inherit the PDF parser command env.");
   }
 
   if (whisperCommand !== (process.env.WHISPER_COMMAND ?? "hosted-runner-smoke-whisper")) {

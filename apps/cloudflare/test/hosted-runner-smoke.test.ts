@@ -60,6 +60,8 @@ describe("runHostedRunnerSmokeDetailed", () => {
             normalizedTranscriptProviderId: "whisper.cpp",
             normalizedTranscriptSha256: "normalized-hash",
             operatorHomeRebound: true,
+            pdfParserProviderId: "poppler.pdf",
+            pdfTextSha256: "pdf-hash",
             reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
             schema: "murph.cloudflare-hosted-runner-smoke.v1",
             vaultCliCommandDiscovered: true,
@@ -93,6 +95,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
     expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
     expect(result.murphCommandDiscovered).toBe(true);
     expect(result.normalizedTranscriptSha256).toBe("normalized-hash");
+    expect(result.pdfParserProviderId).toBe("poppler.pdf");
     expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
     expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
   });

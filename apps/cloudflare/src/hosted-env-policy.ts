@@ -17,6 +17,12 @@ import type { StringEnvSource } from "./string-env.ts";
 
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",
+  "FILE_COMMAND",
+  "MUTOOL_COMMAND",
+  "PDFINFO_COMMAND",
+  "PDFTOPPM_COMMAND",
+  "PDFTOTEXT_COMMAND",
+  "QPDF_COMMAND",
   "WHISPER_COMMAND",
   "WHISPER_MODEL_PATH",
 ] as const;

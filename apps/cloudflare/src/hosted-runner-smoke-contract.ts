@@ -26,6 +26,8 @@ export interface HostedRunnerSmokeResult {
   normalizedTranscriptProviderId: string;
   normalizedTranscriptSha256: string;
   operatorHomeRebound: boolean;
+  pdfParserProviderId: string;
+  pdfTextSha256: string;
   reportedVaultId: string;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
   vaultCliCommandDiscovered: boolean;
@@ -137,6 +139,14 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     operatorHomeRebound: readBoolean(
       record.operatorHomeRebound,
       "Hosted runner smoke result.operatorHomeRebound",
+    ),
+    pdfParserProviderId: readNonEmptyString(
+      record.pdfParserProviderId,
+      "Hosted runner smoke result.pdfParserProviderId",
+    ),
+    pdfTextSha256: readNonEmptyString(
+      record.pdfTextSha256,
+      "Hosted runner smoke result.pdfTextSha256",
     ),
     reportedVaultId: readNonEmptyString(
       record.reportedVaultId,

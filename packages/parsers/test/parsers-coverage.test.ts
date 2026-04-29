@@ -8,6 +8,7 @@ import { afterEach, test } from "vitest";
 
 import * as parsers from "../src/index.js";
 import { prepareAudioInput, resolveFfmpegCommand } from "../src/adapters/ffmpeg.js";
+import { createPopplerPdfProvider } from "../src/adapters/poppler-pdf.js";
 import { createTextFileProvider } from "../src/adapters/text-file.js";
 import type { ParserArtifactRef } from "../src/contracts/artifact.js";
 import type { ParserOutput, ProviderRunResult } from "../src/contracts/parse.js";
@@ -46,6 +47,8 @@ import {
 
 const envSnapshot = {
   FFMPEG_COMMAND: process.env.FFMPEG_COMMAND,
+  PDFINFO_COMMAND: process.env.PDFINFO_COMMAND,
+  PDFTOTEXT_COMMAND: process.env.PDFTOTEXT_COMMAND,
   WHISPER_COMMAND: process.env.WHISPER_COMMAND,
   WHISPER_MODEL_PATH: process.env.WHISPER_MODEL_PATH,
   PATH: process.env.PATH,
@@ -54,6 +57,8 @@ const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   process.env.FFMPEG_COMMAND = envSnapshot.FFMPEG_COMMAND;
+  process.env.PDFINFO_COMMAND = envSnapshot.PDFINFO_COMMAND;
+  process.env.PDFTOTEXT_COMMAND = envSnapshot.PDFTOTEXT_COMMAND;
   process.env.WHISPER_COMMAND = envSnapshot.WHISPER_COMMAND;
   process.env.WHISPER_MODEL_PATH = envSnapshot.WHISPER_MODEL_PATH;
   process.env.PATH = envSnapshot.PATH;
@@ -170,9 +175,10 @@ test("parser barrel exports the default registry and key helpers", () => {
   const registry = parsers.createDefaultParserRegistry();
   assert.deepEqual(
     registry.providers.map((provider) => provider.id),
-    ["text-file", "zxing-wasm", "whisper.cpp"],
+    ["text-file", "poppler.pdf", "zxing-wasm", "whisper.cpp"],
   );
   assert.equal(parsers.createParserRegistry, createParserRegistry);
+  assert.equal(parsers.createPopplerPdfProvider, createPopplerPdfProvider);
   assert.equal(parsers.createTextFileProvider, createTextFileProvider);
 });
 
@@ -528,6 +534,112 @@ test("ffmpeg helpers cover env lookup, system fallback, passthrough, and video f
   );
 });
 
+test("Poppler PDF provider extracts born-digital PDF text with page metadata", async () => {
+  const directory = await makeTempDirectory("murph-parsers-poppler");
+  const toolDirectory = await makeTempDirectory("murph-parsers-poppler-bin");
+  const pdfPath = await writeFile(directory, "report.pdf", "%PDF-1.7\nfixture");
+  const argsCapturePath = path.join(directory, "pdftotext-args.json");
+  const pdfInfoCommand = await writeExecutable(
+    toolDirectory,
+    process.platform === "win32" ? "pdfinfo.cmd" : "pdfinfo",
+    process.platform === "win32"
+      ? "@echo off\r\necho Pages: 5\r\n"
+      : "#!/usr/bin/env node\nprocess.stdout.write('Pages: 5\\n');\n",
+  );
+  const pdfToTextCommand = await writeExecutable(
+    toolDirectory,
+    process.platform === "win32" ? "pdftotext.cmd" : "pdftotext",
+    process.platform === "win32"
+      ? `@echo off\r\necho ["-enc","UTF-8","-f","1","-l","2","-nopgbrk","${pdfPath.replaceAll("\\", "\\\\")}","-"]> ${argsCapturePath}\r\necho FastReport lab panel\r\n`
+      : [
+          "#!/usr/bin/env node",
+          "const fs = require('node:fs');",
+          `fs.writeFileSync(${JSON.stringify(argsCapturePath)}, JSON.stringify(process.argv.slice(2)), 'utf8');`,
+          "process.stdout.write('FastReport lab panel\\nResult row');",
+        ].join("\n"),
+  );
+  const provider = createPopplerPdfProvider({
+    maxPages: 2,
+    pdfInfoCommandCandidates: [pdfInfoCommand],
+    pdfToTextCommandCandidates: [pdfToTextCommand],
+  });
+  const request = {
+    artifact: buildArtifact({
+      absolutePath: pdfPath,
+      fileName: "report.pdf",
+      mime: "application/pdf",
+    }),
+    inputPath: pdfPath,
+    intent: "attachment_text" as const,
+    scratchDirectory: directory,
+  };
+
+  assert.equal(await provider.supports(request), true);
+  assert.deepEqual(await provider.discover(), {
+    available: true,
+    executablePath: pdfToTextCommand,
+    reason: "Poppler PDF text extraction tools available.",
+  });
+
+  const result = await provider.run(request);
+  assert.match(result.text, /FastReport lab panel/u);
+  assert.equal(result.metadata?.pageCount, 5);
+  assert.deepEqual(result.metadata?.warnings, [{
+    code: "pdf_page_limit",
+    message: "PDF text extraction was limited to the first 2 pages.",
+  }]);
+  assert.deepEqual(JSON.parse(await fs.readFile(argsCapturePath, "utf8")), [
+    "-enc",
+    "UTF-8",
+    "-f",
+    "1",
+    "-l",
+    "2",
+    "-nopgbrk",
+    pdfPath,
+    "-",
+  ]);
+  assert.equal(result.blocks?.[0]?.kind, "paragraph");
+
+  await assert.rejects(
+    createPopplerPdfProvider({
+      maxInputBytes: 4,
+      pdfInfoCommandCandidates: [pdfInfoCommand],
+      pdfToTextCommandCandidates: [pdfToTextCommand],
+    }).run(request),
+    /PDF input exceeds parser limit/u,
+  );
+
+  const stdoutNoisyPdfToTextCommand = await writeExecutable(
+    toolDirectory,
+    process.platform === "win32" ? "pdftotext-stdout-noisy.cmd" : "pdftotext-stdout-noisy",
+    process.platform === "win32"
+      ? "@echo off\r\nnode -e \"process.stdout.write('x'.repeat(200000))\"\r\n"
+      : "#!/usr/bin/env node\nprocess.stdout.write('x'.repeat(200000));\n",
+  );
+  await assert.rejects(
+    createPopplerPdfProvider({
+      commandTimeoutMs: 1_000,
+      maxOutputBytes: 4,
+      pdfInfoCommandCandidates: [pdfInfoCommand],
+      pdfToTextCommandCandidates: [stdoutNoisyPdfToTextCommand],
+    }).run(request),
+    /stdout exceeded 4 bytes/u,
+  );
+
+  await assert.rejects(
+    createPopplerPdfProvider({
+      resolvedToolState: {
+        available: false,
+        pdfInfoCommandPath: null,
+        pdfToTextCommandPath: null,
+        reason: "pdfinfo CLI executable not found.",
+      },
+    }).run(request),
+    /pdfinfo CLI executable not found/u,
+  );
+});
+
 test("resolveAttachmentArtifact covers missing captures, missing attachments, and missing stored paths", async () => {
   const vaultRoot = await makeTempDirectory("murph-parsers-artifact");
   await initializeVault({
@@ -747,6 +859,36 @@ test("shared parser helpers cover vault path guards, markdown shaping, and recur
     runCommand(failingCommand, []),
     /<REDACTED_PATH>/u,
   );
+
+  const hangingCommand = await writeExecutable(
+    commandDirectory,
+    "hang-command",
+    "#!/usr/bin/env node\nsetInterval(() => {}, 1000);\n",
+  );
+  await assert.rejects(
+    runCommand(hangingCommand, [], { timeoutMs: 10 }),
+    /timed out/u,
+  );
+
+  const noisyCommand = await writeExecutable(
+    commandDirectory,
+    "noisy-command",
+    "#!/usr/bin/env node\nprocess.stdout.write('0123456789');\n",
+  );
+  await assert.rejects(
+    runCommand(noisyCommand, [], { maxStdoutBytes: 4 }),
+    /stdout exceeded 4 bytes/u,
+  );
+
+  const noisyStderrCommand = await writeExecutable(
+    commandDirectory,
+    "noisy-stderr-command",
+    "#!/usr/bin/env node\nprocess.stderr.write('0123456789');\n",
+  );
+  await assert.rejects(
+    runCommand(noisyStderrCommand, [], { maxStderrBytes: 4 }),
+    /stderr exceeded 4 bytes/u,
+  );
 });
 
 test("parser toolchain config and discovery cover null reads, clearing updates, env sources, and missing sources", async () => {
@@ -763,6 +905,16 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
     process.platform === "win32" ? "whisper-cli.cmd" : "whisper-cli",
     process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/usr/bin/env node\nprocess.exit(0);\n",
   );
+  const pdfInfoPath = await writeExecutable(
+    toolDirectory,
+    process.platform === "win32" ? "pdfinfo.cmd" : "pdfinfo",
+    process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/usr/bin/env node\nprocess.exit(0);\n",
+  );
+  const pdfToTextPath = await writeExecutable(
+    toolDirectory,
+    process.platform === "win32" ? "pdftotext.cmd" : "pdftotext",
+    process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/usr/bin/env node\nprocess.exit(0);\n",
+  );
   const modelPath = await writeFile(modelDirectory, "base.bin", "model");
 
   await initializeVault({
@@ -775,6 +927,8 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
   await writeParserToolchainConfig({
     tools: {
       ffmpeg: { command: ffmpegPath },
+      pdfinfo: { command: pdfInfoPath },
+      pdftotext: { command: pdfToTextPath },
       whisper: { command: whisperPath, modelPath: "models/inside.bin" },
     },
     vaultRoot,
@@ -800,6 +954,10 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
   assert.equal(doctor.configPath, getParserToolchainPaths(vaultRoot).configPath);
   assert.equal(doctor.tools.ffmpeg.source, "env");
   assert.equal(doctor.tools.ffmpeg.command, ffmpegPath);
+  assert.equal(doctor.tools.pdfinfo.source, "config");
+  assert.equal(doctor.tools.pdfinfo.command, pdfInfoPath);
+  assert.equal(doctor.tools.pdftotext.source, "config");
+  assert.equal(doctor.tools.pdftotext.command, pdfToTextPath);
   assert.equal(doctor.tools.whisper.source, "config");
   assert.equal(doctor.tools.whisper.modelPath, modelPath);
   assert.deepEqual(ffmpegOptionsFromDoctor(doctor), {
@@ -819,9 +977,15 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
   });
 
   process.env.PATH = "";
+  delete process.env.PDFINFO_COMMAND;
+  delete process.env.PDFTOTEXT_COMMAND;
   const missingDoctor = await discoverParserToolchain({ vaultRoot: emptyVaultRoot });
   assert.equal(missingDoctor.tools.ffmpeg.source, "missing");
   assert.equal(missingDoctor.tools.ffmpeg.available, false);
+  assert.equal(missingDoctor.tools.pdfinfo.source, "missing");
+  assert.equal(missingDoctor.tools.pdfinfo.available, false);
+  assert.equal(missingDoctor.tools.pdftotext.source, "missing");
+  assert.equal(missingDoctor.tools.pdftotext.available, false);
   assert.equal(missingDoctor.tools.whisper.source, "missing");
   assert.equal(missingDoctor.tools.whisper.reason, "whisper.cpp CLI executable not found.");
 

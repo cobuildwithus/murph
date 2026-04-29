@@ -386,6 +386,16 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
     );
+    expect(baseDockerfile).toContain("FILE_COMMAND=/usr/bin/file");
+    expect(baseDockerfile).toContain("MUTOOL_COMMAND=/usr/bin/mutool");
+    expect(baseDockerfile).toContain("PDFINFO_COMMAND=/usr/bin/pdfinfo");
+    expect(baseDockerfile).toContain("PDFTOPPM_COMMAND=/usr/bin/pdftoppm");
+    expect(baseDockerfile).toContain("PDFTOTEXT_COMMAND=/usr/bin/pdftotext");
+    expect(baseDockerfile).toContain("QPDF_COMMAND=/usr/bin/qpdf");
+    expect(baseDockerfile).toContain("file \\");
+    expect(baseDockerfile).toContain("mupdf-tools \\");
+    expect(baseDockerfile).toContain("poppler-utils \\");
+    expect(baseDockerfile).toContain("qpdf \\");
     expect(baseDockerfile).toContain("RUN ldconfig");
     expect(baseDockerfile).toContain("codex --version");
     expect(baseDockerfile).toContain("codex app-server --help >/dev/null");
@@ -489,6 +499,16 @@ describe("hosted runner container image contract", () => {
     expect(runnerDockerSmokeScript).toContain('"--platform",\n      "linux/amd64"');
     expect(runnerDockerSmokeScript).toContain("codexHostedShellVaultCliLlmsBytes=");
     expect(runnerDockerSmokeScript).toContain("codexHostedShellMurphHelpBytes=");
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("file")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("mutool")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdfinfo")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdftotext")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("pdftoppm")');
+    expect(hostedRunnerSmokeChild).toContain('resolveCommandPath("qpdf")');
+    expect(hostedRunnerSmokeChild).toContain('runTextCommand("qpdf", ["--check", input.pdfPath])');
+    expect(hostedRunnerSmokeChild).toContain('runTextCommand("mutool", ["info", input.pdfPath])');
+    expect(hostedRunnerSmokeChild).toContain('expectedProviderId: "poppler.pdf"');
+    expect(hostedRunnerSmokeChild).toContain("pdfParserProviderId: pdfParse.providerId");
     expect(hostedRunnerSmokeChild).toContain(
       '"/bin/sh",\n          "-lc",',
     );
