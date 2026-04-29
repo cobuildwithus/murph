@@ -148,7 +148,11 @@ describe("StartExperimentButton", () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
-    expect(container.textContent).toContain("Start from your connected channel");
+    expect(container.textContent).toContain("Choose where to start.");
+    expect(container.textContent).toContain("Nothing is sent until you send it.");
+    expect(container.textContent).toContain("Ways to start");
+    expect(container.textContent).toContain("3 available");
+    expect(container.textContent).toContain("Finnish Dry Sauna");
     expect(container.textContent).toContain("Text");
     expect(container.textContent).toContain("Telegram");
     expect(container.textContent).toContain("Email");
@@ -200,7 +204,7 @@ describe("StartExperimentButton", () => {
     });
 
     expect(assign).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain("Start from your connected channel");
+    expect(container.textContent).not.toContain("Choose where to start.");
   });
 
   it("uses initial channel flags without needing raw linked accounts in props", async () => {
@@ -229,7 +233,8 @@ describe("StartExperimentButton", () => {
 
     const links = Array.from(container.querySelectorAll("a"))
       .map((anchor) => (anchor as HTMLAnchorElement).href);
-    expect(container.textContent).toContain("Start from your connected channel");
+    expect(container.textContent).toContain("Choose where to start.");
+    expect(container.textContent).toContain("2 available");
     expect(container.textContent).not.toContain("member@example.test");
     expect(links).toEqual([
       MURPH_EXPERIMENT_TELEGRAM_URL,
@@ -302,7 +307,7 @@ describe("StartExperimentButton", () => {
 
     expect(open).toHaveBeenCalledWith(MURPH_EXPERIMENT_TELEGRAM_URL, "_blank", "noreferrer");
     expect(assign).not.toHaveBeenCalled();
-    expect(container.textContent).not.toContain("Start from your connected channel");
+    expect(container.textContent).not.toContain("Choose where to start.");
   });
 
   it("falls back to Telegram when no connected channel is available", async () => {
