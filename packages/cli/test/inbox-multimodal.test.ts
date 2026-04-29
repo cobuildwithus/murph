@@ -3,12 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import {
-  buildInboxModelAttachmentBundle,
-  inferInboxMultimodalInputMode,
-  isRoutingPdfFallbackCandidate,
-  MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES,
-} from '../src/inbox-multimodal.ts'
+import { buildInboxModelAttachmentBundle } from '../src/inbox-multimodal.ts'
 
 function makeCsv(rowCount: number): string {
   const rows = Array.from({ length: rowCount }, (_, index) => {
@@ -44,56 +39,6 @@ function makeJsonExport(recordCount: number): string {
 }
 
 describe('buildInboxModelAttachmentBundle', () => {
-  const captureEnvelopePath = 'raw/inbox/capture-1/envelope.json'
-
-  it('marks available stored PDFs as local filesystem evidence without making the bundle multimodal', async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-pdf-'))
-    const storedPath = 'raw/inbox/capture-1/attachments/01__scan.pdf'
-    const pdfBytes = Buffer.from('%PDF-1.7\n% fixture\n')
-
-    try {
-      await mkdir(path.join(vaultRoot, path.dirname(storedPath)), {
-        recursive: true,
-      })
-      await writeFile(path.join(vaultRoot, storedPath), pdfBytes)
-
-      const bundle = await buildInboxModelAttachmentBundle({
-        attachment: {
-          attachmentId: 'attachment-pdf',
-          ordinal: 1,
-          kind: 'document',
-          mime: 'application/pdf',
-          fileName: 'scan.pdf',
-          byteSize: pdfBytes.byteLength,
-          storedPath,
-          extractedText: null,
-          transcriptText: null,
-          derivedPath: null,
-          parseState: 'failed',
-        } as never,
-        captureId: 'capture-1',
-        captureEnvelopePath,
-        vaultRoot,
-      })
-
-      expect(isRoutingPdfFallbackCandidate(bundle)).toBe(true)
-      expect(inferInboxMultimodalInputMode([bundle])).toBe('text-only')
-      expect(bundle.routingPdf).toEqual({
-        byteSize: pdfBytes.byteLength,
-        eligible: true,
-        maxBytes: MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES,
-        path: storedPath,
-        reason: 'eligible',
-      })
-      expect(bundle.combinedText).toContain('routingPdfEligible: true')
-      expect(bundle.combinedText).not.toContain('pdfEvidencePath:')
-      expect(bundle.combinedText).not.toContain(storedPath)
-      expect(bundle.combinedText).not.toContain('scan.pdf')
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  })
-
   it('summarizes large CSV-like attachment evidence instead of duplicating raw parser text', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-model-'))
     const csv = makeCsv(125)
@@ -142,7 +87,6 @@ describe('buildInboxModelAttachmentBundle', () => {
           parseState: 'succeeded',
         } as never,
         captureId: 'capture-1',
-        captureEnvelopePath,
         vaultRoot,
       })
 
@@ -208,7 +152,6 @@ describe('buildInboxModelAttachmentBundle', () => {
           parseState: 'succeeded',
         } as never,
         captureId: 'capture-1',
-        captureEnvelopePath,
         vaultRoot,
       })
 

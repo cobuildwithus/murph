@@ -5,7 +5,7 @@ import type {
 
 export const DEFAULT_CODEX_MODEL_CAPABILITIES: AssistantModelCapabilities = {
   images: true,
-  pdf: true,
+  pdf: false,
   reasoning: true,
   streaming: true,
   tools: true,

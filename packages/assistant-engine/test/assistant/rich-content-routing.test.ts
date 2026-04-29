@@ -72,7 +72,7 @@ describe('rich-content-routing', () => {
     expect(prioritizedRoutes).toEqual([codexRoute])
   })
 
-  it('keeps Codex as the only route when file parts are present', () => {
+  it('keeps Codex as the only route even when files must be dropped', () => {
     const codexRoute = createRoute('codex-cli')
 
     const prioritizedRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
@@ -83,7 +83,7 @@ describe('rich-content-routing', () => {
     expect(prioritizedRoutes).toEqual([codexRoute])
   })
 
-  it('keeps image and file evidence for Codex CLI', () => {
+  it('keeps image evidence for Codex CLI but still drops unsupported file parts', () => {
     const codexRoute = createRoute('codex-cli')
 
     expect(assistantRouteSupportsRichUserMessageContent(codexRoute)).toBe(true)
@@ -93,7 +93,7 @@ describe('rich-content-routing', () => {
         route: codexRoute,
         userMessageContent: TEXT_IMAGE_FILE_USER_MESSAGE_CONTENT,
       }),
-    ).toEqual(TEXT_IMAGE_FILE_USER_MESSAGE_CONTENT)
+    ).toEqual(TEXT_AND_IMAGE_USER_MESSAGE_CONTENT)
     expect(
       resolveAssistantRouteUserMessageContent({
         route: codexRoute,
@@ -105,7 +105,7 @@ describe('rich-content-routing', () => {
         route: codexRoute,
         userMessageContent: TEXT_AND_FILE_USER_MESSAGE_CONTENT,
       }),
-    ).toEqual(TEXT_AND_FILE_USER_MESSAGE_CONTENT)
+    ).toBeNull()
     expect(
       resolveAssistantRouteUserMessageContent({
         route: codexRoute,
