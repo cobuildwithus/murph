@@ -8,16 +8,17 @@ Updated: 2026-04-29
 
 - Replace the Results tab's hand-built mock private-run data with a real `ExperimentRunProjection` derived from the current browser-vault replica.
 - Keep the Results UI projection-driven: BrowserVault/query code computes real progress, outcome, schedule, trend, and summary data; `apps/web` maps that data into `ExperimentRunProjection`; React components render that projection without querying BrowserVault directly.
-- Add a source-backed expected range path for trend bands. Expected ranges must come from structured Health Commons/test-plan metadata or be omitted.
-- Add a structured planned schedule source for experiment results. Planned cells should come from a cron-like scheduled-log/run schedule source, plus actual logged `intervention_session` events, not from parsing free-text `runPlan.schedule`.
+- Add a source-backed expected range path for trend bands. The structured field should exist now, but ranges can be empty/null until Health Commons research backs numeric values.
+- Add a structured planned schedule source on the experiment run plan, using a cron-like schedule intent plus actual logged `intervention_session` events. Scheduled-log run linkage remains valuable, but it is a second layer rather than the first blocker for Results.
 
 ## Success criteria
 
 - The production Results tab no longer accepts `?mock=active` or `?mock=finished` as a data source, and `buildMockPrivateRun` / `buildMockSchedule` are deleted or moved behind an explicit non-production demo seam.
 - `resolveBrowserVaultExperimentRun` returns real `signals`, `trends`, `summary`, `summaryDetail`, `conclusions`, and optional `schedule` from current browser-vault replica data for active and finished runs.
-- Trend `expectedRange` is populated only when structured numeric expected-effect metadata is present and revision/source-backed; otherwise the chart renders without an expected band.
-- Planned schedule cells come from structured schedule data using the existing scheduled-log `ScheduleIntent` shape (`at`, `every`, `cron`, `dailyLocal`) or a run-linked equivalent. Free-text `runPlan.schedule` remains display/legacy text only.
+- Trend `expectedRange` is populated only when structured numeric expected-effect metadata is present and revision/source-backed; otherwise the chart renders without an expected band while the expected-effect record remains present.
+- Planned schedule cells can be rendered from a structured `runPlan.scheduleIntent` / structured `runPlan.schedule` union using the existing schedule-intent semantics (`at`, `every`, `cron`, `dailyLocal`) plus actual intervention events. Legacy free-text schedule remains display/compatibility data only.
 - Completed, missed, skipped, and partial session cells are based on run-linked `intervention_session` events from the current replica.
+- Every protocol/test-plan biomarker remains represented in selector output, including unsupported or no-data biomarkers. Unsupported biomarkers do not get fake chart/card values.
 - Browser query selectors are exported through `@murphai/query/browser`; client code does not import server-only query or vault-reader paths.
 - Tests prove active baseline, active intervention, finished with enough data, finished with sparse data, no expected range, no schedule, and structured cron/dailyLocal schedule cases.
 
@@ -25,7 +26,7 @@ Updated: 2026-04-29
 
 - In scope:
   - Browser-vault experiment selectors under `packages/query/src/browser-replica/**`.
-  - Browser replica safe projections needed for experiment metric windows, run-linked events, and planned schedule rows.
+  - Browser replica safe projections needed for experiment metric windows, structured event detail, run-linked events, and planned schedule rows.
   - `apps/web/src/lib/browser-vault/experiment-run.ts` projection shaping.
   - `apps/web/src/types/experiments.ts` type adjustments if real data makes existing fields optional.
   - Results tab mock removal in `apps/web/app/(dashboard)/experiments/[experimentId]/results/results-tab-client.tsx`.
@@ -35,7 +36,7 @@ Updated: 2026-04-29
   - Inventing numeric expected ranges from copy, mock data, or qualitative protocol descriptions.
   - Importing root `@murphai/query` analysis directly into client code when that pulls server-only or privacy-sensitive assumptions.
   - Reworking all scheduled-log execution behavior beyond the run-linking and browser-projection fields needed here.
-  - Blood-pressure result cards until the query metric resolver has a real BP metric source.
+  - Rendering blood-pressure values or trends until the query metric resolver has a real BP metric source. The planned BP biomarker should still stay represented as unavailable/unsupported.
 
 ## Constraints
 
@@ -43,11 +44,12 @@ Updated: 2026-04-29
   - Compute from the current browser-vault replica by default. Use `client.replica.generatedAt` as the default `asOf`, not wall-clock `new Date()`.
   - Do not use `selectBrowserVaultTrackedExperiments` as the detail lookup source; that path is capped for overview. Detail selectors should search replica entities directly by experiment id, slug, protocol ref, commons key, and aliases.
   - Browser-safe selectors should use projected `metricRows` / `metricDayRows` as metric truth. The root experiment helpers rely on raw attributes that the browser replica intentionally strips.
-  - Do not widen browser replica entity attributes wholesale to raw event notes, raw provider provenance, raw external refs, or other private fields just to make analysis easier.
+  - Browser projection may include structured session/context fields that are useful for Results analysis: `sessionStatus`, `durationMinutes`, `timing`, `temperatureC`, `afterExercise`, `symptoms`, `confounders`, `contextType`, and `severity`.
+  - Do not widen browser replica entity attributes wholesale to raw notes, raw provider provenance, raw external refs/ids, or full markdown bodies just to make analysis easier.
   - Keep package dependencies acyclic and one-way. Do not import assistant-engine cron helpers into query/browser code.
 - Product/process constraints:
   - Health Commons owns public reusable protocol/test-plan expectations. BrowserVault owns private user run state and logged outcomes.
-  - Expected ranges need source keys, confidence/caveats, and revision participation. If the source is absent, omit the range rather than showing an approximate band.
+  - Expected-effect records need source keys, confidence/caveats, and revision participation. The field can exist with an empty/null numeric range; if the range source is absent, omit the band rather than showing an approximate band.
   - Schedule precision should be honest. If no structured planned schedule exists, show logged sessions and run windows, not invented weekdays.
   - Preserve private-run freshness: persisted outcome artifacts may be used later when projected and version-matched, but this plan prefers recomputing active and finished result projections from the current replica.
 
@@ -80,6 +82,9 @@ Updated: 2026-04-29
 9. Persisted outcome artifacts exist, but are not enough for this plan's first source of truth.
    Experiment frontmatter can carry `outcome` / `outcomeRef`, and usecases can write outcome artifacts, but the browser replica does not project outcome artifact contents. Use persisted artifacts later as a cache or provenance layer after they are safely projected and version-matched.
 
+10. Unsupported biomarkers need a first-class state.
+    The sauna test plan includes morning blood pressure, while the current query metric resolver does not support BP. That should produce an unavailable/unsupported biomarker result, not disappearance from the result model.
+
 ## Target Architecture
 
 ```text
@@ -108,13 +113,13 @@ The Results tab remains a rendering surface. The projection mapper is the only a
    Expected ranges should live in Health Commons test-plan or analysis-model metadata, not in BrowserVault or app UI. The metadata should include biomarker key, unit, value scale, low/high range, day/window, direction, confidence, source keys, and caveats.
 
 3. Use structured schedules, not free text.
-   Prefer the existing scheduled-log `ScheduleIntent` model for planned occurrences. Add exact run linkage so planned rows and executed sessions can be tied to one experiment run.
+   Store intended cadence on the experiment run in a structured schedule-intent shape, such as cron plus timezone. Use scheduled logs as an execution/reminder layer with exact run linkage, not as the only way Results can know the intended schedule.
 
 4. Omit unknowns.
-   If a run has no structured schedule, omit `schedule`. If a trend has no numeric expected range, omit `expectedRange`. If a biomarker lacks resolver support, omit that card and record the limitation in summary/conclusion copy where useful.
+   If a run has no structured schedule, omit `schedule`. If a trend has no numeric expected range, omit `expectedRange`. If a biomarker lacks resolver support, keep it in selector output as `unsupported_source`, `unavailable`, or `no_data`, do not render fake values, and mention limitations in summary/conclusion copy where useful.
 
 5. Keep browser privacy boundaries.
-   Add minimal safe replica fields/selectors rather than projecting raw notes, raw provider refs, raw external refs, or full scheduled-log bodies.
+   Add minimal safe replica fields/selectors plus structured session/context fields where useful. Continue excluding raw notes, raw provider refs, external ids, and full scheduled-log bodies unless a specific feature needs them and a privacy review approves it.
 
 ## Implementation Plan
 
@@ -129,28 +134,48 @@ Selectors to add:
 - `selectBrowserVaultExperimentMetricWindows(client, input)`
 - `selectBrowserVaultExperimentProgress(client, input)`
 - `selectBrowserVaultExperimentOutcome(client, input)`
+- `selectBrowserVaultExperimentBiomarkers(client, input)`
 
 Implementation notes:
 
 - Search `client.replica.entities` directly for the matching experiment. Do not depend on the capped overview list.
 - Use `metricRows` / `metricDayRows` for baseline and intervention windows.
+- Preserve every protocol/test-plan biomarker in selector output. Use explicit states like `available`, `no_data`, `unsupported_source`, and `unavailable` rather than dropping unresolved biomarkers.
 - Return per-day points for trends as well as means/deltas, since `ExperimentMetricResult` currently summarizes windows without chart-ready points.
 - Keep browser result types narrow and app-agnostic. `apps/web` should still own formatting labels and card copy.
 - Add parity tests against root query analysis only for fields supported by safe browser rows.
 
-### Phase 2: Structured schedule source
+### Phase 2A: Run-plan structured schedule source
 
-Use the existing scheduled-log model as the planned occurrence source, with run linkage added before Results depends on it.
+Add structured intended cadence to the experiment run itself so Results can render honest planned cells without depending on scheduled-log execution being configured.
 
 Required changes:
 
-- Extend `intervention_session.add` scheduled-log action or scheduled-log metadata with optional `experimentId` and `experimentSlug` while preserving `protocolId`.
-- Update scheduled-log execution so generated `intervention_session` events include `experimentId`, `experimentSlug`, a related experiment link, and `sessionStatus` where appropriate.
-- Add a minimal browser-replica projection for scheduled logs or planned session rows. Include only safe fields: id/slug/title/status, schedule intent, action kind, intervention type, duration, protocol id, experiment id/slug, tags, and updated timestamp. Do not include bodies.
+- Add a structured run-plan schedule field, either as `runPlan.scheduleIntent` or by migrating `runPlan.schedule` from string to a structured union while preserving a legacy/display string path.
+- Reuse the existing schedule intent semantics where possible:
+
+```ts
+type ExperimentRunScheduleIntent =
+  | { kind: "at"; at: string; timeZone?: string }
+  | { kind: "every"; everyMs: number; timeZone?: string }
+  | { kind: "dailyLocal"; localTime: string; timeZone?: string }
+  | { kind: "cron"; expression: string; timeZone?: string };
+```
+
+Example:
+
+```ts
+runPlan.schedule = {
+  kind: "cron",
+  expression: "0 8 * * 2,4,6",
+  timeZone: "America/New_York",
+};
+```
+
 - Add a pure schedule expansion helper for `ScheduleIntent` occurrences over a bounded date window. Keep it in a low-level query/contracts-safe place, not in assistant-engine. Support the cron subset the product writes first, such as five-field cron expressions with lists/ranges/steps, plus `dailyLocal`, `at`, and bounded `every`.
 - Build schedule cells from:
   - baseline/intervention dates in `runPlan`
-  - planned occurrences from structured schedule rows
+  - planned occurrences from structured run-plan schedule intent
   - actual run-linked `intervention_session` events
   - current replica `generatedAt` for today/current-state decisions
 
@@ -162,6 +187,17 @@ Cell rules:
 - past planned occurrences with no event can become `missed` only if product semantics say the schedule is authoritative
 - future planned occurrences become `scheduled`
 - days outside planned/actual/baseline become `rest` or are omitted according to the current schedule component shape
+
+### Phase 2B: Scheduled-log run linkage and browser projection
+
+Scheduled logs should become the reminder/execution layer for the same run schedule, but Results should not need to wait on this layer if the run plan already carries schedule intent.
+
+Required changes:
+
+- Extend `intervention_session.add` scheduled-log action or scheduled-log metadata with optional `experimentId` and `experimentSlug` while preserving `protocolId`.
+- Update scheduled-log execution so generated `intervention_session` events include `experimentId`, `experimentSlug`, a related experiment link, and `sessionStatus` where appropriate.
+- Add a minimal browser-replica projection for scheduled logs or planned session rows. Include only safe fields: id/slug/title/status, schedule intent, action kind, intervention type, duration, protocol id, experiment id/slug, tags, and updated timestamp. Do not include bodies.
+- Keep scheduled-log rows consistent with run-plan schedule intent where both exist, and fail closed or surface an inconsistency rather than silently choosing mismatched planned weekdays.
 
 ### Phase 3: Expected range source
 
@@ -191,10 +227,11 @@ interface ExpectedExperimentEffect {
 Rules:
 
 - `range` is optional. Qualitative protocols can provide direction/caveats without a chart band.
+- Add the structured expected-effect field as part of the migration even when all ranges are null/empty.
 - Per-biomarker direction replaces the current global `analysisPlan.desiredDirection` for expected-effect rendering.
 - `mixed` / `watch` means do not label movement as expected improvement.
 - Finnish sauna should initially render without numeric expected bands unless research/content adds source-backed values.
-- Morning blood pressure stays out of Results until a real browser metric source and resolver exist.
+- Morning blood pressure stays represented as a planned/expected biomarker, but with `unsupported_source`, `unavailable`, or `no_data` until a real browser metric source and resolver exist.
 
 ### Phase 4: App projection mapper
 
@@ -204,6 +241,7 @@ Projection outputs:
 
 - `signals`: active runs use progress signals; finished runs use outcome metric results. Populate `expected` only from structured qualitative/expected-effect metadata. Consider making `ExperimentSignal.expected` optional if that matches the real data model.
 - `trends`: map per-day baseline/intervention points, baseline average, current value, formatted delta, and optional source-backed `expectedRange`.
+- `biomarkers`: preserve test-plan biomarkers even when no card/chart can be rendered. Use explicit availability/status fields so the UI can explain unsupported or missing data without pretending a value exists.
 - `schedule`: build `ExperimentSchedule` only when structured planned schedule rows or honest logged-session/window data are available.
 - `summary` / `summaryDetail`: active runs describe phase, coverage, and partiality; finished runs summarize outcome/confidence or sparse-data limitations.
 - `conclusions`: finished runs map outcome conclusion, confidence reasons, caveats, and metric results. Active runs keep conclusions gated until analysis is available.
@@ -224,7 +262,7 @@ After real projection tests pass:
    Mitigation: omit `expectedRange` unless numeric values are source-backed and revisioned.
 
 2. Risk: Free-text schedule parsing invents planned weekdays.
-   Mitigation: use structured `ScheduleIntent` / planned rows only; treat `runPlan.schedule` as display text.
+   Mitigation: use structured run-plan schedule intent / planned rows only; keep any legacy schedule string as display text and never parse it into planned cells.
 
 3. Risk: Browser selectors import server-only query paths.
    Mitigation: keep new selectors under `@murphai/query/browser`, update browser boundary tests, and add a client-bundle or import-graph check.
@@ -241,11 +279,12 @@ After real projection tests pass:
 ## Tasks
 
 1. Add browser-native experiment selectors and tests in `packages/query`.
-2. Add run-linked structured schedule support and safe browser-replica schedule projection.
-3. Add source-backed expected-effect/range metadata to Health Commons contracts/content flow, with no sauna numeric bands until the source exists.
-4. Populate `ExperimentRunProjection` from the new query selectors in `apps/web`.
-5. Remove the Results tab mock branch and mock builders.
-6. Run focused verification and required completion-workflow audits before implementation handoff.
+2. Add run-plan structured schedule support and a schedule expansion helper.
+3. Add scheduled-log run linkage and safe browser-replica schedule projection.
+4. Add source-backed expected-effect/range metadata to Health Commons contracts/content flow, with nullable/empty ranges and no sauna numeric bands until the source exists.
+5. Populate `ExperimentRunProjection` from the new query selectors in `apps/web`.
+6. Remove the Results tab mock branch and mock builders.
+7. Run focused verification and required completion-workflow audits before implementation handoff.
 
 ## Verification
 
