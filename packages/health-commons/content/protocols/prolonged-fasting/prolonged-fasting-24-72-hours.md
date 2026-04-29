@@ -48,6 +48,10 @@ lineage:
 attribution:
   ownerType: murph
   note: Synthesized from the prolonged-fasting research run dated 2026-04-27/28 using canonical ledger, extracted source pages, SOURCE_FINDINGS_V1, and standalone EVIDENCE_APPRAISALS_V1 records.
+media:
+- kind: image
+  relativePath: design-assets/hero-prolonged-fasting.jpeg
+  mediaType: image/jpeg
 protocol:
   doseSignature: One continuous 24–72 h hydrated water-only fast by default · zero-calorie variants require explicit exposure logging and separate interpretation · exact duration selected before start · planned refeed · safety screen required
   target: one hydrated water-only fast lasting 24, 36, 48, 60, or 72 hours; any zero-calorie beverage or electrolyte variant must be logged and interpreted separately from water-only evidence

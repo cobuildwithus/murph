@@ -227,6 +227,10 @@ lineage:
   rationale: Murph canonical starter for adult facial/periocular red+NIR LED/IRED mask self-experiments; adjacent wavelengths, body areas, and medical light protocols remain sibling or excluded variants.
 attribution:
   ownerType: murph
+media:
+- kind: image
+  relativePath: design-assets/hero-red-light-for-skin.jpeg
+  mediaType: image/jpeg
 protocol:
   doseSignature: 6 weeks · 5 sessions/week · 10 min/session · red 630-660 nm + NIR 830-855 nm facial/periocular LED/IRED wrinkle or texture mode · eye protection required
   target: specified adult facial or periocular red+NIR LED/IRED mask, wrinkle or texture mode only
