@@ -56,6 +56,8 @@ test("hosted Codex runtime config writes Vercel AI Gateway Responses config with
   assert.match(config, /model = "gpt-5\.5"/u);
   assert.match(config, /model_provider = "vercel-ai-gateway"/u);
   assert.match(config, /model_reasoning_effort = "medium"/u);
+  assert.match(config, /approval_policy = "never"/u);
+  assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.match(config, /\[model_providers\."vercel-ai-gateway"\]/u);
   assert.match(config, /base_url = "https:\/\/ai-gateway\.vercel\.sh\/v1"/u);
   assert.match(config, /env_key = "VERCEL_AI_API_KEY"/u);
@@ -294,6 +296,8 @@ test("hosted Codex config TOML uses env var names rather than credential values"
       'model = "gpt-5.5"',
       'model_provider = "vercel-ai-gateway"',
       'model_reasoning_effort = "medium"',
+      'approval_policy = "never"',
+      'sandbox_mode = "danger-full-access"',
       "",
       '[model_providers."vercel-ai-gateway"]',
       'name = "Vercel AI Gateway"',
