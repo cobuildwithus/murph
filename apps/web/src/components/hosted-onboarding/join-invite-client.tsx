@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
@@ -62,15 +62,18 @@ export function JoinInviteClient({
   const [billingPlanCode, setBillingPlanCode] = useState<HostedBillingPlanCode | null>(
     initialStatus.billing.defaultPlanCode,
   );
-  const [pendingAction, setPendingAction] = useState<"checkout" | null>(null);
   const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
   const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
+  const checkoutOutcomeRef = useRef<
+    | { kind: "redirect"; url: string }
+    | { kind: "alreadyActive" }
+    | null
+  >(null);
 
   const awaitingInviteSessionResolution = shouldAwaitHostedInviteSessionResolution({
     hasCompletedInitialRefresh,
     status,
   });
-  const checkoutPending = pendingAction === "checkout";
 
   function applyRefreshedStatus(payload: HostedInviteStatusPayload) {
     setStatus((currentStatus) => resolveJoinInviteStatusFromRefresh({
@@ -137,29 +140,38 @@ export function JoinInviteClient({
 
   async function startCheckout() {
     setErrorMessage(null);
-    setPendingAction("checkout");
+    checkoutOutcomeRef.current = null;
+    const payload = await requestHostedBillingCheckout({
+      billingPlanCode,
+      inviteCode,
+    });
 
-    try {
-      const payload = await requestHostedBillingCheckout({
-        billingPlanCode,
-        inviteCode,
-      });
-
-      if (payload.alreadyActive) {
-        await refreshStatus();
-        return;
-      }
-
-      if (!payload.url) {
-        throw new Error("Checkout did not return a redirect URL.");
-      }
-
-      window.location.assign(payload.url);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPendingAction(null);
+    if (payload.alreadyActive) {
+      checkoutOutcomeRef.current = { kind: "alreadyActive" };
+      return;
     }
+
+    if (!payload.url) {
+      throw new Error("Checkout did not return a redirect URL.");
+    }
+
+    checkoutOutcomeRef.current = { kind: "redirect", url: payload.url };
+  }
+
+  function handleCheckoutSuccess() {
+    const outcome = checkoutOutcomeRef.current;
+    checkoutOutcomeRef.current = null;
+    if (!outcome) return;
+    if (outcome.kind === "alreadyActive") {
+      void refreshStatus();
+      return;
+    }
+    window.location.assign(outcome.url);
+  }
+
+  function handleCheckoutError(error: unknown) {
+    checkoutOutcomeRef.current = null;
+    setErrorMessage(error instanceof Error ? error.message : String(error));
   }
 
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
@@ -172,13 +184,13 @@ export function JoinInviteClient({
   const eyebrow = resolveJoinInviteEyebrow(status.stage);
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <JoinInviteEyebrow label={eyebrow.label} tone={eyebrow.tone} />
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
+        <h1 className="font-serif text-5xl font-normal leading-[1.04] tracking-[-0.03em] text-foreground sm:text-6xl">
           {resolveJoinInviteTitle(status)}
         </h1>
-        <p className="text-base leading-relaxed text-muted-foreground">
+        <p className="max-w-md text-base leading-relaxed text-muted-foreground">
           {resolveJoinInviteSubtitle(status)}
         </p>
       </div>
@@ -194,13 +206,14 @@ export function JoinInviteClient({
         <JoinInviteStageContent
           awaitingInviteSessionResolution={awaitingInviteSessionResolution}
           billingPlanCode={billingPlanCode}
-          checkoutPending={checkoutPending}
           initialLinkedAccounts={initialLinkedAccounts}
           inviteCode={inviteCode}
           status={status}
           statusRefreshErrorMessage={statusRefreshErrorMessage}
           statusRefreshRetryPending={statusRefreshRetryPending}
           onCheckout={startCheckout}
+          onCheckoutSuccess={handleCheckoutSuccess}
+          onCheckoutError={handleCheckoutError}
           onSelectBillingPlan={setBillingPlanCode}
           onPhoneVerified={handlePhoneVerified}
           onRefreshStatus={refreshStatus}

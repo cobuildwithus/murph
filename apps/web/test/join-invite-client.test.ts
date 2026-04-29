@@ -58,7 +58,9 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   mocks.hostedInvitePhoneAuthProps = null;
   mocks.usePrivy.mockReturnValue({
+    authenticated: true,
     logout: mocks.logout,
+    ready: true,
   });
   mocks.useHostedInviteStatusRefresh.mockImplementation(() => {});
 });
@@ -340,6 +342,7 @@ test("manual checkout surfaces API errors and can retry", async () => {
   await act(async () => {
     checkoutButton.click();
   });
+  await waitForCheckoutSuccessHold();
 
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/retry");
@@ -399,6 +402,7 @@ test("stale verify refreshes still leave the manual checkout fallback available 
   await act(async () => {
     checkoutButton.click();
   });
+  await waitForCheckoutSuccessHold();
 
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/recovered");
@@ -447,6 +451,7 @@ test("already-active checkout refreshes preserve the current stage when the retu
   await act(async () => {
     checkoutButton.click();
   });
+  await waitForCheckoutSuccessHold();
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
@@ -497,6 +502,7 @@ test("already-active checkout refreshes return to verify when the invite session
   await act(async () => {
     checkoutButton.click();
   });
+  await waitForCheckoutSuccessHold();
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
@@ -836,6 +842,12 @@ function installJoinInviteClientGlobals(
       restore();
     }
   };
+}
+
+async function waitForCheckoutSuccessHold() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  });
 }
 
 function setJoinInviteClientGlobal(key: string, value: unknown) {
