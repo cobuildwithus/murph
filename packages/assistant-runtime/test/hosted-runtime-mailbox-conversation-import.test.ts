@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import type {
   HostedExecutionConversationMessageWake,
@@ -11,14 +11,6 @@ import type {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
-
-const mocks = vi.hoisted(() => ({
-  recordHostedProviderCleanupBeforeCommit: vi.fn(),
-}));
-
-vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
-  recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
-}));
 
 import {
   createHostedConversationMailboxImportItem,
@@ -41,11 +33,6 @@ import type {
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_conversation_import";
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
-});
-
 describe("hosted mailbox conversation import adapter", () => {
   test("decodes conversation.message through the injected seam and imports it through the local inbox path", async () => {
     const item = createResolvedConversationMailboxItem();
@@ -53,7 +40,6 @@ describe("hosted mailbox conversation import adapter", () => {
     const decodeCalls: unknown[] = [];
     const importedWakeIds: string[] = [];
     const preparedWakeIds: string[] = [];
-    const afterCheckpoint = vi.fn(async () => undefined);
 
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: {
@@ -68,7 +54,6 @@ describe("hosted mailbox conversation import adapter", () => {
       async importConversationWake(input) {
         importedWakeIds.push(input.wake.eventId);
         return {
-          afterCheckpoint,
           captureId: "cap_synthetic_conversation_001",
           deduped: false,
           metrics: {
@@ -107,13 +92,9 @@ describe("hosted mailbox conversation import adapter", () => {
       parserProcessed: 0,
     });
     assert.equal(outcome.afterCheckpoint, undefined);
-    assert.equal(typeof outcome.afterCheckpointBeforeAssistant, "function");
-    await outcome.afterCheckpointBeforeAssistant?.();
-    expect(afterCheckpoint).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
   });
 
-  test("records Linq provider message ids after the accepted capture checkpoint", async () => {
+  test("does not record Linq provider cleanup during mailbox import", async () => {
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake({
       message: {
@@ -137,7 +118,6 @@ describe("hosted mailbox conversation import adapter", () => {
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
       async importConversationWake() {
-        expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
         return {
           captureId: "cap_synthetic_linq_conversation_001",
           deduped: false,
@@ -154,20 +134,10 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     assert.equal(outcome.afterCheckpoint, undefined);
-    assert.equal(typeof outcome.afterCheckpointBeforeAssistant, "function");
-    await outcome.afterCheckpointBeforeAssistant?.();
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
-      checkpoint: {
-        nextWakeAt: null,
-      },
-      linqMessageIds: ["msg_linq_cleanup_123"],
-      vaultRoot: "synthetic-vault-root",
-    });
   });
 
-  test("does not fail accepted imports when Linq provider cleanup recording fails", async () => {
+  test("keeps accepted Linq imports independent from provider cleanup", async () => {
     const item = createResolvedConversationMailboxItem();
     const decodedWake = createConversationWake({
       message: {
@@ -182,10 +152,6 @@ describe("hosted mailbox conversation import adapter", () => {
         phoneLookupKey: "+15550100000",
       },
     });
-    mocks.recordHostedProviderCleanupBeforeCommit.mockRejectedValueOnce(
-      new Error("cleanup state unavailable"),
-    );
-
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
       async importConversationWake() {
@@ -205,7 +171,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
-    await assert.doesNotReject(async () => outcome.afterCheckpointBeforeAssistant?.());
+    assert.equal(outcome.afterCheckpoint, undefined);
   });
 
   test("reports deterministic local-capture dedupe as a skipped import without hosted cursor terms", async () => {

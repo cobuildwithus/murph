@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -9,8 +9,8 @@ import {
 } from "@murphai/hosted-execution";
 import {
   resolveAssistantStatePaths,
-  writeJsonFileAtomic,
-} from "@murphai/runtime-state/node";
+  writeAssistantStateJson,
+} from "@murphai/runtime-state/node/assistant-state-fs";
 
 import type {
   HostedAssistantDeliveryOutcome,
@@ -169,7 +169,14 @@ async function readHostedProviderCleanupState(
     throw error;
   }
 
-  return parseHostedProviderCleanupState(JSON.parse(raw));
+  try {
+    return parseHostedProviderCleanupState(JSON.parse(raw));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function writeHostedProviderCleanupState(
@@ -177,8 +184,7 @@ async function writeHostedProviderCleanupState(
   state: HostedProviderCleanupState,
 ): Promise<void> {
   const filePath = resolveHostedProviderCleanupStatePath(vaultRoot);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeJsonFileAtomic(filePath, {
+  await writeAssistantStateJson(filePath, {
     schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
     checkpoint: state.checkpoint,
     linqMessageIds: normalizeHostedProviderMessageIds(state.linqMessageIds),

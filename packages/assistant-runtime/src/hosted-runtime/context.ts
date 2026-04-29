@@ -265,8 +265,8 @@ async function ensureHostedAssistantAutoReplyChannelForWake(
       assistantConfigured,
       autoReplyChanged: beforeEnabled !== afterEnabled,
       autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
-      autoReplyCursorSummary: afterState.autoReply.map((entry) =>
-        `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+      autoReplyEligibleAfterSummary: afterState.autoReply.map((entry) =>
+        `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
       ).join(","),
       capabilityReady: target.capabilityReady,
       channel: target.channel,
@@ -384,8 +384,8 @@ export async function reconcileHostedAssistantChannelState(
         assistantConfigured,
         autoReplyChanged: reconciliation.changed,
         autoReplyChannels: reconciliation.state.autoReply.map((entry) => entry.channel).join(","),
-        autoReplyCursorSummary: reconciliation.state.autoReply.map((entry) =>
-          `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+        autoReplyEligibleAfterSummary: reconciliation.state.autoReply.map((entry) =>
+          `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
         ).join(","),
         desiredAutoReplyChannels: desiredChannels.join(","),
       },

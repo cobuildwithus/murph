@@ -658,7 +658,8 @@ export const assistantStatusAutomationSchema = z
       z
         .object({
           channel: z.string().min(1),
-          cursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
+          enabledAt: isoTimestampSchema,
+          eligibleAfter: z.lazy(() => assistantAutomationCursorSchema).nullable(),
         })
         .strict(),
     ),
@@ -1061,7 +1062,8 @@ export const assistantAutomationCursorSchema = z.object({
 export const assistantAutoReplyChannelStateSchema = z
   .object({
     channel: z.string().min(1),
-    cursor: assistantAutomationCursorSchema.nullable(),
+    enabledAt: isoTimestampSchema,
+    eligibleAfter: assistantAutomationCursorSchema.nullable(),
   })
   .strict()
 

@@ -112,11 +112,13 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     autoReply: [
       {
         channel: 'telegram',
-        cursor: null,
+        enabledAt: '2026-04-08T12:00:00.000Z',
+        eligibleAfter: null,
       },
       {
         channel: 'email',
-        cursor: {
+        enabledAt: '2026-04-08T12:01:00.000Z',
+        eligibleAfter: {
           captureId: 'capture-2',
           occurredAt: '2026-04-08T12:06:00.000Z',
         },
@@ -126,8 +128,24 @@ test('assistant session parsing resolves Codex modelProvider and status automati
   })
 
   assert.equal(statusAutomation.inboxScanCursor?.captureId, 'capture-1')
-  assert.equal(statusAutomation.autoReply[0]?.cursor, null)
-  assert.equal(statusAutomation.autoReply[1]?.cursor?.captureId, 'capture-2')
+  assert.equal(statusAutomation.autoReply[0]?.eligibleAfter, null)
+  assert.equal(statusAutomation.autoReply[1]?.eligibleAfter?.captureId, 'capture-2')
+
+  assert.throws(() =>
+    assistantStatusAutomationSchema.parse({
+      inboxScanCursor: null,
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: {
+            captureId: 'capture-legacy',
+            occurredAt: '2026-04-08T12:05:00.000Z',
+          },
+        },
+      ],
+      updatedAt: '2026-04-08T12:10:00.000Z',
+    }),
+  )
 })
 
 test('assistant session parsing fails closed for unsupported persisted sessions', () => {

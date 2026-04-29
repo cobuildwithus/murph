@@ -332,7 +332,7 @@ describe("runHostedAssistantAutomation", () => {
       expect.objectContaining({
         details: expect.objectContaining({
           autoReplyChannels: "telegram",
-          autoReplyCursorSummary: "telegram:capture_122",
+          autoReplyEligibleAfterSummary: "telegram:null",
           inboxScanCursor: "capture_122",
         }),
         message: "Hosted assistant automation pass starting.",
@@ -375,14 +375,14 @@ describe("runHostedAssistantAutomation", () => {
         },
       ),
     ).resolves.toEqual({
-      nextWakeAt: null,
-      progressed: false,
+      nextWakeAt: expect.any(String),
+      progressed: true,
       redactedLogEntries: [
         expect.objectContaining({
           message: "Hosted assistant automation pass starting.",
         }),
         expect.objectContaining({
-          message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
+          message: "Hosted assistant automation could not run because the inbox runtime is not initialized yet; scheduling a retry.",
         }),
       ],
     });

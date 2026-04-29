@@ -76,7 +76,6 @@ interface HostedWorkspaceCheckpointRequestSession
   latestWorkspace(): HostedWorkspaceState | null;
   recordCheckpointResult(result: HostedMailboxImportCheckpointResult): void;
   recordWorkspaceCheckpoint(response: HostedWorkspaceCheckpointResponse): void;
-  takeMailboxPostCheckpointBeforeAssistantEffects(): readonly (() => Promise<void>)[];
   takeMailboxPostCheckpointEffects(): readonly (() => Promise<void>)[];
 }
 
@@ -220,9 +219,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     requestId: input.requestId,
   });
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
-  await runHostedMailboxPostCheckpointEffectsBestEffort(
-    checkpointRequestSession.takeMailboxPostCheckpointBeforeAssistantEffects(),
-  );
 
   if (!input.runAssistantPhase) {
     await runHostedMailboxPostCheckpointEffectsBestEffort(
@@ -324,9 +320,6 @@ function withActiveTurnInputWorkspacePorts(input: {
       });
       if (shouldRecordHostedActiveTurnMailboxRefreshResult(result)) {
         input.checkpointRequestBuilder.recordCheckpointResult(result);
-        await runHostedMailboxPostCheckpointEffectsBestEffort(
-          input.checkpointRequestBuilder.takeMailboxPostCheckpointBeforeAssistantEffects(),
-        );
       }
 
       return summarizeMailboxRefreshResult(result);
@@ -476,7 +469,6 @@ function createHostedWorkspaceCheckpointRequestSession(
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder,
 ): HostedWorkspaceCheckpointRequestSession {
   let expectedWorkspaceVersion: string | null = null;
-  const mailboxPostCheckpointBeforeAssistantEffects: Array<() => Promise<void>> = [];
   const mailboxPostCheckpointEffects: Array<() => Promise<void>> = [];
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
@@ -506,9 +498,6 @@ function createHostedWorkspaceCheckpointRequestSession(
     },
     recordCheckpointResult(result) {
       latestMailboxImport = result;
-      mailboxPostCheckpointBeforeAssistantEffects.push(
-        ...result.afterCheckpointBeforeAssistantEffects,
-      );
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
         expectedWorkspaceVersion = result.checkpoint.workspace.version;
@@ -520,9 +509,6 @@ function createHostedWorkspaceCheckpointRequestSession(
         expectedWorkspaceVersion = response.workspace.version;
         latestWorkspace = response.workspace;
       }
-    },
-    takeMailboxPostCheckpointBeforeAssistantEffects() {
-      return mailboxPostCheckpointBeforeAssistantEffects.splice(0);
     },
     takeMailboxPostCheckpointEffects() {
       return mailboxPostCheckpointEffects.splice(0);

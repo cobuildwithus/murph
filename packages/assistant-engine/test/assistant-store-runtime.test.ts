@@ -493,7 +493,8 @@ describe('assistant store seam', () => {
       autoReply: [
         {
           channel: 'telegram',
-          cursor: {
+          enabledAt: '2026-04-08T00:11:00.000Z',
+          eligibleAfter: {
             captureId: 'capture-auto-reply',
             occurredAt: '2026-04-08T00:11:00.000Z',
           },

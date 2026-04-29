@@ -432,7 +432,8 @@ function snapshotAssistantAutomationLoopState(
   return {
     autoReply: state.autoReply.map((entry) => ({
       channel: entry.channel,
-      cursor: entry.cursor,
+      eligibleAfter: entry.eligibleAfter,
+      enabledAt: entry.enabledAt,
     })),
     inboxScanCursor: state.inboxScanCursor,
   }

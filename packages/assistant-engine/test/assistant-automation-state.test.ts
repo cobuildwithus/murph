@@ -78,6 +78,18 @@ function createListCapture(
     ],
   }).items[0]
 }
+
+function autoReplyState(
+  channel: string,
+  eligibleAfter: { captureId: string; createdAt?: string | null; occurredAt: string } | null,
+  enabledAt = '2026-04-10T00:00:00.000Z',
+) {
+  return {
+    channel,
+    enabledAt,
+    eligibleAfter,
+  }
+}
 test('normalizeAssistantAutoReplyChannels trims, dedupes, and sorts channels', () => {
   assert.deepEqual(
     normalizeAssistantAutoReplyChannels([
@@ -93,20 +105,14 @@ test('normalizeAssistantAutoReplyChannels trims, dedupes, and sorts channels', (
 
 test('managed helper seeds only when a new managed channel is added', () => {
   const current = [
-    {
-      channel: 'custom',
-      cursor: {
+    autoReplyState('custom', {
         captureId: 'cap-custom',
         occurredAt: '2026-04-09T00:00:00.000Z',
-      },
-    },
-    {
-      channel: 'telegram',
-      cursor: {
+      }),
+    autoReplyState('telegram', {
         captureId: 'cap-telegram',
         occurredAt: '2026-04-10T00:00:00.000Z',
-      },
-    },
+      }),
   ]
 
   assert.equal(
@@ -133,55 +139,38 @@ test('managed helper preserves unmanaged entries and prunes disabled managed one
     occurredAt: '2026-04-10T01:00:00.000Z',
   }
   const current = [
-    {
-      channel: 'custom',
-      cursor: {
+    autoReplyState('custom', {
         captureId: 'cap-custom',
         occurredAt: '2026-04-08T00:00:00.000Z',
-      },
-    },
-    {
-      channel: 'email',
-      cursor: {
+      }),
+    autoReplyState('email', {
         captureId: 'cap-email',
         occurredAt: '2026-04-09T00:00:00.000Z',
-      },
-    },
-    {
-      channel: 'telegram',
-      cursor: {
+      }),
+    autoReplyState('telegram', {
         captureId: 'cap-telegram',
         occurredAt: '2026-04-09T01:00:00.000Z',
-      },
-    },
+      }),
   ]
 
   assert.deepEqual(
     reconcileManagedChannels({
       current,
       desiredChannels: ['email', 'linq'],
-      latestCaptureCursor: latestCursor,
+      eligibleAfter: latestCursor,
+      enabledAt: '2026-04-10T01:00:00.000Z',
       isManagedChannel: (channel) => channel !== 'custom',
     }),
     [
-      {
-        channel: 'custom',
-        cursor: {
+      autoReplyState('custom', {
           captureId: 'cap-custom',
           occurredAt: '2026-04-08T00:00:00.000Z',
-        },
-      },
-      {
-        channel: 'email',
-        cursor: {
+        }),
+      autoReplyState('email', {
           captureId: 'cap-email',
           occurredAt: '2026-04-09T00:00:00.000Z',
-        },
-      },
-      {
-        channel: 'linq',
-        cursor: latestCursor,
-      },
+        }),
+      autoReplyState('linq', latestCursor, '2026-04-10T01:00:00.000Z'),
     ],
   )
 })
@@ -196,13 +185,10 @@ test('enableAssistantAutoReplyChannelLocal returns true when the channel is alre
       version: 1,
       inboxScanCursor: null,
       autoReply: [
-        {
-          channel: 'telegram',
-          cursor: {
+        autoReplyState('telegram', {
             captureId: 'cap-telegram',
             occurredAt: '2026-04-10T00:00:00.000Z',
-          },
-        },
+          }),
       ],
       updatedAt: '2026-04-10T00:00:00.000Z',
     })
@@ -286,13 +272,10 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
       version: 1,
       inboxScanCursor: null,
       autoReply: [
-        {
-          channel: 'custom',
-          cursor: {
+        autoReplyState('custom', {
             captureId: 'cap-custom',
             occurredAt: '2026-04-09T00:00:00.000Z',
-          },
-        },
+          }),
       ],
       updatedAt: '2026-04-10T00:00:00.000Z',
     })
@@ -328,14 +311,16 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when e
     assert.deepEqual(result.state.autoReply, [
       {
         channel: 'custom',
-        cursor: {
+        enabledAt: '2026-04-10T00:00:00.000Z',
+        eligibleAfter: {
           captureId: 'cap-custom',
           occurredAt: '2026-04-09T00:00:00.000Z',
         },
       },
       {
         channel: 'telegram',
-        cursor: {
+        enabledAt: '2026-04-10T03:00:01.000Z',
+        eligibleAfter: {
           captureId: 'cap-latest',
           createdAt: '2026-04-10T03:00:01.000Z',
           occurredAt: '2026-04-10T03:00:00.000Z',
@@ -380,7 +365,8 @@ test('reconcileManagedAssistantAutoReplyChannelsLocal uses an explicit latest cu
     assert.deepEqual(result.state.autoReply, [
       {
         channel: 'linq',
-        cursor: explicitCursor,
+        enabledAt: '2026-04-10T04:00:01.000Z',
+        eligibleAfter: explicitCursor,
       },
     ])
   } finally {
@@ -422,43 +408,36 @@ test('reconcileAssistantAutoReplyState preserves existing cursors and seeds new 
     occurredAt: '2026-04-10T00:00:00.000Z',
   }
   const current = [
-    {
-      channel: 'telegram',
-      cursor: {
+    autoReplyState('telegram', {
         captureId: 'cap-telegram',
         occurredAt: '2026-04-09T00:00:00.000Z',
-      },
-    },
+      }),
   ]
 
   assert.deepEqual(
     reconcileAssistantAutoReplyState({
       current,
       enabledChannels: ['email', 'telegram'],
-      latestCursor,
+      eligibleAfter: latestCursor,
+      enabledAt: '2026-04-10T00:00:00.000Z',
     }),
     [
       {
         channel: 'email',
-        cursor: latestCursor,
+        enabledAt: '2026-04-10T00:00:00.000Z',
+        eligibleAfter: latestCursor,
       },
-      {
-        channel: 'telegram',
-        cursor: {
+      autoReplyState('telegram', {
           captureId: 'cap-telegram',
           occurredAt: '2026-04-09T00:00:00.000Z',
-        },
-      },
+        }),
     ],
   )
 })
 
 test('hasAssistantAutoReplyChannel reports channel membership', () => {
   const autoReply = [
-    {
-      channel: 'email',
-      cursor: null,
-    },
+    autoReplyState('email', null),
   ]
 
   assert.equal(hasAssistantAutoReplyChannel(autoReply, 'email'), true)
@@ -467,64 +446,40 @@ test('hasAssistantAutoReplyChannel reports channel membership', () => {
 
 test('sameAssistantAutoReplyState compares channel and cursor identity', () => {
   const baseline = [
-    {
-      channel: 'email',
-      cursor: {
+    autoReplyState('email', {
         captureId: 'cap-email',
         occurredAt: '2026-04-10T00:00:00.000Z',
-      },
-    },
-    {
-      channel: 'telegram',
-      cursor: null,
-    },
+      }),
+    autoReplyState('telegram', null),
   ]
 
   assert.equal(
     sameAssistantAutoReplyState(baseline, [
-      {
-        channel: 'email',
-        cursor: {
+      autoReplyState('email', {
           captureId: 'cap-email',
           occurredAt: '2026-04-10T00:00:00.000Z',
-        },
-      },
-      {
-        channel: 'telegram',
-        cursor: null,
-      },
+        }),
+      autoReplyState('telegram', null),
     ]),
     true,
   )
   assert.equal(
     sameAssistantAutoReplyState(baseline, [
-      {
-        channel: 'email',
-        cursor: {
+      autoReplyState('email', {
           captureId: 'cap-other',
           occurredAt: '2026-04-10T00:00:00.000Z',
-        },
-      },
-      {
-        channel: 'telegram',
-        cursor: null,
-      },
+        }),
+      autoReplyState('telegram', null),
     ]),
     false,
   )
   assert.equal(
     sameAssistantAutoReplyState(baseline, [
-      {
-        channel: 'telegram',
-        cursor: null,
-      },
-      {
-        channel: 'email',
-        cursor: {
+      autoReplyState('telegram', null),
+      autoReplyState('email', {
           captureId: 'cap-email',
           occurredAt: '2026-04-10T00:00:00.000Z',
-        },
-      },
+        }),
     ]),
     false,
   )

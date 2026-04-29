@@ -6,7 +6,6 @@ import type {
 import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageReceivedEvent,
-  sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
@@ -37,8 +36,6 @@ export {
 export type {
   HostedStripeWebhookResponse,
 } from "./webhook-service-types";
-
-const HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS = 750;
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   defer?: (drain: () => Promise<void>) => Promise<void> | void;
@@ -123,11 +120,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       });
     }
 
-    await maybeSendHostedLinqIngressReadReceipt({
-      plan,
-      signal: input.signal,
-    });
-
     responseReason = plan.response.reason ?? null;
     await maybeHandoffHostedExecutionWebhookWake({
       defer: input.defer,
@@ -153,48 +145,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
     });
     throw error;
-  }
-}
-
-async function maybeSendHostedLinqIngressReadReceipt(input: {
-  plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
-  signal?: AbortSignal;
-}): Promise<void> {
-  const chatId = input.plan.ingressReadReceiptChatId?.trim() ?? "";
-
-  if (chatId.length === 0) {
-    return;
-  }
-
-  const responseReason = input.plan.response.reason ?? null;
-  const timeoutMs = HOSTED_LINQ_INGRESS_READ_RECEIPT_TIMEOUT_MS;
-  const readReceiptTiming = startHostedOnboardingTiming(
-    "hosted-onboarding.webhook.linq.ingress-read-receipt",
-    {
-      chatIdPresent: true,
-      responseReason,
-      timeoutMs,
-    },
-  );
-
-  try {
-    const result = await sendHostedLinqReadReceipt({
-      chatId,
-      signal: input.signal,
-      timeoutMs,
-    });
-
-    finishHostedOnboardingTiming(readReceiptTiming, result.ok ? "sent" : "failed", {
-      httpStatus: result.status,
-      responseReason,
-      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
-    });
-  } catch (error) {
-    finishHostedOnboardingTiming(readReceiptTiming, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      responseReason,
-      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
-    });
   }
 }
 

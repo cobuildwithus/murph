@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { buildHostedExecutionRuntimeTimerWake } from "@murphai/hosted-execution";
@@ -192,6 +192,40 @@ test("hosted provider cleanup persists a future retry checkpoint after failed de
     );
   } finally {
     vi.useRealTimers();
+    await cleanup();
+  }
+});
+
+test("hosted provider cleanup ignores malformed retry state", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    const filePath = path.join(
+      resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+      "hosted-provider-cleanup.json",
+    );
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, '{"schema":', "utf8");
+
+    assert.equal(await readHostedProviderCleanupCheckpoint(vaultRoot), null);
+
+    const result = await drainHostedProviderCleanupAfterCommit({
+      assistantDeliveryOutcomes: [],
+      env: {},
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      vaultRoot,
+      wake,
+    });
+
+    assert.deepEqual(result, {
+      attemptedLinqMessageCount: 0,
+      deletedLinqMessageCount: 0,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+  } finally {
     await cleanup();
   }
 });

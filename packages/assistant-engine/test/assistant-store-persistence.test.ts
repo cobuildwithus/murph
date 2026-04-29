@@ -651,14 +651,16 @@ describe('assistant store persistence seams', () => {
       autoReply: [
         {
           channel: 'telegram',
-          cursor: {
+          enabledAt: '2026-04-08T00:05:00.000Z',
+          eligibleAfter: {
             occurredAt: '2026-04-08T00:05:00.000Z',
             captureId: 'capture-2',
           },
         },
         {
           channel: 'agentmail',
-          cursor: null,
+          enabledAt: '2026-04-08T00:06:00.000Z',
+          eligibleAfter: null,
         },
       ],
       updatedAt: '2026-04-08T00:06:00.000Z',
@@ -673,14 +675,16 @@ describe('assistant store persistence seams', () => {
       autoReply: [
         {
           channel: 'telegram',
-          cursor: {
+          enabledAt: '2026-04-08T00:05:00.000Z',
+          eligibleAfter: {
             occurredAt: '2026-04-08T00:05:00.000Z',
             captureId: 'capture-2',
           },
         },
         {
           channel: 'agentmail',
-          cursor: null,
+          enabledAt: '2026-04-08T00:06:00.000Z',
+          eligibleAfter: null,
         },
       ],
       updatedAt: '2026-04-08T00:06:00.000Z',

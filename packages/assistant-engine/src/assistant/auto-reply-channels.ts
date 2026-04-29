@@ -42,7 +42,8 @@ export function managedAssistantAutoReplyChannelsNeedCursorSeed(input: {
 export function reconcileManagedAssistantAutoReplyChannels(input: {
   current: readonly AssistantAutoReplyEntry[]
   desiredChannels: readonly string[]
-  latestCaptureCursor: AssistantAutomationCursor | null
+  eligibleAfter: AssistantAutomationCursor | null
+  enabledAt: string
   isManagedChannel?: (channel: string) => boolean
 }): AssistantAutoReplyEntry[] {
   const desiredChannels = normalizeAssistantAutoReplyChannels(input.desiredChannels)
@@ -55,7 +56,11 @@ export function reconcileManagedAssistantAutoReplyChannels(input: {
   )
   const managedEntries = desiredChannels.map((channel) => {
     const existing = currentByChannel.get(channel)
-    return existing ?? { channel, cursor: input.latestCaptureCursor }
+    return existing ?? {
+      channel,
+      eligibleAfter: input.eligibleAfter,
+      enabledAt: input.enabledAt,
+    }
   })
 
   return [...preservedEntries, ...managedEntries].sort(compareAssistantAutoReplyEntry)
@@ -115,10 +120,15 @@ export async function reconcileManagedAssistantAutoReplyChannelsLocal(input: {
         input.inboxServices,
       )
     : null
+  const enabledAt =
+    nextReplyCursor?.createdAt ??
+    nextReplyCursor?.occurredAt ??
+    new Date().toISOString()
   const nextAutoReply = reconcileManagedAssistantAutoReplyChannels({
     current: currentAutoReply,
     desiredChannels: input.desiredChannels,
-    latestCaptureCursor: nextReplyCursor,
+    eligibleAfter: nextReplyCursor,
+    enabledAt,
     isManagedChannel: input.isManagedChannel,
   })
 

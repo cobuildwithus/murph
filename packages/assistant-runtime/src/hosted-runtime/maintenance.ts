@@ -176,8 +176,8 @@ export async function runHostedAssistantAutomation(
     component: "runtime",
     details: {
       autoReplyChannels: beforeState.autoReply.map((entry) => entry.channel).join(","),
-      autoReplyCursorSummary: beforeState.autoReply.map((entry) =>
-        `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+      autoReplyEligibleAfterSummary: beforeState.autoReply.map((entry) =>
+        `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
       ).join(","),
       inboxScanCursor: beforeState.inboxScanCursor?.captureId ?? null,
       requestId,
@@ -256,8 +256,8 @@ export async function runHostedAssistantAutomation(
       details: {
         ...buildHostedAssistantAutomationEventCountLogDetails(automationEventCounts),
         autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
-        autoReplyCursorSummary: afterState.autoReply.map((entry) =>
-          `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+        autoReplyEligibleAfterSummary: afterState.autoReply.map((entry) =>
+          `${entry.channel}:${entry.eligibleAfter?.captureId ?? "null"}`
         ).join(","),
         cronProcessed: result.cronProcessed,
         inboxScanCursor: afterState.inboxScanCursor?.captureId ?? null,
@@ -291,18 +291,20 @@ export async function runHostedAssistantAutomation(
       && "code" in error
       && error.code === "INBOX_NOT_INITIALIZED"
     ) {
+      const nextWakeAt = new Date(Date.now() + 30_000).toISOString();
       redactedLogEntries.push(emitHostedRuntimeRedactedLog({
         component: "runtime",
         details: {
+          nextWakeAt,
           requestId,
         },
         wake,
-        message: "Hosted assistant automation skipped because the inbox runtime is not initialized yet.",
+        message: "Hosted assistant automation could not run because the inbox runtime is not initialized yet; scheduling a retry.",
         phase: "wake.running",
       }));
       return {
-        nextWakeAt: null,
-        progressed: false,
+        nextWakeAt,
+        progressed: true,
         redactedLogEntries,
       };
     }

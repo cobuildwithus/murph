@@ -15,8 +15,9 @@ export function normalizeAssistantAutoReplyChannels(
 
 export function reconcileAssistantAutoReplyState(input: {
   current: readonly AssistantAutoReplyChannelState[]
+  enabledAt: string
   enabledChannels: readonly string[]
-  latestCursor: AssistantAutomationCursor | null
+  eligibleAfter: AssistantAutomationCursor | null
 }): AssistantAutoReplyChannelState[] {
   const currentByChannel = new Map(
     input.current.map((entry) => [entry.channel, entry] as const),
@@ -30,7 +31,8 @@ export function reconcileAssistantAutoReplyState(input: {
 
     return {
       channel,
-      cursor: input.latestCursor,
+      eligibleAfter: input.eligibleAfter,
+      enabledAt: input.enabledAt,
     }
   })
 }
@@ -52,9 +54,10 @@ export function sameAssistantAutoReplyState(
       const other = right[index]
       return (
         other?.channel === entry.channel &&
-        other.cursor?.captureId === entry.cursor?.captureId &&
-        (other.cursor?.createdAt ?? null) === (entry.cursor?.createdAt ?? null) &&
-        other.cursor?.occurredAt === entry.cursor?.occurredAt
+        other.enabledAt === entry.enabledAt &&
+        other.eligibleAfter?.captureId === entry.eligibleAfter?.captureId &&
+        (other.eligibleAfter?.createdAt ?? null) === (entry.eligibleAfter?.createdAt ?? null) &&
+        other.eligibleAfter?.occurredAt === entry.eligibleAfter?.occurredAt
       )
     })
   )

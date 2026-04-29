@@ -420,7 +420,8 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       autoReply: [
         {
           channel: 'telegram',
-          cursor: {
+          enabledAt: '2026-04-08T12:05:00.000Z',
+          eligibleAfter: {
             captureId: 'capture-1',
             occurredAt: '2026-04-08T12:05:00.000Z',
           },
@@ -432,7 +433,8 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     [
       {
         channel: 'telegram',
-        cursor: {
+        enabledAt: '2026-04-08T12:05:00.000Z',
+        eligibleAfter: {
           captureId: 'capture-1',
           occurredAt: '2026-04-08T12:05:00.000Z',
         },

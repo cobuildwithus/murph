@@ -73,7 +73,8 @@ export async function recoverAssistantAutoReplies(
     input.autoReply ??
     normalizeEnabledChannels(input.enabledChannels ?? []).map((channel) => ({
       channel,
-      cursor: input.scanCursor ?? null,
+      eligibleAfter: input.scanCursor ?? null,
+      enabledAt: new Date().toISOString(),
     }))
   const enabledChannels = normalizeEnabledChannels(
     autoReply.map((entry) => entry.channel),
@@ -84,7 +85,6 @@ export async function recoverAssistantAutoReplies(
   >(autoReply.map((entry) => [entry.channel, entry] as const))
   if (
     enabledChannels.length === 0 ||
-    autoReply.every((entry) => entry.cursor === null) ||
     input.signal?.aborted
   ) {
     return {
@@ -131,18 +131,9 @@ export async function recoverAssistantAutoReplies(
 
     const recoverySource = context.firstItem.summary.source
     const channelState = autoReplyByChannel.get(recoverySource)
-    if (!channelState?.cursor || !enabledChannels.includes(recoverySource)) {
+    if (!channelState || !enabledChannels.includes(recoverySource)) {
       continue
     }
-    if (
-      compareAssistantCaptureOrder(
-        context.firstItem.summary,
-        channelState.cursor,
-      ) > 0
-    ) {
-      continue
-    }
-
     summary.considered += context.captureCount
     const result = await processAssistantAutoReplyGroup({
       allowSelfAuthored: input.allowSelfAuthored,

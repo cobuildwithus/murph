@@ -17,6 +17,10 @@ export {
   scanAssistantAutoReplyOnce,
 } from './automation/reply.js'
 export {
+  listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued,
+} from './automation/evidence.js'
+export {
   createInboxBackedAssistantTurnInputPort,
   createNoopAssistantTurnInputPort,
   AssistantActiveTurnInputCheckpointRejectedError,

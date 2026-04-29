@@ -6,6 +6,7 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantTurnInputPort } from '../turn-input.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
+import { assistantAutoReplyTerminalEvidenceExists } from './evidence.js'
 import {
   applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext,
@@ -194,9 +195,7 @@ export async function scanAssistantAutomationOnce(input: {
       context,
       result: replyResult,
       summary: replies,
-      updateCursor: (cursor) => {
-        updateAutoReplyChannelCursor(scanState, context.firstItem.summary.source, cursor)
-      },
+      updateCursor: () => undefined,
     })
 
     await persistScanState()
@@ -235,7 +234,7 @@ async function listAssistantReplyCandidates(input: {
   const candidates = await Promise.all(
     input.autoReply.map(async (channelState) => {
       const channelCandidates: AssistantInboxCaptureSummary[] = []
-      let cursor = channelState.cursor
+      let cursor: ReturnType<typeof cursorFromCapture> | null = channelState.eligibleAfter
 
       while (channelCandidates.length < input.limit) {
         const listed = await input.inboxServices.list({
@@ -253,9 +252,15 @@ async function listAssistantReplyCandidates(input: {
           break
         }
 
-        channelCandidates.push(
-          ...listedItems.filter((capture) => capture.source === channelState.channel),
-        )
+        for (const capture of listedItems) {
+          if (capture.source !== channelState.channel) {
+            continue
+          }
+          if (await assistantAutoReplyTerminalEvidenceExists(input.vault, capture.captureId)) {
+            continue
+          }
+          channelCandidates.push(capture)
+        }
 
         const lastListed = listedItems[listedItems.length - 1]
         cursor = lastListed ? cursorFromCapture(lastListed) : cursor
@@ -272,21 +277,6 @@ async function listAssistantReplyCandidates(input: {
     .flat()
     .sort(compareAssistantCaptureOrder)
     .slice(0, input.limit)
-}
-
-function updateAutoReplyChannelCursor(
-  scanState: AssistantAutomationScanStateProgress,
-  channel: string,
-  cursor: ReturnType<typeof cursorFromCapture>,
-): void {
-  scanState.autoReply = scanState.autoReply.map((entry) =>
-    entry.channel === channel
-      ? {
-          ...entry,
-          cursor,
-        }
-      : entry,
-  )
 }
 
 async function persistAssistantAutomationScanState(input: {
@@ -312,7 +302,8 @@ function cloneAutomationScanState(
   return {
     autoReply: state.autoReply.map((entry) => ({
       channel: entry.channel,
-      cursor: entry.cursor,
+      eligibleAfter: entry.eligibleAfter,
+      enabledAt: entry.enabledAt,
     })),
     inboxScanCursor: state.inboxScanCursor,
   }
@@ -336,7 +327,11 @@ function sameAutoReplyState(
     left.length === right.length &&
     left.every((entry, index) => {
       const other = right[index]
-      return other?.channel === entry.channel && sameCursor(other.cursor, entry.cursor)
+      return (
+        other?.channel === entry.channel &&
+        other.enabledAt === entry.enabledAt &&
+        sameCursor(other.eligibleAfter, entry.eligibleAfter)
+      )
     })
   )
 }

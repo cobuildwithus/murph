@@ -36,11 +36,21 @@ import {
 import {
   assistantAutoReplyGroupOutcomeArtifactExists,
   assistantChatReplyArtifactExists,
+  readAssistantAutoReplyGroupOutcomeArtifact,
+  readAssistantChatReplyArtifact,
   writeAssistantAutoReplyGroupOutcomeArtifact,
   writeAssistantChatDeferredArtifacts,
   writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts,
+  type AssistantAutoReplyTerminalArtifactSnapshot,
 } from './artifacts.js'
+import {
+  readAssistantAutoReplyTerminalEvidence,
+  type AssistantAutoReplyTerminalEvidence,
+  writeAssistantAutoReplyReplyIntentEvidence,
+  writeAssistantAutoReplyReplyTerminalEvidence,
+  writeAssistantAutoReplySuppressionEvidence,
+} from './evidence.js'
 import {
   computeAssistantAutoReplyRetryAt,
   isAssistantAutoReplyRepairableConfigError,
@@ -105,16 +115,13 @@ interface AssistantAutoReplySkipDecision {
   nextWakeAt: string | null
   reason: string
   stopScanning: boolean
+  terminalSuppression: boolean
 }
 
 type AssistantAutoReplyDecision =
   | { kind: 'ignore' }
   | AssistantAutoReplyReplyDecision
   | AssistantAutoReplySkipDecision
-
-interface AssistantAutoReplyScanState {
-  cursor: AssistantAutomationCursor | null
-}
 
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
@@ -158,6 +165,7 @@ interface AssistantAutoReplyGroupOutcome {
   nextWakeAt: string | null
   stopScanning: boolean
   summary: AssistantAutoReplyOutcomeSummary
+  terminalSuppression: boolean
 }
 
 type AssistantAutoReplyGroupArtifactStatus = 'complete' | 'none' | 'partial'
@@ -218,9 +226,6 @@ export async function scanAssistantAutoReplyOnce(input: {
   })
 
   const summary = createEmptyAutoReplyScanResult()
-  const scanState: AssistantAutoReplyScanState = {
-    cursor: input.afterCursor ?? null,
-  }
 
   for (let index = 0; index < captures.length; index += 1) {
     if (input.signal?.aborted) {
@@ -263,21 +268,11 @@ export async function scanAssistantAutoReplyOnce(input: {
         context,
         result,
         summary,
-        updateCursor: (cursor) => {
-          scanState.cursor = cursor
-        },
       })
     ) {
       break
     }
   }
-
-  await input.onStateProgress?.({
-    autoReply: enabledChannels.map((channel) => ({
-      channel,
-      cursor: scanState.cursor,
-    })),
-  })
 
   return summary
 }
@@ -286,7 +281,7 @@ export function applyAssistantAutoReplyProcessResult(input: {
   context: AssistantAutoReplyGroupContext
   result: AssistantAutoReplyProcessResult
   summary: AssistantAutoReplyScanResult
-  updateCursor: (cursor: AssistantAutomationCursor) => void
+  updateCursor?: (cursor: AssistantAutomationCursor) => void
 }): boolean {
   input.summary.failed += input.result.failed
   input.summary.nextWakeAt = earliestAssistantAutomationWakeAt(
@@ -296,7 +291,7 @@ export function applyAssistantAutoReplyProcessResult(input: {
   input.summary.replied += input.result.replied
   input.summary.skipped += input.result.skipped
   if (input.result.advanceCursor) {
-    input.updateCursor(input.result.cursor ?? input.context.lastCursor)
+    input.updateCursor?.(input.result.cursor ?? input.context.lastCursor)
   }
 
   return input.result.stopScanning
@@ -528,6 +523,14 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
 }): Promise<void> {
   switch (input.outcome.artifact.kind) {
     case 'none':
+      if (input.outcome.kind === 'skipped' && input.outcome.terminalSuppression) {
+        await writeAssistantAutoReplySuppressionEvidence({
+          captureIds: input.context.captureIds,
+          linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
+          reason: input.outcome.event?.details ?? 'assistant auto-reply suppressed',
+          vault: input.vault,
+        })
+      }
       return
     case 'result': {
       const delivery = input.outcome.artifact.result.delivery
@@ -550,6 +553,14 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
         result: input.outcome.artifact.result,
         vault: input.vault,
       })
+      await writeAssistantAutoReplyReplyIntentEvidence({
+        captureIds: input.context.captureIds,
+        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
+        outcome: 'result',
+        recordedAt: delivery.sentAt,
+        result: input.outcome.artifact.result,
+        vault: input.vault,
+      })
       return
     }
     case 'deferred': {
@@ -564,6 +575,14 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
       await writeAssistantChatDeferredArtifacts({
         captureIds: input.context.captureIds,
         queuedAt,
+        result: input.outcome.artifact.result,
+        vault: input.vault,
+      })
+      await writeAssistantAutoReplyReplyIntentEvidence({
+        captureIds: input.context.captureIds,
+        linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
+        outcome: 'deferred',
+        recordedAt: queuedAt,
         result: input.outcome.artifact.result,
         vault: input.vault,
       })
@@ -606,6 +625,7 @@ function createIgnoredGroupOutcome(): AssistantAutoReplyGroupOutcome {
     nextWakeAt: null,
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary(),
+    terminalSuppression: false,
   }
 }
 
@@ -619,6 +639,7 @@ function createSkippedDecisionOutcome(input: {
       reason: input.decision.reason,
       nextWakeAt: input.decision.nextWakeAt,
       stopScanning: input.decision.stopScanning,
+      terminalSuppression: input.decision.terminalSuppression,
     })
   }
 
@@ -635,6 +656,7 @@ function createSkippedGroupOutcome(input: {
   nextWakeAt?: string | null
   reason: string
   stopScanning?: boolean
+  terminalSuppression: boolean
 }): AssistantAutoReplyGroupOutcome {
   return {
     advanceCursor: true,
@@ -649,6 +671,7 @@ function createSkippedGroupOutcome(input: {
     summary: createAssistantAutoReplyOutcomeSummary({
       skipped: input.captureCount,
     }),
+    terminalSuppression: input.terminalSuppression,
   }
 }
 
@@ -671,6 +694,7 @@ function createDeferredGroupOutcome(input: {
     summary: createAssistantAutoReplyOutcomeSummary({
       skipped: input.captureCount,
     }),
+    terminalSuppression: false,
   }
 }
 
@@ -695,6 +719,7 @@ function createDeferredDeliveryGroupOutcome(
     summary: createAssistantAutoReplyOutcomeSummary({
       replied: 1,
     }),
+    terminalSuppression: false,
   }
 }
 
@@ -724,6 +749,7 @@ function createSuccessfulReplyGroupOutcome(
     summary: createAssistantAutoReplyOutcomeSummary({
       replied: 1,
     }),
+    terminalSuppression: false,
   }
 }
 
@@ -754,6 +780,7 @@ function createFailedGroupOutcome(input: {
     summary: createAssistantAutoReplyOutcomeSummary({
       failed: 1,
     }),
+    terminalSuppression: false,
   }
 }
 
@@ -789,6 +816,45 @@ async function evaluateAssistantAutoReplyGroup(input: {
     input.vault,
     input.group.firstCaptureId,
   )
+  const existingTerminalEvidence = await Promise.all(
+    input.group.captureIds.map((captureId) =>
+      readAssistantAutoReplyTerminalEvidence(input.vault, captureId),
+    ),
+  )
+  if (existingTerminalEvidence.every((evidence) => evidence !== null)) {
+    return createAdvancingSkipDecision('assistant reply already handled', {
+      terminalSuppression: false,
+    })
+  }
+  const repairEvidence = findRepairableTerminalEvidenceForGroup(
+    input.group.captureIds,
+    existingTerminalEvidence,
+  )
+  if (repairEvidence) {
+    await backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence({
+      captureIds: input.group.captureIds,
+      evidence: repairEvidence,
+      vault: input.vault,
+    })
+    return createAdvancingSkipDecision('assistant reply already handled', {
+      terminalSuppression: false,
+    })
+  }
+  const handledReceipt = await resolveAssistantAutoReplyHandledTurnReceipt(
+    input.vault,
+    input.group.captureIds,
+  )
+  if (handledReceipt) {
+    await backfillAssistantAutoReplyTerminalEvidenceFromLegacyArtifact({
+      captureIds: input.group.captureIds,
+      context: input.group,
+      snapshot: handledReceipt,
+      vault: input.vault,
+    })
+    return createAdvancingSkipDecision('assistant reply already handled', {
+      terminalSuppression: false,
+    })
+  }
   const existingArtifact = await Promise.all(
     input.group.captureIds.map((captureId) =>
       assistantChatReplyArtifactExists(input.vault, captureId),
@@ -803,10 +869,62 @@ async function evaluateAssistantAutoReplyGroup(input: {
         'assistant reply artifacts are incomplete; will retry this capture after reply artifacts are rebuilt.',
       )
     }
-    return createAdvancingSkipDecision('assistant reply already handled')
+    const legacyOutcome = await readAssistantAutoReplyGroupOutcomeArtifact(
+      input.vault,
+      input.group.firstCaptureId,
+    )
+    if (!legacyOutcome) {
+      return createDeferredSkipDecision(
+        'assistant reply legacy outcome artifact could not be read; will retry this capture after terminal evidence is rebuilt.',
+      )
+    }
+    const legacyCaptureIds = resolveLegacyTerminalArtifactCaptureIds({
+      context: input.group,
+      snapshot: legacyOutcome,
+    })
+    if (legacyCaptureIds.length === 0) {
+      return createDeferredSkipDecision(
+        'assistant reply legacy outcome artifact does not cover this capture group; will retry after the handled capture evidence is rebuilt.',
+      )
+    }
+    await backfillAssistantAutoReplyTerminalEvidenceFromLegacyArtifact({
+      captureIds: legacyCaptureIds,
+      context: input.group,
+      snapshot: legacyOutcome,
+      vault: input.vault,
+    })
+    return createAdvancingSkipDecision('assistant reply already handled', {
+      terminalSuppression: false,
+    })
   }
   if (existingArtifactStatus === 'complete') {
-    return createAdvancingSkipDecision('assistant reply already exists')
+    const legacyReply = await readAssistantChatReplyArtifact(
+      input.vault,
+      input.group.firstCaptureId,
+    )
+    if (!legacyReply) {
+      return createDeferredSkipDecision(
+        'assistant reply legacy chat artifact could not be read; will retry this capture after terminal evidence is rebuilt.',
+      )
+    }
+    const legacyCaptureIds = resolveLegacyTerminalArtifactCaptureIds({
+      context: input.group,
+      snapshot: legacyReply,
+    })
+    if (legacyCaptureIds.length === 0) {
+      return createDeferredSkipDecision(
+        'assistant reply legacy chat artifact does not cover this capture group; will retry after reply artifacts are rebuilt.',
+      )
+    }
+    await backfillAssistantAutoReplyTerminalEvidenceFromLegacyArtifact({
+      captureIds: legacyCaptureIds,
+      context: input.group,
+      snapshot: legacyReply,
+      vault: input.vault,
+    })
+    return createAdvancingSkipDecision('assistant reply already exists', {
+      terminalSuppression: false,
+    })
   }
   if (existingArtifactStatus === 'partial') {
     return createDeferredSkipDecision(
@@ -825,8 +943,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return { kind: 'ignore' }
   }
 
-  if (await assistantAutoReplyHandledByTurnReceipt(input.vault, input.group.captureIds)) {
-    return createAdvancingSkipDecision('assistant reply already handled')
+  if (existingTerminalEvidence.some((evidence) => evidence !== null)) {
+    return createDeferredSkipDecision(
+      'assistant reply terminal evidence is incomplete; will retry this capture after evidence is rebuilt.',
+    )
   }
 
   const channelAdapter = getAssistantChannelAdapter(primaryCapture.source)
@@ -1299,8 +1419,12 @@ function classifyAssistantAutoReplyFailure(input: {
   }
 
   return createFailedGroupOutcome({
-    advanceCursor: true,
+    advanceCursor: false,
     error: input.error,
+    nextWakeAt: computeAssistantAutomationRetryAt(
+      ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS,
+    ),
+    stopScanning: true,
   })
 }
 
@@ -1322,6 +1446,9 @@ function classifyAssistantAutoReplyGroupArtifactStatus(
 
 function createAdvancingSkipDecision(
   reason: string,
+  input?: {
+    terminalSuppression?: boolean
+  },
 ): AssistantAutoReplySkipDecision {
   return {
     advanceCursor: true,
@@ -1329,34 +1456,126 @@ function createAdvancingSkipDecision(
     nextWakeAt: null,
     reason,
     stopScanning: false,
+    terminalSuppression: input?.terminalSuppression ?? true,
   }
 }
 
-async function assistantAutoReplyHandledByTurnReceipt(
+function resolveAutoReplyLinqProviderMessageIdsFromContext(
+  context: AssistantAutoReplyGroupContext,
+): string[] {
+  const messageIds: string[] = []
+  for (const item of context.items) {
+    if (item.summary.source !== 'linq') {
+      continue
+    }
+    const externalId = normalizeNullableString(item.summary.externalId)
+    if (!externalId?.startsWith('linq:')) {
+      continue
+    }
+    const messageId = normalizeNullableString(externalId.slice('linq:'.length))
+    if (!messageId || messageId.startsWith('hbid:linq.message:')) {
+      continue
+    }
+    messageIds.push(messageId)
+  }
+  return [...new Set(messageIds)]
+}
+
+function findRepairableTerminalEvidenceForGroup(
+  captureIds: readonly string[],
+  evidence: readonly (AssistantAutoReplyTerminalEvidence | null)[],
+): AssistantAutoReplyTerminalEvidence | null {
+  return evidence.find((item) => {
+    if (!item) {
+      return false
+    }
+    return captureIds.every((captureId) => item.groupCaptureIds.includes(captureId))
+  }) ?? null
+}
+
+function resolveLegacyTerminalArtifactCaptureIds(input: {
+  context: AssistantAutoReplyGroupContext
+  snapshot: AssistantAutoReplyTerminalArtifactSnapshot
+}): string[] {
+  const snapshotCaptureIds = input.snapshot.groupCaptureIds?.length
+    ? input.snapshot.groupCaptureIds
+    : [input.context.firstCaptureId]
+  const contextCaptureIds = new Set(input.context.captureIds)
+  return snapshotCaptureIds
+    .filter((captureId) => contextCaptureIds.has(captureId))
+}
+
+async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence(input: {
+  captureIds: readonly string[]
+  evidence: AssistantAutoReplyTerminalEvidence
+  vault: string
+}): Promise<void> {
+  if (input.evidence.terminal.kind === 'suppressed') {
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: input.captureIds,
+      linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
+      reason: input.evidence.terminal.reason,
+      recordedAt: input.evidence.recordedAt,
+      vault: input.vault,
+    })
+    return
+  }
+
+  await writeAssistantAutoReplyReplyTerminalEvidence({
+    captureIds: input.captureIds,
+    deliveryIntentId: input.evidence.terminal.deliveryIntentId,
+    linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
+    outcome: input.evidence.terminal.kind === 'replied' ? 'result' : 'deferred',
+    recordedAt: input.evidence.recordedAt,
+    sessionId: input.evidence.terminal.sessionId,
+    terminalKind: input.evidence.terminal.kind,
+    vault: input.vault,
+  })
+}
+
+async function backfillAssistantAutoReplyTerminalEvidenceFromLegacyArtifact(input: {
+  captureIds: readonly string[]
+  context: AssistantAutoReplyGroupContext
+  snapshot: AssistantAutoReplyTerminalArtifactSnapshot
+  vault: string
+}): Promise<void> {
+  await writeAssistantAutoReplyReplyTerminalEvidence({
+    captureIds: input.captureIds,
+    deliveryIntentId: input.snapshot.deliveryIntentId,
+    linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
+    outcome: input.snapshot.outcome,
+    recordedAt: input.snapshot.recordedAt,
+    sessionId: input.snapshot.sessionId,
+    vault: input.vault,
+  })
+}
+
+async function resolveAssistantAutoReplyHandledTurnReceipt(
   vault: string,
   captureIds: readonly string[],
-): Promise<boolean> {
+): Promise<AssistantAutoReplyTerminalArtifactSnapshot | null> {
   const primaryCaptureId = captureIds[0]
   if (!primaryCaptureId) {
-    return false
+    return null
   }
 
   const recentReceipts = await listAssistantTurnReceipts(vault, 200)
-  return recentReceipts.some((receipt) => {
+  for (const receipt of recentReceipts) {
     if (!(receipt.status === 'completed' || receipt.status === 'deferred')) {
-      return false
+      continue
     }
 
-    return receipt.timeline.some((event) => {
+    const receiptCaptureIds = new Set<string>()
+    for (const event of receipt.timeline) {
       if (
         event.kind !== 'turn.started' &&
         event.kind !== 'turn.input.accepted'
       ) {
-        return false
+        continue
       }
 
       if (event.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY] === primaryCaptureId) {
-        return true
+        receiptCaptureIds.add(primaryCaptureId)
       }
 
       const groupedCaptureIds = event.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
@@ -1364,9 +1583,27 @@ async function assistantAutoReplyHandledByTurnReceipt(
         .map((value) => value.trim())
         .filter((value) => value.length > 0)
 
-      return groupedCaptureIds?.includes(primaryCaptureId) ?? false
-    })
-  })
+      for (const captureId of groupedCaptureIds ?? []) {
+        receiptCaptureIds.add(captureId)
+      }
+    }
+    const receiptMatches = captureIds.every((captureId) =>
+      receiptCaptureIds.has(captureId),
+    )
+    if (!receiptMatches) {
+      continue
+    }
+
+    return {
+      deliveryIntentId: normalizeNullableString(receipt.deliveryIntentId),
+      groupCaptureIds: [...captureIds],
+      outcome: receipt.status === 'deferred' ? 'deferred' : 'result',
+      recordedAt: receipt.completedAt ?? receipt.updatedAt,
+      sessionId: receipt.sessionId,
+    }
+  }
+
+  return null
 }
 
 function createDeferredSkipDecision(
@@ -1386,6 +1623,7 @@ function createDeferredSkipDecision(
         : input.nextWakeAt,
     reason,
     stopScanning: true,
+    terminalSuppression: false,
   }
 }
 

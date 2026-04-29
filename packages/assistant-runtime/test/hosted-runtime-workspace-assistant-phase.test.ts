@@ -12,13 +12,22 @@ const mocks = vi.hoisted(() => ({
   drainHostedProviderCleanupAfterCommit: vi.fn(),
   drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
+  listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
+  markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantDeliverySideEffectsForCheckpoint: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
+  recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
   runHostedAssistantRuntimeTimerLane: vi.fn(),
+}));
+
+vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
+  listPendingAssistantAutoReplyLinqCleanupEvidence:
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
 }));
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
@@ -45,6 +54,7 @@ vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
 
 vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
+  recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
 }));
 
@@ -87,8 +97,14 @@ beforeEach(() => {
   });
   mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([]);
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
+  mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
+    captureIds: [],
+    linqMessageIds: [],
+  });
+  mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliverySideEffectsForCheckpoint.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
+  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
     nextWakeAt: null,
@@ -657,6 +673,54 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
   });
+
+  it("treats pending terminal Linq cleanup evidence as checkpoint progress", async () => {
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
+      captureIds: ["cap_terminal_cleanup"],
+      linqMessageIds: ["linq_msg_terminal_cleanup"],
+    });
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(result.progressed).toBe(true);
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      linqMessageIds: ["linq_msg_terminal_cleanup"],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
+      captureIds: ["cap_terminal_cleanup"],
+      vault: "/tmp/murph-vault",
+    });
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryOutcomes: [],
+        checkpoint: {
+          nextWakeAt: null,
+        },
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "maintenance",
+      redactedStatus: expect.objectContaining({
+        hostedProviderCleanupAttemptedLinqItems: 1,
+        hostedProviderCleanupDeletedLinqItems: 1,
+      }),
+    }));
+  });
 });
 
 describe("hosted runtime log helpers", () => {
@@ -744,7 +808,6 @@ function createPhaseInput(input: {
   return {
     initialMailboxImport: {
       afterCheckpointEffects: [],
-      afterCheckpointBeforeAssistantEffects: [],
       checkpoint: null,
       importResult: {
         blocked: [],

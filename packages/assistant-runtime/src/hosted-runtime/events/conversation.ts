@@ -1,6 +1,5 @@
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution";
 import {
-  emitHostedExecutionStructuredLog,
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
@@ -18,14 +17,9 @@ import {
   type PersistedCapture,
   openInboxRuntime,
 } from "@murphai/inboxd";
-import {
-  createConfiguredParserRegistry,
-  createInboxParserService,
-} from "@murphai/parsers";
 
 import {
   buildHostedTelegramChannelEnv,
-  markHostedConversationReadBestEffort,
 } from "../channel-activity.ts";
 import { readHostedRawEmailMessage } from "./email.ts";
 import {
@@ -38,20 +32,16 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "../models.ts";
 
-const HOSTED_CONVERSATION_PARSER_DRAIN_MAX_JOBS = 4;
-
 export async function ingestHostedConversationMessageWake(input: {
   wake: HostedExecutionConversationMessageWake;
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "forwardedEnv" | "platform" | "platformEnv" | "userEnv">;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
-  await result.afterCheckpoint?.();
   return result.metrics;
 }
 
 export interface HostedConversationWakeLocalImportResult {
-  afterCheckpoint?: (() => Promise<void>) | null;
   capture: PersistedCapture;
   metrics: HostedConversationWakeMetrics;
 }
@@ -79,17 +69,6 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       parserProcessed: 0,
     };
     return {
-      afterCheckpoint: async () => {
-        await markHostedConversationReadBestEffort({
-          forwardedEnv: input.runtime.forwardedEnv,
-          userEnv: input.runtime.userEnv,
-          wake: input.wake,
-        });
-        await drainHostedConversationParsersBestEffort({
-          captureId: persistedCapture.captureId,
-          input,
-        });
-      },
       capture: persistedCapture,
       metrics,
     };
@@ -152,70 +131,4 @@ async function normalizeHostedConversationMessageWake(input: {
   }
 
   throw new TypeError("Unsupported hosted conversation message wake kind.");
-}
-
-async function drainHostedConversationParsersBestEffort(input: {
-  captureId: string;
-  input: {
-    wake: HostedExecutionConversationMessageWake;
-    vaultRoot: string;
-  };
-}): Promise<number> {
-  let phase: "parser_registry_unavailable" | "parser_drain_failed" =
-    "parser_registry_unavailable";
-
-  try {
-    let runtime: Awaited<ReturnType<typeof openInboxRuntime>> | null = null;
-    const configured = await createConfiguredParserRegistry({
-      vaultRoot: input.input.vaultRoot,
-    });
-    phase = "parser_drain_failed";
-    try {
-      runtime = await openInboxRuntime({
-        vaultRoot: input.input.vaultRoot,
-      });
-      const parserService = createInboxParserService({
-        ffmpeg: configured.ffmpeg,
-        registry: configured.registry,
-        runtime,
-        vaultRoot: input.input.vaultRoot,
-      });
-      const results = await parserService.drain({
-        captureId: input.captureId,
-        maxJobs: HOSTED_CONVERSATION_PARSER_DRAIN_MAX_JOBS,
-      });
-
-      if (results.length > 0) {
-        const failed = results.filter((result) => result.status === "failed").length;
-        emitHostedExecutionStructuredLog({
-          component: "runtime",
-          details: {
-            captureId: input.captureId,
-            diagnostic: "parser_drain_completed",
-            failed,
-            processed: results.length,
-            succeeded: results.length - failed,
-          },
-          message: "Hosted conversation parser drain completed after mailbox checkpoint.",
-          phase: "wake.running",
-          wake: input.input.wake,
-        });
-      }
-      return results.length;
-    } finally {
-      runtime?.close();
-    }
-  } catch {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: {
-        captureId: input.captureId,
-        diagnostic: phase,
-      },
-      message: "Hosted conversation parser drain failed after mailbox checkpoint.",
-      phase: "wake.running",
-      wake: input.input.wake,
-    });
-    return 0;
-  }
 }

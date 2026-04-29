@@ -287,17 +287,7 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);
-    expect(mocks.markLinqChatRead).toHaveBeenCalledTimes(1);
-    expect(mocks.markLinqChatRead).toHaveBeenCalledWith(
-      {
-        chatId: "chat_123",
-      },
-      expect.objectContaining({
-        env: {
-          LINQ_API_TOKEN: "linq-token",
-        },
-      }),
-    );
+    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
     expect(pipelineClose).toHaveBeenCalledTimes(3);
     expect(linqMetrics).toEqual({
       nextWakeAt: null,
@@ -395,24 +385,12 @@ describe("ingestHostedConversationMessageWake", () => {
     expect(order).toEqual(["processCapture"]);
     expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
 
-    await importResult.afterCheckpoint?.();
-
-    expect(order).toEqual(["processCapture", "markRead"]);
+    expect(order).toEqual(["processCapture"]);
     expect(importResult.metrics).toEqual({
       nextWakeAt: null,
       parserProcessed: 0,
     });
-    expect(mocks.markLinqChatRead).toHaveBeenCalledWith(
-      {
-        chatId: "chat_after_import",
-      },
-      expect.objectContaining({
-        env: {
-          LINQ_API_BASE_URL: "https://api.linq.example",
-          LINQ_API_TOKEN: "linq-token",
-        },
-      }),
-    );
+    expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
   });
 
   it("keeps persisted conversation import successful when post-persistence parser setup fails", async () => {
@@ -431,9 +409,6 @@ describe("ingestHostedConversationMessageWake", () => {
       }),
       runtime: input.runtime,
     }));
-    mocks.createConfiguredParserRegistry.mockRejectedValueOnce(
-      new Error("parser registry unavailable"),
-    );
     mocks.markLinqChatRead.mockImplementationOnce(async () => {
       order.push("markRead");
     });
@@ -464,15 +439,13 @@ describe("ingestHostedConversationMessageWake", () => {
       }),
     });
 
-    await importResult.afterCheckpoint?.();
-
-    expect(order).toEqual(["processCapture", "markRead"]);
+    expect(order).toEqual(["processCapture"]);
     expect(importResult.metrics).toEqual({
       nextWakeAt: null,
       parserProcessed: 0,
     });
     expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(1);
-    expect(mocks.createConfiguredParserRegistry).toHaveBeenCalledTimes(1);
+    expect(mocks.createConfiguredParserRegistry).not.toHaveBeenCalled();
     expect(mocks.createInboxParserService).not.toHaveBeenCalled();
   });
 
