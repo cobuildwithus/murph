@@ -31,6 +31,7 @@ sourceIdentity:
   canonicalUrl: https://www.wimhofmethod.com/benefits-of-cold-showers
   identityAliases:
   - The Benefits of Cold Showers and the Science Behind Them
+  - Wim Hof Method (Accessed April 27, 2026)
   - https://www.wimhofmethod.com/benefits-of-cold-showers
 researchEvidence:
   designKind: expert_protocol
@@ -92,6 +93,7 @@ coldPlungeExtraction:
   identityResolutionStatus: new_source
 aliases:
 - The Benefits of Cold Showers and the Science Behind Them
+- Wim Hof Method (Accessed April 27, 2026)
 - https://www.wimhofmethod.com/benefits-of-cold-showers
 ---
 

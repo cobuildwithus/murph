@@ -962,7 +962,7 @@
     },
     {
       "artifactId": "art_pmid_26152773",
-      "sourceKey": "source_artifact:cold-water-immersion-pmid-26152773",
+      "sourceKey": "source_artifact:pmid-26152773",
       "kind": "pdf",
       "storage": "none",
       "contentType": "application/pdf",
@@ -1446,7 +1446,7 @@
     },
     {
       "artifactId": "art_pmid_33144349",
-      "sourceKey": "source_artifact:cold-water-immersion-pmid-33144349",
+      "sourceKey": "source_artifact:pmid-33144349",
       "kind": "pdf",
       "storage": "none",
       "contentType": "application/pdf",
@@ -1886,7 +1886,7 @@
     },
     {
       "artifactId": "art_pmid_37462808",
-      "sourceKey": "source_artifact:cold-water-immersion-pmid-37462808",
+      "sourceKey": "source_artifact:pmid-37462808",
       "kind": "pdf",
       "storage": "none",
       "contentType": "application/pdf",
@@ -2227,7 +2227,7 @@
     },
     {
       "artifactId": "art_pmid_39959124",
-      "sourceKey": "source_artifact:cold-water-immersion-pmid-39959124",
+      "sourceKey": "source_artifact:pmid-39959124",
       "kind": "pdf",
       "storage": "none",
       "contentType": "application/pdf",

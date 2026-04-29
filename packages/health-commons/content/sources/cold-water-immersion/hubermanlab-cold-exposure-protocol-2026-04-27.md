@@ -11,8 +11,6 @@ categories:
 - cold-water-immersion
 - cold-plunge
 relations:
-- type: duplicate_source_identity
-  target: source_artifact:hubermanlab-cold-exposure-2022-05-01
 - type: parent_family
   target: experiment_family:cold-water-immersion
 - type: related_protocol

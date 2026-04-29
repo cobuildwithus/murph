@@ -92,6 +92,7 @@ coldPlungeExtraction:
   identityResolutionStatus: new_source
 aliases:
 - Regular Ice Baths
+- Wim Hof Method (Accessed April 27, 2026)
 - https://www.wimhofmethod.com/regular-ice-baths
 ---
 
