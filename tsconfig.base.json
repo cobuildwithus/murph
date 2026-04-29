@@ -73,6 +73,9 @@
       "@murphai/runtime-state/node/assistant-usage": [
         "packages/runtime-state/src/node/assistant-usage.ts"
       ],
+      "@murphai/runtime-state/node/assistant-state-fs": [
+        "packages/runtime-state/src/node/assistant-state-fs.ts"
+      ],
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "packages/runtime-state/src/node/loopback-control-plane-auth.ts"
       ],

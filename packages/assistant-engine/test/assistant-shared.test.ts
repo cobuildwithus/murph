@@ -6,13 +6,14 @@ import type { AssistantStatePermissionAudit } from '@murphai/runtime-state/node'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 type SharedModule = typeof import('../src/assistant/shared.ts')
-type RuntimeStateNodeModule = typeof import('@murphai/runtime-state/node')
+type RuntimeStateAssistantFsModule = typeof import('@murphai/runtime-state/node/assistant-state-fs')
 
 const tempRoots: string[] = []
 
 afterEach(async () => {
   vi.doUnmock('node:fs/promises')
   vi.doUnmock('@murphai/runtime-state/node')
+  vi.doUnmock('@murphai/runtime-state/node/assistant-state-fs')
   vi.resetModules()
   vi.restoreAllMocks()
   vi.useRealTimers()
@@ -212,17 +213,17 @@ describe('assistant shared helpers', () => {
     ])
   })
 
-  it('delegates runtime-state helper wrappers to the package-local node helpers', async () => {
-    const appendTextFileWithMode = vi
+  it('delegates runtime-state helper wrappers to the assistant-state filesystem helpers', async () => {
+    const appendAssistantStateText = vi
       .fn<(filePath: string, value: string) => Promise<void>>()
       .mockResolvedValue(undefined)
-    const ensureAssistantStateDirectory = vi
+    const ensureAssistantStateDir = vi
       .fn<(directoryPath: string) => Promise<void>>()
       .mockResolvedValue(undefined)
-    const writeJsonFileAtomic = vi
+    const writeAssistantStateJson = vi
       .fn<(filePath: string, value: unknown) => Promise<void>>()
       .mockResolvedValue(undefined)
-    const writeTextFileAtomic = vi
+    const writeAssistantStateText = vi
       .fn<(filePath: string, value: string) => Promise<void>>()
       .mockResolvedValue(undefined)
     const auditResult: AssistantStatePermissionAudit = {
@@ -238,40 +239,42 @@ describe('assistant shared helpers', () => {
       .mockResolvedValue(auditResult)
     const shared = await loadSharedModule({
       runtimeStateOverrides: {
-        appendTextFileWithMode,
+        appendAssistantStateText,
         auditAssistantStatePermissions,
-        ensureAssistantStateDirectory,
-        writeJsonFileAtomic,
-        writeTextFileAtomic,
+        ensureAssistantStateDir,
+        writeAssistantStateJson,
+        writeAssistantStateText,
       },
     })
 
-    await shared.ensureAssistantStateDirectory('/tmp/assistant-state')
+    const assistantStateRoot = '/tmp/vault/.runtime/operations/assistant'
+
+    await shared.ensureAssistantStateDirectory(assistantStateRoot)
     await expect(
       shared.auditAssistantStatePermissions({
         repair: true,
-        rootPath: '/tmp/assistant-state',
+        rootPath: assistantStateRoot,
       }),
     ).resolves.toEqual(auditResult)
-    await shared.appendTextFile('/tmp/assistant-state/events.jsonl', 'line\n')
-    await shared.writeJsonFileAtomic('/tmp/assistant-state/state.json', {
+    await shared.appendTextFile(`${assistantStateRoot}/events.jsonl`, 'line\n')
+    await shared.writeJsonFileAtomic(`${assistantStateRoot}/state.json`, {
       enabled: true,
     })
-    await shared.writeTextFileAtomic('/tmp/assistant-state/note.txt', 'hello')
+    await shared.writeTextFileAtomic(`${assistantStateRoot}/note.txt`, 'hello')
 
-    expect(ensureAssistantStateDirectory).toHaveBeenCalledWith('/tmp/assistant-state')
+    expect(ensureAssistantStateDir).toHaveBeenCalledWith(assistantStateRoot)
     expect(auditAssistantStatePermissions).toHaveBeenCalledWith({
       repair: true,
-      rootPath: '/tmp/assistant-state',
+      rootPath: assistantStateRoot,
     })
-    expect(appendTextFileWithMode).toHaveBeenCalledWith(
-      '/tmp/assistant-state/events.jsonl',
+    expect(appendAssistantStateText).toHaveBeenCalledWith(
+      `${assistantStateRoot}/events.jsonl`,
       'line\n',
     )
-    expect(writeJsonFileAtomic).toHaveBeenCalledWith('/tmp/assistant-state/state.json', {
+    expect(writeAssistantStateJson).toHaveBeenCalledWith(`${assistantStateRoot}/state.json`, {
       enabled: true,
     })
-    expect(writeTextFileAtomic).toHaveBeenCalledWith('/tmp/assistant-state/note.txt', 'hello')
+    expect(writeAssistantStateText).toHaveBeenCalledWith(`${assistantStateRoot}/note.txt`, 'hello')
   })
 })
 
@@ -282,16 +285,17 @@ async function createTempDirectory(prefix: string): Promise<string> {
 }
 
 async function loadSharedModule(input?: {
-  runtimeStateOverrides?: Partial<RuntimeStateNodeModule>
+  runtimeStateOverrides?: Partial<RuntimeStateAssistantFsModule>
 }): Promise<SharedModule> {
   vi.resetModules()
   vi.doUnmock('node:fs/promises')
   vi.doUnmock('@murphai/runtime-state/node')
+  vi.doUnmock('@murphai/runtime-state/node/assistant-state-fs')
 
   if (input?.runtimeStateOverrides) {
-    vi.doMock('@murphai/runtime-state/node', async () => {
-      const actual = await vi.importActual<RuntimeStateNodeModule>(
-        '@murphai/runtime-state/node',
+    vi.doMock('@murphai/runtime-state/node/assistant-state-fs', async () => {
+      const actual = await vi.importActual<RuntimeStateAssistantFsModule>(
+        '@murphai/runtime-state/node/assistant-state-fs',
       )
       return {
         ...actual,

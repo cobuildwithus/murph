@@ -1,8 +1,10 @@
 import { readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
-import { writeJsonFileAtomic } from "./atomic-write.ts";
-import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
+import {
+  ensureAssistantStateDir,
+  writeAssistantStateJson,
+} from "./assistant-state-fs.ts";
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -91,8 +93,8 @@ export async function writePendingAssistantUsageRecord(input: {
 }): Promise<void> {
   const paths = resolveAssistantUsagePaths(input.vault, input.paths);
   const record = parseAssistantUsageRecord(input.record);
-  await ensureAssistantStateDirectory(paths.usagePendingDirectory);
-  await writeJsonFileAtomic(
+  await ensureAssistantStateDir(paths.usagePendingDirectory);
+  await writeAssistantStateJson(
     resolvePendingAssistantUsagePath(paths, record.usageId),
     createVersionedJsonStateEnvelope({
       schema: ASSISTANT_USAGE_SCHEMA,

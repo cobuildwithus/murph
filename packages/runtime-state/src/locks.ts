@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  ensureAssistantStateDirectory,
+  resolveAssistantStateFileMode,
+} from "./assistant-state-security.ts";
 import { writeJsonFileAtomic } from "./atomic-write.ts";
 
 interface ProcessDirectoryLockState {
@@ -117,7 +121,7 @@ export async function acquireDirectoryLock<TMetadata>(
     };
   }
 
-  await mkdir(path.dirname(options.lockPath), { recursive: true });
+  await ensureAssistantStateDirectory(path.dirname(options.lockPath));
 
   while (true) {
     try {
@@ -225,7 +229,7 @@ async function publishDirectoryLock<TMetadata>(
     getRelativeMetadataPath(options.lockPath, options.metadataPath),
   );
 
-  await mkdir(tempLockPath);
+  await ensureAssistantStateDirectory(tempLockPath);
 
   try {
     await writeJsonFileAtomic(tempMetadataPath, options.metadata);
@@ -247,7 +251,11 @@ async function tryCleanupStaleLockDirectory<TMetadata>(
   const claimPath = path.join(options.lockPath, STALE_LOCK_CLAIM_FILE_NAME);
 
   try {
-    await writeFile(claimPath, buildClaimToken(), { flag: "wx", encoding: "utf8" });
+    await writeFile(claimPath, buildClaimToken(), {
+      flag: "wx",
+      encoding: "utf8",
+      mode: resolveAssistantStateFileMode(claimPath),
+    });
   } catch (error) {
     if (isErrnoException(error, "EEXIST") || isErrnoException(error, "ENOENT")) {
       return "retry";

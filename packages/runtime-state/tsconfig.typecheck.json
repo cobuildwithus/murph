@@ -13,6 +13,9 @@
       "@murphai/runtime-state/node/assistant-usage": [
         "./src/node/assistant-usage.ts"
       ],
+      "@murphai/runtime-state/node/assistant-state-fs": [
+        "./src/node/assistant-state-fs.ts"
+      ],
       "@murphai/runtime-state/node/hosted-bundle-codec": [
         "./src/node/hosted-bundle-codec.ts"
       ],

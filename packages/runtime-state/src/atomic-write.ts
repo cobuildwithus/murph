@@ -24,7 +24,10 @@ export async function writeTextFileAtomic(
   await ensureAssistantStateParentDirectory(filePath);
 
   try {
-    await writeFile(tempPath, normalizedValue, "utf8");
+    await writeFile(tempPath, normalizedValue, {
+      encoding: "utf8",
+      mode,
+    });
 
     if (typeof mode === "number") {
       await chmod(tempPath, mode);

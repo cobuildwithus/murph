@@ -1,9 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import {
-  appendTextFileWithMode as appendRuntimeTextFileWithMode,
+  appendAssistantStateText,
   auditAssistantStatePermissions as auditRuntimeAssistantStatePermissions,
-  ensureAssistantStateDirectory as ensureRuntimeAssistantStateDirectory,
+  ensureAssistantStateDir as ensureRuntimeAssistantStateDirectory,
   type AssistantStatePermissionAudit,
+  writeAssistantStateJson,
+  writeAssistantStateText,
+} from '@murphai/runtime-state/node/assistant-state-fs'
+import {
+  isAssistantStatePath,
   writeJsonFileAtomic as writeRuntimeJsonFileAtomic,
   writeTextFileAtomic as writeRuntimeTextFileAtomic,
 } from '@murphai/runtime-state/node'
@@ -200,13 +205,18 @@ export async function appendTextFile(
   filePath: string,
   value: string,
 ): Promise<void> {
-  await appendRuntimeTextFileWithMode(filePath, value)
+  await appendAssistantStateText(filePath, value)
 }
 
 export async function writeJsonFileAtomic(
   filePath: string,
   value: unknown,
 ): Promise<void> {
+  if (isAssistantStatePath(filePath)) {
+    await writeAssistantStateJson(filePath, value)
+    return
+  }
+
   await writeRuntimeJsonFileAtomic(filePath, value)
 }
 
@@ -214,5 +224,10 @@ export async function writeTextFileAtomic(
   filePath: string,
   value: string,
 ): Promise<void> {
+  if (isAssistantStatePath(filePath)) {
+    await writeAssistantStateText(filePath, value)
+    return
+  }
+
   await writeRuntimeTextFileAtomic(filePath, value)
 }

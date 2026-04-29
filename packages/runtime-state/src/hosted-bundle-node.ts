@@ -1,6 +1,10 @@
 import path from "node:path";
-import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 
+import {
+  ensureAssistantStateDirectory,
+  resolveAssistantStateRestoreMode,
+} from "./assistant-state-security.ts";
 import {
   assertHostedBundleArtifactIntegrity,
   HOSTED_BUNDLE_SCHEMA,
@@ -224,8 +228,6 @@ async function restoreHostedBundleArchiveFiles(input: {
         );
       }
 
-      await mkdir(path.dirname(absolutePath), { recursive: true });
-      await assertHostedBundleRestorePathHasNoSymlinks(root, absolutePath, file.path);
       const resolved = await input.artifactResolver({
         path: file.path,
         ref: file.artifact,
@@ -238,17 +240,92 @@ async function restoreHostedBundleArchiveFiles(input: {
         ref: file.artifact,
         root: file.root,
       });
-      await writeFile(
+      await writeHostedBundleRestoredFile({
         absolutePath,
-        Buffer.from(resolvedBytes),
-      );
+        bytes: Buffer.from(resolvedBytes),
+        mappedRoot: root,
+        path: file.path,
+        root: file.root,
+      });
       continue;
     }
 
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await assertHostedBundleRestorePathHasNoSymlinks(root, absolutePath, file.path);
-    await writeFile(absolutePath, Buffer.from(file.contentsBase64, "base64"));
+    await writeHostedBundleRestoredFile({
+      absolutePath,
+      bytes: Buffer.from(file.contentsBase64, "base64"),
+      mappedRoot: root,
+      path: file.path,
+      root: file.root,
+    });
   }
+}
+
+async function writeHostedBundleRestoredFile(input: {
+  absolutePath: string;
+  bytes: Buffer;
+  mappedRoot: string;
+  path: string;
+  root: string;
+}): Promise<void> {
+  await ensureHostedBundleRestoreParentDirectory(input);
+  await assertHostedBundleRestorePathHasNoSymlinks(input.mappedRoot, input.absolutePath, input.path);
+  await writeFile(input.absolutePath, input.bytes, {
+    mode: resolveHostedBundleRestoreMode({
+      kind: "file",
+      path: input.path,
+      root: input.root,
+    }),
+  });
+  await chmodHostedBundleRestoredFile(input);
+}
+
+async function ensureHostedBundleRestoreParentDirectory(input: {
+  absolutePath: string;
+  path: string;
+  root: string;
+}): Promise<void> {
+  const directoryPath = path.dirname(input.absolutePath);
+  const mode = resolveHostedBundleRestoreMode({
+    kind: "directory",
+    path: path.posix.dirname(input.path),
+    root: input.root,
+  });
+
+  if (typeof mode === "number") {
+    await ensureAssistantStateDirectory(directoryPath);
+    await chmod(directoryPath, mode);
+    return;
+  }
+
+  await mkdir(directoryPath, { recursive: true });
+}
+
+async function chmodHostedBundleRestoredFile(input: {
+  absolutePath: string;
+  path: string;
+  root: string;
+}): Promise<void> {
+  const mode = resolveHostedBundleRestoreMode({
+    kind: "file",
+    path: input.path,
+    root: input.root,
+  });
+
+  if (typeof mode === "number") {
+    await chmod(input.absolutePath, mode);
+  }
+}
+
+function resolveHostedBundleRestoreMode(input: {
+  kind: "directory" | "file";
+  path: string;
+  root: string;
+}): number | undefined {
+  return resolveAssistantStateRestoreMode({
+    kind: input.kind,
+    relativePath: input.path,
+    root: input.root,
+  });
 }
 
 async function collectBundleFiles(input: {

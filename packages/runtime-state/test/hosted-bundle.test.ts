@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
@@ -23,6 +23,8 @@ import {
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   resolveAssistantStatePaths,
+  ASSISTANT_STATE_DIRECTORY_MODE,
+  ASSISTANT_STATE_FILE_MODE,
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
@@ -491,6 +493,71 @@ test("hosted bundle node helpers cover preserved artifacts, ignored roots, and r
   }
 });
 
+test("hosted bundle restore makes assistant runtime inline files private under permissive umask", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-bundle-assistant-modes-"));
+  const previousUmask = process.umask(0o000);
+
+  try {
+    const restoreRoot = path.join(workspaceRoot, "restore");
+    await restoreHostedBundleRoots({
+      bytes: inlineBundleBytes(
+        ".runtime/operations/assistant/state/sessions/asst_123/session.json",
+        "vault",
+        "{\"ok\":true}\n",
+      ),
+      expectedKind: "vault",
+      roots: {
+        vault: restoreRoot,
+      },
+    });
+
+    const assistantRoot = path.join(restoreRoot, ".runtime", "operations", "assistant");
+    const sessionsDirectory = path.join(assistantRoot, "state", "sessions", "asst_123");
+    const sessionPath = path.join(sessionsDirectory, "session.json");
+
+    assert.equal((await lstat(assistantRoot)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(sessionsDirectory)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(sessionPath)).mode & 0o777, ASSISTANT_STATE_FILE_MODE);
+    assert.equal(await readFile(sessionPath, "utf8"), "{\"ok\":true}\n");
+  } finally {
+    process.umask(previousUmask);
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted artifact materialization makes assistant runtime artifact files private", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-bundle-assistant-artifact-modes-"));
+  const previousUmask = process.umask(0o000);
+
+  try {
+    const assistantArtifactPath = ".runtime/operations/assistant/usage/pending/usage_123.json";
+
+    await materializeHostedExecutionArtifacts({
+      artifactResolver: async () => Uint8Array.from(Buffer.from("{\"usage\":true}\n")),
+      bundle: artifactBundleBytes(assistantArtifactPath, "vault", "{\"usage\":true}\n"),
+      workspaceRoot,
+    });
+
+    const pendingDirectory = path.join(
+      workspaceRoot,
+      "vault",
+      ".runtime",
+      "operations",
+      "assistant",
+      "usage",
+      "pending",
+    );
+    const artifactPath = path.join(pendingDirectory, "usage_123.json");
+
+    assert.equal((await lstat(pendingDirectory)).mode & 0o777, ASSISTANT_STATE_DIRECTORY_MODE);
+    assert.equal((await lstat(artifactPath)).mode & 0o777, ASSISTANT_STATE_FILE_MODE);
+    assert.equal(await readFile(artifactPath, "utf8"), "{\"usage\":true}\n");
+  } finally {
+    process.umask(previousUmask);
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
 test("hosted execution snapshots do not resurrect deleted materialized preserved artifacts", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-preserved-delete-"));
   const artifacts = new Map<string, Uint8Array>();
@@ -950,12 +1017,12 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         root: "vault",
       },
       {
-        expected: "{\"version\":1,\"connectors\":[]}\n",
+        expected: null,
         path: ".runtime/operations/inbox/config.json",
         root: "vault",
       },
       {
-        expected: "{\"running\":false}\n",
+        expected: null,
         path: ".runtime/operations/inbox/state.json",
         root: "vault",
       },
@@ -1170,13 +1237,11 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "device-sync", "stdout.log"), "utf8"),
     );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "config.json"), "utf8"),
-      "{\"version\":1,\"connectors\":[]}\n",
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "config.json"), "utf8"),
     );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "state.json"), "utf8"),
-      "{\"running\":false}\n",
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "state.json"), "utf8"),
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "inbox", "secrets", "token.json"), "utf8"),

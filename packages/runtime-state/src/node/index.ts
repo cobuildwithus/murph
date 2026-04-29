@@ -20,6 +20,7 @@ export {
   type HostedBundleArtifactRef,
 } from "../hosted-bundle.ts";
 export * from "../hosted-bundle-node.ts";
+export * from "../assistant-state-fs.ts";
 export * from "../assistant-state-security.ts";
 export * from "../assistant-state.ts";
 export * from "../assistant-usage.ts";

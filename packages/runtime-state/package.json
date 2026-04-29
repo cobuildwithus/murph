@@ -31,6 +31,10 @@
       "types": "./dist/node/assistant-usage.d.ts",
       "default": "./dist/node/assistant-usage.js"
     },
+    "./node/assistant-state-fs": {
+      "types": "./dist/node/assistant-state-fs.d.ts",
+      "default": "./dist/node/assistant-state-fs.js"
+    },
     "./node/hosted-bundle-codec": {
       "types": "./dist/node/hosted-bundle-codec.d.ts",
       "default": "./dist/node/hosted-bundle-codec.js"
