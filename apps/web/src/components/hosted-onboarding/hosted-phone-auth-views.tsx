@@ -21,6 +21,7 @@ import type {
 interface SharedFlowProps {
   activeAttempt: HostedPhoneVerificationAttempt | null;
   code: string;
+  disableSignup?: boolean;
   disabled: boolean;
   intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
@@ -106,6 +107,7 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
       <HostedCodeEntryStep
         verificationPhoneNumberHint={props.activeAttempt.maskedPhoneNumber}
         code={props.code}
+        disableSignup={props.disableSignup}
         disabled={props.disabled}
         intent={props.intent}
         pendingAction={props.pendingAction}

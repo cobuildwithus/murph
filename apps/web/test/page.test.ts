@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
       authenticated: boolean;
       context: "nav" | "hero" | "footer";
       authLabel: string;
+      signupLabel?: string;
+      splitUnauthenticated?: boolean;
     }) =>
       createElement(
         "div",
@@ -20,6 +22,11 @@ const mocks = vi.hoisted(() => ({
           ),
           "data-root-landing-auth-actions-context": props.context,
           "data-root-landing-auth-actions-label": props.authLabel,
+          "data-root-landing-auth-actions-signup-label":
+            props.signupLabel ?? "",
+          "data-root-landing-auth-actions-split": String(
+            props.splitUnauthenticated ?? false,
+          ),
         },
         "Landing auth actions"
       )
@@ -90,7 +97,9 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "footer",
-      authLabel: "Get started",
+      authLabel: "Signup",
+      signupLabel: "Signup",
+      splitUnauthenticated: true,
     },
     undefined
   );
@@ -120,7 +129,8 @@ test("HomePage renders the canonical landing page at the root route", async () =
     /data-root-landing-auth-actions-label="See what works for your body"/
   );
   assert.match(markup, /Discover what actually makes you healthier\./);
-  assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
+  assert.match(markup, /data-root-landing-auth-actions-label="Signup"/);
+  assert.match(markup, /data-root-landing-auth-actions-split="true"/);
   assert.match(
     markup,
     /data-root-landing-auth-actions-label="Start your first experiment"/
@@ -185,6 +195,8 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
       authenticated: true,
       context: "footer",
       authLabel: "Open settings",
+      signupLabel: "Open settings",
+      splitUnauthenticated: true,
     },
     undefined
   );

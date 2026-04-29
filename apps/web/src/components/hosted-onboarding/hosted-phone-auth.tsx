@@ -11,6 +11,7 @@ import { HostedPrivyCaptcha } from "./hosted-privy-captcha";
 import type { HostedPhoneAuthIntent, HostedPhoneLinkPayload } from "./hosted-phone-auth-types";
 
 interface HostedPhoneAuthProps {
+  disableSignup?: boolean;
   intent?: HostedPhoneAuthIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
@@ -21,6 +22,7 @@ interface HostedPhoneAuthProps {
 }
 
 export function HostedPhoneAuth({
+  disableSignup = false,
   intent = "auth",
   onCompleted,
   onLinked,
@@ -30,6 +32,7 @@ export function HostedPhoneAuth({
   suppressAuthenticatedSessionIssue = false,
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
+    disableSignup,
     intent,
     onCompleted,
     onLinked,

@@ -226,6 +226,7 @@ export function HostedPhoneEntryStep({
 export function HostedCodeEntryStep({
   verificationPhoneNumberHint,
   code,
+  disableSignup = false,
   disabled,
   intent,
   pendingAction,
@@ -237,6 +238,7 @@ export function HostedCodeEntryStep({
 }: {
   verificationPhoneNumberHint: string;
   code: string;
+  disableSignup?: boolean;
   disabled: boolean;
   intent: HostedPhoneAuthIntent;
   pendingAction: HostedPhoneAuthPendingAction;
@@ -249,11 +251,11 @@ export function HostedCodeEntryStep({
   return (
     <HostedVerificationCodeStep
       code={code}
-      description={`We texted the latest ${
-        intent === "link"
-          ? "verification code"
-          : "code"
-      } to ${verificationPhoneNumberHint}.`}
+      description={resolveHostedPhoneCodeEntryDescription({
+        disableSignup,
+        intent,
+        verificationPhoneNumberHint,
+      })}
       disabled={disabled}
       pendingAction={
         pendingAction === "send-code" || pendingAction === "verify-code"
@@ -283,4 +285,24 @@ export function HostedCodeEntryStep({
       onSubmit={onVerifyCode}
     />
   );
+}
+
+function resolveHostedPhoneCodeEntryDescription({
+  disableSignup,
+  intent,
+  verificationPhoneNumberHint,
+}: {
+  disableSignup: boolean;
+  intent: HostedPhoneAuthIntent;
+  verificationPhoneNumberHint: string;
+}) {
+  if (intent === "link") {
+    return `We texted the latest verification code to ${verificationPhoneNumberHint}.`;
+  }
+
+  if (disableSignup) {
+    return `If an account exists for ${verificationPhoneNumberHint}, we texted the latest code there.`;
+  }
+
+  return `We texted the latest code to ${verificationPhoneNumberHint}.`;
 }

@@ -252,6 +252,175 @@ describe("HostedPhoneAuth", () => {
     assert.notEqual(phoneIds[0], phoneIds[1]);
   });
 
+  it("passes no-signup mode to Privy when requesting a public login SMS code", async () => {
+    vi.resetModules();
+    vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+      HostedPhoneAuthFlow(props: {
+        activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null;
+        code: string;
+        onCodeChange: (value: string) => void;
+        onPhoneNumberChange: (value: string) => void;
+        onVerifyCode: () => void;
+        phoneNumber: string;
+        sendCodeDisabled: boolean;
+        onSubmitPhoneEntry: (event?: React.FormEvent<HTMLFormElement>) => void;
+      }) {
+        return React.createElement(
+          "div",
+          {
+            "data-active-attempt": props.activeAttempt?.maskedPhoneNumber ?? "",
+            "data-phone-number": props.phoneNumber,
+            "data-send-disabled": props.sendCodeDisabled ? "yes" : "no",
+          },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-set-phone": "true",
+              onClick: () => props.onPhoneNumberChange("4155552671"),
+            },
+            "Set phone",
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              "data-send-code": "true",
+              disabled: props.sendCodeDisabled,
+              onClick: () => props.onSubmitPhoneEntry(),
+            },
+            "Text me a code",
+          ),
+          props.activeAttempt
+            ? React.createElement(
+                React.Fragment,
+                null,
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    "data-enter-code": "true",
+                    onClick: () => props.onCodeChange("123456"),
+                  },
+                  "Enter code",
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    "data-verify-code": "true",
+                    onClick: props.onVerifyCode,
+                  },
+                  "Verify phone",
+                ),
+              )
+            : null,
+        );
+      },
+      HostedPhoneAuthScaffold({
+        children,
+        errorMessage,
+      }: {
+        children: React.ReactNode;
+        errorMessage: string | null;
+      }) {
+        return React.createElement(
+          React.Fragment,
+          null,
+          errorMessage ? React.createElement("p", null, errorMessage) : null,
+          children,
+        );
+      },
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/hosted-privy-captcha", () => ({
+      HostedPrivyCaptcha() {
+        return React.createElement("div", { "data-privy-captcha": "mounted" });
+      },
+    }));
+    mocks.sendCode.mockRejectedValueOnce(new Error("No account for this phone"));
+
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { cleanup, container } = await renderClientComponent(
+      React.createElement(HostedPhoneAuth, {
+        disableSignup: true,
+      }),
+    );
+
+    try {
+      const setPhoneButton = container.querySelector(
+        "[data-set-phone]",
+      ) as HTMLButtonElement | null;
+      const sendCodeButton = container.querySelector(
+        "[data-send-code]",
+      ) as HTMLButtonElement | null;
+      assert.ok(setPhoneButton);
+      assert.ok(sendCodeButton);
+
+      await act(async () => {
+        setPhoneButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+      assert.equal(
+        container.querySelector("[data-phone-number]")?.getAttribute("data-phone-number"),
+        "4155552671",
+      );
+      assert.equal(
+        container.querySelector("[data-phone-number]")?.getAttribute("data-send-disabled"),
+        "no",
+      );
+
+      await act(async () => {
+        sendCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.sendCode).toHaveBeenCalledWith({
+        phoneNumber: "+14155552671",
+        disableSignup: true,
+      });
+      assert.equal(
+        container.querySelector("[data-active-attempt]")?.getAttribute("data-active-attempt"),
+        "*** 2671",
+      );
+      assert.doesNotMatch(
+        container.textContent ?? "",
+        /No account for this phone/,
+      );
+
+      mocks.loginWithCode.mockRejectedValueOnce(new Error("No account for this phone"));
+      const enterCodeButton = container.querySelector(
+        "[data-enter-code]",
+      ) as HTMLButtonElement | null;
+      const verifyCodeButton = container.querySelector(
+        "[data-verify-code]",
+      ) as HTMLButtonElement | null;
+      assert.ok(enterCodeButton);
+      assert.ok(verifyCodeButton);
+
+      await act(async () => {
+        enterCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+
+      await act(async () => {
+        verifyCodeButton.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.loginWithCode).toHaveBeenCalledWith({
+        code: "123456",
+      });
+      assert.match(container.textContent ?? "", /We could not verify that code\./);
+      assert.doesNotMatch(
+        container.textContent ?? "",
+        /No account for this phone/,
+      );
+    } finally {
+      await cleanup();
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+      vi.doUnmock("@/src/components/hosted-onboarding/hosted-privy-captcha");
+      vi.resetModules();
+    }
+  });
+
   it("renders the explicit manual-resume banner for authenticated invite sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
@@ -356,6 +525,44 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /autofocus=""/);
     assert.match(markup, /class="[^"]*h-12[^"]*text-lg[^"]*"/);
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
+  });
+
+  it("uses neutral code-entry copy for no-signup public login phone checks", async () => {
+    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuthFlow, {
+        activeAttempt: {
+          maskedPhoneNumber: "*** 2671",
+          phoneNumber: "+14155552671",
+        },
+        code: "",
+        disableSignup: true,
+        disabled: false,
+        intent: "auth",
+        pendingAction: null,
+        phoneFieldDescription: null,
+        phoneFieldLabel: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "",
+        sendCodeDisabled: false,
+        secondaryActionSize: "sm",
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSubmitPhoneEntry() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /If an account exists for \*\*\* 2671, we texted the latest code there\./,
+    );
+    assert.doesNotMatch(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
   it("disables invite manual-entry send-code submit until the phone number is valid", async () => {

@@ -27,9 +27,11 @@ import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 
 export function HostedEmailAuthButton({
   active = false,
+  disableSignup = false,
   onActivate,
 }: {
   active?: boolean;
+  disableSignup?: boolean;
   onActivate: () => void;
 }) {
   const { createWallet } = useCreateWallet();
@@ -81,7 +83,7 @@ export function HostedEmailAuthButton({
     }
 
     try {
-      await sendCode({ email: nextEmailAddress });
+      await sendEmailCode(nextEmailAddress);
       setPendingEmailAddress(nextEmailAddress);
       setCode("");
     } catch (error) {
@@ -103,7 +105,7 @@ export function HostedEmailAuthButton({
     setErrorMessage(null);
 
     try {
-      await sendCode({ email: pendingEmailAddress });
+      await sendEmailCode(pendingEmailAddress);
     } catch (error) {
       setErrorMessage(
         toErrorMessage(
@@ -111,6 +113,19 @@ export function HostedEmailAuthButton({
           "We could not send a verification code to that email address.",
         ),
       );
+    }
+  }
+
+  async function sendEmailCode(nextEmailAddress: string) {
+    try {
+      await sendCode({
+        email: nextEmailAddress,
+        ...(disableSignup ? { disableSignup: true } : {}),
+      });
+    } catch (error) {
+      if (!disableSignup) {
+        throw error;
+      }
     }
   }
 
@@ -142,10 +157,12 @@ export function HostedEmailAuthButton({
       window.location.assign(result.redirectUrl);
     } catch (error) {
       setErrorMessage(
-        toErrorMessage(
-          error,
-          "We could not verify that code.",
-        ),
+        disableSignup
+          ? "We could not verify that code."
+          : toErrorMessage(
+              error,
+              "We could not verify that code.",
+            ),
       );
       setRedirectPending(false);
     }
@@ -174,7 +191,11 @@ export function HostedEmailAuthButton({
           {showCodeEntry ? (
             <HostedVerificationCodeStep
               code={code}
-              description={`We emailed the latest code to ${pendingEmailAddress}.`}
+              description={
+                disableSignup
+                  ? `If an account exists for ${pendingEmailAddress}, we emailed the latest code there.`
+                  : `We emailed the latest code to ${pendingEmailAddress}.`
+              }
               disabled={disabled}
               inputRef={codeInputRef}
               pendingAction={loading ? "verify-code" : null}
