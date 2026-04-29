@@ -212,17 +212,17 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Self-Reported Mood")?.description,
     ).toBe(
-      "Use the same 0–10 or 1–5 scale before the session and again 30–180 minutes after. Acute mood is the most defensible first-run target, but it remains short-horizon and source-limited. Source basis: source_artifact:doi-10.1002-lim2.53, source_artifact:doi-10.1002-lim2.70044, source_artifact:doi-10.1002-lim2.70048, source_artifact:pmid-37866096.",
+      "Use the same 0–10 or 1–5 scale before the session and again 30–180 minutes after. Acute mood is the most defensible first-run target, but it remains short-horizon and source-limited.",
     );
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "HRV / RMSSD")?.description,
     ).toBe(
-      "Track HRV as recovery/autonomic context only; acute cold and post-exercise CWI can shift autonomic signals, but HRV is not a direct wellness benefit verdict. Source basis: source_artifact:pmid-39918163, source_artifact:pmid-25437181.",
+      "Track HRV as recovery/autonomic context only; acute cold and post-exercise CWI can shift autonomic signals, but HRV is not a direct wellness benefit verdict.",
     );
     expect(
       protocol?.expectedSignals.find((signal) => signal.label === "Resting Heart Rate")?.description,
     ).toBe(
-      "Track resting heart rate for recovery strain and context. Direct repeated-CWI cardiovascular findings are small and unclear, so avoid calling a change a benefit without the full context. Source basis: source_artifact:pmid-37711459, source_artifact:pmid-8891513.",
+      "Track resting heart rate for recovery strain and context. Direct repeated-CWI cardiovascular findings are small and unclear, so avoid calling a change a benefit without the full context.",
     );
   });
 
