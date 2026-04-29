@@ -154,7 +154,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
         payload: {
           acknowledgedIrreversibleDeletion: true,
           acknowledgedProviderAndBackupLimits: true,
-          confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+          confirmationPhrase,
           secondConfirmationAccepted: true,
         },
         url: "/api/settings/privacy/delete",
@@ -544,7 +544,7 @@ function formatCloudflareCleanupResult(result: CloudflareCleanupSummary): string
 
   const r2Count = result.r2DeletedObjectCount ?? 0;
   if (result.deleted) {
-    return `completed (${r2Count} R2 deletion attempts)`;
+    return `completed (${r2Count} R2 object${r2Count === 1 ? "" : "s"} deleted)`;
   }
 
   const details = [

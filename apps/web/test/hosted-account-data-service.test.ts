@@ -37,6 +37,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_ai_usage",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_invite",
+  "prisma.hosted_consent_event",
+  "prisma.hosted_consent_grant",
   "prisma.device_connection",
   "prisma.device_token_audit",
   "prisma.device_sync_signal",
@@ -355,6 +357,22 @@ describe("buildHostedDataExport", () => {
           },
         ],
       },
+      consent: {
+        events: [
+          {
+            action: "accepted",
+            scope: "launch.required",
+            source: "settings",
+          },
+        ],
+        grants: [
+          {
+            scope: "launch.required",
+            source: "settings",
+            status: "granted",
+          },
+        ],
+      },
       vault: {
         workspace: {
           browserVaultReplicaRefPresent: true,
@@ -394,6 +412,11 @@ describe("buildHostedDataExport", () => {
                   ],
                 }),
                 phoneLookupKeyOmitted: true,
+              }),
+              authPayload: expect.objectContaining({
+                accessTokenEncryptedOmitted: true,
+                apiKeyEnvOmitted: true,
+                credentialIdOmitted: true,
               }),
             }),
           },
@@ -447,6 +470,9 @@ describe("buildHostedDataExport", () => {
     expect(serialized).not.toContain("secret-media-download-url");
     expect(serialized).not.toContain("secret-media-download-url-2");
     expect(serialized).not.toContain("secret-media-object-key");
+    expect(serialized).not.toContain("secret-access-token-encrypted");
+    expect(serialized).not.toContain("SECRET_MAILBOX_API_KEY_ENV");
+    expect(serialized).not.toContain("secret-credential-id");
   });
 });
 
@@ -482,6 +508,11 @@ function createHostedAccountDataExportPrisma() {
         phoneLookupKey: "secret-phone-lookup-key",
       },
       occurredAt: "2026-04-27T00:24:30.000Z",
+      authPayload: {
+        accessTokenEncrypted: "secret-access-token-encrypted",
+        apiKeyEnv: "SECRET_MAILBOX_API_KEY_ENV",
+        credentialId: "secret-credential-id",
+      },
       userId: memberId,
     }),
   });
@@ -689,6 +720,46 @@ function createHostedAccountDataExportPrisma() {
           triggerKind: "manual",
           turnId: "turn-1",
           updatedAt: new Date("2026-04-27T00:24:00.000Z"),
+        },
+      ],
+    },
+    hostedConsentEvent: {
+      count,
+      findMany: async () => [
+        {
+          action: "accepted",
+          createdAt: new Date("2026-04-27T00:18:30.000Z"),
+          documentVersionsJson: {
+            privacy: "2026-04-24",
+            terms: "2026-04-24",
+          },
+          id: "consent-event-1",
+          memberId,
+          metadataJson: {
+            surface: "settings",
+          },
+          scope: "launch.required",
+          source: "settings",
+        },
+      ],
+    },
+    hostedConsentGrant: {
+      count,
+      findMany: async () => [
+        {
+          createdAt: new Date("2026-04-27T00:18:30.000Z"),
+          documentVersionsJson: {
+            privacy: "2026-04-24",
+            terms: "2026-04-24",
+          },
+          grantedAt: new Date("2026-04-27T00:18:30.000Z"),
+          lastEventId: "consent-event-1",
+          memberId,
+          revokedAt: null,
+          scope: "launch.required",
+          source: "settings",
+          status: "granted",
+          updatedAt: new Date("2026-04-27T00:18:31.000Z"),
         },
       ],
     },

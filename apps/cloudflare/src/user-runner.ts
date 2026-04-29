@@ -30,6 +30,7 @@ import type { HostedExecutionEnvironment } from "./env.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
   createHostedUserKeyStoreFromEnvironment,
+  HostedUserCryptoRepairNeededError,
   type HostedUserCryptoContext,
   type HostedUserKeyAuditRecord,
 } from "./user-key-store.js";
@@ -567,42 +568,51 @@ export class HostedUserRunner {
         reason: "account-data-deletion",
       });
     } catch (error) {
+      if (!(error instanceof HostedUserCryptoRepairNeededError)) {
+        throw error;
+      }
       userScopedSkipReason = error instanceof Error && error.name ? error.name : "UnknownError";
     }
 
     let deletedObjectCount = 0;
+    let deletedRootKeyEnvelope = false;
     if (userCrypto) {
-      const prefixes = [
-        await hostedBundleUserPrefix(userCrypto.rootKey, userId),
-        await hostedArtifactUserPrefix(userCrypto.rootKey, userId),
-        await hostedBrowserVaultReplicaUserPrefix({
-          rootKey: userCrypto.rootKey,
+      if (supportsPrefixDeletion) {
+        const prefixes = [
+          await hostedBundleUserPrefix(userCrypto.rootKey, userId),
+          await hostedArtifactUserPrefix(userCrypto.rootKey, userId),
+          await hostedBrowserVaultReplicaUserPrefix({
+            rootKey: userCrypto.rootKey,
+            userId,
+          }),
+        ];
+        for (const prefix of prefixes) {
+          deletedObjectCount += (await deleteR2ObjectsWithPrefix(this.bucket, prefix)).deletedCount;
+        }
+
+        deletedObjectCount += (await deleteR2ObjectIfSupported(
+          this.bucket,
+          await hostedRunnerSecretsObjectKey(userCrypto.rootKey, userId),
+        )).deletedCount;
+
+        const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
+          this.env.platformEnvelopeKey,
           userId,
-        }),
-      ];
-      for (const prefix of prefixes) {
-        deletedObjectCount += (await deleteR2ObjectsWithPrefix(this.bucket, prefix)).deletedCount;
+        );
+        const rootKeyEnvelopeDeletion = await deleteR2ObjectIfSupported(this.bucket, rootEnvelopeKey);
+        deletedObjectCount += rootKeyEnvelopeDeletion.deletedCount;
+        deletedRootKeyEnvelope = rootKeyEnvelopeDeletion.deleted;
+      } else {
+        userScopedSkipReason = "R2PrefixDeletionUnsupported";
       }
-
-      deletedObjectCount += (await deleteR2ObjectIfSupported(
-        this.bucket,
-        await hostedRunnerSecretsObjectKey(userCrypto.rootKey, userId),
-      )).deletedCount;
     }
-
-    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
-      this.env.platformEnvelopeKey,
-      userId,
-    );
-    const rootKeyEnvelopeDeletion = await deleteR2ObjectIfSupported(this.bucket, rootEnvelopeKey);
-    deletedObjectCount += rootKeyEnvelopeDeletion.deletedCount;
 
     return {
       deletedObjectCount,
-      deletedRootKeyEnvelope: rootKeyEnvelopeDeletion.deleted,
-      skippedUserScopedPrefixes: userCrypto === null,
+      deletedRootKeyEnvelope,
+      skippedUserScopedPrefixes: userCrypto === null || !supportsPrefixDeletion,
       supported: supportsObjectDeletion && (userCrypto === null || supportsPrefixDeletion),
-      userScopedSkipReason: userCrypto === null ? userScopedSkipReason : null,
+      userScopedSkipReason: userCrypto === null || !supportsPrefixDeletion ? userScopedSkipReason : null,
     };
   }
 

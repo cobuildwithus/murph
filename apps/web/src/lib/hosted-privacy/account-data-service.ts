@@ -148,6 +148,20 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes invite codes and channel metadata owned by the member.",
   },
   {
+    slug: "prisma.hosted_consent_event",
+    label: "Hosted consent event records",
+    deletion: "live-delete",
+    export: "decoded-redacted-data",
+    note: "Deletes member-scoped consent audit events before the member row; export includes scope/action/version metadata without secrets.",
+  },
+  {
+    slug: "prisma.hosted_consent_grant",
+    label: "Hosted consent grant records",
+    deletion: "live-delete",
+    export: "decoded-redacted-data",
+    note: "Deletes the member's current consent grants before the member row; export includes scope/status/version metadata.",
+  },
+  {
     slug: "prisma.device_connection",
     label: "Device provider connections and tokens",
     deletion: "live-delete",
@@ -437,6 +451,17 @@ const HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_SUFFIXES = [
   "token",
   "url",
 ] as const;
+const HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_MARKERS = [
+  "apikey",
+  "authorization",
+  "blindindex",
+  "credential",
+  "lookupkey",
+  "password",
+  "rawmessagekey",
+  "secret",
+  "token",
+] as const;
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Live Prisma, hosted mailbox, vault sync, device, runtime, and workspace rows are deleted immediately by this workflow.",
@@ -670,6 +695,8 @@ export async function buildHostedDataExport(input: {
     workspace,
     runtimeLogs,
     invites,
+    consentEvents,
+    consentGrants,
     vaultSyncSessions,
     aiUsage,
     linqDailyStates,
@@ -847,6 +874,36 @@ export async function buildHostedDataExport(input: {
       },
       where: { memberId },
     }),
+    prisma.hostedConsentEvent.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        action: true,
+        createdAt: true,
+        documentVersionsJson: true,
+        id: true,
+        memberId: true,
+        metadataJson: true,
+        scope: true,
+        source: true,
+      },
+      where: { memberId },
+    }),
+    prisma.hostedConsentGrant.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: {
+        createdAt: true,
+        documentVersionsJson: true,
+        grantedAt: true,
+        lastEventId: true,
+        memberId: true,
+        revokedAt: true,
+        scope: true,
+        source: true,
+        status: true,
+        updatedAt: true,
+      },
+      where: { memberId },
+    }),
     prisma.hostedVaultSyncSession.findMany({
       orderBy: { createdAt: "desc" },
       select: {
@@ -952,6 +1009,10 @@ export async function buildHostedDataExport(input: {
       redactions: HOSTED_DATA_EXPORT_REDACTIONS,
     },
     account: projectAccountSnapshotForExport(memberSnapshot),
+    consent: {
+      events: consentEvents,
+      grants: consentGrants,
+    },
     messaging: {
       invites: invites.map((invite) => ({
         channel: invite.channel,
@@ -1204,7 +1265,8 @@ function shouldOmitHostedMailboxPayloadKey(key: string): boolean {
   const normalized = key.replace(/[-_\s]/gu, "").toLowerCase();
 
   return HOSTED_DATA_EXPORT_MAILBOX_OMITTED_PAYLOAD_KEYS.has(normalized)
-    || HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+    || HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix))
+    || HOSTED_DATA_EXPORT_MAILBOX_OMITTED_KEY_MARKERS.some((marker) => normalized.includes(marker));
 }
 
 function toExportRecord(value: object): HostedDataExportJsonRecord {
@@ -1330,6 +1392,8 @@ async function countHostedAccountData(input: {
     hostedWorkspace,
     hostedRuntimeLog,
     hostedInvite,
+    hostedConsentEvent,
+    hostedConsentGrant,
     hostedVaultSyncSession,
     hostedVaultSyncPayload,
     hostedAiUsage,
@@ -1354,6 +1418,8 @@ async function countHostedAccountData(input: {
     input.prisma.hostedWorkspace.count({ where: { userId: memberId } }),
     input.prisma.hostedRuntimeLog.count({ where: { userId: memberId } }),
     input.prisma.hostedInvite.count({ where: { memberId } }),
+    input.prisma.hostedConsentEvent.count({ where: { memberId } }),
+    input.prisma.hostedConsentGrant.count({ where: { memberId } }),
     input.prisma.hostedVaultSyncSession.count({ where: { memberId } }),
     input.prisma.hostedVaultSyncPayload.count({ where: { memberId } }),
     input.prisma.hostedAiUsage.count({ where: { memberId } }),
@@ -1377,6 +1443,8 @@ async function countHostedAccountData(input: {
     "prisma.device_token_audit": deviceTokenAudit,
     "prisma.device_webhook_trace": deviceWebhookTrace,
     "prisma.hosted_ai_usage": hostedAiUsage,
+    "prisma.hosted_consent_event": hostedConsentEvent,
+    "prisma.hosted_consent_grant": hostedConsentGrant,
     "prisma.hosted_invite": hostedInvite,
     "prisma.hosted_linq_daily_state": hostedLinqDailyState,
     "prisma.hosted_mailbox_item": hostedMailboxItem,
@@ -1415,6 +1483,8 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId } }));
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId } }));
+  record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId } }));
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberId } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId } }));

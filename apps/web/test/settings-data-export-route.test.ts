@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   prismaClient: {
     label: "test-prisma",
   },
-  requireActivePrivyMemberAuth: vi.fn(),
+  requirePrivyMemberAuth: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -20,7 +20,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
+  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
@@ -45,7 +45,7 @@ describe("settings data export route", () => {
       acknowledgedSensitiveDownload: true,
       confirmationText: "EXPORT MY DATA",
     });
-    mocks.requireActivePrivyMemberAuth.mockResolvedValue({
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
       },
@@ -70,7 +70,7 @@ describe("settings data export route", () => {
       },
     });
     expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
-    expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.requirePrivyMemberAuth).not.toHaveBeenCalled();
   });
 
   it("requires same-origin member auth and returns a no-store JSON attachment", async () => {
@@ -98,7 +98,7 @@ describe("settings data export route", () => {
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request), mocks.prismaClient);
+    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request), mocks.prismaClient);
     expect(mocks.parseHostedDataExportRequest).toHaveBeenCalledWith({
       acknowledgedSensitiveDownload: true,
       confirmationText: "EXPORT MY DATA",
