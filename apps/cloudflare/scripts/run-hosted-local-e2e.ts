@@ -6,6 +6,7 @@ import {
 } from "../../../scripts/dev-hosted-local/runtime.ts";
 
 const hostedLocalFullStackE2eFiles = [
+  "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-linq-first-contact-e2e.test.ts",
   "apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts",
