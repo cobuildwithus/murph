@@ -170,12 +170,3 @@ export type AssistantProviderTurnAttemptResult =
       ok: false
       providerContinuation?: AssistantProviderContinuation
     }
-
-export interface AssistantProviderDefinition {
-  capabilities: AssistantProviderCapabilities
-  executeTurn(
-    input: AssistantProviderTurnExecutionInput,
-  ): Promise<AssistantProviderTurnAttemptResult>
-  resolveLabel(config: AssistantProviderConfig): string
-  resolveStaticModels(config: AssistantProviderConfig): readonly AssistantCatalogModel[]
-}

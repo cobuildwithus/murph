@@ -8,9 +8,9 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { StickyNav } from "../sticky-nav";
 
 const SECURITY_METADATA_DESCRIPTION =
-  "How Murph keeps your health data yours. Hosted architecture, encryption, auth, and the local self-hosted lane.";
+  "How Murph protects hosted and local health data. Hosted architecture, encryption, auth, and the local self-hosted lane.";
 const SECURITY_OPEN_GRAPH_IMAGE = {
-  alt: "Murph Security. Your health data stays yours.",
+  alt: "Murph Security. How Murph protects health data.",
   height: 630,
   type: "image/png",
   url: "/security/opengraph-image",
@@ -29,7 +29,7 @@ export const metadata: Metadata = createMurphPageMetadata({
   },
   twitter: {
     description:
-      "How Murph keeps your health data yours.",
+      "How Murph protects hosted and local health data.",
     images: [SECURITY_OPEN_GRAPH_IMAGE],
   },
 });
@@ -68,16 +68,17 @@ function HeroSection() {
             </p>
           </div>
           <h1 className="mt-8 max-w-[18ch] font-serif text-[clamp(2.5rem,6vw,4.5rem)] font-semibold leading-[1] tracking-[-0.035em] text-balance text-[#f5f0e8]" id="security-hero-title">
-            Your health data{" "}
-            <span className="italic text-[#c4a882]">stays</span> yours.
+            How Murph{" "}
+            <span className="italic text-[#c4a882]">protects</span> your
+            health data.
           </h1>
           <p className="mt-8 max-w-[50ch] text-[1rem] leading-[1.7] text-pretty text-[#f5f0e8]/65 sm:text-[1.0625rem]">
             Hosted Murph runs on our servers so you don&apos;t have to
-            install anything. Your records are stored encrypted at rest.
-            Task work decrypts the records that workspace needs, then wipes
-            that workspace. Limited security, debugging, and support
-            operations may also require readable processing under access
-            controls.
+            install anything. Hosted Murph is encrypted at rest, but not
+            zero-knowledge. The hosted service can decrypt data when it needs
+            to run requested tasks or maintain the service. Task workers write
+            encrypted results back and discard the workspace when the job is
+            done.
           </p>
           <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[10px] tracking-[0.14em] text-[#f5f0e8]/55 uppercase">
             <span>Open source</span>
@@ -107,12 +108,12 @@ const PROMISES = [
     title: "We don't sell your data.",
   },
   {
-    body: "Your records stay encrypted at rest. For requested features, security, incident investigation, debugging, or support, Hosted Murph may decrypt the data needed for that work inside a short-lived task worker or tightly scoped operator workflow, then writes encrypted results back. We minimize human and operator access, but Hosted Murph is not zero-knowledge, operator-blind, or end-to-end encrypted unless a specific feature says so.",
+    body: "Hosted Murph is encrypted at rest, but not zero-knowledge. The hosted service can decrypt data when it needs to run requested tasks or maintain the service. Task workers write encrypted results back and discard the workspace when the job is done.",
     Glyph: PromiseEphemeralKeyGlyph,
     title: "We limit readable processing.",
   },
   {
-    body: "Your data is yours. Export the whole thing as plain files whenever you want. You can ask us to delete hosted copies, subject to the limited retention described in the privacy policy for legal, security, backup, dispute, and service needs.",
+    body: "Export the whole thing as plain files whenever you want. You can ask us to delete hosted copies, subject to the limited retention described in the privacy policy for legal, security, backup, dispute, and service needs.",
     Glyph: PromiseExportDeleteGlyph,
     title: "Take it out or delete it, any time.",
   },
@@ -385,7 +386,7 @@ const HOSTED_LEGEND = [
     title: "The runner",
   },
   {
-    body: "Your health records, encrypted and kept apart. Decrypted in task workers or scoped support/security workflows when needed.",
+    body: "Your health records, stored encrypted at rest. Task workers decrypt workspace data for requested work, then write encrypted results back.",
     kind: "box-neutral",
     title: "Your files",
   },
@@ -440,12 +441,12 @@ function HostedOverviewSection() {
           Hosted Murph
         </p>
         <h2 className="mt-6 max-w-[22ch] font-serif text-[clamp(1.75rem,4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]" id="security-hosted-title">
-          Your records sit apart from our app.
+          Hosted data is encrypted and separated by purpose.
         </h2>
         <p className="mt-6 max-w-[58ch] font-serif text-[1rem] leading-[1.65] text-pretty text-[#4d4533] italic">
-          Think of it like a bank. Your account details sit in one ledger.
-          Your valuables sit in separate encrypted storage and are decrypted
-          for task, support, security, or debugging work when needed.
+          Hosted Murph separates account records, encrypted task data, and
+          runtime workspaces. Each system handles what it needs for sign-in,
+          billing, syncing, task execution, or service maintenance.
         </p>
 
         <div className="relative mt-10">
@@ -534,12 +535,11 @@ function EncryptionSection() {
               What we encrypt.
             </h2>
             <p className="mt-5 max-w-[44ch] text-[0.9375rem] leading-[1.65] text-pretty text-[#635a48] sm:text-[1rem]">
-              The short version: sensitive hosted storage is encrypted at
-              rest. During task work, the worker can handle readable files
-              for the job, then discards that workspace. Limited security,
-              debugging, and support workflows may also require readable
-              processing under access controls. The crypto card below is for
-              technical readers.
+              Hosted Murph is encrypted at rest, but not zero-knowledge. The
+              hosted service can decrypt data when it needs to run requested
+              tasks or maintain the service. During task work, the worker can
+              handle readable files for the job, then discards that workspace.
+              The crypto card below is for technical readers.
             </p>
             <div className="mt-8 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-5">
               <p className="font-mono text-[10px] font-medium tracking-[0.12em] text-[#5a6e32] uppercase">
@@ -620,11 +620,10 @@ function LocalSection() {
             Or run the whole thing yourself.
           </h2>
           <p className="mt-6 max-w-[58ch] text-[1rem] leading-[1.7] text-pretty text-[#4d4533]">
-            If you&apos;d rather not put any of your data on our servers,
-            you can run Murph on your own machine instead. No hosted
-            account, no cloud runner. Just files on your disk, a
-            command-line tool, and whatever disk encryption your operating
-            system already gives you.
+            If you do not want your Murph vault on Murph-hosted servers, run
+            Murph on your own machine. Local Murph keeps your vault as files
+            on your disk, protected by your operating system and whatever disk
+            encryption you use.
           </p>
           <div className="mt-14 grid gap-x-16 gap-y-10 lg:grid-cols-[1.1fr_1fr]">
             <div className="overflow-x-auto">

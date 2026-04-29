@@ -255,7 +255,11 @@ function emitHostedRunnerChildDebug(input: {
     return;
   }
 
-  console.error(`[hosted-runner-child:${input.stage}] ${JSON.stringify(input.payload)}`);
+  console.error(
+    `[hosted-runner-child:${input.stage}] ${JSON.stringify(
+      redactHostedRuntimeDiagnosticDetails(input.payload),
+    )}`,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

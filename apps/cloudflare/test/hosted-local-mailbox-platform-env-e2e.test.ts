@@ -26,7 +26,7 @@ describe("hosted local mailbox platform env e2e", () => {
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
       persistDirPrefix: "murph-hosted-local-mailbox-platform-env-",
-      requiredRunnerEnvProfile: "web",
+      requiredRunnerEnvProfile: "assistant",
       scenarioLabel: "Local hosted mailbox platform env e2e",
       streamLogs: streamDevLogs,
     });

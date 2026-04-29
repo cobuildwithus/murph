@@ -71,8 +71,6 @@ const LOOPBACK_OR_PRIVATE_HOSTS = new Set([
 ]);
 const IPV4_PATTERN = /^\d{1,3}(?:\.\d{1,3}){3}$/u;
 
-const BRAVE_REQUIRED_ENV_NAMES = ["BRAVE_API_KEY"] as const;
-
 export function listMissingHostedDeployEnvironment(
   source: EnvSource = process.env,
   input: {
@@ -87,7 +85,6 @@ export function listMissingHostedDeployEnvironment(
           ...REQUIRED_DEPLOY_WORKER_ENV_NAMES,
           ...(deployContext === "production" ? REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES : []),
           ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
-          ...(isBraveWebSearchProvider(source) ? BRAVE_REQUIRED_ENV_NAMES : []),
         ]
       : []),
   ];
@@ -270,10 +267,6 @@ function listMissingRequiredEnvNames(
   names: readonly string[],
 ): string[] {
   return names.filter((name) => normalizeOptionalString(source[name]) === null);
-}
-
-function isBraveWebSearchProvider(source: EnvSource): boolean {
-  return normalizeOptionalString(source.MURPH_WEB_SEARCH_PROVIDER)?.toLowerCase() === "brave";
 }
 
 function normalizeHostedDeployContext(value: string | undefined): HostedDeployContext | null {

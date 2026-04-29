@@ -78,6 +78,7 @@ jobs:
           name: cloudflare-hosted-e2e-device-connect-logs
           path: .artifacts/cloudflare-hosted-e2e/device-connect.log
           if-no-files-found: warn
+
   linq-delivery:
     name: Linq delivery E2E
     runs-on: blacksmith-4vcpu-ubuntu-2404

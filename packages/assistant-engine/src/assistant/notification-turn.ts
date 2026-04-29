@@ -13,11 +13,10 @@ import {
   executeProviderTurnWithRecovery,
   type AssistantProviderTurnContinuityProfile,
 } from './provider-turn-runner.js'
-import type { ResolvedAssistantProviderRoute } from './provider-route.js'
+import type { CodexThreadIdentity } from './provider-route.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import { persistAssistantTurnAndSession } from './turn-finalizer.js'
-import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
-import { prioritizeAssistantRoutesForRichUserMessageContent } from './rich-content-routing.js'
+import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
 import {
   normalizeAssistantDeliverySubject,
@@ -171,10 +170,7 @@ export async function sendAssistantNotificationLocal(
         }
       }
 
-      const routes = prioritizeAssistantRoutesForRichUserMessageContent({
-        routes: resolveAssistantTurnRoutes(messageInput, defaults, resolved),
-        userMessageContent: null,
-      })
+      const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
       const typingIndicator = startAssistantChannelTypingIndicator({
@@ -191,7 +187,7 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
           resolvedSession: resolved.session,
-          routes,
+          route,
           turnCreatedAt,
           turnId,
         })
@@ -201,7 +197,7 @@ export async function sendAssistantNotificationLocal(
             buildAssistantNotificationObservabilityDetails({
               stage: 'provider',
               input: messageInput,
-              route: providerOutcome.route ?? routes[0] ?? null,
+              route: providerOutcome.route,
               session: resolved.session,
             }),
           )
@@ -360,12 +356,12 @@ function isAssistantNotificationDetailsRecord(
 
 function buildAssistantNotificationObservabilityDetails(input: {
   input: AssistantMessageInput
-  route: ResolvedAssistantProviderRoute | null
+  route: CodexThreadIdentity
   session: AssistantSession
   stage: 'delivery' | 'provider'
 }): Record<string, unknown> {
   const channel = input.input.channel ?? input.session.binding.channel ?? null
-  const providerOptions = input.route?.providerOptions ?? input.session.providerOptions
+  const providerOptions = input.route.providerOptions
   const bindingDelivery = input.session.binding.delivery
   const linqBaseUrl = readAssistantNotificationUrlDetails(process.env.LINQ_API_BASE_URL)
   const providerBaseUrl = readAssistantNotificationUrlDetails(
@@ -390,11 +386,11 @@ function buildAssistantNotificationObservabilityDetails(input: {
     assistantNotificationLinqBaseUrlOrigin: linqBaseUrl.origin,
     assistantNotificationLinqBaseUrlPath: linqBaseUrl.path,
     assistantNotificationGatewayOnlyProviders: gatewayOnlyProviders,
-    assistantNotificationProvider: input.route?.provider ?? input.session.provider,
+    assistantNotificationProvider: input.route.provider,
     assistantNotificationProviderBaseUrlOrigin: providerBaseUrl.origin,
     assistantNotificationProviderBaseUrlPath: providerBaseUrl.path,
     assistantNotificationProviderModel: providerOptions.model ?? null,
-    assistantNotificationRouteId: input.route?.routeId ?? null,
+    assistantNotificationRouteId: input.route.routeId,
     assistantNotificationStage: input.stage,
     assistantNotificationThreadIdPresent:
       normalizeNullableString(input.input.threadId) !== null,

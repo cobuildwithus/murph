@@ -144,6 +144,21 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     name: "runner-nudge",
     wrongMethodResponse: "method-not-allowed",
   },
+
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    beforeMethod(context, params) {
+      return requireBoundInternalRouteUser(context, params, "user-data-delete");
+    },
+    async handle(context, params) {
+      return handleUserDataDeleteRoute(context, params.userId);
+    },
+    match: (pathname) => matchCloudflareHostedControlUserRoutePath("userDataDelete", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.userDataDelete.method],
+    name: "user-data-delete",
+    wrongMethodResponse: "method-not-allowed",
+  },
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
@@ -243,6 +258,10 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async bindUser(userId: string): Promise<{ userId: string }> {
     return this.runner.bindUser(userId);
+  }
+
+  async deleteHostedUserData(userId: string): ReturnType<HostedUserRunner["deleteHostedUserData"]> {
+    return this.runner.deleteHostedUserData(userId);
   }
 
   async runnerStatus(): Promise<HostedRunnerStatusResponse> {
@@ -523,6 +542,34 @@ async function handleRunnerNudgeRoute(
   }
 
   return json(nudge, 202);
+}
+
+
+async function handleUserDataDeleteRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  try {
+    await readOptionalJsonObject(context.request);
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "user-data-delete-request-body-invalid",
+        routeName: "user-data-delete",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker user-data deletion route rejected an invalid request body.",
+      phase: "failed",
+      userId,
+    });
+    throw error;
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId);
+  return json(await stub.deleteHostedUserData(userId));
 }
 
 async function handleBrowserVaultSessionRoute(

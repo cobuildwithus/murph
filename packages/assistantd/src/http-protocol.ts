@@ -89,7 +89,7 @@ function parseAssistantMessageRequestBody(payload: unknown): AssistantMessageReq
   assertOptionalBooleanField(record, 'deliverResponse', 'message')
   assertOptionalBooleanField(record, 'includeEarlySessionOnboarding', 'message')
   assertOptionalBooleanField(record, 'persistUserPromptOnFailure', 'message')
-  assertOptionalObjectField(record, 'modelSpec', 'message')
+  assertUnsupportedAssistantModelSpecField(record, 'message')
   if (
     typeof record.operatorAuthority === 'string' &&
     !assistantOperatorAuthorityValues.has(record.operatorAuthority)
@@ -497,17 +497,21 @@ function validateAssistantSessionResolutionRecord(
   assertOptionalNullableStringField(record, 'participantId', context)
   assertUnsupportedAssistantLegacyThreadField(record, context)
   assertOptionalNullableStringField(record, 'threadId', context)
-  assertOptionalNullableStringField(record, 'provider', context)
+  assertUnsupportedAssistantModelSpecField(record, context)
+  assertUnsupportedAssistantProviderOverrideField(record, 'provider', context)
   assertOptionalNullableStringField(record, 'model', context)
+  assertOptionalNullableStringField(record, 'modelProvider', context)
   assertOptionalNullableStringField(record, 'reasoningEffort', context)
   assertOptionalNullableStringField(record, 'sandbox', context)
   assertOptionalNullableStringField(record, 'approvalPolicy', context)
-  assertOptionalNullableStringField(record, 'codexProfile', context)
+  assertUnsupportedAssistantProviderOverrideField(record, 'codexProfile', context)
+  assertOptionalNullableStringField(record, 'profile', context)
   assertOptionalNullableStringField(record, 'codexCommand', context)
+  assertOptionalNullableStringField(record, 'codexHome', context)
   assertOptionalNullableStringField(record, 'workingDirectory', context)
   assertOptionalNullableStringField(record, 'now', context)
   assertOptionalBooleanField(record, 'threadIsDirect', context)
-  assertOptionalBooleanField(record, 'oss', context)
+  assertUnsupportedAssistantProviderOverrideField(record, 'oss', context)
   assertOptionalFiniteNumberField(record, 'maxSessionAgeMs', context)
 
   const conversation = record.conversation
@@ -527,6 +531,35 @@ function assertUnsupportedAssistantLegacyThreadField(
 
   throw new AssistantHttpRequestError(
     `Assistant ${context} field sourceThreadId is no longer supported. Use threadId or the canonical conversation field instead.`,
+    400,
+  )
+}
+
+function assertUnsupportedAssistantModelSpecField(
+  record: Record<string, unknown>,
+  context: string,
+): void {
+  if (!('modelSpec' in record)) {
+    return
+  }
+
+  throw new AssistantHttpRequestError(
+    `Assistant ${context} field modelSpec is no longer supported. Use the flat model and reasoningEffort fields instead.`,
+    400,
+  )
+}
+
+function assertUnsupportedAssistantProviderOverrideField(
+  record: Record<string, unknown>,
+  key: 'codexProfile' | 'oss' | 'provider',
+  context: string,
+): void {
+  if (!(key in record)) {
+    return
+  }
+
+  throw new AssistantHttpRequestError(
+    `Assistant ${context} field ${key} is no longer supported for per-turn daemon requests.`,
     400,
   )
 }
@@ -675,20 +708,6 @@ function assertOptionalFiniteNumberField(
   ) {
     throw new AssistantHttpRequestError(
       `Assistant ${context} request field ${key} must be a finite number when present.`,
-      400,
-    )
-  }
-}
-
-function assertOptionalObjectField(
-  record: Record<string, unknown>,
-  key: string,
-  context: string,
-): void {
-  const value = record[key]
-  if (value !== undefined && (!value || typeof value !== 'object' || Array.isArray(value))) {
-    throw new AssistantHttpRequestError(
-      `Assistant ${context} request field ${key} must be a JSON object when present.`,
       400,
     )
   }

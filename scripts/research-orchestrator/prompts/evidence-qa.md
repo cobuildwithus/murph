@@ -24,10 +24,12 @@ Output:
 6. Source keys that do not exist
 7. Findings whose claimUse classification should change
 8. Evidence appraisals whose groupId or sourceKey does not match the protocol researchLandscape
-9. Required edits, with exact replacement wording
+9. Raw source-key leaks in user-facing Health Commons prose, including protocol, family, and biomarker pages, with exact replacement wording that preserves the claim but removes internal keys
+10. Required edits, with exact replacement wording
 
 Rules:
 - Be skeptical.
 - Prefer downgrading claim strength over deleting useful nuance.
 - Do not add new claims unless they cite source keys.
+- Do not treat structured `sourceKeys` fields as leaks; only block raw keys in user-facing prose/body copy.
 - Do not reintroduce `protocolEvidence`; protocol-specific interpretation belongs in standalone evidence-appraisal records.

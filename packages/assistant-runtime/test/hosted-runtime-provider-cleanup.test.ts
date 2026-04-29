@@ -69,6 +69,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
       checkpoint,
       vaultRoot,
     });
+    const assertLiveness = vi.fn(async () => undefined);
 
     const result = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: [
@@ -89,6 +90,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
           targetKind: "thread",
         },
       ],
+      assertLiveness,
       env: {
         LINQ_API_TOKEN: "test-token",
       },
@@ -97,6 +99,7 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
       wake,
     });
 
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
     assert.deepEqual(result, {
       attemptedLinqMessageCount: 3,
       deletedLinqMessageCount: 3,

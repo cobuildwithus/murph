@@ -19,6 +19,13 @@ import {
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
 import type { R2BucketLike } from "./bundle-store.js";
+import {
+  hostedArtifactUserPrefix,
+  hostedBrowserVaultReplicaUserPrefix,
+  hostedBundleUserPrefix,
+  hostedRunnerSecretsObjectKey,
+  hostedUserRootKeyEnvelopeObjectKey,
+} from "./storage-paths.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import { toStringEnvSource } from "./string-env.js";
 import {
@@ -31,6 +38,7 @@ import {
   buildHostedRunnerJobRuntimeConfig,
 } from "./runner-env.ts";
 import {
+  destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
@@ -56,6 +64,23 @@ import {
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
+
+export interface HostedRunnerUserDataDeletionResult {
+  deletedAt: string;
+  durableObject: {
+    alarmCleared: boolean;
+    stateDeleted: boolean;
+  };
+  ok: true;
+  r2: {
+    deletedObjectCount: number;
+    deletedRootKeyEnvelope: boolean;
+    skippedUserScopedPrefixes: boolean;
+    supported: boolean;
+    userScopedSkipReason: string | null;
+  };
+  userId: string;
+}
 
 interface RunnerUserStores {
   crypto: HostedUserCryptoContext;
@@ -215,6 +240,75 @@ export class HostedUserRunner {
       userId: record.userId,
       workspace: webStatus.workspace,
     };
+  }
+
+  async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
+    return this.withInvocationLock(async () => {
+      if (this.runnerStores?.userId === userId) {
+        this.runnerStores = null;
+      }
+
+      const r2 = await this.deleteHostedUserR2DataBestEffort(userId);
+      const stateDeletion = await this.stateStore.deleteStateForUser(userId);
+      const deleteAlarm = this.state.storage.deleteAlarm;
+      const alarmCleared = typeof deleteAlarm === "function";
+      if (alarmCleared) {
+        await deleteAlarm.call(this.state.storage);
+      }
+      await destroyHostedExecutionContainer({
+        runnerContainerNamespace: this.runnerContainerNamespace,
+        userId,
+      });
+
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          r2DeletedObjectCount: r2.deletedObjectCount,
+          r2Supported: r2.supported,
+          runnerStateDeleted: stateDeletion.deleted,
+        },
+        message: "Hosted runner user data deletion completed.",
+        phase: "wake.running",
+        userId,
+      });
+
+      return {
+        deletedAt: new Date().toISOString(),
+        durableObject: {
+          alarmCleared,
+          stateDeleted: stateDeletion.deleted,
+        },
+        ok: true,
+        r2,
+        userId,
+      };
+    });
+  }
+
+  private async deleteHostedUserR2DataBestEffort(userId: string): Promise<HostedRunnerUserDataDeletionResult["r2"]> {
+    try {
+      return await this.deleteHostedUserR2Data(userId);
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          r2Supported: false,
+          userScopedSkipReason: safeCleanupErrorCode(error),
+        },
+        error,
+        level: "warn",
+        message: "Hosted runner R2 user data deletion failed; continuing Durable Object cleanup.",
+        phase: "wake.running",
+        userId,
+      });
+      return {
+        deletedObjectCount: 0,
+        deletedRootKeyEnvelope: false,
+        skippedUserScopedPrefixes: true,
+        supported: false,
+        userScopedSkipReason: safeCleanupErrorCode(error),
+      };
+    }
   }
 
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
@@ -460,6 +554,56 @@ export class HostedUserRunner {
       });
       throw error;
     }
+  }
+
+  private async deleteHostedUserR2Data(userId: string): Promise<HostedRunnerUserDataDeletionResult["r2"]> {
+    const supportsObjectDeletion = Boolean(this.bucket.delete);
+    const supportsPrefixDeletion = Boolean(this.bucket.delete && this.bucket.list);
+    let userCrypto: HostedUserCryptoContext | null = null;
+    let userScopedSkipReason: string | null = null;
+
+    try {
+      userCrypto = await this.userKeyStore.requireUserCryptoContext(userId, {
+        reason: "account-data-deletion",
+      });
+    } catch (error) {
+      userScopedSkipReason = error instanceof Error && error.name ? error.name : "UnknownError";
+    }
+
+    let deletedObjectCount = 0;
+    if (userCrypto) {
+      const prefixes = [
+        await hostedBundleUserPrefix(userCrypto.rootKey, userId),
+        await hostedArtifactUserPrefix(userCrypto.rootKey, userId),
+        await hostedBrowserVaultReplicaUserPrefix({
+          rootKey: userCrypto.rootKey,
+          userId,
+        }),
+      ];
+      for (const prefix of prefixes) {
+        deletedObjectCount += (await deleteR2ObjectsWithPrefix(this.bucket, prefix)).deletedCount;
+      }
+
+      deletedObjectCount += (await deleteR2ObjectIfSupported(
+        this.bucket,
+        await hostedRunnerSecretsObjectKey(userCrypto.rootKey, userId),
+      )).deletedCount;
+    }
+
+    const rootEnvelopeKey = await hostedUserRootKeyEnvelopeObjectKey(
+      this.env.platformEnvelopeKey,
+      userId,
+    );
+    const rootKeyEnvelopeDeletion = await deleteR2ObjectIfSupported(this.bucket, rootEnvelopeKey);
+    deletedObjectCount += rootKeyEnvelopeDeletion.deletedCount;
+
+    return {
+      deletedObjectCount,
+      deletedRootKeyEnvelope: rootKeyEnvelopeDeletion.deleted,
+      skippedUserScopedPrefixes: userCrypto === null,
+      supported: supportsObjectDeletion && (userCrypto === null || supportsPrefixDeletion),
+      userScopedSkipReason: userCrypto === null ? userScopedSkipReason : null,
+    };
   }
 
   private async markPendingNudgeAndApplyAlarm(input: {
@@ -731,6 +875,50 @@ export class HostedUserRunner {
     );
   }
 
+}
+
+async function deleteR2ObjectIfSupported(
+  bucket: R2BucketLike,
+  key: string,
+): Promise<{ deleted: boolean; deletedCount: number }> {
+  if (!bucket.delete) {
+    return { deleted: false, deletedCount: 0 };
+  }
+
+  const existingObject = await bucket.get(key);
+  if (!existingObject) {
+    return { deleted: false, deletedCount: 0 };
+  }
+
+  await bucket.delete(key);
+  return { deleted: true, deletedCount: 1 };
+}
+
+async function deleteR2ObjectsWithPrefix(
+  bucket: R2BucketLike,
+  prefix: string,
+): Promise<{ deletedCount: number }> {
+  if (!bucket.delete || !bucket.list) {
+    return { deletedCount: 0 };
+  }
+
+  let cursor: string | undefined;
+  let deletedCount = 0;
+
+  do {
+    const page = await bucket.list({ cursor, limit: 1_000, prefix });
+    for (const object of page.objects) {
+      await bucket.delete(object.key);
+      deletedCount += 1;
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  return { deletedCount };
+}
+
+function safeCleanupErrorCode(error: unknown): string {
+  return error instanceof Error && error.name ? error.name : "UnknownError";
 }
 
 function resolvePendingNudgeWakeAt(input: {

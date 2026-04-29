@@ -8,6 +8,9 @@ import type {
 import type {
   AssistantTurnInputRefreshResult,
 } from "@murphai/assistant-engine";
+import type {
+  HostedPendingAssistantUsageExportResult,
+} from "./usage.ts";
 
 import {
   buildHostedMailboxImportRedactedStatus,
@@ -33,6 +36,9 @@ import {
   type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
+import {
+  exportHostedPendingAssistantUsage,
+} from "./usage.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -221,6 +227,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   checkpointRequestSession.recordCheckpointResult(initialMailboxImport);
 
   if (!input.runAssistantPhase) {
+    await drainHostedWorkspaceUsageExportBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      expectedUserId: input.expectedUserId,
+      initialMailboxImport,
+      input,
+    });
     await runHostedMailboxPostCheckpointEffectsBestEffort(
       checkpointRequestSession.takeMailboxPostCheckpointEffects(),
     );
@@ -265,6 +277,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         workspacePort: input.platform.workspacePort,
       });
     }
+    await drainHostedWorkspaceUsageExportBestEffort({
+      checkpointRequestBuilder: checkpointRequestSession,
+      expectedUserId: input.expectedUserId,
+      initialMailboxImport,
+      input,
+    });
 
     return {
       assistantPhaseResult,
@@ -278,6 +296,84 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       checkpointRequestSession.takeMailboxPostCheckpointEffects(),
     );
   }
+}
+
+async function drainHostedWorkspaceUsageExportBestEffort(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  expectedUserId: string;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  if (!input.checkpointRequestBuilder.latestWorkspace()) {
+    return;
+  }
+
+  let result: HostedPendingAssistantUsageExportResult;
+  try {
+    result = await exportHostedPendingAssistantUsage({
+      now: input.input.now,
+      usageExportPort: input.input.platform.usageExportPort,
+      vaultRoot: input.input.vaultRoot,
+    });
+  } catch (error) {
+    console.warn("Hosted AI usage export failed after checkpoint; leaving pending records for retry.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    await writeHostedWorkspaceUsageExportRuntimeLog({
+      checkpointed: false,
+      errorCode: "usage_export_failed",
+      level: "warn",
+      result: {
+        exported: 0,
+        failed: 1,
+        invalid: 0,
+        invalidIssueRecorded: false,
+        pending: 0,
+      },
+      runnerInput: input.input,
+    });
+    return;
+  }
+
+  if (
+    result.exported === 0
+    && result.failed === 0
+    && result.invalid === 0
+    && !result.invalidIssueRecorded
+    && result.pending === 0
+  ) {
+    return;
+  }
+
+  let checkpointed = false;
+  let errorCode: string | null = null;
+  if (result.exported > 0 || result.invalidIssueRecorded) {
+    try {
+      await checkpointHostedWorkspaceUsageExportCleanup({
+        checkpointRequestBuilder: input.checkpointRequestBuilder,
+        expectedUserId: input.expectedUserId,
+        initialMailboxImport: input.initialMailboxImport,
+        result,
+        workspacePort: input.input.platform.workspacePort,
+      });
+      checkpointed = true;
+    } catch (error) {
+      errorCode = "usage_cleanup_checkpoint_failed";
+      console.warn("Hosted AI usage cleanup checkpoint failed; assistant work remains committed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    }
+  }
+
+  await writeHostedWorkspaceUsageExportRuntimeLog({
+    checkpointed,
+    errorCode,
+    level: result.failed > 0 || result.invalid > 0 || result.pending > 0 || errorCode
+      ? "warn"
+      : "info",
+    result,
+    runnerInput: input.input,
+  });
 }
 
 function assertHostedWorkspaceRunnerUser(input: HostedWorkspaceRunnerInput): void {
@@ -411,6 +507,34 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   });
 }
 
+async function writeHostedWorkspaceUsageExportRuntimeLog(input: {
+  checkpointed: boolean;
+  errorCode: string | null;
+  level: "info" | "warn";
+  result: HostedPendingAssistantUsageExportResult;
+  runnerInput: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(input.runnerInput.runtimeLogContext),
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      component: "runtime",
+      eventCode: "runtime.usage_export_finished",
+      level: input.level,
+      phase: "checkpoint",
+      redactedJson: {
+        cleanupCheckpointed: input.checkpointed,
+        exported: input.result.exported,
+        failed: input.result.failed,
+        invalid: input.result.invalid,
+        pending: input.result.pending,
+      },
+    },
+    now: input.runnerInput.now,
+    platform: input.runnerInput.platform,
+  });
+}
+
 function shouldRecordHostedActiveTurnMailboxRefreshResult(
   result: HostedMailboxImportCheckpointResult,
 ): boolean {
@@ -448,6 +572,63 @@ async function checkpointHostedWorkspacePostAssistantPhase(input: {
     nextWakeAt: input.postCheckpoint.nextWakeAt ?? null,
     nextWakeReason: input.postCheckpoint.nextWakeReason ?? null,
     reason: input.postCheckpoint.checkpointReason,
+    redactedStatus,
+  });
+
+  if (checkpoint.workspace.userId !== input.expectedUserId) {
+    throw new HostedMailboxImportCheckpointUserMismatchError({
+      actualUserId: checkpoint.workspace.userId,
+      expectedUserId: input.expectedUserId,
+    });
+  }
+
+  if (!checkpoint.checkpointed) {
+    throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+  }
+
+  input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
+}
+
+async function checkpointHostedWorkspaceUsageExportCleanup(input: {
+  checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
+  expectedUserId: string;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
+  result: HostedPendingAssistantUsageExportResult;
+  workspacePort: HostedRuntimeWorkspacePort;
+}): Promise<void> {
+  const latestWorkspace = input.checkpointRequestBuilder.latestWorkspace();
+  if (!latestWorkspace) {
+    return;
+  }
+
+  const mailboxImport =
+    input.checkpointRequestBuilder.latestMailboxImport() ?? input.initialMailboxImport;
+  const redactedStatus = buildHostedWorkspaceCheckpointRedactedStatus(
+    mailboxImport,
+    {
+      hostedUsageCleanupCheckpoint: input.result.exported > 0,
+      hostedUsageExportCheckpoint: true,
+      hostedUsageExportedCount: input.result.exported,
+      hostedUsageFailedCount: input.result.failed,
+      hostedUsageInvalidCount: input.result.invalid,
+      hostedUsageInvalidIssueRecorded: input.result.invalidIssueRecorded,
+      hostedUsagePendingCount: input.result.pending,
+    },
+  );
+  const checkpointRequest = await input.checkpointRequestBuilder.createRequest({
+    importResult: mailboxImport.importResult,
+    nextWakeAt: latestWorkspace.nextWakeAt ?? null,
+    nextWakeReason: latestWorkspace.nextWakeReason ?? null,
+    previousState: mailboxImport.state,
+    reason: "maintenance",
+    redactedStatus,
+    state: mailboxImport.state,
+  });
+  const checkpoint = await input.workspacePort.checkpoint({
+    ...checkpointRequest,
+    nextWakeAt: latestWorkspace.nextWakeAt ?? null,
+    nextWakeReason: latestWorkspace.nextWakeReason ?? null,
+    reason: "maintenance",
     redactedStatus,
   });
 

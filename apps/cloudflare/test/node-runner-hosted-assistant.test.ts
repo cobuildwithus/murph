@@ -30,20 +30,20 @@ describe("hosted assistant runner env policy", () => {
     });
   });
 
-  it("does not forward legacy OpenAI-compatible hosted assistant seed vars", () => {
+  it("does not forward unsupported hosted assistant seed vars", () => {
     const env = buildHostedRunnerContainerEnv({
-      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
+      HOSTED_ASSISTANT_API_KEY_ENV: "PROVIDER_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ASSISTANT_PROVIDER: "legacy",
       HOSTED_ASSISTANT_REASONING_EFFORT: "medium",
-      OPENAI_API_KEY: "secret-value",
+      PROVIDER_API_KEY: "secret-value",
     });
 
     expect(env.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_MODEL).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_PROVIDER).toBeUndefined();
     expect(env.HOSTED_ASSISTANT_REASONING_EFFORT).toBeUndefined();
-    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.PROVIDER_API_KEY).toBeUndefined();
   });
 
   it("does not forward a custom hosted assistant api key alias when explicitly referenced", () => {

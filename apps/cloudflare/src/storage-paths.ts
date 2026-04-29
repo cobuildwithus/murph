@@ -46,12 +46,7 @@ export async function hostedArtifactObjectKey(
   userId: string,
   sha256: string,
 ): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "artifact-path",
-    value: `user:${userId}`,
-  });
+  const userSegment = await deriveHostedArtifactUserSegment(rootKey, userId);
   const artifactSegment = await deriveHostedStorageOpaqueId({
     length: 48,
     rootKey,
@@ -60,6 +55,13 @@ export async function hostedArtifactObjectKey(
   });
 
   return `users/artifacts/${userSegment}/${artifactSegment}.artifact.bin`;
+}
+
+export async function hostedArtifactUserPrefix(
+  rootKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  return `users/artifacts/${await deriveHostedArtifactUserSegment(rootKey, userId)}/`;
 }
 
 export async function hostedRunnerSecretsObjectKey(
@@ -74,6 +76,20 @@ export async function hostedRunnerSecretsObjectKey(
   });
 
   return `users/runner-secrets/${userSegment}.json`;
+}
+
+export async function hostedUserRootKeyEnvelopeObjectKey(
+  envelopeEncryptionKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey: envelopeEncryptionKey,
+    scope: "user-key-envelope-path",
+    value: `user:${userId}`,
+  });
+
+  return `users/keys/${userSegment}.json`;
 }
 
 export async function hostedBrowserVaultReplicaObjectKey(input: {
@@ -100,6 +116,18 @@ export async function hostedBrowserVaultReplicaUserPrefix(input: {
     input.rootKey,
     input.userId,
   )}/`;
+}
+
+async function deriveHostedArtifactUserSegment(
+  rootKey: Uint8Array,
+  userId: string,
+): Promise<string> {
+  return deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "artifact-path",
+    value: `user:${userId}`,
+  });
 }
 
 async function deriveHostedBundleUserSegment(

@@ -747,6 +747,80 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("deletes hosted runner user data without queuing a new invocation", async () => {
+    const stub = createUserRunnerStub({
+      deleteHostedUserData: vi.fn(async (userId: string) => ({
+        deletedAt: "2026-04-29T00:00:00.000Z",
+        durableObject: {
+          alarmCleared: true,
+          stateDeleted: true,
+        },
+        ok: true,
+        r2: {
+          deletedObjectCount: 3,
+          deletedRootKeyEnvelope: true,
+          skippedUserScopedPrefixes: false,
+          supported: true,
+          userScopedSkipReason: null,
+        },
+        userId,
+      })),
+    });
+    const env = createWorkerEnv(stub);
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/delete", {
+        body: "{}",
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      })),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        stateDeleted: true,
+      },
+      ok: true,
+      r2: {
+        deletedObjectCount: 3,
+        deletedRootKeyEnvelope: true,
+        skippedUserScopedPrefixes: false,
+        supported: true,
+        userScopedSkipReason: null,
+      },
+      userId: "member_123",
+    });
+    expect(stub.deleteHostedUserData).toHaveBeenCalledWith("member_123");
+    expect(stub.nudgeHostedRunner).not.toHaveBeenCalled();
+    expect(stub.runUntilIdleOrBudget).not.toHaveBeenCalled();
+    expect(env.__runnerWakeQueue.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects user-data deletion route/user mismatches before touching the Durable Object", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await signControlRequest(
+        new Request("https://runner.example.test/internal/users/member_123/delete", {
+          method: "POST",
+        }),
+        { boundUserId: "member_other" },
+      ),
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the route user.",
+    });
+    expect(stub.deleteHostedUserData).not.toHaveBeenCalled();
+  });
+
   it("does not start another workspace invocation when the nudge is already running", async () => {
     const stub = createUserRunnerStub({
       nudgeHostedRunner: vi.fn(async () => ({
@@ -1470,6 +1544,22 @@ async function resolveHostedUserCryptoContextForTest(
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
     bindUser: vi.fn(async (userId: string) => ({ userId })),
+    deleteHostedUserData: vi.fn(async (userId: string) => ({
+      deletedAt: "2026-04-29T00:00:00.000Z",
+      durableObject: {
+        alarmCleared: true,
+        stateDeleted: true,
+      },
+      ok: true as const,
+      r2: {
+        deletedObjectCount: 0,
+        deletedRootKeyEnvelope: false,
+        skippedUserScopedPrefixes: true,
+        supported: true,
+        userScopedSkipReason: null,
+      },
+      userId,
+    })),
     nudgeHostedRunner: vi.fn(async () => ({
       accepted: true,
       alarmScheduled: true,

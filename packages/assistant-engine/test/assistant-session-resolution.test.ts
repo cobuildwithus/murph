@@ -64,7 +64,7 @@ function expectAssistantTarget(
 
 function createCodexTarget(
   overrides: Partial<{
-    approvalPolicy: 'never' | 'on-request' | 'untrusted'
+    approvalPolicy: 'never'
     modelProvider: string
     codexHome: string
     model: string

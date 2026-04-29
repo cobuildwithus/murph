@@ -10,8 +10,8 @@ import {
 } from '@murphai/contracts'
 import { loadVault } from '@murphai/core'
 import {
-  resolveAssistantProviderTargetCapabilities,
-} from '../../assistant-provider.js'
+  resolveCodexAssistantTargetCapabilities,
+} from '../provider-registry.js'
 import { buildAssistantActiveExperimentContextBlock } from '../active-experiment-context.js'
 import { resolveAssistantCliSurfaceBootstrapContext } from '../cli-surface-bootstrap.js'
 import {
@@ -19,7 +19,7 @@ import {
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
 import {
-  type ResolvedAssistantProviderRoute,
+  type CodexThreadIdentity,
 } from '../provider-route.js'
 import {
   resolveAssistantDiagnosticsPolicy,
@@ -31,9 +31,6 @@ import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
 } from '../provider-binding.js'
-import {
-  prioritizeAssistantRoutesForRichUserMessageContent,
-} from '../rich-content-routing.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -138,16 +135,15 @@ export interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
   profile: AssistantProviderTurnResolvedExecutionProfile
-  primaryRoute: ResolvedAssistantProviderRoute | null
   promptTimeContext: AssistantPromptTimeContext
-  routes: readonly ResolvedAssistantProviderRoute[]
+  route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }
 
 export interface AssistantProviderAttemptPlan {
   attemptCount: number
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
 }
@@ -219,7 +215,7 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
   plan: AssistantTurnSharedPlan
   profile?: AssistantProviderTurnContinuityProfile | null
   resolvedSession: AssistantSession
-  routes: readonly ResolvedAssistantProviderRoute[]
+  route: CodexThreadIdentity
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantProviderTurnExecutionPlan> {
@@ -244,34 +240,19 @@ export async function buildAssistantProviderTurnExecutionPlan(input: {
     input: input.input,
     memoryTurnEnv,
     profile,
-    primaryRoute: input.routes[0] ?? null,
     promptTimeContext,
-    routes: input.routes,
+    route: input.route,
     sharedPlan: input.plan,
     turnId: input.turnId,
   }
 }
 
-export async function resolveAssistantProviderAttemptPlan(input: {
+export async function buildCodexProviderAttemptPlan(input: {
   attemptCount: number
-  attemptedRouteIds: ReadonlySet<string>
   executionPlan: AssistantProviderTurnExecutionPlan
   session: AssistantSession
-}): Promise<AssistantProviderAttemptPlan | null> {
-  const primaryRoute = input.executionPlan.primaryRoute
-  if (!primaryRoute || input.attemptedRouteIds.has(primaryRoute.routeId)) {
-    return null
-  }
-
-  const selectableRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
-    routes: [primaryRoute],
-    userMessageContent: input.executionPlan.input.userMessageContent,
-  })
-  const route = selectableRoutes[0] ?? null
-  if (!route) {
-    return null
-  }
-
+}): Promise<AssistantProviderAttemptPlan> {
+  const route = input.executionPlan.route
   return {
     attemptCount: input.attemptCount,
     route,
@@ -295,7 +276,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   input: AssistantMessageInput
   profile: AssistantProviderTurnResolvedExecutionProfile
   promptTimeContext: AssistantPromptTimeContext
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
 }): Promise<AssistantRouteTurnPlan> {
@@ -304,7 +285,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     route: input.route,
     sessionResumeState: input.session.resumeState,
   })
-  const routeProviderCapabilities = resolveAssistantProviderTargetCapabilities({
+  const routeProviderCapabilities = resolveCodexAssistantTargetCapabilities({
     ...input.route.providerOptions,
   })
   const activeTurnHistory = input.activeTurnHistory ?? null
@@ -321,7 +302,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
           resumeProviderSessionId: resolveAssistantProviderResumeKey({
             resumeState: resumeBinding,
           }),
-          route: input.route,
         })
       : null
   const continuityPlan = resolveAssistantProviderTurnContinuityPlan({
@@ -545,9 +525,7 @@ function resolveAssistantProviderContinuation(input: {
 
 function resolveAssistantEffectiveProviderResumeSessionId(input: {
   resumeProviderSessionId: string | null
-  route: ResolvedAssistantProviderRoute
 }): string | null {
-  void input.route
   return normalizeNullableString(input.resumeProviderSessionId)
 }
 

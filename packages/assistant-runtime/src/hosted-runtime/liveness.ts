@@ -1,0 +1,177 @@
+export type RuntimeLivenessRejectionReason =
+  | "malformed_request"
+  | "no_active_invocation"
+  | "stale_attempt"
+  | "stale_generation"
+  | "unauthorized"
+  | "wrong_user";
+
+export type RuntimeLivenessTouchResult =
+  | { ok: true }
+  | {
+    ok: false;
+    reason: RuntimeLivenessRejectionReason;
+  };
+
+export interface RuntimeLivenessPort {
+  touch(input: {
+    requestId: string;
+    signal?: AbortSignal | null;
+  }): Promise<RuntimeLivenessTouchResult>;
+}
+
+export interface RuntimeLivenessHeartbeat {
+  readonly initialTouch: Promise<RuntimeLivenessTouchResult>;
+  stop(): Promise<void>;
+}
+
+export function startRuntimeLivenessHeartbeat(input: {
+  intervalMs?: number;
+  onError?: (error: unknown) => void;
+  onRejected?: (reason: RuntimeLivenessRejectionReason) => void;
+  port?: RuntimeLivenessPort | null;
+  requestId: string;
+  signal?: AbortSignal | null;
+  touchTimeoutMs?: number;
+}): RuntimeLivenessHeartbeat {
+  const port = input.port ?? null;
+  if (!port) {
+    return {
+      initialTouch: Promise.resolve({ ok: true }),
+      async stop() {},
+    };
+  }
+
+  const intervalMs = input.intervalMs ?? 15_000;
+  const touchTimeoutMs = Math.min(input.touchTimeoutMs ?? 5_000, 5_000);
+  let currentTouchAbortController: AbortController | null = null;
+  let inFlight = false;
+  let initialTouchSettled = false;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let resolveInitialTouch!: (result: RuntimeLivenessTouchResult) => void;
+  const initialTouch = new Promise<RuntimeLivenessTouchResult>((resolve) => {
+    resolveInitialTouch = resolve;
+  });
+
+  const clearCurrentTimer = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  const stop = () => {
+    stopped = true;
+    clearCurrentTimer();
+    currentTouchAbortController?.abort();
+    currentTouchAbortController = null;
+    settleInitialTouch({ ok: true });
+  };
+  const schedule = (delayMs: number) => {
+    if (stopped || input.signal?.aborted) {
+      stop();
+      return;
+    }
+    clearCurrentTimer();
+    timer = setTimeout(() => {
+      void runTouch();
+    }, Math.max(0, delayMs));
+    timer.unref?.();
+  };
+  const settleInitialTouch = (result: RuntimeLivenessTouchResult) => {
+    if (initialTouchSettled) {
+      return;
+    }
+
+    initialTouchSettled = true;
+    resolveInitialTouch(result);
+  };
+  const runTouch = async () => {
+    if (stopped || input.signal?.aborted) {
+      stop();
+      return;
+    }
+    if (inFlight) {
+      schedule(intervalMs);
+      return;
+    }
+
+    inFlight = true;
+    const touchAbortController = new AbortController();
+    currentTouchAbortController = touchAbortController;
+    let timeoutReported = false;
+    try {
+      const result = await withRuntimeLivenessTouchTimeout(
+        port.touch({
+          requestId: input.requestId,
+          signal: touchAbortController.signal,
+        }),
+        touchTimeoutMs,
+        touchAbortController,
+        (error) => {
+          timeoutReported = true;
+          if (!stopped && !input.signal?.aborted) {
+            input.onError?.(error);
+          }
+        },
+      );
+      if (!result.ok) {
+        settleInitialTouch(result);
+        input.onRejected?.(result.reason);
+        stop();
+        return;
+      }
+      settleInitialTouch(result);
+    } catch (error) {
+      if (!timeoutReported && !stopped && !input.signal?.aborted) {
+        input.onError?.(error);
+      }
+    } finally {
+      if (currentTouchAbortController === touchAbortController) {
+        currentTouchAbortController = null;
+      }
+      inFlight = false;
+    }
+
+    schedule(intervalMs);
+  };
+
+  if (input.signal) {
+    if (input.signal.aborted) {
+      stop();
+    } else {
+      input.signal.addEventListener("abort", stop, { once: true });
+    }
+  }
+
+  void runTouch();
+
+  return {
+    initialTouch,
+    async stop() {
+      stop();
+    },
+  };
+}
+
+async function withRuntimeLivenessTouchTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  abortController: AbortController,
+  onTimeout: (error: Error) => void,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    timer = setTimeout(() => {
+      const timeoutError = new Error("Runtime liveness heartbeat timed out.");
+      abortController.abort(timeoutError);
+      onTimeout(timeoutError);
+    }, Math.max(1, timeoutMs));
+    timer.unref?.();
+    return await promise;
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}

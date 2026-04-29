@@ -3,7 +3,7 @@ import path from 'node:path'
 import * as React from 'react'
 import { test } from 'vitest'
 
-import { type AssistantCatalogModel } from '@murphai/assistant-engine/assistant-provider-catalog'
+import { type CodexCatalogModel } from '@murphai/assistant-engine/assistant-provider-catalog'
 
 import {
   ChatComposer,
@@ -595,7 +595,7 @@ test('model switcher helpers and component preserve current selections across mo
       description: 'Cheaper default',
       source: 'static',
     },
-  ] satisfies readonly AssistantCatalogModel[]
+  ] satisfies readonly CodexCatalogModel[]
   const modelOptions = models.map((model) => ({
     description: model.description,
     label: model.label,

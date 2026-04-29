@@ -5,12 +5,12 @@ import {
   executeCodexAppServerTurn,
 } from '../../assistant-codex.js'
 import {
+  resolveSupportedCodexAppServerApprovalPolicy,
+} from '../../assistant-codex/app-server-requests.js'
+import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
-import type {
-  AssistantApprovalPolicy,
-} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   DEFAULT_CODEX_MODELS,
@@ -22,7 +22,9 @@ import {
 } from './helpers.js'
 import {
   supportsAnyAssistantRichUserMessageContent,
-  type AssistantProviderDefinition,
+  type AssistantProviderCapabilities,
+  type AssistantProviderTurnAttemptResult,
+  type AssistantProviderTurnExecutionInput,
 } from './types.js'
 import { normalizeNullableString } from '../shared.js'
 import type {
@@ -35,156 +37,145 @@ import type {
 } from '../../assistant-codex.js'
 import { fileURLToPath } from 'node:url'
 
-export const codexCliProviderDefinition: AssistantProviderDefinition = {
-  capabilities: {
-    supportedUserMessageContentTypes: ['text', 'image'],
-    supportsNativeResume: true,
-    supportsReasoningEffort: true,
-    supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
-      'text',
-      'image',
-    ]),
-  },
-  async executeTurn(input) {
-    const providerConfig = input.providerConfig
-    if (!isAssistantCodexTargetConfig(providerConfig)) {
-      throw new VaultCliError(
-        'ASSISTANT_PROVIDER_UNSUPPORTED',
-        'Codex app-server execution requires a Codex provider config.',
-      )
-    }
-    const approvalPolicy = providerConfig.policy.approvalPolicy ?? 'never'
-    assertSupportedCodexAppServerApprovalPolicy(approvalPolicy)
-
-    const baseAppServerInput = {
-      abortSignal: input.abortSignal,
-      approvalPolicy,
-      codexCommand: providerConfig.target.codexCommand ?? undefined,
-      codexHome: providerConfig.target.codexHome ?? undefined,
-      configOverrides: mergeCodexConfigOverrides({
-        showThinkingTraces: input.showThinkingTraces ?? false,
-      }),
-      env: prepareAssistantDirectCliEnv(input.env),
-      model: providerConfig.target.model ?? undefined,
-      modelProvider: providerConfig.target.modelProvider ?? undefined,
-      onLiveTurn:
-        input.activeTurnSteering
-          ? (turn: CodexAppServerLiveTurn) => {
-              const sessionId = normalizeNullableString(input.activeTurnSessionId)
-              const murphTurnId = normalizeNullableString(input.activeTurnId)
-              if (!sessionId || !murphTurnId) {
-                return undefined
-              }
-
-              return input.activeTurnSteering?.registerLiveProviderTurn({
-                interrupt: turn.interrupt,
-                providerSessionId: turn.threadId,
-                providerTurnId: turn.turnId,
-                sessionId,
-                steer: async (steerInput) => {
-                  await turn.steer({
-                    images: extractCodexAppServerUserMessageImages(
-                      steerInput.userMessageContent,
-                    ),
-                    prompt: steerInput.prompt,
-                  })
-                },
-                turnId: murphTurnId,
-              })
-            }
-          : undefined,
-      onProgress: input.onEvent ?? undefined,
-      onTraceEvent: input.onTraceEvent,
-      oss: providerConfig.target.oss,
-      profile: providerConfig.target.profile ?? undefined,
-      images: extractCodexAppServerUserMessageImages(input.userMessageContent),
-      reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
-      sandbox: providerConfig.policy.sandbox ?? undefined,
-      workingDirectory: input.workingDirectory,
-    } as const
-
-    let result
-    let providerContinuation
-    try {
-      result = await executeCodexAppServerTurn({
-        ...baseAppServerInput,
-        prompt: resolveAssistantProviderPrompt(input),
-        resumeSessionId: input.resumeProviderSessionId,
-      })
-    } catch (error) {
-      if (
-        input.resumeProviderSessionId &&
-        error instanceof VaultCliError &&
-        error.code === 'ASSISTANT_CODEX_RESUME_STALE'
-      ) {
-        result = await executeCodexAppServerTurn({
-          ...baseAppServerInput,
-          prompt: resolveAssistantProviderPrompt({
-            ...input,
-            resumeProviderSessionId: null,
-          }),
-          resumeSessionId: undefined,
-        })
-        providerContinuation = {
-          kind: 'flat-prompt-replay' as const,
-        }
-      } else {
-        throw error
-      }
-    }
-
-    return {
-      metadata: {
-        activityLabels: [],
-        executedToolCount: 0,
-        providerActionCount: result.providerActionCount,
-        rawToolEvents: [],
-      },
-      ok: true,
-      result: {
-        provider: resolveAssistantChatProviderFromConfig(providerConfig),
-        ...(providerContinuation
-          ? {
-              providerContinuation,
-            }
-          : {}),
-        providerSessionId: result.sessionId,
-        response: result.finalMessage,
-        stderr: result.stderr,
-        stdout: result.stdout,
-        rawEvents: result.jsonEvents,
-        usage: extractCodexAssistantProviderUsage({
-          providerConfig,
-          rawEvents: result.jsonEvents,
-        }),
-      },
-    }
-  },
-  resolveLabel(config) {
-    return config.target.kind === 'codex-cli' && config.target.oss
-      ? 'Codex OSS app-server'
-      : 'Codex app-server'
-  },
-  resolveStaticModels() {
-    return DEFAULT_CODEX_MODELS
-  },
+export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
+  supportedUserMessageContentTypes: ['text', 'image'],
+  supportsNativeResume: true,
+  supportsReasoningEffort: true,
+  supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
+    'text',
+    'image',
+  ]),
 }
 
-function assertSupportedCodexAppServerApprovalPolicy(
-  approvalPolicy: AssistantApprovalPolicy | null | undefined,
-): void {
-  if (approvalPolicy === 'never') {
-    return
+export async function executeCodexAssistantTurnAttempt(
+  input: AssistantProviderTurnExecutionInput,
+): Promise<AssistantProviderTurnAttemptResult> {
+  const providerConfig = input.providerConfig
+  if (!isAssistantCodexTargetConfig(providerConfig)) {
+    throw new VaultCliError(
+      'ASSISTANT_PROVIDER_UNSUPPORTED',
+      'Codex app-server execution requires a Codex provider config.',
+    )
+  }
+  const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(
+    providerConfig.policy.approvalPolicy,
+  )
+
+  const baseAppServerInput = {
+    abortSignal: input.abortSignal,
+    approvalPolicy,
+    codexCommand: providerConfig.target.codexCommand ?? undefined,
+    codexHome: providerConfig.target.codexHome ?? undefined,
+    configOverrides: mergeCodexConfigOverrides({
+      showThinkingTraces: input.showThinkingTraces ?? false,
+    }),
+    env: prepareAssistantDirectCliEnv(input.env),
+    model: providerConfig.target.model ?? undefined,
+    modelProvider: providerConfig.target.modelProvider ?? undefined,
+    onLiveTurn:
+      input.activeTurnSteering
+        ? (turn: CodexAppServerLiveTurn) => {
+            const sessionId = normalizeNullableString(input.activeTurnSessionId)
+            const murphTurnId = normalizeNullableString(input.activeTurnId)
+            if (!sessionId || !murphTurnId) {
+              return undefined
+            }
+
+            return input.activeTurnSteering?.registerLiveProviderTurn({
+              interrupt: turn.interrupt,
+              providerSessionId: turn.threadId,
+              providerTurnId: turn.turnId,
+              sessionId,
+              steer: async (steerInput) => {
+                await turn.steer({
+                  images: extractCodexAppServerUserMessageImages(
+                    steerInput.userMessageContent,
+                  ),
+                  prompt: steerInput.prompt,
+                })
+              },
+              turnId: murphTurnId,
+            })
+          }
+        : undefined,
+    onProgress: input.onEvent ?? undefined,
+    onTraceEvent: input.onTraceEvent,
+    oss: providerConfig.target.oss,
+    profile: providerConfig.target.profile ?? undefined,
+    images: extractCodexAppServerUserMessageImages(input.userMessageContent),
+    reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
+    sandbox: providerConfig.policy.sandbox ?? undefined,
+    workingDirectory: input.workingDirectory,
+  } as const
+
+  let result
+  let providerContinuation
+  try {
+    result = await executeCodexAppServerTurn({
+      ...baseAppServerInput,
+      prompt: resolveAssistantProviderPrompt(input),
+      resumeSessionId: input.resumeProviderSessionId,
+    })
+  } catch (error) {
+    if (
+      input.resumeProviderSessionId &&
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_CODEX_RESUME_STALE'
+    ) {
+      result = await executeCodexAppServerTurn({
+        ...baseAppServerInput,
+        prompt: resolveAssistantProviderPrompt({
+          ...input,
+          resumeProviderSessionId: null,
+        }),
+        resumeSessionId: undefined,
+      })
+      providerContinuation = {
+        kind: 'flat-prompt-replay' as const,
+      }
+    } else {
+      throw error
+    }
   }
 
-  throw new VaultCliError(
-    'ASSISTANT_CODEX_APPROVAL_POLICY_UNSUPPORTED',
-    `Codex app-server approval policy "${approvalPolicy}" is not supported in noninteractive assistant turns. Use approvalPolicy=never.`,
-    {
-      approvalPolicy,
-      retryable: false,
+  return {
+    metadata: {
+      activityLabels: [],
+      executedToolCount: 0,
+      providerActionCount: result.providerActionCount,
+      rawToolEvents: [],
     },
-  )
+    ok: true,
+    result: {
+      provider: resolveAssistantChatProviderFromConfig(providerConfig),
+      ...(providerContinuation
+        ? {
+            providerContinuation,
+          }
+        : {}),
+      providerSessionId: result.sessionId,
+      response: result.finalMessage,
+      stderr: result.stderr,
+      stdout: result.stdout,
+      rawEvents: result.jsonEvents,
+      usage: extractCodexAssistantProviderUsage({
+        providerConfig,
+        rawEvents: result.jsonEvents,
+      }),
+    },
+  }
+}
+
+export function resolveCodexAssistantLabel(
+  config: AssistantProviderTurnExecutionInput['providerConfig'],
+): string {
+  return config.target.kind === 'codex-cli' && config.target.oss
+    ? 'Codex OSS app-server'
+    : 'Codex app-server'
+}
+
+export function resolveCodexStaticModels(): typeof DEFAULT_CODEX_MODELS {
+  return DEFAULT_CODEX_MODELS
 }
 
 function extractCodexAppServerUserMessageImages(

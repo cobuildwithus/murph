@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const codexAppServerMocks = vi.hoisted(() => ({
+  executeCodexAppServerTurn: vi.fn(),
+}))
+
+vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
+  executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
+}))
+
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 
 import { createAssistantBinding } from '../src/assistant/bindings.ts'
-import { codexCliProviderDefinition } from '../src/assistant/providers/codex-cli.ts'
 import {
   DEFAULT_CODEX_MODEL_CAPABILITIES,
   DEFAULT_CODEX_MODELS,
@@ -14,28 +22,26 @@ import {
   resolveAssistantProviderPrompt,
 } from '../src/assistant/providers/helpers.ts'
 import {
-  executeAssistantProviderTurnAttemptWithDefinition,
-  listAssistantProviderDefinitions,
-  listAssistantProviders,
-  resolveAssistantProviderCapabilities,
-  resolveAssistantProviderLabel,
-  resolveAssistantProviderStaticModels,
-  resolveAssistantProviderTargetCapabilities,
+  executeCodexAssistantTurnAttempt,
+  resolveCodexAssistantCapabilities,
+  resolveCodexAssistantLabel,
+  resolveCodexStaticModels,
+  resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/providers/registry.ts'
 import type {
-  AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
 
 afterEach(() => {
+  codexAppServerMocks.executeCodexAppServerTurn.mockReset()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
-describe('assistant provider registry helpers', () => {
+describe('Codex assistant registry helpers', () => {
   it('resolves provider labels for Codex app-server variants', () => {
     expect(
-      resolveAssistantProviderLabel(
+      resolveCodexAssistantLabel(
         normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           oss: false,
@@ -44,7 +50,7 @@ describe('assistant provider registry helpers', () => {
     ).toBe('Codex app-server')
 
     expect(
-      resolveAssistantProviderLabel(
+      resolveCodexAssistantLabel(
         normalizeAssistantProviderConfig({
           provider: 'codex-cli',
           oss: true,
@@ -308,10 +314,7 @@ describe('assistant provider registry helpers', () => {
   })
 
   it('exposes Codex-only registry capabilities and static model lists', () => {
-    expect(listAssistantProviders()).toEqual(['codex-cli'])
-    expect(listAssistantProviderDefinitions()).toHaveLength(1)
-
-    expect(resolveAssistantProviderCapabilities('codex-cli')).toEqual({
+    expect(resolveCodexAssistantCapabilities()).toEqual({
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsNativeResume: true,
       supportsReasoningEffort: true,
@@ -319,7 +322,7 @@ describe('assistant provider registry helpers', () => {
     })
 
     expect(
-      resolveAssistantProviderTargetCapabilities({
+      resolveCodexAssistantTargetCapabilities({
         provider: 'codex-cli',
       }),
     ).toEqual({
@@ -329,7 +332,7 @@ describe('assistant provider registry helpers', () => {
       supportsRichUserMessageContent: true,
     })
 
-    expect(resolveAssistantProviderStaticModels({ provider: 'codex-cli' })).toEqual(
+    expect(resolveCodexStaticModels({ provider: 'codex-cli' })).toEqual(
       DEFAULT_CODEX_MODELS,
     )
   })
@@ -342,13 +345,28 @@ describe('assistant provider registry helpers', () => {
       response: 'Completed.',
       stderr: '',
       stdout: '',
-      usage: null,
+      usage: {
+        apiKeyEnv: null,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        inputTokens: null,
+        outputTokens: null,
+        providerMetadataJson: null,
+        providerName: null,
+        providerRequestId: null,
+        rawUsageJson: null,
+        reasoningTokens: null,
+        requestedModel: null,
+        servedModel: null,
+        totalTokens: null,
+      },
     }
     const bubbledEvents: unknown[] = []
 
-    vi.spyOn(codexCliProviderDefinition, 'executeTurn').mockImplementation(
-      async (input: AssistantProviderTurnExecutionInput) => {
-        input.onEvent?.({
+    codexAppServerMocks.executeCodexAppServerTurn.mockImplementation(
+      async (input: { onProgress?: (event: unknown) => void }) => {
+        input.onProgress?.({
           id: 'event-1',
           kind: 'tool',
           label: '  Search   Web  ',
@@ -360,25 +378,26 @@ describe('assistant provider registry helpers', () => {
         })
 
         return {
-          metadata: {
-            activityLabels: ['  Existing Label  '],
-            executedToolCount: 1,
-            rawToolEvents: [{ type: 'raw-tool-event' }],
-            providerActionCount: 0,
-          },
-          ok: true,
-          result: executionResult,
+          finalMessage: executionResult.response,
+          jsonEvents: executionResult.rawEvents,
+          providerActionCount: 1,
+          sessionId: executionResult.providerSessionId,
+          stderr: executionResult.stderr,
+          stdout: executionResult.stdout,
+          threadId: executionResult.providerSessionId,
+          turnId: 'turn-1',
         }
       },
     )
 
-    const attempt = await executeAssistantProviderTurnAttemptWithDefinition({
+    const attempt = await executeCodexAssistantTurnAttempt({
       onEvent: (event) => {
         bubbledEvents.push(event)
       },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      userPrompt: 'Run the turn.',
       workingDirectory: '/tmp/provider-tests',
     })
 
@@ -389,10 +408,10 @@ describe('assistant provider registry helpers', () => {
 
     expect(bubbledEvents).toHaveLength(1)
     expect(attempt.metadata).toEqual({
-      activityLabels: ['Existing Label', 'Search Web'],
-      executedToolCount: 1,
-      rawToolEvents: [{ type: 'raw-tool-event' }],
-      providerActionCount: 0,
+      activityLabels: ['Search Web'],
+      executedToolCount: 0,
+      rawToolEvents: [],
+      providerActionCount: 1,
     })
     expect(attempt.result).toEqual(executionResult)
   })
@@ -400,9 +419,9 @@ describe('assistant provider registry helpers', () => {
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {
     const expectedError = new Error('provider crashed')
 
-    vi.spyOn(codexCliProviderDefinition, 'executeTurn').mockImplementation(
-      async (input: AssistantProviderTurnExecutionInput) => {
-        input.onEvent?.({
+    codexAppServerMocks.executeCodexAppServerTurn.mockImplementation(
+      async (input: { onProgress?: (event: unknown) => void }) => {
+        input.onProgress?.({
           id: 'event-2',
           kind: 'command',
           label: '  Refresh Session  ',
@@ -417,10 +436,11 @@ describe('assistant provider registry helpers', () => {
       },
     )
 
-    const attempt = await executeAssistantProviderTurnAttemptWithDefinition({
+    const attempt = await executeCodexAssistantTurnAttempt({
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
+      userPrompt: 'Run the turn.',
       workingDirectory: '/tmp/provider-tests',
     })
 

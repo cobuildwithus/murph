@@ -37,15 +37,15 @@ const FAQ_ITEMS = [
   ],
   [
     "What happens to my data?",
-    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Hosted inference runs through Vercel AI Gateway, and hosted runs use encrypted snapshots with access minimized to task execution, security, incident response, debugging, and support needs. Hosted Murph is not zero-knowledge or end-to-end encrypted unless a specific feature says so.",
+    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Hosted Murph encrypts sensitive data at rest and keeps storage scoped by purpose. Hosted Murph is not zero-knowledge. The hosted service can decrypt data when it needs to run requested tasks or maintain the service. Local Murph keeps your vault on your device.",
   ],
   [
     "Can I self-host Murph?",
-    "Yes. Murph is open source under Apache 2.0. Run it locally with one command and bring your own models — OpenAI, Anthropic, Ollama, whatever. The hosted version is for people who'd rather not run anything themselves.",
+    "Yes. Murph is open source under Apache 2.0. Run it locally with one command using Codex CLI and the model provider configured in Codex. The hosted version is for people who'd rather not run anything themselves.",
   ],
   [
     "Can I cancel anytime?",
-    `Yes. No contracts. ${launchPricingSummary}, cancel whenever. Your data stays yours.`,
+    `Yes. No contracts. ${launchPricingSummary}, cancel whenever. You can export your data.`,
   ],
 ] as const;
 

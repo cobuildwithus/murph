@@ -91,7 +91,7 @@ Core execution tuning:
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
-- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant,parsers,web` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant,parsers` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a child-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 
@@ -131,10 +131,6 @@ Opt-in runtime integrations and tool overrides:
 - `HOSTED_EMAIL_DOMAIN`
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
-- `MURPH_WEB_FETCH_ENABLED`
-- `MURPH_WEB_SEARCH_PROVIDER`
-- `MURPH_WEB_SEARCH_MAX_RESULTS`
-- `MURPH_WEB_SEARCH_TIMEOUT_MS`
 - `LINQ_API_BASE_URL`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
@@ -223,8 +219,6 @@ Opt-in execution integrations:
 - `TELEGRAM_BOT_TOKEN`
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
-- `BRAVE_API_KEY` when `MURPH_WEB_SEARCH_PROVIDER=brave`
-
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
 ## Local Validation And Artifact Render

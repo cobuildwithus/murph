@@ -214,7 +214,10 @@ describe("hosted runner container image contract", () => {
       expect(runtimeDependencyNames).not.toContain(dependencyName);
     }
 
-    for (const dependencyName of hostedRunnerBundleOnlyDependencyNames) {
+    const runtimeWorkspacePackageNameSet = new Set(hostedRunnerWorkspacePackageNames);
+    for (const dependencyName of hostedRunnerBundleOnlyDependencyNames.filter(
+      (name) => !runtimeWorkspacePackageNameSet.has(name),
+    )) {
       expect(runtimeDependencyNames).not.toContain(dependencyName);
     }
   });
@@ -236,10 +239,10 @@ describe("hosted runner container image contract", () => {
     const hostedRunnerWorkspacePackageNameSet = new Set<string>(
       hostedRunnerWorkspacePackageNames,
     );
-    const runtimeDependencyNames = [
+    const runtimeDependencyNames = [...new Set([
       ...Object.keys(readRunnerPackageManifestSync().dependencies ?? {}),
       ...hostedRunnerBundleOnlyDependencyNames,
-    ];
+    ])];
     const runtimeDependencies = Object.fromEntries(
       runtimeDependencyNames.map((dependencyName) => [dependencyName, "1.2.3"]),
     ) as Record<string, string>;
@@ -261,8 +264,10 @@ describe("hosted runner container image contract", () => {
       runtimeDependencyNames.sort(),
     );
     expect(hostedRunnerWorkspacePackageNames).toEqual([
+      "@murphai/assistant-cli",
       "@murphai/assistant-engine",
       "@murphai/assistant-runtime",
+      "@murphai/assistantd",
       "@murphai/cloudflare-hosted-control",
       "@murphai/contracts",
       "@murphai/core",
@@ -280,6 +285,7 @@ describe("hosted runner container image contract", () => {
       "@murphai/parsers",
       "@murphai/query",
       "@murphai/runtime-state",
+      "@murphai/setup-cli",
       "@murphai/vault-usecases",
     ]);
     expect(hostedRunnerBuildPackageNames).toEqual([
@@ -367,7 +373,7 @@ describe("hosted runner container image contract", () => {
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
     );
     expect(baseDockerfile).not.toContain(
-      "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
+      "COPY --chown=root:root .deploy/runner-bundle/ /app/",
     );
     expect(baseDockerfile).not.toContain("wrangler.generated.jsonc");
     expect(baseDockerfile).not.toContain("worker-secrets.json");
@@ -404,15 +410,23 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
     expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
     const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
-      "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
+      "COPY --chown=root:root .deploy/runner-bundle/ /app/",
     );
+    const finalRootUserIndex = finalDockerfile.indexOf("USER root");
+    const finalChmodIndex = finalDockerfile.indexOf("RUN chmod -R a-w /app");
+    const finalRunnerUserIndex = finalDockerfile.indexOf("USER runner");
     const finalLocalBuildIdArgIndex = finalDockerfile.indexOf(
       "ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local",
     );
     const finalLocalBuildIdLabelIndex = finalDockerfile.indexOf(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
+    expect(finalRootUserIndex).toBeGreaterThan(-1);
     expect(finalRunnerBundleCopyIndex).toBeGreaterThan(-1);
+    expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalRootUserIndex);
+    expect(finalChmodIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
+    expect(finalRunnerUserIndex).toBeGreaterThan(finalChmodIndex);
+    expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerUserIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
@@ -420,8 +434,12 @@ describe("hosted runner container image contract", () => {
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
     expect(finalDockerfile).toContain(
-      "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
+      "COPY --chown=root:root .deploy/runner-bundle/ /app/",
     );
+    expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
+    expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
+    expect(readLastDockerUser(baseDockerfile)).toBe("runner");
+    expect(readDockerUsers(finalDockerfile)).toEqual(["root", "runner"]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     expect(finalDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(finalDockerfile).not.toContain("apt-get install");
@@ -432,13 +450,42 @@ describe("hosted runner container image contract", () => {
     expect(smokeDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageTag}`);
     expect(smokeDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
     expect(smokeDockerfile).toContain(
-      "COPY --chown=runner:runner .deploy/runner-smoke-bundle/ /app/",
+      "COPY --chown=root:root .deploy/runner-smoke-bundle/ /app/",
     );
+    expect(smokeDockerfile).toContain("RUN chmod -R a-w /app");
+    expect(smokeDockerfile).toContain("  && chmod -R a+rX /app");
+    expect(readDockerUsers(smokeDockerfile)).toEqual(["root", "runner"]);
     expect(smokeDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     expect(smokeDockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
     expect(smokeDockerfile).not.toContain("apt-get install");
     expect(smokeDockerfile).not.toContain("@openai/codex");
     expect(smokeDockerfile).not.toContain("worker-secrets.json");
+  });
+
+  it("keeps the shared app bundle immutable to the runtime user across warm container reuse", async () => {
+    const finalDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
+      "utf8",
+    );
+    const baseDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url),
+      "utf8",
+    );
+
+    const appBundleIsOwnedByRoot = finalDockerfile.includes(
+      "COPY --chown=root:root .deploy/runner-bundle/ /app/",
+    );
+    const appBundleIsMadeNonWritable =
+      finalDockerfile.includes("RUN chmod -R a-w /app")
+      && finalDockerfile.includes("  && chmod -R a+rX /app");
+    const containerReturnsToRuntimeUser =
+      readLastDockerUser(baseDockerfile) === "runner"
+      && readDockerUsers(finalDockerfile).at(-1) === "runner";
+
+    expect(appBundleIsOwnedByRoot).toBe(true);
+    expect(appBundleIsMadeNonWritable).toBe(true);
+    expect(containerReturnsToRuntimeUser).toBe(true);
+    expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
@@ -525,6 +572,9 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain(
       "pnpm runner:bundle:hosted-local &&",
     );
+    expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain(
+      "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN=1",
+    );
     expect(packageJson.scripts?.["test:e2e:hosted-local"]).toContain("MURPH_DEV_SKIP_RUNNER_BUNDLE=1");
     expect(packageJson.scripts?.["test:e2e:linq-delivery:local"]).toContain(
       "pnpm runner:bundle:hosted-local &&",
@@ -580,4 +630,17 @@ function readRunnerPackageManifestSync(): {
   ) as {
     dependencies?: Record<string, string>;
   };
+}
+
+function readDockerUsers(dockerfile: string): string[] {
+  return dockerfile
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .map((line) => /^USER\s+(.+)$/iu.exec(line)?.[1]?.trim() ?? null)
+    .filter((user): user is string => user !== null);
+}
+
+function readLastDockerUser(dockerfile: string): string | null {
+  return readDockerUsers(dockerfile).at(-1) ?? null;
 }

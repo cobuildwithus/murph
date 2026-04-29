@@ -38,25 +38,17 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("forwards only the default assistant, parser, and web runner env profiles", () => {
+  it("forwards only the default assistant and parser runner env profiles", () => {
     expect(buildHostedRunnerContainerEnv({
-      BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
-      MURPH_WEB_SEARCH_MAX_RESULTS: "8",
-      MURPH_WEB_SEARCH_PROVIDER: "brave",
-      MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
-      BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      MURPH_WEB_SEARCH_MAX_RESULTS: "8",
-      MURPH_WEB_SEARCH_PROVIDER: "brave",
-      MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
       NODE_ENV: "production",
     });
   });
@@ -185,17 +177,6 @@ describe("buildHostedRunnerContainerEnv", () => {
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      NODE_ENV: "production",
-    });
-  });
-
-  it("forwards hosted web-read enablement into the runner", () => {
-    expect(buildHostedRunnerContainerEnv({
-      MURPH_WEB_FETCH_ENABLED: "true",
-    })).toEqual({
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
-      MURPH_WEB_FETCH_ENABLED: "true",
       NODE_ENV: "production",
     });
   });
@@ -785,7 +766,6 @@ describe("hosted deploy automation device-sync surface", () => {
     );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining([
-        "BRAVE_API_KEY",
         "LINQ_API_TOKEN",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",

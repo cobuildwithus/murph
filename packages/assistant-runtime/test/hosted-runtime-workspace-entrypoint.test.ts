@@ -26,6 +26,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
+  HostedWorkspaceRuntimeLivenessRejectedError,
   HostedWorkspaceRunnerUserMismatchError,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
@@ -40,11 +41,17 @@ import {
 import type {
   HostedRuntimeMailboxPort,
   HostedRuntimePlatform,
+  RuntimeLivenessPort,
   HostedRuntimeWorkspacePort,
 } from "../src/hosted-runtime-contracts.ts";
 
 const TEST_NOW = "2026-04-27T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_entrypoint";
+const TEST_HOSTED_CODEX_FORWARDED_ENV = {
+  HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
+  HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+  VERCEL_AI_API_KEY: "test-vercel-key",
+} as const;
 
 describe("hosted workspace runtime entrypoint", () => {
   test("reads workspace, imports mailbox prefix, snapshots through the semantic checkpoint builder, and checkpoints", async () => {
@@ -66,8 +73,9 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: Array<{ id: string; route: string }> = [];
 
     try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess({
-        request: {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
           attemptId: "attempt_synthetic_workspace_entrypoint",
           budget: {
             maxMailboxItems: 10,
@@ -77,7 +85,8 @@ describe("hosted workspace runtime entrypoint", () => {
           userId: TEST_USER_ID,
           workspaceVersion: "0",
         },
-      }, {
+        }),
+      {
         async createCheckpointSnapshot(snapshotInput) {
           const state = await readHostedMailboxImportState({ vaultRoot });
           events.push(`snapshot:${state.watermarks.conversation}`);
@@ -104,7 +113,6 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         vaultRoot,
       });
-
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
@@ -144,15 +152,211 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("starts runtime liveness before workspace read and stops it after completion", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const workspacePort = createWorkspacePort({
+      checkpointRequests: [],
+      events,
+      workspace: createWorkspaceState({ nextWakeAt: null, version: "0" }),
+    });
+    const mailboxPort = createMailboxPort({
+      events,
+      items: [],
+    });
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        events.push("heartbeat");
+        return { ok: true };
+      },
+    };
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+          attemptId: "attempt_synthetic_workspace_entrypoint",
+          leaseGeneration: "7",
+          reason: "nudge",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+        }),
+      {
+        async createCheckpointSnapshot() {
+          events.push("snapshot");
+          return {
+            snapshotRef: createBundleRef({
+              hash: "b".repeat(64),
+              key: "users/bundles/member-synthetic/workspace-entrypoint-heartbeat.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem() {
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort,
+          runtimeLivenessPort,
+          workspacePort,
+        }),
+        vaultRoot,
+      });
+
+      assert.deepEqual(events.slice(0, 2), ["heartbeat", "workspace.read"]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fails closed while waiting for the initial runtime liveness heartbeat", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const initialTouch = createDeferred<Awaited<ReturnType<RuntimeLivenessPort["touch"]>>>();
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        events.push("heartbeat");
+        return await initialTouch.promise;
+      },
+    };
+
+    try {
+      const run = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("Snapshot should not run after rejected liveness.");
+        },
+        async importItem() {
+          throw new Error("Import should not run after rejected liveness.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events, items: [] }),
+          runtimeLivenessPort,
+          workspacePort: {
+            async checkpoint() {
+              throw new Error("Checkpoint should not run after rejected liveness.");
+            },
+            async read() {
+              events.push("workspace.read");
+              return {
+                fetchedAt: TEST_NOW,
+                workspace: createWorkspaceState({ version: "0" }),
+              };
+            },
+          },
+        }),
+        vaultRoot,
+      });
+
+      await waitUntil(() => assert.deepEqual(events, ["heartbeat"]));
+      initialTouch.resolve({
+        ok: false,
+        reason: "stale_attempt",
+      });
+
+      await expect(run).rejects.toBeInstanceOf(HostedWorkspaceRuntimeLivenessRejectedError);
+      assert.deepEqual(events, ["heartbeat"]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("passes liveness cancellation into mailbox imports before import side effects", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    let touchCalls = 0;
+    let importSideEffects = 0;
+    let importStarted = false;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        touchCalls += 1;
+        events.push(`heartbeat:${touchCalls}`);
+        if (touchCalls === 1 || !importStarted) {
+          return { ok: true };
+        }
+        return {
+          ok: false,
+          reason: "stale_attempt",
+        };
+      },
+    };
+
+    try {
+      const run = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          throw new Error("Snapshot should not run after rejected liveness.");
+        },
+        async importItem(_item, context) {
+          importStarted = true;
+          events.push("import.start");
+          await new Promise<void>((resolve, reject) => {
+            const signal = context?.signal ?? null;
+            if (!signal) {
+              reject(new Error("Import should receive liveness signal."));
+              return;
+            }
+            if (signal.aborted) {
+              resolve();
+              return;
+            }
+            signal.addEventListener("abort", () => {
+              events.push("import.abort");
+              resolve();
+            }, { once: true });
+          });
+          if (context?.signal?.aborted) {
+            return {
+              reasonCode: "liveness.aborted",
+              status: "deferred",
+            };
+          }
+          importSideEffects += 1;
+          return { status: "imported" };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            events,
+            items: [
+              createMailboxItem({
+                id: "mailbox_item_entrypoint_liveness_import",
+              }),
+            ],
+          }),
+          runtimeLivenessIntervalMs: 100,
+          runtimeLivenessPort,
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        vaultRoot,
+      });
+      const runResult = run.then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ error, ok: false as const }),
+      );
+
+      await waitUntil(() => assert.ok(events.includes("import.start"), events.join(",")), 5_000);
+      const result = await runResult;
+      assert.equal(result.ok, false);
+      assert.ok(result.error instanceof HostedWorkspaceRuntimeLivenessRejectedError);
+      assert.equal(importSideEffects, 0);
+      assert.equal(events[0], "heartbeat:1");
+      assert.ok(events.indexOf("import.start") < events.indexOf("heartbeat:2"));
+      assert.ok(events.indexOf("heartbeat:2") < events.indexOf("import.abort"));
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("runs assistant outbox phase after restored mailbox checkpoint with restored vault root", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
 
     try {
-      await runHostedWorkspaceRuntimeJobInProcess({
-        request: createWorkspaceRunRequest(),
-      }, {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}:${snapshotInput.state.watermarks.conversation}`);
           return {
@@ -232,9 +436,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await expect(
-        runHostedWorkspaceRuntimeJobInProcess({
-          request: createWorkspaceRunRequest(),
-        }, {
+        runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
           async createCheckpointSnapshot() {
             throw new Error("Snapshot should not run after failed mailbox import.");
           },
@@ -290,6 +492,13 @@ describe("hosted workspace runtime entrypoint", () => {
     const createCheckpointSnapshot = async () => ({
       snapshotRef: null,
     });
+    let livenessTouches = 0;
+    const runtimeLivenessPort: RuntimeLivenessPort = {
+      async touch() {
+        livenessTouches += 1;
+        return { ok: true };
+      },
+    };
 
     await expect(
       runHostedWorkspaceRuntimeJobInProcess(input, {
@@ -297,6 +506,7 @@ describe("hosted workspace runtime entrypoint", () => {
         importItem,
         platform: createPlatform({
           mailboxPort: null,
+          runtimeLivenessPort,
           workspacePort: createWorkspacePort({
             checkpointRequests: [],
             events: [],
@@ -313,6 +523,7 @@ describe("hosted workspace runtime entrypoint", () => {
         importItem,
         platform: createPlatform({
           mailboxPort: createMailboxPort({ events: [], items: [] }),
+          runtimeLivenessPort,
           workspacePort: null,
         }),
         vaultRoot,
@@ -325,6 +536,7 @@ describe("hosted workspace runtime entrypoint", () => {
         importItem,
         platform: createPlatform({
           mailboxPort: createMailboxPort({ events: [], items: [] }),
+          runtimeLivenessPort,
           workspacePort: {
             async checkpoint(): Promise<HostedWorkspaceCheckpointResponse> {
               throw new Error("Checkpoint should not run without workspace read.");
@@ -334,6 +546,7 @@ describe("hosted workspace runtime entrypoint", () => {
         vaultRoot,
       }),
     ).rejects.toThrow(/workspace port must support read/u);
+    assert.equal(livenessTouches, 0);
   });
 
   test("fails closed when workspace read returns a stale version before mailbox fetch", async () => {
@@ -450,11 +663,13 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: string[] = [];
 
     try {
-      await runHostedWorkspaceRuntimeJobInProcess({
-        request: createWorkspaceRunRequest({
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
           workspaceVersion: "9",
+        },
         }),
-      }, {
+      {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
           return {
@@ -528,9 +743,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const artifactGetCalls: string[] = [];
 
     try {
-      await runHostedWorkspaceRuntimeJobInProcess({
-        request: createWorkspaceRunRequest(),
-      }, {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(
             `snapshot:${snapshotInput.previousState.watermarks.conversation}->${snapshotInput.state.watermarks.conversation}`,
@@ -671,13 +884,15 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: string[] = [];
 
     try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess({
-        request: createWorkspaceRunRequest({
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
           budget: {
             maxMailboxItems: 1,
           },
+        },
         }),
-      }, {
+      {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.state.watermarks.conversation}`);
           return {
@@ -754,9 +969,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
 
     try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess({
-        request: createWorkspaceRunRequest(),
-      }, {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot() {
           return {
             snapshotRef: createBundleRef({
@@ -814,9 +1027,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const nextWakeAt = "2026-04-27T00:05:00.000Z";
 
     try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess({
-        request: createWorkspaceRunRequest(),
-      }, {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot() {
           throw new Error("Snapshot should not run without mailbox state changes.");
         },
@@ -863,11 +1074,13 @@ describe("hosted workspace runtime entrypoint", () => {
     const staleWakeAt = "2026-04-27T00:05:00.000Z";
 
     try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess({
-        request: createWorkspaceRunRequest({
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
           reason: "alarm",
+        },
         }),
-      }, {
+      {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}:${snapshotInput.state.watermarks.conversation}`);
           return {
@@ -958,6 +1171,8 @@ function createPlatform(input: {
   artifactBytesByHash?: ReadonlyMap<string, Uint8Array>;
   artifactGetCalls?: string[];
   mailboxPort: HostedRuntimeMailboxPort | null;
+  runtimeLivenessIntervalMs?: number | null;
+  runtimeLivenessPort?: RuntimeLivenessPort | null;
   workspacePort: HostedRuntimeWorkspacePort | null;
 }): HostedRuntimePlatform {
   return {
@@ -979,6 +1194,10 @@ function createPlatform(input: {
       },
     },
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
+    ...(input.runtimeLivenessIntervalMs
+      ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
+      : {}),
+    ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
   };
 }
@@ -1091,6 +1310,21 @@ function createWorkspaceRunRequest(
   };
 }
 
+function createWorkspaceRuntimeJobInput(input: {
+  forwardedEnv?: Readonly<Record<string, string>>;
+  request?: Partial<HostedWorkspaceInvocationRequest>;
+} = {}) {
+  return {
+    request: createWorkspaceRunRequest(input.request),
+    runtime: {
+      forwardedEnv: {
+        ...TEST_HOSTED_CODEX_FORWARDED_ENV,
+        ...(input.forwardedEnv ?? {}),
+      },
+    },
+  };
+}
+
 function createWorkspaceState(overrides: Partial<HostedWorkspaceState> = {}): HostedWorkspaceState {
   return {
     checkpointedAt: TEST_NOW,
@@ -1122,4 +1356,35 @@ function createBundleRef(input: {
     size: input.size,
     updatedAt: TEST_NOW,
   };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return {
+    promise,
+    reject,
+    resolve,
+  };
+}
+
+async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion.");
 }

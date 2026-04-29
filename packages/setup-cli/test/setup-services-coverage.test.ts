@@ -1112,7 +1112,7 @@ test('configureSetupChannels preserves matching email backlog timestamps', async
     await saveAssistantAutomationState(vaultRoot, {
       version: 1,
       inboxScanCursor: null,
-      autoReply: [{ channel: 'email', cursor: null }],
+      autoReply: [{ channel: 'email', enabledAt: TEST_TIMESTAMP, eligibleAfter: null }],
       updatedAt: TEST_TIMESTAMP,
     })
 

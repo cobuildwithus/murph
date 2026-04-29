@@ -9,7 +9,10 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
-import type { HostedExecutionContainerStubLike } from "../src/runner-container.ts";
+import type {
+  HostedExecutionContainerNamespaceLike,
+  HostedExecutionContainerStubLike,
+} from "../src/runner-container.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -168,6 +171,69 @@ describe("HostedUserRunner alarm routing", () => {
         userId: "member_123",
       }),
     );
+  });
+
+  it("deletes runner state and clears alarms for hosted user deletion", async () => {
+    const destroyInstance = vi.fn(async () => {});
+    const { alarms, r2Deletes, runner, sql } = createRunnerHarness({
+      runnerContainerNamespace: createRunnerContainerNamespace(destroyInstance),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        stateDeleted: true,
+      },
+      ok: true,
+      r2: {
+        deletedObjectCount: 0,
+        deletedRootKeyEnvelope: false,
+        skippedUserScopedPrefixes: true,
+        supported: true,
+      },
+      userId: "member_123",
+    });
+
+    expect(alarms).toContain("deleted");
+    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(r2Deletes).toEqual([]);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
+  it("continues Durable Object cleanup when best-effort R2 deletion fails", async () => {
+    const destroyInstance = vi.fn(async () => {});
+    const { alarms, runner, sql } = createRunnerHarness({
+      bucket: {
+        async delete() {},
+        async get() {
+          throw new Error("R2 unavailable");
+        },
+        async put() {},
+      },
+      runnerContainerNamespace: createRunnerContainerNamespace(destroyInstance),
+    });
+    await runner.bindUser("member_123");
+
+    await expect(runner.deleteHostedUserData("member_123")).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        stateDeleted: true,
+      },
+      ok: true,
+      r2: {
+        deletedObjectCount: 0,
+        deletedRootKeyEnvelope: false,
+        skippedUserScopedPrefixes: true,
+        supported: false,
+        userScopedSkipReason: "Error",
+      },
+      userId: "member_123",
+    });
+
+    expect(alarms).toContain("deleted");
+    expect(destroyInstance).toHaveBeenCalledTimes(1);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 });
 
@@ -612,9 +678,17 @@ describe("HostedUserRunner first-workspace crypto bootstrap", () => {
   });
 });
 
-function createRunnerHarness() {
+function createRunnerHarness(options: {
+  bucket?: {
+    delete?(key: string): Promise<void>;
+    get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
+    put(key: string, value: string): Promise<void>;
+  };
+  runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
+} = {}) {
   const sql = createTestSqlStorage();
   const alarms: string[] = [];
+  const r2Deletes: string[] = [];
   const storage = {
     async delete() {
       return true;
@@ -638,7 +712,10 @@ function createRunnerHarness() {
     },
     sql,
   };
-  const bucket = {
+  const bucket = options.bucket ?? {
+    async delete(key: string) {
+      r2Deletes.push(key);
+    },
     async get() {
       return null;
     },
@@ -647,6 +724,7 @@ function createRunnerHarness() {
 
   return {
     alarms,
+    r2Deletes,
     runner: new TestHostedUserRunner(
       {
         storage,
@@ -655,8 +733,37 @@ function createRunnerHarness() {
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       })),
       bucket,
+      {},
+      options.runnerContainerNamespace ?? null,
     ),
     sql,
+  };
+}
+
+function createRunnerContainerNamespace(
+  destroyInstance: HostedExecutionContainerStubLike["destroyInstance"],
+): HostedExecutionContainerNamespaceLike {
+  return {
+    getByName(name: string) {
+      expect(name).toBe("member_123");
+      return {
+        destroyInstance,
+        async invoke() {
+          throw new Error("Deletion tests should not invoke the runner container.");
+        },
+        async ownsInternalWorkerProxyToken() {
+          return false;
+        },
+        async smokeHealth() {
+          return {
+            ok: true,
+            runnerBundle: null,
+            service: "cloudflare-hosted-runner-node",
+            status: 200,
+          };
+        },
+      };
+    },
   };
 }
 

@@ -1183,9 +1183,9 @@ describe('assistant auto-reply prompt builder support', () => {
         attachmentId: 'bundle-1',
         ordinal: 1,
         kind: 'document',
-        mime: 'application/pdf',
-        fileName: 'scan.pdf',
-        storedPath: 'inbox/attachments/scan.pdf',
+        mime: null,
+        fileName: null,
+        storedPath: null,
         parseState: 'succeeded',
         routingImage: {
           eligible: false,

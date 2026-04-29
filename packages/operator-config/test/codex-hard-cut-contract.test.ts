@@ -2,7 +2,9 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 import {
+  assistantApprovalPolicyValues,
   assistantChatProviderValues,
+  assistantCodexModelTargetSchema,
   assistantProviderSessionOptionsSchema,
 } from '../src/assistant-cli-contracts.ts'
 import {
@@ -20,6 +22,38 @@ describe('operator config Codex-only hard-cut contracts', () => {
     expect(assistantChatProviderValues).toEqual(['codex-cli'])
     expect(assistantExecutionDriverValues).toEqual(['codex-app-server'])
     expect(assistantResumeKindValues).toEqual(['codex-thread'])
+  })
+
+  it('keeps assistant approval policy permanently noninteractive', () => {
+    expect(assistantApprovalPolicyValues).toEqual(['never'])
+    expect(
+      assistantCodexModelTargetSchema.parse({
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+      }),
+    ).toMatchObject({
+      approvalPolicy: 'never',
+    })
+    expect(() =>
+      assistantCodexModelTargetSchema.parse({
+        adapter: 'codex-cli',
+        approvalPolicy: 'on-request',
+      }),
+    ).toThrow()
+    expect(() =>
+      assistantProviderSessionOptionsSchema.parse({
+        continuityFingerprint: 'codex:policy',
+        executionDriver: 'codex-app-server',
+        model: null,
+        oss: false,
+        profile: null,
+        provider: 'codex-cli',
+        reasoningEffort: 'medium',
+        resumeKind: 'codex-thread',
+        sandbox: 'danger-full-access',
+        approvalPolicy: 'untrusted',
+      }),
+    ).toThrow()
   })
 
   it('serializes Vercel AI Gateway through Codex modelProvider config', () => {

@@ -126,6 +126,16 @@ test("hosted runtime usage parser rejects non-string or blank usage ids", () => 
   );
 });
 
+test("hosted runtime usage parser rejects recorded counts that do not match usage ids", () => {
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse({
+      recorded: 1,
+      usageIds: ["usage_1", "usage_2"],
+    }),
+    /recorded must equal usageIds\.length/u,
+  );
+});
+
 test("hosted runtime delegated billing resolves the Stripe customer id only for Vercel AI Gateway requests", async () => {
   const billingPort = {
     async resolveVercelAiGatewayStripeCustomerId() {
@@ -617,6 +627,8 @@ test("hosted usage export stays non-fatal and leaves records pending when no usa
       {
         exported: 0,
         failed: 0,
+        invalid: 0,
+        invalidIssueRecorded: false,
         pending: 1,
       },
     );
@@ -700,6 +712,8 @@ test("hosted usage export deletes only the usage ids acknowledged by the injecte
       {
         exported: 1,
         failed: 1,
+        invalid: 0,
+        invalidIssueRecorded: false,
         pending: 1,
       },
     );

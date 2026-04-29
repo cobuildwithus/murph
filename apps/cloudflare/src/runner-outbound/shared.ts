@@ -18,6 +18,24 @@ interface RunnerOutboundUserRunnerStubLike extends WorkerBindUserRunnerStubLike 
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
+  recordActiveInvocationHeartbeat?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<
+    | {
+      nextAlarmAt: string | null;
+      ok: true;
+    }
+    | {
+      ok: false;
+      reason:
+        | "no_active_invocation"
+        | "stale_attempt"
+        | "stale_generation"
+        | "wrong_user";
+    }
+  >;
   recordActiveInvocationWorkspaceCheckpoint?(input: {
     attemptId: string;
     leaseGeneration: string;
@@ -32,6 +50,7 @@ export interface RunnerOutboundEnvironmentSource
 const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
 ]);
 

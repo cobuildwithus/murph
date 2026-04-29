@@ -68,11 +68,8 @@ import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
 } from './service-result.js'
-import {
-  prioritizeAssistantRoutesForRichUserMessageContent,
-} from './rich-content-routing.js'
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
-import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
+import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
 import {
   AssistantActiveTurnInputBudgetExceededError,
@@ -250,16 +247,12 @@ export async function sendAssistantMessageLocal(
         source: 'assistant-message',
       })
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
-      const routes = prioritizeAssistantRoutesForRichUserMessageContent({
-        routes: resolveAssistantTurnRoutes(input, defaults, resolved),
-        userMessageContent: input.userMessageContent,
-      })
-      const primaryRoute = routes[0] ?? null
+      const route = resolveAssistantTurnRoute(input, defaults, resolved)
       const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
         sessionId: resolved.session.sessionId,
-        provider: primaryRoute?.provider ?? resolved.session.provider,
-        providerModel: primaryRoute?.providerOptions.model ?? null,
+        provider: route.provider,
+        providerModel: route.providerOptions.model ?? null,
         metadata: input.receiptMetadata ?? null,
         prompt: input.prompt,
         deliveryRequested: input.deliverResponse === true,
@@ -348,7 +341,7 @@ export async function sendAssistantMessageLocal(
                 })
               providerRequestAcceptedInputIds = providerRequestJournal?.inputIds ?? []
             },
-            routes: activeTurnRouteLock ? [activeTurnRouteLock] : routes,
+            route: activeTurnRouteLock ?? route,
             plan: sharedPlan,
             profile: {
               turnContinuityPolicy,
@@ -911,23 +904,14 @@ function resolveAcceptedActiveTurnInputItems(input: {
   input: AssistantMessageInput
   providerRequestOrdinal: number
 }): readonly AssistantAcceptedTurnInputItemInput[] {
-  const acceptedInputs = input.acceptedInput.acceptedInputs ?? null
-  if (acceptedInputs && acceptedInputs.length > 0) {
-    return acceptedInputs
+  if (input.acceptedInput.acceptedInputs.length > 0) {
+    return input.acceptedInput.acceptedInputs
   }
 
-  return [
-    {
-      id: `request-${input.providerRequestOrdinal + 1}`,
-      promptFallbackReason:
-        isManualAssistantTurnTrigger(input.input.turnTrigger)
-          ? 'manual-input'
-          : 'system-input',
-      promptFallbackText: input.acceptedInput.prompt,
-      source:
-        input.input.turnTrigger === 'automation-auto-reply' ? 'inbox' : 'manual',
-    },
-  ]
+  throw new VaultCliError(
+    'ASSISTANT_TURN_INPUT_MISSING_ACCEPTED_INPUTS',
+    'Accepted active-turn input admissions must provide durable input ids.',
+  )
 }
 
 function isManualAssistantTurnTrigger(

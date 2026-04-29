@@ -31,12 +31,31 @@ export interface WorkerQueueMessageBatchLike<Body = unknown> {
 
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
+  deleteHostedUserData?(userId: string): Promise<unknown>;
   ownsActiveInvocationLease?(input: {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean>;
+  recordActiveInvocationHeartbeat?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<
+    | {
+      nextAlarmAt: string | null;
+      ok: true;
+    }
+    | {
+      ok: false;
+      reason:
+        | "no_active_invocation"
+        | "stale_attempt"
+        | "stale_generation"
+        | "wrong_user";
+    }
+  >;
   recordActiveInvocationWorkspaceCheckpoint?(input: {
     attemptId: string;
     leaseGeneration: string;

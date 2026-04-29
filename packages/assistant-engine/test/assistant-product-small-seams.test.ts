@@ -712,7 +712,7 @@ describe('assistant product small seams', () => {
         details,
         errorCode: ' E_TIMEOUT ',
         issueKind: 'tool_error',
-        operation: ' web.fetch ',
+        operation: ' codex.tool ',
         phase: 'tool_call',
         severity: 'warning',
         summary: sensitiveSummary,
@@ -750,7 +750,7 @@ describe('assistant product small seams', () => {
         environment: 'local',
         errorCode: 'E_TIMEOUT',
         issueKind: 'tool_error',
-        operation: 'web.fetch',
+        operation: 'codex.tool',
         phase: 'tool_call',
         severity: 'warning',
         surface: 'email',
@@ -947,7 +947,7 @@ describe('assistant product small seams', () => {
       providerSessionId: 'provider-session-1',
       resumeRouteId: 'route-primary',
     })
-    expect(plan.routes).toHaveLength(1)
+    expect(plan.codexRoute.provider).toBe('codex-cli')
 
     expect(() =>
       resolveAssistantExecutionPlan({

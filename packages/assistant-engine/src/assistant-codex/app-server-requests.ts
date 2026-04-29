@@ -147,17 +147,8 @@ export function buildCodexAppServerInputItems(input: {
 
 export function mapCodexAppServerApprovalPolicy(
   approvalPolicy: AssistantApprovalPolicy | null | undefined,
-): string | undefined {
-  switch (approvalPolicy) {
-    case 'on-request':
-      return 'onRequest'
-    case 'untrusted':
-      return 'unlessTrusted'
-    case 'never':
-      return 'never'
-    default:
-      return undefined
-  }
+): 'never' {
+  return resolveSupportedCodexAppServerApprovalPolicy(approvalPolicy)
 }
 
 export function mapCodexAppServerSandboxMode(

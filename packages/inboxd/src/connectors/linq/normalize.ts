@@ -29,6 +29,7 @@ export interface LinqAttachmentDownloadDriver {
       attachmentId?: string | null;
       fileName?: string | null;
       mimeType?: string | null;
+      size?: number | null;
       type: "media" | "voice_memo";
       url?: string | null;
     },
@@ -336,6 +337,7 @@ async function downloadLinqAttachmentInlineBestEffort(
       attachmentId: normalizeTextValue(part.attachment_id ?? null),
       fileName: normalizeTextValue(part.filename ?? null),
       mimeType: normalizeTextValue(part.mime_type ?? null),
+      size: normalizeAttachmentDeclaredByteSize(part.size),
       type: part.type,
       url,
     };
@@ -622,9 +624,18 @@ function normalizeAttachmentByteSize(
   value: number | null | undefined,
   data: Uint8Array | null,
 ): number | null {
-  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-    return Math.floor(value);
+  const declaredSize = normalizeAttachmentDeclaredByteSize(value);
+  if (declaredSize !== null) {
+    return declaredSize;
   }
 
   return data?.byteLength ?? null;
+}
+
+function normalizeAttachmentDeclaredByteSize(
+  value: number | null | undefined,
+): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : null;
 }

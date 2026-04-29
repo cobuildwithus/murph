@@ -5,55 +5,56 @@ import {
   type AssistantProviderConfig,
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
-import {
-  createCatalogModel,
-  resolveAssistantProviderTargetCapabilities as resolveAssistantProviderRegistryTargetCapabilities,
-  resolveAssistantProviderCapabilities as resolveAssistantProviderRegistryCapabilities,
-  resolveAssistantProviderLabel,
-  resolveAssistantProviderStaticModels,
-  type AssistantCatalogModel,
-  type AssistantProviderCapabilities,
-} from '../assistant-provider.js'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import {
+  resolveCodexAssistantCapabilities,
+  resolveCodexAssistantLabel,
+  resolveCodexAssistantTargetCapabilities,
+  resolveCodexStaticModels,
+  type AssistantCatalogModel,
+  type AssistantModelCapabilities,
+  type AssistantProviderCapabilities,
+} from './provider-registry.js'
+import { createCatalogModel } from './providers/catalog.js'
 
-export type {
-  AssistantCatalogModel,
-} from '../assistant-provider.js'
+export type CodexCatalogModel = AssistantCatalogModel
+export type CodexModelCapabilities = AssistantModelCapabilities
+export type CodexAssistantCapabilities = AssistantProviderCapabilities
 
-export interface AssistantModelOption {
+export interface CodexModelOption {
   description: string
   value: string
 }
 
-export interface AssistantReasoningOption {
+export interface CodexReasoningOption {
   description: string
   label: string
   value: string
 }
 
-export type AssistantProviderProfile = AssistantProviderConfig & {
+export type CodexAssistantProfile = AssistantProviderConfig & {
   providerLabel: string
 }
 
-export interface AssistantModelCatalog {
-  capabilities: AssistantProviderCapabilities
-  modelOptions: readonly AssistantModelOption[]
-  models: readonly AssistantCatalogModel[]
+export interface CodexModelCatalog {
+  capabilities: CodexAssistantCapabilities
+  modelOptions: readonly CodexModelOption[]
+  models: readonly CodexCatalogModel[]
   provider: AssistantChatProvider
   providerLabel: string
-  reasoningOptions: readonly AssistantReasoningOption[]
-  selectedModel: AssistantCatalogModel | null
+  reasoningOptions: readonly CodexReasoningOption[]
+  selectedModel: CodexCatalogModel | null
 }
 
-export const DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS: readonly AssistantModelOption[] =
-  resolveAssistantProviderStaticModels({
+export const DEFAULT_CODEX_CHAT_MODEL_OPTIONS: readonly CodexModelOption[] =
+  resolveCodexStaticModels({
     provider: 'codex-cli',
   }).map((model) => ({
     value: model.id,
     description: model.description,
   }))
 
-export const DEFAULT_ASSISTANT_REASONING_OPTIONS: readonly AssistantReasoningOption[] = [
+export const DEFAULT_CODEX_REASONING_OPTIONS: readonly CodexReasoningOption[] = [
   {
     value: 'low',
     label: 'Low',
@@ -76,30 +77,28 @@ export const DEFAULT_ASSISTANT_REASONING_OPTIONS: readonly AssistantReasoningOpt
   },
 ] as const
 
-export function resolveAssistantProviderCapabilities(
-  provider: AssistantChatProvider,
-): AssistantProviderCapabilities {
-  return resolveAssistantProviderRegistryCapabilities(provider)
+export function resolveCodexModelCapabilities(): CodexAssistantCapabilities {
+  return resolveCodexAssistantCapabilities()
 }
 
-export function resolveAssistantTargetCapabilities(
+export function resolveCodexTargetCapabilities(
   input: AssistantProviderConfigLike | null | undefined,
-): AssistantProviderCapabilities {
-  return resolveAssistantProviderRegistryTargetCapabilities(input)
+): CodexAssistantCapabilities {
+  return resolveCodexAssistantTargetCapabilities(input)
 }
 
-export function resolveAssistantProviderProfile(
+export function resolveCodexAssistantProfile(
   input: AssistantProviderConfigLike | null | undefined,
-): AssistantProviderProfile {
+): CodexAssistantProfile {
   const normalized = normalizeAssistantProviderConfig(input)
 
   return {
     ...normalized,
-    providerLabel: resolveAssistantProviderLabel(normalized),
+    providerLabel: resolveCodexAssistantLabel(normalized),
   }
 }
 
-export function resolveAssistantModelCatalog(input: {
+export function resolveCodexModelCatalog(input: {
   apiKeyEnv?: string | null
   baseUrl?: string | null
   currentModel?: string | null
@@ -109,11 +108,11 @@ export function resolveAssistantModelCatalog(input: {
   presetId?: string | null
   provider?: AssistantChatProvider | null
   providerName?: string | null
-}): AssistantModelCatalog {
-  const profile = resolveAssistantProviderProfile(input)
-  const capabilities = resolveAssistantTargetCapabilities(profile)
-  const staticModels = resolveAssistantProviderStaticModels(profile)
-  const models = buildAssistantCatalogModels({
+}): CodexModelCatalog {
+  const profile = resolveCodexAssistantProfile(input)
+  const capabilities = resolveCodexTargetCapabilities(profile)
+  const staticModels = resolveCodexStaticModels(profile)
+  const models = buildCodexCatalogModels({
     currentModel: input.currentModel,
     profile,
     staticModels,
@@ -133,20 +132,20 @@ export function resolveAssistantModelCatalog(input: {
     models,
     provider: resolveAssistantChatProviderFromConfig(profile),
     providerLabel: profile.providerLabel,
-    reasoningOptions: resolveAssistantCatalogReasoningOptions(selectedModel),
+    reasoningOptions: resolveCodexCatalogReasoningOptions(selectedModel),
     selectedModel,
   }
 }
 
-export function resolveAssistantCatalogReasoningOptions(
-  model: AssistantCatalogModel | null | undefined,
-): readonly AssistantReasoningOption[] {
-  return model?.capabilities.reasoning ? DEFAULT_ASSISTANT_REASONING_OPTIONS : []
+export function resolveCodexCatalogReasoningOptions(
+  model: CodexCatalogModel | null | undefined,
+): readonly CodexReasoningOption[] {
+  return model?.capabilities.reasoning ? DEFAULT_CODEX_REASONING_OPTIONS : []
 }
 
-export function findAssistantCatalogModelOptionIndex(
+export function findCodexCatalogModelOptionIndex(
   model: string | null,
-  options: readonly AssistantModelOption[],
+  options: readonly CodexModelOption[],
 ): number {
   if (options.length === 0) {
     return 0
@@ -157,9 +156,9 @@ export function findAssistantCatalogModelOptionIndex(
   return index >= 0 ? index : 0
 }
 
-export function findAssistantCatalogReasoningOptionIndex(
+export function findCodexCatalogReasoningOptionIndex(
   reasoningEffort: string | null,
-  options: readonly AssistantReasoningOption[],
+  options: readonly CodexReasoningOption[],
 ): number {
   if (options.length === 0) {
     return 0
@@ -172,17 +171,17 @@ export function findAssistantCatalogReasoningOptionIndex(
   return index >= 0 ? index : Math.min(1, options.length - 1)
 }
 
-function buildAssistantCatalogModels(input: {
+function buildCodexCatalogModels(input: {
   currentModel?: string | null
-  profile: AssistantProviderProfile
-  staticModels: readonly AssistantCatalogModel[]
-  targetCapabilities: AssistantProviderCapabilities
-}): readonly AssistantCatalogModel[] {
+  profile: CodexAssistantProfile
+  staticModels: readonly CodexCatalogModel[]
+  targetCapabilities: CodexAssistantCapabilities
+}): readonly CodexCatalogModel[] {
   const normalizedCurrentModel = normalizeNullableString(input.currentModel)
-  const models: AssistantCatalogModel[] = []
+  const models: CodexCatalogModel[] = []
   const seen = new Set<string>()
 
-  const pushModel = (model: AssistantCatalogModel | null | undefined) => {
+  const pushModel = (model: CodexCatalogModel | null | undefined) => {
     if (!model) {
       return
     }
@@ -204,12 +203,12 @@ function buildAssistantCatalogModels(input: {
     pushModel(
       createCatalogModel({
         id: normalizedCurrentModel,
-        description: buildCurrentModelDescription(input.profile),
+        description: buildCurrentCodexModelDescription(input.profile),
         source: 'current',
         capabilities:
           input.staticModels.find((model) => model.id === normalizedCurrentModel)
             ?.capabilities ??
-          resolveAssistantCatalogModelCapabilities(input.targetCapabilities),
+          resolveCodexCatalogModelCapabilities(input.targetCapabilities),
       }),
     )
   }
@@ -221,13 +220,13 @@ function buildAssistantCatalogModels(input: {
   return models
 }
 
-function buildCurrentModelDescription(profile: AssistantProviderProfile): string {
+function buildCurrentCodexModelDescription(profile: CodexAssistantProfile): string {
   return profile.target.oss ? 'Current Codex OSS model.' : 'Current Codex model.'
 }
 
-function resolveAssistantCatalogModelCapabilities(
-  capabilities: AssistantProviderCapabilities,
-): AssistantCatalogModel['capabilities'] {
+function resolveCodexCatalogModelCapabilities(
+  capabilities: CodexAssistantCapabilities,
+): CodexCatalogModel['capabilities'] {
   const supportedContentTypes = new Set(capabilities.supportedUserMessageContentTypes)
 
   return {

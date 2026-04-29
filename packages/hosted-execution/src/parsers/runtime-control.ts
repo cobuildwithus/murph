@@ -1188,12 +1188,20 @@ function parseHostedRuntimeRecordExportResponse(
     `Hosted runtime record export response ${idsFieldName}[${index}]`,
   ));
 
+  const recorded = requireNonNegativeInteger(
+    record.recorded,
+    "Hosted runtime record export response recorded",
+  );
+
+  if (recorded !== ids.length) {
+    throw new TypeError(
+      `Hosted runtime record export response recorded must equal ${idsFieldName}.length.`,
+    );
+  }
+
   return {
     ids,
-    recorded: requireNonNegativeInteger(
-      record.recorded,
-      "Hosted runtime record export response recorded",
-    ),
+    recorded,
   };
 }
 

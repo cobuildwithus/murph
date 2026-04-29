@@ -375,7 +375,8 @@ function isSafeAssistantDetail(details: string): boolean {
 
 function formatSafeAssistantReplyStatusDetail(details: string): string | null {
   if (
-    details.startsWith('new input accepted into active turn with ') ||
+    details.startsWith('new input queued for active turn with ') ||
+    details.startsWith('new input committed to active turn with ') ||
     details.startsWith('assistant still running after ') ||
     details.startsWith('assistant provider stalled after ')
   ) {

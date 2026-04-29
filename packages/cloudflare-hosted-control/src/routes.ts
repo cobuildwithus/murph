@@ -12,6 +12,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "nudge",
   },
+  userDataDelete: {
+    method: "POST",
+    suffix: "delete",
+  },
   status: {
     method: "GET",
     suffix: "status",
@@ -29,6 +33,10 @@ export function buildCloudflareHostedControlUserStatusPath(userId: string): stri
 
 export function buildCloudflareHostedControlUserRunnerNudgePath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runnerNudge", userId);
+}
+
+export function buildCloudflareHostedControlUserDataDeletionPath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("userDataDelete", userId);
 }
 
 export function buildCloudflareHostedControlBrowserVaultSessionPath(userId: string): string {

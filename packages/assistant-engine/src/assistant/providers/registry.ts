@@ -12,106 +12,67 @@ import {
   mergeAssistantProviderActivityLabels,
   type AssistantProviderProgressEvent,
 } from '../provider-progress.js'
-import { codexCliProviderDefinition } from './codex-cli.js'
+import {
+  CODEX_ASSISTANT_CAPABILITIES,
+  executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
+  resolveCodexAssistantLabel as resolveCodexAssistantConfigLabel,
+  resolveCodexStaticModels as resolveCodexStaticModelCatalog,
+} from './codex-cli.js'
 import { createCatalogModel } from './catalog.js'
 import type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
-  AssistantProviderDefinition,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
-  AssistantUserMessageContentType,
 } from './types.js'
 
-const ASSISTANT_PROVIDER_DEFINITIONS: Readonly<Partial<Record<
-  AssistantChatProvider,
-  AssistantProviderDefinition
->>> = Object.freeze({
-  'codex-cli': codexCliProviderDefinition,
-})
-
-export function listAssistantProviderDefinitions(): readonly AssistantProviderDefinition[] {
-  return Object.values(ASSISTANT_PROVIDER_DEFINITIONS)
+export function resolveCodexAssistantCapabilities(): AssistantProviderCapabilities {
+  return cloneAssistantProviderCapabilities(CODEX_ASSISTANT_CAPABILITIES)
 }
 
-export function listAssistantProviders(): readonly AssistantChatProvider[] {
-  return Object.keys(ASSISTANT_PROVIDER_DEFINITIONS) as AssistantChatProvider[]
-}
-
-export function getAssistantProviderDefinition(
-  provider: AssistantChatProvider,
-): AssistantProviderDefinition {
-  const definition = ASSISTANT_PROVIDER_DEFINITIONS[provider]
-  if (!definition) {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      `Assistant provider "${provider}" is not available in this runtime.`,
-    )
-  }
-
-  return definition
-}
-
-function resolveAssistantProviderDefinition(
-  provider: AssistantChatProvider,
-): AssistantProviderDefinition {
-  return getAssistantProviderDefinition(provider)
-}
-
-export function resolveAssistantProviderCapabilities(
-  provider: AssistantChatProvider,
-): AssistantProviderCapabilities {
-  return cloneAssistantProviderCapabilities(
-    resolveAssistantProviderDefinition(provider).capabilities,
-  )
-}
-
-export function resolveAssistantProviderTargetCapabilities(
+export function resolveCodexAssistantTargetCapabilities(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
+  assertCodexAssistantProvider(resolveAssistantChatProviderFromConfig(normalized))
+
   return cloneAssistantProviderCapabilities({
-    ...resolveAssistantProviderDefinition(
-      resolveAssistantChatProviderFromConfig(normalized),
-    ).capabilities,
-    supportsNativeResume: shouldAssistantProviderUseNativeResume(normalized),
+    ...CODEX_ASSISTANT_CAPABILITIES,
+    supportsNativeResume: shouldCodexAssistantUseNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
   })
 }
 
-function shouldAssistantProviderUseNativeResume(
+function shouldCodexAssistantUseNativeResume(
   config: AssistantProviderConfig,
 ): boolean {
   return supportsAssistantNativeResume(config)
 }
 
-export function resolveAssistantProviderLabel(
+export function resolveCodexAssistantLabel(
   input: AssistantProviderConfigLike | null | undefined,
 ): string {
   const normalized = normalizeAssistantProviderConfig(input)
-  const definition = resolveAssistantProviderDefinition(
-    resolveAssistantChatProviderFromConfig(normalized),
-  )
-  return definition.resolveLabel(normalized)
+  assertCodexAssistantProvider(resolveAssistantChatProviderFromConfig(normalized))
+  return resolveCodexAssistantConfigLabel(normalized)
 }
 
-export function resolveAssistantProviderStaticModels(
+export function resolveCodexStaticModels(
   input: AssistantProviderConfigLike | null | undefined,
 ): readonly AssistantCatalogModel[] {
   const normalized = normalizeAssistantProviderConfig(input)
-  return resolveAssistantProviderDefinition(
-    resolveAssistantChatProviderFromConfig(normalized),
-  ).resolveStaticModels(normalized)
+  assertCodexAssistantProvider(resolveAssistantChatProviderFromConfig(normalized))
+  return resolveCodexStaticModelCatalog()
 }
 
-export async function executeAssistantProviderTurnWithDefinition(
+export async function executeCodexAssistantTurn(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnExecutionResult> {
-  const result = await executeAssistantProviderTurnAttemptWithDefinition(input)
+  const result = await executeCodexAssistantTurnAttempt(input)
   if (!result.ok) {
     throw result.error
   }
@@ -119,7 +80,7 @@ export async function executeAssistantProviderTurnWithDefinition(
   return result.result
 }
 
-export async function executeAssistantProviderTurnAttemptWithDefinition(
+export async function executeCodexAssistantTurnAttempt(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
   const progressEvents: AssistantProviderProgressEvent[] = []
@@ -132,9 +93,10 @@ export async function executeAssistantProviderTurnAttemptWithDefinition(
   }
 
   try {
-    const result = await resolveAssistantProviderDefinition(
+    assertCodexAssistantProvider(
       resolveAssistantChatProviderFromConfig(input.providerConfig),
-    ).executeTurn(executionInput)
+    )
+    const result = await executeCodexAssistantTurnAttemptUnchecked(executionInput)
     return finalizeAssistantProviderAttemptResult(result, progressEvents)
   } catch (error) {
     return {
@@ -148,12 +110,12 @@ export async function executeAssistantProviderTurnAttemptWithDefinition(
   }
 }
 
-export async function executeAssistantProviderTurn(
+export async function executeCodexAssistantTurnFromInput(
   input: AssistantProviderTurnInput,
 ): Promise<AssistantProviderTurnExecutionResult> {
   const providerConfig = normalizeAssistantProviderConfig(input)
 
-  return await executeAssistantProviderTurnWithDefinition({
+  return await executeCodexAssistantTurn({
     activeTurnId: input.activeTurnId,
     abortSignal: input.abortSignal,
     activeTurnSteering: input.activeTurnSteering,
@@ -177,12 +139,12 @@ export async function executeAssistantProviderTurn(
   })
 }
 
-export async function executeAssistantProviderTurnAttempt(
+export async function executeCodexAssistantTurnAttemptFromInput(
   input: AssistantProviderTurnInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
   const providerConfig = normalizeAssistantProviderConfig(input)
 
-  return await executeAssistantProviderTurnAttemptWithDefinition({
+  return await executeCodexAssistantTurnAttempt({
     activeTurnId: input.activeTurnId,
     abortSignal: input.abortSignal,
     activeTurnSteering: input.activeTurnSteering,
@@ -207,13 +169,11 @@ export async function executeAssistantProviderTurnAttempt(
 }
 
 export { createCatalogModel }
-export { ASSISTANT_PROVIDER_DEFINITIONS }
 export type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
-  AssistantProviderDefinition,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
@@ -264,4 +224,15 @@ function cloneAssistantProviderCapabilities(
     supportsReasoningEffort: capabilities.supportsReasoningEffort,
     supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
   }
+}
+
+function assertCodexAssistantProvider(provider: AssistantChatProvider): void {
+  if (provider === 'codex-cli') {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_PROVIDER_UNSUPPORTED',
+    `Assistant provider "${provider}" is not available in the Codex-only runtime.`,
+  )
 }

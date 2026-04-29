@@ -59,13 +59,6 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   ],
   parsers: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.parserToolingConfigured,
   telegram: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.telegramConfigured,
-  web: [
-    "BRAVE_API_KEY",
-    "MURPH_WEB_FETCH_ENABLED",
-    "MURPH_WEB_SEARCH_MAX_RESULTS",
-    "MURPH_WEB_SEARCH_PROVIDER",
-    "MURPH_WEB_SEARCH_TIMEOUT_MS",
-  ],
 } as const;
 
 export const HOSTED_RUNTIME_ENV_KEY_NAMES: readonly string[] = Array.from(
@@ -80,7 +73,6 @@ export type HostedRuntimeEnvProfileName = keyof typeof HOSTED_RUNTIME_ENV_PROFIL
 const DEFAULT_HOSTED_RUNTIME_ENV_PROFILE_NAMES = [
   "assistant",
   "parsers",
-  "web",
 ] as const satisfies readonly HostedRuntimeEnvProfileName[];
 
 type UnknownEnvSource = Readonly<Record<string, unknown>>;

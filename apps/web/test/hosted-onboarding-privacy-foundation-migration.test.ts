@@ -200,6 +200,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('"trigger_kind" TEXT');
     expect(baselineMigrationSql).toContain('"reporting_user_id" TEXT');
     expect(baselineMigrationSql).toContain('"gateway_tags_json" JSONB');
+    expect(baselineMigrationSql).toContain('"provider_request_ordinal" INTEGER NOT NULL DEFAULT 0');
     expect(baselineMigrationSql).toContain('"stripe_meter_source" TEXT NOT NULL DEFAULT \'murph\'');
     expect(baselineMigrationSql).toContain('"stripe_meter_attempt_count" INTEGER NOT NULL DEFAULT 0');
     expect(baselineMigrationSql).toContain('"stripe_meter_last_attempted_at" TIMESTAMP(3)');
@@ -217,7 +218,10 @@ describe("hosted Prisma baseline migration", () => {
       'CREATE INDEX "hosted_ai_usage_stripe_meter_due_idx" ON "hosted_ai_usage"("stripe_meter_status", "stripe_meter_next_attempt_at", "occurred_at")',
     );
     expect(baselineMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_ai_usage_turn_id_attempt_count_idx" ON "hosted_ai_usage"("turn_id", "attempt_count")',
+      'CREATE UNIQUE INDEX "hosted_ai_usage_turn_attempt_provider_request_idx" ON "hosted_ai_usage"("turn_id", "attempt_count", "provider_request_ordinal")',
+    );
+    expect(baselineMigrationSql).not.toContain(
+      'CREATE UNIQUE INDEX "hosted_ai_usage_turn_id_attempt_count_idx"',
     );
     expect(baselineMigrationSql).not.toContain(
       'CREATE UNIQUE INDEX IF NOT EXISTS "hosted_ai_usage_turn_id_attempt_count_idx"',

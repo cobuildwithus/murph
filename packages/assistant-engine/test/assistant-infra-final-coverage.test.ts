@@ -1,7 +1,6 @@
 import { access, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Readable } from 'node:stream'
 
 import {
   parseAssistantSessionRecord,
@@ -31,18 +30,9 @@ import {
   tailKnowledgeLog,
 } from '../src/knowledge/service.ts'
 import { tryKillProcess } from '@murphai/runtime-state/node'
-import {
-  applyDomainFilterToAssistantSearchResults,
-  normalizeAssistantDomainFilters,
-} from '../src/assistant/web-search/results.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
-type LookupImplementation = typeof import('node:dns/promises').lookup
-type MockLookupAddress = {
-  address: string
-  family: number
-}
 
 afterEach(async () => {
   vi.useRealTimers()
@@ -52,9 +42,6 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/outbox.js')
   vi.doUnmock('../src/assistant/runtime-write-lock.js')
   vi.doUnmock('../src/assistant/automation/runtime-lock.js')
-  vi.doUnmock('node:http')
-  vi.doUnmock('node:https')
-  vi.doUnmock('node:dns/promises')
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
       rm(rootPath, {
@@ -550,68 +537,6 @@ describe('assistant infra final coverage', () => {
     })
   })
 
-  it('covers web-search empty filters and invalid domain normalization fallbacks', () => {
-    const results = [
-      {
-        publishedAt: null,
-        score: null,
-        snippet: null,
-        source: 'example.com',
-        title: 'Example',
-        url: 'https://example.com/page',
-      },
-    ]
-
-    expect(applyDomainFilterToAssistantSearchResults(results, [])).toEqual(results)
-    expect(normalizeAssistantDomainFilters(undefined)).toEqual([])
-    expect(
-      normalizeAssistantDomainFilters(['   ', '.Example.com', 'not a valid url???']),
-    ).toEqual(['.example.com', 'not a valid url???'])
-  })
-
-  it('covers web-fetch duplicate DNS address dedupe without widening runtime behavior', async () => {
-    const lookupImplementation = createLookupImplementation([
-      {
-        address: 'edge.example.test',
-        family: 0,
-      },
-      {
-        address: 'edge.example.test',
-        family: 0,
-      },
-    ])
-    const load = await loadWebFetchModule({
-      httpsSteps: [
-        {
-          response: {
-            body: 'ok',
-            headers: {
-              'content-type': 'text/plain',
-            },
-            status: 200,
-          },
-          type: 'response',
-        },
-      ],
-      lookupImplementation,
-    })
-
-    const response = await load.module.fetchAssistantWebResponse({
-      runtime: {
-        lookupImplementation,
-        maxRedirects: 1,
-        maxResponseBytes: 1024,
-        timeoutMs: 5000,
-      },
-      signal: new AbortController().signal,
-      toolName: 'web.fetch',
-      url: new URL('https://example.com/article'),
-    })
-
-    expect(await response.response.text()).toBe('ok')
-    expect(load.httpsRequestMock).toHaveBeenCalledTimes(1)
-  })
-
   it('covers ESRCH swallow and non-ESRCH rethrow in process kill helper', () => {
     const killProcess = vi.fn()
     expect(() =>
@@ -718,133 +643,4 @@ function createSession(input?: {
     turnCount: 2,
     updatedAt: input?.updatedAt ?? '2026-04-08T00:05:00.000Z',
   })
-}
-
-type WebFetchModule = typeof import('../src/assistant/web-fetch.ts')
-
-type MockResponseDefinition = {
-  body?: string | Uint8Array | Array<string | Uint8Array> | null
-  headers?: Record<string, string | string[] | undefined>
-  status: number
-  statusText?: string
-}
-
-type MockRequestStep =
-  | {
-      error: Error
-      type: 'error'
-    }
-  | {
-      response: MockResponseDefinition
-      type: 'response'
-    }
-
-async function loadWebFetchModule(input?: {
-  httpsSteps?: MockRequestStep[]
-  lookupImplementation?: LookupImplementation
-}): Promise<{
-  httpsRequestMock: ReturnType<typeof vi.fn>
-  module: WebFetchModule
-}> {
-  vi.resetModules()
-
-  const httpsRequestMock = createRequestMock(input?.httpsSteps ?? [])
-  vi.doMock('node:http', () => ({
-    request: vi.fn(),
-  }))
-  vi.doMock('node:https', () => ({
-    request: httpsRequestMock,
-  }))
-
-  if (input?.lookupImplementation) {
-    vi.doMock('node:dns/promises', () => ({
-      lookup: input.lookupImplementation,
-    }))
-  }
-
-  return {
-    httpsRequestMock,
-    module: await import('../src/assistant/web-fetch.ts'),
-  }
-}
-
-function createRequestMock(steps: MockRequestStep[]) {
-  const queuedSteps = [...steps]
-
-  return vi.fn((options: unknown, callback?: (response: import('node:http').IncomingMessage) => void) => {
-    const step = queuedSteps.shift()
-    if (!step) {
-      throw new Error(`Unexpected request: ${JSON.stringify(options)}`)
-    }
-
-    const listeners = new Map<string, Array<(error: Error) => void>>()
-
-    return {
-      end() {
-        queueMicrotask(() => {
-          if (step.type === 'error') {
-            for (const listener of listeners.get('error') ?? []) {
-              listener(step.error)
-            }
-            return
-          }
-
-          callback?.(createIncomingMessage(step.response))
-        })
-      },
-      once(eventName: string, listener: (error: Error) => void) {
-        const existing = listeners.get(eventName) ?? []
-        existing.push(listener)
-        listeners.set(eventName, existing)
-        return this
-      },
-    }
-  })
-}
-
-function createIncomingMessage(
-  response: MockResponseDefinition,
-): import('node:http').IncomingMessage {
-  return Object.assign(
-    Readable.from(normalizeResponseChunks(response.body)),
-    {
-      headers: response.headers ?? {},
-      statusCode: response.status,
-      statusMessage: response.statusText ?? 'OK',
-    },
-  ) as import('node:http').IncomingMessage
-}
-
-function normalizeResponseChunks(
-  body: MockResponseDefinition['body'],
-): Uint8Array[] {
-  if (body === null || body === undefined) {
-    return []
-  }
-
-  const encoder = new TextEncoder()
-  const chunks = Array.isArray(body) ? body : [body]
-  return chunks.map((chunk) =>
-    typeof chunk === 'string' ? encoder.encode(chunk) : chunk,
-  )
-}
-
-function createLookupImplementation(
-  addresses: MockLookupAddress[],
-): LookupImplementation {
-  const fallback = addresses[0] ?? { address: '127.0.0.1', family: 4 }
-  const lookupImplementation = (async (
-    _hostname: string,
-    options?: number | { all?: boolean },
-  ) => {
-    if (typeof options === 'number') {
-      return fallback
-    }
-    if (options?.all) {
-      return addresses
-    }
-    return fallback
-  }) as LookupImplementation
-
-  return lookupImplementation
 }

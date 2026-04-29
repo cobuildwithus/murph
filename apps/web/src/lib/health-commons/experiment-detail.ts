@@ -20,6 +20,7 @@ import {
   CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
 } from "@/src/lib/experiments/experiment-detail";
 import type { ExperimentProtocol } from "@/src/types/experiments";
+import { resolveExperimentRouteImage } from "./experiment-images";
 import {
   listProtocolBiomarkers,
   toExpectedSignal,
@@ -44,7 +45,6 @@ const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const RED_LIGHT_GLASSES_ROUTE_ID = "red-light-glasses-before-bed";
 const BRYAN_JOHNSON_SAUNA_ROUTE_ID = "bryan-johnson-blueprint";
-const DEFAULT_PROTOCOL_IMAGE = "/design-assets/hero-04.png";
 
 const QUALITY_TO_EVIDENCE_LEVEL: Record<string, number> = {
   stub: 1,
@@ -74,13 +74,6 @@ const PROTOCOL_LIBRARY_ORDER = [
   RED_LIGHT_GLASSES_ROUTE_ID,
   BRYAN_JOHNSON_SAUNA_ROUTE_ID,
 ] as const;
-const PROTOCOL_ROUTE_IMAGES: Record<string, string> = {
-  [BRYAN_JOHNSON_SAUNA_ROUTE_ID]: "/design-assets/hero-bryan-johnson-sauna.jpg",
-  "cold-plunge": "/design-assets/cold-plunge-tub.jpeg",
-  [FINNISH_SAUNA_ROUTE_ID]: "/design-assets/hero-finnish-sauna.jpeg",
-  [NORWEGIAN_4X4_ROUTE_ID]: "/design-assets/hero-norwegian-4x4.jpeg",
-  [RED_LIGHT_GLASSES_ROUTE_ID]: "/design-assets/hero-red-light-glasses-before-bed.jpeg",
-};
 
 export function listHealthCommonsExperimentProtocols(
   catalog?: HealthCommonsCatalogReader,
@@ -159,7 +152,7 @@ function isPublicExperimentProtocol(
 function toExperimentProtocolIndexEntry(
   entry: ReturnType<typeof getGeneratedHealthCommonsWebExperimentIndex>["experiments"][number],
 ): ExperimentProtocol {
-  const image = PROTOCOL_ROUTE_IMAGES[entry.routeId] ?? entry.image ?? DEFAULT_PROTOCOL_IMAGE;
+  const image = resolveExperimentRouteImage(entry.routeId, entry.image);
 
   return {
     protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
@@ -312,7 +305,7 @@ function toExperimentDetail(
     id: routeId,
     title: protocol.title,
     category: formatProtocolCategory(protocol),
-    image: resolveProtocolPageImage(protocol) ?? PROTOCOL_ROUTE_IMAGES[routeId] ?? DEFAULT_PROTOCOL_IMAGE,
+    image: resolveExperimentRouteImage(routeId, resolveProtocolPageImage(protocol)),
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
     baselineDays: testPlan?.baselineDays ?? 0,
     studyCount: hasMixedResearchAndProvenanceSources({

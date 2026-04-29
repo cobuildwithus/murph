@@ -121,7 +121,7 @@ describe('createInboxBackedAssistantTurnInputPort', () => {
 
     await expect(
       port.refresh({
-        phase: 'before_provider',
+        phase: 'request_boundary',
       }),
     ).resolves.toEqual({
       progressed: false,
@@ -482,7 +482,7 @@ describe('createNoopAssistantTurnInputPort', () => {
 
     await expect(
       port.refresh({
-        phase: 'after_provider',
+        phase: 'request_boundary',
       }),
     ).resolves.toEqual({
       progressed: false,

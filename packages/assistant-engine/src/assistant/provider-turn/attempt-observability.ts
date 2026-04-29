@@ -1,5 +1,5 @@
 import type {
-  ResolvedAssistantProviderRoute,
+  CodexThreadIdentity,
 } from '../provider-route.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import {
@@ -9,7 +9,7 @@ import {
 export async function recordProviderAttemptStarted(input: {
   attemptCount: number
   at: string
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   sessionId: string
   turnId: string
   vault: string
@@ -50,7 +50,7 @@ export async function recordProviderAttemptStarted(input: {
 export async function recordProviderAttemptSucceeded(input: {
   activityLabels?: readonly string[]
   attemptCount: number
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   turnId: string
   vault: string
 }): Promise<void> {
@@ -80,7 +80,7 @@ export async function recordProviderAttemptFailed(input: {
   attemptCount: number
   detail: string
   errorCode: string | null
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   sessionId: string
   turnId: string
   vault: string

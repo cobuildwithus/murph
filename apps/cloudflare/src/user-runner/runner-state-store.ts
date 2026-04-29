@@ -86,6 +86,25 @@ export class RunnerStateStore {
     return this.readStateSync();
   }
 
+  async deleteStateForUser(userId: string): Promise<{ deleted: boolean }> {
+    const meta = this.selectMetaRowSync();
+
+    if (meta && meta.user_id !== userId) {
+      throw new Error(
+        `Hosted runner Durable Object is bound to ${meta.user_id}, not ${userId}.`,
+      );
+    }
+
+    if (!meta) {
+      this.userId = null;
+      return { deleted: false };
+    }
+
+    this.sql.exec("DELETE FROM runner_meta WHERE singleton = 1");
+    this.userId = null;
+    return { deleted: true };
+  }
+
   async clearNextWakeIfDue(nowMs: number): Promise<RunnerStateRecord> {
     const meta = this.requireMetaRowSync();
     const parsedMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;

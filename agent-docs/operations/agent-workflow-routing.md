@@ -69,9 +69,9 @@ Before landing any new persisted state, classify it explicitly and place it in t
 | State class | Canonical root | Required rule |
 | --- | --- | --- |
 | Canonical product truth | `vault/**` | Must be writable only through `packages/core`-owned canonical mutation paths. |
-| Durable local operational state | `.runtime/operations/**` | Use for tokens, cursors, daemon/service metadata, local tool config, and other non-canonical state you expect to survive restarts. Also classify each path explicitly as `portable` or `machine_local`; hosted bundle inclusion follows that portability allowlist outside the assistant runtime root. |
+| Durable local operational state | `.runtime/operations/**` | Use for tokens, cursors, daemon/service metadata, local tool config, and other non-canonical state you expect to survive restarts. Also classify each path explicitly as `portable` or `machine_local`; hosted bundle inclusion is denylist-based for this bucket so unsafe/process-local state must be explicitly excluded. |
 | Rebuildable local projection | `.runtime/projections/**` | Use for indexes, serving stores, and other derived read models that can be rebuilt from canonical evidence plus durable operational state. |
-| Assistant/session runtime state | `.runtime/operations/assistant/**` | Use for durable but non-canonical assistant runtime/session residue such as outbox, diagnostics, receipts, transcripts, and related execution state. Hosted snapshots preserve this root by default except explicit unsafe/process-local exclusions. Durable user-facing memory and scheduled prompt configuration belong in canonical vault records instead. |
+| Assistant/session runtime state | `.runtime/operations/assistant/**` | Use for durable but non-canonical assistant runtime/session residue such as outbox, diagnostics, receipts, transcripts, and related execution state. Hosted snapshots preserve durable `.runtime/operations/**` state by default except explicit unsafe/process-local exclusions. Durable user-facing memory and scheduled prompt configuration belong in canonical vault records instead. |
 | Ephemeral scratch/cache | `.runtime/cache/**` or `.runtime/tmp/**` | Use only for deleteable caches, sockets, temp files, or scratch artifacts. |
 
 Additional gate rules:

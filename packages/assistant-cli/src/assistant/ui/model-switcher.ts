@@ -3,14 +3,14 @@ import { Box, Text, useInput, type Key } from 'ink'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import {
-  resolveAssistantCatalogReasoningOptions,
-  type AssistantCatalogModel,
+  resolveCodexCatalogReasoningOptions,
+  type CodexCatalogModel,
 } from '@murphai/assistant-engine/assistant-provider-catalog'
 import {
-  findAssistantModelOptionIndex,
-  findAssistantReasoningOptionIndex,
-  type AssistantModelOption,
-  type AssistantReasoningOption,
+  findCodexModelOptionIndex,
+  findCodexReasoningOptionIndex,
+  type CodexModelOption,
+  type CodexReasoningOption,
 } from './view-model.js'
 import { normalizeAssistantInkArrowKey } from './composer-editor.js'
 import type { AssistantInkTheme } from './theme.js'
@@ -20,22 +20,22 @@ export interface ModelSwitcherProps {
   currentReasoningEffort: string | null
   mode: 'model' | 'reasoning'
   modelIndex: number
-  modelOptions: readonly AssistantModelOption[]
+  modelOptions: readonly CodexModelOption[]
   onCancel: () => void
   onConfirm: () => void
   onMove: (delta: number) => void
   reasoningIndex: number
-  reasoningOptions: readonly AssistantReasoningOption[]
+  reasoningOptions: readonly CodexReasoningOption[]
   theme: AssistantInkTheme
 }
 
 export interface ModelSwitcherState {
-  models: readonly AssistantCatalogModel[]
+  models: readonly CodexCatalogModel[]
   mode: 'model' | 'reasoning'
   modelIndex: number
   reasoningIndex: number
-  modelOptions: readonly AssistantModelOption[]
-  reasoningOptions: readonly AssistantReasoningOption[]
+  modelOptions: readonly CodexModelOption[]
+  reasoningOptions: readonly CodexReasoningOption[]
 }
 
 function isCurrentReasoningOption(
@@ -113,14 +113,14 @@ function renderSwitcherRow(input: {
 export function createModelSwitcherState(input: {
   activeModel: string | null
   activeReasoningEffort: string | null
-  models: readonly AssistantCatalogModel[]
-  modelOptions: readonly AssistantModelOption[]
+  models: readonly CodexCatalogModel[]
+  modelOptions: readonly CodexModelOption[]
 }): ModelSwitcherState {
-  const modelIndex = findAssistantModelOptionIndex(
+  const modelIndex = findCodexModelOptionIndex(
     input.activeModel,
     input.modelOptions,
   )
-  const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+  const reasoningOptions = resolveCodexCatalogReasoningOptions(
     input.models[modelIndex],
   )
 
@@ -128,7 +128,7 @@ export function createModelSwitcherState(input: {
     models: input.models,
     mode: 'model',
     modelIndex,
-    reasoningIndex: findAssistantReasoningOptionIndex(
+    reasoningIndex: findCodexReasoningOptionIndex(
       input.activeReasoningEffort,
       reasoningOptions,
     ),
@@ -147,14 +147,14 @@ export function offsetModelSwitcherSelection(input: {
       input.state.modelIndex + input.delta,
       input.state.modelOptions.length,
     )
-    const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+    const reasoningOptions = resolveCodexCatalogReasoningOptions(
       input.state.models[modelIndex],
     )
 
     return {
       ...input.state,
       modelIndex,
-      reasoningIndex: findAssistantReasoningOptionIndex(
+      reasoningIndex: findCodexReasoningOptionIndex(
         input.activeReasoningEffort,
         reasoningOptions,
       ),

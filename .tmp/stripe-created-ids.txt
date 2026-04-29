@@ -1,0 +1,3 @@
+product=prod_UQMOQiZCrZrAVh
+monthly=price_1TRVfRHDyXTTG0i1bOoOUq8i
+annual=price_1TRVfRHDyXTTG0i1LP8o7gYz

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -97,6 +97,9 @@ async function assembleRunnerBundle(): Promise<void> {
       stagingBundleDir,
       runnerBundleDeployRoot,
     );
+    if (process.env.MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN === "1") {
+      await writeHostedLocalE2eParserToolchain(runnerBundleDeployRoot);
+    }
     await writeRunnerBundleManifest(runnerBundleDeployRoot, {
       appDir,
       buildSkipped: shouldSkipBuild,
@@ -110,4 +113,36 @@ async function assembleRunnerBundle(): Promise<void> {
   } finally {
     await rm(stagingRoot, { force: true, recursive: true });
   }
+}
+
+async function writeHostedLocalE2eParserToolchain(bundleRoot: string): Promise<void> {
+  const toolchainRoot = path.join(bundleRoot, "test-parser-toolchain");
+  await mkdir(toolchainRoot, { recursive: true });
+  await writeFile(path.join(toolchainRoot, "ggml-test.bin"), "test whisper model\n", "utf8");
+  await writeExecutable(path.join(toolchainRoot, "ffmpeg"), [
+    "#!/usr/bin/env node",
+    "import fs from 'node:fs';",
+    "import path from 'node:path';",
+    "const args = process.argv.slice(2);",
+    "const inputIndex = args.indexOf('-i');",
+    "const inputPath = inputIndex >= 0 ? args[inputIndex + 1] : null;",
+    "const outputPath = args.at(-1);",
+    "if (!inputPath || !outputPath) process.exit(2);",
+    "fs.mkdirSync(path.dirname(outputPath), { recursive: true });",
+    "fs.copyFileSync(inputPath, outputPath);",
+  ].join("\n"));
+  await writeExecutable(path.join(toolchainRoot, "whisper-cli"), [
+    "#!/usr/bin/env node",
+    "import fs from 'node:fs';",
+    "const args = process.argv.slice(2);",
+    "const outputIndex = args.indexOf('-of');",
+    "const outputBase = outputIndex >= 0 ? args[outputIndex + 1] : null;",
+    "if (!outputBase) process.exit(2);",
+    "fs.writeFileSync(`${outputBase}.txt`, 'Remember to log the voice note\\n', 'utf8');",
+  ].join("\n"));
+}
+
+async function writeExecutable(filePath: string, contents: string): Promise<void> {
+  await writeFile(filePath, `${contents}\n`, "utf8");
+  await chmod(filePath, 0o755);
 }

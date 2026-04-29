@@ -159,7 +159,7 @@ describe("runHostedAssistantAutomation", () => {
     }));
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       await input.turnInputPort?.refresh({
-        phase: "after_provider",
+        phase: "request_boundary",
       });
       await input.turnInputPort?.checkpointAcceptedInput?.({
         acceptedInputIds: ["request-1"],

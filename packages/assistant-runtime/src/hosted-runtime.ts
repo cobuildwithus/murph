@@ -27,6 +27,10 @@ import type {
 } from "./hosted-runtime/mailbox-import.ts";
 import type { HostedRuntimePlatform } from "./hosted-runtime/platform.ts";
 import {
+  startRuntimeLivenessHeartbeat,
+  type RuntimeLivenessRejectionReason,
+} from "./hosted-runtime/liveness.ts";
+import {
   buildHostedMailboxImportRedactedStatus,
   HostedMailboxImportCheckpointConflictError,
   HostedMailboxImportCheckpointUserMismatchError,
@@ -92,6 +96,11 @@ export type {
   HostedRuntimeVaultSyncPort,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
+export type {
+  RuntimeLivenessPort,
+  RuntimeLivenessRejectionReason,
+  RuntimeLivenessTouchResult,
+} from "./hosted-runtime/liveness.ts";
 export {
   normalizeHostedAssistantRuntimeConfig,
   sanitizeHostedAssistantRuntimeForwardedEnv,
@@ -162,10 +171,17 @@ export {
 
 export interface HostedWorkspaceRuntimeJobOptions {
   createCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
-  importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
+  importItem(
+    item: HostedMailboxResolvedImportItem,
+    context?: HostedWorkspaceRuntimeJobImportContext,
+  ): Promise<HostedMailboxItemImportOutcome>;
   platform: HostedRuntimePlatform;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   vaultRoot: string;
+}
+
+export interface HostedWorkspaceRuntimeJobImportContext {
+  signal?: AbortSignal | null;
 }
 
 export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Error {
@@ -183,6 +199,16 @@ export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Erro
   }
 }
 
+export class HostedWorkspaceRuntimeLivenessRejectedError extends Error {
+  readonly reason: RuntimeLivenessRejectionReason;
+
+  constructor(reason: RuntimeLivenessRejectionReason) {
+    super(`Hosted workspace runtime liveness heartbeat was rejected: ${reason}.`);
+    this.name = "HostedWorkspaceRuntimeLivenessRejectedError";
+    this.reason = reason;
+  }
+}
+
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -190,7 +216,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
   const mailboxPort = runtime.platform.mailboxPort ?? null;
   const workspacePort = runtime.platform.workspacePort ?? null;
-
   if (!mailboxPort) {
     throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
   }
@@ -205,95 +230,201 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
   assertHostedWorkspaceRuntimeBudgetSupported(input.request.budget?.maxRuntimeMs);
 
-  const workspaceRead = await workspacePort.read();
-  assertWorkspaceRunVersionMatchesRequest({
-    expectedWorkspaceVersion: input.request.workspaceVersion,
-    workspace: workspaceRead.workspace,
-  });
-  assertWorkspaceRunUserMatchesRequest({
-    expectedUserId: input.request.userId,
-    workspace: workspaceRead.workspace,
-  });
-  const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
-    platform: runtime.platform,
-    vaultRoot: options.vaultRoot,
-    workspace: workspaceRead.workspace,
-  });
-  const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
-    input.request.budget?.maxMailboxItems,
-  );
-  const baseRuntimeEnv = {
-    ...runtime.forwardedEnv,
-    ...runtime.userEnv,
+  const livenessAbortController = new AbortController();
+  let livenessRejectedReason: RuntimeLivenessRejectionReason | null = null;
+  const requestId = `hosted-workspace-invocation:${input.request.attemptId}`;
+  const assertRuntimeLiveness = () => {
+    if (livenessRejectedReason) {
+      throw new HostedWorkspaceRuntimeLivenessRejectedError(livenessRejectedReason);
+    }
   };
-  const hostedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
-    operatorHomeRoot: restored.operatorHomeRoot,
-    runtimeEnv: baseRuntimeEnv,
-  });
-  const runtimeEnv = hostedCodexRuntime.runtimeEnv;
-
-  const result = await withHostedProcessEnvironment(
-    {
-      envOverrides: runtimeEnv,
-      operatorHomeRoot: restored.operatorHomeRoot,
-      vaultRoot: restored.vaultRoot,
+  const heartbeat = startRuntimeLivenessHeartbeat({
+    intervalMs: runtime.platform.runtimeLivenessIntervalMs ?? undefined,
+    onRejected: (reason) => {
+      livenessRejectedReason = reason;
+      livenessAbortController.abort(new HostedWorkspaceRuntimeLivenessRejectedError(reason));
     },
-    async () =>
-      runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
-          createSnapshot: options.createCheckpointSnapshot,
-          metadata: {
-            attemptId: input.request.attemptId,
-            expectedWorkspaceVersion: input.request.workspaceVersion,
-            leaseGeneration: input.request.leaseGeneration,
-            nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
-            nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
-          },
-        }),
-        expectedUserId: input.request.userId,
-        importItem: (item) => mailboxBudget.importItem(item, options.importItem),
-        limitPerLane: mailboxBudget.fetchLimitPerLane,
-        platform: {
-          ...runtime.platform,
-          mailboxPort,
-          workspacePort,
-        },
-        requestId: `hosted-workspace-invocation:${input.request.attemptId}`,
-        runtimeLogContext: {
-          attemptId: input.request.attemptId,
-          leaseGeneration: input.request.leaseGeneration,
-          workspaceVersion: input.request.workspaceVersion,
-        },
-        runAssistantPhase: (phaseInput) =>
-          (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
-            ...phaseInput,
-            request: input.request,
-            restored,
-            runtime,
-            runtimeEnv,
-          }),
-        vaultRoot: restored.vaultRoot,
+    port: runtime.platform.runtimeLivenessPort,
+    requestId,
+    signal: livenessAbortController.signal,
+  });
+  const guardedPlatform = createLivenessGuardedHostedRuntimePlatform(
+    runtime.platform,
+    assertRuntimeLiveness,
+  );
+  const guardedRuntime = {
+    ...runtime,
+    platform: guardedPlatform,
+  };
+  const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
+  const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
+  const createLivenessGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
+    async (snapshotInput) => {
+      assertRuntimeLiveness();
+      const snapshot = await options.createCheckpointSnapshot(snapshotInput);
+      assertRuntimeLiveness();
+      return snapshot;
+    };
+
+  try {
+    const initialLiveness = await heartbeat.initialTouch;
+    if (!initialLiveness.ok) {
+      throw new HostedWorkspaceRuntimeLivenessRejectedError(initialLiveness.reason);
+    }
+
+    const workspaceRead = await raceHostedRuntimeLiveness(
+      workspacePort.read(),
+      livenessAbortController.signal,
+    );
+    assertRuntimeLiveness();
+    assertWorkspaceRunVersionMatchesRequest({
+      expectedWorkspaceVersion: input.request.workspaceVersion,
+      workspace: workspaceRead.workspace,
+    });
+    assertWorkspaceRunUserMatchesRequest({
+      expectedUserId: input.request.userId,
+      workspace: workspaceRead.workspace,
+    });
+    const restored = await raceHostedRuntimeLiveness(
+      restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: guardedRuntime.platform,
+        vaultRoot: options.vaultRoot,
         workspace: workspaceRead.workspace,
       }),
-  );
-  const committedWorkspace = result.latestWorkspace
-    ?? result.initialMailboxImport.checkpoint?.workspace
-    ?? workspaceRead.workspace;
-  const nextWakeAt = resolveHostedWorkspaceRunNextWakeAt({
-    assistantPhaseResult: result.assistantPhaseResult,
-    committedWorkspace,
-  });
+      livenessAbortController.signal,
+    );
+    assertRuntimeLiveness();
+    const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
+      input.request.budget?.maxMailboxItems,
+    );
+    const baseRuntimeEnv = {
+      ...guardedRuntime.forwardedEnv,
+      ...guardedRuntime.userEnv,
+    };
+    const hostedCodexRuntime = await raceHostedRuntimeLiveness(
+      prepareHostedCodexRuntimeEnvironment({
+        operatorHomeRoot: restored.operatorHomeRoot,
+        runtimeEnv: baseRuntimeEnv,
+      }),
+      livenessAbortController.signal,
+    );
+    assertRuntimeLiveness();
+    const runtimeEnv = hostedCodexRuntime.runtimeEnv;
 
-  return {
-    ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
-    ...(committedWorkspace?.redactedStatus
-      ? { redactedStatus: committedWorkspace.redactedStatus }
-      : { redactedStatus: buildHostedMailboxImportRedactedStatus(result.initialMailboxImport.importResult) }),
-    status: resolveHostedWorkspaceInvocationStatus({
-      mailboxBudgetExhausted: mailboxBudget.exhausted,
-      nextWakeAt,
-    }),
-  };
+    const result = await raceHostedRuntimeLiveness(
+      withHostedProcessEnvironment(
+        {
+          envOverrides: runtimeEnv,
+          operatorHomeRoot: restored.operatorHomeRoot,
+          vaultRoot: restored.vaultRoot,
+        },
+        async () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            checkpointRequestBuilder: createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+              createSnapshot: createLivenessGuardedCheckpointSnapshot,
+              metadata: {
+                attemptId: input.request.attemptId,
+                expectedWorkspaceVersion: input.request.workspaceVersion,
+                leaseGeneration: input.request.leaseGeneration,
+                nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
+                nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
+              },
+            }),
+            expectedUserId: input.request.userId,
+            importItem: (item) =>
+              mailboxBudget.importItem(
+                item,
+                async (importItem, context) => {
+                  assertRuntimeLiveness();
+                  const outcome = await options.importItem(importItem, context);
+                  assertRuntimeLiveness();
+                  return outcome;
+                },
+                {
+                  signal: livenessAbortController.signal,
+                },
+              ),
+            limitPerLane: mailboxBudget.fetchLimitPerLane,
+            platform: {
+              ...guardedRuntime.platform,
+              mailboxPort: guardedMailboxPort,
+              workspacePort: guardedWorkspacePort,
+            },
+            requestId,
+            runtimeLogContext: {
+              attemptId: input.request.attemptId,
+              leaseGeneration: input.request.leaseGeneration,
+              workspaceVersion: input.request.workspaceVersion,
+            },
+            runAssistantPhase: (phaseInput) =>
+              (options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase)({
+                ...phaseInput,
+                request: input.request,
+                restored,
+                runtime: guardedRuntime,
+                runtimeEnv,
+                signal: livenessAbortController.signal,
+              }),
+            vaultRoot: restored.vaultRoot,
+            workspace: workspaceRead.workspace,
+          }),
+      ),
+      livenessAbortController.signal,
+    );
+    assertRuntimeLiveness();
+    const committedWorkspace = result.latestWorkspace
+      ?? result.initialMailboxImport.checkpoint?.workspace
+      ?? workspaceRead.workspace;
+    const nextWakeAt = resolveHostedWorkspaceRunNextWakeAt({
+      assistantPhaseResult: result.assistantPhaseResult,
+      committedWorkspace,
+    });
+
+    return {
+      ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
+      ...(committedWorkspace?.redactedStatus
+        ? { redactedStatus: committedWorkspace.redactedStatus }
+        : { redactedStatus: buildHostedMailboxImportRedactedStatus(result.initialMailboxImport.importResult) }),
+      status: resolveHostedWorkspaceInvocationStatus({
+        mailboxBudgetExhausted: mailboxBudget.exhausted,
+        nextWakeAt,
+      }),
+    };
+  } finally {
+    await heartbeat.stop();
+  }
+}
+
+function raceHostedRuntimeLiveness<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(readHostedRuntimeAbortReason(signal));
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      reject(readHostedRuntimeAbortReason(signal));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace runtime liveness was aborted.");
 }
 
 function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null | undefined): void {
@@ -304,12 +435,127 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
   throw new TypeError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
+function createLivenessGuardedHostedRuntimePlatform(
+  platform: HostedRuntimePlatform,
+  assertLive: () => void,
+): HostedRuntimePlatform {
+  const guard = async <T>(run: () => Promise<T>): Promise<T> => {
+    assertLive();
+    const result = await run();
+    assertLive();
+    return result;
+  };
+
+  return {
+    ...platform,
+    artifactStore: {
+      get: platform.artifactStore.get,
+      put: (putInput) => guard(() => platform.artifactStore.put(putInput)),
+    },
+    ...(platform.checkpointActiveTurnInput
+      ? {
+          checkpointActiveTurnInput: (checkpointInput) =>
+            guard(() => platform.checkpointActiveTurnInput!(checkpointInput)),
+        }
+      : {}),
+    ...(platform.deviceSyncPort
+      ? {
+          deviceSyncPort: {
+            applyUpdates: (applyInput) =>
+              guard(() => platform.deviceSyncPort!.applyUpdates(applyInput)),
+            createConnectLink: (connectInput) =>
+              guard(() => platform.deviceSyncPort!.createConnectLink(connectInput)),
+            fetchSnapshot: platform.deviceSyncPort.fetchSnapshot,
+          },
+        }
+      : {}),
+    effectsPort: {
+      ...platform.effectsPort,
+      ...(platform.effectsPort.deletePreparedAssistantDelivery
+        ? {
+            deletePreparedAssistantDelivery: (deleteInput) =>
+              guard(() => platform.effectsPort.deletePreparedAssistantDelivery!(deleteInput)),
+          }
+        : {}),
+      ...(platform.effectsPort.readAssistantDeliveryRecord
+        ? {
+            readAssistantDeliveryRecord: platform.effectsPort.readAssistantDeliveryRecord,
+          }
+        : {}),
+      readRawEmailMessage: platform.effectsPort.readRawEmailMessage,
+      sendEmail: (request) => guard(() => platform.effectsPort.sendEmail(request)),
+      ...(platform.effectsPort.writeAssistantDeliveryRecord
+        ? {
+            writeAssistantDeliveryRecord: (record) =>
+              guard(() => platform.effectsPort.writeAssistantDeliveryRecord!(record)),
+          }
+        : {}),
+    },
+    ...(platform.issueExportPort
+      ? {
+          issueExportPort: {
+            recordIssues: (issues) => guard(() => platform.issueExportPort!.recordIssues(issues)),
+          },
+        }
+      : {}),
+    ...(platform.logPort
+      ? {
+          logPort: {
+            write: (request) => guard(() => platform.logPort!.write(request)),
+          },
+        }
+      : {}),
+    ...(platform.mailboxPort
+      ? {
+          mailboxPort: {
+            fetch: platform.mailboxPort.fetch,
+            fetchPayload: platform.mailboxPort.fetchPayload,
+          },
+        }
+      : {}),
+    ...(platform.refreshMailboxForActiveTurnInput
+      ? {
+          refreshMailboxForActiveTurnInput: (refreshInput) =>
+            guard(() => platform.refreshMailboxForActiveTurnInput!(refreshInput)),
+        }
+      : {}),
+    ...(platform.usageExportPort
+      ? {
+          usageExportPort: {
+            recordUsage: (usage) => guard(() => platform.usageExportPort!.recordUsage(usage)),
+          },
+        }
+      : {}),
+    ...(platform.vaultSyncPort
+      ? {
+          vaultSyncPort: {
+            fetchPayload: platform.vaultSyncPort.fetchPayload,
+            recordImport: (request) => guard(() => platform.vaultSyncPort!.recordImport(request)),
+          },
+        }
+      : {}),
+    ...(platform.workspacePort
+      ? {
+          workspacePort: {
+            ...(platform.workspacePort.read
+              ? {
+                  read: platform.workspacePort.read,
+                }
+              : {}),
+            checkpoint: (request) => guard(() => platform.workspacePort!.checkpoint(request)),
+          },
+        }
+      : {}),
+  };
+}
+
 function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null | undefined): {
   readonly exhausted: boolean;
   readonly fetchLimitPerLane: number;
   importItem(
     item: HostedMailboxResolvedImportItem,
     importItem: HostedWorkspaceRuntimeJobOptions["importItem"],
+    context: HostedWorkspaceRuntimeJobImportContext,
   ): Promise<HostedMailboxItemImportOutcome>;
 } {
   const importLimit = resolveHostedWorkspaceRunMailboxLimit(maxMailboxItems);
@@ -321,7 +567,7 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
       return exhausted;
     },
     fetchLimitPerLane: resolveHostedWorkspaceRunMailboxFetchLimit(importLimit),
-    async importItem(item, importItem) {
+    async importItem(item, importItem, context) {
       if (importAttempts >= importLimit) {
         exhausted = true;
         return {
@@ -331,7 +577,7 @@ function createHostedWorkspaceMailboxImportBudget(maxMailboxItems: number | null
       }
 
       importAttempts += 1;
-      return importItem(item);
+      return importItem(item, context);
     },
   };
 }

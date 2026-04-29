@@ -24,6 +24,7 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserRunnerNudgePath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -46,12 +47,30 @@ export interface CloudflareHostedControlBrowserVaultReplicaAad {
   userId: string;
 }
 
+export interface CloudflareHostedControlUserDataDeletionResult {
+  durableObject: {
+    alarmCleared: boolean;
+    stateDeleted: boolean;
+  };
+  deletedAt: string;
+  ok: true;
+  r2: {
+    deletedObjectCount: number;
+    deletedRootKeyEnvelope: boolean;
+    skippedUserScopedPrefixes: boolean;
+    supported: boolean;
+    userScopedSkipReason: string | null;
+  };
+  userId: string;
+}
+
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
     replicaRef: HostedBrowserVaultReplicaRef;
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
+  deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   nudgeUserRunner(userId: string): Promise<HostedRunnerNudgeResult>;
 }
@@ -126,6 +145,28 @@ export function createCloudflareHostedControlClient(
         }
 
         throw error;
+      });
+    },
+
+    deleteUserData(userId) {
+      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: expectedUserId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "user data deletion",
+        parse: (value) => parseCloudflareHostedControlUserDataDeletionResult(value, expectedUserId),
+        path: buildCloudflareHostedControlUserDataDeletionPath(expectedUserId),
+        request: {
+          body: "{}",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
       });
     },
     getRunnerStatus(userId) {
@@ -328,6 +369,66 @@ function parseCloudflareHostedControlBrowserVaultReplicaAad(
     schema,
     sourceBundleHash: requireString(record.sourceBundleHash, `${label}.sourceBundleHash`),
     userId: requireString(record.userId, `${label}.userId`),
+  };
+}
+
+function parseCloudflareHostedControlUserDataDeletionResult(
+  value: unknown,
+  expectedUserId: string,
+): CloudflareHostedControlUserDataDeletionResult {
+  const record = requireRecord(value, "Cloudflare user-data deletion result");
+
+  if (record.ok !== true) {
+    throw new TypeError("Cloudflare user-data deletion result ok must be true.");
+  }
+
+  const userId = requireString(record.userId, "Cloudflare user-data deletion result userId");
+  assertMatchingString(
+    userId,
+    expectedUserId,
+    "Cloudflare user-data deletion result userId",
+    "the requested userId",
+  );
+
+  const durableObject = requireRecord(
+    record.durableObject,
+    "Cloudflare user-data deletion result durableObject",
+  );
+  const r2 = requireRecord(record.r2, "Cloudflare user-data deletion result r2");
+  const userScopedSkipReason = r2.userScopedSkipReason;
+
+  return {
+    deletedAt: requireString(record.deletedAt, "Cloudflare user-data deletion result deletedAt"),
+    durableObject: {
+      alarmCleared: requireBoolean(
+        durableObject.alarmCleared,
+        "Cloudflare user-data deletion result durableObject.alarmCleared",
+      ),
+      stateDeleted: requireBoolean(
+        durableObject.stateDeleted,
+        "Cloudflare user-data deletion result durableObject.stateDeleted",
+      ),
+    },
+    ok: true,
+    r2: {
+      deletedObjectCount: requireNonNegativeInteger(
+        r2.deletedObjectCount,
+        "Cloudflare user-data deletion result r2.deletedObjectCount",
+      ),
+      deletedRootKeyEnvelope: requireBoolean(
+        r2.deletedRootKeyEnvelope,
+        "Cloudflare user-data deletion result r2.deletedRootKeyEnvelope",
+      ),
+      skippedUserScopedPrefixes: requireBoolean(
+        r2.skippedUserScopedPrefixes,
+        "Cloudflare user-data deletion result r2.skippedUserScopedPrefixes",
+      ),
+      supported: requireBoolean(r2.supported, "Cloudflare user-data deletion result r2.supported"),
+      userScopedSkipReason: typeof userScopedSkipReason === "string" && userScopedSkipReason.length > 0
+        ? userScopedSkipReason
+        : null,
+    },
+    userId,
   };
 }
 
@@ -542,4 +643,29 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function requireNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function requireNonNegativeInteger(value: unknown, label: string): number {
+  const numberValue = requireNumber(value, label);
+  if (!Number.isInteger(numberValue) || numberValue < 0) {
+    throw new TypeError(`${label} must be a non-negative integer.`);
+  }
+
+  return numberValue;
 }

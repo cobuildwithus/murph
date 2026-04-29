@@ -1,6 +1,10 @@
 import {
   deletePendingAssistantUsageRecord,
+  ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+  createAssistantRuntimeIssueFingerprint,
+  listPendingAssistantRuntimeIssueRecords,
   listPendingAssistantUsageRecords,
+  writePendingAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node";
 import {
   summarizeHostedExecutionError,
@@ -13,32 +17,45 @@ import type {
 export interface HostedPendingAssistantUsageExportResult {
   exported: number;
   failed: number;
+  invalid: number;
+  invalidIssueRecorded: boolean;
   pending: number;
 }
 
 const HOSTED_USAGE_EXPORT_BATCH_LIMIT = 50;
 
 export async function exportHostedPendingAssistantUsage(input: {
+  now?: () => string;
   usageExportPort?: HostedRuntimeUsageExportPort | null;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantUsageExportResult> {
   let invalidPendingRecordCount = 0;
   const pendingRecords = await listPendingAssistantUsageRecords({
-    onInvalidRecord: ({ error, fileName }) => {
+    onInvalidRecord: ({ error }) => {
       invalidPendingRecordCount += 1;
       console.warn(
-        `Skipping malformed pending assistant usage file ${fileName}; leaving it pending: ${summarizeHostedExecutionError(error)}`,
+        "Skipping malformed pending assistant usage file; leaving it pending.",
+        {
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
       );
     },
     skipInvalidRecords: true,
     vault: input.vaultRoot,
   });
   const totalPendingRecords = pendingRecords.length + invalidPendingRecordCount;
+  const invalidIssueRecorded = await writeHostedMalformedUsageRuntimeIssueBestEffort({
+    invalidPendingRecordCount,
+    now: input.now,
+    vaultRoot: input.vaultRoot,
+  });
 
   if (!input.usageExportPort || pendingRecords.length === 0) {
     return {
       exported: 0,
       failed: input.usageExportPort ? invalidPendingRecordCount : 0,
+      invalid: invalidPendingRecordCount,
+      invalidIssueRecorded,
       pending: totalPendingRecords,
     };
   }
@@ -90,8 +107,68 @@ export async function exportHostedPendingAssistantUsage(input: {
   return {
     exported,
     failed,
+    invalid: invalidPendingRecordCount,
+    invalidIssueRecorded,
     pending: totalPendingRecords - exported,
   };
+}
+
+async function writeHostedMalformedUsageRuntimeIssueBestEffort(input: {
+  invalidPendingRecordCount: number;
+  now?: () => string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (input.invalidPendingRecordCount === 0) {
+    return false;
+  }
+
+  try {
+    const fingerprint = createAssistantRuntimeIssueFingerprint({
+      component: "hosted.usage_export",
+      errorCode: "pending_usage_invalid",
+      issueKind: "schema_rejection",
+      operation: "pending_usage_export",
+      phase: "hosted_commit",
+      summary: "Assistant runtime issue: schema rejection during hosted_commit (pending_usage_export).",
+    });
+    const issueId = `ari_${fingerprint.slice(0, 16)}_${fingerprint}`;
+    const existingIssues = await listPendingAssistantRuntimeIssueRecords({
+      skipInvalidRecords: true,
+      vault: input.vaultRoot,
+    });
+    if (existingIssues.some((issue) => issue.issueId === issueId)) {
+      return false;
+    }
+
+    await writePendingAssistantRuntimeIssueRecord({
+      record: {
+        component: "hosted.usage_export",
+        details: {
+          invalidPendingRecordCount: input.invalidPendingRecordCount,
+        },
+        environment: "hosted",
+        errorCode: "pending_usage_invalid",
+        fingerprint,
+        issueId,
+        issueKind: "schema_rejection",
+        occurredAt: input.now?.() ?? new Date().toISOString(),
+        operation: "pending_usage_export",
+        phase: "hosted_commit",
+        schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,
+        severity: "warning",
+        summary: "Assistant runtime issue: schema rejection during hosted_commit (pending_usage_export).",
+        surface: null,
+      },
+      vault: input.vaultRoot,
+    });
+
+    return true;
+  } catch (error) {
+    console.warn("Failed to record malformed hosted AI usage runtime issue.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return false;
+  }
 }
 
 function chunkPendingUsageRecords<T>(records: readonly T[], size: number): T[][] {
@@ -110,12 +187,16 @@ async function exportHostedUsageBatch(input: {
   vaultRoot: string;
 }): Promise<{ exported: number; failed: number }> {
   const response = await input.usageExportPort.recordUsage(input.batch);
+  if (response.recorded !== response.usageIds.length) {
+    throw new TypeError("Hosted AI usage export response recorded count does not match usageIds.");
+  }
 
   const batchUsageIds = new Set(input.batch.map((record) => record.usageId));
   const acknowledgedUsageIds = new Set(
     response.usageIds.filter((usageId) => batchUsageIds.has(usageId)),
   );
-  const failed = input.batch.length - acknowledgedUsageIds.size;
+  let failed = input.batch.length - acknowledgedUsageIds.size;
+  let exported = 0;
 
   if (failed > 0) {
     console.warn(
@@ -124,14 +205,25 @@ async function exportHostedUsageBatch(input: {
   }
 
   for (const usageId of acknowledgedUsageIds) {
-    await deletePendingAssistantUsageRecord({
-      usageId,
-      vault: input.vaultRoot,
-    });
+    try {
+      await deletePendingAssistantUsageRecord({
+        usageId,
+        vault: input.vaultRoot,
+      });
+      exported += 1;
+    } catch (error) {
+      failed += 1;
+      console.warn(
+        "Failed to delete acknowledged hosted AI usage record; leaving it pending.",
+        {
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      );
+    }
   }
 
   return {
-    exported: acknowledgedUsageIds.size,
+    exported,
     failed,
   };
 }

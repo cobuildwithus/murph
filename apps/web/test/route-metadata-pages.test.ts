@@ -39,11 +39,11 @@ test("SecurityPage metadata keeps the custom security preview image and copy", (
   assert.equal(securityMetadata.title, "Security · Murph");
   assert.equal(
     securityMetadata.description,
-    "How Murph keeps your health data yours. Hosted architecture, encryption, auth, and the local self-hosted lane.",
+    "How Murph protects hosted and local health data. Hosted architecture, encryption, auth, and the local self-hosted lane.",
   );
   assert.deepEqual(securityMetadata.openGraph?.images, [
     {
-      alt: "Murph Security. Your health data stays yours.",
+      alt: "Murph Security. How Murph protects health data.",
       height: 630,
       type: "image/png",
       url: "/security/opengraph-image",
@@ -52,7 +52,7 @@ test("SecurityPage metadata keeps the custom security preview image and copy", (
   ]);
   assert.deepEqual(securityMetadata.twitter?.images, [
     {
-      alt: "Murph Security. Your health data stays yours.",
+      alt: "Murph Security. How Murph protects health data.",
       height: 630,
       type: "image/png",
       url: "/security/opengraph-image",
@@ -86,6 +86,7 @@ test("SubprocessorsPage metadata and table expose the provider list", () => {
   assert.match(markup, /Configured AI model providers/);
   assert.match(markup, /Trains on Murph data\?/);
   assert.match(markup, /Oura, WHOOP, Garmin, Strava/);
-  assert.match(markup, /Brave Search, Exa, Kagi, Perplexity, SerpAPI, or Tavily/);
-  assert.match(markup, /Not used for Murph health data unless no-training controls are in place/);
+  assert.doesNotMatch(markup, /Brave Search, Exa, Kagi, Perplexity, SerpAPI, or Tavily/);
+  assert.doesNotMatch(markup, /Optional web-search features/);
+  assert.doesNotMatch(markup, /Optional search, transcription/);
 });

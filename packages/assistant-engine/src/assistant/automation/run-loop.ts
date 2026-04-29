@@ -12,6 +12,7 @@ import {
   normalizeAssistantExecutionContext,
   type AssistantExecutionContext,
 } from '../execution-context.js'
+import { conversationRefFromCapture } from '../conversation-ref.js'
 import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
 import {
   drainAssistantOutboxLocal as drainAssistantOutbox,
@@ -32,6 +33,7 @@ import {
   createInboxBackedAssistantTurnInputPort,
   type AssistantTurnInputPort,
 } from '../turn-input.js'
+import { notifyAssistantActiveTurnInputAvailable } from '../active-turn-input-controller.js'
 import {
   errorMessage,
   formatStructuredErrorMessage,
@@ -135,6 +137,29 @@ export async function runAssistantAutomation(
               event.type === 'parser.jobs.drained'
             ) {
               wakeController.requestWake()
+            }
+            if (
+              event.type === 'capture.imported' &&
+              event.capture &&
+              event.capture.thread &&
+              (input.allowSelfAuthored || event.capture.actor.isSelf !== true)
+            ) {
+              notifyAssistantActiveTurnInputAvailable({
+                conversation: conversationRefFromCapture({
+                  accountId: event.capture.accountId,
+                  actorId: event.capture.actor.id,
+                  source: event.capture.source,
+                  threadId: event.capture.thread.id,
+                  threadIsDirect: event.capture.thread.isDirect ?? null,
+                }),
+                signal: controller.signal,
+                vault: input.vault,
+              }).catch((error) => {
+                warnAssistantBestEffortFailure({
+                  error,
+                  operation: 'active turn input notification',
+                })
+              })
             }
             input.onInboxEvent?.(event)
           },

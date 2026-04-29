@@ -77,30 +77,6 @@ describe("deploy preflight helpers", () => {
     }, { deployWorker: false })).not.toThrow();
   });
 
-  it("requires BRAVE_API_KEY when hosted search is pinned to brave", () => {
-    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
-      MURPH_WEB_SEARCH_PROVIDER: "brave",
-    }), { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: BRAVE_API_KEY",
-    );
-  });
-
-  it("allows brave-hosted search when the matching secret is present", () => {
-    expect(() => assertHostedDeployEnvironment(createRequiredWorkerDeployEnv({
-      BRAVE_API_KEY: "brave-secret",
-      MURPH_WEB_SEARCH_PROVIDER: "brave",
-    }), { deployWorker: true })).not.toThrow();
-  });
-
-  it("does not require BRAVE_API_KEY for config-only runs even when hosted search is pinned to brave", () => {
-    expect(listMissingHostedDeployEnvironment({
-      CF_BUNDLES_BUCKET: "bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-      CF_WORKER_NAME: "hosted-runner",
-      MURPH_WEB_SEARCH_PROVIDER: "brave",
-    }, { deployWorker: false })).toEqual([]);
-  });
-
   it("treats whitespace-only values as missing", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",

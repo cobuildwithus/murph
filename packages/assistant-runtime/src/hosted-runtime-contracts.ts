@@ -27,6 +27,11 @@ export type {
   HostedRuntimeVaultSyncPort,
   HostedRuntimeWorkspacePort,
 } from "./hosted-runtime/platform.ts";
+export type {
+  RuntimeLivenessPort,
+  RuntimeLivenessRejectionReason,
+  RuntimeLivenessTouchResult,
+} from "./hosted-runtime/liveness.ts";
 export {
   parseHostedAssistantRuntimeConfig,
   parseHostedAssistantWorkspaceRuntimeJobInput,

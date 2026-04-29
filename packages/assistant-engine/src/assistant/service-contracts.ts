@@ -12,11 +12,11 @@ import type {
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
+import type { AssistantProviderProgressEvent } from './provider-progress.js'
 import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type {
-  AssistantProviderProgressEvent,
   AssistantProviderTurnExecutionResult,
-} from '../assistant-provider.js'
+} from './providers/types.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantCliAccessContext } from '../assistant-cli-access.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
@@ -37,7 +37,7 @@ import type {
   AssistantProviderContinuation,
 } from './active-turn-input-journal.js'
 import type {
-  ResolvedAssistantProviderRoute,
+  CodexThreadIdentity,
 } from './provider-route.js'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
@@ -144,7 +144,7 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
   onboardingGuidanceInjected?: boolean
   providerContinuation: AssistantProviderContinuation
   providerOptions: AssistantProviderSessionOptions
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   session: AssistantSession
   usageAttribution?: AssistantUsageAttribution | null
   workingDirectory: string
@@ -153,15 +153,14 @@ export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTu
 export interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
-  primaryRoute: ResolvedAssistantProviderRoute | null
-  routes: readonly ResolvedAssistantProviderRoute[]
+  route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }
 
 export interface AssistantProviderAttemptPlan {
   attemptCount: number
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
 }
@@ -183,7 +182,7 @@ export type AssistantProviderTurnRecoveryOutcome =
       kind: 'failed_terminal'
       error: unknown
       providerContinuation: AssistantProviderContinuation
-      route?: ResolvedAssistantProviderRoute | null
+      route: CodexThreadIdentity
       session: AssistantSession
     }
   | {

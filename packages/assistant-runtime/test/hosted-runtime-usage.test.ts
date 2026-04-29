@@ -6,6 +6,7 @@ import { test, vi } from "vitest";
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
+  listPendingAssistantRuntimeIssueRecords,
   listPendingAssistantUsageRecords,
   resolveAssistantStatePaths,
   resolvePendingAssistantUsagePath,
@@ -99,6 +100,8 @@ test("hosted usage export retries failed batches one record at a time and warns"
     assert.deepEqual(result, {
       exported: 2,
       failed: 0,
+      invalid: 0,
+      invalidIssueRecorded: false,
       pending: 0,
     });
     assert.equal(attempt, 3);
@@ -127,7 +130,7 @@ test("hosted usage export leaves unacknowledged records pending and warns", asyn
       usageExportPort: {
         async recordUsage() {
           return {
-            recorded: 1,
+            recorded: 3,
             usageIds: [firstUsageId, firstUsageId, "unknown_usage_id"],
           };
         },
@@ -138,6 +141,8 @@ test("hosted usage export leaves unacknowledged records pending and warns", asyn
     assert.deepEqual(result, {
       exported: 1,
       failed: 1,
+      invalid: 0,
+      invalidIssueRecorded: false,
       pending: 1,
     });
     const remaining = await listPendingAssistantUsageRecords({
@@ -216,8 +221,20 @@ test("hosted usage export skips malformed pending records and still exports vali
     assert.deepEqual(result, {
       exported: 1,
       failed: 1,
+      invalid: 1,
+      invalidIssueRecorded: true,
       pending: 1,
     });
+    const issues = await listPendingAssistantRuntimeIssueRecords({
+      vault: vaultRoot,
+    });
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0]?.component, "hosted.usage_export");
+    assert.equal(issues[0]?.errorCode, "pending_usage_invalid");
+    assert.deepEqual(issues[0]?.details, {
+      invalidPendingRecordCount: 1,
+    });
+    assert.equal(JSON.stringify(issues).includes(invalidUsageId), false);
     assert.deepEqual(
       await listPendingAssistantUsageRecords({
         skipInvalidRecords: true,

@@ -26,6 +26,8 @@ import {
   isAssistantActiveTurnInputCheckpointRejectedError,
   isAssistantActiveTurnInputUnavailableError,
   type AssistantActiveTurnInputCheckpointHook,
+  type AssistantActiveTurnInputCheckpointInput,
+  type AssistantActiveTurnInputAdmissionResult,
   type AssistantActiveTurnInputAdmissionHook,
   type AssistantTurnInputPort,
 } from '../turn-input.js'
@@ -436,6 +438,20 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     captureId: input.context.firstCaptureId,
     details: 'assistant provider turn started',
   })
+  const activeTurnHooks = input.turnInputPort
+    ? createAssistantAutoReplyActiveTurnInputHooks({
+        context: input.context,
+        inboxServices: input.inboxServices,
+        onAcceptedContext(nextContext) {
+          acceptedContext = nextContext
+          input.onAcceptedContext?.(nextContext)
+        },
+        onEvent: input.onEvent,
+        port: input.turnInputPort,
+        requestId: input.requestId,
+        vault: input.vault,
+      })
+    : null
   const result = await executeAssistantAutoReply({
     acceptedTurnInputInitialInputs: buildAutoReplyAcceptedTurnInputItems({
       captures: input.context.items.map((item) => item.summary),
@@ -458,23 +474,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     primaryCapture: decision.primaryCapture,
     prompt: decision.prompt,
     replyCaptureId: input.context.firstCaptureId,
-    activeTurnInput: input.turnInputPort
-      ? createAssistantAutoReplyActiveTurnInputHook({
-          context: input.context,
-          inboxServices: input.inboxServices,
-          onAcceptedContext(nextContext) {
-            acceptedContext = nextContext
-            input.onAcceptedContext?.(nextContext)
-          },
-          onEvent: input.onEvent,
-          port: input.turnInputPort,
-          requestId: input.requestId,
-          vault: input.vault,
-        })
-      : undefined,
-    activeTurnCheckpoint: createAssistantAutoReplyActiveTurnCheckpointHook(
-      input.turnInputPort,
-    ),
+    activeTurnInput: activeTurnHooks?.admit,
+    activeTurnCheckpoint: activeTurnHooks?.checkpoint,
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
@@ -1072,7 +1073,13 @@ async function executeAssistantAutoReply(input: {
   }
 }
 
-function createAssistantAutoReplyActiveTurnInputHook(input: {
+interface AssistantAutoReplyActiveTurnPendingAcceptance {
+  acceptedInputIds: readonly string[]
+  captureIds: readonly string[]
+  apply(): void
+}
+
+function createAssistantAutoReplyActiveTurnInputHooks(input: {
   context: AssistantAutoReplyGroupContext
   inboxServices: InboxServices
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
@@ -1080,10 +1087,14 @@ function createAssistantAutoReplyActiveTurnInputHook(input: {
   port: AssistantTurnInputPort
   requestId: string | null
   vault: string
-}): AssistantActiveTurnInputAdmissionHook {
+}): {
+  admit: AssistantActiveTurnInputAdmissionHook
+  checkpoint?: AssistantActiveTurnInputCheckpointHook
+} {
   let context = input.context
+  const pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[] = []
 
-  return async (admissionInput) => {
+  const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
     const refreshResult = await input.port.refresh({
       phase: admissionInput.phase,
       signal: admissionInput.signal,
@@ -1097,7 +1108,12 @@ function createAssistantAutoReplyActiveTurnInputHook(input: {
     const lateCaptures = await input.port.listNewConversationCaptures({
       afterCursor: context.lastCursor,
       conversation: conversationCaptureRefFromCapture(context.firstItem.summary),
-      knownCaptureIds: context.captureIds,
+      knownCaptureIds: [
+        ...context.captureIds,
+        ...pendingAcceptances.flatMap((pending) => pending.captureIds),
+        ...(admissionInput.knownCaptureIds ?? []),
+      ],
+      signal: admissionInput.signal,
     })
     if (lateCaptures.captures.length === 0) {
       return {
@@ -1154,35 +1170,58 @@ function createAssistantAutoReplyActiveTurnInputHook(input: {
     })
 
     const previousCursor = context.lastCursor
-    context = nextContext
-    input.onAcceptedContext(context)
+    const acceptedInputs = buildAutoReplyAcceptedTurnInputItems({
+      captures: lateCaptures.captures,
+      cursorFrom: previousCursor,
+      cursorTo: lateCaptures.nextCursor,
+    })
     input.onEvent?.({
       type: 'capture.reply-progress',
       captureId: context.firstCaptureId,
-      details: `new input accepted into active turn with ${lateCaptures.captures.length} additional capture(s)`,
+      details: `new input queued for active turn with ${lateCaptures.captures.length} additional capture(s)`,
       providerKind: 'status',
       providerState: 'running',
     })
+    pendingAcceptances.push({
+      acceptedInputIds: acceptedInputs.map((item) => item.id),
+      captureIds: lateCaptures.captures.map((capture) => capture.captureId),
+      apply() {
+        context = nextContext
+        input.onAcceptedContext(context)
+        input.onEvent?.({
+          type: 'capture.reply-progress',
+          captureId: context.firstCaptureId,
+          details: `new input committed to active turn with ${lateCaptures.captures.length} additional capture(s)`,
+          providerKind: 'status',
+          providerState: 'running',
+        })
+      },
+    })
 
-    return {
-      acceptedInputs: buildAutoReplyAcceptedTurnInputItems({
-        captures: lateCaptures.captures,
-        cursorFrom: previousCursor,
-        cursorTo: lateCaptures.nextCursor,
-      }),
+    const result: AssistantActiveTurnInputAdmissionResult = {
+      acceptedInputs,
       deliveryReplyToMessageId:
         readAutoReplyDeliveryReplyToMessageId(shownFinalGroup),
       kind: 'accepted',
       prompt: preparedInput.prompt,
       receiptMetadata: {
-        [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]: context.firstCaptureId,
-        [AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]: context.captureIds.join(','),
+        [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]: nextContext.firstCaptureId,
+        [AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]: nextContext.captureIds.join(','),
       },
       transcriptText: buildAutoReplyAcceptedTurnTranscriptText(
         lateCaptures.captures,
       ),
       userMessageContent: preparedInput.userMessageContent,
     }
+    return result
+  }
+
+  return {
+    admit,
+    checkpoint: createAssistantAutoReplyActiveTurnCheckpointHook({
+      pendingAcceptances,
+      port: input.port,
+    }),
   }
 }
 
@@ -1212,15 +1251,28 @@ function buildAutoReplyAcceptedCaptureTranscriptText(
   return 'User sent a new message.'
 }
 
-function createAssistantAutoReplyActiveTurnCheckpointHook(
-  port?: AssistantTurnInputPort,
-): AssistantActiveTurnInputCheckpointHook | undefined {
-  if (!port?.checkpointAcceptedInput) {
-    return undefined
-  }
-  const checkpointAcceptedInput = port.checkpointAcceptedInput.bind(port)
+function createAssistantAutoReplyActiveTurnCheckpointHook(input: {
+  pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[]
+  port?: AssistantTurnInputPort
+}): AssistantActiveTurnInputCheckpointHook | undefined {
+  const checkpointAcceptedInput =
+    input.port?.checkpointAcceptedInput?.bind(input.port)
 
-  return (checkpointInput) => checkpointAcceptedInput(checkpointInput)
+  return async (checkpointInput: AssistantActiveTurnInputCheckpointInput) => {
+    await checkpointAcceptedInput?.(checkpointInput)
+    const acceptedInputIds = new Set(checkpointInput.acceptedInputIds)
+    let applied = 0
+    for (const pending of input.pendingAcceptances) {
+      if (!pending.acceptedInputIds.every((id) => acceptedInputIds.has(id))) {
+        break
+      }
+      pending.apply()
+      applied += 1
+    }
+    if (applied > 0) {
+      input.pendingAcceptances.splice(0, applied)
+    }
+  }
 }
 
 function buildAutoReplyAcceptedTurnInputItems(input: {

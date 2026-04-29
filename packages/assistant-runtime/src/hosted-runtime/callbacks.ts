@@ -169,8 +169,10 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
   allowPreparedSending?: boolean;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  assertLiveness?: () => Promise<void>;
   forwardedEnv?: Readonly<Record<string, string>>;
   platformEnv?: Readonly<Record<string, string>>;
+  signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): Promise<HostedAssistantDeliveryOutcome[]> {
@@ -180,6 +182,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
   }) as NodeJS.ProcessEnv;
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
+    assertHostedDeliveryLiveness(input.signal);
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
       details: buildHostedAssistantDeliveryDetails({
@@ -196,11 +199,14 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
       wake: input.wake,
       effectsPort: input.effectsPort,
       allowPreparedSending: input.allowPreparedSending === true,
+      assertLiveness: input.assertLiveness,
       assistantDeliveryEffect,
+      signal: input.signal ?? null,
       telegramEnv,
       userId: input.wake.userId,
       vaultRoot: input.vaultRoot,
     }));
+    assertHostedDeliveryLiveness(input.signal);
   }
 
   return outcomes;
@@ -210,7 +216,9 @@ async function deliverHostedCommittedAssistantDelivery(input: {
   allowPreparedSending: boolean;
   wake: HostedRuntimeEvent;
   effectsPort: HostedRuntimeEffectsPort;
+  assertLiveness?: () => Promise<void>;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  signal: AbortSignal | null;
   telegramEnv: NodeJS.ProcessEnv;
   userId: string;
   vaultRoot: string;
@@ -223,6 +231,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
     vault: input.vaultRoot,
   });
   try {
+    assertHostedDeliveryLiveness(input.signal);
     const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
       allowPreparedSending: input.allowPreparedSending,
       assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -236,6 +245,7 @@ async function deliverHostedCommittedAssistantDelivery(input: {
       return mirrorOutcome;
     }
 
+    assertHostedDeliveryLiveness(input.signal);
     assertSupportedHostedAssistantDeliveryPayload(input.assistantDeliveryEffect.payload);
     const dispatched = await dispatchAssistantOutboxIntent({
       dependencies: {
@@ -247,7 +257,8 @@ async function deliverHostedCommittedAssistantDelivery(input: {
             );
           }
 
-          return await input.effectsPort.sendEmail({
+          await assertHostedDeliveryLiveNow(input);
+          const result = await input.effectsPort.sendEmail({
             idempotencyKey: request.idempotencyKey ?? null,
             identityId: request.identityId ?? null,
             message: request.message,
@@ -256,17 +267,25 @@ async function deliverHostedCommittedAssistantDelivery(input: {
             target: request.target,
             targetKind: request.targetKind,
           });
+          await assertHostedDeliveryLiveNow(input);
+          return result;
         },
-        sendTelegram: async (request) =>
-          await sendTelegramMessage(request, {
+        sendTelegram: async (request) => {
+          await assertHostedDeliveryLiveNow(input);
+          const result = await sendTelegramMessage(request, {
             env: input.telegramEnv,
-          }),
+            signal: input.signal ?? undefined,
+          });
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
       },
       intentId: input.assistantDeliveryEffect.effectId,
       now,
       ...(input.allowPreparedSending ? { allowPreparedSending: true } : {}),
       vault: input.vaultRoot,
     });
+    assertHostedDeliveryLiveness(input.signal);
     return await buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
@@ -299,6 +318,27 @@ async function deliverHostedCommittedAssistantDelivery(input: {
     });
     throw enrichedError;
   }
+}
+
+async function assertHostedDeliveryLiveNow(input: {
+  assertLiveness?: () => Promise<void>;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  assertHostedDeliveryLiveness(input.signal);
+  await input.assertLiveness?.();
+  assertHostedDeliveryLiveness(input.signal);
+}
+
+function assertHostedDeliveryLiveness(signal: AbortSignal | null | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  const reason = signal.reason;
+  if (reason instanceof Error) {
+    throw reason;
+  }
+  throw new Error("Hosted assistant delivery was aborted.");
 }
 
 async function maybeResolveHostedAssistantDeliveryFromMirror(input: {

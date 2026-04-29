@@ -36,7 +36,7 @@ import {
   writeAssistantProviderResumeRouteId,
   writeAssistantSessionProviderSessionId,
 } from '../src/assistant/provider-state.ts'
-import type { ResolvedAssistantProviderRoute } from '../src/assistant/provider-route.ts'
+import type { CodexThreadIdentity } from '../src/assistant/provider-route.ts'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
@@ -392,7 +392,7 @@ describe('assistant provider seam helpers', () => {
 function createRoute(input?: {
   providerOptions?: Partial<AssistantProviderSessionOptions>
   routeId?: string
-}): ResolvedAssistantProviderRoute {
+}): CodexThreadIdentity {
   return {
     codexCommand: null,
     label: 'primary',

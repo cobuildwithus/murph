@@ -2571,7 +2571,7 @@ test('sendAssistantMessageLocal skips typing indicators when delivery is not req
   assert.equal(disabledAdapter.startTypingIndicator.mock.calls.length, 1)
 })
 
-test('sendAssistantMessageLocal falls back to session defaults and not-requested delivery state when no route is resolved', async () => {
+test('sendAssistantMessageLocal uses the Codex route and not-requested delivery state', async () => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-04-08T16:30:00.000Z'))
 
@@ -2603,14 +2603,19 @@ test('sendAssistantMessageLocal falls back to session defaults and not-requested
       session,
     },
     plan,
-    routes: [],
+    route: {
+      provider: 'codex-cli',
+      providerOptions: {
+        model: null,
+      },
+    },
     session,
     transcriptEntries: [],
   })
 
   const result = await sendAssistantMessageLocal({
     deliverResponse: true,
-    prompt: 'No explicit route please',
+    prompt: 'No explicit delivery please',
     vault: '/vaults/test',
   })
 
@@ -2619,7 +2624,7 @@ test('sendAssistantMessageLocal falls back to session defaults and not-requested
   assert.equal(result.deliveryError, null)
   assert.equal(result.deliveryIntentId, null)
   assert.equal(result.session.sessionId, session.sessionId)
-  assert.equal(mocks.createAssistantTurnReceipt.mock.calls[0]?.[0]?.provider, session.provider)
+  assert.equal(mocks.createAssistantTurnReceipt.mock.calls[0]?.[0]?.provider, 'codex-cli')
   assert.equal(mocks.createAssistantTurnReceipt.mock.calls[0]?.[0]?.providerModel, null)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], null)
   assert.match(
@@ -2857,12 +2862,12 @@ async function loadLocalServiceModule(input?: {
     kind: 'failed' | 'not-requested' | 'queued' | 'sent'
     session: AssistantSession
   }
-  routes?: Array<{
+  route?: {
     provider: string
     providerOptions?: {
       model?: string | null
     } | null
-  }>
+  }
   session?: AssistantSession
   transcriptEntries?: Array<{
     createdAt?: string | null
@@ -3120,15 +3125,13 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
       timezone: 'Australia/Sydney',
     })),
-    resolveAssistantTurnRoutes: vi.fn(() =>
-      input?.routes ?? [
-        {
-          provider: 'codex-cli',
-          providerOptions: {
-            model: 'gpt-5.4',
-          },
+    resolveAssistantTurnRoute: vi.fn(() =>
+      input?.route ?? {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
         },
-      ],
+      },
     ),
     withAssistantTurnLock: vi.fn(async (value: {
       run(): Promise<unknown>
@@ -3282,7 +3285,7 @@ async function loadLocalServiceModule(input?: {
     persistFailedAssistantPromptAttempt: mocks.persistFailedAssistantPromptAttempt,
   }))
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
-    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
   vi.doMock('../src/assistant/service-usage.js', () => ({
     persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,

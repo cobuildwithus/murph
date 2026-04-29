@@ -2,7 +2,7 @@ import type {
   AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
-import type { ResolvedAssistantProviderRoute } from './provider-route.js'
+import type { CodexThreadIdentity } from './provider-route.js'
 
 export function resolveAssistantProviderResumeKey(input: {
   resumeState: AssistantSessionResumeState | null
@@ -15,7 +15,7 @@ export function resolveAssistantProviderResumeKey(input: {
 }
 
 export function resolveAssistantRouteResumeBinding(input: {
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
   sessionResumeState: AssistantSessionResumeState | null
 }): AssistantSessionResumeState | null {
   if (
@@ -32,7 +32,7 @@ export function resolveAssistantRouteResumeBinding(input: {
 
 export function doesAssistantResumeBindingMatchRoute(input: {
   resumeState: AssistantSessionResumeState | null
-  route: ResolvedAssistantProviderRoute
+  route: CodexThreadIdentity
 }): boolean {
   const storedRouteId = normalizeNullableString(
     input.resumeState?.resumeRouteId,
@@ -41,9 +41,9 @@ export function doesAssistantResumeBindingMatchRoute(input: {
     return false
   }
 
-  // Minimal resume state stores only the provider session id plus the exact
-  // provider route id that minted it. Cross-route compatibility guesses can
-  // resume the wrong upstream session across route changes, so exact matches are the
-  // only safe contract.
+  // Minimal resume state stores only the Codex thread id plus the exact route
+  // fingerprint that minted it. Cross-route guesses can resume the wrong
+  // upstream thread after target changes, so exact matches are the only safe
+  // contract.
   return storedRouteId === input.route.routeId
 }

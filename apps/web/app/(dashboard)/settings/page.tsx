@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { HostedPhoneCountryCodeBoundary } from "@/src/components/hosted-onboarding/hosted-phone-country-code-boundary";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
+import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
@@ -43,7 +44,7 @@ export default async function SettingsPage() {
             Your account
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Subscription, connected accounts, vault sync, and wearables.
+            Subscription, connected accounts, vault sync, wearables, and data privacy.
           </p>
         </div>
 
@@ -87,6 +88,13 @@ export default async function SettingsPage() {
             authenticated={authenticated}
             member={authenticatedMember}
           />
+        </section>
+
+        <section className="flex flex-col gap-4">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Data & privacy
+          </div>
+          <HostedDataPrivacySettings authenticated={authenticated} />
         </section>
       </div>
     </HostedPhoneCountryCodeBoundary>
