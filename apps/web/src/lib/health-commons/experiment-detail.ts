@@ -38,6 +38,11 @@ import {
   toResearchStats,
   toStudy,
 } from "./experiment-detail-research";
+import {
+  cleanHealthCommonsUserFacingCopy,
+  cleanHealthCommonsUserFacingCopyList,
+  cleanOptionalHealthCommonsUserFacingCopy,
+} from "./user-facing-copy";
 
 export { readOptionalProfileImageUrl } from "./experiment-detail-experts";
 
@@ -152,13 +157,15 @@ function isPublicExperimentProtocol(
 function toExperimentProtocolIndexEntry(
   entry: ReturnType<typeof getGeneratedHealthCommonsWebExperimentIndex>["experiments"][number],
 ): ExperimentProtocol {
+  const description = cleanHealthCommonsUserFacingCopy(entry.description);
+
   const image = resolveExperimentRouteImage(entry.routeId, entry.image);
 
   return {
     protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
     id: entry.routeId,
-    title: entry.title,
-    category: entry.category,
+    title: cleanHealthCommonsUserFacingCopy(entry.title),
+    category: cleanHealthCommonsUserFacingCopy(entry.category),
     image,
     durationDays: entry.durationDays,
     baselineDays: entry.baselineDays,
@@ -166,7 +173,7 @@ function toExperimentProtocolIndexEntry(
     researchSummaryLabel: formatIndexResearchSummaryLabel(entry.studyCount),
     evidenceLevel: entry.evidenceLevel,
     evidenceLabel: entry.evidenceLabel,
-    description: entry.description,
+    description,
     expectedSignals: [],
     measurementPaths: [],
     protocolFacts: [],
@@ -174,7 +181,7 @@ function toExperimentProtocolIndexEntry(
     protocolTips: [],
     protocolKeepInMind: [],
     protocolLogFields: [],
-    whyItWorks: entry.description,
+    whyItWorks: description,
     experts: [],
     researchStats: [],
     studies: [],
@@ -303,7 +310,7 @@ function toExperimentDetail(
   return {
     protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
     id: routeId,
-    title: protocol.title,
+    title: cleanHealthCommonsUserFacingCopy(protocol.title),
     category: formatProtocolCategory(protocol),
     image: resolveExperimentRouteImage(routeId, resolveProtocolPageImage(protocol)),
     durationDays: testPlan?.durationDays ?? protocolSpecDurationDays(protocolSpec),
@@ -320,20 +327,20 @@ function toExperimentDetail(
     }),
     evidenceLevel: QUALITY_TO_EVIDENCE_LEVEL[protocol.quality ?? ""] ?? 2,
     evidenceLabel: formatEvidenceLabel(protocol),
-    description: protocol.summary ?? summarizeBody(protocol.body),
+    description: cleanHealthCommonsUserFacingCopy(protocol.summary ?? summarizeBody(protocol.body)),
     expectedSignals: biomarkerEntities.map((biomarker) =>
       toExpectedSignal(protocol, biomarker)
     ),
-    measurementPaths,
-    protocolFacts: toProtocolFacts(protocolSpec, testPlan),
+    measurementPaths: measurementPaths.map(cleanMeasurementPathCopy),
+    protocolFacts: toProtocolFacts(protocolSpec, testPlan).map(cleanProtocolFactCopy),
     protocol: toProtocolSteps(protocolSpec),
-    protocolTips: protocolSpec?.tips ?? [],
-    protocolKeepInMind: protocolSpec?.keepInMind ?? [],
+    protocolTips: cleanHealthCommonsUserFacingCopyList(protocolSpec?.tips),
+    protocolKeepInMind: cleanHealthCommonsUserFacingCopyList(protocolSpec?.keepInMind),
     protocolLogFields: protocolSpec?.logFields ?? [],
     ...(protocol.experimentOnboarding
       ? { experimentOnboarding: protocol.experimentOnboarding }
       : {}),
-    whyItWorks: toWhyItWorks(protocol, claims),
+    whyItWorks: cleanHealthCommonsUserFacingCopy(toWhyItWorks(protocol, claims)),
     experts: sourcePeople.map(toExpert),
     researchStats: toResearchStats({
       countedResearchSources,
@@ -345,10 +352,19 @@ function toExperimentDetail(
     ...(protocol.researchLandscape
       ? {
           researchLandscape: {
-            bottomLine: protocol.researchLandscape?.bottomLine ?? "The evidence base is mixed enough to read by category.",
+            bottomLine: cleanHealthCommonsUserFacingCopy(
+              protocol.researchLandscape?.bottomLine
+                ?? "The evidence base is mixed enough to read by category.",
+            ),
             confidenceLabel: protocol.researchLandscape?.confidenceLabel ?? "limited",
-            primaryClaim: protocol.researchLandscape?.primaryClaim ?? "Use the highest-quality direct sources to set the main claim.",
-            mainCaveat: protocol.researchLandscape?.mainCaveat ?? "Adjacent and safety sources should calibrate the claim rather than become direct proof.",
+            primaryClaim: cleanHealthCommonsUserFacingCopy(
+              protocol.researchLandscape?.primaryClaim
+                ?? "Use the highest-quality direct sources to set the main claim.",
+            ),
+            mainCaveat: cleanHealthCommonsUserFacingCopy(
+              protocol.researchLandscape?.mainCaveat
+                ?? "Adjacent and safety sources should calibrate the claim rather than become direct proof.",
+            ),
             groups: hasCompleteResearchGroupCoverage ? researchGroups : [],
           },
           ...(hasCompleteResearchGroupCoverage ? { researchGroups } : {}),
@@ -366,6 +382,53 @@ function toExperimentDetail(
       runSpecRevisionId: protocol.revision.runSpecRevisionId ?? null,
       slug: protocol.slug,
     },
+  };
+}
+
+function cleanProtocolFactCopy(
+  fact: ExperimentProtocol["protocolFacts"][number],
+): ExperimentProtocol["protocolFacts"][number] {
+  const detail = cleanOptionalHealthCommonsUserFacingCopy(fact.detail);
+
+  return {
+    label: cleanHealthCommonsUserFacingCopy(fact.label),
+    value: cleanHealthCommonsUserFacingCopy(fact.value),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+function cleanMeasurementPathCopy(
+  path: ExperimentProtocol["measurementPaths"][number],
+): ExperimentProtocol["measurementPaths"][number] {
+  return {
+    ...path,
+    label: cleanHealthCommonsUserFacingCopy(path.label),
+    methods: path.methods.map(cleanMeasurementMethodCopy),
+    notes: cleanHealthCommonsUserFacingCopyList(path.notes),
+    outcomeLabels: path.outcomeLabels.map(cleanHealthCommonsUserFacingCopy),
+    safetyOutcomeLabels: path.safetyOutcomeLabels.map(cleanHealthCommonsUserFacingCopy),
+  };
+}
+
+function cleanMeasurementMethodCopy(
+  method: ExperimentProtocol["measurementPaths"][number]["methods"][number],
+): ExperimentProtocol["measurementPaths"][number]["methods"][number] {
+  const { privacy, summary, ...requiredMethod } = method;
+  const cleanSummary = cleanOptionalHealthCommonsUserFacingCopy(summary);
+
+  return {
+    ...requiredMethod,
+    shortName: cleanHealthCommonsUserFacingCopy(requiredMethod.shortName),
+    title: cleanHealthCommonsUserFacingCopy(requiredMethod.title),
+    ...(cleanSummary ? { summary: cleanSummary } : {}),
+    ...(privacy
+      ? {
+          privacy: {
+            ...privacy,
+            notes: cleanHealthCommonsUserFacingCopyList(privacy.notes),
+          },
+        }
+      : {}),
   };
 }
 
@@ -657,7 +720,7 @@ function toProtocolSteps(protocol: HealthCommonsProtocolSpec | undefined): Exper
   return steps.map((step, index) => ({
     number: index + 1,
     title: `Step ${index + 1}`,
-    detail: step,
+    detail: cleanHealthCommonsUserFacingCopy(step),
   }));
 }
 
@@ -791,12 +854,12 @@ function toSafety(safety: HealthCommonsSafety | undefined): ExperimentProtocol["
   return {
     cautionLevel: safetyCautionLevel(safety.cautionLevel),
     whoShouldAvoid: (safety.avoidOrGetClinicianGuidance ?? []).map(humanizeToken),
-    precautions: [
+    precautions: cleanHealthCommonsUserFacingCopyList([
       ...(safety.notes ?? []),
       ...(safety.stopIf && safety.stopIf.length > 0
         ? [`Stop if: ${safety.stopIf.map(humanizeToken).join(", ")}.`]
         : []),
-    ],
+    ]),
   };
 }
 

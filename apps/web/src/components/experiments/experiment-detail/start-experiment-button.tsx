@@ -94,7 +94,7 @@ export function StartExperimentButton({
           size="lg"
           className="rounded-2xl bg-primary py-4 text-base font-semibold text-primary-foreground hover:bg-chart-1 md:px-12"
           onClick={handleAuthenticatedStartClick}
-          connectLabel="Sign in to start"
+          connectLabel="Start experiment"
         >
           <span>Start Experiment</span>
           <ArrowRightIcon data-icon="inline-end" />

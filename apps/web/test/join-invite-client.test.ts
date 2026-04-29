@@ -86,7 +86,8 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
     }),
   );
 
-  assert.match(markup, /Murph signup/);
+  assert.match(markup, /<span>Murph<\/span>/);
+  assert.doesNotMatch(markup, /Murph signup/);
   assert.match(markup, /Verify the number you texted Murph from\./);
   assert.doesNotMatch(markup, /What happens next/);
   assert.doesNotMatch(markup, /Invite for/);

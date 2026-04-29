@@ -7,6 +7,7 @@ import {
   getGeneratedExperimentIndex,
   type GeneratedExperimentIndexEntry,
 } from "./generated-experiment-artifacts";
+import { cleanHealthCommonsUserFacingCopy } from "./user-facing-copy";
 
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
@@ -41,11 +42,13 @@ function isPublicExperimentIndexEntry(entry: GeneratedExperimentIndexEntry): boo
 }
 
 function toExperimentProtocolIndexEntry(entry: GeneratedExperimentIndexEntry): ExperimentProtocol {
+  const description = cleanHealthCommonsUserFacingCopy(entry.description);
+
   return {
     protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
     id: entry.routeId,
-    title: entry.title,
-    category: entry.category,
+    title: cleanHealthCommonsUserFacingCopy(entry.title),
+    category: cleanHealthCommonsUserFacingCopy(entry.category),
     image: resolveExperimentRouteImage(entry.routeId, entry.image),
     durationDays: entry.durationDays,
     baselineDays: entry.baselineDays,
@@ -53,7 +56,7 @@ function toExperimentProtocolIndexEntry(entry: GeneratedExperimentIndexEntry): E
     researchSummaryLabel: formatIndexResearchSummaryLabel(entry.studyCount),
     evidenceLevel: entry.evidenceLevel,
     evidenceLabel: entry.evidenceLabel,
-    description: entry.description,
+    description,
     expectedSignals: [],
     measurementPaths: [],
     protocolFacts: [],
@@ -61,7 +64,7 @@ function toExperimentProtocolIndexEntry(entry: GeneratedExperimentIndexEntry): E
     protocolTips: [],
     protocolKeepInMind: [],
     protocolLogFields: [],
-    whyItWorks: entry.description,
+    whyItWorks: description,
     experts: [],
     researchStats: [],
     studies: [],

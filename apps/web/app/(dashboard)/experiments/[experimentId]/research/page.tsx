@@ -6,9 +6,9 @@ import {
   type ResearchTabExperiment,
 } from "@/src/components/experiments/experiment-detail/research-tab";
 import {
-  loadGeneratedExperimentProjection,
-  type GeneratedExperimentResearchTab,
-} from "@/src/lib/health-commons/generated-experiment-artifacts";
+  resolveHealthCommonsExperimentResearchTab,
+  type ExperimentResearchTabProjection,
+} from "@/src/lib/health-commons/experiment-projections";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export async function generateMetadata({
@@ -17,7 +17,7 @@ export async function generateMetadata({
   params: Promise<{ experimentId: string }>;
 }): Promise<Metadata> {
   const { experimentId } = await params;
-  const research = loadGeneratedExperimentProjection(experimentId, "experiment.research");
+  const research = resolveHealthCommonsExperimentResearchTab(experimentId);
 
   if (!research) {
     return {};
@@ -38,7 +38,7 @@ export default async function ExperimentResearchPage({
   params: Promise<{ experimentId: string }>;
 }) {
   const { experimentId } = await params;
-  const research = loadGeneratedExperimentProjection(experimentId, "experiment.research");
+  const research = resolveHealthCommonsExperimentResearchTab(experimentId);
 
   if (!research) {
     notFound();
@@ -48,7 +48,7 @@ export default async function ExperimentResearchPage({
 }
 
 function toResearchTabExperiment(
-  research: GeneratedExperimentResearchTab,
+  research: ExperimentResearchTabProjection,
 ): ResearchTabExperiment {
   return {
     id: research.route.routeId,

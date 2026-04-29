@@ -20,6 +20,10 @@ import {
   type HealthCommonsRouteBundleReader,
 } from "@murphai/health-commons/runtime";
 import { isBrowserVaultMetricBinding } from "./biomarker-bindings";
+import {
+  cleanHealthCommonsUserFacingCopy,
+  cleanHealthCommonsUserFacingCopyList,
+} from "./user-facing-copy";
 
 const FINNISH_SAUNA_PROTOCOL_KEY = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const FINNISH_SAUNA_ROUTE_ID = "finnish-sauna";
@@ -205,7 +209,7 @@ function toBiomarkerPageModel(
 
   return {
     aliases: biomarker.aliases ?? [],
-    body: biomarker.body,
+    body: cleanHealthCommonsUserFacingCopy(biomarker.body),
     catalogHash: catalog.catalogHash,
     categories: biomarker.categories ?? [],
     claims: buildBiomarkerClaims(biomarker, catalog),
@@ -214,36 +218,44 @@ function toBiomarkerPageModel(
       placeholder: "Community outcome summaries will appear once enough opted-in Murph runs are available.",
       state: "coming_soon",
     },
-    explainerCards: biomarkerSpec?.explainerCards ?? fallbackExplainerCards(biomarker),
-    interpretationFrame: biomarker.interpretationFrame ?? {
+    explainerCards: cleanExplainerCards(
+      biomarkerSpec?.explainerCards ?? fallbackExplainerCards(biomarker),
+    ),
+    interpretationFrame: cleanInterpretationFrame(biomarker.interpretationFrame ?? {
       caveat: "Compare this biomarker against your own baseline and keep obvious confounders visible.",
       principle: "Trend beats a single value.",
-    },
+    }),
     key: biomarker.key,
     measurement: {
-      bestContext: biomarkerSpec?.measurement?.bestContext
+      bestContext: cleanHealthCommonsUserFacingCopy(biomarkerSpec?.measurement?.bestContext
         ?? "Use the most consistent available measurement context.",
-      confounders: biomarkerSpec?.measurement?.confounders ?? [],
-      howToMeasure: biomarkerSpec?.measurement?.howToMeasure ?? [
+      ),
+      confounders: cleanHealthCommonsUserFacingCopyList(
+        biomarkerSpec?.measurement?.confounders ?? [],
+      ),
+      howToMeasure: cleanHealthCommonsUserFacingCopyList(biomarkerSpec?.measurement?.howToMeasure ?? [
         "Use the same device or method when comparing before and after windows.",
         "Prefer window averages over one-off readings.",
-      ],
+      ]),
     },
-    measurementContexts: biomarker.measurementContexts ?? [],
+    measurementContexts: cleanHealthCommonsUserFacingCopyList(biomarker.measurementContexts ?? []),
     pageRevisionId: biomarker.revision.pageRevisionId,
     privateMetricBindings: biomarkerSpec?.privateMetricBindings ?? [],
-    protocolRankingFormula: protocolRanking?.scoreFormula
+    protocolRankingFormula: cleanHealthCommonsUserFacingCopy(protocolRanking?.scoreFormula
       ?? "evidenceWeight * 3 + biomarkerRelevance * 3 + wearableMeasurability * 2 - burdenPenalty - safetyCautionPenalty + communityOutcomeConfidence",
+    ),
     protocolRankingVersion: protocolRanking?.version ?? "deterministic-v0",
     protocolRankings: buildProtocolRankings({ biomarker, catalog }),
     qualityLabel: formatQualityLabel(biomarker.quality),
     routeId: toTrailingRouteId(biomarker.slug),
-    shortName: biomarkerSpec?.shortName ?? biomarker.aliases?.[0] ?? biomarker.title,
+    shortName: cleanHealthCommonsUserFacingCopy(
+      biomarkerSpec?.shortName ?? biomarker.aliases?.[0] ?? biomarker.title,
+    ),
     slug: biomarker.slug,
     sourceHighlights: buildBiomarkerSourceHighlights(biomarker, catalog),
     statusLabel: formatStatusLabel(biomarker.status),
-    summary: biomarker.summary ?? summarizeBody(biomarker.body),
-    title: biomarkerSpec?.displayName ?? biomarker.title,
+    summary: cleanHealthCommonsUserFacingCopy(biomarker.summary ?? summarizeBody(biomarker.body)),
+    title: cleanHealthCommonsUserFacingCopy(biomarkerSpec?.displayName ?? biomarker.title),
     trendDefaults: biomarkerSpec?.trendDefaults ?? DEFAULT_TREND_DEFAULTS,
     unit: biomarkerSpec?.unit ?? biomarker.unit ?? "value",
     valuePrecision: biomarkerSpec?.valuePrecision ?? 0,
@@ -267,12 +279,12 @@ function buildBiomarkerClaims(
   catalog: HealthCommonsCatalogReader,
 ): BiomarkerClaimModel[] {
   return (biomarker.claims ?? []).map((claim) => ({
-    caveats: claim.caveats ?? [],
     claimId: claim.claimId,
     sourceKeys: claim.sourceKeys ?? [],
     sources: resolveClaimSources(claim, catalog),
     strength: claim.strength,
-    text: claim.text,
+    caveats: cleanHealthCommonsUserFacingCopyList(claim.caveats ?? []),
+    text: cleanHealthCommonsUserFacingCopy(claim.text),
     type: claim.type,
   }));
 }
@@ -333,8 +345,8 @@ function toBiomarkerSourceModel(sourceEntity: HealthCommonsEntity): BiomarkerSou
       ?? formatSourceKind(source?.kind ?? sourceEntity.entityType),
     externalUrl: source?.url ?? null,
     key: sourceEntity.key,
-    summary: resolveBiomarkerSourceSummary(sourceEntity),
-    title: source?.title ?? sourceEntity.title,
+    summary: cleanHealthCommonsUserFacingCopy(resolveBiomarkerSourceSummary(sourceEntity)),
+    title: cleanHealthCommonsUserFacingCopy(source?.title ?? sourceEntity.title),
     typeLabel: formatSourceKind(source?.kind ?? sourceEntity.entityType),
     year: source?.year ?? null,
   };
@@ -478,19 +490,41 @@ function toProtocolRanking(input: {
       ?? labelForPenalty(scoring.safetyCautionPenalty),
     category: formatProtocolCategory(input.protocol),
     confidence: input.explicitCandidate?.display?.confidence ?? confidenceForScore(rankScore),
-    description: input.protocol.summary ?? summarizeBody(input.protocol.body),
+    description: cleanHealthCommonsUserFacingCopy(
+      input.protocol.summary ?? summarizeBody(input.protocol.body),
+    ),
     explicitCandidateIndex: input.explicitCandidateIndex,
     expectedDirection: input.explicitCandidate?.expectedDirection
       ?? expectedDirectionForBiomarker(input.biomarker),
     href: `/experiments/${toProtocolExperimentRouteId(input.protocol)}`,
     isExplicitCandidate: input.explicitCandidate !== null,
     key: input.protocol.key,
-    mechanism: input.explicitCandidate?.mechanism
+    mechanism: cleanHealthCommonsUserFacingCopy(input.explicitCandidate?.mechanism
       ?? `${input.protocol.title} is linked to ${input.biomarker.title} in Health Commons. Use the protocol page for dosing, caveats, and expected measurement windows.`,
+    ),
     rankScore,
     relationship,
     scoring,
-    title: input.protocol.title,
+    title: cleanHealthCommonsUserFacingCopy(input.protocol.title),
+  };
+}
+
+function cleanExplainerCards(
+  cards: readonly HealthCommonsBiomarkerExplainerCard[],
+): HealthCommonsBiomarkerExplainerCard[] {
+  return cards.map((card) => ({
+    ...card,
+    body: cleanHealthCommonsUserFacingCopy(card.body),
+    title: cleanHealthCommonsUserFacingCopy(card.title),
+  }));
+}
+
+function cleanInterpretationFrame(
+  frame: HealthCommonsInterpretationFrame,
+): HealthCommonsInterpretationFrame {
+  return {
+    caveat: cleanHealthCommonsUserFacingCopy(frame.caveat),
+    principle: cleanHealthCommonsUserFacingCopy(frame.principle),
   };
 }
 

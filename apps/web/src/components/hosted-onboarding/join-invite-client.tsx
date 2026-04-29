@@ -23,7 +23,7 @@ function resolveJoinInviteEyebrow(
     case "blocked":
       return { label: "Needs support", tone: "danger" };
     default:
-      return { label: "Murph signup", tone: "default" };
+      return { label: "Murph", tone: "default" };
   }
 }
 

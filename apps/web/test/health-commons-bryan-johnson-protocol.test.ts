@@ -11,10 +11,26 @@ import {
   createHealthCommonsCatalogReader,
 } from "@/src/lib/health-commons/catalog";
 import {
+  listHealthCommonsExperimentBrowseProtocols,
+} from "@/src/lib/health-commons/experiment-browse";
+import {
+  listHealthCommonsBiomarkerRoutes,
+  resolveHealthCommonsBiomarkerDetail,
+} from "@/src/lib/health-commons/biomarker-detail";
+import {
   listHealthCommonsExperimentRouteParams,
   listHealthCommonsExperimentProtocols,
   resolveHealthCommonsExperimentProtocol,
 } from "@/src/lib/health-commons/experiment-detail";
+import {
+  resolveHealthCommonsExperimentProtocolTab,
+  resolveHealthCommonsExperimentResearchTab,
+  resolveHealthCommonsExperimentResultsPublic,
+  resolveHealthCommonsExperimentShell,
+} from "@/src/lib/health-commons/experiment-projections";
+import {
+  loadGeneratedExperimentProjection,
+} from "@/src/lib/health-commons/generated-experiment-artifacts";
 
 const SUPPLEMENT_PROTOCOL_FIXTURES = [
   {
@@ -42,6 +58,9 @@ const SUPPLEMENT_PROTOCOL_FIXTURES = [
     routeId: "daily-vitamin-d3-supplementation",
   },
 ] as const;
+
+const PUBLIC_SOURCE_KEY_RESIDUE_PATTERN =
+  /source_artifact:|\b(?:source|citation)\s+keys?\b|`{2,}/iu;
 
 describe("Health Commons experiment protocol metadata", () => {
   it("keeps public experiment resolution on generated route bundles, not the monolithic catalog import", () => {
@@ -226,7 +245,298 @@ describe("Health Commons experiment protocol metadata", () => {
     );
   });
 
+  it("strips Health Commons source keys from public Daily Step Floor copy", () => {
+    const fullProtocol = resolveHealthCommonsExperimentProtocol("daily-step-floor");
+    const browseProtocol = listHealthCommonsExperimentBrowseProtocols().find((protocol) =>
+      protocol.id === "daily-step-floor"
+    );
+    const shell = resolveHealthCommonsExperimentShell("daily-step-floor");
+    const protocolTab = resolveHealthCommonsExperimentProtocolTab("daily-step-floor");
+    const researchTab = resolveHealthCommonsExperimentResearchTab("daily-step-floor");
+    const resultsPublic = resolveHealthCommonsExperimentResultsPublic("daily-step-floor");
+    const rawProtocolTab = loadGeneratedExperimentProjection(
+      "daily-step-floor",
+      "experiment.protocol",
+    );
+
+    if (
+      !fullProtocol
+      || !browseProtocol
+      || !shell
+      || !protocolTab
+      || !researchTab
+      || !resultsPublic
+      || !rawProtocolTab
+    ) {
+      throw new Error("Daily Step Floor projections should resolve for public routes.");
+    }
+
+    const rawSignalWithSourceKeys = rawProtocolTab.expectedSignals.find((signal) =>
+      signal.description?.includes("source_artifact:")
+    );
+
+    if (!rawSignalWithSourceKeys?.description) {
+      throw new Error("Daily Step Floor fixture should include raw source keys before projection.");
+    }
+
+    expect(rawSignalWithSourceKeys.description).toMatch(/\bsource\s*keys?\s*:/iu);
+    const scrubbedSignal = protocolTab.expectedSignals.find((signal) =>
+      signal.label === rawSignalWithSourceKeys.label
+    );
+
+    if (!scrubbedSignal?.description) {
+      throw new Error("Daily Step Floor scrubbed signal should retain public copy.");
+    }
+
+    expect(scrubbedSignal.description).not.toContain("source_artifact:");
+
+    const publicCopy = [
+      fullProtocol.title,
+      fullProtocol.description,
+      fullProtocol.whyItWorks,
+      ...collectExperimentProtocolCopy(fullProtocol),
+      browseProtocol.title,
+      browseProtocol.description,
+      browseProtocol.whyItWorks,
+      shell.title,
+      shell.description,
+      protocolTab.title,
+      protocolTab.whyItWorks,
+      ...collectExperimentProtocolCopy(protocolTab),
+      researchTab.title,
+      researchTab.description,
+      ...researchTab.protocolKeepInMind,
+      ...collectResearchLandscapeCopy(researchTab.researchLandscape),
+      ...researchTab.studies.flatMap(collectResearchStudyCopy),
+      ...(researchTab.researchGroups ?? []).flatMap((group) => [
+        group.label,
+        group.summary,
+        ...group.studies.flatMap(collectResearchStudyCopy),
+      ]),
+      resultsPublic.title,
+      ...resultsPublic.protocol.flatMap((step) => [step.title, step.detail]),
+    ].join("\n");
+
+    expect(publicCopy).not.toMatch(PUBLIC_SOURCE_KEY_RESIDUE_PATTERN);
+  });
+
+  it("strips Health Commons source keys from all public experiment projection copy", () => {
+    const browseProtocols = new Map(
+      listHealthCommonsExperimentBrowseProtocols().map((protocol) => [protocol.id, protocol]),
+    );
+    const dirtyCopy: string[] = [];
+
+    for (const { experimentId } of listHealthCommonsExperimentRouteParams()) {
+      const fullProtocol = resolveHealthCommonsExperimentProtocol(experimentId);
+      const browseProtocol = browseProtocols.get(experimentId);
+      const shell = resolveHealthCommonsExperimentShell(experimentId);
+      const protocolTab = resolveHealthCommonsExperimentProtocolTab(experimentId);
+      const researchTab = resolveHealthCommonsExperimentResearchTab(experimentId);
+      const resultsPublic = resolveHealthCommonsExperimentResultsPublic(experimentId);
+
+      if (
+        !fullProtocol
+        || !browseProtocol
+        || !shell
+        || !protocolTab
+        || !researchTab
+        || !resultsPublic
+      ) {
+        throw new Error(`${experimentId} should resolve for all public experiment projections.`);
+      }
+
+      const publicCopy = [
+        fullProtocol.title,
+        fullProtocol.description,
+        fullProtocol.whyItWorks,
+        ...collectExperimentProtocolCopy(fullProtocol),
+        browseProtocol.title,
+        browseProtocol.description,
+        browseProtocol.whyItWorks,
+        shell.title,
+        shell.description,
+        protocolTab.title,
+        protocolTab.whyItWorks,
+        ...collectExperimentProtocolCopy(protocolTab),
+        researchTab.title,
+        researchTab.description,
+        ...researchTab.protocolKeepInMind,
+        ...collectResearchLandscapeCopy(researchTab.researchLandscape),
+        ...researchTab.studies.flatMap(collectResearchStudyCopy),
+        ...(researchTab.researchGroups ?? []).flatMap((group) => [
+          group.label,
+          group.summary,
+          ...group.studies.flatMap(collectResearchStudyCopy),
+        ]),
+        resultsPublic.title,
+        ...resultsPublic.protocol.flatMap((step) => [step.title, step.detail]),
+      ].join("\n");
+
+      const issue = describeSourceKeyResidue(experimentId, publicCopy);
+      if (issue) {
+        dirtyCopy.push(issue);
+      }
+    }
+
+    expect(dirtyCopy).toEqual([]);
+  });
+
+  it("strips Health Commons source keys from public biomarker detail copy", () => {
+    const dirtyCopy: string[] = [];
+
+    for (const biomarkerId of listHealthCommonsBiomarkerRoutes()) {
+      const biomarker = resolveHealthCommonsBiomarkerDetail(biomarkerId);
+
+      if (!biomarker) {
+        throw new Error(`${biomarkerId} biomarker should resolve for public routes.`);
+      }
+
+      const issue = describeSourceKeyResidue(
+        biomarkerId,
+        collectBiomarkerCopy(biomarker).join("\n"),
+      );
+      if (issue) {
+        dirtyCopy.push(issue);
+      }
+    }
+
+    expect(dirtyCopy).toEqual([]);
+  });
+
 });
+
+type ExperimentProtocolLike = NonNullable<
+  ReturnType<typeof resolveHealthCommonsExperimentProtocolTab>
+>;
+
+type ExperimentResearchTab = NonNullable<
+  ReturnType<typeof resolveHealthCommonsExperimentResearchTab>
+>;
+
+type BiomarkerDetail = NonNullable<
+  ReturnType<typeof resolveHealthCommonsBiomarkerDetail>
+>;
+
+function collectExperimentProtocolCopy(
+  protocol: Pick<
+    ExperimentProtocolLike,
+    | "expectedSignals"
+    | "measurementPaths"
+    | "protocol"
+    | "protocolFacts"
+    | "protocolTips"
+    | "safety"
+  >,
+): string[] {
+  return [
+    ...protocol.expectedSignals.flatMap((signal) => [
+      signal.label,
+      signal.value,
+      signal.delta,
+      signal.expected,
+      signal.baseline ?? "",
+      signal.description ?? "",
+      signal.unit ?? "",
+    ]),
+    ...protocol.measurementPaths.flatMap((path) => [
+      path.label,
+      ...path.notes,
+      ...path.outcomeLabels,
+      ...path.safetyOutcomeLabels,
+      ...path.methods.flatMap((method) => [
+        method.shortName,
+        method.summary ?? "",
+        method.title,
+        ...(method.privacy?.notes ?? []),
+      ]),
+    ]),
+    ...protocol.protocol.flatMap((step) => [step.title, step.detail]),
+    ...protocol.protocolFacts.flatMap((fact) => [
+      fact.label,
+      fact.value,
+      fact.detail ?? "",
+    ]),
+    ...protocol.protocolTips,
+    ...protocol.safety.precautions,
+    ...protocol.safety.whoShouldAvoid,
+  ];
+}
+
+function collectResearchLandscapeCopy(
+  landscape: ExperimentResearchTab["researchLandscape"],
+): string[] {
+  if (!landscape) {
+    return [];
+  }
+
+  return [
+    landscape.bottomLine,
+    landscape.mainCaveat,
+    landscape.primaryClaim,
+  ];
+}
+
+function collectResearchStudyCopy(
+  study: ExperimentResearchTab["studies"][number],
+): string[] {
+  return [
+    study.authors,
+    study.caveat ?? "",
+    study.designLabel ?? "",
+    study.duration ?? "",
+    study.finding ?? "",
+    study.headline ?? "",
+    study.implication ?? "",
+    study.journal,
+    study.population ?? "",
+    study.title,
+  ];
+}
+
+function collectBiomarkerCopy(biomarker: BiomarkerDetail): string[] {
+  return [
+    biomarker.body,
+    biomarker.summary,
+    biomarker.title,
+    biomarker.shortName,
+    biomarker.measurement.bestContext,
+    ...biomarker.measurement.confounders,
+    ...biomarker.measurement.howToMeasure,
+    ...biomarker.measurementContexts,
+    biomarker.interpretationFrame.caveat,
+    biomarker.interpretationFrame.principle,
+    ...biomarker.explainerCards.flatMap((card) => [card.title, card.body]),
+    ...biomarker.claims.flatMap((claim) => [
+      claim.text,
+      ...claim.caveats,
+      ...claim.sources.flatMap((source) => [source.title, source.summary, source.typeLabel]),
+    ]),
+    ...biomarker.sourceHighlights.flatMap((source) => [source.title, source.summary, source.typeLabel]),
+    ...biomarker.protocolRankings.flatMap((protocol) => [
+      protocol.title,
+      protocol.description,
+      protocol.mechanism,
+      protocol.category,
+      protocol.burdenLabel,
+      protocol.cautionLabel,
+    ]),
+    biomarker.communityOutcomeSummary.placeholder ?? "",
+  ];
+}
+
+function describeSourceKeyResidue(label: string, text: string): string | null {
+  const match = PUBLIC_SOURCE_KEY_RESIDUE_PATTERN.exec(text);
+  if (!match) {
+    return null;
+  }
+
+  const index = match.index;
+  const excerpt = text
+    .slice(Math.max(0, index - 80), index + 120)
+    .replace(/\s+/gu, " ")
+    .trim();
+  return `${label}: ${excerpt}`;
+}
 
 function createFixtureCatalog(): HealthCommonsCatalog {
   return structuredClone(healthCommonsCatalogSchema.parse(healthCommonsCatalogJson));

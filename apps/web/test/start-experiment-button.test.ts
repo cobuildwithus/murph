@@ -197,7 +197,7 @@ describe("StartExperimentButton", () => {
     );
     cleanupRender = cleanup;
 
-    expect(container.textContent).toContain("Sign in to start");
+    expect(container.textContent).toContain("Start experiment");
 
     await act(async () => {
       button.dispatchEvent(new window.Event("click", { bubbles: true }));
