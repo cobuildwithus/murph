@@ -6,6 +6,7 @@ import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
 import { NextStepCard } from "@/src/components/next-step-card";
 import { ExpectedSignalCard } from "@/src/components/experiments/experiment-detail/expected-signal-card";
+import { StartExperimentChannelDialog } from "@/src/components/experiments/experiment-detail/start-experiment-button";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
@@ -32,6 +33,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/src/components/ui/collapsible";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/src/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
+import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -42,8 +44,36 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
+  {
+    connected: true,
+    description: "Open Messages with the note ready to send.",
+    href: "sms:?body=I%20want%20to%20start%20the%20Finnish%20Dry%20Sauna%20experiment.",
+    kind: "text",
+    label: "Text",
+    meta: "Messages",
+  },
+  {
+    connected: true,
+    description: "Open Telegram with Murph.",
+    href: "https://t.me/withmurph_bot",
+    kind: "telegram",
+    label: "Telegram",
+    meta: "Telegram",
+  },
+  {
+    connected: true,
+    description: "Open an email draft to Murph.",
+    href: "mailto:murph@mail.withmurph.ai",
+    kind: "email",
+    label: "Email",
+    meta: "Email",
+  },
+];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
+  const [channelPickerOpen, setChannelPickerOpen] = useState(false);
 
   return (
     <TooltipProvider>
@@ -199,6 +229,33 @@ export function ComponentsContent() {
               <div className="flex justify-end gap-2 pt-4"><Button variant="outline">Cancel</Button><Button>Confirm</Button></div>
             </DialogContent>
           </Dialog>
+        </Section>
+
+        <Separator />
+
+        <Section title="Experiment Start Channel Picker">
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
+                Start from the app you already use
+              </p>
+              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+                If several apps are connected, choose where this experiment
+                begins. Murph opens the app and prepares a note when the
+                channel supports it.
+              </p>
+            </div>
+            <Button onClick={() => setChannelPickerOpen(true)}>
+              Preview picker
+            </Button>
+          </div>
+          <StartExperimentChannelDialog
+            onOpenChange={setChannelPickerOpen}
+            open={channelPickerOpen}
+            options={EXPERIMENT_START_CHANNEL_OPTIONS}
+            protocolDays={14}
+            protocolTitle="Finnish Dry Sauna"
+          />
         </Section>
 
         <Separator />
