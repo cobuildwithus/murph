@@ -117,6 +117,8 @@ test("HostedAuthPanel keeps only one alternate auth method active at a time", as
   expect(telegramButton?.textContent).toContain("Telegram");
   expect(emailButton?.textContent).toContain("Email");
   expect(container.textContent).toContain("By continuing, you agree to our");
+  expect(container.textContent).toContain("personal, direct-to-consumer use");
+  expect(container.textContent).toContain("without a signed BAA");
 
   await act(async () => {
     telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));

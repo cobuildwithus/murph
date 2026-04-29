@@ -21,15 +21,14 @@ By accessing or using the Hosted Service, you agree to these Terms. If you do no
 You may use the Hosted Service only if:
 
 1. you are legally capable of entering into a binding agreement;
-2. you are not barred from using the Hosted Service under applicable law;
-3. you comply with these Terms; and
-4. if you use the Hosted Service on behalf of a company, clinic, coach, family office, or other organization, you have authority to bind that organization.
+2. you are not barred from using the Hosted Service under applicable law; and
+3. you comply with these Terms.
 
 **Minimum age.** You must be at least **18 years old** to use the Hosted Service.
 
 ## 2. What Murph Is
 
-Murph is a health assistant and health-organization tool that may include, depending on the features you enable or purchase:
+Murph is a personal health assistant and self-experimentation tool that may include, depending on the features you enable or purchase:
 
 - health-related conversations through channels such as Telegram, iMessage, email, or similar surfaces;
 - wearable and connected-source integrations, including sources such as Oura, WHOOP, Garmin, or similar providers;
@@ -42,7 +41,7 @@ Murph is a health assistant and health-organization tool that may include, depen
 
 Some features may be available only in Local Software, while others may be available only in the Hosted Service. We may add, remove, or change features, providers, and integrations over time.
 
-Subject to these Terms, Murph grants you a limited, non-exclusive, non-transferable, non-sublicensable, revocable right to access and use the Hosted Service only for your personal use or your organization’s internal lawful use.
+Subject to these Terms, Murph grants you a limited, non-exclusive, non-transferable, non-sublicensable, revocable right to access and use the Hosted Service only for your personal, direct-to-consumer use.
 
 ## 3. Health, Safety, Emergency, and Medication Disclaimer
 
@@ -164,6 +163,8 @@ Because Murph is health-oriented, some information you provide may be sensitive.
 - Local Software and self-hosted Murph may have different privacy, locality, and security characteristics than the Hosted Service;
 - when we say data is encrypted, that does **not** mean the Hosted Service is zero-knowledge, operator-blind, or inaccessible to us where decryption or readable processing is necessary to operate hosted features; and
 - unless we expressly agree otherwise in a separate signed writing, Murph is **not** acting as your HIPAA business associate and the Hosted Service is **not** offered under a Business Associate Agreement.
+
+Hosted Murph is for personal, direct-to-consumer use and is not intended for covered entities or business associates to create, receive, maintain, transmit, or otherwise process protected health information (PHI) unless Murph has signed a separate Business Associate Agreement governing that use.
 
 Do not submit regulated protected health information to the Hosted Service on behalf of a covered entity unless and until Murph expressly offers that service under a signed BAA.
 
