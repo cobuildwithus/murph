@@ -17,6 +17,7 @@ import {
 } from "../scripts/deploy-automation.js";
 import {
   hostedRunnerRuntimePackageName,
+  resolveHostedRunnerBuildPackageNames,
   resolveHostedRunnerWorkspacePackageNames,
 } from "../scripts/runner-bundle-contract.js";
 
@@ -61,6 +62,26 @@ describe("deploy artifact validation", () => {
     await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
   });
 
+  it("ignores generated dist bin entries when checking source fingerprints", async () => {
+    const distBinPackageName = "@murphai/device-syncd";
+    const sourceFixture = await createDeployArtifactSourceFixture({
+      distBinPackageName,
+    });
+    const fixture = await createDeployArtifactFixture(sourceFixture);
+    const distBinPackageDir = sourceFixture.packageDirs.get(distBinPackageName);
+
+    if (!distBinPackageDir) {
+      throw new Error(`Missing source fixture package ${distBinPackageName}.`);
+    }
+
+    const distBinPath = path.join(distBinPackageDir, "dist", "bin.js");
+
+    await mkdir(path.dirname(distBinPath), { recursive: true });
+    await writeFile(distBinPath, "console.log('generated');\n", "utf8");
+
+    await expect(assertPreparedDeployArtifacts(fixture)).resolves.toBeUndefined();
+  });
+
   it("rejects a missing runner workspace dependency", async () => {
     const fixture = await createDeployArtifactFixture();
     const missingPackageName = selectRunnerDependencyPackageName(fixture.workspacePackageNames);
@@ -97,7 +118,7 @@ describe("deploy artifact validation", () => {
       }, null, 2)}\n`,
       "utf8",
     );
-    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+    await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Runner Health Commons generated catalog is stale or missing Finnish Dry Sauna",
@@ -141,7 +162,7 @@ describe("deploy artifact validation", () => {
       }, null, 2)}\n`,
       "utf8",
     );
-    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+    await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Runner Health Commons generated catalog is invalid",
@@ -289,7 +310,7 @@ export function loadGeneratedHealthCommonsCatalog() {
       "utf8",
     );
     await symlink(externalPackageDir, packageDir, "dir");
-    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+    await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       `Runner dependency ${healthCommonsPackageName} resolves outside the runner bundle.`,
@@ -327,7 +348,7 @@ export function loadGeneratedHealthCommonsCatalog() {
     );
     await rm(runtimePath);
     await symlink(externalRuntimePath, runtimePath);
-    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+    await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Health Commons runtime entrypoint must not be a symlink.",
@@ -364,7 +385,7 @@ export function loadGeneratedHealthCommonsCatalog() {
     );
     await rm(catalogPath);
     await symlink(externalCatalogPath, catalogPath);
-    await writeRunnerBundleManifest(fixture.runnerBundleDir);
+    await rewriteRunnerBundleManifest(fixture);
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Health Commons generated catalog must not be a symlink.",
@@ -460,14 +481,18 @@ export function loadGeneratedHealthCommonsCatalog() {
 });
 
 async function createDeployArtifactFixture(input: {
+  appDir?: string;
   buildSkipped?: boolean;
   config?: Record<string, unknown>;
   includeBundleOnlyDependencies?: boolean;
+  repoRoot?: string;
   virtualStorePackageName?: string;
 } = {}): Promise<{
+  appDir?: string;
   configPath: string;
   includeSecrets: boolean;
   manifest: RunnerBundleManifest;
+  repoRoot?: string;
   runnerBundleDir: string;
   secretsFilePath: string;
   source: Record<string, string>;
@@ -478,6 +503,11 @@ async function createDeployArtifactFixture(input: {
   const runnerBundleDir = path.join(deployDir, "runner-bundle");
   const configPath = path.join(deployDir, "wrangler.generated.jsonc");
   const secretsFilePath = path.join(deployDir, "worker-secrets.json");
+  const sourceFixture = input.appDir && input.repoRoot
+    ? null
+    : await createDeployArtifactSourceFixture();
+  const appDir = input.appDir ?? sourceFixture?.appDir;
+  const repoRoot = input.repoRoot ?? sourceFixture?.repoRoot;
   const workspacePackageNames = [
     ...resolveHostedRunnerWorkspacePackageNames({
       includeBundleOnlyDependencies: input.includeBundleOnlyDependencies ?? true,
@@ -544,19 +574,113 @@ async function createDeployArtifactFixture(input: {
     await chmod(binPath, 0o755);
   }
 
-  const manifest = await writeRunnerBundleManifest(runnerBundleDir, {
+  const manifestInput: Parameters<typeof writeRunnerBundleManifest>[1] = {
     buildSkipped: input.buildSkipped === true,
     includeBundleOnlyDependencies: input.includeBundleOnlyDependencies ?? true,
-  });
+  };
+
+  if (input.appDir) {
+    manifestInput.appDir = input.appDir;
+  }
+
+  if (input.repoRoot) {
+    manifestInput.repoRoot = input.repoRoot;
+  }
+
+  if (!input.appDir && appDir) {
+    manifestInput.appDir = appDir;
+  }
+
+  if (!input.repoRoot && repoRoot) {
+    manifestInput.repoRoot = repoRoot;
+  }
+
+  const manifest = await writeRunnerBundleManifest(runnerBundleDir, manifestInput);
 
   return {
+    ...(appDir ? { appDir } : {}),
     configPath,
     includeSecrets: true,
     manifest,
+    ...(repoRoot ? { repoRoot } : {}),
     runnerBundleDir,
     secretsFilePath,
     source,
     workspacePackageNames,
+  };
+}
+
+async function rewriteRunnerBundleManifest(fixture: {
+  appDir?: string;
+  repoRoot?: string;
+  runnerBundleDir: string;
+}): Promise<RunnerBundleManifest> {
+  const input: Parameters<typeof writeRunnerBundleManifest>[1] = {};
+
+  if (fixture.appDir) {
+    input.appDir = fixture.appDir;
+  }
+
+  if (fixture.repoRoot) {
+    input.repoRoot = fixture.repoRoot;
+  }
+
+  return await writeRunnerBundleManifest(fixture.runnerBundleDir, input);
+}
+
+async function createDeployArtifactSourceFixture(input: {
+  distBinPackageName?: string;
+} = {}): Promise<{
+  appDir: string;
+  packageDirs: Map<string, string>;
+  repoRoot: string;
+}> {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "cloudflare-deploy-source-"));
+  const appDir = path.join(repoRoot, "apps", "cloudflare");
+  const packageDirs = new Map<string, string>();
+  const packageNames = new Set([
+    hostedRunnerRuntimePackageName,
+    ...resolveHostedRunnerBuildPackageNames({ includeBundleOnlyDependencies: true }),
+  ]);
+
+  await mkdir(path.join(appDir, "scripts"), { recursive: true });
+  await mkdir(path.join(repoRoot, "packages"), { recursive: true });
+  await writeFile(path.join(repoRoot, "package.json"), "{}\n", "utf8");
+  await writeFile(path.join(repoRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+  await writeFile(path.join(repoRoot, "pnpm-workspace.yaml"), "packages: []\n", "utf8");
+  await writeFile(path.join(repoRoot, "tsconfig.json"), "{}\n", "utf8");
+  await writeFile(path.join(repoRoot, "tsconfig.base.json"), "{}\n", "utf8");
+  await writeFile(path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner"), "\n", "utf8");
+  await writeFile(path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner-base"), "\n", "utf8");
+  await writeFile(path.join(appDir, ".dockerignore"), "\n", "utf8");
+  await writeFile(path.join(appDir, "scripts", "placeholder.ts"), "export {};\n", "utf8");
+
+  for (const packageName of packageNames) {
+    const packageDir = packageName === hostedRunnerRuntimePackageName
+      ? appDir
+      : path.join(repoRoot, "packages", packageName.split("/").at(-1) ?? packageName);
+    const packageJson = {
+      name: packageName,
+      version: "1.0.0",
+      ...(packageName === input.distBinPackageName
+        ? { bin: { "dist-bin-fixture": "./dist/bin.js" } }
+        : {}),
+    };
+
+    await mkdir(path.join(packageDir, "src"), { recursive: true });
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      `${JSON.stringify(packageJson, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(path.join(packageDir, "src", "index.ts"), "export {};\n", "utf8");
+    packageDirs.set(packageName, packageDir);
+  }
+
+  return {
+    appDir,
+    packageDirs,
+    repoRoot,
   };
 }
 

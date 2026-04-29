@@ -56,8 +56,7 @@ describe("ExperimentResearchPage", () => {
       "utf8",
     );
 
-    expect(source).toContain("loadGeneratedExperimentProjection");
-    expect(source).toContain("experiment.research");
+    expect(source).toContain("resolveHealthCommonsExperimentResearchTab");
     expect(source).not.toContain("resolveHealthCommonsExperimentProtocol");
     expect(source).not.toContain("ResearchTabClient");
     expect(source).not.toContain("useBrowserVault");

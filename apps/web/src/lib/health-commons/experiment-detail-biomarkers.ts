@@ -5,6 +5,10 @@ import type {
 } from "@murphai/health-commons/runtime";
 
 import type { ExperimentProtocol } from "@/src/types/experiments";
+import {
+  cleanHealthCommonsUserFacingCopy,
+  cleanOptionalHealthCommonsUserFacingCopy,
+} from "./user-facing-copy";
 
 type BiomarkerSignalDirection =
   ExperimentProtocol["expectedSignals"][number]["direction"];
@@ -187,18 +191,20 @@ export function toExpectedSignal(
   const protocolSignal = resolveProtocolExpectedSignalDescription(protocol, biomarker.key);
   const protocolProminence =
     protocolSignal?.protocolProminence ?? hint.protocolProminence;
+  const description = cleanOptionalHealthCommonsUserFacingCopy(
+    protocolSignal?.description
+      ?? hint.description
+      ?? biomarker.summary
+      ?? summarizeBody(biomarker.body),
+  );
 
   return {
     label: biomarker.title,
     value: "",
     delta: "",
     direction: hint.direction,
-    expected: protocolSignal?.expected ?? hint.expected,
-    description:
-      protocolSignal?.description
-      ?? hint.description
-      ?? biomarker.summary
-      ?? summarizeBody(biomarker.body),
+    expected: cleanHealthCommonsUserFacingCopy(protocolSignal?.expected ?? hint.expected),
+    ...(description ? { description } : {}),
     ...(protocolProminence
       ? { protocolProminence }
       : {}),

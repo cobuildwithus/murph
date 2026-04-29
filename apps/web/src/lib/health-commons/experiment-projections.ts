@@ -1,5 +1,6 @@
 import type {
   HealthCommonsWebExperimentProtocolTab,
+  HealthCommonsWebExperimentResearchTab,
   HealthCommonsWebExperimentResultsPublic,
   HealthCommonsWebExperimentShell,
 } from "@murphai/health-commons/runtime";
@@ -15,6 +16,11 @@ import { resolveExperimentRouteImage } from "./experiment-images";
 import {
   loadGeneratedExperimentProjection,
 } from "./generated-experiment-artifacts";
+import {
+  cleanHealthCommonsUserFacingCopy,
+  cleanHealthCommonsUserFacingCopyList,
+  cleanOptionalHealthCommonsUserFacingCopy,
+} from "./user-facing-copy";
 
 export interface ExperimentShellProjection {
   protocolContractVersion: number;
@@ -48,6 +54,8 @@ export type ExperimentProtocolTabProjection =
     protocolContractVersion: number;
   };
 
+export type ExperimentResearchTabProjection = HealthCommonsWebExperimentResearchTab;
+
 export function resolveHealthCommonsExperimentShell(
   experimentId: string,
 ): ExperimentShellProjection | null {
@@ -61,12 +69,15 @@ export function resolveHealthCommonsExperimentProtocolTab(
 ): ExperimentProtocolTabProjection | null {
   const protocolTab = loadGeneratedExperimentProjection(experimentId, "experiment.protocol");
 
-  return protocolTab
-    ? {
-        ...protocolTab,
-        protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
-      }
-    : null;
+  return protocolTab ? toExperimentProtocolTabProjection(protocolTab) : null;
+}
+
+export function resolveHealthCommonsExperimentResearchTab(
+  experimentId: string,
+): ExperimentResearchTabProjection | null {
+  const researchTab = loadGeneratedExperimentProjection(experimentId, "experiment.research");
+
+  return researchTab ? toExperimentResearchTabProjection(researchTab) : null;
 }
 
 export function resolveHealthCommonsExperimentResultsPublic(
@@ -86,8 +97,8 @@ function toExperimentShellProjection(
   return {
     protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
     baselineDays: shell.baselineDays,
-    category: shell.category,
-    description: shell.description,
+    category: cleanHealthCommonsUserFacingCopy(shell.category),
+    description: cleanHealthCommonsUserFacingCopy(shell.description),
     durationDays: shell.durationDays,
     evidenceLabel: shell.evidenceLabel,
     evidenceLevel: shell.evidenceLevel,
@@ -95,7 +106,44 @@ function toExperimentShellProjection(
     image: resolveExperimentRouteImage(shell.id, shell.image),
     key: shell.key,
     revision: shell.revision,
-    title: shell.title,
+    title: cleanHealthCommonsUserFacingCopy(shell.title),
+  };
+}
+
+function toExperimentProtocolTabProjection(
+  protocolTab: HealthCommonsWebExperimentProtocolTab,
+): ExperimentProtocolTabProjection {
+  return {
+    ...protocolTab,
+    expectedSignals: protocolTab.expectedSignals.map(cleanExperimentSignal),
+    experts: protocolTab.experts.map(cleanExperimentExpert),
+    measurementPaths: protocolTab.measurementPaths.map(cleanExperimentMeasurementPath),
+    protocol: protocolTab.protocol.map(cleanExperimentProtocolStep),
+    protocolContractVersion: CURRENT_EXPERIMENT_PROTOCOL_CONTRACT_VERSION,
+    protocolFacts: protocolTab.protocolFacts.map(cleanExperimentProtocolFact),
+    protocolTips: cleanHealthCommonsUserFacingCopyList(protocolTab.protocolTips),
+    safety: cleanExperimentSafety(protocolTab.safety),
+    title: cleanHealthCommonsUserFacingCopy(protocolTab.title),
+    whyItWorks: cleanHealthCommonsUserFacingCopy(protocolTab.whyItWorks),
+  };
+}
+
+function toExperimentResearchTabProjection(
+  researchTab: HealthCommonsWebExperimentResearchTab,
+): ExperimentResearchTabProjection {
+  return {
+    ...researchTab,
+    description: cleanHealthCommonsUserFacingCopy(researchTab.description),
+    protocolKeepInMind: cleanHealthCommonsUserFacingCopyList(researchTab.protocolKeepInMind),
+    ...(researchTab.researchGroups
+      ? { researchGroups: researchTab.researchGroups.map(cleanExperimentResearchGroup) }
+      : {}),
+    ...(researchTab.researchLandscape
+      ? { researchLandscape: cleanExperimentResearchLandscape(researchTab.researchLandscape) }
+      : {}),
+    researchStats: researchTab.researchStats.map(cleanExperimentResearchStat),
+    studies: researchTab.studies.map(cleanExperimentResearchStudy),
+    title: cleanHealthCommonsUserFacingCopy(researchTab.title),
   };
 }
 
@@ -109,8 +157,179 @@ function toExperimentResultsPublicProjection(
     durationDays: resultsPublic.durationDays,
     id: resultsPublic.id,
     key: resultsPublic.key,
-    protocol: resultsPublic.protocol,
+    protocol: resultsPublic.protocol.map(cleanExperimentProtocolStep),
     revision: resultsPublic.revision,
-    title: resultsPublic.title,
+    title: cleanHealthCommonsUserFacingCopy(resultsPublic.title),
+  };
+}
+
+function cleanExperimentSignal(
+  signal: HealthCommonsWebExperimentProtocolTab["expectedSignals"][number],
+): HealthCommonsWebExperimentProtocolTab["expectedSignals"][number] {
+  const { baseline, description, unit, ...requiredSignal } = signal;
+  const cleanBaseline = cleanOptionalHealthCommonsUserFacingCopy(baseline);
+  const cleanDescription = cleanOptionalHealthCommonsUserFacingCopy(description);
+  const cleanUnit = cleanOptionalHealthCommonsUserFacingCopy(unit);
+
+  return {
+    ...requiredSignal,
+    delta: cleanHealthCommonsUserFacingCopy(requiredSignal.delta),
+    expected: cleanHealthCommonsUserFacingCopy(requiredSignal.expected),
+    label: cleanHealthCommonsUserFacingCopy(requiredSignal.label),
+    value: cleanHealthCommonsUserFacingCopy(requiredSignal.value),
+    ...(cleanBaseline ? { baseline: cleanBaseline } : {}),
+    ...(cleanDescription ? { description: cleanDescription } : {}),
+    ...(cleanUnit ? { unit: cleanUnit } : {}),
+  };
+}
+
+function cleanExperimentExpert(
+  expert: HealthCommonsWebExperimentProtocolTab["experts"][number],
+): HealthCommonsWebExperimentProtocolTab["experts"][number] {
+  const { profileImageUrl, ...requiredExpert } = expert;
+
+  return {
+    ...requiredExpert,
+    field: cleanHealthCommonsUserFacingCopy(requiredExpert.field),
+    initials: cleanHealthCommonsUserFacingCopy(requiredExpert.initials),
+    name: cleanHealthCommonsUserFacingCopy(requiredExpert.name),
+    quote: cleanHealthCommonsUserFacingCopy(requiredExpert.quote),
+    ...(profileImageUrl ? { profileImageUrl } : {}),
+  };
+}
+
+function cleanExperimentMeasurementPath(
+  path: HealthCommonsWebExperimentProtocolTab["measurementPaths"][number],
+): HealthCommonsWebExperimentProtocolTab["measurementPaths"][number] {
+  return {
+    ...path,
+    label: cleanHealthCommonsUserFacingCopy(path.label),
+    methods: path.methods.map(cleanExperimentMeasurementMethod),
+    notes: cleanHealthCommonsUserFacingCopyList(path.notes),
+    outcomeLabels: path.outcomeLabels.map(cleanHealthCommonsUserFacingCopy),
+    safetyOutcomeLabels: path.safetyOutcomeLabels.map(cleanHealthCommonsUserFacingCopy),
+  };
+}
+
+function cleanExperimentMeasurementMethod(
+  method: HealthCommonsWebExperimentProtocolTab["measurementPaths"][number]["methods"][number],
+): HealthCommonsWebExperimentProtocolTab["measurementPaths"][number]["methods"][number] {
+  const { privacy, summary, ...requiredMethod } = method;
+  const cleanSummary = cleanOptionalHealthCommonsUserFacingCopy(summary);
+
+  return {
+    ...requiredMethod,
+    shortName: cleanHealthCommonsUserFacingCopy(requiredMethod.shortName),
+    title: cleanHealthCommonsUserFacingCopy(requiredMethod.title),
+    ...(cleanSummary ? { summary: cleanSummary } : {}),
+    ...(privacy
+      ? {
+          privacy: {
+            ...privacy,
+            notes: cleanHealthCommonsUserFacingCopyList(privacy.notes),
+          },
+        }
+      : {}),
+  };
+}
+
+function cleanExperimentProtocolFact(
+  fact: HealthCommonsWebExperimentProtocolTab["protocolFacts"][number],
+): HealthCommonsWebExperimentProtocolTab["protocolFacts"][number] {
+  const cleanDetail = cleanOptionalHealthCommonsUserFacingCopy(fact.detail);
+
+  return {
+    label: cleanHealthCommonsUserFacingCopy(fact.label),
+    value: cleanHealthCommonsUserFacingCopy(fact.value),
+    ...(cleanDetail ? { detail: cleanDetail } : {}),
+  };
+}
+
+function cleanExperimentProtocolStep(
+  step: HealthCommonsWebExperimentProtocolTab["protocol"][number],
+): HealthCommonsWebExperimentProtocolTab["protocol"][number] {
+  return {
+    ...step,
+    detail: cleanHealthCommonsUserFacingCopy(step.detail),
+    title: cleanHealthCommonsUserFacingCopy(step.title),
+  };
+}
+
+function cleanExperimentSafety(
+  safety: HealthCommonsWebExperimentProtocolTab["safety"],
+): HealthCommonsWebExperimentProtocolTab["safety"] {
+  return {
+    cautionLevel: safety.cautionLevel,
+    precautions: cleanHealthCommonsUserFacingCopyList(safety.precautions),
+    whoShouldAvoid: cleanHealthCommonsUserFacingCopyList(safety.whoShouldAvoid),
+  };
+}
+
+function cleanExperimentResearchLandscape(
+  landscape: NonNullable<HealthCommonsWebExperimentResearchTab["researchLandscape"]>,
+): NonNullable<HealthCommonsWebExperimentResearchTab["researchLandscape"]> {
+  return {
+    bottomLine: cleanHealthCommonsUserFacingCopy(landscape.bottomLine),
+    confidenceLabel: landscape.confidenceLabel,
+    mainCaveat: cleanHealthCommonsUserFacingCopy(landscape.mainCaveat),
+    primaryClaim: cleanHealthCommonsUserFacingCopy(landscape.primaryClaim),
+  };
+}
+
+function cleanExperimentResearchGroup(
+  group: NonNullable<HealthCommonsWebExperimentResearchTab["researchGroups"]>[number],
+): NonNullable<HealthCommonsWebExperimentResearchTab["researchGroups"]>[number] {
+  return {
+    ...group,
+    label: cleanHealthCommonsUserFacingCopy(group.label),
+    studies: group.studies.map(cleanExperimentResearchStudy),
+    summary: cleanHealthCommonsUserFacingCopy(group.summary),
+  };
+}
+
+function cleanExperimentResearchStat(
+  stat: HealthCommonsWebExperimentResearchTab["researchStats"][number],
+): HealthCommonsWebExperimentResearchTab["researchStats"][number] {
+  return {
+    label: cleanHealthCommonsUserFacingCopy(stat.label),
+    value: typeof stat.value === "string"
+      ? cleanHealthCommonsUserFacingCopy(stat.value)
+      : stat.value,
+  };
+}
+
+function cleanExperimentResearchStudy(
+  study: HealthCommonsWebExperimentResearchTab["studies"][number],
+): HealthCommonsWebExperimentResearchTab["studies"][number] {
+  const {
+    caveat,
+    designLabel,
+    duration,
+    finding,
+    headline,
+    implication,
+    population,
+    ...requiredStudy
+  } = study;
+  const cleanCaveat = cleanOptionalHealthCommonsUserFacingCopy(caveat);
+  const cleanDesignLabel = cleanOptionalHealthCommonsUserFacingCopy(designLabel);
+  const cleanDuration = cleanOptionalHealthCommonsUserFacingCopy(duration);
+  const cleanFinding = cleanOptionalHealthCommonsUserFacingCopy(finding);
+  const cleanHeadline = cleanOptionalHealthCommonsUserFacingCopy(headline);
+  const cleanImplication = cleanOptionalHealthCommonsUserFacingCopy(implication);
+  const cleanPopulation = cleanOptionalHealthCommonsUserFacingCopy(population);
+
+  return {
+    ...requiredStudy,
+    authors: cleanHealthCommonsUserFacingCopy(requiredStudy.authors),
+    journal: cleanHealthCommonsUserFacingCopy(requiredStudy.journal),
+    title: cleanHealthCommonsUserFacingCopy(requiredStudy.title),
+    ...(cleanCaveat ? { caveat: cleanCaveat } : {}),
+    ...(cleanDesignLabel ? { designLabel: cleanDesignLabel } : {}),
+    ...(cleanDuration ? { duration: cleanDuration } : {}),
+    ...(cleanFinding ? { finding: cleanFinding } : {}),
+    ...(cleanHeadline ? { headline: cleanHeadline } : {}),
+    ...(cleanImplication ? { implication: cleanImplication } : {}),
+    ...(cleanPopulation ? { population: cleanPopulation } : {}),
   };
 }

@@ -12,6 +12,10 @@ import type {
   Study,
 } from "@/src/types/experiments";
 import type { HealthCommonsEntity } from "@murphai/health-commons/runtime";
+import {
+  cleanHealthCommonsUserFacingCopy,
+  cleanOptionalHealthCommonsUserFacingCopy,
+} from "./user-facing-copy";
 
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";
@@ -121,27 +125,29 @@ export function toStudy(
 
   return {
     type: researchEvidenceToStudyType(evidence, source),
-    title: source?.title ?? entity.title,
-    authors: source?.authors ?? "Health Commons",
-    journal: source?.journal ?? formatSourceSurfaceLabel(entity, source),
+    title: cleanHealthCommonsUserFacingCopy(source?.title ?? entity.title),
+    authors: cleanHealthCommonsUserFacingCopy(source?.authors ?? "Health Commons"),
+    journal: cleanHealthCommonsUserFacingCopy(
+      source?.journal ?? formatSourceSurfaceLabel(entity, source),
+    ),
     year: source?.year,
     participants: evidence?.participantCount,
     participantCountKind: evidence?.participantCountKind,
     includedStudyCount: evidence?.includedStudyCount,
-    population: evidence?.populationLabel,
-    duration: evidence?.durationLabel,
-    designLabel: evidence?.designLabel ?? (evidence
+    population: cleanOptionalHealthCommonsUserFacingCopy(evidence?.populationLabel),
+    duration: cleanOptionalHealthCommonsUserFacingCopy(evidence?.durationLabel),
+    designLabel: cleanOptionalHealthCommonsUserFacingCopy(evidence?.designLabel ?? (evidence
       ? formatResearchDesignLabel(evidence.designKind)
-      : undefined),
+      : undefined)),
     groupId: appraisal?.groupId,
     stance: appraisal?.stance,
     scope: appraisal?.scope,
     result: appraisal?.result,
-    headline: appraisal?.headline,
-    finding: extractedFinding ?? fallbackFinding?.text,
+    headline: cleanOptionalHealthCommonsUserFacingCopy(appraisal?.headline),
+    finding: cleanOptionalHealthCommonsUserFacingCopy(extractedFinding ?? fallbackFinding?.text),
     findingKind: extractedFinding ? "finding" : fallbackFinding?.kind,
-    implication: appraisal?.implication,
-    caveat: appraisal?.caveat,
+    implication: cleanOptionalHealthCommonsUserFacingCopy(appraisal?.implication),
+    caveat: cleanOptionalHealthCommonsUserFacingCopy(appraisal?.caveat),
     displayPriority: appraisal?.displayPriority,
     url: source?.url,
   };
@@ -212,7 +218,7 @@ export function toResearchGroups({
         id: group.id,
         label: group.label,
         stance: group.stance,
-        summary: group.summary,
+        summary: cleanHealthCommonsUserFacingCopy(group.summary),
         studies,
         defaultOpen: group.defaultOpen,
       },
@@ -675,7 +681,9 @@ function readPassthroughString(entity: HealthCommonsEntity, key: string): string
 }
 
 function normalizeStudyCardText(value: string | undefined): string | undefined {
-  const normalized = value?.replace(/\s+/gu, " ").trim();
+  const normalized = value
+    ? cleanHealthCommonsUserFacingCopy(value).replace(/\s+/gu, " ").trim()
+    : undefined;
   return normalized ? normalized : undefined;
 }
 
@@ -724,10 +732,12 @@ function extractPublicStudyFinding(body: string): string | undefined {
   }
 
   if (finding.length <= STUDY_FINDING_MAX_LENGTH) {
-    return finding;
+    return cleanHealthCommonsUserFacingCopy(finding);
   }
 
-  return `${finding.slice(0, STUDY_FINDING_MAX_LENGTH - 3).trimEnd()}...`;
+  return cleanHealthCommonsUserFacingCopy(
+    `${finding.slice(0, STUDY_FINDING_MAX_LENGTH - 3).trimEnd()}...`,
+  );
 }
 
 function formatCategory(value: string): string {
