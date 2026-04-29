@@ -5,6 +5,9 @@
 // Per-biomarker prose for the About 3-column section on the biomarker page.
 // When a biomarker is missing here, the About section falls back to rendering
 // only the biomarker.summary as a single paragraph.
+//
+// Keep each column to one tight sentence (~15–25 words). The column is meant
+// to be scanned, not read.
 
 export interface BiomarkerAboutContent {
   whyItMatters: string;
@@ -14,52 +17,34 @@ export interface BiomarkerAboutContent {
 
 const ABOUT_LOOKUP: Record<string, BiomarkerAboutContent> = {
   "resting-heart-rate": {
-    whyItMatters:
-      "Lower resting heart rate tracks aerobic fitness and parasympathetic tone. A calmer baseline usually means the heart works less per beat at rest, and the body recovers faster between efforts.",
-    howItsMeasured:
-      "Measured just after waking, before caffeine, while still lying or sitting quietly for at least one minute. Wearables read it overnight; clinical readings need consistent context to compare.",
-    whatMovesIt:
-      "Aerobic capacity, sleep quality, heat adaptation, and sustained recovery practices nudge resting heart rate down over weeks. Stress, illness, alcohol, and undertraining push it up.",
+    whyItMatters: "Lower means the heart works less at rest. A reliable proxy for aerobic fitness and recovery.",
+    howItsMeasured: "Wearables read it overnight. Manually: just after waking, sitting still for one minute, before caffeine.",
+    whatMovesIt: "Down with aerobic training, sleep, heat adaptation. Up with stress, illness, alcohol, undertraining.",
   },
   "hrv-rmssd": {
-    whyItMatters:
-      "HRV reflects how flexibly your autonomic nervous system responds to demands. Higher RMSSD usually means stronger parasympathetic recovery and better readiness for hard efforts.",
-    howItsMeasured:
-      "Read overnight by wearables that measure beat-to-beat intervals. Most reliable when context is consistent: same sleep window, no late alcohol, no acute illness.",
-    whatMovesIt:
-      "Aerobic conditioning, sleep regularity, breathwork, and heat exposure tend to raise HRV. Acute stress, alcohol, late-night training, and illness collapse it temporarily.",
+    whyItMatters: "Higher means stronger parasympathetic recovery. A readiness signal for hard efforts the next day.",
+    howItsMeasured: "Wearables read it overnight from beat-to-beat intervals. Same sleep window, no late alcohol.",
+    whatMovesIt: "Up with aerobic training, sleep regularity, breathwork. Down with acute stress, alcohol, illness.",
   },
   "estimated-vo2max": {
-    whyItMatters:
-      "VO₂max is the strongest single longevity correlate Murph tracks. It measures how much oxygen your body can use under maximal effort, capped by heart, lungs, and mitochondria together.",
-    howItsMeasured:
-      "Wearables estimate it from heart rate response during sustained efforts. Lab tests with a mask are more accurate but rare. Trends matter more than absolute values across devices.",
-    whatMovesIt:
-      "High-intensity intervals, zone-2 aerobic volume, and consistent training over months. Detraining and inactivity drop it within weeks.",
+    whyItMatters: "The strongest single longevity correlate Murph tracks. Caps how hard the body can work aerobically.",
+    howItsMeasured: "Wearables estimate from heart rate during sustained efforts. Trends matter more than absolute values.",
+    whatMovesIt: "Up with high-intensity intervals and zone-2 volume over months. Down within weeks of detraining.",
   },
   "blood-glucose": {
-    whyItMatters:
-      "Postprandial glucose spikes and fasting baselines together signal how cleanly your metabolism handles fuel. Stable, low-amplitude curves predict better long-term cardiometabolic health.",
-    howItsMeasured:
-      "Continuous glucose monitors capture full curves; finger-prick meters give point reads. Consistent measurement context matters: time since last meal, time of day, activity.",
-    whatMovesIt:
-      "Meal composition, timing, sleep, exercise, and heat exposure all shift glucose handling. Fiber, protein, and movement after meals reduce spikes.",
+    whyItMatters: "Stable, low-amplitude curves predict better long-term cardiometabolic health than any single value.",
+    howItsMeasured: "CGMs capture full curves. Finger-prick gives point reads. Same context every time.",
+    whatMovesIt: "Fiber, protein, and post-meal movement reduce spikes. Sleep and timing matter as much as food.",
   },
   "blood-oxygen-spo2": {
-    whyItMatters:
-      "Blood oxygen saturation reflects how well oxygen is being delivered to tissues. Persistent low readings can signal sleep-disordered breathing or pulmonary issues that warrant clinical follow-up.",
-    howItsMeasured:
-      "Consumer wearables and home pulse oximeters estimate SpO₂ optically. Readings are affected by skin tone, perfusion, motion, and cold extremities. Low single readings need clinical context, not self-diagnosis.",
-    whatMovesIt:
-      "Altitude, sleep position, breathing patterns, and respiratory health move SpO₂. If overnight averages drop below your usual baseline together with daytime symptoms, talk to a clinician.",
+    whyItMatters: "Persistently low readings can signal sleep-disordered breathing. Trends matter more than single values.",
+    howItsMeasured: "Optical estimate. Affected by skin tone, motion, cold extremities. Low single reads need clinical context.",
+    whatMovesIt: "Altitude, sleep position, and respiratory health move SpO₂. Sustained drops with symptoms need a clinician.",
   },
   "deep-sleep-minutes": {
-    whyItMatters:
-      "Deep (slow-wave) sleep is when the body does most of its physical recovery and growth-hormone work. Too little correlates with worse training adaptation and immune function.",
-    howItsMeasured:
-      "Wearables stage sleep from heart rate, movement, and temperature. Estimates vary across devices; track trends, not absolute minutes.",
-    whatMovesIt:
-      "Cool sleep environment, consistent bedtime, daytime aerobic load, and avoiding late alcohol all push deep sleep up. Late screens and warm rooms suppress it.",
+    whyItMatters: "When the body does most of its physical recovery and growth-hormone work.",
+    howItsMeasured: "Wearables stage sleep from heart rate, movement, temperature. Track trends, not absolute minutes.",
+    whatMovesIt: "Up with cool rooms, consistent bedtime, daytime aerobic load. Down with late screens, alcohol, warm rooms.",
   },
 };
 
