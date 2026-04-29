@@ -24,6 +24,11 @@ categories:
 - behavior-change
 - self-experiment
 - murph-canonical
+media:
+- kind: image
+  relativePath: design-assets/hero-daily-step-floor.jpeg
+  mediaType: image/jpeg
+  caption: Daily Step Floor
 relations:
 - type: parent_family
   target: experiment_family:daily-step-floor
