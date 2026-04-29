@@ -224,6 +224,7 @@ describe("buildHostedLocalDevOverrides", () => {
     });
 
     expect(overrides).toMatchObject({
+      HOSTED_EXECUTION_CONTROL_URL: "http://127.0.0.1:8787",
       HOSTED_EXECUTION_DISPATCH_URL: "http://127.0.0.1:8787",
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
       HOSTED_WAKE_ENCRYPTION_KEY: "worker-wake-key",

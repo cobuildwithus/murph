@@ -440,7 +440,7 @@ export function useHostedPhoneAuthController({
     authenticatedLoadingBody,
     authenticatedLoadingTitle,
     authenticatedSessionDescription: requiresAuthenticatedSessionRestart
-      ? "This browser is signed into account details that cannot use that phone number. Sign out, then choose the number you want to use with Murph."
+      ? "This browser is signed into a different Murph account. Sign out, then verify the phone number you want to use."
       : describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
         ?? "Sign out and request a fresh code to continue.",
     authenticatedView,

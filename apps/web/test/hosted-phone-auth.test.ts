@@ -1146,11 +1146,11 @@ describe("HostedPhoneAuth", () => {
       assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
       assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
       assert.doesNotMatch(container.textContent ?? "", /Continue/);
-      assert.match(container.textContent ?? "", /This browser needs a fresh phone verification\./);
-      assert.match(container.textContent ?? "", /cannot use that phone number/);
+      assert.match(container.textContent ?? "", /Sign in with this phone again/);
+      assert.match(container.textContent ?? "", /signed into a different Murph account/);
 
       const resetButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Use a different number") as
+        .find((button) => button.textContent === "Sign out") as
           | HTMLButtonElement
           | undefined;
       assert.ok(resetButton);
@@ -1247,11 +1247,11 @@ describe("HostedPhoneAuth", () => {
       assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
       assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
       assert.doesNotMatch(container.textContent ?? "", /Continue/);
-      assert.match(container.textContent ?? "", /This browser needs a fresh phone verification\./);
-      assert.match(container.textContent ?? "", /cannot use that phone number/);
+      assert.match(container.textContent ?? "", /Sign in with this phone again/);
+      assert.match(container.textContent ?? "", /signed into a different Murph account/);
 
       const resetButton = [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Use a different number") as
+        .find((button) => button.textContent === "Sign out") as
           | HTMLButtonElement
           | undefined;
       assert.ok(resetButton);
@@ -1417,8 +1417,8 @@ describe("HostedPhoneAuth", () => {
       assert.doesNotMatch(container.textContent ?? "", /Unable to continue/);
       assert.doesNotMatch(container.textContent ?? "", /different Privy account/);
       assert.doesNotMatch(container.textContent ?? "", /Continue/);
-      assert.match(container.textContent ?? "", /This browser needs a fresh phone verification\./);
-      assert.match(container.textContent ?? "", /cannot use that phone number/);
+      assert.match(container.textContent ?? "", /Sign in with this phone again/);
+      assert.match(container.textContent ?? "", /signed into a different Murph account/);
     } finally {
       await cleanup();
       vi.doUnmock("@/src/components/hosted-onboarding/hosted-phone-auth-views");

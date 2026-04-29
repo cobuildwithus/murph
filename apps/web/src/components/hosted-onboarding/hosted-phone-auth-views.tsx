@@ -188,7 +188,7 @@ export function HostedAuthenticatedPhoneAuthState({
   if (view === "restart") {
     return (
       <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>This browser needs a fresh phone verification.</AlertTitle>
+        <AlertTitle>Sign in with this phone again</AlertTitle>
         <AlertDescription>{description}</AlertDescription>
         <div className="mt-3 flex flex-wrap gap-3">
           <Button
@@ -198,7 +198,7 @@ export function HostedAuthenticatedPhoneAuthState({
             size="lg"
             className="w-full"
           >
-            {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
+            {pendingAction === "logout" ? "Signing out..." : "Sign out"}
           </Button>
         </div>
       </Alert>
