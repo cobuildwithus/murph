@@ -59,7 +59,8 @@ export function createHostedAssistantTurnInputPort(input: {
       let mailboxRefresh: AssistantTurnInputRefreshResult | null = null;
 
       if (
-        refreshInput.phase === "after_provider"
+        refreshInput.phase === "input_available"
+        || refreshInput.phase === "request_boundary"
         || refreshInput.phase === "commit_barrier"
       ) {
         try {

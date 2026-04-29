@@ -322,7 +322,12 @@ function withActiveTurnInputWorkspacePorts(input: {
         lanes: ["conversation"],
         requestId,
       });
-      input.checkpointRequestBuilder.recordCheckpointResult(result);
+      if (shouldRecordHostedActiveTurnMailboxRefreshResult(result)) {
+        input.checkpointRequestBuilder.recordCheckpointResult(result);
+        await runHostedMailboxPostCheckpointEffectsBestEffort(
+          input.checkpointRequestBuilder.takeMailboxPostCheckpointBeforeAssistantEffects(),
+        );
+      }
 
       return summarizeMailboxRefreshResult(result);
     },
@@ -373,6 +378,12 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   const singleLane = lanes.length === 1 ? lanes[0] : null;
   const blocked = input.result.importResult.blocked;
   const retryableBlockedCount = blocked.filter((item) => item.retryable).length;
+  if (
+    input.checkpointReason === "active_turn_input"
+    && !shouldRecordHostedActiveTurnMailboxRefreshResult(input.result)
+  ) {
+    return;
+  }
   await writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields(input.runnerInput.runtimeLogContext),
@@ -405,6 +416,16 @@ async function writeHostedMailboxImportRuntimeLog(input: {
     now: input.runnerInput.now,
     platform: input.runnerInput.platform,
   });
+}
+
+function shouldRecordHostedActiveTurnMailboxRefreshResult(
+  result: HostedMailboxImportCheckpointResult,
+): boolean {
+  return (
+    result.stateChanged
+    || result.importResult.importedCount > 0
+    || result.importResult.blocked.length > 0
+  );
 }
 
 async function checkpointHostedWorkspacePostAssistantPhase(input: {
