@@ -134,6 +134,13 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-it-band-rehab.jpeg");
   });
 
+  it("uses the simplified intermittent fasting title", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("time-restricted-eating-18-6");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.title).toBe("Intermittent Fasting");
+  });
+
   it("uses the dedicated red and near infrared skin artwork", () => {
     const protocol = resolveHealthCommonsExperimentProtocol(
       "red-near-infrared-skin-texture-photoaging",

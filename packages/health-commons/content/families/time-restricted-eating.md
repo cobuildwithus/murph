@@ -44,4 +44,4 @@ attribution:
 
 Time-restricted eating protocols limit the daily window in which calories are consumed. This family keeps 18:6, 16:8, 8-hour early TRE, 10-hour metabolic-syndrome TRE, alternate-day fasting, multi-day fasting, calorie-restricted TRE, diabetes protocols, and other clinical variants separate so context sources are not converted into direct proof for a different protocol.
 
-The current Murph landing variant is **18:6 Time-Restricted Eating With Graded Starter Windows**. Its exact ramp and minimum analyzable exposure are Murph implementation scaffolds, not evidence-derived optimal doses.
+The current Murph landing variant is **Intermittent Fasting**. Its exact ramp and minimum analyzable exposure are Murph implementation scaffolds, not evidence-derived optimal doses.
