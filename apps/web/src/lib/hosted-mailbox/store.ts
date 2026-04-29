@@ -26,7 +26,10 @@ import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { recordHostedRuntimeLogTx } from "../hosted-workspace/store";
-import { encryptHostedMailboxNullableString } from "./encryption";
+import {
+  decryptHostedMailboxNullableString,
+  encryptHostedMailboxNullableString,
+} from "./encryption";
 
 export {
   HOSTED_MAILBOX_KINDS,
@@ -754,6 +757,34 @@ export function projectHostedMailboxPayload(
     payloadSchema: record.payloadSchema,
     userId: record.userId,
   };
+}
+
+export function decodeHostedMailboxStoredPayload(input: {
+  payloadCiphertext?: string | null;
+  payloadInlineCiphertext?: string | null;
+  userId: string;
+}): unknown | null {
+  const inlineCiphertext = normalizeNullableString(input.payloadInlineCiphertext);
+  const refCiphertext = normalizeNullableString(input.payloadCiphertext);
+  const serialized = inlineCiphertext
+    ? decryptHostedMailboxNullableString({
+        field: HOSTED_MAILBOX_INLINE_PAYLOAD_FIELD,
+        userId: input.userId,
+        value: inlineCiphertext,
+      })
+    : refCiphertext
+      ? decryptHostedMailboxNullableString({
+          field: HOSTED_MAILBOX_REF_PAYLOAD_FIELD,
+          userId: input.userId,
+          value: refCiphertext,
+        })
+      : null;
+
+  if (!serialized) {
+    return null;
+  }
+
+  return JSON.parse(serialized);
 }
 
 export function resolveHostedMailboxLaneForKind(kind: string): HostedMailboxLane {

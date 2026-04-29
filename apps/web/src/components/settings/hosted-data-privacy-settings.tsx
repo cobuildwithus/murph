@@ -19,7 +19,10 @@ import {
 } from "@/src/components/ui/dialog";
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
-import { HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE } from "@/src/lib/hosted-privacy/account-data-shared";
+import {
+  HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
+} from "@/src/lib/hosted-privacy/account-data-shared";
 
 import { ConnectedAccountCard } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
@@ -56,8 +59,16 @@ type DeletionDialogStep = "review" | "confirm";
 type CloudflareCleanupSummary = HostedAccountDeleteResponse["result"]["cloudflare"];
 type ProviderRevocationSummary = HostedAccountDeleteResponse["result"]["providerRevocations"][number];
 
+const DATA_EXPORT_ENDPOINT = "/api/settings/data-export";
+const DEFAULT_EXPORT_FILENAME = "murph-data-export.json";
+const DATA_EXPORT_CONFIRMATION_HELP_ID = "hosted-data-export-phrase-help";
+
 export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [exportPending, setExportPending] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportConfirmationText, setExportConfirmationText] = useState("");
+  const [acknowledgedSensitiveDownload, setAcknowledgedSensitiveDownload] = useState(false);
+  const [exportDialogError, setExportDialogError] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogStep, setDialogStep] = useState<DeletionDialogStep>("review");
@@ -69,6 +80,8 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   const [success, setSuccess] = useState<string | null>(null);
   const [deletionSummary, setDeletionSummary] = useState<HostedAccountDeleteResponse["result"] | null>(null);
 
+  const exportPhraseMatches = exportConfirmationText === HOSTED_DATA_EXPORT_CONFIRMATION_TEXT;
+  const exportReady = acknowledgedSensitiveDownload && exportPhraseMatches && !exportPending;
   const phraseMatches = confirmationPhrase === HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
   const deleteReady = phraseMatches
     && acknowledgedIrreversibleDeletion
@@ -81,35 +94,44 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     [deletionSummary],
   );
 
-  async function handleExport() {
+  async function handleExportConfirmed() {
+    if (!exportReady) {
+      return;
+    }
+
     setExportPending(true);
     setError(null);
-    setDialogError(null);
+    setExportDialogError(null);
     setSuccess(null);
 
     try {
-      const response = await fetch("/api/settings/privacy/export", {
+      const response = await fetch(DATA_EXPORT_ENDPOINT, {
+        body: JSON.stringify({
+          acknowledgedSensitiveDownload,
+          confirmationText: exportConfirmationText,
+        }),
         cache: "no-store",
         credentials: "same-origin",
-        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
       });
 
       if (!response.ok) {
-        throw new Error("Could not export your data right now.");
+        throw new Error(await readDataExportErrorMessage(response));
       }
 
       const blob = await response.blob();
-      const objectUrl = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = `murph-data-export-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(objectUrl);
-      setSuccess("Export started. The file includes account metadata, counts, and deletion coverage notes without exposing tokens or ciphertext.");
+      triggerDataExportDownload(
+        blob,
+        readDataExportFilename(response.headers.get("content-disposition")),
+      );
+
+      closeExportDialog();
+      setSuccess("Your data export downloaded. Keep the file somewhere private and secure.");
     } catch (requestError) {
-      setError(requestError instanceof Error
+      setExportDialogError(requestError instanceof Error
         ? requestError.message
         : "Could not export your data right now.");
     } finally {
@@ -149,6 +171,26 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
     }
   }
 
+  function openExportDialog() {
+    setExportConfirmationText("");
+    setAcknowledgedSensitiveDownload(false);
+    setExportDialogError(null);
+    setError(null);
+    setSuccess(null);
+    setExportDialogOpen(true);
+  }
+
+  function closeExportDialog() {
+    if (exportPending) {
+      return;
+    }
+
+    setExportDialogOpen(false);
+    setExportConfirmationText("");
+    setAcknowledgedSensitiveDownload(false);
+    setExportDialogError(null);
+  }
+
   function openDialog() {
     setDialogStep("review");
     setConfirmationPhrase("");
@@ -184,7 +226,7 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
   return (
     <div className="flex flex-col gap-4">
       {success ? (
-        <Alert>
+        <Alert role="status" aria-live="polite">
           <AlertTitle>Data privacy workflow updated</AlertTitle>
           <AlertDescription>{success}</AlertDescription>
         </Alert>
@@ -199,12 +241,12 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
 
       <ConnectedAccountCard
         label="Export data"
-        value="Download a safe account export"
-        meta="Exports account metadata, store counts, connected-provider status, and coverage notes. Tokens and ciphertext are not included."
+        value="Download your Murph data"
+        meta="Exports account, messaging, vault sync, wearable, usage, and redacted diagnostic records. Tokens, lookup keys, nonces, invite codes, and encrypted vault payload blobs are not included."
         action={
-          <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={() => void handleExport()} type="button" variant="outline">
+          <Button disabled={exportPending || deletePending || deletionSummary !== null} onClick={openExportDialog} type="button" variant="outline">
             <DownloadIcon data-icon="inline-start" />
-            {deletionSummary ? "Export unavailable" : exportPending ? "Exporting..." : "Export JSON"}
+            {deletionSummary ? "Export unavailable" : exportPending ? "Exporting..." : "Export data"}
           </Button>
         }
       />
@@ -248,6 +290,72 @@ export function HostedDataPrivacySettings(props: { authenticated: boolean }) {
           </AlertDescription>
         </Alert>
       ) : null}
+
+      <Dialog open={exportDialogOpen} onOpenChange={(open) => (open ? setExportDialogOpen(true) : closeExportDialog())}>
+        <DialogContent
+          aria-busy={exportPending}
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+          showCloseButton={!exportPending}
+        >
+          <DialogHeader>
+            <DialogTitle>Confirm data export</DialogTitle>
+            <DialogDescription>
+              This download can contain decrypted account details and mailbox payloads. Murph will omit tokens,
+              lookup keys, nonces, invite codes, API key environment names, and encrypted vault payload blobs.
+            </DialogDescription>
+          </DialogHeader>
+          {exportDialogError ? (
+            <Alert variant="destructive">
+              <AlertTitle>Export request failed</AlertTitle>
+              <AlertDescription>{exportDialogError}</AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="flex flex-col gap-4">
+            <label className="flex gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+              <input
+                checked={acknowledgedSensitiveDownload}
+                className="mt-0.5 size-4 shrink-0 accent-current"
+                type="checkbox"
+                onChange={(event) => setAcknowledgedSensitiveDownload(event.target.checked)}
+              />
+              <span>I understand this export may contain sensitive account, message, wearable, and usage data.</span>
+            </label>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="hosted-data-export-phrase">Confirmation phrase</Label>
+              <code className="block rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
+                {HOSTED_DATA_EXPORT_CONFIRMATION_TEXT}
+              </code>
+              <Input
+                autoComplete="off"
+                id="hosted-data-export-phrase"
+                inputMode="text"
+                value={exportConfirmationText}
+                onChange={(event) => setExportConfirmationText(event.target.value)}
+                aria-invalid={exportConfirmationText.length > 0 && !exportPhraseMatches}
+                aria-describedby={DATA_EXPORT_CONFIRMATION_HELP_ID}
+                placeholder={HOSTED_DATA_EXPORT_CONFIRMATION_TEXT}
+              />
+              <p
+                className={exportConfirmationText.length > 0 && !exportPhraseMatches
+                  ? "text-xs text-destructive"
+                  : "text-xs text-muted-foreground"}
+                id={DATA_EXPORT_CONFIRMATION_HELP_ID}
+              >
+                Type {HOSTED_DATA_EXPORT_CONFIRMATION_TEXT} exactly, with no extra spaces.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeExportDialog} disabled={exportPending}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleExportConfirmed()} disabled={!exportReady}>
+              <DownloadIcon data-icon="inline-start" />
+              {exportPending ? "Preparing..." : "Download JSON"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}>
         <DialogContent className="sm:max-w-lg">
@@ -359,6 +467,70 @@ function formatDeletionTimestamp(value: string): string {
   } catch {
     return value;
   }
+}
+
+async function readDataExportErrorMessage(response: Response): Promise<string> {
+  const fallback = "Could not prepare your data export right now.";
+  const text = await response.text().catch(() => "");
+  if (!text.trim()) {
+    return fallback;
+  }
+
+  try {
+    const payload: unknown = JSON.parse(text);
+    if (isRecord(payload) && isRecord(payload.error) && typeof payload.error.message === "string") {
+      return payload.error.message;
+    }
+  } catch {
+    return fallback;
+  }
+
+  return fallback;
+}
+
+function readDataExportFilename(contentDisposition: string | null): string {
+  if (!contentDisposition) {
+    return DEFAULT_EXPORT_FILENAME;
+  }
+
+  const encodedMatch = /filename\*=UTF-8''([^;]+)/iu.exec(contentDisposition);
+  if (encodedMatch?.[1]) {
+    try {
+      return sanitizeDownloadFilename(decodeURIComponent(encodedMatch[1]));
+    } catch {
+      return DEFAULT_EXPORT_FILENAME;
+    }
+  }
+
+  const quotedMatch = /filename="([^"]+)"/iu.exec(contentDisposition);
+  if (quotedMatch?.[1]) {
+    return sanitizeDownloadFilename(quotedMatch[1]);
+  }
+
+  const bareMatch = /filename=([^;]+)/iu.exec(contentDisposition);
+  return bareMatch?.[1]
+    ? sanitizeDownloadFilename(bareMatch[1])
+    : DEFAULT_EXPORT_FILENAME;
+}
+
+function triggerDataExportDownload(blob: Blob, filename: string): void {
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}
+
+function sanitizeDownloadFilename(value: string): string {
+  const sanitized = value.trim().replace(/[\\/]/gu, "-");
+  return sanitized || DEFAULT_EXPORT_FILENAME;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function formatCloudflareCleanupResult(result: CloudflareCleanupSummary): string {

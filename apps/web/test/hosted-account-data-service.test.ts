@@ -3,12 +3,23 @@ import { describe, expect, it } from "vitest";
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
 } from "@/src/lib/hosted-privacy/account-data-shared";
 import {
+  buildHostedMemberBillingPrivateColumns,
+  buildHostedMemberIdentityPrivateColumns,
+  buildHostedMemberRoutingPrivateColumns,
+} from "@/src/lib/hosted-onboarding/member-private-codecs";
+import { encryptHostedMailboxNullableString } from "@/src/lib/hosted-mailbox/encryption";
+import {
   buildHostedAccountDataExport,
+  buildHostedDataExport,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
+  parseHostedDataExportRequest,
 } from "@/src/lib/hosted-privacy/account-data-service";
+
+type HostedAccountDataPrismaForTest = Parameters<typeof buildHostedDataExport>[0]["prisma"];
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
@@ -49,6 +60,7 @@ const VALID_DELETION_MODES = new Set([
   "local-reference-delete",
 ]);
 const VALID_EXPORT_MODES = new Set([
+  "decoded-redacted-data",
   "documented-only",
   "metadata-and-counts",
   "not-exported-secret",
@@ -114,6 +126,44 @@ describe("parseHostedAccountDeletionRequest", () => {
   });
 });
 
+describe("parseHostedDataExportRequest", () => {
+  it("requires the exact export phrase and sensitive-download acknowledgement", () => {
+    expect(parseHostedDataExportRequest({
+      acknowledgedSensitiveDownload: true,
+      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
+    })).toEqual({
+      acknowledgedSensitiveDownload: true,
+      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
+    });
+  });
+
+  it.each([
+    ["lowercase phrase", {
+      acknowledgedSensitiveDownload: true,
+      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT.toLowerCase(),
+    }, "DATA_EXPORT_CONFIRMATION_REQUIRED"],
+    ["extra whitespace", {
+      acknowledgedSensitiveDownload: true,
+      confirmationText: `${HOSTED_DATA_EXPORT_CONFIRMATION_TEXT} `,
+    }, "DATA_EXPORT_CONFIRMATION_REQUIRED"],
+    ["missing acknowledgement", {
+      acknowledgedSensitiveDownload: false,
+      confirmationText: HOSTED_DATA_EXPORT_CONFIRMATION_TEXT,
+    }, "DATA_EXPORT_ACK_REQUIRED"],
+  ])("rejects %s", (_label, body, expectedCode) => {
+    let error: unknown;
+    try {
+      parseHostedDataExportRequest(body);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(HostedOnboardingError);
+    expect((error as HostedOnboardingError).code).toBe(expectedCode);
+    expect((error as HostedOnboardingError).httpStatus).toBe(400);
+  });
+});
+
 describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
   it("documents every high-value store called out by the deletion/export workflow", () => {
     const slugs = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((entry) => entry.slug);
@@ -136,7 +186,7 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
   it("marks ciphertext/token stores and external systems with the safest export/deletion modes", () => {
     const bySlug = new Map(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((entry) => [entry.slug, entry]));
 
-    expect(bySlug.get("prisma.hosted_mailbox_payload")?.export).toBe("not-exported-secret");
+    expect(bySlug.get("prisma.hosted_mailbox_payload")?.export).toBe("decoded-redacted-data");
     expect(bySlug.get("prisma.hosted_vault_sync_payload")?.export).toBe("not-exported-secret");
     expect(bySlug.get("cloudflare.runner_durable_object")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("cloudflare.r2_user_artifacts")?.deletion).toBe("best-effort-delete");
@@ -157,7 +207,7 @@ describe("buildHostedAccountDataExport", () => {
   it("returns metadata and counts without resurfacing lookup secrets or ciphertext", async () => {
     const exported = await buildHostedAccountDataExport({
       memberId: "member_123",
-      prisma: createHostedAccountDataExportPrisma() as never,
+      prisma: createHostedAccountDataExportPrismaForTest(),
     });
 
     expect(exported.schema).toBe("murph.hosted-account-data-export.v1");
@@ -272,14 +322,240 @@ describe("buildHostedAccountDataExport", () => {
   });
 });
 
+describe("buildHostedDataExport", () => {
+  it("exports high-value user data while omitting secrets and lookup material", async () => {
+    const exported = await buildHostedDataExport({
+      memberId: "member_123",
+      prisma: createHostedAccountDataExportPrismaForTest(),
+    });
+    const serialized = JSON.stringify(exported);
+
+    expect(exported).toMatchObject({
+      account: {
+        billingRef: {
+          stripeCustomerId: "cus_export_123",
+          stripeSubscriptionId: "sub_export_123",
+        },
+        identity: {
+          phoneNumber: "+15550100123",
+          privyUserId: "privy-user-123",
+          signupPhoneCodeSendAttemptPresent: true,
+          walletAddress: "0xabc123",
+        },
+        routing: {
+          linqChatId: "linq-chat-123",
+          telegramUserId: "telegram-user-123",
+        },
+      },
+      schema: "murph.hosted-data-export.v1",
+      usage: {
+        aiUsage: [
+          {
+            apiKeyEnvConfigured: true,
+          },
+        ],
+      },
+      vault: {
+        workspace: {
+          browserVaultReplicaRefPresent: true,
+          snapshotRefPresent: true,
+        },
+        vaultSyncSessions: [
+          {
+            payload: {
+              payloadOmitted: true,
+              payloadSchema: "murph.hosted-vault-sync-payload.v1",
+            },
+          },
+        ],
+      },
+    });
+    expect(exported.messaging).toMatchObject({
+      mailboxItems: expect.arrayContaining([
+        expect.objectContaining({
+          dedupeKeyPresent: true,
+          payload: {
+            status: "decoded",
+            value: expect.objectContaining({
+              message: expect.objectContaining({
+                channel: "linq",
+                linqMessage: expect.objectContaining({
+                  parts: [
+                    {
+                      type: "text",
+                      value: "hello from mailbox",
+                    },
+                    {
+                      type: "media",
+                      downloadUrlOmitted: true,
+                      storageObjectKeyOmitted: true,
+                      urlOmitted: true,
+                    },
+                  ],
+                }),
+                phoneLookupKeyOmitted: true,
+              }),
+            }),
+          },
+          payloadRefPresent: false,
+        }),
+        expect.objectContaining({
+          payload: {
+            status: "decoded",
+            value: expect.objectContaining({
+              message: expect.objectContaining({
+                channel: "email",
+                rawMessageKeyOmitted: true,
+              }),
+            }),
+          },
+        }),
+        expect.objectContaining({
+          payload: {
+            status: "decoded",
+            value: expect.objectContaining({
+              notification: expect.objectContaining({
+                deliveryDedupeTokenOmitted: true,
+                deliveryIdempotencyKeyOmitted: true,
+                route: expect.objectContaining({
+                  identityIdOmitted: true,
+                }),
+              }),
+            }),
+          },
+        }),
+      ]),
+    });
+    expect(serialized).not.toContain("secret-provider-account-blind-index");
+    expect(serialized).not.toContain("secret-agent-token-hash");
+    expect(serialized).not.toContain("SECRET_API_KEY_ENV");
+    expect(serialized).not.toContain("invite-code-raw");
+    expect(serialized).not.toContain("encrypted-vault-payload");
+    expect(serialized).not.toContain("oauth-state");
+    expect(serialized).not.toContain("secret-privy");
+    expect(serialized).not.toContain("secret-wallet");
+    expect(serialized).not.toContain("secret-telegram");
+    expect(serialized).not.toContain("hbpc_send_attempt_secret");
+    expect(serialized).not.toContain("workspace-object-key");
+    expect(serialized).not.toContain("workspace-bundle-hash");
+    expect(serialized).not.toContain("secret-dedupe-key");
+    expect(serialized).not.toContain("secret-phone-lookup-key");
+    expect(serialized).not.toContain("secret-raw-message-key");
+    expect(serialized).not.toContain("secret-delivery-dedupe-token");
+    expect(serialized).not.toContain("secret-delivery-idempotency-key");
+    expect(serialized).not.toContain("secret-route-identity");
+    expect(serialized).not.toContain("secret-media-download-url");
+    expect(serialized).not.toContain("secret-media-download-url-2");
+    expect(serialized).not.toContain("secret-media-object-key");
+  });
+});
+
 function createHostedAccountDataExportPrisma() {
   const count = async () => 1;
+  const memberId = "member_123";
+  const linqMailboxPayload = encryptHostedMailboxNullableString({
+    field: "hosted-mailbox-inline-payload",
+    userId: memberId,
+    value: JSON.stringify({
+      eventId: "mailbox-event-linq",
+      kind: "conversation.message",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "linq-chat-123",
+          from: "+15550100123",
+          isFromMe: false,
+          messageId: "linq-message-1",
+          parts: [
+            {
+              type: "text",
+              value: "hello from mailbox",
+            },
+            {
+              type: "media",
+              downloadUrl: "secret-media-download-url-2",
+              storageObjectKey: "secret-media-object-key",
+              url: "secret-media-download-url",
+            },
+          ],
+        },
+        phoneLookupKey: "secret-phone-lookup-key",
+      },
+      occurredAt: "2026-04-27T00:24:30.000Z",
+      userId: memberId,
+    }),
+  });
+  const emailMailboxPayload = encryptHostedMailboxNullableString({
+    field: "hosted-mailbox-inline-payload",
+    userId: memberId,
+    value: JSON.stringify({
+      eventId: "mailbox-event-email",
+      kind: "conversation.message",
+      message: {
+        channel: "email",
+        identityId: "email-identity-1",
+        rawMessageKey: "secret-raw-message-key",
+        selfAddress: "member@example.test",
+      },
+      occurredAt: "2026-04-27T00:24:45.000Z",
+      userId: memberId,
+    }),
+  });
+  const systemMailboxPayload = encryptHostedMailboxNullableString({
+    field: "hosted-mailbox-inline-payload",
+    userId: memberId,
+    value: JSON.stringify({
+      eventId: "mailbox-event-system",
+      kind: "assistant.notification.requested",
+      notification: {
+        deliveryDedupeToken: "secret-delivery-dedupe-token",
+        deliveryIdempotencyKey: "secret-delivery-idempotency-key",
+        instructions: "welcome the member",
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "explicit",
+            target: "+15550100123",
+          },
+          identityId: "secret-route-identity",
+          threadId: "linq-chat-123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-27T00:25:15.000Z",
+      userId: memberId,
+    }),
+  });
+  const billingPrivateColumns = buildHostedMemberBillingPrivateColumns({
+    memberId,
+    stripeCustomerId: "cus_export_123",
+    stripeSubscriptionId: "sub_export_123",
+  });
+  const identityPrivateColumns = buildHostedMemberIdentityPrivateColumns({
+    memberId,
+    phoneNumber: "+15550100123",
+    privyUserId: "privy-user-123",
+    signupPhoneCodeSendAttemptId: "hbpc_send_attempt_secret",
+    signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-27T00:01:30.000Z"),
+    signupPhoneCodeSentAt: new Date("2026-04-27T00:01:45.000Z"),
+    signupPhoneNumber: "+15550100123",
+    walletAddress: "0xabc123",
+  });
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: "linq-chat-123",
+    linqRecipientPhone: "+15550100123",
+    memberId,
+    pendingLinqChatId: "pending-linq-chat-123",
+    pendingLinqRecipientPhone: "+15550100124",
+    telegramThreadId: "telegram-thread-123",
+    telegramUserId: "telegram-user-123",
+  });
 
   return {
     $transaction: async () => {
       throw new Error("Unexpected transaction during export proof.");
     },
-    deviceAgentSession: { count },
     deviceBrowserAssertionNonce: { count },
     deviceConnection: {
       count,
@@ -289,32 +565,253 @@ function createHostedAccountDataExportPrisma() {
           createdAt: new Date("2026-04-27T00:07:00.000Z"),
           displayName: "WHOOP",
           id: "device-1",
+          accessTokenExpiresAt: new Date("2026-04-27T00:07:30.000Z"),
+          keyVersion: "v1",
+          lastErrorCode: null,
+          lastErrorMessage: null,
           lastSyncCompletedAt: new Date("2026-04-27T00:08:00.000Z"),
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: new Date("2026-04-27T00:07:45.000Z"),
+          lastWebhookAt: new Date("2026-04-27T00:07:40.000Z"),
+          metadataJson: { shallow: "metadata" },
+          nextReconcileAt: new Date("2026-04-27T00:12:00.000Z"),
           provider: "whoop",
           providerAccountBlindIndex: "secret-provider-account-blind-index",
+          scopesJson: ["read:profile"],
           status: "active",
+          tokenVersion: 2,
           updatedAt: new Date("2026-04-27T00:09:00.000Z"),
+          userId: memberId,
         },
       ],
     },
-    deviceOauthSession: { count },
-    deviceSyncSignal: { count },
-    deviceTokenAudit: { count },
+    deviceOauthSession: {
+      count,
+      findMany: async () => [{ state: "oauth-state" }],
+    },
+    deviceSyncSignal: {
+      count,
+      findMany: async () => [
+        {
+          connectionId: "device-1",
+          createdAt: new Date("2026-04-27T00:15:00.000Z"),
+          eventType: "webhook",
+          id: 1,
+          kind: "provider-webhook",
+          nextReconcileAt: null,
+          occurredAt: new Date("2026-04-27T00:14:00.000Z"),
+          provider: "whoop",
+          reason: "sync",
+          resourceCategory: "sleep",
+          revokeWarningCode: null,
+          revokeWarningMessage: null,
+          traceId: "trace-1",
+          userId: memberId,
+        },
+      ],
+    },
+    deviceTokenAudit: {
+      count,
+      findMany: async () => [
+        {
+          action: "refresh",
+          channel: "background",
+          connectionId: "device-1",
+          createdAt: new Date("2026-04-27T00:16:00.000Z"),
+          expectedTokenVersion: 1,
+          forceRefresh: false,
+          id: 1,
+          keyVersion: "v1",
+          provider: "whoop",
+          refreshOutcome: "success",
+          sessionId: "session-1",
+          tokenVersion: 2,
+          tokenVersionChanged: true,
+          userId: memberId,
+        },
+      ],
+    },
     deviceWebhookTrace: { count },
-    hostedAiUsage: { count },
-    hostedInvite: { count },
-    hostedLinqDailyState: { count },
-    hostedMailboxItem: { count },
-    hostedMailboxLaneCounter: { count },
+    deviceAgentSession: {
+      count,
+      findMany: async () => [
+        {
+          createdAt: new Date("2026-04-27T00:18:00.000Z"),
+          expiresAt: new Date("2026-04-28T00:18:00.000Z"),
+          id: "agent-session-1",
+          label: "Laptop",
+          lastSeenAt: null,
+          replacedBySessionId: null,
+          revokedAt: null,
+          revokeReason: null,
+          tokenHash: "secret-agent-token-hash",
+          updatedAt: new Date("2026-04-27T00:18:00.000Z"),
+          userId: memberId,
+        },
+      ],
+    },
+    hostedAiUsage: {
+      count,
+      findMany: async () => [
+        {
+          apiKeyEnv: "SECRET_API_KEY_ENV",
+          attemptCount: 1,
+          baseUrl: "https://gateway.example",
+          cacheWriteTokens: null,
+          cachedInputTokens: null,
+          createdAt: new Date("2026-04-27T00:24:00.000Z"),
+          credentialSource: "member",
+          featureKey: "assistant",
+          gatewayTagsJson: { surface: "settings" },
+          id: "usage-1",
+          inputTokens: 10,
+          memberId,
+          occurredAt: new Date("2026-04-27T00:23:00.000Z"),
+          outputTokens: 20,
+          provider: "openai",
+          providerName: "OpenAI",
+          reasoningTokens: null,
+          reportingUserId: memberId,
+          requestedModel: "model-a",
+          routeId: "route-a",
+          servedModel: "model-b",
+          sessionId: "session-1",
+          stripeMeterAttemptCount: 0,
+          stripeMeteredAt: null,
+          stripeMeterError: null,
+          stripeMeterIdentifier: null,
+          stripeMeterLastAttemptedAt: null,
+          stripeMeterNextAttemptAt: null,
+          stripeMeterSource: "murph",
+          stripeMeterStatus: "pending",
+          surface: "assistant",
+          totalTokens: 30,
+          triggerKind: "manual",
+          turnId: "turn-1",
+          updatedAt: new Date("2026-04-27T00:24:00.000Z"),
+        },
+      ],
+    },
+    hostedInvite: {
+      count,
+      findMany: async () => [
+        {
+          channel: "linq",
+          createdAt: new Date("2026-04-27T00:19:00.000Z"),
+          expiresAt: new Date("2026-04-28T00:19:00.000Z"),
+          id: "invite-1",
+          inviteCode: "invite-code-raw",
+          memberId,
+          sentAt: new Date("2026-04-27T00:20:00.000Z"),
+          updatedAt: new Date("2026-04-27T00:20:00.000Z"),
+        },
+      ],
+    },
+    hostedLinqDailyState: {
+      count,
+      findMany: async () => [
+        {
+          createdAt: new Date("2026-04-27T00:21:00.000Z"),
+          dayUtc: new Date("2026-04-27T00:00:00.000Z"),
+          firstSeenAt: new Date("2026-04-27T00:21:00.000Z"),
+          inboundCount: 2,
+          lastSeenAt: new Date("2026-04-27T00:22:00.000Z"),
+          memberId,
+          onboardingLinkSentAt: null,
+          outboundCount: 1,
+          quotaReplySentAt: null,
+          updatedAt: new Date("2026-04-27T00:22:00.000Z"),
+        },
+      ],
+    },
+    hostedMailboxItem: {
+      count,
+      findMany: async () => [
+        {
+          createdAt: new Date("2026-04-27T00:25:00.000Z"),
+          dedupeKey: "secret-dedupe-key-linq",
+          expiresAt: null,
+          id: "mailbox-1",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: 1n,
+          occurredAt: new Date("2026-04-27T00:24:30.000Z"),
+          payload: null,
+          payloadBytes: 512,
+          payloadInlineCiphertext: linqMailboxPayload,
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+          updatedAt: new Date("2026-04-27T00:25:00.000Z"),
+          userId: memberId,
+        },
+        {
+          createdAt: new Date("2026-04-27T00:25:10.000Z"),
+          dedupeKey: "secret-dedupe-key-email",
+          expiresAt: null,
+          id: "mailbox-2",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: 2n,
+          occurredAt: new Date("2026-04-27T00:24:45.000Z"),
+          payload: null,
+          payloadBytes: 384,
+          payloadInlineCiphertext: emailMailboxPayload,
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+          updatedAt: new Date("2026-04-27T00:25:10.000Z"),
+          userId: memberId,
+        },
+        {
+          createdAt: new Date("2026-04-27T00:25:20.000Z"),
+          dedupeKey: "secret-dedupe-key-system",
+          expiresAt: null,
+          id: "mailbox-3",
+          kind: "assistant.notification.requested",
+          lane: "system",
+          laneSeq: 1n,
+          occurredAt: new Date("2026-04-27T00:25:15.000Z"),
+          payload: null,
+          payloadBytes: 512,
+          payloadInlineCiphertext: systemMailboxPayload,
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item-payload.v1",
+          updatedAt: new Date("2026-04-27T00:25:20.000Z"),
+          userId: memberId,
+        },
+      ],
+    },
+    hostedMailboxLaneCounter: {
+      count,
+      findMany: async () => [
+        {
+          lane: "conversation",
+          nextSeq: 2n,
+          updatedAt: new Date("2026-04-27T00:25:30.000Z"),
+          userId: memberId,
+        },
+      ],
+    },
     hostedMailboxPayload: { count },
     hostedMember: {
       count,
       findUnique: async () => ({
+        billingRef: {
+          createdAt: new Date("2026-04-27T00:00:00.000Z"),
+          lastStripeEventCreatedAt: new Date("2026-04-27T00:00:30.000Z"),
+          memberId,
+          stripeCustomerLookupKey: "secret-stripe-customer",
+          stripeSubscriptionLookupKey: "secret-stripe-subscription",
+          updatedAt: new Date("2026-04-27T00:00:30.000Z"),
+          ...billingPrivateColumns,
+        },
         billingStatus: "active",
         createdAt: new Date("2026-04-27T00:00:00.000Z"),
         emailAuthorization: {
           directPublicSenderAuthorizedAt: null,
+          directPublicSenderAddressEncrypted: null,
           directPublicSenderLookupKey: "secret-direct-public-sender",
+          memberId,
+          verifiedEmailAddressEncrypted: null,
           verifiedEmailLookupKey: "secret-verified-email",
           verifiedEmailVerifiedAt: new Date("2026-04-27T00:01:00.000Z"),
         },
@@ -330,21 +827,31 @@ function createHostedAccountDataExportPrisma() {
         },
         id: "member_123",
         identity: {
+          createdAt: new Date("2026-04-27T00:02:00.000Z"),
           maskedPhoneNumberHint: "+1 **** 1234",
+          memberId,
+          phoneLookupKey: "secret-phone",
           phoneNumberVerifiedAt: new Date("2026-04-27T00:02:00.000Z"),
           privyUserLookupKey: "secret-privy",
+          updatedAt: new Date("2026-04-27T00:03:00.000Z"),
           walletAddressLookupKey: "secret-wallet",
           walletChainType: "ethereum",
           walletCreatedAt: new Date("2026-04-27T00:03:00.000Z"),
           walletProvider: "privy",
+          ...identityPrivateColumns,
         },
         pendingActivationTimeZone: null,
         routing: {
+          createdAt: new Date("2026-04-27T00:03:30.000Z"),
           linqChatLookupKey: "secret-linq-home",
           linqRecipientPhoneLookupKey: "secret-linq-recipient",
+          memberId,
           pendingLinqChatLookupKey: "secret-pending-linq",
+          pendingLinqRecipientPhoneLookupKey: "secret-pending-linq-recipient",
           replyAliasLookupKey: "secret-reply-alias",
           telegramUserLookupKey: "secret-telegram",
+          updatedAt: new Date("2026-04-27T00:03:30.000Z"),
+          ...routingPrivateColumns,
         },
         suspendedAt: null,
         updatedAt: new Date("2026-04-27T00:12:00.000Z"),
@@ -354,7 +861,31 @@ function createHostedAccountDataExportPrisma() {
     hostedMemberEmailAuthorization: { count },
     hostedMemberIdentity: { count },
     hostedMemberRouting: { count },
-    hostedRuntimeLog: { count },
+    hostedRuntimeLog: {
+      count,
+      findMany: async () => [
+        {
+          at: new Date("2026-04-27T00:26:00.000Z"),
+          attemptId: "attempt-1",
+          checkpointVersion: 9n,
+          component: "runtime",
+          createdAt: new Date("2026-04-27T00:26:00.000Z"),
+          errorCode: null,
+          eventCode: "runtime.ok",
+          id: "runtime-log-1",
+          leaseGeneration: 3n,
+          level: "info",
+          mailboxLane: "conversation",
+          mailboxSeqEnd: 1n,
+          mailboxSeqStart: 1n,
+          outboxIntentRef: null,
+          phase: "assistant",
+          redactedJson: { message: "redacted" },
+          userId: memberId,
+          workspaceVersion: 9n,
+        },
+      ],
+    },
     hostedVaultSyncPayload: { count },
     hostedVaultSyncSession: {
       count,
@@ -364,16 +895,53 @@ function createHostedAccountDataExportPrisma() {
           direction: "import",
           expiresAt: new Date("2026-04-27T01:10:00.000Z"),
           id: "vault-sync-1",
-          payload: { sessionId: "payload-secret" },
+          localManifestHash: "manifest-hash",
+          memberId,
+          payload: {
+            createdAt: new Date("2026-04-27T00:10:30.000Z"),
+            payloadEncrypted: "encrypted-vault-payload",
+            payloadSchema: "murph.hosted-vault-sync-payload.v1",
+            sessionId: "payload-secret",
+            updatedAt: new Date("2026-04-27T00:10:45.000Z"),
+          },
+          queuedAt: new Date("2026-04-27T00:10:45.000Z"),
+          revokedAt: null,
           sourceSchemaVersion: "3",
           sourceVaultId: "vault-secret",
           sourceVaultTitle: "Source Vault",
           status: "ready",
           updatedAt: new Date("2026-04-27T00:11:00.000Z"),
+          uploadedAt: new Date("2026-04-27T00:10:40.000Z"),
         },
       ],
     },
-    hostedWorkspace: { count },
+    hostedWorkspace: {
+      count,
+      findUnique: async () => ({
+        browserVaultReplicaRef: {
+          objectKey: "workspace-object-key",
+          sourceBundleHash: "workspace-bundle-hash",
+        },
+        checkpointedAt: new Date("2026-04-27T00:04:00.000Z"),
+        createdAt: new Date("2026-04-27T00:04:00.000Z"),
+        nextWakeAt: new Date("2026-04-27T00:05:00.000Z"),
+        nextWakeReason: "nudge",
+        redactedStatusJson: { private: true },
+        snapshotRef: {
+          hash: "workspace-bundle-hash",
+          key: "workspace-object-key",
+        },
+        updatedAt: new Date("2026-04-27T00:06:00.000Z"),
+        userId: memberId,
+        version: 9n,
+      }),
+    },
     hostedWebInternalRequestNonce: { count },
   };
+}
+
+function createHostedAccountDataExportPrismaForTest(): HostedAccountDataPrismaForTest {
+  // This fake implements the Prisma delegates exercised by this focused unit test.
+  const fakePrisma: unknown = createHostedAccountDataExportPrisma();
+  return fakePrisma as HostedAccountDataPrismaForTest;
 }
