@@ -17,9 +17,8 @@ const DEFAULT_TURN_INPUT_QUERY_LIMIT = 100
 type AssistantInboxCaptureSummary = InboxListResult['items'][number]
 
 export type AssistantTurnInputRefreshPhase =
-  | 'before_provider'
-  | 'after_tool_result'
-  | 'after_provider'
+  | 'input_available'
+  | 'request_boundary'
   | 'commit_barrier'
 
 export interface AssistantTurnInputRefreshInput {
@@ -62,24 +61,29 @@ export interface AssistantTurnInputPort {
 }
 
 export interface AssistantActiveTurnInputAdmissionBaseInput {
-  response: string
+  knownCaptureIds?: readonly string[]
+  knownInputIds?: readonly string[]
+  phase: AssistantActiveTurnInputPhase
+  signal?: AbortSignal
   sessionId: string
   turnId: string
   vault: string
 }
 
+export type AssistantActiveTurnInputPhase =
+  | 'input_available'
+  | 'request_boundary'
+  | 'commit_barrier'
+
 export interface AssistantActiveTurnInputAdmissionInput
-  extends AssistantActiveTurnInputAdmissionBaseInput {
-  phase: 'request_boundary' | 'commit_barrier'
-  providerRequestOrdinal: number
-}
+  extends AssistantActiveTurnInputAdmissionBaseInput {}
 
 export type AssistantActiveTurnInputAdmissionResult =
   | {
       kind: 'no-new-input'
     }
   | {
-      acceptedInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
+      acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
       deliveryReplyToMessageId?: string | null
       prompt: string
       receiptMetadata?: Record<string, string> | null
