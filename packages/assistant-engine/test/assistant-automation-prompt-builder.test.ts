@@ -296,16 +296,18 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain(
       'Occurred at: 2026-04-08T10:00:00.000Z -> 2026-04-08T10:03:00.000Z',
     )
-    expect(result.prompt).toContain('Thread: thread-1 (Family)')
-    expect(result.prompt).toContain('Actor: telegram-user-42 | self=false')
+    expect(result.prompt).toContain('Thread type: direct')
+    expect(result.prompt).toContain('Actor self: false')
+    expect(result.prompt).not.toContain('thread-1')
+    expect(result.prompt).not.toContain('telegram-user-42')
     expect(result.prompt).toContain('Grouped captures: 2')
-    expect(result.prompt).toContain('Telegram media group: media-group-7')
+    expect(result.prompt).toContain('Telegram media group: present')
     expect(result.prompt).toContain('Capture 1:')
     expect(result.prompt).toContain(
-      'Reply context:\nReplying to Alex: Please review the attachment.',
+      'Reply context:\nReplying to: Please review the attachment.',
     )
     expect(result.prompt).toContain(
-      'Attachment 1 (audio, voice-note.m4a)',
+      'Attachment 1 (audio)',
     )
     expect(result.prompt).toContain(
       'Large parsed attachment content omitted from prompt to keep context small: transcript (2005 chars).',
@@ -387,7 +389,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).toContain('Grouped captures: 3')
-    expect(result.prompt).toContain('Telegram media group: media-group-7')
+    expect(result.prompt).toContain('Telegram media group: present')
   })
 })
 
@@ -505,13 +507,14 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed attachment text is available. Use attached image evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+        'No parsed attachment text is available. Use native attachment evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
       ),
       userMessageContent,
     })
   })
 
-  it('keeps PDF-only input metadata-only when raw file evidence is disabled', async () => {
+  it('keeps PDF-only input ready when native file evidence is available', async () => {
+    const userMessageContent = createRichUserMessageContent('Read PDF')
     promptBuilderMocks.buildInboxModelAttachmentBundles.mockResolvedValue([
       createAttachmentBundle({
         kind: 'document',
@@ -521,10 +524,10 @@ describe('prepareAssistantAutoReplyInput', () => {
         parseState: 'failed',
         routingPdf: {
           byteSize: 128,
-          eligible: false,
+          eligible: true,
           maxBytes: 20 * 1024 * 1024,
           path: 'inbox/attachments/scan.pdf',
-          reason: 'raw-pdf-disabled',
+          reason: 'eligible',
         },
         fragments: [
           {
@@ -533,23 +536,23 @@ describe('prepareAssistantAutoReplyInput', () => {
             path: null,
             text: [
               'mime: application/pdf',
-              'routingPdfEligible: false',
-              'routingPdfReason: raw-pdf-disabled',
+              'routingPdfEligible: true',
+              'routingPdfReason: eligible',
             ].join('\n'),
             truncated: false,
           },
         ],
         combinedText:
-          '[metadata]\nmime: application/pdf\nroutingPdfEligible: false\nroutingPdfReason: raw-pdf-disabled',
+          '[metadata]\nmime: application/pdf\nroutingPdfEligible: true\nroutingPdfReason: eligible',
       }),
     ])
     promptBuilderMocks.hasInboxMultimodalAttachmentEvidenceCandidate.mockReturnValue(
-      false,
+      true,
     )
     promptBuilderMocks.prepareInboxMultimodalUserMessageContent.mockResolvedValue({
       fallbackError: null,
-      inputMode: 'text-only',
-      userMessageContent: null,
+      inputMode: 'multimodal',
+      userMessageContent,
     })
 
     const result = await prepareAssistantAutoReplyInput(
@@ -564,9 +567,9 @@ describe('prepareAssistantAutoReplyInput', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'Attachment parser status: parser failed; parsed attachment text or transcript is unavailable.',
+        'No parsed attachment text is available. Use native attachment evidence only if it is present in the model input;',
       ),
-      userMessageContent: null,
+      userMessageContent,
     })
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt.')
@@ -629,7 +632,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
               reply_to_message: {
                 contact: {
                   first_name: 'Pat',
-                  phone_number: '+15551212',
+                  phone_number: 'redacted-phone',
                 },
               },
             },
@@ -672,7 +675,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
                 },
                 contact: {
                   first_name: 'Pat',
-                  phone_number: '+15551212',
+                  phone_number: 'redacted-phone',
                 },
               },
               quote: {
@@ -691,7 +694,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
       mediaGroupId: null,
       messageId: '444',
       replyContext:
-        'Replying to Alex Kim: Shared contact Pat (+15551212)\nQuoted text: Please call me back soon.',
+        'Replying to: Shared contact\nQuoted text: Please call me back soon.',
     })
   })
 
@@ -732,8 +735,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
     ).resolves.toEqual({
       mediaGroupId: 'venue-group',
       messageId: '445',
-      replyContext:
-        'Replying to Cafe Bot: Shared venue Coffee Shop | 1 Main St | Shared location 40.7128, -74.006',
+      replyContext: 'Replying to: Shared venue',
     })
   })
 
@@ -776,7 +778,7 @@ describe('loadTelegramAutoReplyMetadata', () => {
     ).resolves.toEqual({
       mediaGroupId: null,
       messageId: '446',
-      replyContext: 'Replying to @surveybot: Shared poll Lunch? [Pizza | Salad]',
+      replyContext: 'Replying to: Shared poll Lunch? [Pizza | Salad]',
     })
   })
 })

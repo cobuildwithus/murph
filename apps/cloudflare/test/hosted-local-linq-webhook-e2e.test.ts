@@ -24,6 +24,7 @@ import {
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
+  HOSTED_LOCAL_LINQ_PDF_BYTES,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   startHostedLocalLinqStub,
@@ -31,6 +32,9 @@ import {
 } from "./helpers/hosted-local-linq-support.js";
 
 const linqWebhookSecret = "linq-local-webhook-secret";
+const hostedLinqVoiceNoteTranscriptText = "Remember to log the voice note";
+const hostedLinqVoiceNoteAssistantReplyText = "Logged the voice note.";
+const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -55,7 +59,10 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
 describe("hosted local Linq webhook e2e", () => {
   beforeAll(async () => {
     await startLinqScenario((linq) => ({
+      FFMPEG_COMMAND: "/app/test-parser-toolchain/ffmpeg",
       LINQ_ATTACHMENT_CDN_BASE_URL: linq.attachmentDownloadBaseUrl,
+      WHISPER_COMMAND: "/app/test-parser-toolchain/whisper-cli",
+      WHISPER_MODEL_PATH: "/app/test-parser-toolchain/ggml-test.bin",
     }));
   }, 300_000);
 
@@ -70,11 +77,6 @@ describe("hosted local Linq webhook e2e", () => {
     const { chatId: materializedChatId, replyChatPath, userId } =
       await createActiveLinqWebhookMember("reply");
     const expectedReplyChatPath = replyChatPath;
-    const typingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
-    const typingCountBeforeWebhook = requireLinqStub().countObservedRequests({
-      expectedMethod: "POST",
-      expectedPath: typingPath,
-    });
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
     const webhookEvent = buildHostedLinqInboundEvent(userId, materializedChatId, {
@@ -90,10 +92,6 @@ describe("hosted local Linq webhook e2e", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    expect(requireLinqStub().countObservedRequests({
-      expectedMethod: "POST",
-      expectedPath: typingPath,
-    })).toBeGreaterThanOrEqual(typingCountBeforeWebhook + 1);
 
     await requireScenario().waitForLatestPendingWake(userId);
     await requireScenario().waitForHostedCompletion(userId);
@@ -173,18 +171,13 @@ describe("hosted local Linq webhook e2e", () => {
     );
   }, 300_000);
 
-  it("hydrates a metadata-only Linq voice memo through the local attachment API and drains without a transcript", async () => {
+  it("transcribes generic iMessage audio media and delivers the assistant reply", async () => {
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
       await createActiveLinqWebhookMember("voice");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const attachmentId = `att_voice_${userId}`;
-    const expectedAttachmentMetadataPath = `/attachments/${encodeURIComponent(attachmentId)}`;
     const expectedAttachmentDownloadPath =
-      `/attachment-downloads/${encodeURIComponent(attachmentId)}.wav`;
-    const attachmentMetadataCountBeforeReply = requireLinqStub().countObservedRequests({
-      expectedMethod: "GET",
-      expectedPath: expectedAttachmentMetadataPath,
-    });
+      `/attachment-downloads/${encodeURIComponent(attachmentId)}.m4a`;
     const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
       expectedMethod: "GET",
       expectedPath: expectedAttachmentDownloadPath,
@@ -196,6 +189,8 @@ describe("hosted local Linq webhook e2e", () => {
       expectedPath: expectedInboundDeletePath,
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+
+    requireScenario().queueAssistantResponses([hostedLinqVoiceNoteAssistantReplyText]);
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,
@@ -205,9 +200,11 @@ describe("hosted local Linq webhook e2e", () => {
         parts: [
           {
             attachmentId,
-            fileName: `${attachmentId}.wav`,
-            mimeType: "audio/wav",
-            type: "voice_memo",
+            fileName: "Audio Message.m4a",
+            mimeType: "audio/mp4",
+            size: 23_000,
+            type: "media",
+            url: `${requireLinqStub().attachmentDownloadContainerBaseUrl}/${encodeURIComponent(attachmentId)}.m4a`,
           },
         ],
       },
@@ -219,13 +216,6 @@ describe("hosted local Linq webhook e2e", () => {
     });
 
     await requireScenario().waitForLatestPendingWake(userId);
-    await requireLinqStub().waitForAdditionalRequest({
-      baselineCount: attachmentMetadataCountBeforeReply,
-      expectedMethod: "GET",
-      expectedPath: expectedAttachmentMetadataPath,
-      scenario: requireScenario(),
-      userId,
-    });
     await requireLinqStub().waitForAdditionalRequest({
       baselineCount: attachmentDownloadCountBeforeReply,
       expectedMethod: "GET",
@@ -246,13 +236,149 @@ describe("hosted local Linq webhook e2e", () => {
     expect(finalStatus.inFlight).toBe(false);
     expect(finalStatus.workspace).not.toBeNull();
 
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: expectedReplyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      hostedLinqVoiceNoteAssistantReplyText,
+    );
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
-    expect(assistantProviderRequests).toHaveLength(0);
-    expect(requireLinqStub().countObservedSends(expectedReplyChatPath)).toBe(
-      outboundCountBeforeReply,
+    expect(assistantProviderRequests).toHaveLength(1);
+    const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
+    expect(assistantProviderBody).toContain(hostedLinqVoiceNoteTranscriptText);
+    expect(assistantProviderBody).not.toContain("Audio Message.m4a");
+    expect(assistantProviderBody).not.toContain(attachmentId);
+    expect(assistantProviderBody).not.toContain(expectedAttachmentDownloadPath);
+  }, 300_000);
+
+  it("keeps PDF-only iMessage media replyable by exposing bounded local PDF evidence", async () => {
+    const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
+      await createActiveLinqWebhookMember("pdf");
+    const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
+    const attachmentId = `att_pdf_${userId}`;
+    const expectedAttachmentDownloadPath =
+      `/attachment-downloads/${encodeURIComponent(attachmentId)}.pdf`;
+    const expectedAttachmentDownloadUrl =
+      `${requireLinqStub().attachmentDownloadContainerBaseUrl}/${encodeURIComponent(attachmentId)}.pdf`;
+    const attachmentDownloadCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+    });
+    const expectedInboundDeletePath =
+      `/messages/${encodeURIComponent(`msg_pdf_${userId}`)}`;
+    const inboundDeleteCountBeforeReply = requireLinqStub().countObservedRequests({
+      expectedMethod: "DELETE",
+      expectedPath: expectedInboundDeletePath,
+    });
+    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+
+    requireScenario().queueAssistantResponses([hostedLinqPdfAssistantReplyText]);
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      materializedChatId,
+      {
+        eventId: `evt_pdf_${userId}`,
+        messageId: `msg_pdf_${userId}`,
+        parts: [
+          {
+            attachmentId,
+            fileName: "lab-results.pdf",
+            mimeType: "application/pdf",
+            size: 128,
+            type: "media",
+            url: expectedAttachmentDownloadUrl,
+          },
+        ],
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: attachmentDownloadCountBeforeReply,
+      expectedMethod: "GET",
+      expectedPath: expectedAttachmentDownloadPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    await requireLinqStub().waitForAdditionalRequest({
+      baselineCount: inboundDeleteCountBeforeReply,
+      expectedMethod: "DELETE",
+      expectedPath: expectedInboundDeletePath,
+      scenario: requireScenario(),
+      userId,
+    });
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(finalStatus.inFlight).toBe(false);
+    expect(finalStatus.workspace).not.toBeNull();
+
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: expectedReplyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      hostedLinqPdfAssistantReplyText,
     );
+    const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
+      assistantProviderCountBeforeReply,
+    );
+    expect(assistantProviderRequests).toHaveLength(1);
+    const providerBody = parseAssistantProviderRequestBody(assistantProviderRequests[0]?.body);
+    const providerInput = Array.isArray(providerBody.input) ? providerBody.input : [];
+    const inputFiles = providerInput.flatMap((item) => {
+      if (!item || typeof item !== "object" || !("content" in item)) {
+        return [];
+      }
+      const content = (item as { content?: unknown }).content;
+      return Array.isArray(content)
+        ? content.filter((part) =>
+            part
+              && typeof part === "object"
+              && (part as { type?: unknown }).type === "input_file"
+          )
+        : [];
+    });
+    expect(inputFiles).toEqual([
+      expect.objectContaining({
+        type: "input_file",
+        filename: "attachment-01.pdf",
+        file_data: expect.stringMatching(/^data:application\/pdf;base64,/u),
+      }),
+    ]);
+    const injectedFileData = (inputFiles[0] as { file_data?: unknown }).file_data;
+    expect(typeof injectedFileData).toBe("string");
+    if (typeof injectedFileData !== "string") {
+      throw new Error("Expected native PDF input file data");
+    }
+    expect(injectedFileData).toBe(
+      `data:application/pdf;base64,${Buffer.from(HOSTED_LOCAL_LINQ_PDF_BYTES).toString("base64")}`,
+    );
+    expectNoNativeAttachmentLeaks(assistantProviderRequests[0]?.body, [
+      attachmentId,
+      expectedAttachmentDownloadPath,
+      expectedAttachmentDownloadUrl,
+      "01__lab-results.pdf",
+      "attachments/",
+      "lab-results.pdf",
+      "pdfEvidencePath:",
+      "raw/inbox/",
+      "storedPath",
+      "stub-local-vercel-ai-gateway-key",
+      "VERCEL_AI_API_KEY",
+    ]);
   }, 300_000);
 });
 
@@ -291,6 +417,22 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
     .digest("hex");
 
   return `sha256=${signature}`;
+}
+
+function parseAssistantProviderRequestBody(body: string | undefined): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(body ?? "{}");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
+function expectNoNativeAttachmentLeaks(body: string | undefined, blockedTokens: readonly string[]): void {
+  const normalized = body ?? "";
+  for (const token of blockedTokens) {
+    expect(normalized).not.toContain(token);
+  }
 }
 
 function requireLinqStub(): HostedLocalLinqStub {

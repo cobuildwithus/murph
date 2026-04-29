@@ -450,6 +450,20 @@ test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text
 
 test('materializeInboxModelBundle marks parse-failed PDFs with no text as multimodal fallback candidates', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-pdf-fallback-bundle-'))
+  const storedPdfDirectory = path.join(
+    vaultRoot,
+    'raw',
+    'inbox',
+    'captures',
+    'cap_pdf_fallback',
+    'attachments',
+    '1',
+  )
+  await mkdir(storedPdfDirectory, { recursive: true })
+  await writeFile(
+    path.join(storedPdfDirectory, 'scanned-lab.pdf'),
+    Buffer.from('%PDF-1.7\n% fixture\n'),
+  )
 
   const inboxServices = createStubInboxServices({
     vault: vaultRoot,
@@ -500,10 +514,13 @@ test('materializeInboxModelBundle marks parse-failed PDFs with no text as multim
     })
 
     assert.ok(result.bundle)
-    assert.equal(result.bundle.preparedInputMode, 'multimodal')
+    assert.equal(result.bundle.preparedInputMode, 'text-only')
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
-    assert.match(result.bundle.routingText, /Prepared input mode: multimodal/u)
+    assert.equal(result.bundle.attachments[0]?.routingPdf?.eligible, true)
+    assert.match(result.bundle.routingText, /Prepared input mode: text-only/u)
     assert.match(result.bundle.routingText, /parseState: failed/u)
+    assert.doesNotMatch(result.bundle.routingText, /pdfEvidencePath:/u)
+    assert.doesNotMatch(result.bundle.routingText, /scanned-lab\.pdf/u)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

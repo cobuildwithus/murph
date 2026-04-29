@@ -189,7 +189,6 @@ function buildLargeTabularSummary(input: {
       source,
       text: renderTabularSummary({
         attachment: input.attachment,
-        path: source.path,
         profile,
       }),
     }
@@ -282,7 +281,6 @@ function buildLargeJsonSummary(input: {
       source,
       text: renderJsonSummary({
         attachment: input.attachment,
-        path: source.path,
         profile,
       }),
     }
@@ -443,14 +441,8 @@ function describeJsonArray(
 
 function renderJsonSummary(input: {
   attachment: ModelEvidenceAttachmentMetadata
-  path: string | null
   profile: JsonProfile
 }): string {
-  const sourcePath =
-    input.path ??
-    input.attachment.derivedPath ??
-    input.attachment.storedPath ??
-    'unknown'
   const lines = [
     'Large JSON attachment summary:',
     `fileName: ${input.attachment.fileName ?? 'unknown'}`,
@@ -460,7 +452,6 @@ function renderJsonSummary(input: {
         ? input.attachment.byteSize
         : 'unknown'
     }`,
-    `sourcePath: ${sourcePath}`,
     `rootType: ${input.profile.rootType}`,
     ...(input.profile.topLevelKeys.length > 0
       ? [`topLevelKeys: ${formatJsonKeyList(input.profile.topLevelKeys)}`]
@@ -688,14 +679,8 @@ function splitDelimitedLine(line: string, delimiter: string): string[] {
 
 function renderTabularSummary(input: {
   attachment: ModelEvidenceAttachmentMetadata
-  path: string | null
   profile: TabularProfile
 }): string {
-  const sourcePath =
-    input.path ??
-    input.attachment.derivedPath ??
-    input.attachment.storedPath ??
-    'unknown'
   const lines = [
     'Large tabular attachment summary:',
     `fileName: ${input.attachment.fileName ?? 'unknown'}`,
@@ -705,7 +690,6 @@ function renderTabularSummary(input: {
         ? input.attachment.byteSize
         : 'unknown'
     }`,
-    `sourcePath: ${sourcePath}`,
     `rows: ${input.profile.dataRowCount} data rows plus header (${input.profile.totalLineCount} non-empty lines)`,
     `columns: ${input.profile.columns}`,
     `headers: ${formatHeaderList(input.profile.headers)}`,
@@ -716,7 +700,7 @@ function renderTabularSummary(input: {
       ? ['', 'Last rows:', ...formatSampleRows(input.profile.lastRows)]
       : []),
     '',
-    'Full parsed tabular content is stored locally but omitted from model context; inspect the source path for the complete data.',
+    'Full parsed tabular content is stored locally but omitted from model context.',
   ]
 
   return lines.join('\n')

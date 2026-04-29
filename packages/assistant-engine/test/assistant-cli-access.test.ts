@@ -51,7 +51,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(new Set(pathEntries).size).toBe(pathEntries.length);
   });
 
-  it("projects hosted Codex child env to the needed CLI surface without provider credentials", () => {
+  it("projects hosted Codex child env to the needed CLI surface without unrelated credentials", () => {
     const env = prepareAssistantDirectCliEnv({
       [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
       AGENTMAIL_API_KEY: "agentmail-secret",
@@ -80,7 +80,7 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.CODEX_HOME).toBe("/tmp/murph-home/.codex-hosted");
     expect(env.HOME).toBe("/tmp/murph-home");
     expect(env.VAULT).toBe("/tmp/murph-vault");
-    expect(env.VERCEL_AI_API_KEY).toBeUndefined();
+    expect(env.VERCEL_AI_API_KEY).toBe("vercel-secret");
     expect(env.ASSISTANT_MEMORY_BOUND_SESSION_ID).toBe("asst_123");
     expect(env.ASSISTANT_MEMORY_BOUND_SOURCE_PROMPT).toBe("hello");
     expect(pathEntries[0]).toBe(path.join("/tmp/murph-home", ".codex-hosted", "bin"));
