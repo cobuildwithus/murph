@@ -86,12 +86,30 @@ export interface TrendData {
 
 export type ExperimentSignalProminence = "focus" | "context";
 
+export type ExperimentSignalEstimatedChange =
+  | {
+      basis?: string;
+      confidence?: "low" | "moderate" | "high" | "mixed";
+      high: number;
+      kind: "absolute" | "relative_percent";
+      low: number;
+      unit: string;
+      window?: string;
+    }
+  | {
+      basis?: string;
+      confidence?: "low" | "moderate" | "high" | "mixed";
+      kind: "mixed_or_contextual";
+      window?: string;
+    };
+
 export interface ExperimentSignal {
   label: string;
   value: string;
   unit?: string;
   delta: string;
   direction: "up" | "down" | "neutral";
+  estimatedChange?: ExperimentSignalEstimatedChange;
   expected: string;
   baseline?: string;
   description?: string;
