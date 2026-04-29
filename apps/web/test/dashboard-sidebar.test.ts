@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
-import { createElement, type ReactNode } from "react";
+import {
+  cloneElement,
+  createElement,
+  isValidElement,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test, vi } from "vitest";
 
@@ -107,8 +112,15 @@ vi.mock("@/src/components/ui/dropdown-menu", () => ({
     createElement("div", null, children),
   DropdownMenuGroup: ({ children }: { children: ReactNode }) =>
     createElement("div", null, children),
-  DropdownMenuItem: ({ children }: { children: ReactNode }) =>
-    createElement("div", null, children),
+  DropdownMenuItem: ({
+    children,
+    render,
+  }: {
+    children: ReactNode;
+    render?: ReactNode;
+  }) => isValidElement<{ children?: ReactNode }>(render)
+    ? createElement("div", null, cloneElement(render, undefined, children))
+    : createElement("div", null, children),
   DropdownMenuLabel: ({ children }: { children: ReactNode }) =>
     createElement("div", null, children),
   DropdownMenuSeparator: () => createElement("hr"),
@@ -160,7 +172,23 @@ test("Sidebar renders account menu with signed-in user label", () => {
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /test@example\.com/);
+  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
   assert.match(markup, /Sign out/);
+});
+
+test("Sidebar keeps Settings out of the primary navigation", () => {
+  mocks.usePathname.mockReturnValue("/settings");
+  mocks.useUser.mockReturnValue({
+    user: { email: { address: "test@example.com" } },
+  });
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.match(markup, /href="\/settings"[^>]*>Settings<\/a>/);
+  assert.doesNotMatch(
+    markup,
+    /data-active="true">\s*<a[^>]*href="\/settings"[^>]*>Settings<\/a>/,
+  );
 });
 
 test("Sidebar renders a login CTA card when signed out", () => {

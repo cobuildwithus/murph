@@ -21,7 +21,9 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
 import {
@@ -47,7 +49,6 @@ const navItems = [
     matchPrefix: "/biomarkers",
   },
   { label: "Experiments", href: "/experiments" },
-  { label: "Settings", href: "/settings" },
 ];
 
 const sidebarThemeStyle = {
@@ -206,9 +207,17 @@ function AccountMenu() {
             <ChevronsUpDown className="ml-auto size-3.5 shrink-0 text-white/50" />
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" className="min-w-56">
-            <DropdownMenuItem onClick={() => void logout()}>
-              Sign out
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuItem render={<Link href="/settings" />}>
+                Settings
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => void logout()}>
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
