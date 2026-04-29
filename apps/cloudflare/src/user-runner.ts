@@ -55,6 +55,8 @@ import {
 
 export type { DurableObjectStateLike } from "./user-runner/types.js";
 
+const PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS = 45_000;
+
 interface RunnerUserStores {
   crypto: HostedUserCryptoContext;
   runnerSecrets: RunnerSecretsService;
@@ -161,8 +163,7 @@ export class HostedUserRunner {
       return;
     }
 
-    const nowMs = Date.now();
-    record = await this.stateStore.clearNextWakeIfDue(nowMs);
+    record = await this.stateStore.clearNextWakeIfDue(Date.now());
     if (!record.userId) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
@@ -176,37 +177,12 @@ export class HostedUserRunner {
     }
 
     try {
-      const webStatus = await this.readHostedRuntimeStatusFromWeb(record.userId);
-      const workspaceWakeDue = hostedWorkspaceWakeIsDue(
-        webStatus.workspace?.nextWakeAt ?? null,
-        nowMs,
-      );
-      const alarmDecisionDetails = {
-        pendingNudge: record.pendingNudge,
-        runnerNextWakePresent: record.nextWakeAt !== null,
-        workspaceNextWakePresent: (webStatus.workspace?.nextWakeAt ?? null) !== null,
-        workspaceWakeDue,
-      };
-      if (
-        !record.pendingNudge
-        && !workspaceWakeDue
-      ) {
-        await this.runtimeAlarmScheduler.syncNextWake({
-          preferredWakeAt: webStatus.workspace?.nextWakeAt ?? null,
-        });
-        emitHostedExecutionStructuredLog({
-          component: "hosted.runner",
-          details: alarmDecisionDetails,
-          message: "Hosted runner alarm skipped because no wake is due.",
-          phase: "scheduled",
-          userId: record.userId,
-        });
-        return;
-      }
-
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
-        details: alarmDecisionDetails,
+        details: {
+          pendingNudge: record.pendingNudge,
+          runnerNextWakePresent: record.nextWakeAt !== null,
+        },
         message: "Hosted runner alarm starting workspace invocation.",
         phase: "wake.running",
         userId: record.userId,
@@ -242,10 +218,27 @@ export class HostedUserRunner {
   }
 
   async nudgeHostedRunner(): Promise<HostedRunnerNudgeResult> {
-    const runningRecord = await this.stateStore.readState();
-    const alreadyRunning = this.invocationLock !== null
-      || runningRecord.inFlight;
-    const record = await this.markPendingNudgeAndApplyAlarm();
+    const activeInThisIsolate = this.invocationLock !== null;
+    let runningRecord = await this.stateStore.readState();
+    if (!activeInThisIsolate && runningRecord.inFlight) {
+      const recovery = await this.stateStore.clearStaleInvocationIfExpired({
+        nowMs: Date.now(),
+        orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
+        timeoutMs: this.env.runnerTimeoutMs,
+      });
+      runningRecord = recovery.record;
+      if (recovery.cleared) {
+        this.logStaleInvocationLeaseCleared(recovery.attemptId, runningRecord.userId);
+      }
+    }
+    const alreadyRunning = activeInThisIsolate || runningRecord.inFlight;
+    const record = await this.markPendingNudgeAndApplyAlarm({
+      preferredWakeAt: resolvePendingNudgeWakeAt({
+        nowMs: Date.now(),
+        record: runningRecord,
+        runnerTimeoutMs: this.env.runnerTimeoutMs,
+      }),
+    });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -273,7 +266,44 @@ export class HostedUserRunner {
     userId: string;
     workspaceVersion?: string | null;
   }): Promise<boolean> {
-    return this.stateStore.ownsActiveInvocationLease(input);
+    const result = await this.stateStore.ownsActiveInvocationLease(input);
+    if (result.owns && result.clearedOrphanObservation) {
+      await this.reschedulePendingNudgeAfterInvocationLiveness(result.record);
+    }
+    return result.owns;
+  }
+
+  async recordActiveInvocationHeartbeat(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<
+    | {
+      nextAlarmAt: string | null;
+      ok: true;
+    }
+    | {
+      ok: false;
+      reason:
+        | "no_active_invocation"
+        | "stale_attempt"
+        | "stale_generation"
+        | "wrong_user";
+    }
+  > {
+    const result = await this.stateStore.recordActiveInvocationHeartbeat(input);
+    if (!result.ok) {
+      return {
+        ok: false,
+        reason: result.reason,
+      };
+    }
+
+    const record = await this.reschedulePendingNudgeAfterInvocationLiveness(result.record);
+    return {
+      nextAlarmAt: record?.nextWakeAt ?? result.record.nextWakeAt,
+      ok: true,
+    };
   }
 
   async recordActiveInvocationWorkspaceCheckpoint(input: {
@@ -282,14 +312,25 @@ export class HostedUserRunner {
     userId: string;
     workspaceVersion: string;
   }): Promise<{ recorded: boolean }> {
-    return this.stateStore.recordActiveInvocationWorkspaceCheckpoint(input);
+    const result = await this.stateStore.recordActiveInvocationWorkspaceCheckpoint(input);
+    if (result.recorded && result.clearedOrphanObservation) {
+      await this.reschedulePendingNudgeAfterInvocationLiveness(result.record);
+    }
+    return { recorded: result.recorded };
   }
 
   async runUntilIdleOrBudget(input: {
     reason: HostedWorkspaceInvocationReason;
   }): Promise<HostedWorkspaceInvocationResult> {
     if (this.invocationLock !== null) {
-      const record = await this.markPendingNudgeAndApplyAlarm();
+      const runningRecord = await this.stateStore.readState();
+      const record = await this.markPendingNudgeAndApplyAlarm({
+        preferredWakeAt: resolvePendingNudgeWakeAt({
+          nowMs: Date.now(),
+          record: runningRecord,
+          runnerTimeoutMs: this.env.runnerTimeoutMs,
+        }),
+      });
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -314,27 +355,26 @@ export class HostedUserRunner {
     let initialRecord = await this.stateStore.readState();
     if (initialRecord.inFlight) {
       if (initialRecord.workspaceInvocation) {
+        const nowMs = Date.now();
         const recovery = await this.stateStore.clearStaleInvocationIfExpired({
-          nowMs: Date.now(),
+          nowMs,
+          orphanGraceMs: PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS,
           timeoutMs: this.env.runnerTimeoutMs,
         });
         initialRecord = recovery.record;
         if (recovery.cleared) {
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            details: {
-              workspaceAttemptId: recovery.attemptId,
-            },
-            level: "warn",
-            message: "Hosted workspace invocation lease expired; clearing stale in-flight state.",
-            phase: "wake.running",
-            userId: initialRecord.userId,
-          });
+          this.logStaleInvocationLeaseCleared(recovery.attemptId, initialRecord.userId);
         }
       }
 
       if (initialRecord.inFlight) {
-        const record = await this.markPendingNudgeAndApplyAlarm();
+        const record = await this.markPendingNudgeAndApplyAlarm({
+          preferredWakeAt: resolvePendingNudgeWakeAt({
+            nowMs: Date.now(),
+            record: initialRecord,
+            runnerTimeoutMs: this.env.runnerTimeoutMs,
+          }),
+        });
         return {
           nextWakeAt: record.nextWakeAt,
           status: "scheduled",
@@ -376,14 +416,16 @@ export class HostedUserRunner {
         userId: initialRecord.userId,
         workspaceVersion,
       });
-      await this.stateStore.completeInvocation({
+      const completion = await this.stateStore.completeInvocation({
         finishedAt: new Date().toISOString(),
         lease,
       });
-      await this.scheduleNextWorkspaceAlarm({
-        fallbackNextWakeAt: result.nextWakeAt ?? null,
-        userId: initialRecord.userId,
-      });
+      if (completion.completed) {
+        await this.scheduleNextWorkspaceAlarm({
+          fallbackNextWakeAt: result.nextWakeAt ?? null,
+          userId: initialRecord.userId,
+        });
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -397,11 +439,14 @@ export class HostedUserRunner {
       });
       return result;
     } catch (error) {
-      await this.stateStore.failInvocation({
+      const failure = await this.stateStore.failInvocation({
         error,
         finishedAt: new Date().toISOString(),
         lease,
       });
+      if (failure.failed) {
+        await this.scheduleHostedWakeRetryAlarm();
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -413,25 +458,52 @@ export class HostedUserRunner {
         phase: "failed",
         userId: initialRecord.userId,
       });
-      await this.scheduleHostedWakeRetryAlarm();
       throw error;
     }
   }
 
-  private async markPendingNudgeAndApplyAlarm(): Promise<RunnerStateRecord> {
-    const record = await this.stateStore.markPendingInvocationNudge();
+  private async markPendingNudgeAndApplyAlarm(input: {
+    preferredWakeAt?: string | null;
+  } = {}): Promise<RunnerStateRecord> {
+    const record = await this.stateStore.markPendingInvocationNudge({
+      preferredWakeAt: input.preferredWakeAt,
+    });
     if (record.nextWakeAt) {
       await this.state.storage.setAlarm(new Date(record.nextWakeAt));
     }
     return record;
   }
 
-  private async readHostedWorkspaceForStatus(
+  private async reschedulePendingNudgeAfterInvocationLiveness(
+    record: RunnerStateRecord,
+  ): Promise<RunnerStateRecord | null> {
+    if (!record.pendingNudge) {
+      return null;
+    }
+
+    return await this.markPendingNudgeAndApplyAlarm({
+      preferredWakeAt: resolvePendingNudgeWakeAt({
+        nowMs: Date.now(),
+        record,
+        runnerTimeoutMs: this.env.runnerTimeoutMs,
+      }),
+    });
+  }
+
+  private logStaleInvocationLeaseCleared(
+    attemptId: string | null,
     userId: string,
-  ): Promise<HostedWorkspaceState | null> {
-    const workspace = (await this.readHostedWorkspaceFromWeb(userId)).workspace;
-    this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
-    return workspace;
+  ): void {
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        workspaceAttemptId: attemptId,
+      },
+      level: "warn",
+      message: "Hosted workspace invocation lease expired; clearing stale in-flight state.",
+      phase: "wake.running",
+      userId,
+    });
   }
 
   private async readHostedRuntimeStatusFromWeb(
@@ -580,15 +652,13 @@ export class HostedUserRunner {
       return;
     }
 
-    const latestWorkspace = await this.readHostedWorkspaceForStatus(input.userId);
     await this.runtimeAlarmScheduler.syncNextWake({
-      preferredWakeAt: latestWorkspace?.nextWakeAt ?? input.fallbackNextWakeAt,
+      preferredWakeAt: input.fallbackNextWakeAt,
     });
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
-        fallbackNextWakePresent: input.fallbackNextWakeAt !== null,
-        workspaceNextWakePresent: (latestWorkspace?.nextWakeAt ?? null) !== null,
+        nextWakePresent: input.fallbackNextWakeAt !== null,
       },
       message: "Hosted runner synced next workspace alarm.",
       phase: "scheduled",
@@ -663,16 +733,34 @@ export class HostedUserRunner {
 
 }
 
-function hostedWorkspaceWakeIsDue(
-  nextWakeAt: string | null,
-  nowMs: number,
-): boolean {
-  if (!nextWakeAt) {
-    return false;
+function resolvePendingNudgeWakeAt(input: {
+  nowMs: number;
+  record: RunnerStateRecord;
+  runnerTimeoutMs: number;
+}): string {
+  const invocation = input.record.workspaceInvocation;
+  if (!invocation) {
+    return new Date(input.nowMs).toISOString();
   }
 
-  const parsedMs = Date.parse(nextWakeAt);
-  return Number.isFinite(parsedMs) && parsedMs <= nowMs;
+  const startedAtMs = Date.parse(invocation.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return new Date(input.nowMs).toISOString();
+  }
+
+  const hardDeadlineMs = startedAtMs + input.runnerTimeoutMs;
+  const lastHeartbeatAtMs = invocation.lastHeartbeatAt
+    ? Date.parse(invocation.lastHeartbeatAt)
+    : Number.NaN;
+  const orphanObservedAtMs = invocation.orphanObservedAt
+    ? Date.parse(invocation.orphanObservedAt)
+    : Number.NaN;
+  const orphanDeadlineMs = Number.isFinite(lastHeartbeatAtMs)
+    ? lastHeartbeatAtMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS
+    : Number.isFinite(orphanObservedAtMs)
+      ? orphanObservedAtMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS
+      : input.nowMs + PERSISTED_ONLY_INVOCATION_ORPHAN_GRACE_MS;
+  return new Date(Math.max(input.nowMs, Math.min(hardDeadlineMs, orphanDeadlineMs))).toISOString();
 }
 
 function hostedWorkspaceNeedsActivationBootstrapCrypto(

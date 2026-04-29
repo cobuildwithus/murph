@@ -47,6 +47,8 @@ export interface RunnerStateRecord {
   userId: string;
   workspaceInvocation: {
     attemptId: string;
+    lastHeartbeatAt: string | null;
+    orphanObservedAt: string | null;
     reason: string | null;
     startedAt: string;
     workspaceVersion: string | null;

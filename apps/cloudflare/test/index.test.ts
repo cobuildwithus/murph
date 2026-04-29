@@ -1478,6 +1478,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       nextAlarmAt: null,
     })),
     ownsActiveInvocationLease: vi.fn(async () => true),
+    recordActiveInvocationHeartbeat: vi.fn(async () => ({
+      nextAlarmAt: null,
+      ok: true as const,
+    })),
     recordActiveInvocationWorkspaceCheckpoint: vi.fn(async () => ({
       recorded: true,
     })),

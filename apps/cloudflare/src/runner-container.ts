@@ -378,9 +378,10 @@ export class RunnerContainer extends Container {
     } finally {
       try {
         const outboundProxyExpired = await this.expireOutboundProxyState(outboundProxyState);
-        if (!completedSuccessfully || !outboundProxyExpired) {
+        const shouldKeepWarm = completedSuccessfully && outboundProxyExpired;
+        if (!shouldKeepWarm) {
           await this.stopWarmContainer({
-            failClosed: !completedSuccessfully || !outboundProxyExpired,
+            failClosed: true,
           });
         }
       } finally {
@@ -665,8 +666,6 @@ export class RunnerContainer extends Container {
     }
 
     const destroyStartedAt = Date.now();
-    let destroyError: unknown = null;
-
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -686,7 +685,6 @@ export class RunnerContainer extends Container {
       if (isMissingRunnerContainerError(error)) {
         return;
       }
-      destroyError = error;
       emitRunnerContainerLifecycleFailure({
         destroyLatencyMs: Date.now() - destroyStartedAt,
         destroyTimeoutMs: RUNNER_DESTROY_TIMEOUT_MS,
@@ -736,21 +734,16 @@ export class RunnerContainer extends Container {
       }
       return;
     }
-
-    if (destroyError) {
-      return;
-    }
   }
 
-  private async stopWarmContainer(input: {
+  private async stopWarmContainer(input?: {
     failClosed?: boolean;
-  } = {
-    failClosed: true,
   }): Promise<void> {
+    const failClosed = input?.failClosed ?? true;
     this.runnerControlToken = null;
     this.runnerOutboundProxyState = null;
     this.installedRunnerOutboundProxyState = null;
-    await this.destroyIfRunning(input);
+    await this.destroyIfRunning({ failClosed });
   }
 
   private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {

@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import type { SQLInputValue } from "node:sqlite";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import type {
@@ -165,6 +165,216 @@ describe("RunnerStateStore schema guard", () => {
     expect(() => createRunnerStateStoreHarness(setupLegacyBundleSchema)).toThrow(
       /runner_meta schema is unsupported; legacy runner_bundle_slots table remains/u,
     );
+  });
+
+  it("adds invocation liveness metadata to existing runner_meta rows", async () => {
+    const setupPreviousSchema = (database: DatabaseSync) => {
+      database.exec(`
+        DROP TABLE IF EXISTS runner_meta;
+        DROP TABLE IF EXISTS runner_bundle_slots;
+        CREATE TABLE runner_meta (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          user_id TEXT NOT NULL,
+          active_invocation_id TEXT,
+          active_invocation_reason TEXT,
+          active_invocation_started_at TEXT,
+          active_workspace_version TEXT,
+          lease_generation INTEGER NOT NULL DEFAULT 0,
+          in_flight INTEGER NOT NULL DEFAULT 0,
+          last_error_at TEXT,
+          last_error_code TEXT,
+          last_invocation_at TEXT,
+          next_wake_at TEXT,
+          pending_nudge INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO runner_meta (
+          singleton,
+          user_id,
+          active_invocation_id,
+          active_invocation_reason,
+          active_invocation_started_at,
+          active_workspace_version,
+          lease_generation,
+          in_flight
+        ) VALUES (
+          1,
+          'user-existing',
+          'workspace-invocation-1',
+          'nudge',
+          '2026-04-27T00:00:00.000Z',
+          '0',
+          1,
+          1
+        );
+      `);
+    };
+
+    const { db, store } = createRunnerStateStoreHarness(setupPreviousSchema);
+
+    expect(readRunnerMetaColumns(db)).toContain("active_invocation_last_heartbeat_at");
+    expect(readRunnerMetaColumns(db)).toContain("active_invocation_orphan_observed_at");
+    await expect(store.readState()).resolves.toMatchObject({
+      userId: "user-existing",
+      workspaceInvocation: {
+        attemptId: "workspace-invocation-1",
+        lastHeartbeatAt: null,
+        orphanObservedAt: null,
+      },
+    });
+  });
+
+  it("ignores stale invocation completion and failure metadata", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    const activeLease = await store.beginInvocation({
+      reason: "nudge",
+      userId: "user-existing",
+    });
+    const staleLease = {
+      ...activeLease,
+      attemptId: "workspace-invocation-0",
+      leaseGeneration: "0",
+    };
+
+    await expect(store.completeInvocation({
+      finishedAt: "2026-04-27T00:01:00.000Z",
+      lease: staleLease,
+    })).resolves.toMatchObject({
+      completed: false,
+      record: {
+        inFlight: true,
+        lastInvocationAt: null,
+        workspaceInvocation: {
+          attemptId: activeLease.attemptId,
+        },
+      },
+    });
+    await expect(store.failInvocation({
+      error: new Error("stale failure"),
+      finishedAt: "2026-04-27T00:02:00.000Z",
+      lease: staleLease,
+    })).resolves.toMatchObject({
+      failed: false,
+      record: {
+        inFlight: true,
+        lastErrorAt: null,
+        lastErrorCode: null,
+        workspaceInvocation: {
+          attemptId: activeLease.attemptId,
+        },
+      },
+    });
+  });
+
+  it("clears orphan observation when the active child proves it still owns the lease", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    const lease = await store.beginInvocation({
+      reason: "nudge",
+      userId: "user-existing",
+    });
+    db.prepare(`
+      UPDATE runner_meta
+      SET active_invocation_orphan_observed_at = ?
+      WHERE singleton = 1
+    `).run("2026-04-27T00:00:00.000Z");
+
+    await expect(store.ownsActiveInvocationLease({
+      attemptId: lease.attemptId,
+      leaseGeneration: lease.leaseGeneration,
+      userId: lease.userId,
+    })).resolves.toMatchObject({
+      clearedOrphanObservation: true,
+      owns: true,
+      record: {
+        pendingNudge: false,
+        workspaceInvocation: {
+          attemptId: lease.attemptId,
+          orphanObservedAt: null,
+        },
+      },
+    });
+
+    expect(db.prepare(`
+      SELECT active_invocation_orphan_observed_at
+      FROM runner_meta
+      WHERE singleton = 1
+    `).get()).toEqual({
+      active_invocation_orphan_observed_at: null,
+    });
+  });
+
+  it("refreshes the active invocation heartbeat when a child proves lease ownership", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:01:00.000Z"));
+    try {
+      const { store } = createRunnerStateStoreHarness();
+      await store.bindUser("user-existing");
+      const lease = await store.beginInvocation({
+        reason: "nudge",
+        userId: "user-existing",
+      });
+
+      await expect(store.ownsActiveInvocationLease({
+        attemptId: lease.attemptId,
+        leaseGeneration: lease.leaseGeneration,
+        userId: lease.userId,
+      })).resolves.toMatchObject({
+        clearedOrphanObservation: false,
+        owns: true,
+        record: {
+          workspaceInvocation: {
+            attemptId: lease.attemptId,
+            lastHeartbeatAt: "2026-04-27T00:01:00.000Z",
+            orphanObservedAt: null,
+          },
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records active invocation heartbeats and rejects stale heartbeat leases", async () => {
+    const { store } = createRunnerStateStoreHarness();
+    await store.bindUser("user-existing");
+    const lease = await store.beginInvocation({
+      reason: "nudge",
+      userId: "user-existing",
+    });
+    await store.bindInvocationWorkspaceVersion({
+      lease,
+      workspaceVersion: "0",
+    });
+
+    await expect(store.recordActiveInvocationHeartbeat({
+      attemptId: lease.attemptId,
+      leaseGeneration: lease.leaseGeneration,
+      nowMs: Date.parse("2026-04-27T00:00:10.000Z"),
+      userId: lease.userId,
+    })).resolves.toMatchObject({
+      ok: true,
+      record: {
+        workspaceInvocation: {
+          lastHeartbeatAt: "2026-04-27T00:00:10.000Z",
+          orphanObservedAt: null,
+        },
+      },
+    });
+
+    await expect(store.recordActiveInvocationHeartbeat({
+      attemptId: lease.attemptId,
+      leaseGeneration: lease.leaseGeneration,
+      nowMs: Date.parse("2026-04-27T00:00:20.000Z"),
+      userId: lease.userId,
+    })).resolves.toMatchObject({
+      ok: true,
+      record: {
+        workspaceInvocation: {
+          lastHeartbeatAt: "2026-04-27T00:00:20.000Z",
+        },
+      },
+    });
   });
 
   it("keeps runner state free of bundle metadata after initialization", async () => {

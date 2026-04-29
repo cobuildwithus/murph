@@ -12,8 +12,10 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
       active_invocation_id TEXT,
+      active_invocation_last_heartbeat_at TEXT,
       active_invocation_reason TEXT,
       active_invocation_started_at TEXT,
+      active_invocation_orphan_observed_at TEXT,
       active_workspace_version TEXT,
       lease_generation INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,
@@ -25,8 +27,10 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     )
   `);
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_id", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_last_heartbeat_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_reason", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_started_at", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_meta", "active_invocation_orphan_observed_at", "TEXT");
   ensureRunnerStateTableColumn(sql, "runner_meta", "active_workspace_version", "TEXT");
   ensureRunnerStateTableColumn(
     sql,
@@ -46,8 +50,10 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "singleton",
       "user_id",
       "active_invocation_id",
+      "active_invocation_last_heartbeat_at",
       "active_invocation_reason",
       "active_invocation_started_at",
+      "active_invocation_orphan_observed_at",
       "active_workspace_version",
       "lease_generation",
       "in_flight",
