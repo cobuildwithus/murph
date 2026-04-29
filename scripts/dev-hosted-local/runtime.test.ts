@@ -5,9 +5,12 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  resolveHostedLocalWorkerPortMode,
   terminateChildProcessAndWait,
   waitForHealthyHttpEndpoint,
 } from "./runtime.ts";
+
+let workerModeServer: http.Server | null = null;
 
 describe("waitForHealthyHttpEndpoint", () => {
   let server: http.Server | null = null;
@@ -58,6 +61,62 @@ describe("waitForHealthyHttpEndpoint", () => {
       port: address.port,
       protocol: "http",
     })).resolves.toBeUndefined();
+  });
+});
+
+describe("resolveHostedLocalWorkerPortMode", () => {
+  afterEach(async () => {
+    if (!workerModeServer) {
+      return;
+    }
+
+    await closeServer(workerModeServer);
+    workerModeServer = null;
+  });
+
+  it("starts a fresh worker when the port is free", async () => {
+    const port = await reserveAndReleaseLocalPort();
+
+    await expect(resolveHostedLocalWorkerPortMode({
+      host: "127.0.0.1",
+      message: "worker port busy",
+      port,
+      protocol: "http",
+    })).resolves.toBe("start");
+  });
+
+  it("reuses an existing Murph worker health endpoint", async () => {
+    const port = await listenWithResponse((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        service: "cloudflare-hosted-runner",
+      }));
+    });
+
+    await expect(resolveHostedLocalWorkerPortMode({
+      host: "127.0.0.1",
+      message: "worker port busy",
+      port,
+      protocol: "http",
+    })).resolves.toBe("reuse-existing");
+  });
+
+  it("fails closed when the occupied port is not the Murph worker", async () => {
+    const port = await listenWithResponse((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        service: "other-local-service",
+      }));
+    });
+
+    await expect(resolveHostedLocalWorkerPortMode({
+      host: "127.0.0.1",
+      message: "worker port busy",
+      port,
+      protocol: "http",
+    })).rejects.toThrow("worker port busy");
   });
 });
 
@@ -139,3 +198,46 @@ describe("terminateChildProcessAndWait", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 });
+
+async function reserveAndReleaseLocalPort(): Promise<number> {
+  const temporaryServer = http.createServer();
+  const address = await listen(temporaryServer);
+  await closeServer(temporaryServer);
+  return address.port;
+}
+
+async function listenWithResponse(
+  handler: http.RequestListener,
+): Promise<number> {
+  workerModeServer = http.createServer(handler);
+  const address = await listen(workerModeServer);
+  return address.port;
+}
+
+async function listen(input: http.Server): Promise<AddressInfo> {
+  return await new Promise<AddressInfo>((resolve, reject) => {
+    input.listen(0, "127.0.0.1", () => {
+      const value = input.address();
+      if (!value || typeof value === "string") {
+        reject(new Error("Expected a TCP listener address."));
+        return;
+      }
+
+      resolve(value);
+    });
+    input.once("error", reject);
+  });
+}
+
+async function closeServer(input: http.Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    input.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
