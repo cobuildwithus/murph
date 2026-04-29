@@ -19,7 +19,6 @@ import {
 } from "./connected-account-card";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import {
-  formatContactPhoneNumber,
   formatMaskedPhoneNumber,
   toErrorMessage,
 } from "./hosted-settings-utils";
@@ -113,9 +112,9 @@ export function HostedPhoneSettings(props: {
       {props.murphPhoneNumber ? (
         <SettingsContactLink
           href={`sms:${props.murphPhoneNumber}`}
-          label={`Message Murph at ${formatContactPhoneNumber(props.murphPhoneNumber)}`}
+          label="message murph"
         >
-          Message {formatContactPhoneNumber(props.murphPhoneNumber)}
+          message murph
         </SettingsContactLink>
       ) : null}
 
