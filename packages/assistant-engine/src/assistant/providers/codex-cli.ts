@@ -41,7 +41,10 @@ import { fileURLToPath } from 'node:url'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
+    murphCommandSurface: 'direct-cli',
+    requestFormat: 'flat-prompt',
     supportedUserMessageContentTypes: ['text', 'image', 'file'],
+    supportsModelDiscovery: false,
     supportsNativeResume: true,
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
@@ -183,6 +186,13 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     return config.target.kind === 'codex-cli' && config.target.oss
       ? 'Codex OSS app-server'
       : 'Codex app-server'
+  },
+  async discoverModels() {
+    return {
+      message: 'Codex app-server uses the static model catalog.',
+      models: [],
+      status: 'unsupported',
+    }
   },
   resolveStaticModels() {
     return DEFAULT_CODEX_MODELS
