@@ -13,14 +13,13 @@ import {
 interface JoinInviteStageContentProps {
   awaitingInviteSessionResolution: boolean;
   billingPlanCode: HostedInviteStatusPayload["billing"]["defaultPlanCode"];
+  checkoutPending: boolean;
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   inviteCode: string;
   status: HostedInviteStatusPayload;
   statusRefreshErrorMessage: string | null;
   statusRefreshRetryPending: boolean;
   onCheckout: () => Promise<void>;
-  onCheckoutSuccess: () => void;
-  onCheckoutError: (error: unknown) => void;
   onSelectBillingPlan: (
     billingPlanCode: NonNullable<HostedInviteStatusPayload["billing"]["defaultPlanCode"]>,
   ) => void;
@@ -33,14 +32,13 @@ interface JoinInviteStageContentProps {
 export function JoinInviteStageContent({
   awaitingInviteSessionResolution,
   billingPlanCode,
+  checkoutPending,
   initialLinkedAccounts,
   inviteCode,
   status,
   statusRefreshErrorMessage,
   statusRefreshRetryPending,
   onCheckout,
-  onCheckoutSuccess,
-  onCheckoutError,
   onSelectBillingPlan,
   onPhoneVerified,
   onRefreshStatus,
@@ -90,9 +88,8 @@ export function JoinInviteStageContent({
           billingReady={status.capabilities.billingReady}
           billingPlanCode={billingPlanCode}
           billingPlans={status.billing.plans}
+          checkoutPending={checkoutPending}
           onCheckout={onCheckout}
-          onCheckoutSuccess={onCheckoutSuccess}
-          onCheckoutError={onCheckoutError}
           onSelectBillingPlan={onSelectBillingPlan}
         />
       ) : null}

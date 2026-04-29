@@ -4,26 +4,10 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useState } from "react";
 import Link from "next/link";
 
-import {
-  ArrowRightIcon,
-  CalendarIcon,
-  CheckCircleIcon,
-  CheckIcon,
-  LoaderCircleIcon,
-  LockIcon,
-  RefreshCwIcon,
-  ShieldCheckIcon,
-} from "lucide-react";
+import { CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
-import { CheckoutButton } from "@/src/components/ui/checkout-button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-} from "@/src/components/ui/card";
 import type { HostedBillingPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
@@ -204,180 +188,89 @@ export function JoinInviteCheckoutPanel({
   billingReady,
   billingPlanCode,
   billingPlans,
+  checkoutPending,
   onCheckout,
-  onCheckoutSuccess,
-  onCheckoutError,
   onSelectBillingPlan,
 }: {
   billingReady: boolean;
   billingPlanCode: HostedBillingPlanCode | null;
   billingPlans: HostedInviteStatusPayload["billing"]["plans"];
+  checkoutPending: boolean;
   onCheckout: () => Promise<void>;
-  onCheckoutSuccess: () => void;
-  onCheckoutError: (error: unknown) => void;
   onSelectBillingPlan: (billingPlanCode: HostedBillingPlanCode) => void;
 }) {
   const selectedBillingPlan =
     billingPlans.find((plan) => plan.code === billingPlanCode) ?? null;
 
   return (
-    <Card className="rounded-3xl shadow-[0_24px_60px_-30px_rgba(26,31,22,0.18)]">
-      <CardContent className="px-7 pt-3 pb-2 sm:px-10 sm:pt-5">
-        <div className="space-y-2">
-          <h2 className="font-serif text-2xl font-normal tracking-tight text-foreground">
-            Choose your plan
-          </h2>
-          <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-            Private vault, every experiment, full before/after analysis.
-          </p>
-        </div>
+    <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-6 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-[#2d3436]">Choose your plan</p>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Murph includes a private health vault, full experiment library, before
+          and after analysis.
+        </p>
+      </div>
 
-        <div
-          role="radiogroup"
-          aria-label="Billing plan"
-          className="mt-6 grid gap-3 sm:grid-cols-2"
-        >
-          {billingPlans.map((plan, index) => {
-            const selected = plan.code === billingPlanCode;
-            const [priceAmount, priceUnit] = splitRecurringSummary(
-              plan.recurringSummary,
-            );
-            const ariaLabel = [
-              plan.displayName,
-              plan.recurringSummary,
-              plan.badge,
-            ]
-              .filter(Boolean)
-              .join(", ");
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {billingPlans.map((plan) => {
+          const selected = plan.code === billingPlanCode;
 
-            return (
-              <button
-                key={plan.code}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                aria-label={ariaLabel}
-                tabIndex={selected || (!billingPlanCode && index === 0) ? 0 : -1}
-                onClick={() => onSelectBillingPlan(plan.code)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key !== "ArrowRight"
-                    && event.key !== "ArrowLeft"
-                    && event.key !== "ArrowDown"
-                    && event.key !== "ArrowUp"
-                  ) {
-                    return;
-                  }
-                  event.preventDefault();
-                  const direction =
-                    event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
-                  const next =
-                    billingPlans[
-                      (index + direction + billingPlans.length) % billingPlans.length
-                    ];
-                  if (next) {
-                    onSelectBillingPlan(next.code);
-                  }
-                }}
-                className={[
-                  "rounded-2xl border px-5 py-5 text-left transition-colors",
-                  selected
-                    ? "border-foreground/15 bg-olive-light/15 shadow-[0_2px_4px_rgba(26,31,22,0.05)]"
-                    : "border-border bg-card hover:border-olive-light/40",
-                ].join(" ")}
-              >
-                <div className="flex h-7 items-center justify-between gap-3">
-                  <p className="text-sm font-semibold leading-none text-foreground">
+          return (
+            <button
+              key={plan.code}
+              type="button"
+              onClick={() => onSelectBillingPlan(plan.code)}
+              className={[
+                "rounded-2xl border px-4 py-4 text-left transition-colors",
+                selected
+                  ? "border-olive/60 bg-olive/5 shadow-[0_1px_2px_rgba(45,52,54,0.06)]"
+                  : "border-[#c4a882]/25 bg-white hover:border-[#c4a882]/45",
+              ].join(" ")}
+              aria-pressed={selected}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[#2d3436]">
                     {plan.displayName}
                   </p>
-                  {selected ? (
-                    <span
-                      aria-hidden
-                      className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background"
-                    >
-                      <CheckIcon className="size-3.5" strokeWidth={2.5} />
-                    </span>
-                  ) : plan.badge ? (
-                    <Badge
-                      variant="secondary"
-                      className="h-7 rounded-full bg-olive-light/20 px-2.5 font-mono text-[0.625rem] font-medium uppercase tracking-[0.14em] text-olive"
-                    >
-                      {plan.badge}
-                    </Badge>
-                  ) : null}
+                  <p className="mt-1 font-serif text-2xl font-semibold tracking-tight text-[#2d3436]">
+                    {plan.recurringSummary}
+                  </p>
                 </div>
-                <div className="mt-3 flex items-baseline gap-0.5">
-                  <span className="font-serif text-4xl font-normal leading-none tracking-tight text-foreground">
-                    {priceAmount}
+                {plan.badge ? (
+                  <span className="rounded-full bg-olive/10 px-2.5 py-1 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-olive">
+                    {plan.badge}
                   </span>
-                  {priceUnit ? (
-                    <span className="font-serif text-lg font-normal text-muted-foreground">
-                      {priceUnit}
-                    </span>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                ) : null}
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
-        <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="flex size-7 items-center justify-center rounded-full border border-border bg-card">
-            <CalendarIcon className="size-3.5" />
-          </span>
-          <span className="leading-relaxed">
-            {selectedBillingPlan
-              ? `You’ll start on the ${selectedBillingPlan.displayName.toLowerCase()} plan.`
-              : "Choose a plan to continue."}
-          </span>
-        </div>
-
-        <CheckoutButton
-          onCheckout={onCheckout}
-          onSuccess={onCheckoutSuccess}
-          onError={onCheckoutError}
-          disabled={!billingReady || !billingPlanCode}
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {selectedBillingPlan
+            ? `You’ll start on the ${selectedBillingPlan.displayName.toLowerCase()} plan.`
+            : "Choose a plan to continue."}
+        </p>
+        <Button
+          type="button"
+          onClick={onCheckout}
+          disabled={checkoutPending || !billingReady || !billingPlanCode}
           size="lg"
-          className="mt-5 h-16 w-full justify-between rounded-2xl bg-foreground px-7 text-[1.0625rem] font-semibold text-background hover:bg-foreground/90"
-          idleLabel={billingReady ? "Continue to checkout" : "Billing is not configured yet"}
-          idleAdornment={<ArrowRightIcon className="size-5" />}
-        />
-      </CardContent>
-
-      <CardFooter className="border-t border-border bg-muted/40 px-7 py-5 sm:px-10">
-        <ul className="flex w-full flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <CheckoutTrustItem icon={LockIcon} label="Private by default" />
-          <CheckoutTrustItem icon={ShieldCheckIcon} label="No data sold, ever" />
-          <CheckoutTrustItem icon={RefreshCwIcon} label="Cancel anytime" />
-        </ul>
-      </CardFooter>
-    </Card>
+          className="w-full sm:w-fit"
+        >
+          {checkoutPending
+            ? "Opening checkout…"
+            : billingReady
+            ? "Continue to checkout"
+            : "Billing is not configured yet"}
+        </Button>
+      </div>
+    </div>
   );
-}
-
-function CheckoutTrustItem({
-  icon: Icon,
-  label,
-}: {
-  icon: typeof LockIcon;
-  label: string;
-}) {
-  return (
-    <li className="flex items-center gap-2.5">
-      <span className="flex size-7 items-center justify-center rounded-full border border-border bg-card">
-        <Icon className="size-3.5 text-olive-light" />
-      </span>
-      <span className="text-sm text-foreground">{label}</span>
-    </li>
-  );
-}
-
-function splitRecurringSummary(summary: string): [string, string | null] {
-  const match = summary.match(/^(.*?)(\/.+)$/);
-  if (!match) {
-    return [summary, null];
-  }
-  return [match[1].trim(), match[2]];
 }
 
 export function JoinInviteActivePanel({
