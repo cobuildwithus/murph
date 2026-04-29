@@ -11,22 +11,14 @@ import {
 } from 'vitest'
 
 import {
-  assistantAskResultSchema,
-} from '@murphai/operator-config/assistant-cli-contracts'
-import {
   inboxListResultSchema,
   inboxShowResultSchema,
   type InboxListResult,
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import {
-  assistantChatReplyArtifactExists,
   assistantResultArtifactExists,
-  assistantAutoReplyGroupOutcomeArtifactExists,
-  writeAssistantAutoReplyGroupOutcomeArtifact,
-  writeAssistantChatDeferredArtifacts,
   writeAssistantChatErrorArtifacts,
-  writeAssistantChatResultArtifacts,
 } from '../src/assistant/automation/artifacts.ts'
 import { describeAssistantAutoReplyFailure } from '../src/assistant/automation/failure-observability.ts'
 import { collectAssistantAutoReplyGroup } from '../src/assistant/automation/grouping.ts'
@@ -102,84 +94,6 @@ beforeEach(() => {
     userMessageContent: null,
   })
 })
-
-function createAssistantAskResult(input: {
-  delivery?: {
-    channel: string
-    sentAt: string
-    target: string
-    targetKind?: 'explicit' | 'participant' | 'thread'
-  } | null
-  deliveryError?: { code: string | null; message: string } | null
-  deliveryIntentId?: string | null
-  response?: string
-  sessionId?: string
-}) {
-  return assistantAskResultSchema.parse({
-    vault: '/tmp/automation-support-vault',
-    status: 'completed',
-    prompt: 'reply to the inbox capture',
-    response: input.response ?? 'Done.',
-    session: {
-      schema: 'murph.assistant-session.v1',
-      sessionId:
-        input.sessionId ?? 'asst_1234567890abcdef1234567890abcd',
-      target: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        model: 'gpt-5.4',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'workspace-write',
-      },
-      resumeState: null,
-      alias: null,
-      binding: {
-        conversationKey: null,
-        channel: 'telegram',
-        identityId: null,
-        actorId: 'actor-1',
-        threadId: 'thread-1',
-        threadIsDirect: true,
-        delivery: null,
-      },
-      createdAt: '2026-04-08T00:00:00.000Z',
-      updatedAt: '2026-04-08T00:00:00.000Z',
-      lastTurnAt: null,
-      turnCount: 0,
-      provider: 'codex-cli',
-      providerOptions: {
-        continuityFingerprint: 'codex-fingerprint',
-        executionDriver: 'codex-app-server',
-        model: 'gpt-5.4',
-        reasoningEffort: 'medium',
-        sandbox: 'workspace-write',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-        provider: 'codex-cli',
-        resumeKind: 'codex-thread',
-      },
-    },
-    delivery: input.delivery
-      ? {
-          channel: input.delivery.channel,
-          idempotencyKey: null,
-          target: input.delivery.target,
-          targetKind: input.delivery.targetKind ?? 'thread',
-          sentAt: input.delivery.sentAt,
-          messageLength: (input.response ?? 'Done.').length,
-          providerMessageId: null,
-          providerThreadId: null,
-        }
-      : null,
-    deliveryDeferred: false,
-    deliveryIntentId: input.deliveryIntentId ?? null,
-    deliveryError: input.deliveryError ?? null,
-  })
-}
 
 function createListCapture(
   overrides: Partial<InboxListResult['items'][number]> = {},
@@ -313,85 +227,15 @@ async function createTempVault(prefix: string) {
 }
 
 describe('assistant automation artifacts', () => {
-  it('writes and detects grouped outcome, deferred, result, and error artifacts', async () => {
+  it('detects result artifacts and writes non-terminal chat error diagnostics', async () => {
     const { vaultRoot } = await createTempVault('assistant-automation-support-')
 
     expect(
       await assistantResultArtifactExists(vaultRoot, 'capture-a'),
     ).toBe(false)
-    expect(
-      await assistantChatReplyArtifactExists(vaultRoot, 'capture-a'),
-    ).toBe(false)
-    expect(
-      await assistantAutoReplyGroupOutcomeArtifactExists(vaultRoot, 'capture-a'),
-    ).toBe(false)
 
-    const deferredResult = createAssistantAskResult({
-      delivery: null,
-      deliveryError: {
-        code: 'DELIVERY_QUEUED',
-        message: 'delivery queued',
-      },
-      deliveryIntentId: 'intent-1',
-      response: 'Queued reply',
-    })
-    await writeAssistantChatDeferredArtifacts({
-      captureIds: ['capture-a', 'capture-b'],
-      queuedAt: '2026-04-08T01:00:00.000Z',
-      result: deferredResult,
-      vault: vaultRoot,
-    })
-
-    expect(
-      await assistantChatReplyArtifactExists(vaultRoot, 'capture-a'),
-    ).toBe(true)
-
-    await writeAssistantAutoReplyGroupOutcomeArtifact({
-      captureIds: ['capture-a', 'capture-b'],
-      outcome: 'deferred',
-      recordedAt: '2026-04-08T01:01:00.000Z',
-      result: deferredResult,
-      vault: vaultRoot,
-    })
-    expect(
-      await assistantAutoReplyGroupOutcomeArtifactExists(vaultRoot, 'capture-a'),
-    ).toBe(true)
-
-    const primaryOutcomePath = await resolveAssistantInboxArtifactPath(
-      vaultRoot,
-      'capture-a',
-      'chat-group-outcome.json',
-    )
-    const primaryOutcome = JSON.parse(
-      await readFile(primaryOutcomePath.absolutePath, 'utf8'),
-    ) as Record<string, unknown>
-
-    expect(primaryOutcome).toMatchObject({
-      captureId: 'capture-a',
-      delivery: null,
-      deliveryIntentId: 'intent-1',
-      groupCaptureIds: ['capture-a', 'capture-b'],
-      outcome: 'deferred',
-      response: 'Queued reply',
-      schema: 'murph.assistant-auto-reply-group-outcome.v1',
-      sessionId: 'asst_1234567890abcdef1234567890abcd',
-    })
-
-    await writeAssistantChatResultArtifacts({
-      captureIds: ['capture-a'],
-      respondedAt: '2026-04-08T01:02:00.000Z',
-      result: createAssistantAskResult({
-        delivery: {
-          channel: 'telegram',
-          sentAt: '2026-04-08T01:02:30.000Z',
-          target: 'thread-1',
-        },
-        response: 'Delivered reply',
-      }),
-      vault: vaultRoot,
-    })
     await writeAssistantChatErrorArtifacts({
-      captureIds: ['capture-a'],
+      captureIds: ['capture-a', 'capture-b'],
       failure: {
         code: 'ASSISTANT_CODEX_FAILED',
         context: { retryable: true },
@@ -401,6 +245,22 @@ describe('assistant automation artifacts', () => {
         safeSummary: 'assistant provider failed; retry may succeed (ASSISTANT_CODEX_FAILED)',
       },
       vault: vaultRoot,
+    })
+    const errorPath = await resolveAssistantInboxArtifactPath(
+      vaultRoot,
+      'capture-a',
+      'chat-error.json',
+    )
+    const errorArtifact = JSON.parse(
+      await readFile(errorPath.absolutePath, 'utf8'),
+    ) as Record<string, unknown>
+
+    expect(errorArtifact).toMatchObject({
+      captureId: 'capture-a',
+      groupCaptureIds: ['capture-a', 'capture-b'],
+      kind: 'provider',
+      retryable: true,
+      schema: 'murph.assistant-chat-error.v1',
     })
 
     const resultPath = await resolveAssistantInboxArtifactPath(
@@ -412,77 +272,6 @@ describe('assistant automation artifacts', () => {
     expect(
       await assistantResultArtifactExists(vaultRoot, 'capture-a'),
     ).toBe(true)
-  })
-
-  it('rejects empty grouped outcome inputs', async () => {
-    const { vaultRoot } = await createTempVault('assistant-automation-support-')
-
-    await expect(
-      writeAssistantAutoReplyGroupOutcomeArtifact({
-        captureIds: [],
-        outcome: 'result',
-        recordedAt: '2026-04-08T01:00:00.000Z',
-        result: createAssistantAskResult({
-          response: 'No-op',
-        }),
-        vault: vaultRoot,
-      }),
-    ).rejects.toThrow(/require at least one capture id/u)
-  })
-
-  it('writes delivered group outcomes and null-delivery result artifacts', async () => {
-    const { vaultRoot } = await createTempVault('assistant-automation-support-')
-
-    await writeAssistantAutoReplyGroupOutcomeArtifact({
-      captureIds: ['capture-c'],
-      outcome: 'result',
-      recordedAt: '2026-04-08T01:02:30.000Z',
-      result: createAssistantAskResult({
-        delivery: {
-          channel: 'telegram',
-          sentAt: '2026-04-08T01:02:30.000Z',
-          target: 'thread-9',
-        },
-        deliveryIntentId: 'intent-9',
-        response: 'Delivered reply',
-      }),
-      vault: vaultRoot,
-    })
-    await writeAssistantChatResultArtifacts({
-      captureIds: ['capture-c'],
-      respondedAt: '2026-04-08T01:03:00.000Z',
-      result: createAssistantAskResult({
-        delivery: null,
-        response: 'Saved without delivery metadata',
-      }),
-      vault: vaultRoot,
-    })
-
-    const outcomePath = await resolveAssistantInboxArtifactPath(
-      vaultRoot,
-      'capture-c',
-      'chat-group-outcome.json',
-    )
-    const outcome = JSON.parse(await readFile(outcomePath.absolutePath, 'utf8')) as {
-      delivery: { channel: string; sentAt: string; target: string } | null
-    }
-    expect(outcome.delivery).toEqual({
-      channel: 'telegram',
-      sentAt: '2026-04-08T01:02:30.000Z',
-      target: 'thread-9',
-    })
-
-    const resultPath = await resolveAssistantInboxArtifactPath(
-      vaultRoot,
-      'capture-c',
-      'chat-result.json',
-    )
-    const resultArtifact = JSON.parse(await readFile(resultPath.absolutePath, 'utf8')) as {
-      channel: string | null
-      target: string | null
-    }
-    expect(resultArtifact.channel).toBeNull()
-    expect(resultArtifact.target).toBeNull()
   })
 })
 

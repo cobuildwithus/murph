@@ -429,7 +429,8 @@ export async function runAssistantAutomationPass(
       stateProgressed ||
       outboxResult.attempted > 0 ||
       cronResult.processed > 0 ||
-      recovery.progressed,
+      recovery.progressed ||
+      replies.checkpointRequired === true,
     replies,
     routing: scanResult.routing,
   }
@@ -440,6 +441,9 @@ function mergeAssistantAutoReplyScanResults(
   right: AssistantAutoReplyScanResult,
 ): AssistantAutoReplyScanResult {
   return {
+    ...(left.checkpointRequired || right.checkpointRequired
+      ? { checkpointRequired: true }
+      : {}),
     considered: left.considered + right.considered,
     failed: left.failed + right.failed,
     nextWakeAt: earliestAssistantAutomationWakeAt(

@@ -72,9 +72,17 @@ This plan is now being implemented for the hosted conversation loss window:
 
 - Delete the `afterCheckpointBeforeAssistant` phase from mailbox imports and runner orchestration. Read acknowledgements, parser drain, and provider cleanup cannot sit between import checkpoint and assistant admission.
 - Make auto-reply selection evidence-based. A capture is excluded from pending work only when it has per-capture terminal handling evidence: reply intent committed, replied/deferred artifacts, or explicit suppression.
-- Treat `autoReply.cursor` as a legacy enablement boundary only while migrating the state shape. It must not advance after processing and must not hide unhandled captures behind it.
+- Treat auto-reply channel state as a fixed enablement boundary. It must not advance after processing and must not hide unhandled captures behind it.
 - Add explicit suppression evidence for intentional no-reply outcomes. Failed reply artifacts stay observability/retry evidence, not terminal handling proof.
 - Keep eventual Linq provider cleanup by queueing inbound Linq message deletion after terminal handling evidence exists, then draining the existing hosted provider cleanup retry state after commit.
+
+2026-04-29 update:
+
+- Deleted the old chat-result/chat-deferred/group-outcome artifact authority from assistant auto-reply handling. `chat-error.json` remains non-terminal observability only.
+- Kept terminal auto-reply evidence as the only replay/dedupe authority for handled captures, with repair for partially written group evidence.
+- Added `checkpointRequired` propagation so terminal evidence writes count as hosted pass progress even when no scan cursor or automation state changes.
+- Kept evidenced captures in the scanner candidate set when their terminal evidence group is incomplete, so missing sibling evidence can be repaired before duplicate reply work.
+- Updated focused assistant-engine coverage and status fixtures to the fixed `eligibleAfter` channel state shape.
 
 ### 0. Close Hosted Mailbox Lane Gaps
 

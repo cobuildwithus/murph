@@ -13,42 +13,6 @@ afterEach(() => {
 })
 
 describe('assistant automation tail branch coverage', () => {
-  it('rejects grouped outcome writes when the primary artifact path is missing', async () => {
-    const resolveAssistantInboxArtifactPath = vi
-      .fn()
-      .mockResolvedValueOnce(undefined)
-    const writeJsonFileAtomic = vi.fn()
-
-    vi.doMock('@murphai/vault-usecases/assistant-vault-paths', () => ({
-      resolveAssistantInboxArtifactPath,
-    }))
-    vi.doMock('../src/assistant/shared.js', () => ({
-      writeJsonFileAtomic,
-    }))
-
-    const artifacts = await import('../src/assistant/automation/artifacts.ts')
-
-    await expect(
-      artifacts.writeAssistantAutoReplyGroupOutcomeArtifact({
-        captureIds: ['capture-a'],
-        outcome: 'result',
-        recordedAt: '2026-04-08T00:00:00.000Z',
-        result: {
-          delivery: null,
-          deliveryError: null,
-          deliveryIntentId: null,
-          response: 'Done.',
-          session: {
-            sessionId: 'session-a',
-          },
-        } as never,
-        vault: '/tmp/test-vault',
-      }),
-    ).rejects.toThrow(/primary capture artifact path/u)
-
-    expect(writeJsonFileAtomic).not.toHaveBeenCalled()
-  })
-
   it('covers runtime-lock held and propagation branches through mocked directory locks', async () => {
     class MockDirectoryLockHeldError<TMetadata> extends Error {
       inspection: {
