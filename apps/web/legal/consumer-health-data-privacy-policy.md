@@ -72,7 +72,7 @@ Murph may collect, use, and process Consumer Health Data for the following purpo
 - to maintain, test, develop, and improve Murph using aggregated, de-identified, pseudonymized, or otherwise minimized information where feasible; and
 - for other purposes disclosed to you with any consent required by law.
 
-Unless we present a separate, specific opt-in consent that clearly identifies the Consumer Health Data involved and applicable law permits the use, Murph does not use Consumer Health Data you submit through Murph to train, fine-tune, or improve Murph’s or any third party’s general-purpose AI models. We also require third-party AI model providers that process Consumer Health Data for the Hosted Service not to use that data to train their models, except where you separately authorize that use after clear disclosure.
+Murph does not use Consumer Health Data you submit through Murph to train, fine-tune, or improve Murph’s or any third party’s general-purpose AI models. This commitment applies even if you provide feedback. Separate research consents, if offered, will be limited to the research or product-evaluation purpose described in that consent and will not authorize general-purpose AI model training on Consumer Health Data. We also require third-party AI model providers that process Consumer Health Data for the Hosted Service not to use that data to train their models.
 
 ## 6. Categories of Consumer Health Data we may share
 
@@ -146,7 +146,7 @@ Murph may need to authenticate your identity and authority before acting on a re
 
 Where permitted by law, you may use an authorized agent to submit a request. Murph may require proof that the agent is authorized to act for you and may ask you to verify your identity directly.
 
-Murph will respond to Consumer Health Data requests within the time required by applicable law. When allowed by law, Murph may extend the response period if reasonably necessary and will tell you why.
+For Consumer Health Data requests covered by applicable law, Murph will respond within the time required by law, including within 45 days where Washington law requires it. When allowed by law, Murph may use one 45-day extension if reasonably necessary and will tell you why.
 
 ## 12. Withdrawing consent and disconnecting integrations
 
@@ -166,7 +166,7 @@ Deletion may be limited or delayed where permitted by law, including for legal c
 
 If Murph denies your Consumer Health Data request and applicable law gives you an appeal right, you may appeal by replying to Murph’s decision or by emailing **legal@justco.build** with the subject line **“Consumer Health Data Appeal.”**
 
-Murph will review the appeal and respond within the time required by applicable law. If Murph denies the appeal, Murph will explain the reason for the denial and provide information about how to contact the appropriate regulator or attorney general where required by law.
+Murph will review the appeal and respond within the time required by applicable law, including within 45 days where Washington law requires it. If Murph denies the appeal where consumer health privacy law requires regulator-contact information, Murph will explain the reason for the denial and provide the applicable complaint mechanism or other method for contacting the relevant regulator or attorney general.
 
 ## 15. Security
 

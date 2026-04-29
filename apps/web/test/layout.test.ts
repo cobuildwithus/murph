@@ -79,12 +79,12 @@ test("RootLayout renders the Apache footer with support and GitHub links", () =>
   assert.match(markup, /Consumer Health Data Privacy Policy/);
   assert.match(
     markup,
-    /href="\/legal\/consumer-health-data-privacy-policy" class="max-w-full text-\[12px\] leading-snug font-semibold text-stone-700 underline underline-offset-4 transition-colors hover:text-stone-900"/u,
+    /href="\/consumer-health-data-privacy-policy" class="max-w-full text-\[12px\] leading-snug font-semibold text-stone-700 underline underline-offset-4 transition-colors hover:text-stone-900"/u,
   );
   assert.match(markup, /Privacy Policy/);
-  assert.match(markup, /\/legal\/privacy\.pdf/u);
+  assert.match(markup, /\/legal\/privacy/u);
   assert.match(markup, /Terms/);
-  assert.match(markup, /\/legal\/terms\.pdf/u);
+  assert.match(markup, /\/legal\/terms/u);
   assert.match(markup, /Subprocessors/);
   assert.match(markup, /\/subprocessors/u);
   assert.match(markup, /Contact support/);

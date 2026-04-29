@@ -32,6 +32,12 @@ const mocks = vi.hoisted(() => ({
   formatHostedLandingPricingLongSummary: vi.fn(() => "Murph starts at $0"),
 }));
 
+const redirectMock = vi.hoisted(() =>
+  vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
+);
+
 const policyMarkdown = readFileSync(
   path.resolve(
     process.cwd(),
@@ -56,13 +62,17 @@ vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(async () => policyMarkdown),
 }));
 
+vi.mock("next/navigation", () => ({
+  redirect: redirectMock,
+}));
+
 import { SiteFooter } from "../src/components/homepage/site-footer";
 
 test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders the authored policy source", async () => {
   const {
     default: ConsumerHealthDataPrivacyPolicyPage,
     metadata: consumerHealthMetadata,
-  } = await import("../app/legal/consumer-health-data-privacy-policy/page");
+  } = await import("../app/consumer-health-data-privacy-policy/page");
 
   assert.equal(
     consumerHealthMetadata.title,
@@ -70,7 +80,7 @@ test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders
   );
   assert.equal(
     consumerHealthMetadata.alternates?.canonical,
-    "/legal/consumer-health-data-privacy-policy",
+    "/consumer-health-data-privacy-policy",
   );
   assert.equal(
     consumerHealthMetadata.description,
@@ -89,6 +99,21 @@ test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders
   assert.match(markup, /Download PDF/);
 });
 
+test("legacy Consumer Health Data Privacy Policy route redirects to the canonical notice", async () => {
+  const { default: LegacyConsumerHealthDataPrivacyPolicyPage } = await import(
+    "../app/legal/consumer-health-data-privacy-policy/page",
+  );
+
+  assert.throws(
+    () => LegacyConsumerHealthDataPrivacyPolicyPage(),
+    /NEXT_REDIRECT:\/consumer-health-data-privacy-policy/,
+  );
+  assert.equal(
+    redirectMock.mock.calls.at(-1)?.[0],
+    "/consumer-health-data-privacy-policy",
+  );
+});
+
 test("SiteFooter exposes the consumer health data privacy link with wrapping-friendly legal nav styling", () => {
   const markup = renderToStaticMarkup(
     createElement(SiteFooter, {
@@ -97,7 +122,7 @@ test("SiteFooter exposes the consumer health data privacy link with wrapping-fri
   );
 
   assert.match(markup, /aria-label="Legal and project links"/);
-  assert.match(markup, /href="\/legal\/consumer-health-data-privacy-policy"/u);
+  assert.match(markup, /href="\/consumer-health-data-privacy-policy"/u);
   assert.match(
     markup,
     /font-semibold text-\[#f5f0e8\]\/70 underline underline-offset-4 transition-colors hover:text-\[#f5f0e8\]/u,

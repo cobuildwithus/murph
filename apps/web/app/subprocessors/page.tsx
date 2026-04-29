@@ -29,7 +29,7 @@ const providerRows = [
     provider: "Cloudflare",
     service: "Hosted execution, Workers, Durable Objects, queues, object storage, logs, and security.",
     dataCategories:
-      "Encrypted hosted workspace data, execution metadata, runtime logs, and operational artifacts.",
+      "Encrypted stored workspace data, transient execution content needed to run requested hosted workflows, execution metadata, runtime logs, and operational artifacts.",
     region: "United States / global infrastructure",
     training: "No",
     retention: "Execution artifacts and logs per Murph retention rules and deployment settings.",
@@ -82,7 +82,8 @@ const providerRows = [
     dataCategories:
       "Prompts, messages, files, health context, tool context, and outputs needed for the requested feature.",
     region: "Provider-specific",
-    training: "Not used for Murph health data unless no-training controls are in place.",
+    training:
+      "No for Murph-managed health data. Murph does not route health data to configured model providers unless no-training controls are in place. If a user supplies their own provider account, API key, or self-hosted configuration, that provider's own settings and terms may apply.",
     retention:
       "Limited to service delivery, security, and troubleshooting under applicable provider controls.",
     role: "Deployment-configured model provider",
@@ -128,17 +129,6 @@ const providerRows = [
     role: "Connected service / integration provider",
   },
   {
-    provider: "Brave Search, Exa, Kagi, Perplexity, SerpAPI, or Tavily",
-    service: "Optional web-search features requested by the user when a search provider is configured.",
-    dataCategories:
-      "Feature-specific search queries, result snippets, source URLs, and operational metadata.",
-    region: "Provider-specific",
-    training: "Not used for Murph health data unless no-training controls are in place.",
-    retention:
-      "Limited to service delivery, security, and troubleshooting under applicable provider controls.",
-    role: "Feature provider / subprocessor",
-  },
-  {
     provider: "Mapbox",
     service: "Optional routing, geocoding, directions, and map enrichment requested by the user.",
     dataCategories:
@@ -149,12 +139,25 @@ const providerRows = [
     role: "Feature provider / subprocessor",
   },
   {
+    provider: "Configured search providers",
+    service: "Optional user-requested search, retrieval, or source-discovery features.",
+    dataCategories:
+      "Feature-specific search queries, result snippets, source URLs, health context needed for the requested feature, and operational metadata.",
+    region: "Provider-specific",
+    training:
+      "Murph does not send health data to search providers unless the feature requires it, the user requests it, and applicable no-training/no-secondary-use controls are in place.",
+    retention:
+      "Limited to service delivery, security, and troubleshooting under applicable provider controls.",
+    role: "Deployment-configured feature provider",
+  },
+  {
     provider: "Deployment-configured transcription and parsing providers",
-    service: "Optional search, transcription, parsing, routing, or enrichment features requested by the user.",
+    service: "Optional transcription, parsing, routing, or enrichment features requested by the user.",
     dataCategories:
       "Feature-specific prompts, files, audio, extracted text, and operational metadata.",
     region: "Provider-specific",
-    training: "Not used for Murph health data unless no-training controls are in place.",
+    training:
+      "No for Murph-managed health data when applicable no-training controls are in place.",
     retention:
       "Limited to service delivery, security, and troubleshooting under applicable provider controls.",
     role: "Deployment-configured feature provider",

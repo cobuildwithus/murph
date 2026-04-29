@@ -56,6 +56,23 @@ The UI receives the composed `Experiment` view model, but public protocol prose,
 - storing raw provider webhook bodies or provider tokens in hosted API responses
 - turning Cloudflare execution mirrors into a second durable source of product truth
 
+## Legal and health-permission publication surfaces
+
+Hosted deployments should expose HTML legal pages in addition to downloadable
+PDFs:
+
+- `/legal/privacy`
+- `/legal/terms`
+- `/consumer-health-data-privacy-policy`
+- `/subprocessors`
+
+For Google Health Connect distribution, the Google Play privacy-policy link and
+the Health Connect permission flow should point to the same `/legal/privacy`
+policy users can reach in product. Health and fitness permissions must be tied
+to a clear user benefit, no broader than necessary for the feature, and the
+policy must explain collected health/fitness categories, use, storage, sharing,
+retention/deletion, and security practices.
+
 ## Canonical hosted models
 
 The hosted Prisma schema keeps ownership sharp and nested:

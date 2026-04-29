@@ -60,19 +60,19 @@ export default function RootLayout(input: { children: React.ReactNode }) {
                   </p>
                   <div className="flex flex-wrap items-center gap-3">
                     <a
-                      href="/legal/consumer-health-data-privacy-policy"
+                      href="/consumer-health-data-privacy-policy"
                       className="max-w-full text-[12px] leading-snug font-semibold text-stone-700 underline underline-offset-4 transition-colors hover:text-stone-900"
                     >
                       Consumer Health Data Privacy Policy
                     </a>
                     <a
-                      href="/legal/privacy.pdf"
+                      href="/legal/privacy"
                       className="inline-flex items-center text-[11px] font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:text-stone-800"
                     >
                       Privacy Policy
                     </a>
                     <a
-                      href="/legal/terms.pdf"
+                      href="/legal/terms"
                       className="inline-flex items-center text-[11px] font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:text-stone-800"
                     >
                       Terms
