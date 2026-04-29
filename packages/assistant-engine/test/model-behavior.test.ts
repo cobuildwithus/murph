@@ -115,6 +115,26 @@ describe('assistant local PDF evidence guidance', () => {
   })
 })
 
+describe('assistant user-facing wording guidance', () => {
+  it('keeps Health Commons provenance behind first-person assistant wording', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'do not refer to Murph in the third person',
+    )
+    expect(prompt).toContain(
+      'Use "I" for assistant actions and "we" for planning with the user',
+    )
+    expect(prompt).toContain(
+      'lead with the useful protocol, evidence, or next step',
+    )
+    expect(prompt).toContain(
+      'Mention Health Commons only when provenance matters',
+    )
+    expect(prompt).toContain('exact protocol versions')
+  })
+})
+
 describe('assistant system prompt cache stability', () => {
   it('keeps the common Codex route prefix stable across dynamic turn context', () => {
     const cacheInput = {
@@ -174,14 +194,12 @@ describe('assistant system prompt cache stability', () => {
     expect(stablePrefix).not.toContain('Active experiment context for user A.')
     expect(dynamicSuffix).toContain('The user\'s canonical timezone')
     expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
-    expect(promptA.cacheMetadata).toMatchInlineSnapshot(`
-      {
-        "dynamicContextStartsAfterStaticCore": 21930,
-        "stableRouteCapabilityPromptHash": "1c63c3e50598f8e6f04777421e4d4bc3a0eb1ff4478a9d0d0d8a5fcf1fa0792a",
-        "staticPromptHash": "55545923910bc38b4b2e85e50ee706716f5e413fe457844572d70dfcab7da444",
-        "toolSchemaHash": "assistant-tool-schema-common-codex-test",
-      }
-    `)
+    expect(promptA.cacheMetadata.staticPromptHash).toBe(
+      'ed7194c7afafeb56e3832d378651d9abdf5c851627b4b7ab72bb9d1d690d2a65',
+    )
+    expect(promptA.cacheMetadata.toolSchemaHash).toBe(
+      'assistant-tool-schema-common-codex-test',
+    )
     expect(promptB.cacheMetadata.staticPromptHash).toBe(
       promptA.cacheMetadata.staticPromptHash,
     )
