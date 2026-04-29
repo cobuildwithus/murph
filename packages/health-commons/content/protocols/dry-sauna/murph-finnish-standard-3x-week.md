@@ -4,7 +4,7 @@ entityType: "protocol_variant"
 key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week"
 slug: "protocols/dry-sauna/murph-finnish-standard-3x-week"
 title: "Finnish Dry Sauna"
-summary: "Test whether a traditional dry-sauna routine changes tolerability, recovery context, sleep context, resting pulse, or morning blood-pressure signals enough to be worth keeping."
+summary: "A dry sauna session at a steady, tolerable heat, to see whether your resting pulse, recovery, or sleep trends improve."
 status: "field-testing"
 quality: "usable"
 aliases:
@@ -36,13 +36,13 @@ relations:
     target: "biomarker:resting-heart-rate"
   -
     type: "secondary_biomarker"
-    target: "biomarker:morning-blood-pressure"
-  -
-    type: "secondary_biomarker"
     target: "biomarker:hrv-rmssd"
   -
     type: "secondary_biomarker"
     target: "biomarker:sleep-efficiency"
+  -
+    type: "secondary_biomarker"
+    target: "biomarker:morning-blood-pressure"
   -
     type: "secondary_biomarker"
     target: "biomarker:deep-sleep-minutes"
@@ -124,9 +124,9 @@ testPlans:
     interventionDays: 14
     primaryBiomarkerKey: "biomarker:resting-heart-rate"
     secondaryBiomarkerKeys:
-      - "biomarker:morning-blood-pressure"
       - "biomarker:hrv-rmssd"
       - "biomarker:sleep-efficiency"
+      - "biomarker:morning-blood-pressure"
       - "biomarker:deep-sleep-minutes"
     minimumAdherenceSessions: 4
     targetAdherenceSessions: 6
@@ -143,20 +143,20 @@ expectedSignalDescriptions:
     protocolProminence: "focus"
     description: "Resting heart rate is practical to watch, but the evidence does not support expecting a drop; compare averaged baseline and intervention windows while checking heat timing, hydration, sleep, illness, alcohol, and training load."
   -
-    biomarkerKey: "biomarker:morning-blood-pressure"
-    expected: "mixed_or_contextual"
-    protocolProminence: "context"
-    description: "Sauna can change vascular tone acutely, but morning blood pressure should stay optional and contextual; only consistent home-cuff averages are interpretable."
-  -
     biomarkerKey: "biomarker:hrv-rmssd"
     expected: "mixed_or_contextual"
-    protocolProminence: "context"
+    protocolProminence: "focus"
     description: "HRV may improve if the routine supports recovery, but it can also drop with heat stress, poor sleep, illness, alcohol, or hard training."
   -
     biomarkerKey: "biomarker:sleep-efficiency"
     expected: "mixed_or_contextual"
-    protocolProminence: "context"
+    protocolProminence: "focus"
     description: "Cooling after heat may help some people settle at night, while late, hot, or poorly tolerated sessions can disturb sleep."
+  -
+    biomarkerKey: "biomarker:morning-blood-pressure"
+    expected: "mixed_or_contextual"
+    protocolProminence: "context"
+    description: "Sauna can change vascular tone acutely, but morning blood pressure should stay optional and contextual; only consistent home-cuff averages are interpretable."
   -
     biomarkerKey: "biomarker:deep-sleep-minutes"
     expected: "mixed_or_contextual"

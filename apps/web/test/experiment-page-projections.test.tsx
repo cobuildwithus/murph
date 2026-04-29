@@ -145,7 +145,6 @@ describe("experiment page projections", () => {
     expect(experiment).toEqual(expect.objectContaining({
       baselineDays: fullProtocol.baselineDays,
       durationDays: fullProtocol.durationDays,
-      expectedSignals: fullProtocol.expectedSignals,
       id: "finnish-sauna",
       protocol: fullProtocol.protocol,
       protocolFacts: fullProtocol.protocolFacts,
@@ -153,6 +152,14 @@ describe("experiment page projections", () => {
       safety: fullProtocol.safety,
       whyItWorks: fullProtocol.whyItWorks,
     }));
+    expect(experiment.expectedSignals).toEqual(
+      fullProtocol.expectedSignals.map((signal) => expect.objectContaining({
+        description: signal.description,
+        direction: signal.direction,
+        label: signal.label,
+        protocolProminence: signal.protocolProminence,
+      })),
+    );
     expect(markup).toContain('data-experiment-id="finnish-sauna"');
     expect(markup).toContain('data-research-href="/experiments/finnish-sauna/research"');
   });
