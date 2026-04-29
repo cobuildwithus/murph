@@ -25,7 +25,6 @@ export const inboxModelRoutingPdfSchema = z.object({
     'eligible',
     'missing-stored-path',
     'not-pdf',
-    'raw-pdf-disabled',
     'stored-file-too-large',
     'stored-file-unavailable',
     'stored-path-outside-capture',

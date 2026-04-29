@@ -1,14 +1,11 @@
-import { normalizeNullableString } from '../shared.js'
 import type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
 } from './types.js'
 
-const MAX_DISCOVERED_MODELS = 12
-
 export const DEFAULT_CODEX_MODEL_CAPABILITIES: AssistantModelCapabilities = {
   images: true,
-  pdf: false,
+  pdf: true,
   reasoning: true,
   streaming: true,
   tools: true,
@@ -67,14 +64,4 @@ export function createCatalogModel(input: {
       ...input.capabilities,
     },
   }
-}
-
-export function normalizeDiscoveredModelIds(
-  models: readonly (string | null | undefined)[],
-): string[] {
-  const normalizedModels = models
-    .map((model) => normalizeNullableString(model))
-    .filter((model): model is string => Boolean(model))
-
-  return [...new Set(normalizedModels)].slice(0, MAX_DISCOVERED_MODELS)
 }

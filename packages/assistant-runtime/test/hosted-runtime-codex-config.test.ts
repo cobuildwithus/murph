@@ -181,7 +181,33 @@ test("hosted Codex runtime local E2E app-server stub bridges JSON-RPC turns to R
     const messages = await runHostedLocalCodexStubTurn(child);
 
     assert.equal(requests.length, 1);
-    assert.match(requests[0]!, /hello hosted local/u);
+    const requestBody = JSON.parse(requests[0]!);
+    assert.deepEqual(requestBody.input, [
+      {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "Attached PDF evidence.",
+          },
+          {
+            type: "input_file",
+            filename: "attachment-01.pdf",
+            file_data: "data:application/pdf;base64,JVBERi0xLjcK",
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "hello hosted local",
+          },
+        ],
+      },
+    ]);
     assert.deepEqual(
       messages.find((message) => message.type === "item.completed"),
       {
@@ -452,9 +478,39 @@ async function runHostedLocalCodexStubTurn(
   try {
     childStdin.write(`${JSON.stringify({ id: 1, method: "initialize", params: {} })}\n`);
     childStdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
-    childStdin.write(`${JSON.stringify({ id: 2, method: "thread/start", params: {} })}\n`);
+    childStdin.write(`${JSON.stringify({
+      id: 2,
+      method: "thread/start",
+      params: {
+        threadId: "thread_test",
+      },
+    })}\n`);
     childStdin.write(`${JSON.stringify({
       id: 3,
+      method: "thread/inject_items",
+      params: {
+        threadId: "thread_test",
+        items: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: "Attached PDF evidence.",
+              },
+              {
+                type: "input_file",
+                filename: "attachment-01.pdf",
+                file_data: "data:application/pdf;base64,JVBERi0xLjcK",
+              },
+            ],
+          },
+        ],
+      },
+    })}\n`);
+    childStdin.write(`${JSON.stringify({
+      id: 4,
       method: "turn/start",
       params: {
         input: [

@@ -5,6 +5,9 @@ import {
   executeCodexAppServerTurn,
 } from '../../assistant-codex.js'
 import {
+  buildCodexInjectedFileMessageItems,
+} from '../../assistant-codex/files.js'
+import {
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -26,6 +29,7 @@ import {
 } from './types.js'
 import { normalizeNullableString } from '../shared.js'
 import type {
+  AssistantModelFilePart,
   AssistantModelImagePart,
   AssistantUserMessageContentPart,
 } from '../content-types.js'
@@ -37,24 +41,15 @@ import { fileURLToPath } from 'node:url'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
-    murphCommandSurface: 'direct-cli',
-    requestFormat: 'flat-prompt',
-    supportedUserMessageContentTypes: ['text', 'image'],
-    supportsModelDiscovery: false,
+    supportedUserMessageContentTypes: ['text', 'image', 'file'],
     supportsNativeResume: true,
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
       'text',
       'image',
+      'file',
     ]),
     supportsZeroDataRetention: false,
-  },
-  async discoverModels() {
-    return {
-      models: [],
-      status: 'unsupported',
-      message: 'Codex app-server model discovery is not wired into Murph yet.',
-    }
   },
   async executeTurn(input) {
     const providerConfig = input.providerConfig
@@ -93,6 +88,16 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
                 providerTurnId: turn.turnId,
                 sessionId,
                 steer: async (steerInput) => {
+                  if (hasCodexAppServerUserMessageFiles(steerInput.userMessageContent)) {
+                    throw new VaultCliError(
+                      'ASSISTANT_CODEX_LIVE_FILE_STEER_UNSUPPORTED',
+                      'Codex app-server live steering does not support file inputs.',
+                      {
+                        retryable: false,
+                      },
+                    )
+                  }
+
                   await turn.steer({
                     images: extractCodexAppServerUserMessageImages(
                       steerInput.userMessageContent,
@@ -109,6 +114,9 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       oss: providerConfig.target.oss,
       profile: providerConfig.target.profile ?? undefined,
       images: extractCodexAppServerUserMessageImages(input.userMessageContent),
+      injectedResponsesItems: buildCodexInjectedFileMessageItems({
+        files: extractCodexAppServerUserMessageFiles(input.userMessageContent),
+      }),
       reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
       sandbox: providerConfig.policy.sandbox ?? undefined,
       workingDirectory: input.workingDirectory,
@@ -217,6 +225,26 @@ function extractCodexAppServerUserMessageImages(
   }
 
   return images.length > 0 ? images : undefined
+}
+
+function extractCodexAppServerUserMessageFiles(
+  userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
+): readonly AssistantModelFilePart[] | undefined {
+  const files: AssistantModelFilePart[] = []
+
+  for (const part of userMessageContent ?? []) {
+    if (part.type === 'file') {
+      files.push(part)
+    }
+  }
+
+  return files.length > 0 ? files : undefined
+}
+
+function hasCodexAppServerUserMessageFiles(
+  userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
+): boolean {
+  return (userMessageContent ?? []).some((part) => part.type === 'file')
 }
 
 function toCodexAppServerImageInput(input: {

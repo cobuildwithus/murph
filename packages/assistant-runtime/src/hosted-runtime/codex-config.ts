@@ -264,6 +264,7 @@ const turnDelayMs = 25;
 let threadCounter = 0;
 let turnCounter = 0;
 let activeTurn = null;
+const injectedItemsByThreadId = new Map();
 
 function writeRpc(payload) {
   process.stdout.write(JSON.stringify(payload) + "\\n");
@@ -286,6 +287,19 @@ function readTextInput(params) {
     .join("\\n\\n");
 }
 
+function readResponsesInputItems(params) {
+  const text = readTextInput(params);
+  return text
+    ? [{
+        role: "user",
+        content: [{
+          type: "input_text",
+          text,
+        }],
+      }]
+    : [];
+}
+
 function extractResponseText(payload) {
   const outputs = payload && Array.isArray(payload.output) ? payload.output : [];
   for (const output of outputs) {
@@ -300,10 +314,10 @@ function extractResponseText(payload) {
   throw new Error("assistant provider stub response did not contain output text");
 }
 
-async function fetchAssistantResponse(prompt) {
+async function fetchAssistantResponse(input) {
   const response = await fetch(new URL("responses", assistantProviderBaseUrl.replace(/\\/+$/u, "") + "/"), {
     body: JSON.stringify({
-      input: prompt,
+      input,
       model: "hosted-local-codex-shim",
     }),
     headers: {
@@ -327,8 +341,9 @@ async function completeTurn(turn) {
   turn.completed = true;
 
   try {
-    const prompt = turn.prompts.filter(Boolean).join("\\n\\n");
-    const text = await fetchAssistantResponse(prompt);
+    const injected = injectedItemsByThreadId.get(turn.threadId) ?? [];
+    const input = [...injected, ...turn.inputItems];
+    const text = await fetchAssistantResponse(input);
     writeRpc({
       type: "item.completed",
       item: {
@@ -395,6 +410,9 @@ async function handleRpc(message) {
       ? params.threadId.trim()
       : null;
     const threadId = requestedThreadId ?? "thread_hosted_local_" + (++threadCounter);
+    if (!injectedItemsByThreadId.has(threadId)) {
+      injectedItemsByThreadId.set(threadId, []);
+    }
     writeRpc({
       id,
       result: {
@@ -406,6 +424,24 @@ async function handleRpc(message) {
     return;
   }
 
+  if (method === "thread/inject_items" && id !== null) {
+    const threadId = typeof params.threadId === "string" && params.threadId.trim()
+      ? params.threadId.trim()
+      : null;
+    const items = Array.isArray(params.items) ? params.items : null;
+    if (!threadId || !items) {
+      writeRpcError(id, "thread/inject_items requires threadId and items");
+      return;
+    }
+    const existing = injectedItemsByThreadId.get(threadId) ?? [];
+    injectedItemsByThreadId.set(threadId, [...existing, ...items]);
+    writeRpc({
+      id,
+      result: {},
+    });
+    return;
+  }
+
   if (method === "turn/start" && id !== null) {
     const threadId = typeof params.threadId === "string" && params.threadId.trim()
       ? params.threadId.trim()
@@ -413,7 +449,7 @@ async function handleRpc(message) {
     const turnId = "turn_hosted_local_" + (++turnCounter);
     const turn = {
       completed: false,
-      prompts: [readTextInput(params)],
+      inputItems: readResponsesInputItems(params),
       threadId,
       turnId,
     };
@@ -443,7 +479,7 @@ async function handleRpc(message) {
       writeRpcError(id, "hosted local Codex shim does not have an active turn");
       return;
     }
-    activeTurn.prompts.push(readTextInput(params));
+    activeTurn.inputItems.push(...readResponsesInputItems(params));
     writeRpc({
       id,
       result: {

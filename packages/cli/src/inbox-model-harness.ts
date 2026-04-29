@@ -70,6 +70,7 @@ async function prepareInboxModelSession(
   const attachments = await buildInboxModelAttachmentBundles({
     attachments: shown.capture.attachments,
     captureId: shown.capture.captureId,
+    captureEnvelopePath: shown.capture.envelopePath,
     vaultRoot: input.vault,
   })
   const preparedInputMode = inferInboxMultimodalInputMode(attachments)
@@ -107,12 +108,10 @@ function renderRoutingText(
   preparedInputMode: InboxModelInputMode,
 ): string {
   const lines: string[] = [
-    `Capture id: ${capture.captureId}`,
     `Occurred at: ${capture.occurredAt}`,
     `Source: ${capture.source}`,
-    `Thread: ${capture.threadId}${capture.threadTitle ? ` (${capture.threadTitle})` : ''}`,
-    `Actor: ${capture.actorName ?? capture.actorId ?? 'unknown'} | self=${String(capture.actorIsSelf)}`,
-    `Envelope path: ${capture.envelopePath}`,
+    `Thread type: ${capture.threadIsDirect ? 'direct' : 'group'}`,
+    `Actor self: ${String(capture.actorIsSelf)}`,
     `Prepared input mode: ${preparedInputMode}`,
   ]
 
@@ -126,7 +125,7 @@ function renderRoutingText(
     for (const attachment of attachments) {
       lines.push(
         '',
-        `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`,
+        `Attachment ${attachment.ordinal} (${attachment.kind})`,
         attachment.combinedText.length > 0 ? attachment.combinedText : 'No attachment text available.',
       )
     }

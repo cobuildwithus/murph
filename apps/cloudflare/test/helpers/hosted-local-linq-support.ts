@@ -41,6 +41,7 @@ type HostedLinqInboundPartInput =
     };
 
 export interface HostedLocalLinqStub {
+  attachmentDownloadContainerBaseUrl: string;
   attachmentDownloadBaseUrl: string;
   baseUrl: string;
   countObservedSends(expectedPath: string, matchRequest?: ObservedLinqRequestMatcher): number;
@@ -101,15 +102,25 @@ export const HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT =
   "Got it — I’ll call you Rocket Man.\n\nWhat are your health goals right now?";
 export const HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT =
   "What should I call you? And out of those, which ones matter most to you right now?";
+export const HOSTED_LOCAL_LINQ_PDF_BYTES = new TextEncoder().encode([
+  "%PDF-1.7",
+  "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+  "2 0 obj<</Type/Pages/Count 0>>endobj",
+  "trailer<</Root 1 0 R>>",
+  "%%EOF",
+  "",
+].join("\n"));
 
 export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const observedChatIdsByRecipient = new Map<string, string>();
   const observedMessageIdsByChat = new Map<string, string[]>();
   const voiceMemoBytes = buildHostedLocalLinqVoiceMemoBytes();
+  const pdfBytes = HOSTED_LOCAL_LINQ_PDF_BYTES;
   let nextObservedChatSequence = 0;
   let nextObservedMessageSequence = 0;
   let attachmentDownloadBaseUrl = "";
+  let attachmentDownloadContainerBaseUrl = "";
   let server: HttpServer | null = null;
 
   server = createServer(async (request, response) => {
@@ -193,11 +204,19 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
     if (
       request.method === "GET"
       && request.url
-      && /^\/attachment-downloads\/[^/]+\.wav$/u.test(request.url)
+      && /^\/attachment-downloads\/[^/]+\.(?:m4a|pdf|wav)$/u.test(request.url)
     ) {
       response.statusCode = 200;
-      response.setHeader("content-type", "audio/wav");
-      response.end(Buffer.from(voiceMemoBytes));
+      if (request.url.endsWith(".pdf")) {
+        response.setHeader("content-type", "application/pdf");
+        response.end(Buffer.from(pdfBytes));
+      } else {
+        response.setHeader(
+          "content-type",
+          request.url.endsWith(".m4a") ? "audio/mp4" : "audio/wav",
+        );
+        response.end(Buffer.from(voiceMemoBytes));
+      }
       return;
     }
 
@@ -245,6 +264,8 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   });
   const baseUrl = `http://127.0.0.1:${requireBoundTcpPort(activeServer, "Linq stub")}`;
   attachmentDownloadBaseUrl = `${baseUrl}${linqAttachmentDownloadBasePath}`;
+  attachmentDownloadContainerBaseUrl =
+    `http://host.docker.internal:${requireBoundTcpPort(activeServer, "Linq stub")}${linqAttachmentDownloadBasePath}`;
 
   const waitForObservedRequests = async (input: {
     expectedCount: number;
@@ -283,6 +304,7 @@ export async function startHostedLocalLinqStub(): Promise<HostedLocalLinqStub> {
   };
 
   return {
+    attachmentDownloadContainerBaseUrl,
     attachmentDownloadBaseUrl,
     baseUrl,
     countObservedSends: (expectedPath, matchRequest) =>

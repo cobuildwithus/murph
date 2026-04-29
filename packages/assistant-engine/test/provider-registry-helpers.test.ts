@@ -8,7 +8,6 @@ import {
   DEFAULT_CODEX_MODEL_CAPABILITIES,
   DEFAULT_CODEX_MODELS,
   createCatalogModel,
-  normalizeDiscoveredModelIds,
 } from '../src/assistant/providers/catalog.ts'
 import {
   extractCodexAssistantProviderUsage,
@@ -19,11 +18,9 @@ import {
   listAssistantProviderDefinitions,
   listAssistantProviders,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderExecutionCapabilities,
   resolveAssistantProviderLabel,
   resolveAssistantProviderStaticModels,
   resolveAssistantProviderTargetCapabilities,
-  resolveAssistantProviderTargetExecutionCapabilities,
 } from '../src/assistant/providers/registry.ts'
 import type {
   AssistantProviderTurnExecutionInput,
@@ -288,43 +285,7 @@ describe('assistant provider registry helpers', () => {
     )
   })
 
-  it('normalizes discovered model ids and clones catalog capabilities', () => {
-    expect(
-      normalizeDiscoveredModelIds([
-        '  alpha  ',
-        'beta',
-        'alpha',
-        '',
-        null,
-        undefined,
-        'model-1',
-        'model-2',
-        'model-3',
-        'model-4',
-        'model-5',
-        'model-6',
-        'model-7',
-        'model-8',
-        'model-9',
-        'model-10',
-        'model-11',
-        'model-12',
-      ]),
-    ).toEqual([
-      'alpha',
-      'beta',
-      'model-1',
-      'model-2',
-      'model-3',
-      'model-4',
-      'model-5',
-      'model-6',
-      'model-7',
-      'model-8',
-      'model-9',
-      'model-10',
-    ])
-
+  it('clones catalog capabilities', () => {
     const capabilities = {
       ...DEFAULT_CODEX_MODEL_CAPABILITIES,
     }
@@ -351,8 +312,7 @@ describe('assistant provider registry helpers', () => {
     expect(listAssistantProviderDefinitions()).toHaveLength(1)
 
     expect(resolveAssistantProviderCapabilities('codex-cli')).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsModelDiscovery: false,
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
@@ -364,23 +324,7 @@ describe('assistant provider registry helpers', () => {
         provider: 'codex-cli',
       }),
     ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsModelDiscovery: false,
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
-      supportsRichUserMessageContent: true,
-      supportsZeroDataRetention: false,
-    })
-
-    expect(
-      resolveAssistantProviderTargetExecutionCapabilities({
-        provider: 'codex-cli',
-      }),
-    ).toEqual({
-      murphCommandSurface: 'direct-cli',
-      requestFormat: 'flat-prompt',
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsModelDiscovery: false,
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
