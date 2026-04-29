@@ -209,18 +209,26 @@ describe("@murphai/health-commons build determinism", () => {
       ],
     });
 
-    expect([...webArtifacts.experimentShells.keys()]).toEqual([
+    expect([...webArtifacts.projectionArtifacts.keys()].sort()).toEqual([
       "shell/experiments/public.json",
-    ]);
-    expect([...webArtifacts.experimentProtocolTabs.keys()]).toEqual([
       "tabs/experiments/public/protocol.json",
-    ]);
-    expect([...webArtifacts.experimentResearchTabs.keys()]).toEqual([
       "tabs/experiments/public/research.json",
-    ]);
-    expect([...webArtifacts.experimentResultsPublic.keys()]).toEqual([
       "tabs/experiments/public/results-public.json",
     ]);
+    expect(webArtifacts.routeIndex.routes.find((route) =>
+      route.routeId === "public"
+    )?.projections).toEqual({
+      "experiment.protocol": "tabs/experiments/public/protocol.json",
+      "experiment.research": "tabs/experiments/public/research.json",
+      "experiment.results-public": "tabs/experiments/public/results-public.json",
+      "experiment.shell": "shell/experiments/public.json",
+    });
+    expect(webArtifacts.routeIndex.routes.find((route) =>
+      route.routeId === "hidden"
+    )?.projections).toBeUndefined();
+    expect(webArtifacts.routeIndex.routes.find((route) =>
+      route.routeId === "deprecated"
+    )?.projections).toBeUndefined();
   });
 });
 

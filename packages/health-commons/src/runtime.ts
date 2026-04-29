@@ -29,14 +29,17 @@ import {
   type HealthCommonsWebExperimentResearchTab,
   type HealthCommonsWebExperimentResultsPublic,
   type HealthCommonsWebExperimentShell,
+  type HealthCommonsWebProjectionKey,
   type HealthCommonsWebRouteBundle,
   type HealthCommonsWebRouteIndex,
 } from "./web-artifacts.ts";
 
 export type {
   HealthCommonsWebExperimentProtocolTab,
+  HealthCommonsWebExperimentResearchTab,
   HealthCommonsWebExperimentResultsPublic,
   HealthCommonsWebExperimentShell,
+  HealthCommonsWebProjectionKey,
 } from "./web-artifacts.ts";
 
 export type HealthCommonsEntity = HealthCommonsCatalogEntity;
@@ -278,6 +281,12 @@ const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
 const DEFAULT_SOURCE_LIMIT = 8;
 const MAX_LIMIT = 500;
+const HEALTH_COMMONS_WEB_PROJECTION_KEYS: readonly HealthCommonsWebProjectionKey[] = [
+  "experiment.protocol",
+  "experiment.research",
+  "experiment.results-public",
+  "experiment.shell",
+];
 
 let cachedGeneratedCatalogReader: HealthCommonsCatalogReader | null = null;
 let cachedGeneratedWebBiomarkerIndex: HealthCommonsWebBiomarkerIndex | null = null;
@@ -406,10 +415,7 @@ export function loadGeneratedHealthCommonsWebRouteBundle(input: {
     return cachedGeneratedWebRouteBundles.get(cacheKey) ?? null;
   }
 
-  const raw = readFileSync(
-    new URL(route.bundlePath, normalizeGeneratedWebRoot(input.generatedWebRoot)),
-    "utf8",
-  );
+  const raw = readFileSync(generatedWebArtifactUrl(route.bundlePath, input.generatedWebRoot), "utf8");
   const bundle = parseJsonObject(raw);
   assertGeneratedWebRouteBundle(bundle, route.bundlePath);
 
@@ -428,8 +434,7 @@ export function loadGeneratedHealthCommonsWebExperimentResearchTab(input: {
     assertArtifact: assertGeneratedWebExperimentResearchTab,
     cache: cachedGeneratedWebExperimentResearchTabs,
     generatedWebRoot: input.generatedWebRoot,
-    pathForBundlePath: (bundlePath) =>
-      experimentArtifactPathForRouteBundlePath(bundlePath, "research.json"),
+    projectionKey: "experiment.research",
     routeId: input.routeId,
   });
 }
@@ -442,7 +447,7 @@ export function loadGeneratedHealthCommonsWebExperimentShell(input: {
     assertArtifact: assertGeneratedWebExperimentShell,
     cache: cachedGeneratedWebExperimentShells,
     generatedWebRoot: input.generatedWebRoot,
-    pathForBundlePath: experimentShellPathForRouteBundlePath,
+    projectionKey: "experiment.shell",
     routeId: input.routeId,
   });
 }
@@ -455,8 +460,7 @@ export function loadGeneratedHealthCommonsWebExperimentProtocolTab(input: {
     assertArtifact: assertGeneratedWebExperimentProtocolTab,
     cache: cachedGeneratedWebExperimentProtocolTabs,
     generatedWebRoot: input.generatedWebRoot,
-    pathForBundlePath: (bundlePath) =>
-      experimentArtifactPathForRouteBundlePath(bundlePath, "protocol.json"),
+    projectionKey: "experiment.protocol",
     routeId: input.routeId,
   });
 }
@@ -469,8 +473,7 @@ export function loadGeneratedHealthCommonsWebExperimentResultsPublic(input: {
     assertArtifact: assertGeneratedWebExperimentResultsPublic,
     cache: cachedGeneratedWebExperimentResultsPublic,
     generatedWebRoot: input.generatedWebRoot,
-    pathForBundlePath: (bundlePath) =>
-      experimentArtifactPathForRouteBundlePath(bundlePath, "results-public.json"),
+    projectionKey: "experiment.results-public",
     routeId: input.routeId,
   });
 }
@@ -479,7 +482,7 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
   assertArtifact: (value: unknown, artifactPath: string) => asserts value is T;
   cache: Map<string, T | null>;
   generatedWebRoot?: string | URL;
-  pathForBundlePath: (bundlePath: string) => string;
+  projectionKey: HealthCommonsWebProjectionKey;
   routeId: string;
 }): T | null {
   const routeIndex = getGeneratedHealthCommonsWebRouteIndex({
@@ -494,13 +497,19 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
     return null;
   }
 
-  const artifactPath = input.pathForBundlePath(route.bundlePath);
+  const artifactPath = route.projections?.[input.projectionKey];
+  if (!artifactPath) {
+    return null;
+  }
+  const artifactRouteId = routeIdFromGeneratedWebBundlePath(route.bundlePath);
+  assertProjectionPathMatchesRoute(input.projectionKey, artifactPath, artifactRouteId);
+
   const cacheKey = `${routeIndex.catalogHash}:${artifactPath}`;
   if (!input.generatedWebRoot && input.cache.has(cacheKey)) {
     return input.cache.get(cacheKey) ?? null;
   }
 
-  const artifactUrl = new URL(artifactPath, normalizeGeneratedWebRoot(input.generatedWebRoot));
+  const artifactUrl = generatedWebArtifactUrl(artifactPath, input.generatedWebRoot);
   if (artifactUrl.protocol === "file:" && !existsSync(artifactUrl)) {
     if (!input.generatedWebRoot) {
       input.cache.set(cacheKey, null);
@@ -511,6 +520,11 @@ function loadGeneratedHealthCommonsWebExperimentArtifact<T>(input: {
   const raw = readFileSync(artifactUrl, "utf8");
   const artifact = parseJsonObject(raw);
   input.assertArtifact(artifact, artifactPath);
+  assertGeneratedWebExperimentArtifactMatchesRoute(artifact, {
+    artifactPath,
+    routeId: artifactRouteId,
+    routeKey: route.key,
+  });
 
   if (!input.generatedWebRoot) {
     input.cache.set(cacheKey, artifact);
@@ -1463,6 +1477,89 @@ function normalizeGeneratedWebRoot(value: string | URL | undefined): URL {
   return ensureTrailingSlashUrl(url);
 }
 
+function generatedWebArtifactUrl(artifactPath: string, generatedWebRoot: string | URL | undefined): URL {
+  if (!isSafeGeneratedWebArtifactPath(artifactPath)) {
+    throw new Error(`Unsafe Health Commons generated web artifact path: ${artifactPath}`);
+  }
+
+  return new URL(artifactPath, normalizeGeneratedWebRoot(generatedWebRoot));
+}
+
+function routeIdFromGeneratedWebBundlePath(bundlePath: string): string {
+  const parts = bundlePath.split("/");
+  if (
+    parts.length !== 3 ||
+    parts[0] !== "bundles" ||
+    !parts[2]?.endsWith(".json")
+  ) {
+    throw new Error(`Unexpected Health Commons generated web bundle path: ${bundlePath}`);
+  }
+
+  return parts[2].slice(0, -".json".length);
+}
+
+function assertProjectionPathMatchesRoute(
+  projectionKey: HealthCommonsWebProjectionKey,
+  artifactPath: string,
+  routeId: string,
+): void {
+  const expectedPath = experimentProjectionPathForRouteId(projectionKey, routeId);
+  if (artifactPath !== expectedPath) {
+    throw new Error(
+      `Health Commons generated web projection path does not match route bundle id: ${artifactPath}.`,
+    );
+  }
+}
+
+function experimentProjectionPathForRouteId(
+  projectionKey: HealthCommonsWebProjectionKey,
+  routeId: string,
+): string {
+  switch (projectionKey) {
+    case "experiment.protocol":
+      return `tabs/experiments/${routeId}/protocol.json`;
+    case "experiment.research":
+      return `tabs/experiments/${routeId}/research.json`;
+    case "experiment.results-public":
+      return `tabs/experiments/${routeId}/results-public.json`;
+    case "experiment.shell":
+      return `shell/experiments/${routeId}.json`;
+  }
+}
+
+function assertGeneratedWebExperimentArtifactMatchesRoute(
+  artifact: unknown,
+  input: {
+    artifactPath: string;
+    routeId: string;
+    routeKey: string;
+  },
+): void {
+  if (!isRecord(artifact) || artifact["key"] !== input.routeKey) {
+    throw new Error(`Health Commons generated web projection key does not match route index: ${input.artifactPath}.`);
+  }
+
+  if ("id" in artifact && artifact["id"] !== input.routeId) {
+    throw new Error(`Health Commons generated web projection id does not match route index: ${input.artifactPath}.`);
+  }
+
+  const route = artifact["route"];
+  if (!isRecord(route) || route["routeId"] !== input.routeId) {
+    throw new Error(`Health Commons generated web projection route does not match route index: ${input.artifactPath}.`);
+  }
+}
+
+function isSafeGeneratedWebArtifactPath(value: string): boolean {
+  if (/^[a-z][a-z\d+.-]*:/iu.test(value) || value.startsWith("/") || value.includes("\\")) {
+    return false;
+  }
+
+  const parts = value.split("/");
+  return parts.length > 0 && parts.every((part) =>
+    part.length > 0 && part !== "." && part !== ".."
+  );
+}
+
 function ensureTrailingSlashUrl(value: URL): URL {
   return value.href.endsWith("/") ? value : new URL(`${value.href}/`);
 }
@@ -1732,15 +1829,32 @@ function isGeneratedWebRouteIndexEntry(value: unknown): boolean {
     return false;
   }
 
+  const projections = value["projections"];
   return (
     Array.isArray(value["aliases"]) &&
     value["aliases"].every(isString) &&
     typeof value["bundlePath"] === "string" &&
+    isSafeGeneratedWebArtifactPath(value["bundlePath"]) &&
     typeof value["entityType"] === "string" &&
     typeof value["key"] === "string" &&
     typeof value["routeId"] === "string" &&
-    typeof value["slug"] === "string"
+    typeof value["slug"] === "string" &&
+    (
+      projections === undefined ||
+      (
+        isRecord(projections) &&
+        Object.entries(projections).every(([projectionKey, artifactPath]) =>
+          isGeneratedWebProjectionKey(projectionKey) &&
+          typeof artifactPath === "string" &&
+          isSafeGeneratedWebArtifactPath(artifactPath)
+        )
+      )
+    )
   );
+}
+
+function isGeneratedWebProjectionKey(value: string): value is HealthCommonsWebProjectionKey {
+  return HEALTH_COMMONS_WEB_PROJECTION_KEYS.some((projectionKey) => projectionKey === value);
 }
 
 function isGeneratedWebExperimentIndexEntry(value: unknown): boolean {
@@ -2175,18 +2289,6 @@ function isGeneratedWebBundleEntity(value: Record<string, unknown>): boolean {
     Array.isArray(relations) &&
     relations.length === 0
   );
-}
-
-function experimentArtifactPathForRouteBundlePath(bundlePath: string, artifactFileName: string): string {
-  const fileName = bundlePath.split("/").at(-1) ?? "";
-  const routeId = fileName.replace(/\.json$/u, "");
-  return `tabs/experiments/${routeId}/${artifactFileName}`;
-}
-
-function experimentShellPathForRouteBundlePath(bundlePath: string): string {
-  const fileName = bundlePath.split("/").at(-1) ?? "";
-  const routeId = fileName.replace(/\.json$/u, "");
-  return `shell/experiments/${routeId}.json`;
 }
 
 function normalizeKeyInput(value: string): string {

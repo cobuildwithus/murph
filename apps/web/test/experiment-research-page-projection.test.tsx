@@ -1,8 +1,12 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getGeneratedHealthCommonsWebRouteIndex } from "@murphai/health-commons";
 import { resolveHealthCommonsExperimentProtocol } from "@/src/lib/health-commons/experiment-detail";
 import type { ResearchTabExperiment } from "@/src/components/experiments/experiment-detail/research-tab";
 
@@ -52,7 +56,8 @@ describe("ExperimentResearchPage", () => {
       "utf8",
     );
 
-    expect(source).toContain("loadGeneratedExperimentResearchTab");
+    expect(source).toContain("loadGeneratedExperimentProjection");
+    expect(source).toContain("experiment.research");
     expect(source).not.toContain("resolveHealthCommonsExperimentProtocol");
     expect(source).not.toContain("ResearchTabClient");
     expect(source).not.toContain("useBrowserVault");
@@ -70,6 +75,110 @@ describe("ExperimentResearchPage", () => {
       }),
       title: "Finnish Dry Sauna research — Murph Experiments",
     }));
+  });
+
+  it("rejects projection artifacts whose key and route no longer match the route index", async () => {
+    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
+    const generatedWebArtifactsRoot = path.join(
+      generatedWebRoot,
+      "packages/health-commons/generated/web",
+    );
+
+    await mkdir(path.join(generatedWebArtifactsRoot, "routes"), { recursive: true });
+    await mkdir(path.join(generatedWebArtifactsRoot, "tabs/experiments/finnish-sauna"), {
+      recursive: true,
+    });
+
+    await writeFile(
+      path.join(generatedWebArtifactsRoot, "routes/index.json"),
+      JSON.stringify(getGeneratedHealthCommonsWebRouteIndex()),
+      "utf8",
+    );
+
+    const projection = JSON.parse(
+      readFileSync(
+        new URL("../../../packages/health-commons/generated/web/tabs/experiments/finnish-sauna/research.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      key: string;
+      route: {
+        routeId: string;
+        slug: string;
+      };
+    };
+
+    await writeFile(
+      path.join(generatedWebArtifactsRoot, "tabs/experiments/finnish-sauna/research.json"),
+      JSON.stringify({
+        ...projection,
+        key: "protocol_variant:dry-sauna/not-finnish-sauna",
+        route: {
+          ...projection.route,
+          routeId: "not-finnish-sauna",
+        },
+      }),
+      "utf8",
+    );
+
+    vi.resetModules();
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(generatedWebRoot);
+    try {
+      const { loadGeneratedExperimentProjection } = await import(
+        "@/src/lib/health-commons/generated-experiment-artifacts"
+      );
+
+      expect(() => loadGeneratedExperimentProjection("finnish-sauna", "experiment.research"))
+        .toThrow("does not match route index");
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
+  it("rejects projection artifacts whose top-level id no longer matches the route index", async () => {
+    const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
+    const generatedWebArtifactsRoot = path.join(
+      generatedWebRoot,
+      "packages/health-commons/generated/web",
+    );
+
+    await mkdir(path.join(generatedWebArtifactsRoot, "routes"), { recursive: true });
+    await mkdir(path.join(generatedWebArtifactsRoot, "shell/experiments"), { recursive: true });
+
+    await writeFile(
+      path.join(generatedWebArtifactsRoot, "routes/index.json"),
+      JSON.stringify(getGeneratedHealthCommonsWebRouteIndex()),
+      "utf8",
+    );
+
+    const shell = JSON.parse(
+      readFileSync(
+        new URL("../../../packages/health-commons/generated/web/shell/experiments/finnish-sauna.json", import.meta.url),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+
+    await writeFile(
+      path.join(generatedWebArtifactsRoot, "shell/experiments/finnish-sauna.json"),
+      JSON.stringify({
+        ...shell,
+        id: "not-finnish-sauna",
+      }),
+      "utf8",
+    );
+
+    vi.resetModules();
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(generatedWebRoot);
+    try {
+      const { loadGeneratedExperimentProjection } = await import(
+        "@/src/lib/health-commons/generated-experiment-artifacts"
+      );
+
+      expect(() => loadGeneratedExperimentProjection("finnish-sauna", "experiment.shell"))
+        .toThrow("does not match route index");
+    } finally {
+      cwdSpy.mockRestore();
+    }
   });
 
   it("renders the same Finnish sauna research fields as the full detail model", async () => {

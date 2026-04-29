@@ -33,6 +33,12 @@ export const HEALTH_COMMONS_WEB_EXPERIMENT_PROTOCOL_TAB_SCHEMA_VERSION =
 export const HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION =
   "murph.commons.web.experiment-results-public.v1" as const;
 
+export type HealthCommonsWebProjectionKey =
+  | "experiment.shell"
+  | "experiment.protocol"
+  | "experiment.research"
+  | "experiment.results-public";
+
 const SOURCE_SNIPPET_FINDING_MAX_LENGTH = 1_000;
 const NORWEGIAN_4X4_ROUTE_ID = "norwegian-4x4";
 const PARTICIPANT_STAT_LABEL = "DIRECT HUMAN PARTICIPANTS";
@@ -56,6 +62,7 @@ export interface HealthCommonsWebRouteIndexEntry {
   bundlePath: string;
   entityType: HealthCommonsEntityType;
   key: string;
+  projections?: Partial<Record<HealthCommonsWebProjectionKey, string>>;
   routeId: string;
   slug: string;
 }
@@ -400,13 +407,16 @@ export interface HealthCommonsWebExperimentResultsPublic {
   title: string;
 }
 
+export type HealthCommonsWebExperimentProjectionArtifact =
+  | HealthCommonsWebExperimentProtocolTab
+  | HealthCommonsWebExperimentResearchTab
+  | HealthCommonsWebExperimentResultsPublic
+  | HealthCommonsWebExperimentShell;
+
 export interface HealthCommonsWebGeneratedArtifacts {
   biomarkerIndex: HealthCommonsWebBiomarkerIndex;
   experimentIndex: HealthCommonsWebExperimentIndex;
-  experimentProtocolTabs: Map<string, HealthCommonsWebExperimentProtocolTab>;
-  experimentResearchTabs: Map<string, HealthCommonsWebExperimentResearchTab>;
-  experimentResultsPublic: Map<string, HealthCommonsWebExperimentResultsPublic>;
-  experimentShells: Map<string, HealthCommonsWebExperimentShell>;
+  projectionArtifacts: Map<string, HealthCommonsWebExperimentProjectionArtifact>;
   routeBundles: Map<string, HealthCommonsWebRouteBundle>;
   routeIndex: HealthCommonsWebRouteIndex;
 }
@@ -416,6 +426,40 @@ const WEB_BUNDLE_ENTITY_TYPES = new Set<HealthCommonsEntityType>([
   "measurement_method",
   "protocol_variant",
 ]);
+type HealthCommonsWebExperimentProjectionSpec = {
+  buildArtifact: (input: {
+    bundle: HealthCommonsWebRouteBundle;
+    entitiesByKey: Map<string, HealthCommonsCatalogEntity>;
+    protocol: HealthCommonsCatalogEntity & { entityType: "protocol_variant" };
+  }) => HealthCommonsWebExperimentProjectionArtifact;
+  key: HealthCommonsWebProjectionKey;
+  pathForRouteId: (routeId: string) => string;
+};
+
+const EXPERIMENT_PROJECTION_SPECS: readonly HealthCommonsWebExperimentProjectionSpec[] = [
+  {
+    buildArtifact: ({ bundle, protocol }) => buildExperimentShell({ bundle, protocol }),
+    key: "experiment.shell",
+    pathForRouteId: (routeId) => `shell/experiments/${routeId}.json`,
+  },
+  {
+    buildArtifact: ({ bundle, entitiesByKey, protocol }) =>
+      buildExperimentProtocolTab({ bundle, entitiesByKey, protocol }),
+    key: "experiment.protocol",
+    pathForRouteId: (routeId) => `tabs/experiments/${routeId}/protocol.json`,
+  },
+  {
+    buildArtifact: ({ bundle, entitiesByKey, protocol }) =>
+      buildExperimentResearchTab({ bundle, entitiesByKey, protocol }),
+    key: "experiment.research",
+    pathForRouteId: (routeId) => `tabs/experiments/${routeId}/research.json`,
+  },
+  {
+    buildArtifact: ({ bundle, protocol }) => buildExperimentResultsPublic({ bundle, protocol }),
+    key: "experiment.results-public",
+    pathForRouteId: (routeId) => `tabs/experiments/${routeId}/results-public.json`,
+  },
+];
 
 export function buildHealthCommonsWebGeneratedArtifacts(
   catalog: HealthCommonsCatalog,
@@ -443,6 +487,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
     const routeId = selectPrimaryRouteId(entity, routeIds);
     const bundlePath = bundlePathForEntity(entity.entityType, routeId);
     const aliases = routeIds.filter((candidate) => candidate !== routeId);
+    const projections = projectionPathsForRoute(entity, routeId);
     if (routeBundles.has(bundlePath)) {
       throw new Error(`Duplicate Health Commons web bundle path generated for ${bundlePath}.`);
     }
@@ -462,6 +507,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
         bundlePath,
         entityType: entity.entityType,
         key: entity.key,
+        ...(projections ? { projections } : {}),
         routeId: alias,
         slug: entity.slug,
       };
@@ -479,10 +525,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
   }
 
   routeEntries.sort(compareRouteEntries);
-  const experimentProtocolTabs = new Map<string, HealthCommonsWebExperimentProtocolTab>();
-  const experimentResearchTabs = new Map<string, HealthCommonsWebExperimentResearchTab>();
-  const experimentResultsPublic = new Map<string, HealthCommonsWebExperimentResultsPublic>();
-  const experimentShells = new Map<string, HealthCommonsWebExperimentShell>();
+  const projectionArtifacts = new Map<string, HealthCommonsWebExperimentProjectionArtifact>();
 
   for (const bundle of routeBundles.values()) {
     if (bundle.route.entityType !== "protocol_variant") {
@@ -493,36 +536,16 @@ export function buildHealthCommonsWebGeneratedArtifacts(
       continue;
     }
 
-    experimentShells.set(
-      experimentShellPathForRouteId(bundle.route.routeId),
-      buildExperimentShell({
-        bundle,
-        protocol,
-      }),
-    );
-    experimentProtocolTabs.set(
-      experimentProtocolTabPathForRouteId(bundle.route.routeId),
-      buildExperimentProtocolTab({
-        bundle,
-        entitiesByKey,
-        protocol,
-      }),
-    );
-    experimentResearchTabs.set(
-      experimentResearchTabPathForRouteId(bundle.route.routeId),
-      buildExperimentResearchTab({
-        bundle,
-        entitiesByKey,
-        protocol,
-      }),
-    );
-    experimentResultsPublic.set(
-      experimentResultsPublicPathForRouteId(bundle.route.routeId),
-      buildExperimentResultsPublic({
-        bundle,
-        protocol,
-      }),
-    );
+    for (const spec of EXPERIMENT_PROJECTION_SPECS) {
+      projectionArtifacts.set(
+        spec.pathForRouteId(bundle.route.routeId),
+        spec.buildArtifact({
+          bundle,
+          entitiesByKey,
+          protocol,
+        }),
+      );
+    }
   }
 
   return {
@@ -590,10 +613,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
         .sort((left, right) => left.title.localeCompare(right.title)),
       schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
     },
-    experimentProtocolTabs,
-    experimentResearchTabs,
-    experimentResultsPublic,
-    experimentShells,
+    projectionArtifacts,
     routeBundles,
     routeIndex: {
       catalogHash: catalog.catalogHash,
@@ -2084,20 +2104,19 @@ function isPublicProtocolVariant(
     && entity.hidden !== true;
 }
 
-function experimentResearchTabPathForRouteId(routeId: string): string {
-  return `tabs/experiments/${routeId}/research.json`;
-}
+function projectionPathsForRoute(
+  entity: HealthCommonsCatalogEntity,
+  routeId: string,
+): Partial<Record<HealthCommonsWebProjectionKey, string>> | null {
+  if (!isPublicProtocolVariant(entity)) {
+    return null;
+  }
 
-function experimentShellPathForRouteId(routeId: string): string {
-  return `shell/experiments/${routeId}.json`;
-}
-
-function experimentProtocolTabPathForRouteId(routeId: string): string {
-  return `tabs/experiments/${routeId}/protocol.json`;
-}
-
-function experimentResultsPublicPathForRouteId(routeId: string): string {
-  return `tabs/experiments/${routeId}/results-public.json`;
+  const projections: Partial<Record<HealthCommonsWebProjectionKey, string>> = {};
+  for (const spec of EXPERIMENT_PROJECTION_SPECS) {
+    projections[spec.key] = spec.pathForRouteId(routeId);
+  }
+  return projections;
 }
 
 function collectRouteReverseEdges(
