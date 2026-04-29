@@ -93,9 +93,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async importItem(item) {
           events.push(`import:${item.item.laneSeq}`);
           return {
-            afterCheckpointBeforeAssistant: async () => {
-              events.push("mailbox:beforeAssistant");
-            },
             afterCheckpoint: async () => {
               events.push("mailbox:afterCheckpoint");
             },
@@ -131,7 +128,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(events, [
         "import:1",
         "checkpoint:import",
-        "mailbox:beforeAssistant",
         "assistant",
         "mailbox:afterCheckpoint",
       ]);
@@ -215,10 +211,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         async importItem(item) {
           events.push(`import:${item.item.laneSeq}`);
           return {
-            afterCheckpointBeforeAssistant: async () => {
-              events.push("mailbox:beforeAssistant");
-              throw new Error("parser drain failed after mailbox checkpoint");
-            },
             status: "imported",
           };
         },
@@ -241,7 +233,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "mailbox:beforeAssistant",
         "assistant",
       ]);
       assert.equal(checkpointRequests.length, 1);
@@ -283,9 +274,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             async importItem(item) {
               events.push(`import:${item.item.laneSeq}`);
               return {
-                afterCheckpointBeforeAssistant: async () => {
-                  events.push("mailbox:beforeAssistant");
-                },
                 afterCheckpoint: async () => {
                   events.push("mailbox:afterCheckpoint");
                 },
@@ -311,7 +299,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(events, [
         "import:1",
-        "mailbox:beforeAssistant",
         "assistant",
         "mailbox:afterCheckpoint",
       ]);
@@ -499,12 +486,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           async importItem(item) {
             importedSeqs.push(item.item.laneSeq);
             if (item.item.laneSeq === "2") {
-              return {
-                afterCheckpointBeforeAssistant: async () => {
-                  events.push("mailbox:beforeAssistant:2");
-                },
-                status: "imported",
-              };
+              return { status: "imported" };
             }
             return { status: "imported" };
           },
@@ -625,7 +607,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(caught, undefined);
       assert.deepEqual(events, [
         "refresh:start",
-        "mailbox:beforeAssistant:2",
         "refresh:done",
         "list",
       ]);

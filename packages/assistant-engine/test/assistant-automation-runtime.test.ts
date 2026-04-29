@@ -71,6 +71,8 @@ const replyMocks = vi.hoisted(() => ({
   listAssistantTurnReceipts: vi.fn(),
   normalizeNullableString: vi.fn(),
   prepareAssistantAutoReplyInput: vi.fn(),
+  readAssistantAutoReplyGroupOutcomeArtifact: vi.fn(),
+  readAssistantChatReplyArtifact: vi.fn(),
   resolveAssistantSession: vi.fn(),
   sendAssistantMessage: vi.fn(),
   writeAssistantAutoReplyGroupOutcomeArtifact: vi.fn(),
@@ -79,15 +81,39 @@ const replyMocks = vi.hoisted(() => ({
   writeAssistantChatResultArtifacts: vi.fn(),
 }))
 
+const evidenceMocks = vi.hoisted(() => ({
+  assistantAutoReplyTerminalEvidenceExists: vi.fn(),
+  readAssistantAutoReplyTerminalEvidence: vi.fn(),
+  writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
+  writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
+  writeAssistantAutoReplySuppressionEvidence: vi.fn(),
+}))
+
 vi.mock('../src/assistant/automation/artifacts.ts', () => ({
   assistantAutoReplyGroupOutcomeArtifactExists:
     replyMocks.assistantAutoReplyGroupOutcomeArtifactExists,
   assistantChatReplyArtifactExists: replyMocks.assistantChatReplyArtifactExists,
+  readAssistantAutoReplyGroupOutcomeArtifact:
+    replyMocks.readAssistantAutoReplyGroupOutcomeArtifact,
+  readAssistantChatReplyArtifact: replyMocks.readAssistantChatReplyArtifact,
   writeAssistantAutoReplyGroupOutcomeArtifact:
     replyMocks.writeAssistantAutoReplyGroupOutcomeArtifact,
   writeAssistantChatDeferredArtifacts: replyMocks.writeAssistantChatDeferredArtifacts,
   writeAssistantChatErrorArtifacts: replyMocks.writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts: replyMocks.writeAssistantChatResultArtifacts,
+}))
+
+vi.mock('../src/assistant/automation/evidence.ts', () => ({
+  assistantAutoReplyTerminalEvidenceExists:
+    evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
+  readAssistantAutoReplyTerminalEvidence:
+    evidenceMocks.readAssistantAutoReplyTerminalEvidence,
+  writeAssistantAutoReplyReplyIntentEvidence:
+    evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence,
+  writeAssistantAutoReplyReplyTerminalEvidence:
+    evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence,
+  writeAssistantAutoReplySuppressionEvidence:
+    evidenceMocks.writeAssistantAutoReplySuppressionEvidence,
 }))
 
 vi.mock('../src/assistant/automation/reply.ts', () => ({
@@ -395,7 +421,8 @@ function createAutomationState(
     explicitAutoReply ??
     [...new Set(legacyAutoReplyChannels ?? [])].map((channel) => ({
       channel,
-      cursor: legacyAutoReplyScanCursor ?? null,
+      eligibleAfter: legacyAutoReplyScanCursor ?? null,
+      enabledAt: '2026-04-08T00:00:00.000Z',
     }))
   return {
     version: 1,
@@ -412,7 +439,8 @@ function createAutoReplyEntries(
 ): AssistantAutomationState['autoReply'] {
   return [...new Set(channels)].map((channel) => ({
     channel,
-    cursor,
+    eligibleAfter: cursor,
+    enabledAt: '2026-04-08T00:00:00.000Z',
   }))
 }
 
@@ -420,7 +448,7 @@ function readAutoReplyCursor(
   state: Pick<AssistantAutomationState, 'autoReply'>,
   channel: string,
 ): AssistantAutomationCursor | null {
-  return state.autoReply.find((entry) => entry.channel === channel)?.cursor ?? null
+  return state.autoReply.find((entry) => entry.channel === channel)?.eligibleAfter ?? null
 }
 
 function createInboxServices(
@@ -679,6 +707,22 @@ beforeEach(() => {
     prompt: 'reply prompt',
     userMessageContent: null,
   })
+  replyMocks.readAssistantAutoReplyGroupOutcomeArtifact
+    .mockReset()
+    .mockResolvedValue({
+      deliveryIntentId: null,
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-1',
+    })
+  replyMocks.readAssistantChatReplyArtifact
+    .mockReset()
+    .mockResolvedValue({
+      deliveryIntentId: null,
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-1',
+    })
   replyMocks.resolveAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
@@ -704,6 +748,22 @@ beforeEach(() => {
   replyMocks.writeAssistantChatDeferredArtifacts.mockReset().mockResolvedValue(undefined)
   replyMocks.writeAssistantChatErrorArtifacts.mockReset().mockResolvedValue(undefined)
   replyMocks.writeAssistantChatResultArtifacts.mockReset().mockResolvedValue(undefined)
+
+  evidenceMocks.assistantAutoReplyTerminalEvidenceExists
+    .mockReset()
+    .mockResolvedValue(false)
+  evidenceMocks.readAssistantAutoReplyTerminalEvidence
+    .mockReset()
+    .mockResolvedValue(null)
+  evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence
+    .mockReset()
+    .mockResolvedValue(undefined)
+  evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence
+    .mockReset()
+    .mockResolvedValue(undefined)
+  evidenceMocks.writeAssistantAutoReplySuppressionEvidence
+    .mockReset()
+    .mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -915,10 +975,7 @@ describe('assistant automation scanner', () => {
       replied: 0,
       skipped: 1,
     })
-    expect(readAutoReplyCursor(stateUpdates[0] ?? createAutomationState(), 'telegram')).toEqual({
-      captureId: 'capture-latest',
-      occurredAt: '2026-04-08T00:05:00.000Z',
-    })
+    expect(readAutoReplyCursor(stateUpdates[0] ?? createAutomationState(), 'telegram')).toBeNull()
     expect(events).not.toContainEqual(
       expect.objectContaining({
         type: 'reply.scan.primed',
@@ -951,6 +1008,43 @@ describe('assistant automation scanner', () => {
     })
 
     expect(stateUpdates).toEqual([])
+  })
+
+  it('rechecks captures behind the legacy reply cursor until terminal evidence exists', async () => {
+    const capture = createCaptureSummary({
+      captureId: 'capture-before-cursor',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+    })
+    const list = vi.fn().mockResolvedValue(createListResult([capture]))
+    const inboxServices = createInboxServices({
+      list,
+    })
+    const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
+      '../src/assistant/automation/scanner.ts',
+    )
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices,
+      state: createAutomationState({
+        autoReply: [
+          {
+            channel: 'telegram',
+            enabledAt: '2026-04-08T00:00:00.000Z',
+            eligibleAfter: null,
+          },
+        ],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({
+      afterCaptureId: null,
+      afterOccurredAt: null,
+    }))
+    expect(result.replies).toMatchObject({
+      considered: 1,
+      skipped: 1,
+    })
   })
 
   it('continues reply processing when automatic document preservation fails', async () => {
@@ -1159,7 +1253,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('advances the reply cursor after scanning existing captures', async () => {
+  it('keeps failed captures pending instead of advancing the reply cursor', async () => {
     const latest = createCaptureSummary({
       captureId: 'capture-latest',
       occurredAt: '2026-04-08T00:03:00.000Z',
@@ -1193,24 +1287,11 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toMatchObject({
       considered: 1,
       failed: 1,
-      nextWakeAt: null,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 0,
     })
-    expect(stateUpdates).toEqual([
-      {
-        autoReply: [
-          {
-            channel: 'telegram',
-            cursor: {
-              captureId: 'capture-latest',
-              createdAt: '2026-04-08T00:00:01.000Z',
-              occurredAt: '2026-04-08T00:03:00.000Z',
-            },
-          },
-        ],
-      },
-    ])
+    expect(stateUpdates).toEqual([])
     expect(events).not.toContainEqual(
       expect.objectContaining({
         type: 'reply.scan.primed',
@@ -1250,16 +1331,7 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 0,
     })
-    expect(stateUpdates).toEqual([
-      {
-        autoReply: [
-          {
-            channel: 'telegram',
-            cursor: null,
-          },
-        ],
-      },
-    ])
+    expect(stateUpdates).toEqual([])
     expect(events).toContainEqual({
       type: 'reply.scan.started',
       details: '0 capture(s)',
@@ -1295,22 +1367,10 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 0,
     })
-    expect(stateUpdates).toEqual([
-      {
-        autoReply: [
-          {
-            channel: 'telegram',
-            cursor: {
-              captureId: 'capture-previous',
-              occurredAt: '2026-04-08T00:01:00.000Z',
-            },
-          },
-        ],
-      },
-    ])
+    expect(stateUpdates).toEqual([])
   })
 
-  it('scans grouped captures and persists the advanced reply cursor', async () => {
+  it('scans grouped captures without using the reply cursor as handling proof', async () => {
     const first = createCaptureSummary({
       captureId: 'capture-2',
       occurredAt: '2026-04-08T00:02:00.000Z',
@@ -1366,20 +1426,7 @@ describe('assistant auto-reply runtime', () => {
       type: 'reply.scan.started',
       details: '2 capture(s)',
     })
-    expect(stateUpdates).toEqual([
-      {
-        autoReply: [
-          {
-            channel: 'telegram',
-            cursor: {
-              captureId: 'capture-2',
-              createdAt: '2026-04-08T00:00:01.000Z',
-              occurredAt: '2026-04-08T00:02:00.000Z',
-            },
-          },
-        ],
-      },
-    ])
+    expect(stateUpdates).toEqual([])
   })
 
   it('skips null reply contexts while keeping the scan cursor unchanged', async () => {
@@ -1416,19 +1463,7 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 0,
     })
-    expect(stateUpdates).toEqual([
-      {
-        autoReply: [
-          {
-            channel: 'telegram',
-            cursor: {
-              captureId: 'capture-before',
-              occurredAt: '2026-04-08T00:00:00.000Z',
-            },
-          },
-        ],
-      },
-    ])
+    expect(stateUpdates).toEqual([])
   })
 
   it('stops scanning immediately when the reply loop is already aborted', async () => {
@@ -1460,16 +1495,7 @@ describe('assistant auto-reply runtime', () => {
       replied: 0,
       skipped: 0,
     })
-    expect(stateUpdates).toEqual([
-      {
-        autoReply: [
-          {
-            channel: 'telegram',
-            cursor: null,
-          },
-        ],
-      },
-    ])
+    expect(stateUpdates).toEqual([])
   })
 
   it('exposes context helpers for grouped captures', async () => {
@@ -1700,6 +1726,16 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: false,
     })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledWith({
+      captureIds: ['capture-1'],
+      deliveryIntentId: null,
+      linqMessageIds: [],
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-1',
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
   it('skips immediately when rebuilt chat reply artifacts already exist', async () => {
@@ -1733,6 +1769,16 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: false,
     })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledWith({
+      captureIds: ['capture-1'],
+      deliveryIntentId: null,
+      linqMessageIds: [],
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-1',
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
   it('defers when reply artifacts are partially rebuilt even without a group outcome marker', async () => {
@@ -2268,6 +2314,9 @@ describe('assistant auto-reply runtime', () => {
   it('skips groups already handled by assistant turn receipts', async () => {
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       {
+        completedAt: '2026-04-08T00:10:00.000Z',
+        deliveryIntentId: null,
+        sessionId: 'session-receipt',
         status: 'completed',
         timeline: [
           {
@@ -2278,6 +2327,7 @@ describe('assistant auto-reply runtime', () => {
             },
           },
         ],
+        updatedAt: '2026-04-08T00:10:00.000Z',
       },
     ])
     const inboxServices = createInboxServices({
@@ -2312,6 +2362,16 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: false,
     })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledWith({
+      captureIds: ['capture-1'],
+      deliveryIntentId: null,
+      linqMessageIds: [],
+      outcome: 'result',
+      recordedAt: '2026-04-08T00:10:00.000Z',
+      sessionId: 'session-receipt',
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
   it('skips groups when the channel adapter refuses auto-reply', async () => {
@@ -3524,7 +3584,7 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
-  it('turns unconfirmed outbound deliveries into failed reply outcomes that advance the cursor', async () => {
+  it('turns unconfirmed outbound deliveries into retryable failed reply outcomes', async () => {
     replyMocks.sendAssistantMessage.mockResolvedValue({
       delivery: null,
       deliveryDeferred: false,
@@ -3562,18 +3622,21 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toMatchObject({
-      advanceCursor: true,
+      advanceCursor: false,
       failed: 1,
-      nextWakeAt: null,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 0,
-      stopScanning: false,
+      stopScanning: true,
     })
   })
 
   it('treats direct auto-reply receipt ids as already handled work', async () => {
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       {
+        completedAt: null,
+        deliveryIntentId: 'intent-receipt',
+        sessionId: 'session-receipt',
         status: 'deferred',
         timeline: [
           {
@@ -3583,6 +3646,7 @@ describe('assistant auto-reply runtime', () => {
             },
           },
         ],
+        updatedAt: '2026-04-08T00:11:00.000Z',
       },
     ])
     const inboxServices = createInboxServices({
@@ -3617,6 +3681,16 @@ describe('assistant auto-reply runtime', () => {
       skipped: 1,
       stopScanning: false,
     })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyTerminalEvidence).toHaveBeenCalledWith({
+      captureIds: ['capture-1'],
+      deliveryIntentId: 'intent-receipt',
+      linqMessageIds: [],
+      outcome: 'deferred',
+      recordedAt: '2026-04-08T00:11:00.000Z',
+      sessionId: 'session-receipt',
+      vault: '/tmp/assistant-automation-vault',
+    })
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
   it('rethrows artifact write failures for successful outcomes', async () => {
@@ -3907,7 +3981,7 @@ describe('assistant auto-reply receipt recovery', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })
 
-  it('does not retry captures that are still ahead of the saved auto-reply cursor', async () => {
+  it('retries failed receipts ahead of the fixed auto-reply eligibility boundary', async () => {
     replyMocks.listAssistantTurnReceipts.mockResolvedValue([
       createTurnReceipt({
         primaryCaptureId: 'capture-2',
@@ -3939,14 +4013,14 @@ describe('assistant auto-reply receipt recovery', () => {
     })
 
     expect(result).toEqual({
-      considered: 0,
+      considered: 1,
       failed: 0,
       nextWakeAt: null,
-      progressed: false,
+      progressed: true,
       replied: 0,
-      skipped: 0,
+      skipped: 1,
     })
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
   })
 
   it('skips receipt recovery when the persisted primary capture is missing', async () => {

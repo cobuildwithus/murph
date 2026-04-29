@@ -51,7 +51,6 @@ export interface HostedMailboxImportCheckpointRequestInput {
 
 export interface HostedMailboxImportCheckpointResult {
   afterCheckpointEffects: readonly (() => Promise<void>)[];
-  afterCheckpointBeforeAssistantEffects: readonly (() => Promise<void>)[];
   checkpoint: HostedWorkspaceCheckpointResponse | null;
   importResult: HostedMailboxImportLoopResult;
   previousState: HostedMailboxImportState;
@@ -94,17 +93,10 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     vaultRoot: input.vaultRoot,
   });
   const afterCheckpointEffects: Array<() => Promise<void>> = [];
-  const afterCheckpointBeforeAssistantEffects: Array<() => Promise<void>> = [];
   const importResult = await fetchAndProcessHostedMailboxPrefix({
     expectedUserId: input.expectedUserId,
     importItem: async (item) => {
       const outcome = await input.importItem(item);
-      if (
-        (outcome.status === "imported" || outcome.status === "skipped")
-        && outcome.afterCheckpointBeforeAssistant
-      ) {
-        afterCheckpointBeforeAssistantEffects.push(outcome.afterCheckpointBeforeAssistant);
-      }
       if (
         (outcome.status === "imported" || outcome.status === "skipped")
         && outcome.afterCheckpoint
@@ -128,7 +120,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   if (!stateChanged) {
     return {
       afterCheckpointEffects: [],
-      afterCheckpointBeforeAssistantEffects: [],
       checkpoint: null,
       importResult,
       previousState,
@@ -181,7 +172,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
 
   return {
     afterCheckpointEffects,
-    afterCheckpointBeforeAssistantEffects,
     checkpoint,
     importResult,
     previousState,

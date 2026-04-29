@@ -8,6 +8,10 @@ import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
+  listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   listConfiguredDeviceSyncProviderNames,
 } from "@murphai/device-syncd/config";
 import {
@@ -35,6 +39,7 @@ import {
 import {
   drainHostedProviderCleanupAfterCommit,
   readHostedProviderCleanupCheckpoint,
+  recordHostedProviderCleanupBeforeCommit,
   type HostedProviderCleanupCheckpoint,
 } from "./provider-cleanup.ts";
 import {
@@ -269,6 +274,23 @@ export async function runHostedWorkspaceAssistantPhase(
       vaultRoot: input.restored.vaultRoot,
       wake,
     });
+    const terminalLinqCleanup = await listPendingAssistantAutoReplyLinqCleanupEvidence({
+      vault: input.restored.vaultRoot,
+    });
+    const terminalLinqCleanupDue = terminalLinqCleanup.linqMessageIds.length > 0;
+    if (terminalLinqCleanupDue) {
+      await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: null,
+        },
+        linqMessageIds: terminalLinqCleanup.linqMessageIds,
+        vaultRoot: input.restored.vaultRoot,
+      });
+      await markAssistantAutoReplyLinqCleanupQueued({
+        captureIds: terminalLinqCleanup.captureIds,
+        vault: input.restored.vaultRoot,
+      });
+    }
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
@@ -293,7 +315,8 @@ export async function runHostedWorkspaceAssistantPhase(
       ...assistantMetrics,
       nextWakeAt,
     }, deliveryEffects.length)
-      || consumedScheduledWorkspaceWake(input);
+      || consumedScheduledWorkspaceWake(input)
+      || terminalLinqCleanupDue;
     await writeHostedAssistantAutomationDetailRuntimeLogs({
       assistantMetrics,
       input,
@@ -306,7 +329,9 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed,
       systemMailboxWakeAt,
     });
-    const hasPostCommitProviderCleanup = providerCleanupDue || deliveryEffects.length > 0;
+    const hasPostCommitProviderCleanup = providerCleanupDue
+      || deliveryEffects.length > 0
+      || terminalLinqCleanupDue;
 
     return {
       ...(hasPostCommitProviderCleanup

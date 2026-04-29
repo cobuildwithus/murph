@@ -1,4 +1,4 @@
-import { access, mkdir } from 'node:fs/promises'
+import { access, mkdir, readFile } from 'node:fs/promises'
 import { writeJsonFileAtomic } from '../shared.js'
 import { resolveAssistantInboxArtifactPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import type { sendAssistantMessage } from '../service.js'
@@ -6,6 +6,14 @@ import type { AssistantAutoReplyFailureSnapshot } from './failure-observability.
 
 const ASSISTANT_AUTO_REPLY_GROUP_OUTCOME_ARTIFACT =
   'chat-group-outcome.json'
+
+export interface AssistantAutoReplyTerminalArtifactSnapshot {
+  deliveryIntentId: string | null
+  groupCaptureIds: string[] | null
+  outcome: 'deferred' | 'result'
+  recordedAt: string
+  sessionId: string
+}
 
 export async function assistantResultArtifactExists(
   vaultRoot: string,
@@ -51,6 +59,53 @@ export async function assistantAutoReplyGroupOutcomeArtifactExists(
     vaultRoot,
     captureId,
     ASSISTANT_AUTO_REPLY_GROUP_OUTCOME_ARTIFACT,
+  )
+}
+
+export async function readAssistantAutoReplyGroupOutcomeArtifact(
+  vaultRoot: string,
+  captureId: string,
+): Promise<AssistantAutoReplyTerminalArtifactSnapshot | null> {
+  const value = await readAssistantArtifact(
+    vaultRoot,
+    captureId,
+    ASSISTANT_AUTO_REPLY_GROUP_OUTCOME_ARTIFACT,
+  )
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const record = value as {
+    deliveryIntentId?: unknown
+    groupCaptureIds?: unknown
+    outcome?: unknown
+    recordedAt?: unknown
+    schema?: unknown
+    sessionId?: unknown
+  }
+  if (record.schema !== 'murph.assistant-auto-reply-group-outcome.v1') {
+    return null
+  }
+  return parseAssistantAutoReplyTerminalArtifactSnapshot({
+    deliveryIntentId: record.deliveryIntentId,
+    groupCaptureIds: record.groupCaptureIds,
+    outcome: record.outcome,
+    recordedAt: record.recordedAt,
+    sessionId: record.sessionId,
+  })
+}
+
+export async function readAssistantChatReplyArtifact(
+  vaultRoot: string,
+  captureId: string,
+): Promise<AssistantAutoReplyTerminalArtifactSnapshot | null> {
+  const result = await readAssistantArtifact(vaultRoot, captureId, 'chat-result.json')
+  const resultSnapshot = parseAssistantChatResultArtifact(result)
+  if (resultSnapshot) {
+    return resultSnapshot
+  }
+
+  return parseAssistantChatDeferredArtifact(
+    await readAssistantArtifact(vaultRoot, captureId, 'chat-deferred.json'),
   )
 }
 
@@ -236,10 +291,114 @@ async function assistantArtifactExists(
   }
 }
 
+async function readAssistantArtifact(
+  vaultRoot: string,
+  captureId: string,
+  fileName: string,
+): Promise<unknown | null> {
+  try {
+    const artifactPath = await resolveAssistantInboxArtifactPath(
+      vaultRoot,
+      captureId,
+      fileName,
+    )
+    return JSON.parse(await readFile(artifactPath.absolutePath, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
 async function writeAssistantArtifactFile(
   artifactPath: Awaited<ReturnType<typeof resolveAssistantInboxArtifactPath>>,
   value: unknown,
 ): Promise<void> {
   await mkdir(artifactPath.absoluteDirectory, { recursive: true })
   await writeJsonFileAtomic(artifactPath.absolutePath, value)
+}
+
+function parseAssistantChatResultArtifact(
+  value: unknown,
+): AssistantAutoReplyTerminalArtifactSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const record = value as {
+    groupCaptureIds?: unknown
+    respondedAt?: unknown
+    schema?: unknown
+    sessionId?: unknown
+  }
+  if (record.schema !== 'murph.assistant-chat-result.v1') {
+    return null
+  }
+  return parseAssistantAutoReplyTerminalArtifactSnapshot({
+    deliveryIntentId: null,
+    groupCaptureIds: record.groupCaptureIds,
+    outcome: 'result',
+    recordedAt: record.respondedAt,
+    sessionId: record.sessionId,
+  })
+}
+
+function parseAssistantChatDeferredArtifact(
+  value: unknown,
+): AssistantAutoReplyTerminalArtifactSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const record = value as {
+    deliveryIntentId?: unknown
+    groupCaptureIds?: unknown
+    queuedAt?: unknown
+    schema?: unknown
+    sessionId?: unknown
+  }
+  if (record.schema !== 'murph.assistant-chat-deferred.v1') {
+    return null
+  }
+  return parseAssistantAutoReplyTerminalArtifactSnapshot({
+    deliveryIntentId: record.deliveryIntentId,
+    groupCaptureIds: record.groupCaptureIds,
+    outcome: 'deferred',
+    recordedAt: record.queuedAt,
+    sessionId: record.sessionId,
+  })
+}
+
+function parseAssistantAutoReplyTerminalArtifactSnapshot(input: {
+  deliveryIntentId: unknown
+  groupCaptureIds: unknown
+  outcome: unknown
+  recordedAt: unknown
+  sessionId: unknown
+}): AssistantAutoReplyTerminalArtifactSnapshot | null {
+  if (
+    input.outcome !== 'deferred' &&
+    input.outcome !== 'result'
+  ) {
+    return null
+  }
+  if (
+    typeof input.recordedAt !== 'string' ||
+    input.recordedAt.trim().length === 0 ||
+    typeof input.sessionId !== 'string' ||
+    input.sessionId.trim().length === 0
+  ) {
+    return null
+  }
+
+  return {
+    deliveryIntentId:
+      typeof input.deliveryIntentId === 'string' && input.deliveryIntentId.trim().length > 0
+        ? input.deliveryIntentId
+        : null,
+    groupCaptureIds: Array.isArray(input.groupCaptureIds)
+      ? input.groupCaptureIds
+          .map((item) => typeof item === 'string' ? item.trim() : '')
+          .filter((item) => item.length > 0)
+      : null,
+    outcome: input.outcome,
+    recordedAt: input.recordedAt,
+    sessionId: input.sessionId,
+  }
 }

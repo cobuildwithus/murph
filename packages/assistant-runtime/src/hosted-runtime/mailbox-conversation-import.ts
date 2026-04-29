@@ -1,10 +1,6 @@
 import type {
   HostedExecutionConversationMessageWake,
 } from "@murphai/hosted-execution";
-import {
-  emitHostedExecutionStructuredLog,
-  isHostedLinqConversationMessageWake,
-} from "@murphai/hosted-execution";
 
 import type {
   HostedMailboxItemImportOutcome,
@@ -24,10 +20,6 @@ import {
 import {
   HostedRawEmailMessageMissingError,
 } from "./events/email.ts";
-import {
-  recordHostedProviderCleanupBeforeCommit,
-  type HostedProviderCleanupCheckpoint,
-} from "./provider-cleanup.ts";
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -59,7 +51,6 @@ export interface HostedConversationMailboxPayloadDecodeInput {
 }
 
 export interface HostedConversationMailboxLocalImportResult {
-  afterCheckpoint?: (() => Promise<void>) | null;
   captureId: string | null;
   deduped: boolean;
   metrics: HostedConversationWakeMetrics;
@@ -83,16 +74,9 @@ export type HostedConversationMailboxWakeContextPreparer = (input: {
   wake: HostedExecutionConversationMessageWake;
 }) => Promise<void>;
 
-export type HostedConversationMailboxProviderCleanupRecorder = (input: {
-  checkpoint: HostedProviderCleanupCheckpoint;
-  linqMessageIds?: readonly string[] | null;
-  vaultRoot: string;
-}) => Promise<void>;
-
 export type HostedConversationMailboxImportOutcome =
   | {
       afterCheckpoint?: (() => Promise<void>) | null;
-      afterCheckpointBeforeAssistant?: (() => Promise<void>) | null;
       captureId: string | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: null;
@@ -100,7 +84,6 @@ export type HostedConversationMailboxImportOutcome =
     }
   | {
       afterCheckpoint?: (() => Promise<void>) | null;
-      afterCheckpointBeforeAssistant?: (() => Promise<void>) | null;
       captureId: string | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode: "capture.deduped";
@@ -120,7 +103,6 @@ export function createHostedConversationMailboxImportItem(input: {
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
-  recordProviderCleanupBeforeCommit?: HostedConversationMailboxProviderCleanupRecorder;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -138,7 +120,6 @@ export async function importHostedConversationMailboxItem(input: {
   decodePayload: HostedConversationMailboxPayloadDecoder;
   importConversationWake?: HostedConversationMailboxLocalImporter;
   prepareWakeContext?: HostedConversationMailboxWakeContextPreparer;
-  recordProviderCleanupBeforeCommit?: HostedConversationMailboxProviderCleanupRecorder;
   item: HostedMailboxResolvedImportItem;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -214,40 +195,8 @@ export async function importHostedConversationMailboxItem(input: {
 
     throw error;
   }
-  const linqProviderMessageId = resolveHostedConversationProviderCleanupMessageId(decoded.wake);
-  const afterCheckpointBeforeAssistant = composeHostedConversationMailboxAfterCheckpointEffects(
-    imported.afterCheckpoint,
-    linqProviderMessageId
-      ? async () => {
-          try {
-            await (input.recordProviderCleanupBeforeCommit ?? recordHostedProviderCleanupBeforeCommit)({
-              checkpoint: {
-                nextWakeAt: null,
-              },
-              linqMessageIds: [linqProviderMessageId],
-              vaultRoot: input.vaultRoot,
-            });
-          } catch {
-            emitHostedExecutionStructuredLog({
-              component: "runtime",
-              details: {
-                diagnostic: "provider_cleanup_record_failed",
-                provider: "linq",
-              },
-              level: "warn",
-              message:
-                "Hosted runtime could not record provider-visible Linq cleanup after mailbox checkpoint.",
-              phase: "wake.running",
-              wake: decoded.wake,
-            });
-          }
-        }
-      : null,
-  );
-
   if (imported.deduped) {
     return {
-      ...(afterCheckpointBeforeAssistant ? { afterCheckpointBeforeAssistant } : {}),
       captureId: imported.captureId,
       metrics: imported.metrics,
       reasonCode: "capture.deduped",
@@ -256,21 +205,10 @@ export async function importHostedConversationMailboxItem(input: {
   }
 
   return {
-    ...(afterCheckpointBeforeAssistant ? { afterCheckpointBeforeAssistant } : {}),
     captureId: imported.captureId,
     metrics: imported.metrics,
     status: "imported",
   };
-}
-
-function resolveHostedConversationProviderCleanupMessageId(
-  wake: HostedExecutionConversationMessageWake,
-): string | null {
-  if (!isHostedLinqConversationMessageWake(wake)) {
-    return null;
-  }
-
-  return wake.message.linqMessage.messageId.trim() || null;
 }
 
 async function importHostedConversationWakeWithLocalInbox(input: {
@@ -283,32 +221,9 @@ async function importHostedConversationWakeWithLocalInbox(input: {
 }): Promise<HostedConversationMailboxLocalImportResult> {
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
   return {
-    afterCheckpoint: result.afterCheckpoint,
     captureId: result.capture.captureId,
     deduped: result.capture.deduped,
     metrics: result.metrics,
-  };
-}
-
-function composeHostedConversationMailboxAfterCheckpointEffects(
-  ...candidates: Array<(() => Promise<void>) | null | undefined>
-): (() => Promise<void>) | null {
-  const effects = candidates.filter(
-    (effect): effect is () => Promise<void> => typeof effect === "function",
-  );
-  if (effects.length === 0) {
-    return null;
-  }
-
-  return async () => {
-    for (const effect of effects) {
-      try {
-        await effect();
-      } catch {
-        // Post-checkpoint conversation effects are enrichment/provider cleanup.
-        // They must not affect the accepted capture watermark.
-      }
-    }
   };
 }
 
