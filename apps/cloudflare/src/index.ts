@@ -262,6 +262,14 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.ownsActiveInvocationLease(input);
   }
 
+  async recordActiveInvocationHeartbeat(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): ReturnType<HostedUserRunner["recordActiveInvocationHeartbeat"]> {
+    return this.runner.recordActiveInvocationHeartbeat(input);
+  }
+
   async recordActiveInvocationWorkspaceCheckpoint(input: {
     attemptId: string;
     leaseGeneration: string;
