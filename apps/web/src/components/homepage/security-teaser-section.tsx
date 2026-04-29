@@ -2,8 +2,8 @@ import Link from "next/link";
 
 const PROMISES = [
   "We don't sell your data.",
-  "Encrypted by default.",
-  "Your chats never train models.",
+  "Encrypted at rest.",
+  "Health data isn't used for general AI training.",
   "Open source. See for yourself.",
 ] as const;
 
@@ -23,9 +23,11 @@ export function SecurityTeaserSection() {
             <span className="italic text-[#8a6a3a]">stays</span> yours.
           </h2>
           <p className="mt-6 max-w-[52ch] text-base leading-[1.7] text-pretty text-[#4d4533] sm:text-[1.0625rem]">
-            Your records stay locked by default. Murph opens them for a few
-            seconds to run a task, then locks them again. Between tasks, we
-            couldn&apos;t read them if we tried.
+            Hosted Murph encrypts records at rest. Short-lived task workers
+            decrypt what they need for requested work, and limited security,
+            debugging, or support workflows may also require readable
+            processing. We minimize operator access, but hosted Murph is not
+            zero-knowledge unless a specific feature says so.
           </p>
 
           <ul className="mt-8 grid gap-3 sm:grid-cols-2">
@@ -166,7 +168,7 @@ function TeaserVaultGlyph({ className }: { className?: string }) {
         x="170"
         y="308"
       >
-        LOCKED &middot; OPENED WHEN YOU ASK
+        ENCRYPTED &middot; TASK WORKERS
       </text>
     </svg>
   );
