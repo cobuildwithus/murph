@@ -3,6 +3,7 @@ dist/
 coverage/
 .DS_Store
 .turbo/
+.tmp/
 .next/
 .next-dev/
 .next-smoke/
@@ -43,8 +44,7 @@ packages/health-commons/generated/
 
 # Local Cloudflare runner secrets
 apps/cloudflare/.dev.vars*
-apps/cloudflare/.wrangler/local-dev.generated.json
-apps/cloudflare/.wrangler/.wrangler/
+apps/cloudflare/.wrangler/
 apps/cloudflare/.runner.env*
 apps/cloudflare/.deploy
 .vercel
