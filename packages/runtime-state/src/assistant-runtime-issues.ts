@@ -2,8 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
-import { writeJsonFileAtomic } from "./atomic-write.ts";
-import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
+import {
+  ensureAssistantStateDir,
+  writeAssistantStateJson,
+} from "./assistant-state-fs.ts";
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -111,8 +113,8 @@ export async function writePendingAssistantRuntimeIssueRecord(input: {
 }): Promise<void> {
   const paths = resolveAssistantRuntimeIssuePaths(input.vault, input.paths);
   const record = parseAssistantRuntimeIssueRecord(input.record);
-  await ensureAssistantStateDirectory(paths.issuesPendingDirectory);
-  await writeJsonFileAtomic(
+  await ensureAssistantStateDir(paths.issuesPendingDirectory);
+  await writeAssistantStateJson(
     resolvePendingAssistantRuntimeIssuePath(paths, record.issueId),
     createVersionedJsonStateEnvelope({
       schema: ASSISTANT_RUNTIME_ISSUE_SCHEMA,

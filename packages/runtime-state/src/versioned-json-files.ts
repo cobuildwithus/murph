@@ -1,6 +1,10 @@
-import { chmod as fsChmod, mkdir as fsMkdir, writeFile as fsWriteFile } from "node:fs/promises";
+import { chmod as fsChmod, writeFile as fsWriteFile } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  ensureAssistantStateDirectory,
+  resolveAssistantStateFileMode,
+} from "./assistant-state-security.ts";
 import { readLocalStateTextFile } from "./local-state-files.ts";
 import {
   createVersionedJsonStateEnvelope,
@@ -49,13 +53,16 @@ export async function writeVersionedJsonStateFile<T>(
 ): Promise<void> {
   const resolvedDependencies = dependencies ?? {
     chmod: fsChmod,
-    async mkdir(targetPath: string) {
-      await fsMkdir(targetPath, { recursive: true });
-    },
+    mkdir: ensureAssistantStateDirectory,
     writeFile(filePath: string, text: string) {
-      return fsWriteFile(filePath, text, "utf8");
+      const mode = resolveAssistantStateFileMode(filePath, input.mode);
+      return fsWriteFile(filePath, text, {
+        encoding: "utf8",
+        mode,
+      });
     },
   };
+  const fileMode = resolveAssistantStateFileMode(input.filePath, input.mode);
 
   await resolvedDependencies.mkdir(path.dirname(input.filePath));
   await resolvedDependencies.writeFile(
@@ -63,7 +70,7 @@ export async function writeVersionedJsonStateFile<T>(
     `${JSON.stringify(createVersionedJsonStateEnvelope(input), null, 2)}\n`,
   );
 
-  if (typeof input.mode === "number") {
-    await resolvedDependencies.chmod(input.filePath, input.mode);
+  if (typeof fileMode === "number") {
+    await resolvedDependencies.chmod(input.filePath, fileMode);
   }
 }

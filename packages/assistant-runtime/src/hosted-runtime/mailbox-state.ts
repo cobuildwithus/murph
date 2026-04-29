@@ -1,4 +1,3 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -11,9 +10,11 @@ import type {
 import {
   parseVersionedJsonStateEnvelope,
   readVersionedJsonStateFile,
-  resolveAssistantStatePaths,
-  writeVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";
+import {
+  resolveAssistantStatePaths,
+  writeAssistantStateVersionedJson,
+} from "@murphai/runtime-state/node/assistant-state-fs";
 
 export const HOSTED_MAILBOX_IMPORT_STATE_SCHEMA =
   "murph.hosted-mailbox-import-state.v1";
@@ -113,28 +114,12 @@ export async function writeHostedMailboxImportState(input: {
   const filePath = resolveHostedMailboxImportStatePath(input.vaultRoot);
   const state = parseHostedMailboxImportStateValue(input.state);
 
-  await writeVersionedJsonStateFile(
-    {
-      filePath,
-      mode: 0o600,
-      schema: HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
-      schemaVersion: HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
-      value: state,
-    },
-    {
-      chmod,
-      async mkdir(directoryPath: string) {
-        await mkdir(directoryPath, {
-          mode: 0o700,
-          recursive: true,
-        });
-        await chmod(directoryPath, 0o700);
-      },
-      writeFile(filePathToWrite: string, text: string) {
-        return writeFile(filePathToWrite, text, "utf8");
-      },
-    },
-  );
+  await writeAssistantStateVersionedJson({
+    filePath,
+    schema: HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
+    schemaVersion: HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
+    value: state,
+  });
 }
 
 export function advanceHostedMailboxLaneWatermark(

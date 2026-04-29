@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
+import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
 import {
   ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH,
   describeVaultLocalStateRelativePath,
   isPortableVaultOperationalContainerRelativePath,
   RUNTIME_CACHE_ROOT_RELATIVE_PATH,
-  RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH,
   RUNTIME_PROJECTION_ROOT_RELATIVE_PATH,
   RUNTIME_ROOT_RELATIVE_PATH,
   RUNTIME_TEMP_ROOT_RELATIVE_PATH,
@@ -126,7 +126,7 @@ export async function restoreHostedExecutionContext(input: {
   const operatorHomeRoot = path.join(workspaceRoot, "home");
 
   await mkdir(vaultRoot, { recursive: true });
-  await mkdir(assistantStateRoot, { recursive: true });
+  await ensureAssistantStateDirectory(assistantStateRoot);
   await mkdir(operatorHomeRoot, { recursive: true });
 
   if (input.bundle) {
@@ -165,7 +165,7 @@ export async function materializeHostedExecutionArtifacts(input: {
   const operatorHomeRoot = path.join(workspaceRoot, "home");
 
   await mkdir(vaultRoot, { recursive: true });
-  await mkdir(assistantStateRoot, { recursive: true });
+  await ensureAssistantStateDirectory(assistantStateRoot);
   await mkdir(operatorHomeRoot, { recursive: true });
 
   await materializeHostedBundleArtifacts({
@@ -253,6 +253,19 @@ function isHostedAssistantRuntimeSnapshotExcludedRelativePath(relativePath: stri
   if (
     ASSISTANT_RUNTIME_EXCLUDED_PATH_PREFIXES.some((prefix) =>
       hasWorkspaceSnapshotPathPrefix(relativePath, prefix),
+    )
+  ) {
+    return true;
+  }
+
+  const pathSegments = relativePath.split(path.posix.sep);
+  if (
+    pathSegments.some((segment) =>
+      segment === "secrets"
+      || segment === ".secrets"
+      || segment === "quarantine"
+      || segment === ".quarantine"
+      || segment === ".locks"
     )
   ) {
     return true;

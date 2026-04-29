@@ -1,4 +1,3 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -18,9 +17,11 @@ import type {
 import {
   parseVersionedJsonStateEnvelope,
   readVersionedJsonStateFile,
-  resolveAssistantStatePaths,
-  writeVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";
+import {
+  resolveAssistantStatePaths,
+  writeAssistantStateVersionedJson,
+} from "@murphai/runtime-state/node/assistant-state-fs";
 
 import {
   createHostedAssistantChannelTypingDependencies,
@@ -544,28 +545,12 @@ async function writeHostedSystemMailboxState(
   vaultRoot: string,
   state: HostedSystemMailboxState,
 ): Promise<void> {
-  await writeVersionedJsonStateFile(
-    {
-      filePath: resolveHostedSystemMailboxStatePath(vaultRoot),
-      mode: 0o600,
-      schema: HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA,
-      schemaVersion: HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION,
-      value: parseHostedSystemMailboxStateValue(state),
-    },
-    {
-      chmod,
-      async mkdir(directoryPath: string) {
-        await mkdir(directoryPath, {
-          mode: 0o700,
-          recursive: true,
-        });
-        await chmod(directoryPath, 0o700);
-      },
-      writeFile(filePathToWrite: string, text: string) {
-        return writeFile(filePathToWrite, text, "utf8");
-      },
-    },
-  );
+  await writeAssistantStateVersionedJson({
+    filePath: resolveHostedSystemMailboxStatePath(vaultRoot),
+    schema: HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA,
+    schemaVersion: HOSTED_SYSTEM_MAILBOX_STATE_SCHEMA_VERSION,
+    value: parseHostedSystemMailboxStateValue(state),
+  });
 }
 
 function resolveHostedSystemMailboxStatePath(vaultRoot: string): string {
