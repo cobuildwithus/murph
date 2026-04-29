@@ -8,7 +8,7 @@ package_script="scripts/package-review-gpt-protocol-context.sh"
 filtered_repomix_ignore_patterns=()
 for pattern in "${repomix_ignore_patterns[@]}"; do
   case "$pattern" in
-    "packages/health-commons/content/**"|"packages/health-commons/generated/**")
+    "packages/health-commons/content/**")
       continue
       ;;
   esac

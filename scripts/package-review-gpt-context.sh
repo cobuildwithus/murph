@@ -72,10 +72,7 @@ append_audit_context_lines COBUILD_AUDIT_CONTEXT_PRUNE_DIR_NAMES \
 
 if [[ "${MURPH_REVIEW_GPT_INCLUDE_HEALTH_COMMONS:-0}" =~ ^(1|true|yes|on)$ ]]; then
   remove_audit_context_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
-    "packages/health-commons/content/**" \
-    "packages/health-commons/generated/**"
-  remove_audit_context_lines COBUILD_AUDIT_CONTEXT_BINARY_EXCLUDE_GLOBS \
-    "packages/health-commons/generated/**"
+    "packages/health-commons/content/**"
   append_audit_context_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
     "output-packages/**"
 else
@@ -84,30 +81,6 @@ else
     "packages/health-commons/content/**" \
     "packages/health-commons/generated/**"
 fi
-
-append_health_commons_generated_to_zip() {
-  local zip_path="$1"
-  [[ -f "$zip_path" ]] || return 0
-  [[ -d "packages/health-commons/generated" ]] || return 0
-
-  find "packages/health-commons/generated" -type f -print \
-    | LC_ALL=C sort \
-    | zip -q "$zip_path" -@
-}
-
-append_health_commons_generated_to_txt() {
-  local txt_path="$1"
-  local relative_path
-  [[ -f "$txt_path" ]] || return 0
-  [[ -d "packages/health-commons/generated" ]] || return 0
-
-  while IFS= read -r relative_path; do
-    {
-      printf '\n===== FILE: %s =====\n' "$relative_path"
-      cat "$relative_path"
-    } >>"$txt_path"
-  done < <(find "packages/health-commons/generated" -type f -print | LC_ALL=C sort)
-}
 
 stdout_log="$(mktemp "${TMPDIR:-/tmp}/review-gpt-context.XXXXXX")"
 cleanup_stdout_log() {
@@ -121,15 +94,5 @@ set +e
   2> >(sed '/^Warning: excluding path from audit package: /d' >&2)
 package_status=$?
 set -e
-
-if [[ "$package_status" -eq 0 && "${MURPH_REVIEW_GPT_INCLUDE_HEALTH_COMMONS:-0}" =~ ^(1|true|yes|on)$ ]]; then
-  while IFS= read -r zip_path; do
-    append_health_commons_generated_to_zip "$zip_path"
-  done < <(sed -n 's/^ZIP: \(.*\) (.*/\1/p' "$stdout_log")
-
-  while IFS= read -r txt_path; do
-    append_health_commons_generated_to_txt "$txt_path"
-  done < <(sed -n 's/^TXT: \(.*\) (.*/\1/p' "$stdout_log")
-fi
 
 exit "$package_status"
