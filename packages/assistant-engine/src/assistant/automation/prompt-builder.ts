@@ -78,7 +78,6 @@ export async function prepareAssistantAutoReplyInput(
       attachmentBundles: await buildInboxModelAttachmentBundles({
         attachments: entry.capture.attachments,
         captureId: entry.capture.captureId,
-        captureEnvelopePath: entry.capture.envelopePath,
         vaultRoot,
       }),
     })),
@@ -106,7 +105,6 @@ export async function prepareAssistantAutoReplyInput(
         entry.attachmentBundles.map((attachment) => ({
           attachment,
           captureId: entry.capture.captureId,
-          captureEnvelopePath: entry.capture.envelopePath,
         })),
       ),
       prompt: nextPrompt,
@@ -198,7 +196,7 @@ function renderAssistantAutoReplyCaptureSection(input: {
   const sections: string[] = []
   if (input.replyContext) {
     sections.push(`Reply context:
-${sanitizeTelegramReplyContext(input.replyContext)}`)
+${input.replyContext}`)
   }
   if (input.captureText) {
     sections.push(`Message text:
@@ -227,6 +225,7 @@ function renderAttachmentPromptSection(
   const transcript = normalizeNullableString(attachment.transcriptText)
   const extractedText = normalizeNullableString(attachment.extractedText)
   const metadataLines = [
+    attachment.attachmentId ? `attachmentId: ${attachment.attachmentId}` : null,
     attachment.mime ? `mime: ${attachment.mime}` : null,
     typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
     attachment.parseState ? `parseState: ${attachment.parseState}` : null,
@@ -269,7 +268,7 @@ ${buildAttachmentTextExcerpt(extractedText)}`)
     chunks.unshift(metadataLines.join('\n'))
   }
 
-  const label = `Attachment ${attachment.ordinal} (${attachment.kind})`
+  const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${chunks.join('\n\n')}`
 }
 
@@ -290,10 +289,10 @@ function buildAssistantAutoReplyContextLines(
         ? firstCapture.occurredAt
         : `${firstCapture.occurredAt} -> ${lastCapture.occurredAt}`
     }`,
-    `Thread type: ${firstCapture.threadIsDirect ? 'direct' : 'group'}`,
-    `Actor self: ${String(firstCapture.actorIsSelf)}`,
+    `Thread: ${firstCapture.threadId}${firstCapture.threadTitle ? ` (${firstCapture.threadTitle})` : ''}`,
+    `Actor: ${firstCapture.actorName ?? firstCapture.actorId ?? 'unknown'} | self=${String(firstCapture.actorIsSelf)}`,
     captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
-    mediaGroupId ? 'Telegram media group: present' : null,
+    mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
   ]
 }
 
@@ -344,11 +343,11 @@ function renderPreparedAttachmentPromptSection(
   }
   if (richEvidenceCandidate && !hasTextFragments) {
     sections.push(
-      'No parsed attachment text is available. Use native attachment evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+      'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
     )
   }
 
-  const label = `Attachment ${attachment.ordinal} (${attachment.kind})`
+  const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${sections.join('\n\n')}`
 }
 
@@ -407,9 +406,14 @@ function buildTelegramReplyContext(
   const lines: string[] = []
 
   if (replyToMessage) {
+    const actor = buildTelegramRawActorDisplayName(replyToMessage)
     const text = summarizeTelegramRawMessageText(replyToMessage)
-    if (text) {
+    if (actor && text) {
+      lines.push(`Replying to ${actor}: ${text}`)
+    } else if (text) {
       lines.push(`Replying to: ${text}`)
+    } else if (actor) {
+      lines.push(`Replying to ${actor}`)
     } else {
       lines.push('Replying to an earlier Telegram message')
     }
@@ -422,10 +426,6 @@ function buildTelegramReplyContext(
   }
 
   return lines.length > 0 ? lines.join('\n') : null
-}
-
-function sanitizeTelegramReplyContext(replyContext: string): string {
-  return replyContext.replace(/^Replying to [^:\n]+: /u, 'Replying to: ')
 }
 
 function summarizeTelegramRawMessageText(
@@ -443,6 +443,41 @@ function summarizeTelegramRawMessageText(
   return text ? summarizeTelegramText(text) : null
 }
 
+function buildTelegramRawActorDisplayName(
+  message: Record<string, unknown>,
+): string | null {
+  return (
+    buildTelegramRawDisplayName(asRecord(message.from)) ??
+    buildTelegramRawDisplayName(asRecord(message.sender_chat)) ??
+    buildTelegramRawDisplayName(asRecord(message.chat)) ??
+    null
+  )
+}
+
+function buildTelegramRawDisplayName(
+  record: Record<string, unknown> | null,
+): string | null {
+  if (!record) {
+    return null
+  }
+
+  const parts = [
+    stringFromRecord(record, 'first_name'),
+    stringFromRecord(record, 'last_name'),
+  ].filter((value): value is string => value !== null)
+
+  if (parts.length > 0) {
+    return parts.join(' ')
+  }
+
+  const username = stringFromRecord(record, 'username')
+  if (username) {
+    return username.startsWith('@') ? username : `@${username}`
+  }
+
+  return stringFromRecord(record, 'title')
+}
+
 function buildTelegramRawContactText(
   contact: Record<string, unknown> | null,
 ): string | null {
@@ -450,15 +485,19 @@ function buildTelegramRawContactText(
     return null
   }
 
-  if (
-    !stringFromRecord(contact, 'first_name') &&
-    !stringFromRecord(contact, 'last_name') &&
-    !stringFromRecord(contact, 'phone_number')
-  ) {
+  const name = [
+    stringFromRecord(contact, 'first_name'),
+    stringFromRecord(contact, 'last_name'),
+  ]
+    .filter((value): value is string => value !== null)
+    .join(' ')
+  const phoneNumber = stringFromRecord(contact, 'phone_number')
+
+  if (!name && !phoneNumber) {
     return null
   }
 
-  return 'Shared contact'
+  return phoneNumber ? `Shared contact ${name || 'unknown'} (${phoneNumber})` : `Shared contact ${name}`
 }
 
 function buildTelegramRawLocationText(
@@ -476,7 +515,7 @@ function buildTelegramRawLocationText(
     return null
   }
 
-  return 'Shared location'
+  return `Shared location ${latitude}, ${longitude}`
 }
 
 function buildTelegramRawVenueText(
@@ -486,12 +525,13 @@ function buildTelegramRawVenueText(
     return null
   }
 
-  const hasVenueData =
-    stringFromRecord(venue, 'title') !== null ||
-    stringFromRecord(venue, 'address') !== null ||
-    buildTelegramRawLocationText(asRecord(venue.location)) !== null
+  const parts = [
+    stringFromRecord(venue, 'title'),
+    stringFromRecord(venue, 'address'),
+    buildTelegramRawLocationText(asRecord(venue.location)),
+  ].filter((value): value is string => value !== null)
 
-  return hasVenueData ? 'Shared venue' : null
+  return parts.length > 0 ? `Shared venue ${parts.join(' | ')}` : null
 }
 
 function buildTelegramRawPollText(

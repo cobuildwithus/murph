@@ -250,7 +250,6 @@ describe("hosted local Linq webhook e2e", () => {
     expect(assistantProviderRequests).toHaveLength(1);
     const assistantProviderBody = assistantProviderRequests[0]?.body ?? "";
     expect(assistantProviderBody).toContain(hostedLinqVoiceNoteTranscriptText);
-    expect(assistantProviderBody).not.toContain("Audio Message.m4a");
     expect(assistantProviderBody).not.toContain(attachmentId);
     expect(assistantProviderBody).not.toContain(expectedAttachmentDownloadPath);
   }, 300_000);
@@ -351,16 +350,14 @@ describe("hosted local Linq webhook e2e", () => {
         : [];
     });
     expect(inputFiles).toEqual([]);
+    expect(assistantProviderRequests[0]?.body).toContain("raw/inbox/");
+    expect(assistantProviderRequests[0]?.body).toContain("lab-results.pdf");
+    expect(assistantProviderRequests[0]?.body).toContain("storedPath");
     expectNoNativeAttachmentLeaks(assistantProviderRequests[0]?.body, [
       attachmentId,
       expectedAttachmentDownloadPath,
       expectedAttachmentDownloadUrl,
-      "01__lab-results.pdf",
-      "attachments/",
-      "lab-results.pdf",
       "pdfEvidencePath:",
-      "raw/inbox/",
-      "storedPath",
       "stub-local-vercel-ai-gateway-key",
       "VERCEL_AI_API_KEY",
     ]);

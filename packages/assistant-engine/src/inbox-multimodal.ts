@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -23,7 +23,7 @@ import {
   type AssistantUserMessageContentPart,
 } from './assistant/content-types.js'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
-import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 const parserManifestSchema = z.object({
   schema: z.literal('murph.parser-manifest.v1'),
@@ -37,18 +37,12 @@ const parserManifestSchema = z.object({
 interface PreparedRoutingImage {
   kind: 'image'
   ordinal: number
+  fileName: string | null
   mediaType: string | null
   bytes: Buffer
 }
 
-interface PreparedRoutingFile {
-  kind: 'file'
-  ordinal: number
-  mediaType: string
-  bytes: Buffer
-}
-
-type PreparedRoutingEvidence = PreparedRoutingImage | PreparedRoutingFile
+type PreparedRoutingEvidence = PreparedRoutingImage
 
 export const MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES = 20 * 1024 * 1024
 
@@ -57,6 +51,7 @@ type RoutingPdfEligibilityReason =
   | 'eligible'
   | 'missing-stored-path'
   | 'not-pdf'
+  | 'raw-pdf-disabled'
   | 'stored-file-too-large'
   | 'stored-file-unavailable'
   | 'stored-path-outside-capture'
@@ -72,21 +67,15 @@ interface RoutingPdfEligibility {
 export interface InboxMultimodalAttachmentSource {
   attachment: InboxModelAttachmentBundle
   captureId: string
-  captureEnvelopePath: string
 }
 
 export async function buildInboxModelAttachmentBundle(input: {
   attachment: InboxShowResult['capture']['attachments'][number]
   captureId: string
-  captureEnvelopePath: string
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle> {
   const routingImage = getRoutingImageEligibility(input.attachment)
-  const routingPdf = await getRoutingPdfEligibility({
-    attachment: input.attachment,
-    captureEnvelopePath: input.captureEnvelopePath,
-    vaultRoot: input.vaultRoot,
-  })
+  const routingPdf = getRoutingPdfEligibility(input.attachment)
   const evidenceSources = [
     ...buildInlineTextSources(input.attachment),
     ...(await buildDerivedTextSources({
@@ -101,9 +90,9 @@ export async function buildInboxModelAttachmentBundle(input: {
       attachment: {
         byteSize: input.attachment.byteSize ?? null,
         derivedPath: input.attachment.derivedPath ?? null,
-        fileName: buildAttachmentDisplayName(input.attachment),
+        fileName: input.attachment.fileName ?? null,
         mime: input.attachment.mime ?? null,
-        storedPath: null,
+        storedPath: input.attachment.storedPath ?? null,
       },
       sources: evidenceSources,
     }),
@@ -132,7 +121,6 @@ export async function buildInboxModelAttachmentBundle(input: {
 export async function buildInboxModelAttachmentBundles(input: {
   attachments: readonly InboxShowResult['capture']['attachments'][number][]
   captureId: string
-  captureEnvelopePath: string
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle[]> {
   return Promise.all(
@@ -140,7 +128,6 @@ export async function buildInboxModelAttachmentBundles(input: {
       buildInboxModelAttachmentBundle({
         attachment,
         captureId: input.captureId,
-        captureEnvelopePath: input.captureEnvelopePath,
         vaultRoot: input.vaultRoot,
       }),
     ),
@@ -152,7 +139,7 @@ export function inferInboxMultimodalInputMode(
 ): InboxModelInputMode {
   return attachments.some(
     (attachment) =>
-      attachment.routingImage.eligible || attachment.routingPdf?.eligible,
+      attachment.routingImage.eligible || isRoutingPdfFallbackCandidate(attachment),
   )
     ? 'multimodal'
     : 'text-only'
@@ -167,12 +154,8 @@ export function hasInboxMultimodalAttachmentEvidenceCandidate(
     'routingImage' in attachment
       ? attachment.routingImage
       : getRoutingImageEligibility(attachment)
-  const routingPdf =
-    'routingPdf' in attachment
-      ? attachment.routingPdf ?? inferRoutingPdfEligibilityWithoutFileCheck(attachment)
-      : inferRoutingPdfEligibilityWithoutFileCheck(attachment)
 
-  return routingImage.eligible || routingPdf.eligible
+  return routingImage.eligible || isRoutingPdfFallbackCandidate(attachment)
 }
 
 export async function prepareInboxMultimodalUserMessageContent(input: {
@@ -220,32 +203,19 @@ export async function prepareInboxMultimodalUserMessageContent(input: {
   ]
 
   for (const item of routingEvidence.evidence) {
-    if (item.kind === 'image') {
-      content.push({
-        type: 'text',
-        text: `Attachment image ${item.ordinal}.`,
-      })
-      content.push({
-        type: 'image',
-        image: item.bytes,
-        ...(item.mediaType
-          ? {
-              mediaType: item.mediaType,
-              mimeType: item.mediaType,
-            }
-          : {}),
-      })
-      continue
-    }
-
     content.push({
-      type: 'file',
-      data: item.bytes,
-      mediaType: item.mediaType,
-      filename: buildSyntheticAttachmentFilename({
-        ordinal: item.ordinal,
-        mediaType: item.mediaType,
-      }),
+      type: 'text',
+      text: `Attachment image ${item.ordinal}.`,
+    })
+    content.push({
+      type: 'image',
+      image: item.bytes,
+      ...(item.mediaType
+        ? {
+            mediaType: item.mediaType,
+            mimeType: item.mediaType,
+          }
+        : {}),
     })
   }
 
@@ -261,11 +231,21 @@ export function isRoutingPdfFallbackCandidate(
     | InboxShowResult['capture']['attachments'][number]
     | InboxModelAttachmentBundle,
 ): boolean {
-  return (
+  const routingPdf =
     'routingPdf' in attachment
       ? attachment.routingPdf ?? inferRoutingPdfEligibilityWithoutFileCheck(attachment)
       : inferRoutingPdfEligibilityWithoutFileCheck(attachment)
-  ).eligible
+
+  return (
+    !routingPdf.eligible &&
+    routingPdf.reason === 'raw-pdf-disabled' &&
+    hasUsableStoredPath(attachment) &&
+    attachment.parseState !== 'pending' &&
+    attachment.parseState !== 'running' &&
+    !('fragments' in attachment
+      ? attachment.fragments.some((fragment) => fragment.kind !== 'attachment_metadata')
+      : false)
+  )
 }
 
 function buildMetadataFragment(
@@ -274,11 +254,13 @@ function buildMetadataFragment(
   routingPdf: RoutingPdfEligibility,
 ) {
   const metadataLines = [
+    `attachmentId: ${attachment.attachmentId ?? `attachment-${attachment.ordinal}`}`,
     `ordinal: ${attachment.ordinal}`,
     `kind: ${attachment.kind}`,
     `mime: ${attachment.mime ?? 'unknown'}`,
-    `displayName: ${buildAttachmentDisplayName(attachment)}`,
+    `fileName: ${attachment.fileName ?? 'unknown'}`,
     `byteSize: ${attachment.byteSize ?? 'unknown'}`,
+    `storedPath: ${attachment.storedPath ?? 'missing'}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
     ...(attachment.kind === 'image'
       ? [
@@ -292,8 +274,10 @@ function buildMetadataFragment(
     `routingPdfEligible: ${String(routingPdf.eligible)}`,
     `routingPdfReason: ${routingPdf.reason}`,
     `routingPdfMaxBytes: ${routingPdf.maxBytes}`,
+    ...(routingPdf.path ? [`routingPdfPath: ${routingPdf.path}`] : []),
     ...(routingPdf.eligible
       ? [
+          `pdfEvidencePath: ${routingPdf.path ?? 'unknown'}`,
           `pdfEvidenceByteSize: ${routingPdf.byteSize ?? 'unknown'}`,
         ]
       : []),
@@ -302,7 +286,7 @@ function buildMetadataFragment(
   return {
     kind: 'attachment_metadata' as const,
     label: `attachment-${attachment.ordinal}-metadata`,
-    path: null,
+    path: attachment.storedPath ?? null,
     text,
     truncated: false,
   }
@@ -318,7 +302,7 @@ function buildInlineTextSources(
     sources.push({
       kind: 'attachment_extracted_text',
       label: `attachment-${attachment.ordinal}-extracted-text`,
-      path: null,
+      path: attachment.derivedPath ?? attachment.storedPath ?? null,
       text: extracted,
     })
   }
@@ -328,7 +312,7 @@ function buildInlineTextSources(
     sources.push({
       kind: 'attachment_transcript',
       label: `attachment-${attachment.ordinal}-transcript`,
-      path: null,
+      path: attachment.derivedPath ?? attachment.storedPath ?? null,
       text: transcript,
     })
   }
@@ -371,7 +355,7 @@ async function buildDerivedTextSources(input: {
     sources.push({
       kind: 'derived_plain_text',
       label: 'derived-plain-text',
-      path: null,
+      path: plainTextPath,
       text: plainText,
     })
   }
@@ -387,7 +371,7 @@ async function buildDerivedTextSources(input: {
     sources.push({
       kind: 'derived_markdown',
       label: 'derived-markdown',
-      path: null,
+      path: markdownPath,
       text: markdown,
     })
   }
@@ -402,7 +386,7 @@ async function buildDerivedTextSources(input: {
       sources.push({
         kind: 'derived_tables',
         label: 'derived-tables',
-        path: null,
+        path: tablesPath,
         text: tables,
       })
     }
@@ -426,50 +410,35 @@ async function readPreparedRoutingEvidence(input: {
     const { attachment } = source
     const storedPath = normalizeCaptureStoredAttachmentPath(
       attachment.storedPath ?? null,
-      source.captureEnvelopePath,
+      source.captureId,
     )
     const shouldLoadImage = attachment.routingImage.eligible
-    const shouldLoadPdf = attachment.routingPdf?.eligible === true
-    if (shouldLoadImage) {
-      try {
-        const bytes = await readPreparedAttachmentBytes({
-          maxBytes: null,
-          storedPath,
-          vaultRoot: input.vaultRoot,
-        })
-
-        evidence.push({
-          kind: 'image',
-          ordinal: attachment.ordinal,
-          mediaType: attachment.routingImage.mediaType ?? null,
-          bytes,
-        })
-      } catch {
-        errors.push(
-          `attachment ${attachment.ordinal} (image): stored-file-unavailable`,
-        )
-      }
+    if (!shouldLoadImage || !attachment.storedPath) {
+      continue
     }
 
-    if (shouldLoadPdf) {
-      try {
-        const bytes = await readPreparedAttachmentBytes({
-          maxBytes: MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES,
-          storedPath,
-          vaultRoot: input.vaultRoot,
-        })
-
-        evidence.push({
-          kind: 'file',
-          ordinal: attachment.ordinal,
-          mediaType: 'application/pdf',
-          bytes,
-        })
-      } catch {
-        errors.push(
-          `attachment ${attachment.ordinal} (pdf): stored-file-unavailable`,
-        )
+    try {
+      if (!storedPath) {
+        throw new Error('attachment stored path is outside the capture attachment subtree')
       }
+      const absolutePath = await resolveAssistantVaultPath(
+        input.vaultRoot,
+        storedPath,
+        'file path',
+      )
+      const bytes = await readFile(absolutePath)
+
+      evidence.push({
+        kind: 'image',
+        ordinal: attachment.ordinal,
+        fileName: attachment.fileName ?? null,
+        mediaType: attachment.routingImage.mediaType ?? null,
+        bytes,
+      })
+    } catch (error) {
+      errors.push(
+        `attachment ${attachment.ordinal} (image): ${errorMessage(error)}`,
+      )
     }
   }
 
@@ -482,93 +451,10 @@ async function readPreparedRoutingEvidence(input: {
   }
 }
 
-async function readPreparedAttachmentBytes(input: {
-  maxBytes: number | null
-  storedPath: string | null
-  vaultRoot: string
-}): Promise<Buffer> {
-  if (!input.storedPath) {
-    throw new Error('stored-file-unavailable')
-  }
-
-  const absolutePath = await resolveAssistantVaultPath(
-    input.vaultRoot,
-    input.storedPath,
-    'file path',
-  )
-  const fileStats = await stat(absolutePath)
-  if (!fileStats.isFile()) {
-    throw new Error('stored-file-unavailable')
-  }
-  if (input.maxBytes !== null && fileStats.size > input.maxBytes) {
-    throw new Error('stored-file-too-large')
-  }
-
-  const bytes = await readFile(absolutePath)
-  if (input.maxBytes !== null && bytes.byteLength > input.maxBytes) {
-    throw new Error('stored-file-too-large')
-  }
-
-  return bytes
-}
-
-async function getRoutingPdfEligibility(input: {
-  attachment: InboxShowResult['capture']['attachments'][number]
-  captureEnvelopePath: string
-  vaultRoot: string
-}): Promise<RoutingPdfEligibility> {
-  const inferred = inferRoutingPdfEligibilityWithoutFileCheck(input.attachment)
-  if (!inferred.eligible) {
-    return inferred
-  }
-
-  const storedPath = normalizeCaptureStoredAttachmentPath(
-    input.attachment.storedPath ?? null,
-    input.captureEnvelopePath,
-  )
-  if (!storedPath) {
-    return buildRoutingPdfEligibility({
-      byteSize: inferred.byteSize,
-      path: null,
-      reason: 'stored-path-outside-capture',
-    })
-  }
-
-  try {
-    const absolutePath = await resolveAssistantVaultPath(
-      input.vaultRoot,
-      storedPath,
-      'file path',
-    )
-    const fileStats = await stat(absolutePath)
-    if (!fileStats.isFile()) {
-      return buildRoutingPdfEligibility({
-        byteSize: inferred.byteSize,
-        path: storedPath,
-        reason: 'stored-file-unavailable',
-      })
-    }
-    if (fileStats.size > MAX_INBOX_ROUTING_PDF_EVIDENCE_BYTES) {
-      return buildRoutingPdfEligibility({
-        byteSize: fileStats.size,
-        path: storedPath,
-        reason: 'stored-file-too-large',
-      })
-    }
-
-    return buildRoutingPdfEligibility({
-      byteSize: fileStats.size,
-      eligible: true,
-      path: storedPath,
-      reason: 'eligible',
-    })
-  } catch {
-    return buildRoutingPdfEligibility({
-      byteSize: inferred.byteSize,
-      path: storedPath,
-      reason: 'stored-file-unavailable',
-    })
-  }
+function getRoutingPdfEligibility(
+  attachment: InboxShowResult['capture']['attachments'][number],
+): RoutingPdfEligibility {
+  return inferRoutingPdfEligibilityWithoutFileCheck(attachment)
 }
 
 function inferRoutingPdfEligibilityWithoutFileCheck(
@@ -607,9 +493,8 @@ function inferRoutingPdfEligibilityWithoutFileCheck(
 
   return buildRoutingPdfEligibility({
     byteSize,
-    eligible: true,
     path: storedPath,
-    reason: 'eligible',
+    reason: 'raw-pdf-disabled',
   })
 }
 
@@ -636,6 +521,14 @@ function readAttachmentByteSize(
   return typeof attachment.byteSize === 'number' ? attachment.byteSize : null
 }
 
+function hasUsableStoredPath(
+  attachment:
+    | InboxShowResult['capture']['attachments'][number]
+    | InboxModelAttachmentBundle,
+): boolean {
+  return normalizeNullableString(attachment.storedPath) !== null
+}
+
 function isPdfAttachment(
   attachment:
     | InboxShowResult['capture']['attachments'][number]
@@ -650,32 +543,6 @@ function isPdfAttachment(
   return candidates.some((candidate) =>
     normalizeNullableString(candidate)?.toLowerCase().endsWith('.pdf') ?? false,
   )
-}
-
-function buildAttachmentDisplayName(
-  attachment:
-    | InboxShowResult['capture']['attachments'][number]
-    | InboxModelAttachmentBundle,
-): string {
-  if (isPdfAttachment(attachment)) {
-    return buildSyntheticAttachmentFilename({
-      ordinal: attachment.ordinal,
-      mediaType: 'application/pdf',
-    })
-  }
-
-  return `attachment-${String(attachment.ordinal).padStart(2, '0')}`
-}
-
-function buildSyntheticAttachmentFilename(input: {
-  ordinal: number
-  mediaType: string
-}): string {
-  const extension =
-    input.mediaType === 'application/pdf' || input.mediaType === 'application/x-pdf'
-      ? 'pdf'
-      : 'bin'
-  return `attachment-${String(input.ordinal).padStart(2, '0')}.${extension}`
 }
 
 function buildAllowedDerivedPrefixes(
@@ -712,7 +579,7 @@ function buildAllowedDerivedPrefixes(
 
 function normalizeCaptureStoredAttachmentPath(
   candidatePath: string | null | undefined,
-  captureEnvelopePath: string,
+  captureId: string,
 ): string | null {
   const normalizedCandidate = normalizeNullableString(candidatePath)
   if (!normalizedCandidate) {
@@ -721,9 +588,7 @@ function normalizeCaptureStoredAttachmentPath(
 
   try {
     const normalized = normalizeRelativeVaultPath(normalizedCandidate)
-    return isCaptureStoredAttachmentPath(normalized, captureEnvelopePath)
-      ? normalized
-      : null
+    return isCaptureStoredAttachmentPath(normalized, captureId) ? normalized : null
   } catch {
     return null
   }
@@ -731,15 +596,17 @@ function normalizeCaptureStoredAttachmentPath(
 
 function isCaptureStoredAttachmentPath(
   normalizedStoredPath: string,
-  captureEnvelopePath: string,
+  captureId: string,
 ): boolean {
-  const normalizedEnvelopePath = normalizeRelativeVaultPath(captureEnvelopePath)
-  const captureDirectory = path.posix.dirname(normalizedEnvelopePath)
-  const attachmentsPrefix = `${captureDirectory}/attachments/`
+  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
+  const segments = normalizedStoredPath.split('/')
+  const attachmentsIndex = segments.indexOf('attachments')
   return (
-    normalizedEnvelopePath.endsWith('/envelope.json') &&
-    normalizedStoredPath.startsWith(attachmentsPrefix) &&
-    normalizedStoredPath.length > attachmentsPrefix.length
+    segments[0] === 'raw' &&
+    segments[1] === 'inbox' &&
+    attachmentsIndex >= 3 &&
+    attachmentsIndex < segments.length - 1 &&
+    segments[attachmentsIndex - 1] === normalizedCaptureId
   )
 }
 

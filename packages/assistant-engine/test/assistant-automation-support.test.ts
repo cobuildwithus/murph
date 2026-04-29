@@ -705,7 +705,7 @@ describe('assistant auto-reply grouping', () => {
       JSON.stringify({
         input: {
           raw: {
-            reply_context_preview: 'Replying to: Shared venue',
+            reply_context_preview: 'Replying to: Shared venue Coffee Shop',
             schema: 'murph.telegram-capture.v1',
             media_group_id: 'group-1',
             message_id: '101',
@@ -770,7 +770,7 @@ describe('assistant auto-reply grouping', () => {
       {
         mediaGroupId: 'group-1',
         messageId: '101',
-        replyContext: 'Replying to: Shared venue',
+        replyContext: 'Replying to: Shared venue Coffee Shop',
       },
       {
         mediaGroupId: 'group-2',
@@ -1113,7 +1113,7 @@ describe('assistant auto-reply prompt builder support', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt.')
     }
-    expect(result.prompt).toContain('Reply context:\nReplying to: Can you review this?')
+    expect(result.prompt).toContain('Reply context:\nReplying to Jordan: Can you review this?')
     expect(result.prompt).toContain('Message text:\nPlease summarize this.')
     expect(result.prompt).toContain('Extracted text:\nAttachment excerpt')
     expect(result.prompt).not.toContain('Capture 1:')
@@ -1166,7 +1166,7 @@ describe('assistant auto-reply prompt builder support', () => {
       'Occurred at: 2026-04-08T00:00:00.000Z -> 2026-04-08T00:00:05.000Z',
     )
     expect(result.prompt).toContain('Grouped captures: 2')
-    expect(result.prompt).toContain('Telegram media group: present')
+    expect(result.prompt).toContain('Telegram media group: group-1')
     expect(result.prompt).toContain('Capture 1:')
     expect(result.prompt).toContain('Capture 2:')
     expect(result.prompt).toContain('Transcript excerpt:')
@@ -1275,7 +1275,7 @@ describe('assistant auto-reply prompt builder support', () => {
     expect(result).toEqual({
       kind: 'ready',
       prompt: expect.stringContaining(
-        'No parsed attachment text is available. Use native attachment evidence only if it is present in the model input; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
+        'No parsed attachment text is available. If local attachment paths are present in the context, inspect those files with local tools; do not claim a QR or barcode payload was decoded unless it appears in parsed attachment text.',
       ),
       userMessageContent: [
         {
@@ -1383,7 +1383,7 @@ describe('assistant auto-reply prompt builder support', () => {
     ).resolves.toEqual({
       mediaGroupId: null,
       messageId: '43',
-      replyContext: 'Replying to: Shared poll Lunch? [Sushi | Soup]',
+      replyContext: 'Replying to @casey: Shared poll Lunch? [Sushi | Soup]',
     })
   })
 
@@ -1420,11 +1420,12 @@ describe('assistant auto-reply prompt builder support', () => {
     ).resolves.toEqual({
       mediaGroupId: null,
       messageId: '88',
-      replyContext: 'Replying to: Shared venue',
+      replyContext:
+        'Replying to: Shared venue Cafe Luna | 123 Harbour St | Shared location -33.86, 151.21',
     })
   })
 
-  it('uses a generic telegram reply context when referenced content is empty', async () => {
+  it('falls back to actor-only telegram reply context when a referenced poll is empty', async () => {
     const { vaultRoot } = await createTempVault('assistant-automation-support-')
     const envelopePath = path.join(vaultRoot, 'telegram-empty-poll.json')
 
@@ -1453,7 +1454,7 @@ describe('assistant auto-reply prompt builder support', () => {
     ).resolves.toEqual({
       mediaGroupId: null,
       messageId: '89',
-      replyContext: 'Replying to an earlier Telegram message',
+      replyContext: 'Replying to Team Thread',
     })
   })
 
