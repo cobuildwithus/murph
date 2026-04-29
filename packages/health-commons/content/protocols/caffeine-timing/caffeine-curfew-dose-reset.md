@@ -45,6 +45,10 @@ lineage:
   rationale: Murph canonical adult wellness self-experiment for testing whether late or high-dose all-source caffeine exposure is affecting sleep, while preserving abstinence, clinical, pregnancy, shift-work, and performance variants as separate protocols.
 attribution:
   ownerType: murph
+media:
+- kind: image
+  relativePath: design-assets/hero-caffeine-curfew.jpeg
+  mediaType: image/jpeg
 protocol:
   doseSignature: Daily · 14 intervention days after optional 7-day baseline · all caffeine before 10–11am or ≥8h before bedtime, whichever is earlier
   target: 'all caffeine sources: coffee, tea, energy products, supplements, decaf, chocolate/cocoa, and caffeine-containing medicines'

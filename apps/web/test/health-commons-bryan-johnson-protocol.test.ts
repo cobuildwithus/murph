@@ -117,6 +117,13 @@ describe("Health Commons experiment protocol metadata", () => {
     expect(protocol?.image).toBe("/design-assets/hero-red-light-glasses-before-bed.jpeg");
   });
 
+  it("uses the dedicated caffeine curfew artwork", () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("caffeine-curfew-dose-reset");
+
+    expect(protocol).not.toBeNull();
+    expect(protocol?.image).toBe("/design-assets/hero-caffeine-curfew.jpeg");
+  });
+
   it("omits protocols hidden by Health Commons frontmatter from the public experiments library", () => {
     const catalog = createFixtureCatalog();
 
