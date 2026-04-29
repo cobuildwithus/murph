@@ -18,7 +18,7 @@ describe("resolveHostedLocalDevConfig", () => {
       skipWeb: false,
       skipVercelPull: false,
       useVercelDatabaseUrl: false,
-      webHost: "127.0.0.1",
+      webHost: "localhost",
       webPort: 3000,
       workerHost: "127.0.0.1",
       workerPersistDir: ".wrangler/state/dev-root",
@@ -85,6 +85,7 @@ describe("printHelp", () => {
     expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
     expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
     expect(output).toContain("MURPH_DEV_STRIPE_ENV_FILE=.tmp/.env.hosted-local-stripe");
+    expect(output).toContain("MURPH_DEV_WEB_HOST=localhost");
     expect(output).toContain("stripe listen");
   });
 });

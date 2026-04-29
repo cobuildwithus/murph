@@ -12,7 +12,7 @@ const startHostedLocalDevStack = vi.fn(async () => ({
   ready: ready(),
   stop,
   waitForExit,
-  webBaseUrl: "http://127.0.0.1:3000",
+  webBaseUrl: "http://localhost:3000",
   workerBaseUrl: "http://127.0.0.1:8787",
 }));
 
