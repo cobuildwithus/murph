@@ -137,6 +137,8 @@ async function runSmokeChecks(input: {
     codexCommandDiscovered: true,
     codexHostedConfigShellEnvironmentPolicyAllowlisted:
       hostedCodexConfig.shellEnvironmentPolicyAllowlisted,
+    codexHostedShellMurphHelpBytes: hostedCodexConfig.murphHelpBytes,
+    codexHostedShellVaultCliLlmsBytes: hostedCodexConfig.vaultCliLlmsBytes,
     codexVersion: codexPreflight.version,
     healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
     healthCommonsCliProtocolListBytes: healthCommonsCli.protocolListBytes,
@@ -371,7 +373,11 @@ async function runCodexPreflight(): Promise<{
 
 async function runHostedCodexConfigShellEnvironmentPolicySmoke(
   workspaceRoot: string,
-): Promise<{ shellEnvironmentPolicyAllowlisted: boolean }> {
+): Promise<{
+  murphHelpBytes: number;
+  shellEnvironmentPolicyAllowlisted: boolean;
+  vaultCliLlmsBytes: number;
+}> {
   const codexHome = path.join(workspaceRoot, "hosted-codex-config-smoke-home", ".codex-hosted");
   await mkdir(codexHome, {
     mode: 0o700,
@@ -410,7 +416,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
     throw new Error("Hosted runner smoke Codex config leaked the provider credential value.");
   }
 
-  await runCodexAppServerShellEnvironmentProbe({
+  const shellProbe = await runCodexAppServerShellEnvironmentProbe({
     codexHome,
     runtimeEnv: {
       PATH: process.env.PATH ?? "",
@@ -422,7 +428,9 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(
   });
 
   return {
+    murphHelpBytes: shellProbe.murphHelpBytes,
     shellEnvironmentPolicyAllowlisted: true,
+    vaultCliLlmsBytes: shellProbe.vaultCliLlmsBytes,
   };
 }
 
@@ -451,7 +459,10 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   codexHome: string;
   runtimeEnv: Record<string, string>;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<{
+  murphHelpBytes: number;
+  vaultCliLlmsBytes: number;
+}> {
   const child = spawn("codex", ["app-server"], {
     env: {
       ...process.env,
@@ -474,12 +485,23 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   let stderr = "";
   let settled = false;
 
-  const completed = new Promise<void>((resolve, reject) => {
+  const completed = new Promise<{
+    murphHelpBytes: number;
+    vaultCliLlmsBytes: number;
+  }>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error(`Timed out waiting for Codex app-server shell env probe. stderr: ${stderr}`));
+      reject(new Error(
+        `Timed out waiting for Codex app-server shell env probe. stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
+      ));
     }, 10_000);
 
-    const finish = (error?: Error): void => {
+    const finish = (
+      error?: Error,
+      result?: {
+        murphHelpBytes: number;
+        vaultCliLlmsBytes: number;
+      },
+    ): void => {
       if (settled) {
         return;
       }
@@ -491,14 +513,19 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
         return;
       }
 
-      resolve();
+      if (!result) {
+        reject(new Error("Codex app-server shell env probe finished without a result."));
+        return;
+      }
+
+      resolve(result);
     };
 
     child.once("error", finish);
     child.once("exit", (code, signal) => {
       if (!settled) {
         finish(new Error(
-          `Codex app-server exited before shell env probe completed: ${code ?? signal}. stderr: ${stderr}`,
+          `Codex app-server exited before shell env probe completed: ${code ?? signal}. stderrBytes=${Buffer.byteLength(stderr, "utf8")}`,
         ));
       }
     });
@@ -526,11 +553,11 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
         }
 
         const result = readCodexCommandExecResult(message.result);
-        assertCodexShellEnvironmentProbeResult({
+        const probe = assertCodexShellEnvironmentProbeResult({
           result,
           vaultRoot: input.vaultRoot,
         });
-        finish();
+        finish(undefined, probe);
       }
     });
   });
@@ -557,8 +584,14 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
           [
             "vault_cli_path=$(command -v vault-cli || true)",
             "murph_path=$(command -v murph || true)",
+            "if [ -z \"$vault_cli_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-vault-cli'; exit 127; fi",
+            "if [ -z \"$murph_path\" ]; then printf '%s\\n' 'probe_step_failed:resolve-murph'; exit 127; fi",
+            "vault_cli_manifest=$(\"$vault_cli_path\" --llms --format json) || { status=$?; printf '%s\\n' 'probe_step_failed:vault-cli-llms'; exit \"$status\"; }",
+            "murph_help=$(\"$murph_path\" --help) || { status=$?; printf '%s\\n' 'probe_step_failed:murph-help'; exit \"$status\"; }",
             "printf '%s\\n' \"$vault_cli_path\"",
             "printf '%s\\n' \"$murph_path\"",
+            "printf '%s\\n' \"${#vault_cli_manifest}\"",
+            "printf '%s\\n' \"${#murph_help}\"",
             "printf '%s\\n' \"${VAULT:-}\"",
             "printf '%s\\n' \"${WHISPER_COMMAND:-}\"",
             "printf '%s\\n' \"${VERCEL_AI_API_KEY:-}\"",
@@ -567,7 +600,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
         timeoutMs: 5_000,
       },
     })}\n`);
-    await completed;
+    return await completed;
   } finally {
     childStdin.end();
     child.kill();
@@ -606,18 +639,38 @@ function assertCodexShellEnvironmentProbeResult(input: {
     stdout: string;
   };
   vaultRoot: string;
-}): void {
+}): {
+  murphHelpBytes: number;
+  vaultCliLlmsBytes: number;
+} {
   if (input.result.exitCode !== 0) {
+    const failedStep = readProbeFailureStep(input.result.stdout);
+    const failedStepSuffix = failedStep ? ` during ${failedStep}` : "";
     throw new Error(
-      `Codex app-server shell env probe exited ${input.result.exitCode}. stdout=${JSON.stringify(input.result.stdout)} stderr=${JSON.stringify(input.result.stderr)}`,
+      `Codex app-server shell env probe exited ${input.result.exitCode}${failedStepSuffix}. stdoutBytes=${Buffer.byteLength(input.result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(input.result.stderr, "utf8")}`,
     );
   }
 
-  const [vaultCliPath, murphPath, vaultRoot, whisperCommand, providerCredential, ...extra] =
+  const [
+    vaultCliPath,
+    murphPath,
+    vaultCliLlmsBytesText,
+    murphHelpBytesText,
+    vaultRoot,
+    whisperCommand,
+    providerCredential,
+    ...extra
+  ] =
     input.result.stdout.split(/\r?\n/u);
   if (!vaultCliPath || !murphPath || extra.some((line) => line.trim().length > 0)) {
     throw new Error("Codex app-server shell env probe did not resolve vault-cli and murph cleanly.");
   }
+
+  const vaultCliLlmsBytes = parsePositiveByteCount(
+    vaultCliLlmsBytesText,
+    "vault-cli --llms --format json",
+  );
+  const murphHelpBytes = parsePositiveByteCount(murphHelpBytesText, "murph --help");
 
   if (vaultRoot !== input.vaultRoot) {
     throw new Error("Codex app-server shell env probe did not inherit the hosted VAULT path.");
@@ -630,6 +683,25 @@ function assertCodexShellEnvironmentProbeResult(input: {
   if (providerCredential && providerCredential.trim().length > 0) {
     throw new Error("Codex app-server shell env probe leaked the provider credential env.");
   }
+
+  return {
+    murphHelpBytes,
+    vaultCliLlmsBytes,
+  };
+}
+
+function parsePositiveByteCount(value: string | undefined, label: string): number {
+  if (!value || !/^[1-9][0-9]*$/u.test(value)) {
+    throw new Error(`Codex app-server shell env probe did not execute ${label}.`);
+  }
+
+  return Number(value);
+}
+
+function readProbeFailureStep(stdout: string): string | null {
+  const firstLine = stdout.split(/\r?\n/u).find((line) => line.trim().length > 0);
+  const match = firstLine?.match(/^probe_step_failed:([a-z0-9-]+)$/u);
+  return match?.[1] ?? null;
 }
 
 async function runHealthCommonsCliSmoke(): Promise<{
