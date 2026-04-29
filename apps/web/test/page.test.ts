@@ -35,6 +35,19 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 
+vi.mock("next/image", () => ({
+  default: (props: {
+    alt?: string;
+    className?: string;
+    src: string;
+  }) =>
+    createElement("img", {
+      alt: props.alt ?? "",
+      className: props.className,
+      src: props.src,
+    }),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
@@ -80,6 +93,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "nav",
       authLabel: "Log in or sign up",
+      splitUnauthenticated: true,
     },
     undefined
   );
@@ -155,6 +169,29 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /\/subprocessors/u);
   assert.doesNotMatch(markup, /Perplexity Health/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
+});
+
+test("SecurityPage keeps the shared sticky nav on one auth button", async () => {
+  vi.clearAllMocks();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+  });
+
+  const { default: SecurityPage } = await import("../app/security/page");
+
+  renderToStaticMarkup(await SecurityPage());
+
+  expect(mocks.LandingAuthActions).toHaveBeenCalled();
+  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
+    1,
+    {
+      authenticated: false,
+      context: "nav",
+      authLabel: "Log in or sign up",
+      splitUnauthenticated: false,
+    },
+    undefined
+  );
 });
 
 test("HomePage metadata keeps the root route as the canonical landing URL", async () => {
