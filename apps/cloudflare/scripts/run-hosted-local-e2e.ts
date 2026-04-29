@@ -14,14 +14,16 @@ const hostedLocalFullStackE2eFiles = [
 ] as const;
 
 async function main(): Promise<void> {
-  try {
-    await runVitestFiles(hostedLocalFullStackE2eFiles);
-  } finally {
-    await cleanupHostedRunnerContainers({
-      cwd: repoRoot,
-      env: process.env,
-      ignoreErrors: true,
-    });
+  for (const file of hostedLocalFullStackE2eFiles) {
+    try {
+      await runVitestFiles([file]);
+    } finally {
+      await cleanupHostedRunnerContainers({
+        cwd: repoRoot,
+        env: process.env,
+        ignoreErrors: true,
+      });
+    }
   }
 }
 

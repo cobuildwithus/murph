@@ -189,6 +189,11 @@ export async function runHostedAssistantAutomation(
     message: "Hosted assistant automation pass starting.",
     phase: "wake.running",
   }));
+  await inboxServices.init({
+    rebuild: false,
+    requestId,
+    vault: vaultRoot,
+  });
 
   try {
     const result = await runAssistantAutomationPass({

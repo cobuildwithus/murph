@@ -243,6 +243,16 @@ describe("buildHostedLocalDevOverrides", () => {
     });
   });
 
+  it("advertises a loopback worker URL when Wrangler binds all interfaces", () => {
+    const overrides = buildHostedLocalDevOverrides({
+      ...localConfig,
+      workerHost: "0.0.0.0",
+    }, {});
+
+    expect(overrides.HOSTED_EXECUTION_CONTROL_URL).toBe("http://127.0.0.1:8787");
+    expect(overrides.HOSTED_EXECUTION_DISPATCH_URL).toBe("http://127.0.0.1:8787");
+  });
+
   it("preserves an explicit wake fetch proof key override", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
     });

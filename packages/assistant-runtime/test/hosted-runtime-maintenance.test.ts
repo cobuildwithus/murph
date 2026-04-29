@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
+  initInboxRuntime: vi.fn(),
   ingestHostedConversationMessageWake: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
@@ -98,7 +99,17 @@ beforeEach(() => {
   mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
     service.close?.();
   });
-  mocks.createIntegratedInboxServices.mockReturnValue(Symbol("inbox-services"));
+  mocks.initInboxRuntime.mockResolvedValue({
+    configPath: ".runtime/operations/inbox/config.json",
+    createdPaths: [],
+    databasePath: ".runtime/projections/inboxd.sqlite",
+    rebuiltCaptures: 0,
+    runtimeDirectory: ".runtime/operations/inbox",
+    vault: "/tmp/vault-root",
+  });
+  mocks.createIntegratedInboxServices.mockReturnValue({
+    init: mocks.initInboxRuntime,
+  });
   mocks.createInboxBackedAssistantTurnInputPort.mockReturnValue({
     listNewConversationCaptures: vi.fn(async (query) => ({
       captures: [],
@@ -231,6 +242,45 @@ describe("runHostedAssistantAutomation", () => {
         turnInputPort: expect.any(Object),
       }),
     );
+    expect(mocks.initInboxRuntime).toHaveBeenCalledWith({
+      rebuild: false,
+      requestId: "req_turn_input",
+      vault: "/tmp/vault-root",
+    });
+  });
+
+  it("ensures the inbox runtime exists before hosted automation runs", async () => {
+    await expect(
+      runHostedAssistantAutomation(
+        "/tmp/vault-root",
+        "req_bootstrap",
+        {
+          hosted: {
+            issueDeviceConnectLink: vi.fn(),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
+        {
+          eventId: "evt_automation_bootstrap",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-29T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+      ),
+    ).resolves.toEqual({
+      nextWakeAt: "2026-04-08T01:00:00.000Z",
+      progressed: false,
+      redactedLogEntries: expect.any(Array),
+    });
+
+    expect(mocks.initInboxRuntime).toHaveBeenCalledWith({
+      rebuild: false,
+      requestId: "req_bootstrap",
+      vault: "/tmp/vault-root",
+    });
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledTimes(1);
   });
 
   it("logs automation events emitted during the hosted pass", async () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -31,6 +32,9 @@ import {
   resolvePendingAssistantUsagePath,
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
+import {
+  initializeVault,
+} from "@murphai/core";
 import { describe, test, vi } from "vitest";
 
 import {
@@ -68,6 +72,12 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("bootstraps empty local mailbox state and checkpoints before the assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Test Vault",
+      vaultRoot,
+    });
     const events: string[] = [];
     const items = [
       createMailboxItem({
@@ -100,6 +110,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
+          assert.equal(
+            existsSync(path.join(vaultRoot, ".runtime/operations/inbox/config.json")),
+            true,
+          );
           events.push(`import:${item.item.laneSeq}`);
           return {
             afterCheckpoint: async () => {

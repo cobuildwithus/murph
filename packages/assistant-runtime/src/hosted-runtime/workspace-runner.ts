@@ -1,3 +1,9 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
+import {
+  VAULT_LAYOUT,
+} from "@murphai/contracts";
 import type {
   HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointReason,
@@ -39,6 +45,9 @@ import {
 import {
   exportHostedPendingAssistantUsage,
 } from "./usage.ts";
+import {
+  prepareHostedLocalRuntime,
+} from "./context.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -214,6 +223,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   input: HostedWorkspaceRunnerInput,
 ): Promise<HostedWorkspaceRunnerResult> {
   assertHostedWorkspaceRunnerUser(input);
+  if (existsSync(path.join(input.vaultRoot, VAULT_LAYOUT.metadata))) {
+    await prepareHostedLocalRuntime(input.vaultRoot, input.requestId);
+  }
 
   const checkpointRequestSession = createHostedWorkspaceCheckpointRequestSession(
     input.checkpointRequestBuilder,
