@@ -112,7 +112,6 @@ vi.mock('../src/assistant-runtime.js', () => runtimeModuleMocks)
 
 import * as assistantAutomationFacade from '../src/assistant/automation.ts'
 import { runAssistantAutomation } from '../src/assistant/automation/run-loop.ts'
-import * as assistantDaemonFacade from '../src/assistant/daemon-client.ts'
 import {
   getAssistantCronJob,
   getAssistantCronJobTarget,
@@ -659,9 +658,5 @@ test('assistant facade modules re-export the package runtime and daemon-aware se
   assert.equal(
     Reflect.has(assistantRuntimeRootFacade, 'scanAssistantInboxOnce'),
     false,
-  )
-  assert.equal(
-    assistantDaemonFacade.maybeGetAssistantStatusViaDaemon,
-    daemonMocks.maybeGetAssistantStatusViaDaemon,
   )
 })

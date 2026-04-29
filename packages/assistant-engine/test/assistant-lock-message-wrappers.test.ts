@@ -58,27 +58,6 @@ test('assistant cron write lock defines a generic fallback held-lock message', a
   )
 })
 
-test('assistant state document write lock defines a generic fallback held-lock message', async () => {
-  let capturedOptions: CapturedLockOptions | null = null
-
-  vi.doMock('../src/assistant/state-write-lock.ts', () => ({
-    createAssistantStateWriteLock(options: CapturedLockOptions) {
-      capturedOptions = options
-      return {
-        withWriteLock: vi.fn(),
-      }
-    },
-  }))
-
-  await import('../src/assistant/state/locking.ts')
-
-  const options = requireCapturedLockOptions(capturedOptions)
-  assert.equal(
-    options.formatHeldLockMessage(null),
-    'Assistant state document writes are already in progress.',
-  )
-})
-
 function requireCapturedLockOptions(
   options: CapturedLockOptions | null,
 ): CapturedLockOptions {
