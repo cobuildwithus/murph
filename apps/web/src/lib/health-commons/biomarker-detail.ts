@@ -23,6 +23,7 @@ import { isBrowserVaultMetricBinding } from "./biomarker-bindings";
 import {
   cleanHealthCommonsUserFacingCopy,
   cleanHealthCommonsUserFacingCopyList,
+  cleanOptionalHealthCommonsUserFacingCopy,
 } from "./user-facing-copy";
 
 const FINNISH_SAUNA_PROTOCOL_KEY = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
@@ -213,11 +214,11 @@ function toBiomarkerPageModel(
     catalogHash: catalog.catalogHash,
     categories: biomarker.categories ?? [],
     claims: buildBiomarkerClaims(biomarker, catalog),
-    communityOutcomeSummary: biomarker.communityOutcomeSummary ?? {
+    communityOutcomeSummary: cleanCommunityOutcomeSummary(biomarker.communityOutcomeSummary ?? {
       minimumCohortSize: 20,
       placeholder: "Community outcome summaries will appear once enough opted-in Murph runs are available.",
       state: "coming_soon",
-    },
+    }),
     explainerCards: cleanExplainerCards(
       biomarkerSpec?.explainerCards ?? fallbackExplainerCards(biomarker),
     ),
@@ -525,6 +526,17 @@ function cleanInterpretationFrame(
   return {
     caveat: cleanHealthCommonsUserFacingCopy(frame.caveat),
     principle: cleanHealthCommonsUserFacingCopy(frame.principle),
+  };
+}
+
+function cleanCommunityOutcomeSummary(
+  summary: HealthCommonsBiomarkerCommunityOutcomeSummary,
+): HealthCommonsBiomarkerCommunityOutcomeSummary {
+  const placeholder = cleanOptionalHealthCommonsUserFacingCopy(summary.placeholder);
+
+  return {
+    ...summary,
+    ...(placeholder ? { placeholder } : {}),
   };
 }
 
