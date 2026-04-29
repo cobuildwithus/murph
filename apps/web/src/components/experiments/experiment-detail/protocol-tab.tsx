@@ -17,6 +17,7 @@ import type {
   ExperimentProtocolStep,
   ExperimentSafety,
   ExperimentSignal,
+  ExperimentSignalEstimatedChange,
 } from "@/src/types/experiments";
 import { ExpertCard } from "./expert-card";
 import { SafetySection } from "./safety-section";
@@ -49,34 +50,9 @@ interface SignalEstimate {
   baseline: string;
   projected: string;
   evidence: string;
+  isNumeric: boolean;
 }
 
-const SIGNAL_ESTIMATES: Record<string, SignalEstimate> = {
-  "Resting Heart Rate": {
-    range: "−5–10%",
-    point: "~−8%",
-    window: "4–8 wks",
-    baseline: "~62 bpm",
-    projected: "~56 bpm",
-    evidence: "Moderate",
-  },
-  "Morning Blood Pressure": {
-    range: "−3–5 mmHg",
-    point: "~−4 mmHg",
-    window: "4–8 wks",
-    baseline: "~120/80",
-    projected: "~115/75",
-    evidence: "Moderate",
-  },
-  "HRV / RMSSD": {
-    range: "+3–7 ms",
-    point: "~+5 ms",
-    window: "4–8 wks",
-    baseline: "~45 ms",
-    projected: "~48 ms",
-    evidence: "Variable",
-  },
-};
 const PRACTICE_ICONS = [
   Repeat,
   ShieldAlert,
@@ -102,22 +78,98 @@ function practiceGridCols(count: number): string {
 }
 
 const SIGNAL_ESTIMATE_FALLBACK: SignalEstimate = {
-  range: "—",
-  point: "—",
-  window: "4–8 wks",
+  range: "Possible change",
+  point: "possible change",
+  window: "4-8 weeks",
   baseline: "Baseline",
-  projected: "Projected",
+  projected: "Tracked",
   evidence: "Indicative",
+  isNumeric: false,
 };
 
 function getSignalEstimate(signal: ExperimentSignal): SignalEstimate {
-  const estimate = SIGNAL_ESTIMATES[signal.label];
-  if (estimate) return estimate;
+  const estimate = signal.estimatedChange;
+  if (estimate?.kind === "mixed_or_contextual") {
+    return {
+      ...SIGNAL_ESTIMATE_FALLBACK,
+      range: signal.expected,
+      point: signal.expected.toLowerCase(),
+      window: estimate.window ?? SIGNAL_ESTIMATE_FALLBACK.window,
+      evidence: formatEstimateConfidence(estimate.confidence),
+    };
+  }
+  if (estimate) {
+    const range = formatEstimatedChangeRange(estimate);
+    return {
+      range,
+      point: range,
+      window: estimate.window ?? SIGNAL_ESTIMATE_FALLBACK.window,
+      baseline: "Baseline",
+      projected: range,
+      evidence: formatEstimateConfidence(estimate.confidence),
+      isNumeric: true,
+    };
+  }
+
   return {
     ...SIGNAL_ESTIMATE_FALLBACK,
     range: signal.expected,
-    point: signal.expected,
+    point: signal.expected.toLowerCase(),
   };
+}
+
+function formatEstimateConfidence(
+  confidence: ExperimentSignalEstimatedChange["confidence"],
+): string {
+  switch (confidence) {
+    case "high":
+      return "Strong";
+    case "moderate":
+      return "Moderate";
+    case "mixed":
+      return "Mixed";
+    case "low":
+      return "Indicative";
+    default:
+      return SIGNAL_ESTIMATE_FALLBACK.evidence;
+  }
+}
+
+function formatEstimatedChangeRange(
+  estimate: Exclude<ExperimentSignalEstimatedChange, { kind: "mixed_or_contextual" }>,
+): string {
+  const low = formatEstimateBound(estimate.low, estimate.low > 0);
+  const high = formatEstimateBound(
+    estimate.high,
+    estimate.low < 0 && estimate.high > 0,
+  );
+  const joiner = estimate.low < 0 ? " to " : "–";
+  const range = `${low}${joiner}${high}`;
+
+  if (estimate.kind === "relative_percent") {
+    return `${range}%`;
+  }
+
+  return `${range} ${estimate.unit}`;
+}
+
+function formatEstimateBound(value: number, showPositiveSign: boolean): string {
+  if (value > 0) {
+    return `${showPositiveSign ? "+" : ""}${formatEstimateNumber(value)}`;
+  }
+  if (value < 0) {
+    return `−${formatEstimateNumber(Math.abs(value))}`;
+  }
+  return formatEstimateNumber(value);
+}
+
+function formatEstimateNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatTrajectoryLabel(signal: ExperimentSignal, estimate: SignalEstimate): string {
+  const verb = estimate.isNumeric ? "projected" : "tracked as";
+  return `${signal.label} ${verb} ${estimate.point} over ${estimate.window}`;
 }
 
 interface TrajectoryChartProps {
@@ -126,6 +178,7 @@ interface TrajectoryChartProps {
   projected: string;
   height: number;
   label: string;
+  endLabel?: string;
 }
 
 const TRAJECTORY_GEOMETRY: Record<
@@ -155,6 +208,7 @@ function TrajectoryChart({
   projected,
   height,
   label,
+  endLabel = "Week 8",
 }: TrajectoryChartProps) {
   const isNeutral = direction === "neutral";
   const { baselineY, projectedY, curveD } = TRAJECTORY_GEOMETRY[direction];
@@ -244,7 +298,7 @@ function TrajectoryChart({
         </span>
         <span className="h-px flex-1 border-t border-dotted border-border/50" />
         <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-          Week 8
+          {endLabel}
         </span>
       </div>
     </div>
@@ -345,7 +399,8 @@ export function ProtocolTab({ experiment, researchHref }: ProtocolTabProps) {
                       baseline={est.baseline}
                       projected={est.projected}
                       height={isPrimary ? 108 : 84}
-                      label={`${signal.label} projected ${est.point} over ${est.window}`}
+                      label={formatTrajectoryLabel(signal, est)}
+                      endLabel={est.window}
                     />
 
                     <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

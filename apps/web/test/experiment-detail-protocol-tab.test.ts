@@ -117,9 +117,17 @@ describe("ProtocolTab", () => {
     );
     expect(countOccurrences(markup, "data-card=")).toBe(3);
     expect(markup).toContain('data-card="Resting Heart Rate"');
-    expect(markup).not.toContain('data-card="Morning Blood Pressure"');
+    expect(markup).toContain('data-card="Morning Blood Pressure"');
+    expect(markup).toContain("−4 to 0 mmHg");
+    expect(markup).toContain("Morning Blood Pressure projected −4 to 0 mmHg over 2-6 weeks");
+    expect(markup).toContain("Resting Heart Rate tracked as possible change over 2-6 weeks");
+    expect(markup).toContain(">Tracked</span>");
     expect(markup).toContain('data-card="HRV / RMSSD"');
-    expect(markup).toContain('data-card="Sleep Efficiency"');
+    expect(markup).toContain("2-6 weeks");
+    expect(markup).toContain(
+      '<span class="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">2-6 weeks</span>',
+    );
+    expect(markup).not.toContain('data-card="Sleep Efficiency"');
     expect(markup).not.toContain('data-card="Deep Sleep Minutes"');
     expect(markup).toContain("Morning Blood Pressure");
     expect(markup).toContain("HRV / RMSSD");
