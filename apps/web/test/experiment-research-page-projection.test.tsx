@@ -69,7 +69,7 @@ describe("ExperimentResearchPage", () => {
         experimentId: "finnish-sauna",
       }),
     })).resolves.toEqual(expect.objectContaining({
-      description: expect.stringContaining("traditional dry-sauna"),
+      description: expect.stringContaining("steady, tolerable heat"),
       openGraph: expect.objectContaining({
         type: "article",
       }),

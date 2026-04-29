@@ -73,17 +73,21 @@ describe("StudyCard", () => {
   });
 
   it("resolves the fallback study copy when a source has no Findings block", () => {
-    const protocol = resolveHealthCommonsExperimentProtocol("bryan-johnson-blueprint");
+    const protocol = resolveHealthCommonsExperimentProtocol("at-home-static-stretching-for-flexibility");
     expect(protocol).toBeTruthy();
 
-    const study = protocol?.studies.find((entry) => entry.title === "My Morning Routine 2026");
+    const study = protocol?.studies.find(
+      (entry) =>
+        entry.title === "Effect of static and ballistic stretching on the muscle-tendon tissue properties",
+    );
 
     expect(study).toEqual(expect.objectContaining({
-      caveat: "It repeats the same single-person source family and does not add independent outcome evidence.",
-      finding: undefined,
-      findingKind: undefined,
-      headline: "Morning-routine page corroborates the 20-minute 200 F daily sauna and adds routine-level tactics.",
-      implication: "Supports the page's exact timing, groin-cooling, head-protection, and tracking details for the Blueprint routine.",
+      caveat: "Includes ballistic stretching, which should not be promoted into static-stretch protocol claims.",
+      finding:
+        "Shows that different stretching modalities can produce different passive-tissue responses even when ROM changes occur.",
+      findingKind: "why_it_matters",
+      headline: "Static and ballistic calf stretching both affected ROM, but tissue-property patterns differed.",
+      implication: "Use to separate static stretching from adjacent stretching variants in mechanism claims.",
     }));
   });
 
