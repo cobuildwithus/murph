@@ -37,7 +37,7 @@ const FAQ_ITEMS = [
   ],
   [
     "What happens to my data?",
-    "Your conversations never train AI models. Cloud inference runs through Venice AI with zero data retention — nothing is stored on their side. Hosted runs use encrypted snapshots with privacy-first defaults, so only you can access them.",
+    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Hosted inference runs through Vercel AI Gateway, and hosted runs use encrypted snapshots with access minimized to task execution, security, incident response, debugging, and support needs. Hosted Murph is not zero-knowledge or end-to-end encrypted unless a specific feature says so.",
   ],
   [
     "Can I self-host Murph?",

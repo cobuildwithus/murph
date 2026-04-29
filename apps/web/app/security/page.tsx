@@ -73,9 +73,11 @@ function HeroSection() {
           </h1>
           <p className="mt-8 max-w-[50ch] text-[1rem] leading-[1.7] text-pretty text-[#f5f0e8]/65 sm:text-[1.0625rem]">
             Hosted Murph runs on our servers so you don&apos;t have to
-            install anything. Your records never end up in our database.
-            When Murph runs a task, it happens in a short-lived workspace
-            that wipes itself.
+            install anything. Your records are stored encrypted at rest.
+            Task work decrypts the records that workspace needs, then wipes
+            that workspace. Limited security, debugging, and support
+            operations may also require readable processing under access
+            controls.
           </p>
           <p className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-[10px] tracking-[0.14em] text-[#f5f0e8]/55 uppercase">
             <span>Open source</span>
@@ -105,17 +107,17 @@ const PROMISES = [
     title: "We don't sell your data.",
   },
   {
-    body: "Your records stay locked by default. When you ask Murph to do something, it unlocks them for a few seconds, does the work, then locks them again. Between tasks, we couldn't read them if we tried.",
+    body: "Your records stay encrypted at rest. For requested features, security, incident investigation, debugging, or support, Hosted Murph may decrypt the data needed for that work inside a short-lived task worker or tightly scoped operator workflow, then writes encrypted results back. We minimize human and operator access, but Hosted Murph is not zero-knowledge, operator-blind, or end-to-end encrypted unless a specific feature says so.",
     Glyph: PromiseEphemeralKeyGlyph,
-    title: "We only open your records when you ask.",
+    title: "We limit readable processing.",
   },
   {
-    body: "Your data is yours. Export the whole thing as plain files whenever you want. Delete our copy the same way. We hold it only because you asked us to.",
+    body: "Your data is yours. Export the whole thing as plain files whenever you want. You can ask us to delete hosted copies, subject to the limited retention described in the privacy policy for legal, security, backup, dispute, and service needs.",
     Glyph: PromiseExportDeleteGlyph,
     title: "Take it out or delete it, any time.",
   },
   {
-    body: "Every line of code that touches your data is public at github.com/cobuildwithus/murph. Read it yourself, or hand it to a developer you trust.",
+    body: "Murph's product and runtime code is public at github.com/cobuildwithus/murph. Read it yourself, or hand it to a developer you trust.",
     Glyph: PromiseOpenSourceGlyph,
     title: "Open source. See for yourself.",
   },
@@ -365,7 +367,7 @@ function HeroVaultGlyph({ className }: { className?: string }) {
 
       <line stroke="currentColor" strokeOpacity="0.3" strokeWidth="0.6" x1="80" x2="300" y1="326" y2="326" />
       <text className="font-mono" fill="currentColor" fillOpacity="0.6" fontSize="9" letterSpacing="0.24em" textAnchor="middle" x="190" y="344">
-        ENCRYPTED &middot; ONLY FOR RUNS
+        ENCRYPTED &middot; TASK WORK
       </text>
     </svg>
   );
@@ -373,7 +375,7 @@ function HeroVaultGlyph({ className }: { className?: string }) {
 
 const HOSTED_LEGEND = [
   {
-    body: "Your name, email, and login. We find accounts by a fingerprint of your email, never the raw address. If our database leaked, nobody could read it.",
+    body: "Your name, email, and login. We use keyed lookup fingerprints instead of raw email for account lookup, and sensitive account fields are encrypted so a database leak is much less useful without the keys.",
     kind: "box-paper",
     title: "Your account",
   },
@@ -383,7 +385,7 @@ const HOSTED_LEGEND = [
     title: "The runner",
   },
   {
-    body: "Your health records, encrypted and kept apart. Only opened briefly inside the runner.",
+    body: "Your health records, encrypted and kept apart. Decrypted in task workers or scoped support/security workflows when needed.",
     kind: "box-neutral",
     title: "Your files",
   },
@@ -442,7 +444,8 @@ function HostedOverviewSection() {
         </h2>
         <p className="mt-6 max-w-[58ch] font-serif text-[1rem] leading-[1.65] text-pretty text-[#4d4533] italic">
           Think of it like a bank. Your account details sit in one ledger.
-          Your valuables sit in a separate vault, opened only when you ask.
+          Your valuables sit in separate encrypted storage and are decrypted
+          for task, support, security, or debugging work when needed.
         </p>
 
         <div className="relative mt-10">
@@ -510,7 +513,7 @@ const ENCRYPTION_FIELDS = [
 const ENCRYPTION_META = [
   { label: "Method", value: "AES-256-GCM" },
   { label: "Keys", value: "Scoped · rotatable" },
-  { label: "Storage", value: "Never plain text" },
+  { label: "Storage", value: "Encrypted at rest" },
   { label: "Lookups", value: "Scrambled, not raw" },
 ] as const;
 
@@ -531,9 +534,12 @@ function EncryptionSection() {
               What we encrypt.
             </h2>
             <p className="mt-5 max-w-[44ch] text-[0.9375rem] leading-[1.65] text-pretty text-[#635a48] sm:text-[1rem]">
-              The short version: anything sensitive stays encrypted. Plain
-              text never sits on disk. Not a developer? You can stop here.
-              The crypto card below is for technical readers.
+              The short version: sensitive hosted storage is encrypted at
+              rest. During task work, the worker can handle readable files
+              for the job, then discards that workspace. Limited security,
+              debugging, and support workflows may also require readable
+              processing under access controls. The crypto card below is for
+              technical readers.
             </p>
             <div className="mt-8 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-5">
               <p className="font-mono text-[10px] font-medium tracking-[0.12em] text-[#5a6e32] uppercase">
@@ -803,7 +809,7 @@ function ArchitectureDiagram() {
         </text>
         <line stroke={inkRule} strokeWidth="0.8" x1="760" x2="872" y1="178" y2="178" />
         <text className="font-mono" fill={inkMuted} fontSize="10" textAnchor="middle" x="816" y="198">
-          never copied
+          encrypted at rest
         </text>
       </g>
 
@@ -912,7 +918,7 @@ function ArchitectureDiagramMobile() {
         </text>
         <line stroke={inkRule} strokeWidth="0.8" x1="44" x2="276" y1="608" y2="608" />
         <text className="font-mono" fill={inkMuted} fontSize="10" textAnchor="middle" x="160" y="628">
-          never copied
+          encrypted at rest
         </text>
       </g>
 
