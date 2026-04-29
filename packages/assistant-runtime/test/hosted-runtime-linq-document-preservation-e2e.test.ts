@@ -122,7 +122,7 @@ describe("hosted Linq document preservation", () => {
 
       assert.deepEqual(metrics, {
         nextWakeAt: null,
-        parserProcessed: 0,
+        parserProcessed: 1,
       });
 
       const runtime = await openInboxRuntime({ vaultRoot });

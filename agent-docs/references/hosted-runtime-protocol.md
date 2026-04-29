@@ -62,6 +62,13 @@ the runtime refreshes mailbox rows, imports any new items, checkpoints accepted
 input state, and continues the same logical assistant turn before outbox intent
 creation.
 
+This is the deploy/reset recovery contract. If a Cloudflare Durable Object,
+worker isolate, or runner container resets after mailbox import checkpointing
+but before assistant handling, the next invocation starts with an advanced
+mailbox watermark and no new fetched items. That must still run the assistant
+phase, because replay authority comes from raw capture evidence plus missing
+terminal auto-reply evidence, not from mailbox import progress.
+
 Mailbox import has no pre-assistant side-effect phase. Provider-visible cleanup,
 read acknowledgement, parser drain, and other enrichment work must not run
 between import checkpoint and assistant admission. Linq inbound message deletion

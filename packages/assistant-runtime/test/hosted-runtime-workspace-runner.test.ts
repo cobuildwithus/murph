@@ -622,6 +622,135 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("runs the assistant phase on restart after the import checkpoint already advanced", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_reset_replay",
+        laneSeq: "1",
+      }),
+    ];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+
+    try {
+      await assert.rejects(
+        () =>
+          runHostedWorkspaceUntilIdleOrBudget({
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: "attempt_synthetic_runner_reset_before_assistant",
+              expectedWorkspaceVersion: "0",
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem(item) {
+              events.push(`import:${item.item.laneSeq}`);
+              return { status: "imported" };
+            },
+            limitPerLane: 10,
+            platform: createPlatform({
+              mailboxPort,
+              workspacePort: createWorkspacePort({
+                checkpointRequests: firstCheckpointRequests,
+              }),
+            }),
+            requestId: "request_synthetic_runner_reset_before_assistant",
+            async runAssistantPhase() {
+              events.push("assistant:first");
+              throw new Error("durable object reset before assistant handling");
+            },
+            vaultRoot,
+            workspace: createWorkspaceState({ version: "0" }),
+            now: () => TEST_NOW,
+          }),
+        /durable object reset before assistant handling/u,
+      );
+
+      assert.deepEqual(firstCheckpointRequests.map((request) => request.reason), [
+        "import",
+      ]);
+      assert.equal(
+        (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+        "1",
+      );
+
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_reset_replay",
+          expectedWorkspaceVersion: "1",
+          leaseGeneration: "2",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not rerun after the watermark checkpoint.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({
+            checkpointRequests: secondCheckpointRequests,
+          }),
+        }),
+        requestId: "request_synthetic_runner_reset_replay",
+        async runAssistantPhase(input) {
+          events.push("assistant:replay");
+          assert.equal(input.initialMailboxImport.stateChanged, false);
+          assert.equal(input.initialMailboxImport.importResult.importedCount, 0);
+          assert.equal(input.initialMailboxImport.state.watermarks.conversation, "1");
+          return {
+            checkpointReason: "maintenance",
+            progressed: true,
+            redactedStatus: {
+              hostedAssistantReplayHandledCount: 1,
+            },
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "1" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(events, [
+        "import:1",
+        "assistant:first",
+        "assistant:replay",
+      ]);
+      assert.deepEqual(
+        fetchRequests.map((request) =>
+          request.lanes.find((lane) => lane.lane === "conversation")?.importedSeq
+        ),
+        ["0", "1"],
+      );
+      assert.deepEqual(secondCheckpointRequests.map((request) => request.reason), [
+        "maintenance",
+      ]);
+      assert.equal(secondCheckpointRequests[0]?.expectedWorkspaceVersion, "1");
+      assert.deepEqual(secondCheckpointRequests[0]?.redactedStatus, {
+        hostedAssistantReplayHandledCount: 1,
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "1",
+        hostedMailboxFetchedCount: 0,
+        hostedMailboxImportedCount: 0,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemImportedSeq: "0",
+      });
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("does not drain pending usage when the assistant phase throws before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];

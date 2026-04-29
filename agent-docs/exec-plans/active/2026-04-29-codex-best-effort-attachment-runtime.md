@@ -83,6 +83,9 @@ This plan is now being implemented for the hosted conversation loss window:
 - Added `checkpointRequired` propagation so terminal evidence writes count as hosted pass progress even when no scan cursor or automation state changes.
 - Kept evidenced captures in the scanner candidate set when their terminal evidence group is incomplete, so missing sibling evidence can be repaired before duplicate reply work.
 - Updated focused assistant-engine coverage and status fixtures to the fixed `eligibleAfter` channel state shape.
+- Added a hosted runner regression that simulates a reset after mailbox import checkpointing and proves the next invocation still runs/checkpoints assistant work from the advanced watermark state.
+- Updated the hosted Linq document-preservation E2E expectation to match the current best-effort parser drain: the capture is still preserved from raw inbox evidence after inbox runtime init, and one parser job may already have been processed.
+- Documented the reset recovery invariant in the hosted runtime protocol and live architecture docs.
 
 ### 0. Close Hosted Mailbox Lane Gaps
 
@@ -448,6 +451,18 @@ Then run broader checks before landing:
 - Privacy scan over touched files for local usernames, home paths, secrets, auth headers, phone numbers, emails, and local paths in generated diagnostics/prompts.
 
 Docs-only edits for this plan only need exact-file diff checks and privacy scanning.
+
+2026-04-29 reset-replay close-out verification:
+
+- `pnpm --dir packages/cli typecheck`: passed.
+- `pnpm --dir packages/assistant-runtime typecheck`: passed.
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-workspace-runner.test.ts -t "runs the assistant phase on restart after the import checkpoint already advanced"`: passed.
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-linq-document-preservation-e2e.test.ts test/hosted-runtime-workspace-runner.test.ts`: passed.
+- `pnpm --dir packages/assistant-runtime test:coverage`: passed.
+- `pnpm typecheck`: passed.
+- `pnpm docs:drift`: passed.
+- `git diff --check` on scoped files: passed.
+- Required security/privacy, coverage-write, and final-review passes found no blockers.
 
 ## Migration Plan
 
