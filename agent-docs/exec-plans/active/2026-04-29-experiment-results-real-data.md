@@ -394,6 +394,278 @@ After real projection tests pass:
 6. Remove the Results tab mock branch and mock builders.
 7. Run focused verification and required completion-workflow audits before implementation handoff.
 
+## Parallel Landing Shape
+
+Use GPT-5.5 xhigh workers only where the write set is disjoint or the dependency is already landed. Each worker is not alone in the codebase: preserve unrelated edits, do not revert work from other workers, and adjust to nearby changes instead of overwriting them.
+
+Recommended batch order:
+
+1. Batch A is the contract anchor and should be prepared first.
+2. Batch E depends on Batch A and must land in the same hard-cut PR/landing unit as Batch A so no writer keeps emitting legacy string schedules.
+3. Batches B and C can run after Batch A's public type/schema names are known.
+4. Batch D should start after B and C are available, or draft against their expected helper names but not land before them.
+5. Batch F is the integration close-out after B, C, D, and E land.
+
+### Batch A: Contracts schedule hard cut
+
+Purpose:
+
+- Extract schedule-intent ownership and introduce the run-specific `ExperimentRunScheduleIntent` subset.
+- Make `experimentRunPlanSchema.schedule` accept only `dailyLocal` and five-field `cron` with required `timeZone`.
+- Keep scheduled logs on the full schedule union if they still need `at` / `every`.
+
+Write set:
+
+- `packages/contracts/src/schedule-intent.ts`
+- `packages/contracts/src/scheduled-log.ts`
+- `packages/contracts/src/zod.ts`
+- `packages/contracts/src/examples.ts`
+- `packages/contracts/generated/**`
+- `packages/contracts/test/**`
+
+Do not touch:
+
+- `packages/query/**`
+- `packages/vault-usecases/**`
+- `packages/cli/**`
+- `apps/web/**`
+
+Prompt:
+
+```text
+You are a GPT-5.5 xhigh worker implementing Batch A of the experiment Results real-data plan. You are not alone in the codebase; do not revert unrelated edits or other workers' changes.
+
+Goal: hard-cut experiment run plans to a run-specific schedule subset while preserving scheduled-log schedule behavior.
+
+Implement:
+- Extract schedule-intent schemas/types from scheduled-log ownership into a lower-level contracts module, likely packages/contracts/src/schedule-intent.ts.
+- Preserve the full scheduled-log union for scheduled logs: at, every, cron, dailyLocal.
+- Add ExperimentRunScheduleIntent / experimentRunScheduleIntentSchema with only:
+  - { kind: "dailyLocal"; localTime: string; timeZone: string }
+  - { kind: "cron"; expression: string; timeZone: string }
+- Update experimentRunPlanSchema so runPlan.schedule uses ExperimentRunScheduleIntent, rejects legacy strings, rejects at/every, and requires timeZone.
+- Update contract examples and generated schema artifacts.
+- Add or update contract tests proving runPlan.schedule accepts dailyLocal/cron and rejects string/at/every.
+
+Stay within the write set listed in the active plan. Run the focused contracts tests you touch and report exact commands/results.
+```
+
+### Batch B: BrowserVault event projection
+
+Purpose:
+
+- Add family/kind-specific BrowserVault projection for experiment-session/context event fields.
+- Avoid widening global `projectSafeAttributes`.
+
+Write set:
+
+- `packages/query/src/browser-replica/build.ts`
+- `packages/query/src/browser-replica/shared.ts` only if types need a narrow extension
+- `packages/query/test/**` or existing browser-replica tests
+
+Do not touch:
+
+- `packages/contracts/**`
+- `packages/query/src/browser-replica/experiments.ts`
+- `apps/web/**`
+
+Prompt:
+
+```text
+You are a GPT-5.5 xhigh worker implementing Batch B of the experiment Results real-data plan. You are not alone in the codebase; do not revert unrelated edits or other workers' changes.
+
+Goal: project safe structured experiment-session/context event fields into BrowserVault rows by entity family/kind, not through a bigger global allowlist.
+
+Implement:
+- Inspect packages/query/src/browser-replica/build.ts and current BrowserVault replica tests.
+- Keep raw events internal to query selectors; this batch only ensures the replica carries safe structured attributes on relevant event rows.
+- Project at least these fields only for relevant event family/kind rows:
+  experimentId, experimentSlug, interventionType, protocolId, regimenId, sessionStatus, durationMinutes, timing, temperatureC, afterExercise, symptoms, confounders, contextType, severity.
+- Do not add these keys to a global projectSafeAttributes allowlist for all entities.
+- Keep raw notes, markdown bodies, provider refs, external IDs, and raw provenance excluded.
+- Add tests proving relevant event rows include the safe fields and unrelated rows do not receive them.
+
+Stay within the write set listed in the active plan. Run focused query/browser-replica tests and report exact commands/results.
+```
+
+### Batch C: Local-date schedule expansion
+
+Purpose:
+
+- Add a pure local-date schedule expansion helper for `ExperimentRunScheduleIntent`.
+- Support only `dailyLocal` and narrow weekday-list cron.
+
+Write set:
+
+- New query helper file under `packages/query/src/browser-replica/**`, preferably not `experiments.ts`
+- A focused query test file for schedule expansion
+- No public query exports unless the selector needs a private module import
+
+Do not touch:
+
+- `packages/contracts/**` except import the Batch A type/schema from public entrypoints
+- `packages/query/src/browser-replica/experiments.ts`
+- `apps/web/**`
+- `packages/cli/**`
+
+Prompt:
+
+```text
+You are a GPT-5.5 xhigh worker implementing Batch C of the experiment Results real-data plan. You are not alone in the codebase; do not revert unrelated edits or other workers' changes.
+
+Goal: implement local-date run schedule expansion for Results, using the ExperimentRunScheduleIntent subset from Batch A.
+
+Implement:
+- Add a pure helper in packages/query/src/browser-replica/** that expands a bounded run window into planned local dates/cells.
+- Support dailyLocal.
+- Support five-field cron with concrete minute/hour, wildcard day-of-month and month, and day-of-week lists such as 2,4,6.
+- Require timeZone from the schedule intent.
+- Loop local dates in the run window and match supported weekdays. Do not use a generic cron engine and do not produce generic UTC occurrence instants.
+- Apply semantics:
+  - future local date: scheduled
+  - today in schedule timezone: scheduled unless an event says otherwise
+  - event on same local day/window wins
+  - completed/partial/missed/skipped remain distinct
+  - past planned local date with no event becomes missed only after the explicit grace period, MVP 24 hours after planned local time
+- Add tests for dailyLocal, weekday-list cron, today/future/past, grace period, and event-wins behavior.
+
+Stay within the write set listed in the active plan. Run focused query tests and report exact commands/results.
+```
+
+### Batch D: Browser experiment results selector
+
+Purpose:
+
+- Add the app-facing `selectBrowserVaultExperimentResults(...)` selector.
+- Keep missing run as `null`, raw events internal, and biomarkers represented even when unsupported/no-data.
+
+Write set:
+
+- `packages/query/src/browser-replica/experiments.ts`
+- `packages/query/src/browser-replica.ts`
+- `packages/query/src/browser.ts`
+- `packages/query/test/**`
+
+Do not touch:
+
+- `apps/web/**`
+- `packages/contracts/**` beyond imports from public entrypoints
+- `packages/cli/**`
+
+Prompt:
+
+```text
+You are a GPT-5.5 xhigh worker implementing Batch D of the experiment Results real-data plan. You are not alone in the codebase; do not revert unrelated edits or other workers' changes.
+
+Goal: export one high-level browser selector:
+selectBrowserVaultExperimentResults(client, lookup, { asOf }): BrowserVaultExperimentResultsView | null
+
+Implement:
+- Add packages/query/src/browser-replica/experiments.ts and export it through @murphai/query/browser.
+- Search client.replica.entities directly for the matching private run; do not use the capped tracked-experiment overview list.
+- Default asOf from client.replica.generatedAt.
+- Return null when no matching private run exists. Diagnostics are only for found runs.
+- Keep raw event rows internal. Use them to build schedule/progress/outcome, but do not export an events array.
+- Keep every protocol/test-plan biomarker in selector output with statuses such as available, no_data, unsupported_source, unavailable.
+- Build trend-ready per-day points from metricRows/metricDayRows where supported.
+- Integrate Batch C schedule expansion when available, but keep the selector app-agnostic.
+- Add tests for no matching run, active baseline, active intervention, finished enough data, sparse data, unsupported biomarker, no expected range, and no schedule.
+
+Stay within the write set listed in the active plan. Run focused query/browser tests and report exact commands/results.
+```
+
+### Batch E: Onboarding writers and Health Commons targets
+
+Purpose:
+
+- Stop every current run-plan writer from emitting legacy string schedules.
+- Update Health Commons onboarding targets/defaults to emit structured run schedules.
+
+Write set:
+
+- `packages/vault-usecases/src/usecases/experiment-journal-vault.ts`
+- `packages/cli/src/commands/experiment.ts`
+- directly coupled CLI generated metadata/tests
+- `packages/health-commons/content/protocols/**`
+- `packages/health-commons/src/**`
+- focused tests for CLI/usecase/Health Commons generation
+
+Do not touch:
+
+- `packages/contracts/**` except import the Batch A type/schema from public entrypoints
+- `packages/query/**`
+- `apps/web/**`
+
+Prompt:
+
+```text
+You are a GPT-5.5 xhigh worker implementing Batch E of the experiment Results real-data plan. You are not alone in the codebase; do not revert unrelated edits or other workers' changes.
+
+Goal: remove all current writers that produce legacy string runPlan.schedule and make onboarding write ExperimentRunScheduleIntent.
+
+Implement:
+- Update the vault-usecase onboarding apply path so schedule input is parsed/validated as ExperimentRunScheduleIntent, not a plain string.
+- Update the CLI experiment onboarding path and generated metadata/tests so CLI cannot silently write string runPlan.schedule.
+- Prefer run-plan-specific CLI flags: --schedule-kind dailyLocal|cron, --schedule-cron, --schedule-local-time, --schedule-time-zone, or a JSON payload path validated against the run-plan schedule schema.
+- Update Health Commons protocol onboarding targets/defaults so authored/generated setup data emits structured dailyLocal/cron schedules.
+- Add a residue test or focused rg-based verification that fails on new experiment-run writers assigning a string to runPlan.schedule.
+
+Stay within the write set listed in the active plan. Run focused CLI/usecase/Health Commons tests and report exact commands/results.
+```
+
+### Batch F: Apps/web projection, UI, and mock removal
+
+Purpose:
+
+- Consume the new selector in `resolveBrowserVaultExperimentRun`.
+- Add `partial` and `skipped` schedule-cell UI support.
+- Remove production mock-mode Results data.
+
+Write set:
+
+- `apps/web/src/lib/browser-vault/experiment-run.ts`
+- `apps/web/src/lib/experiments/experiment-detail.ts`
+- `apps/web/src/types/experiments.ts`
+- `apps/web/src/components/experiments/experiment-detail/experiment-schedule.tsx`
+- `apps/web/src/components/experiments/experiment-detail/**`
+- `apps/web/app/(dashboard)/experiments/[experimentId]/results/results-tab-client.tsx`
+- focused apps/web tests
+
+Do not touch:
+
+- `packages/query/**` except imports from public `@murphai/query/browser`
+- `packages/contracts/**`
+- `packages/cli/**`
+
+Prompt:
+
+```text
+You are a GPT-5.5 xhigh worker implementing Batch F of the experiment Results real-data plan. You are not alone in the codebase; do not revert unrelated edits or other workers' changes.
+
+Goal: wire real browser experiment results into apps/web and remove the mock Results path.
+
+Implement:
+- Update resolveBrowserVaultExperimentRun to call selectBrowserVaultExperimentResults from @murphai/query/browser.
+- Map selector output into ExperimentRunProjection: signals, trends, optional schedule, summary, summaryDetail, conclusions, timeline, and nextStep.
+- Treat selector null as no private run.
+- Keep unsupported/no-data biomarkers out of fake cards/charts, but let them inform summary/detail/conclusions where useful.
+- Add partial and skipped to ScheduleCellKind and update the schedule component styles/legend without collapsing them into completed/missed.
+- Remove ?mock=active / ?mock=finished branching, buildMockPrivateRun, buildMockSchedule, and mock-mode error suppression from results-tab-client.tsx.
+- Add tests proving no expected range renders no band, partial/skipped cells render, no private run still works, and production Results is not gated by ?mock=.
+
+Stay within the write set listed in the active plan. Run focused apps/web tests and report exact commands/results.
+```
+
+### Final Integration Owner
+
+After worker batches land, the integrating agent should:
+
+- Re-run generated artifacts once, if more than one batch touched generated files.
+- Resolve import/export names around `ExperimentRunScheduleIntent`.
+- Run `rg` checks for legacy string `runPlan.schedule`, lingering `?mock=` Results branches, and global BrowserVault projection widening.
+- Run the strongest scoped verification available for the final changed paths.
+- Run required completion workflow review passes for app/UI and health-data/browser-vault changes before handoff.
+
 ## Verification
 
 Planning-only verification for this document:
