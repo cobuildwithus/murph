@@ -3,7 +3,7 @@ schemaVersion: murph.commons.page.v1
 entityType: protocol_variant
 key: protocol_variant:time-restricted-eating/time-restricted-eating-18-6
 slug: protocols/time-restricted-eating/time-restricted-eating-18-6
-title: 18:6 Time-Restricted Eating With Graded Starter Windows
+title: Intermittent Fasting
 summary: Use a gradually narrowed eating window to test whether a consistent 18-hour fast and 6-hour eating window produces a personal signal in weight, waist, glucose, blood pressure, hunger, energy, or adherence without worsening sleep, symptoms, recovery, or safety.
 status: field-testing
 quality: usable
@@ -126,7 +126,7 @@ lineage:
   rationale: Protocol variant separated from adjacent TRE windows, calorie-restricted protocols, and clinical protocols because direct 18:6 evidence and safety boundaries do not transfer cleanly across variants.
 attribution:
   ownerType: murph
-  note: Direct efficacy claims are limited to extracted 6-hour eating-window studies, which are short-term and mostly selected-population evidence. Graded starter windows are Murph implementation scaffolding. Adjacent 8-hour, 10-hour, 16:8, calorie-restricted, clinical-population, mechanistic, observational, registry, protocol-only, and safety-only sources are context and must be labeled as such. Core direct anchors include source_artifact:pmid-32673591, source_artifact:pmid-29754952, and source_artifact:pmid-36034217; additional direct mechanism/null context comes from source_artifact:pmid-31151228, source_artifact:pmid-31339000, and source_artifact:pmid-33759620.
+  note: Direct efficacy claims are limited to extracted 6-hour eating-window studies, which are short-term and mostly selected-population evidence. Graded starter windows are Murph implementation scaffolding. Adjacent 8-hour, 10-hour, 16:8, calorie-restricted, clinical-population, mechanistic, observational, registry, protocol-only, and safety-only sources are context and must be labeled as such.
 protocol:
   doseSignature: 18-hour fast / 6-hour eating window after a graded starter-window ramp
   target: All calories inside one consistent 6-hour window on target days; water during the fasting interval. Other zero-calorie beverage rules are product-policy choices unless an underlying source explicitly verifies them.
@@ -136,8 +136,8 @@ protocol:
   interventionSessionsTarget: 20
   steps:
   - 'Baseline for 14 days: log normal first-calorie and last-calorie times, weight trend, hunger, energy, mood, symptoms, sleep, training, medication changes, and any calorie or protein estimates before narrowing the window.'
-  - 'Pick the earliest realistic 6-hour window you can repeat most target days, and record actual first-calorie and last-calorie times. Early 6-hour windows have the clearest timing-specific metabolic rationale in small or selected studies, while later 6-hour windows may still affect weight and are not proven ineffective. Sources: source_artifact:pmid-29754952, source_artifact:pmid-36034217, source_artifact:pmid-31151228.'
-  - 'Ramp as Murph implementation scaffolding: 12:12 for 4 days, 14:10 for 4 days, 16:8 for 6 days, then target 18:6. No extracted trial validates this exact ramp as superior; stay at or return to the last tolerable tier if symptoms, binge-restrict patterns, sleep disruption, headache, repeated missed days, or major work/family/social disruption appear. Sources: source_artifact:pmid-39614235, source_artifact:pmid-26411343, source_artifact:pmid-35934114, source_artifact:pmid-37242218, source_artifact:pmid-40117066.'
+  - Pick the earliest realistic 6-hour window you can repeat most target days, and record actual first-calorie and last-calorie times. Early 6-hour windows have the clearest timing-specific metabolic rationale in small or selected studies, while later 6-hour windows may still affect weight and are not proven ineffective.
+  - Ramp as Murph implementation scaffolding: 12:12 for 4 days, 14:10 for 4 days, 16:8 for 6 days, then target 18:6. No extracted trial validates this exact ramp as superior; stay at or return to the last tolerable tier if symptoms, binge-restrict patterns, sleep disruption, headache, repeated missed days, or major work/family/social disruption appear.
   - After the ramp, use the Murph operational target of 5-7 logged target-window days per week; the minimum analyzable exposure is 4 logged target-window days per week after the ramp. This is an analysis threshold, not an evidence-derived optimal dose.
   - Keep food quality, protein, fiber, training load, caffeine, alcohol, and sleep schedule as stable as possible so the experiment is not only measuring a new diet or recovery pattern.
   - During the fasting interval, use water as the default. Do not turn unverified zero-calorie beverage rules into evidence-backed claims for this protocol.
@@ -234,8 +234,8 @@ expectedSignalDescriptions:
   protocolProminence: context
   description: Track sleep as a safety and quality signal; a direct 6-hour sleep analysis did not show a clear sleep advantage.
 whyItWorks:
-- 'The protocol tests whether a narrower daily eating window changes eating opportunity, total intake, and clock-time exposure. Direct 6-hour studies support possible short-term weight or selected metabolic signals, but effects are not universal and may depend on energy intake, adherence, clinical population, and whether the window is early or later in the day. Sources: source_artifact:pmid-32673591, source_artifact:pmid-29754952, source_artifact:pmid-36034217, source_artifact:pmid-32986097, source_artifact:pmid-35443107, source_artifact:pmid-31339000, source_artifact:pmid-38639542, source_artifact:pmid-39973006.'
-- 'Mechanistic and acute controlled-feeding studies can explain why early clock-time exposure might matter for glucose, insulin, appetite, fat oxidation, and circadian markers, but they should not be converted into durable weight-loss, energy-expenditure, or long-term safety promises. Sources: source_artifact:pmid-31151228, source_artifact:pmid-31339000, source_artifact:pmid-32480126, source_artifact:pmid-33759620.'
+- The protocol tests whether a narrower daily eating window changes eating opportunity, total intake, and clock-time exposure. Direct 6-hour studies support possible short-term weight or selected metabolic signals, but effects are not universal and may depend on energy intake, adherence, clinical population, and whether the window is early or later in the day.
+- Mechanistic and acute controlled-feeding studies can explain why early clock-time exposure might matter for glucose, insulin, appetite, fat oxidation, and circadian markers, but they should not be converted into durable weight-loss, energy-expenditure, or long-term safety promises.
 claims:
 - claimId: direct-six-hour-weight
   type: intervention_result
@@ -426,7 +426,7 @@ researchLandscape:
     - source_artifact:pmid-40849219
     - source_artifact:heart-org-time-restricted-eating-cvd-death-2024-03-18
 ---
-# 18:6 Time-Restricted Eating With Graded Starter Windows
+# Intermittent Fasting
 
 Use a gradually narrowed eating window to test whether a consistent 18-hour fast and 6-hour eating window produces a personal signal in weight, waist, glucose, blood pressure, hunger, energy, or adherence without worsening sleep, symptoms, recovery, or safety.
 
@@ -434,31 +434,29 @@ Use a gradually narrowed eating window to test whether a consistent 18-hour fast
 
 This is a safety-screened self-experiment for medically stable adults. Direct efficacy claims are limited to extracted 6-hour eating-window studies, which are short-term and mostly selected-population evidence. Graded starter windows are Murph implementation scaffolding. Adjacent 8-hour, 10-hour, 16:8, calorie-restricted, clinical-population, mechanistic, observational, registry, protocol-only, and safety-only sources are context and must stay labeled as context.
 
-Direct anchors include `source_artifact:pmid-32673591`, `source_artifact:pmid-29754952`, and `source_artifact:pmid-36034217`. Direct mechanism and null context includes `source_artifact:pmid-31151228`, `source_artifact:pmid-31339000`, and `source_artifact:pmid-33759620`.
-
 ## How to run it
 
 1. **Baseline for 14 days.** Log normal first-calorie and last-calorie times, weight trend, hunger, energy, mood, symptoms, sleep, training, medication changes, and any calorie or protein estimates before narrowing the window.
-2. **Choose the target window.** Pick the earliest realistic 6-hour window you can repeat most target days, and record actual first-calorie and last-calorie times. Early 6-hour windows have the clearest timing-specific metabolic rationale in small or selected studies, while later 6-hour windows may still affect weight and are not proven ineffective. Sources: `source_artifact:pmid-29754952`, `source_artifact:pmid-36034217`, `source_artifact:pmid-31151228`.
-3. **Ramp gradually.** Ramp as Murph implementation scaffolding: 12:12 for 4 days, 14:10 for 4 days, 16:8 for 6 days, then target 18:6. No extracted trial validates this exact ramp as superior; stay at or return to the last tolerable tier if symptoms, binge-restrict patterns, sleep disruption, headache, repeated missed days, or major work/family/social disruption appear. Sources: `source_artifact:pmid-39614235`, `source_artifact:pmid-26411343`, `source_artifact:pmid-35934114`, `source_artifact:pmid-37242218`, `source_artifact:pmid-40117066`.
+2. **Choose the target window.** Pick the earliest realistic 6-hour window you can repeat most target days, and record actual first-calorie and last-calorie times. Early 6-hour windows have the clearest timing-specific metabolic rationale in small or selected studies, while later 6-hour windows may still affect weight and are not proven ineffective.
+3. **Ramp gradually.** Ramp as Murph implementation scaffolding: 12:12 for 4 days, 14:10 for 4 days, 16:8 for 6 days, then target 18:6. No extracted trial validates this exact ramp as superior; stay at or return to the last tolerable tier if symptoms, binge-restrict patterns, sleep disruption, headache, repeated missed days, or major work/family/social disruption appear.
 4. **Target phase.** Use the Murph operational target of 5-7 logged target-window days per week; the minimum analyzable exposure is 4 logged target-window days per week after the ramp. This is an analysis threshold, not an evidence-derived optimal dose.
 5. **Keep the comparison clean.** Keep food quality, protein, fiber, training load, caffeine, alcohol, and sleep schedule as stable as possible. During the fasting interval, use water as the default; other zero-calorie beverage rules are product-policy choices unless explicitly verified.
 
 ## Why it might work
 
-The protocol tests whether a narrower daily eating window changes eating opportunity, total intake, and clock-time exposure. Direct 6-hour studies support possible short-term weight or selected metabolic signals, but effects are not universal and may depend on energy intake, adherence, clinical population, and whether the window is early or later in the day. Sources: `source_artifact:pmid-32673591`, `source_artifact:pmid-29754952`, `source_artifact:pmid-36034217`, `source_artifact:pmid-32986097`, `source_artifact:pmid-35443107`, `source_artifact:pmid-31339000`, `source_artifact:pmid-38639542`, `source_artifact:pmid-39973006`.
+The protocol tests whether a narrower daily eating window changes eating opportunity, total intake, and clock-time exposure. Direct 6-hour studies support possible short-term weight or selected metabolic signals, but effects are not universal and may depend on energy intake, adherence, clinical population, and whether the window is early or later in the day.
 
-Early 6-hour eating windows have the clearest direct timing-specific rationale for glucose, insulin, appetite, and blood-pressure signals; later 6-hour windows may still affect weight, but metabolic findings are more mixed. Sources: `source_artifact:pmid-29754952`, `source_artifact:pmid-36034217`, `source_artifact:pmid-31151228`, `source_artifact:pmid-31339000`.
+Early 6-hour eating windows have the clearest direct timing-specific rationale for glucose, insulin, appetite, and blood-pressure signals; later 6-hour windows may still affect weight, but metabolic findings are more mixed.
 
 ## What not to expect
 
-Do not expect 18:6 to reliably outperform calorie restriction or usual timing, to improve sleep, to raise energy expenditure, or to work independently of total intake, protein/fiber, diet quality, adherence, and body-composition context. Adjacent trials and syntheses include null, mixed, and calorie-confounded findings. Sources: `source_artifact:pmid-32986097`, `source_artifact:pmid-35443107`, `source_artifact:pmid-33759620`, `source_artifact:pmid-31339000`, `source_artifact:pmid-38639542`, `source_artifact:pmid-39973006`, `source_artifact:pmid-40298934`.
+Do not expect 18:6 to reliably outperform calorie restriction or usual timing, to improve sleep, to raise energy expenditure, or to work independently of total intake, protein/fiber, diet quality, adherence, and body-composition context. Adjacent trials and syntheses include null, mixed, and calorie-confounded findings.
 
 RHR and HRV may be logged as optional personal context only. They are not evidence-backed safety biomarkers for this protocol in the landed source set.
 
 ## Safety posture
 
-Safety gating should take priority over efficacy interpretation. People with diabetes or glucose-lowering medication, pregnancy or breastfeeding, current underweight, unexplained weight loss, eating-disorder history, adolescent status, athlete low-energy-availability risk, CKD/frailty, gallbladder-risk symptoms, or clinician-directed meal timing should not start self-directed 18:6 without clinician guidance. These are boundary sources, not evidence that 18:6 is safe or effective in those groups. Sources: `source_artifact:pmid-31003482`, `source_artifact:pmid-15451892`, `source_artifact:ncbi-bookshelf-diabetes-management-ramadan-2022-03-04`, `source_artifact:pmid-39785103`, `source_artifact:pmid-28654225`, `source_artifact:pmid-19025239`, `source_artifact:pmid-37752011`, `source_artifact:pmid-17127188`, `source_artifact:pmid-38987755`.
+Safety gating should take priority over efficacy interpretation. People with diabetes or glucose-lowering medication, pregnancy or breastfeeding, current underweight, unexplained weight loss, eating-disorder history, adolescent status, athlete low-energy-availability risk, CKD/frailty, gallbladder-risk symptoms, or clinician-directed meal timing should not start self-directed 18:6 without clinician guidance. These are boundary sources, not evidence that 18:6 is safe or effective in those groups.
 
 Stop or step down for hypoglycemia symptoms, dizziness or syncope, binge/restrict cycling, sleep disruption, training underfueling, clinically meaningful mood worsening, repeated headaches, inability to eat enough calories or protein, rapid or unexplained weight loss, dehydration, severe abdominal pain, gallbladder-risk symptoms, or medication changes that require food.
 

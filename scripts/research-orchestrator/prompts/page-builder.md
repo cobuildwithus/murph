@@ -56,6 +56,7 @@ User-facing prose hygiene:
 - User-facing Health Commons Markdown prose must not contain raw `source_artifact:*` tokens, `sourceKeys`, or `Source keys:` lines.
 - This applies to protocol, family, and biomarker pages, including any missing biomarker pages drafted for the package.
 - This includes summaries, steps, tips, keepInMind, whyItWorks, safety, family overview, non-claims, and explanatory paragraphs.
+- Do not include `Source basis:`, `Sources: source_artifact:...`, `Safety basis: source_artifact:...`, or similar internal source-key footnotes in user-facing protocol copy, biomarker descriptions, safety notes, or explanatory prose.
 - Preserve source keys in structured frontmatter/JSONL fields only: relations, `claims.sourceKeys`, `researchLandscape.groups.sourceKeys`, source findings, evidence appraisals, and artifact manifests.
 - If prose needs attribution, use readable source-card/study references rather than internal keys.
 - Protocol frontmatter `summary` is shown as the `/experiments` card description. Keep it short and behavior/outcome-focused; do not repeat duration, session count, frequency, dose windows, or other timing already represented by test plans, metadata, `doseSignature`, or protocol fields.

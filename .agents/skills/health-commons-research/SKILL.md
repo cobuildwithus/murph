@@ -424,5 +424,6 @@ When writing or editing research prompts, keep claims conservative and evidence-
 - keep safety language stronger than efficacy where evidence is thin
 - write protocol frontmatter `summary` for `/experiments` cards as action/outcome/safety copy, not as a repeat of duration, session count, frequency, or dose timing already shown in metadata or protocol fields
 - keep internal source keys out of user-facing Health Commons prose; preserve them only in structured source-key fields, ledgers, source pages, evidence appraisals, and manifests
+- never put `Source basis:`, `Sources: source_artifact:...`, `Safety basis: source_artifact:...`, or similar internal source-key footnotes inside user-facing protocol, family, or biomarker copy/descriptions
 - use readable source-card/study references in prose when attribution is needed
 - before landing protocol, family, or biomarker pages, scan Markdown bodies and frontmatter prose fields for raw `source_artifact:*`, `sourceKeys`, or `Source keys:` leaks outside structured metadata
